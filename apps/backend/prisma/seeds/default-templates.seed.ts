@@ -25,6 +25,7 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
           currency: 'COP',
           language: 'es',
           tax_included: false,
+          industries: ['retail'],
         },
         inventory: {
           low_stock_threshold: 10,

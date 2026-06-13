@@ -177,6 +177,7 @@ export class CreditNotesService {
                 tax_rate: new Prisma.Decimal(tax_item.tax_rate),
                 taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
                 tax_amount: new Prisma.Decimal(tax_item.tax_amount),
+                tax_type: ((tax_item as any).tax_type ?? 'iva') as any,
               })),
             },
           }),

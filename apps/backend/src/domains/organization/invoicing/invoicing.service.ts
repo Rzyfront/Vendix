@@ -53,6 +53,7 @@ export class OrgInvoicingService {
     const skip = (page - 1) * limit;
     const where = this.buildInvoiceWhere({
       store_id: scope.store_id,
+      accounting_entity_id: scope.accounting_entity_id,
       search,
       status,
       invoice_type,
@@ -90,6 +91,9 @@ export class OrgInvoicingService {
       where: {
         id,
         ...(scope.store_id != null ? { store_id: scope.store_id } : {}),
+        ...(scope.store_id == null && scope.accounting_entity_id != null
+          ? { accounting_entity_id: scope.accounting_entity_id }
+          : {}),
       },
       include: {
         ...ORG_INVOICE_INCLUDE,
@@ -109,6 +113,7 @@ export class OrgInvoicingService {
     const scope = await this.resolveFiscalReadScope(query.store_id);
     const where = this.buildInvoiceWhere({
       store_id: scope.store_id,
+      accounting_entity_id: scope.accounting_entity_id,
       search: query.search,
       status: query.status,
       invoice_type: query.invoice_type,
@@ -154,6 +159,7 @@ export class OrgInvoicingService {
     return {
       fiscal_scope: scope.fiscal_scope,
       store_id: scope.store_id,
+      accounting_entity_id: scope.accounting_entity_id,
       invoice_count: totals._count.id,
       subtotal_amount: Number(totals._sum.subtotal_amount || 0),
       tax_amount: Number(totals._sum.tax_amount || 0),
@@ -178,6 +184,9 @@ export class OrgInvoicingService {
     return this.orgPrisma.invoice_resolutions.findMany({
       where: {
         ...(scope.store_id != null ? { store_id: scope.store_id } : {}),
+        ...(scope.store_id == null && scope.accounting_entity_id != null
+          ? { accounting_entity_id: scope.accounting_entity_id }
+          : {}),
       },
       orderBy: [{ is_active: 'desc' }, { valid_to: 'desc' }],
       include: {
@@ -199,6 +208,7 @@ export class OrgInvoicingService {
     organization_id: number;
     fiscal_scope: OrganizationFiscalScope;
     store_id: number | null;
+    accounting_entity_id: number | null;
   }> {
     const organization_id = this.requireOrgId();
     const fiscal_scope = await this.fiscalScope.requireFiscalScope(
@@ -208,7 +218,12 @@ export class OrgInvoicingService {
 
     if (requestedStoreId != null) {
       await this.assertStoreInOrg(requestedStoreId);
-      return { organization_id, fiscal_scope, store_id: requestedStoreId };
+      return {
+        organization_id,
+        fiscal_scope,
+        store_id: requestedStoreId,
+        accounting_entity_id: null,
+      };
     }
 
     if (fiscal_scope === 'STORE') {
@@ -217,7 +232,10 @@ export class OrgInvoicingService {
       );
     }
 
-    return { organization_id, fiscal_scope, store_id: null };
+    const accounting_entity_id =
+      await this.fiscalScope.findFiscalAccountingEntityId({ organization_id });
+
+    return { organization_id, fiscal_scope, store_id: null, accounting_entity_id };
   }
 
   private async assertStoreInOrg(store_id: number) {
@@ -235,6 +253,7 @@ export class OrgInvoicingService {
 
   private buildInvoiceWhere(params: {
     store_id?: number | null;
+    accounting_entity_id?: number | null;
     search?: string;
     status?: string;
     invoice_type?: string;
@@ -244,6 +263,13 @@ export class OrgInvoicingService {
   }): Prisma.invoicesWhereInput {
     return {
       ...(params.store_id != null && { store_id: params.store_id }),
+      // invoices.accounting_entity_id is NOT NULL in schema: a strict equality
+      // filter is enough (no legacy untagged rows can exist) and a null filter
+      // would be rejected by Prisma on a required field.
+      ...(params.store_id == null &&
+        params.accounting_entity_id != null && {
+          accounting_entity_id: params.accounting_entity_id,
+        }),
       ...(params.search && {
         OR: [
           {

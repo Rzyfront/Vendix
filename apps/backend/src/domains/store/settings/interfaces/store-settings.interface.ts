@@ -1,4 +1,5 @@
 import type { FiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
+import type { StoreIndustry } from '../../stores/dto/index';
 
 // ============================================================================
 // FISCAL DATA - Legal/tax identity of the store (NIT, regime, address, etc.)
@@ -18,10 +19,18 @@ export interface FiscalDataSettings {
   department?: string;
   city?: string;
   tax_responsibilities?: string[];
+  // IVA declaration periodicity (art. 600 ET). Only meaningful when the
+  // tenant is responsable de IVA (O-48). Absent ⇒ defaults to 'bimonthly'.
+  vat_periodicity?: 'monthly' | 'bimonthly' | 'four_monthly';
   // DIAN issuer tax scheme code ('O-13' Gran Contribuyente, 'O-15'
   // Autorretenedor, 'R-99-PN', etc.). Currently hardcoded in the DIAN
   // provider; captured here for the pending provider-wiring follow-up.
   tax_scheme?: string;
+  // Withholding (retención) role flags. Absent ⇒ treated as false.
+  // is_withholding_agent: tenant retains on purchases (Caso 1, retenedor).
+  // is_self_withholder: tenant may be subject to being withheld (Caso 2, autorretenedor).
+  is_withholding_agent?: boolean;
+  is_self_withholder?: boolean;
 }
 
 // ============================================================================
@@ -333,6 +342,7 @@ export interface GeneralSettings {
   name?: string;
   logo_url?: string;
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
+  industries?: StoreIndustry[];
 }
 
 export type InventoryScope = 'main_location' | 'all_locations';

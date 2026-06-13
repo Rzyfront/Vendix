@@ -6,6 +6,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { OvertimeRates } from '../interfaces/payroll-rules.interface';
 
 export class UpdatePayrollRulesDto {
   // Employee deductions
@@ -101,4 +102,21 @@ export class UpdatePayrollRulesDto {
   @Min(0)
   @Max(1)
   bonus_rate?: number;
+
+  // Novelty valuation (optional — global ValidationPipe uses
+  // forbidNonWhitelisted, so these keys must be whitelisted to allow
+  // GET → PATCH round-trips of the rules object)
+  @IsOptional()
+  @IsNumber()
+  @Min(1)
+  monthly_hours?: number;
+
+  @IsOptional()
+  overtime_rates?: OvertimeRates;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  incapacity_general_employer_rate?: number;
 }

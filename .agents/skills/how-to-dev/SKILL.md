@@ -23,6 +23,11 @@ Use this skill to execute development work safely and consistently after the req
 
 - Load every relevant skill before editing code.
 - **Mobile detection:** If the task involves `apps/mobile/`, load `mobile-dev` first — all edits are exclusive to `apps/mobile/`; other projects are read-only reference.
+- **Git workflow gates (load `git-workflow` before any branch/commit/push):**
+  - Work only on a branch that is up to date with `origin/dev` (RULE 5).
+  - Pull the latest Engram memories before starting work (RULE 6).
+  - Save a new Engram memory before pushing non-trivial changes (RULE 7).
+  - Every PR must pass the `pr-code-review` skill at >= 80% before merge (RULE 8).
 - Follow the approved plan when one exists; do not replan unless the human asks.
 - If no approved plan exists for non-trivial work, use `how-to-plan` before development.
 - Keep changes minimal, scoped, and aligned with the mapped skills.
@@ -76,6 +81,9 @@ After code or skill changes:
 ## Related Skills
 
 - `how-to-plan` - Planning protocol before development
+- `git-workflow` - **Required** for branches, commits, pushes, PRs, Engram memory sync, and the PR review gate (RULES 1-8)
+- `vendix-engram` - Persistent shared memory (load alongside `git-workflow` to satisfy RULES 6-7)
+- `pr-code-review` - Automated code review gate (load before any PR merge, RULE 8)
 - `agent-teams` - Multi-agent orchestration for non-trivial work
 - `buildcheck-dev` - Development verification through Docker watch-mode logs
 - `skill-sync` - Synchronize skill metadata and generated agent files

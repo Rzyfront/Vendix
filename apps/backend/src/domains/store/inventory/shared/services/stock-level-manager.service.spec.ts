@@ -7,7 +7,9 @@ import { StorePrismaService } from '../../../../../prisma/services/store-prisma.
 import { InventoryTransactionsService } from '../../transactions/inventory-transactions.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
+import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { ConflictException, BadRequestException } from '@nestjs/common';
+import { VendixHttpException } from 'src/common/errors';
 import { InventoryTransaction } from '../../transactions/interfaces/inventory-transaction.interface';
 
 describe('StockLevelManager', () => {
@@ -15,6 +17,7 @@ describe('StockLevelManager', () => {
   let prismaService: jest.Mocked<StorePrismaService>;
   let transactionsService: jest.Mocked<InventoryTransactionsService>;
   let eventEmitter: jest.Mocked<EventEmitter2>;
+  let operatingScopeService: jest.Mocked<OperatingScopeService>;
 
   const mockContext = {
     organization_id: 1,
@@ -92,8 +95,14 @@ describe('StockLevelManager', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
       },
+      product_variants: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        count: jest.fn(),
+      },
       inventory_locations: {
         findFirst: jest.fn(),
+        findUnique: jest.fn(),
         findMany: jest.fn(),
       },
       stock_reservations: {
@@ -104,6 +113,17 @@ describe('StockLevelManager', () => {
       inventory_movements: {
         create: jest.fn(),
       },
+      inventory_valuation_snapshots: {
+        create: jest.fn(),
+      },
+      inventory_cost_layers: {
+        findMany: jest.fn(),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+      store_settings: {
+        findFirst: jest.fn(),
+      },
     };
 
     const mockTransactionsService = {
@@ -112,6 +132,11 @@ describe('StockLevelManager', () => {
 
     const mockEventEmitter = {
       emit: jest.fn(),
+    };
+
+    const mockOperatingScopeService = {
+      getOperatingScope: jest.fn().mockResolvedValue('STORE'),
+      resolveAccountingEntity: jest.fn().mockResolvedValue({ id: 1 }),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -129,6 +154,10 @@ describe('StockLevelManager', () => {
           provide: EventEmitter2,
           useValue: mockEventEmitter,
         },
+        {
+          provide: OperatingScopeService,
+          useValue: mockOperatingScopeService,
+        },
       ],
     }).compile();
 
@@ -136,10 +165,24 @@ describe('StockLevelManager', () => {
     prismaService = module.get(StorePrismaService);
     transactionsService = module.get(InventoryTransactionsService);
     eventEmitter = module.get(EventEmitter2);
+    operatingScopeService = module.get(OperatingScopeService);
+
+    // Default stub for product_variants count to 0 (no variants) so syncProductStock works.
+    (prismaService as any).product_variants.count.mockResolvedValue(0);
+    (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+      store_id: 1,
+      organization_id: 1,
+    });
+    (prismaService as any).inventory_valuation_snapshots.create.mockResolvedValue(
+      {},
+    );
+    (prismaService as any).inventory_cost_layers.findMany.mockResolvedValue([]);
+    (prismaService as any).store_settings.findFirst.mockResolvedValue(null);
     prismaService.products.findUnique.mockResolvedValue({
       track_inventory: true,
       store_id: 1,
       name: 'Test Product',
+      cost_price: 0,
     } as any);
 
     // Mock RequestContextService
@@ -158,7 +201,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -182,14 +230,16 @@ describe('StockLevelManager', () => {
 
       const result = await service.updateStock(updateStockParams);
 
-      expect(result).toEqual({
-        stock_level: expect.objectContaining({
-          quantity_on_hand: 150,
-          quantity_available: 140,
+      expect(result).toEqual(
+        expect.objectContaining({
+          stock_level: expect.objectContaining({
+            quantity_on_hand: 150,
+            quantity_available: 140,
+          }),
+          transaction: mockTransaction,
+          previous_quantity: 90,
         }),
-        transaction: mockTransaction,
-        previous_quantity: 90,
-      });
+      );
 
       expect(eventEmitter.emit).toHaveBeenCalledWith(
         'stock.updated',
@@ -216,7 +266,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -256,7 +311,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -284,7 +344,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -316,7 +381,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.products.findFirst.mockResolvedValue(mockProduct);
@@ -350,7 +420,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -358,8 +433,112 @@ describe('StockLevelManager', () => {
       );
 
       await expect(service.updateStock(updateStockParams)).rejects.toThrow(
-        BadRequestException,
+        VendixHttpException,
       );
+    });
+
+    // === Step 1 contract: movement_unit_cost vs unit_cost ===
+    // Verifies recordValuationSnapshot separates movement cost (the cost of
+    // this individual receipt, e.g. 2000) from valuation cost (CPP persisted
+    // in stock_levels.cost_per_unit, e.g. 1500). The cost_snapshot returned by
+    // updateStock is the same object inserted into inventory_valuation_snapshots.
+    it('should record snapshot using movement_unit_cost for unit_cost and cost_per_unit for total_value', async () => {
+      const params: UpdateStockParams = {
+        ...updateStockParams,
+        quantity_change: 10,
+        unit_cost: 1500, // CPP a persistir (cost_per_unit)
+        movement_unit_cost: 2000, // costo real del movimiento
+      };
+
+      const mockTx = {
+        stock_levels: prismaService.stock_levels,
+        inventory_movements: prismaService.inventory_movements,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+        inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
+      };
+
+      prismaService.$transaction.mockImplementation((callback) =>
+        callback(mockTx),
+      );
+      prismaService.products.findFirst.mockResolvedValue(mockProduct);
+      prismaService.inventory_locations.findFirst.mockResolvedValue(
+        mockLocation,
+      );
+      prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
+      // Updated stock now reflects new CPP (1500) and qty post-update (110).
+      prismaService.stock_levels.update.mockResolvedValue({
+        ...mockStockLevel,
+        quantity_on_hand: 110,
+        quantity_available: 100,
+        cost_per_unit: 1500,
+      });
+      transactionsService.createTransaction.mockResolvedValue(mockTransaction);
+      prismaService.products.update.mockResolvedValue(mockProduct);
+      prismaService.stock_levels.aggregate.mockResolvedValue({
+        _sum: { quantity_available: 100 },
+      });
+
+      const result = await service.updateStock(params);
+
+      expect(result.cost_snapshot).toBeDefined();
+      // Snapshot.unit_cost = movement_unit_cost (2000), NOT unit_cost (1500)
+      expect(result.cost_snapshot!.unit_cost).toBe(2000);
+      // Snapshot.total_cost = movement_unit_cost × qty (2000 × 10)
+      expect(result.cost_snapshot!.total_cost).toBe(20000);
+      // Snapshot.stock_value = qty_on_hand_post × cost_per_unit (110 × 1500)
+      expect(result.cost_snapshot!.stock_value).toBe(110 * 1500);
+    });
+
+    it('should fall back to unit_cost / stock cost_per_unit when movement_unit_cost is absent', async () => {
+      const params: UpdateStockParams = {
+        ...updateStockParams,
+        quantity_change: 10,
+        unit_cost: 1500,
+        // movement_unit_cost OMITTED — comportamiento legacy
+      };
+
+      const mockTx = {
+        stock_levels: prismaService.stock_levels,
+        inventory_movements: prismaService.inventory_movements,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
+        inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
+      };
+
+      prismaService.$transaction.mockImplementation((callback) =>
+        callback(mockTx),
+      );
+      prismaService.products.findFirst.mockResolvedValue(mockProduct);
+      prismaService.inventory_locations.findFirst.mockResolvedValue(
+        mockLocation,
+      );
+      prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.update.mockResolvedValue({
+        ...mockStockLevel,
+        quantity_on_hand: 110,
+        quantity_available: 100,
+        cost_per_unit: 1500,
+      });
+      transactionsService.createTransaction.mockResolvedValue(mockTransaction);
+      prismaService.products.update.mockResolvedValue(mockProduct);
+      prismaService.stock_levels.aggregate.mockResolvedValue({
+        _sum: { quantity_available: 100 },
+      });
+
+      const result = await service.updateStock(params);
+
+      // Without movement_unit_cost the chain falls back to unit_cost.
+      expect(result.cost_snapshot!.unit_cost).toBe(1500);
+      expect(result.cost_snapshot!.total_cost).toBe(15000);
     });
   });
 
@@ -379,6 +558,7 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         stock_reservations: prismaService.stock_reservations,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
       };
 
@@ -392,6 +572,9 @@ describe('StockLevelManager', () => {
       prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
       prismaService.stock_reservations.create.mockResolvedValue({ id: 1 });
       prismaService.stock_levels.update.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.aggregate.mockResolvedValue({
+        _sum: { quantity_available: 70 },
+      });
 
       await expect(
         service.reserveStock(
@@ -427,6 +610,7 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         stock_reservations: prismaService.stock_reservations,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
       };
 
@@ -463,6 +647,7 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         stock_reservations: prismaService.stock_reservations,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
       };
 
@@ -476,6 +661,9 @@ describe('StockLevelManager', () => {
       prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
       prismaService.stock_reservations.create.mockResolvedValue({ id: 1 });
       prismaService.stock_levels.update.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.aggregate.mockResolvedValue({
+        _sum: { quantity_available: 70 },
+      });
 
       await expect(
         service.reserveStock(
@@ -529,6 +717,8 @@ describe('StockLevelManager', () => {
       const mockTx = {
         stock_levels: prismaService.stock_levels,
         stock_reservations: prismaService.stock_reservations,
+        products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -540,8 +730,11 @@ describe('StockLevelManager', () => {
       prismaService.stock_reservations.updateMany.mockResolvedValue({
         count: 2,
       });
-      prismaService.stock_levels.findUnique.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.findFirst.mockResolvedValue(mockStockLevel);
       prismaService.stock_levels.update.mockResolvedValue(mockStockLevel);
+      prismaService.stock_levels.aggregate.mockResolvedValue({
+        _sum: { quantity_available: 120 },
+      });
 
       await expect(
         service.releaseReservation(
@@ -559,13 +752,7 @@ describe('StockLevelManager', () => {
       });
 
       expect(prismaService.stock_levels.update).toHaveBeenCalledWith({
-        where: {
-          product_id_product_variant_id_location_id: {
-            product_id: 1,
-            product_variant_id: null,
-            location_id: 1,
-          },
-        },
+        where: { id: mockStockLevel.id },
         data: {
           quantity_reserved: 0,
           quantity_available: 120,
@@ -778,10 +965,12 @@ describe('StockLevelManager', () => {
 
       await service.checkReorderPoints(1);
 
+      // After settings-driven threshold refactor, checkReorderPoints reads
+      // all stock_levels for the product and filters in-memory via the
+      // resolved low-stock threshold (no Prisma reorder_point filter).
       expect(prismaService.stock_levels.findMany).toHaveBeenCalledWith({
         where: {
           product_id: 1,
-          reorder_point: { not: null },
         },
         include: {
           inventory_locations: {
@@ -807,7 +996,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -839,7 +1033,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -854,7 +1053,7 @@ describe('StockLevelManager', () => {
           quantity_change: 10,
           movement_type: 'stock_in',
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(VendixHttpException);
     });
 
     it('should validate location scope for non-super admin', async () => {
@@ -862,7 +1061,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -878,7 +1082,7 @@ describe('StockLevelManager', () => {
           quantity_change: 10,
           movement_type: 'stock_in',
         }),
-      ).rejects.toThrow(BadRequestException);
+      ).rejects.toThrow(VendixHttpException);
     });
 
     it('should map initial movement type to stock_in for movements', async () => {
@@ -891,7 +1095,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>
@@ -928,7 +1137,12 @@ describe('StockLevelManager', () => {
         stock_levels: prismaService.stock_levels,
         inventory_movements: prismaService.inventory_movements,
         products: prismaService.products,
+        product_variants: (prismaService as any).product_variants,
         inventory_locations: prismaService.inventory_locations,
+        inventory_valuation_snapshots: (prismaService as any)
+          .inventory_valuation_snapshots,
+        inventory_cost_layers: (prismaService as any).inventory_cost_layers,
+        store_settings: (prismaService as any).store_settings,
       };
 
       prismaService.$transaction.mockImplementation((callback) =>

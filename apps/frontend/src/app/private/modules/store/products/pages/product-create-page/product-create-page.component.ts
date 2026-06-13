@@ -501,8 +501,8 @@ export class ProductCreatePageComponent {
   );
 
   // Promotions
-  promotionOptions: MultiSelectorOption[] = [];
-  productPromotionIds: number[] = [];
+  promotionOptions = signal<MultiSelectorOption[]>([]);
+  productPromotionIds = signal<number[]>([]);
 
   // Image loading state for feedback visual (signals — reactive bajo Zoneless)
   readonly isLoadingImages = signal(false);
@@ -830,17 +830,19 @@ export class ProductCreatePageComponent {
 
   loadPromotionOptions(): void {
     this.promotionsService.getPromotions({ limit: 200 }).subscribe((res) => {
-      this.promotionOptions = res.data.map((p: any) => ({
-        value: p.id,
-        label: p.name,
-        description: `${p.type === 'percentage' ? p.value + '%' : '$' + p.value} — ${p.state}`,
-      }));
+      this.promotionOptions.set(
+        res.data.map((p: any) => ({
+          value: p.id,
+          label: p.name,
+          description: `${p.type === 'percentage' ? p.value + '%' : '$' + p.value} — ${p.state}`,
+        })),
+      );
     });
   }
 
   loadProductPromotions(productId: number): void {
     this.productsService.getProductPromotions(productId).subscribe((promos) => {
-      this.productPromotionIds = promos.map((p: any) => p.id);
+      this.productPromotionIds.set(promos.map((p: any) => p.id));
     });
   }
 
@@ -851,7 +853,7 @@ export class ProductCreatePageComponent {
       .updateProductPromotions(this.productId, numericIds)
       .subscribe({
         next: (promos) => {
-          this.productPromotionIds = promos.map((p: any) => p.id);
+          this.productPromotionIds.set(promos.map((p: any) => p.id));
           this.toastService.success('Promociones actualizadas');
         },
         error: () => {
@@ -2753,13 +2755,22 @@ export class ProductCreatePageComponent {
     return 'Valor inválido';
   }
 
+  // Memoizado por referencia de product: el modal lo recibe como input signal
+  // y un objeto nuevo por lectura dispara sus effects en cada CD
+  private _adjustmentPreselected: PreselectedProduct | null = null;
+  private _adjustmentPreselectedSource: Product | null = null;
+
   get adjustmentPreselectedProduct(): PreselectedProduct | null {
     if (!this.product) return null;
-    return {
-      id: this.product.id,
-      name: this.product.name,
-      sku: this.product.sku ?? null,
-    };
+    if (this._adjustmentPreselectedSource !== this.product) {
+      this._adjustmentPreselectedSource = this.product;
+      this._adjustmentPreselected = {
+        id: this.product.id,
+        name: this.product.name,
+        sku: this.product.sku ?? null,
+      };
+    }
+    return this._adjustmentPreselected;
   }
 
   // Adjustment Modal

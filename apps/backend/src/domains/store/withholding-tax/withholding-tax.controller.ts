@@ -14,6 +14,8 @@ import {
   CreateWithholdingConceptDto,
   UpdateWithholdingConceptDto,
   CalculateWithholdingDto,
+  PreviewWithholdingDto,
+  CalculationsQueryDto,
 } from './dto';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 
@@ -98,6 +100,15 @@ export class WithholdingTaxController {
     return this.response_service.success(result);
   }
 
+  // ===== Preview (no persistence) =====
+
+  @Post('preview')
+  @Permissions('withholding:read')
+  async previewWithholding(@Body() dto: PreviewWithholdingDto) {
+    const result = await this.withholding_tax_service.previewWithholding(dto);
+    return this.response_service.success(result);
+  }
+
   // ===== Apply to Invoice =====
 
   @Post('apply/:invoiceId')
@@ -112,6 +123,21 @@ export class WithholdingTaxController {
       body.supplier_type,
     );
     return this.response_service.success(result);
+  }
+
+  // ===== Calculations Audit =====
+
+  @Get('calculations')
+  @Permissions('withholding:read')
+  async findAllCalculations(@Query() query: CalculationsQueryDto) {
+    const result =
+      await this.withholding_tax_service.findAllCalculations(query);
+    return this.response_service.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+    );
   }
 
   // ===== Certificates =====

@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../errors';
+import { TaxFiscalTypeValue } from '../interfaces/tax-breakdown.interface';
 
 export type DefaultTaxesScope = 'STORE' | 'ORGANIZATION';
 
@@ -29,6 +30,8 @@ interface DefaultTaxTemplate {
   description: string;
   /** Decimal rate, e.g. 0.19 for 19%. Stored at decimal(6,5). */
   rate: number;
+  /** Fiscal classification persisted on the category (source of truth). */
+  tax_type: TaxFiscalTypeValue;
   is_compound?: boolean;
   priority?: number;
 }
@@ -63,31 +66,44 @@ export class DefaultTaxesSeederService {
       name: 'IVA 19%',
       description: 'Impuesto al Valor Agregado - Tarifa general',
       rate: 0.19,
+      tax_type: 'iva',
       priority: 10,
     },
     {
       name: 'IVA 5%',
       description: 'Impuesto al Valor Agregado - Tarifa reducida',
       rate: 0.05,
+      tax_type: 'iva',
       priority: 11,
     },
     {
       name: 'IVA 0%',
       description: 'Impuesto al Valor Agregado - Exento / Tarifa cero',
       rate: 0.0,
+      tax_type: 'iva',
       priority: 12,
+    },
+    {
+      name: 'Impoconsumo 8%',
+      description:
+        'Impuesto Nacional al Consumo - Restaurantes/bares (8%, no descontable)',
+      rate: 0.08,
+      tax_type: 'inc',
+      priority: 15,
     },
     {
       name: 'ICA Bogotá',
       description:
         'Impuesto de Industria y Comercio - Bogotá (tarifa común 9.66 x 1000)',
       rate: 0.00966,
+      tax_type: 'ica',
       priority: 20,
     },
     {
       name: 'Retención en la Fuente 2.5%',
       description: 'Retención en la fuente - Servicios generales',
       rate: 0.025,
+      tax_type: 'withholding',
       priority: 30,
     },
   ];
@@ -165,7 +181,10 @@ export class DefaultTaxesSeederService {
           .withoutScope()
           .tax_categories.update({
             where: { id: existingCategory.id },
-            data: { description: template.description },
+            data: {
+              description: template.description,
+              tax_type: template.tax_type,
+            },
             select: { id: true },
           });
         categoryId = updated.id;
@@ -176,6 +195,7 @@ export class DefaultTaxesSeederService {
             data: {
               name: template.name,
               description: template.description,
+              tax_type: template.tax_type,
               store_id,
               organization_id,
             },

@@ -104,15 +104,10 @@ export const APP_MODULES: {
           description: 'Checklist y control de cierre mensual',
         },
         {
-          key: 'fiscal_evidence',
-          label: 'Evidencias fiscales',
-          description: 'Soportes, hashes y trazabilidad documental',
-        },
-        {
-          key: 'fiscal_history',
-          label: 'Historial fiscal',
+          key: 'fiscal_audit',
+          label: 'Auditoría fiscal',
           description:
-            'Eventos auditables por obligación, declaración y cierre',
+            'Evidencias, soportes y eventos auditables de la operación fiscal',
         },
         {
           key: 'fiscal_rules',
@@ -521,15 +516,10 @@ export const APP_MODULES: {
           description: 'Checklist y control de cierre mensual',
         },
         {
-          key: 'fiscal_evidence',
-          label: 'Evidencias fiscales',
-          description: 'Soportes, hashes y trazabilidad documental',
-        },
-        {
-          key: 'fiscal_history',
-          label: 'Historial fiscal',
+          key: 'fiscal_audit',
+          label: 'Auditoría fiscal',
           description:
-            'Eventos auditables por obligación, declaración y cierre',
+            'Evidencias, soportes y eventos auditables de la operación fiscal',
         },
         {
           key: 'fiscal_rules',

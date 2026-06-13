@@ -96,6 +96,12 @@ export interface ProviderInvoiceTax {
   tax_rate: string;
   taxable_amount: string;
   tax_amount: string;
+  /**
+   * Persisted fiscal classification ('iva' | 'inc' | 'ica' | ...). When present
+   * it is the authoritative source for the DIAN tax scheme code (01/04/03),
+   * taking priority over the tax_name heuristic.
+   */
+  tax_type?: string;
 }
 
 export interface ProviderResponse {

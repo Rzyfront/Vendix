@@ -6,6 +6,11 @@ import { ReturnOrderQueryDto } from './dto/return-order-query.dto';
 import { return_order_status_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
+import {
+  buildTaxBreakdown,
+  scaleBreakdownToTotal,
+  TaxBreakdownItem,
+} from 'src/common/interfaces/tax-breakdown.interface';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 
 @Injectable()
@@ -251,6 +256,7 @@ export class ReturnOrdersService {
         // Derive tax proportion from the original order if linked
         let tax_amount = 0;
         let store_id: number | undefined;
+        let tax_breakdown: TaxBreakdownItem[] = [];
         if (processed_return.related_order_id) {
           const original_order = await this.prisma.orders.findUnique({
             where: { id: processed_return.related_order_id },
@@ -269,6 +275,20 @@ export class ReturnOrdersService {
               tax_amount =
                 Math.round((refund_amount / order_total) * order_tax * 100) /
                 100;
+              // Preserve the original fiscal-type mix when reversing taxes, so
+              // an IVA+INC sale reverses against 2408 and 2436 proportionally.
+              const items = await this.prisma.order_items.findMany({
+                where: { order_id: processed_return.related_order_id },
+                select: {
+                  order_item_taxes: {
+                    select: { tax_type: true, tax_amount: true },
+                  },
+                },
+              });
+              const baseBreakdown = buildTaxBreakdown(
+                items.flatMap((i) => i.order_item_taxes || []),
+              );
+              tax_breakdown = scaleBreakdownToTotal(baseBreakdown, tax_amount);
             }
           }
         }
@@ -279,6 +299,7 @@ export class ReturnOrdersService {
           store_id,
           amount: refund_amount,
           tax_amount,
+          tax_breakdown,
           return_type: processed_return.type,
           user_id: RequestContextService.getUserId(),
         });

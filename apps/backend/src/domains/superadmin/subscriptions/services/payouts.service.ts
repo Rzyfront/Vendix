@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma, partner_payout_batch_state_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
@@ -6,7 +7,12 @@ import { PayoutQueryDto, ApprovePayoutDto } from '../dto';
 
 @Injectable()
 export class PayoutsService {
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  private readonly logger = new Logger(PayoutsService.name);
+
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   async findAll(query: PayoutQueryDto) {
     const {
@@ -179,6 +185,22 @@ export class PayoutsService {
       where: { payout_batch_id: id },
       data: { state: 'paid', paid_at: new Date() },
     });
+
+    // RNC-MF-3: notify the platform accounting pipeline so Vendix's books
+    // settle the partner payable (DR 2335 / CR 1110). Emit AFTER the writes
+    // commit; failures are logged and MUST NOT break the admin workflow.
+    try {
+      this.eventEmitter.emit('partner_payout_batch.paid', {
+        batchId: updated.id,
+        amount: updated.total_amount ? Number(updated.total_amount) : 0,
+        entryDate: new Date(),
+        userId: undefined,
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `partner_payout_batch.paid emit failed for batch=${updated.id}: ${e?.message ?? e}`,
+      );
+    }
 
     return updated;
   }

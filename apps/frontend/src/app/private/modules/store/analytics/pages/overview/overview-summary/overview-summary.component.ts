@@ -317,8 +317,10 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
       series: [
         {
           type: 'gauge',
-          center: ['50%', m ? '62%' : '65%'],
-          radius: m ? '72%' : '82%',
+          // Semicircle only draws upward: anchor low and let radius exceed
+          // 100% of min(w,h)/2 so the arc fills the canvas without clipping.
+          center: ['50%', m ? '75%' : '78%'],
+          radius: m ? '105%' : '112%',
           startAngle: 180,
           endAngle: 0,
           min: 0,
@@ -326,13 +328,13 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
           splitNumber: 3,
           pointer: {
             show: true,
-            length: m ? '55%' : '60%',
-            width: m ? 4 : 6,
+            length: m ? '58%' : '62%',
+            width: m ? 5 : 7,
             itemStyle: {
               color: 'auto' } },
           axisLine: {
             lineStyle: {
-              width: m ? 13 : 20,
+              width: m ? 18 : 26,
               color: [
                 [0.467, '#22c55e'], // 0-70%: green
                 [0.6, '#eab308'], // 70-90%: yellow
@@ -340,19 +342,19 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
               ] } },
           axisTick: { show: false },
           splitLine: {
-            length: m ? 8 : 12,
+            length: m ? 10 : 14,
             lineStyle: { width: 2, color: '#999' } },
           axisLabel: {
             // Negative distance pushes the % ticks outside the arc (cleaner look).
-            distance: m ? -16 : -26,
-            fontSize: m ? 9 : 11,
+            distance: m ? -18 : -28,
+            fontSize: m ? 10 : 12,
             formatter: (value: number) => `${value}%` },
           detail: {
             valueAnimation: true,
             formatter: (value: number) => `${value.toFixed(1)}%`,
-            fontSize: m ? 17 : 20,
+            fontSize: m ? 20 : 26,
             fontWeight: 'bold',
-            offsetCenter: [0, m ? '24%' : '20%'],
+            offsetCenter: [0, m ? '20%' : '16%'],
             color: ratio < 70 ? '#22c55e' : ratio < 90 ? '#eab308' : '#ef4444' },
           data: [{ value: Math.min(ratio, 150) }] },
       ] });

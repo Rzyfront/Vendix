@@ -34,7 +34,9 @@
           </div>
           <div class="section-body">
             <app-general-settings-form [settings]="settings().general"
-              (settingsChange)="onSectionChange('general', $event)" />
+              [panelUi]="settings().panel_ui"
+              (settingsChange)="onSectionChange('general', $event)"
+              (panelUiChange)="onSectionChange('panel_ui', $event)" />
           </div>
         </section>
 

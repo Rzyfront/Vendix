@@ -9,6 +9,21 @@ import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
 import { InvoiceNumberGenerator } from './utils/invoice-number-generator';
+import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
+
+/**
+ * Listing rows whose send/transmission state is an error or a pending send get
+ * their `retry_status` resolved from invoice_retry_queue (batch, no N+1).
+ */
+const RETRY_ELIGIBLE_SEND_STATUSES = ['pending', 'sending', 'sent_error'];
+const RETRY_ELIGIBLE_TRANSMISSION_STATUSES = [
+  'queued',
+  'signing',
+  'signed',
+  'submitted',
+  'rejected',
+  'error',
+];
 
 const INVOICE_INCLUDE = {
   invoice_items: true,
@@ -64,6 +79,7 @@ export class InvoicingService {
     private readonly invoice_number_generator: InvoiceNumberGenerator,
     private readonly event_emitter: EventEmitter2,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly retry_queue: InvoiceRetryQueueService,
   ) {}
 
   private getContext() {
@@ -320,8 +336,28 @@ export class InvoicingService {
       this.prisma.invoices.count({ where }),
     ]);
 
+    // Paso 13 — retry_status: resolve queue state for invoices in an error or
+    // pending-send state with ONE batch query over the page IDs (no N+1).
+    const retry_candidate_ids = data
+      .filter(
+        (invoice: any) =>
+          RETRY_ELIGIBLE_SEND_STATUSES.includes(invoice.send_status) ||
+          RETRY_ELIGIBLE_TRANSMISSION_STATUSES.includes(
+            invoice.transmission_status,
+          ),
+      )
+      .map((invoice: any) => invoice.id);
+
+    const retry_status_map =
+      await this.retry_queue.getRetryStatusByInvoiceIds(retry_candidate_ids);
+
+    const data_with_retry = data.map((invoice: any) => ({
+      ...invoice,
+      retry_status: retry_status_map.get(invoice.id) ?? null,
+    }));
+
     return {
-      data,
+      data: data_with_retry,
       meta: {
         total,
         page,
@@ -422,6 +458,7 @@ export class InvoicingService {
                 tax_rate: new Prisma.Decimal(tax_item.tax_rate),
                 taxable_amount: new Prisma.Decimal(tax_item.taxable_amount),
                 tax_amount: new Prisma.Decimal(tax_item.tax_amount),
+                tax_type: (tax_item.tax_type ?? 'iva') as any,
               })),
             },
           }),
@@ -453,6 +490,7 @@ export class InvoicingService {
           include: {
             products: true,
             product_variants: true,
+            order_item_taxes: true,
           },
         },
         users: {
@@ -547,6 +585,51 @@ export class InvoicingService {
     );
     const total = subtotal - discount + tax;
 
+    // Aggregate the order's per-line typed taxes (order_item_taxes) into invoice
+    // header-level invoice_taxes, one row per (name, rate, fiscal type). Without
+    // this, invoices created from an order reached DIAN with NO taxes and fell
+    // back to a default 19% IVA. order_item_taxes.tax_rate is a fraction (0.19);
+    // invoice_taxes.tax_rate is a percentage (19.00) as DIAN UBL expects.
+    const round2 = (n: number) => Math.round(n * 100) / 100;
+    const taxGroups = new Map<
+      string,
+      {
+        tax_rate_id: number | null;
+        tax_name: string;
+        tax_rate: number;
+        tax_type: string;
+        taxable_amount: number;
+        tax_amount: number;
+      }
+    >();
+    for (const item of order.order_items || []) {
+      const lineNet = Number(item.total_price || 0);
+      for (const t of (item as any).order_item_taxes || []) {
+        const ratePct = round2(Number(t.tax_rate || 0) * 100);
+        const type = (t.tax_type as string) || 'iva';
+        const key = `${t.tax_name}|${ratePct}|${type}|${t.tax_rate_id ?? ''}`;
+        const group = taxGroups.get(key) || {
+          tax_rate_id: t.tax_rate_id ?? null,
+          tax_name: t.tax_name,
+          tax_rate: ratePct,
+          tax_type: type,
+          taxable_amount: 0,
+          tax_amount: 0,
+        };
+        group.taxable_amount += lineNet;
+        group.tax_amount += Number(t.tax_amount || 0);
+        taxGroups.set(key, group);
+      }
+    }
+    const invoiceTaxes = Array.from(taxGroups.values()).map((g) => ({
+      tax_rate_id: g.tax_rate_id,
+      tax_name: g.tax_name,
+      tax_rate: new Prisma.Decimal(g.tax_rate),
+      taxable_amount: new Prisma.Decimal(round2(g.taxable_amount)),
+      tax_amount: new Prisma.Decimal(round2(g.tax_amount)),
+      tax_type: g.tax_type as any,
+    }));
+
     const invoiceDataRequest = order.invoice_data_requests?.[0];
     const guest_customer_name = invoiceDataRequest
       ? `${invoiceDataRequest.first_name || ''} ${invoiceDataRequest.last_name || ''}`.trim()
@@ -582,6 +665,9 @@ export class InvoicingService {
         invoice_items: {
           create: items,
         },
+        ...(invoiceTaxes.length > 0
+          ? { invoice_taxes: { create: invoiceTaxes } }
+          : {}),
       },
       include: INVOICE_INCLUDE,
     });

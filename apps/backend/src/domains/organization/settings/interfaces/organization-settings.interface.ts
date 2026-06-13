@@ -110,6 +110,14 @@ export interface OrganizationFiscalData {
   department?: string;
   city?: string;
   tax_responsibilities?: string[];
+  // IVA declaration periodicity (art. 600 ET). Only meaningful when the
+  // tenant is responsable de IVA (O-48). Absent ⇒ defaults to 'bimonthly'.
+  vat_periodicity?: 'monthly' | 'bimonthly' | 'four_monthly';
+  // Withholding (retención) role flags. Absent ⇒ treated as false.
+  // is_withholding_agent: tenant retains on purchases (Caso 1, retenedor).
+  // is_self_withholder: tenant may be subject to being withheld (Caso 2, autorretenedor).
+  is_withholding_agent?: boolean;
+  is_self_withholder?: boolean;
 }
 
 // ============================================================================

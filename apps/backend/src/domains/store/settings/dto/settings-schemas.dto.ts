@@ -16,9 +16,11 @@ import {
   IsNotEmpty,
   MaxLength,
   ValidateIf,
+  ArrayMinSize,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
+import { StoreIndustry } from '../../stores/dto/index';
 import {} from './shipping-carriers.dto';
 
 export class GeneralSettingsDto {
@@ -62,6 +64,20 @@ export class GeneralSettingsDto {
   @IsOptional()
   @IsEnum(['physical', 'online', 'hybrid', 'popup', 'kiosko'])
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
+
+  @ApiProperty({
+    enum: StoreIndustry,
+    isArray: true,
+    example: [StoreIndustry.RETAIL, StoreIndustry.RESTAURANT],
+    required: false,
+    description:
+      'Multi-select industry classification. Mirrored to stores.industries; empty arrays are rejected.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
 }
 
 export class InventorySettingsDto {

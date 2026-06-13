@@ -604,10 +604,10 @@ export const storeAdminRoutes: Routes = [
       // Legal / Tax Routes — withholding-tax, exogenous and ica are now nested
       // under the accounting module (see accounting.routes.ts) so they share
       // its persistent sticky-header. Old /admin/taxes/ica deep-links redirect
-      // to the new canonical /admin/accounting/ica path.
+      // to the new canonical /admin/accounting/taxes/ica path.
       {
         path: 'taxes/ica',
-        redirectTo: 'accounting/ica',
+        redirectTo: 'accounting/taxes/ica',
         pathMatch: 'full',
       },
       // Price Tiers (Precios y Tarifas)

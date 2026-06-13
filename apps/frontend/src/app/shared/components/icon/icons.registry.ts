@@ -249,6 +249,8 @@ import {
   FileSignature,
   ListChecks,
   LifeBuoy,
+  // Accounting shell icons
+  ListTree,
   // Subscription module icons
   AlertOctagon,
   PauseCircle,
@@ -586,6 +588,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'file-signature': FileSignature,
   'list-checks': ListChecks,
   'life-buoy': LifeBuoy,
+
+  // Accounting shell icons
+  'list-tree': ListTree,
 
   'alert-octagon': AlertOctagon,
   'pause-circle': PauseCircle,

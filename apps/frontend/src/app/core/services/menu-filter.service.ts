@@ -4,6 +4,7 @@ import { map } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
+import { getModulesHiddenByIndustries } from '../../shared/constants/industry-modules.constant';
 import type {
   OrganizationOperatingScope,
   OrganizationFiscalScope,
@@ -141,8 +142,7 @@ export class MenuFilterService {
     'Obligaciones fiscales': 'fiscal_obligations',
     'Declaraciones fiscales': 'fiscal_declarations',
     'Cierre fiscal': 'fiscal_close',
-    'Evidencias fiscales': 'fiscal_evidence',
-    'Historial fiscal': 'fiscal_history',
+    'Auditoría fiscal': 'fiscal_audit',
     'Reglas fiscales': 'fiscal_rules',
 
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)
@@ -184,6 +184,7 @@ export class MenuFilterService {
     return combineLatest([
       this.authFacade.getVisibleModules$(),
       this.authFacade.userStoreType$,
+      this.authFacade.userIndustries$,
       this.authFacade.storeSettings$,
       this.authFacade.userOrganization$,
       this.authFacade.activeFiscalAreas$,
@@ -192,19 +193,62 @@ export class MenuFilterService {
         ([
           visibleModules,
           loginStoreType,
+          loginIndustries,
           storeSettings,
           organization,
           activeFiscalAreas,
         ]) => {
-          // Prefer store_settings.general.store_type (updated on save) over user.store.store_type (login snapshot)
+          // ─── Crossing order: industry ∩ store_panel ∩ user_panel ∩ store_type ∩ scope ∩ subscription ───
+          // Each layer is an AND. A module is visible only if it passes every layer.
+          // The `effectiveModules` chain below must read top-to-bottom in the same order
+          // so the next dev can follow the flow without surprises.
+
+          // Layer 1: industry availability.
+          // Prefer store_settings.general.industries (updated on save) over user.store.industries
+          // (login snapshot — may not include the field yet). Fallback to ['retail'] is the
+          // canonical default from the DB column default + settings default.
+          const industries: string[] =
+            storeSettings?.general?.industries ||
+            (Array.isArray(loginIndustries) ? loginIndustries : null) ||
+            ['retail'];
+          // OR semantics: a module is hidden only if hidden for EVERY industry of the store.
+          const hiddenByIndustries = getModulesHiddenByIndustries(industries);
+
+          // Layer 2: store panel UI (store-wide ceiling, editable by owner).
+          // A key set to `false` in `store_settings.panel_ui.STORE_ADMIN` hides the module
+          // for the whole store. Absent key or `true` = allowed.
+          // Only the STORE_ADMIN app_type map applies (industries are store-scoped;
+          // ORG_ADMIN is untouched). `panel_ui` itself is optional.
+          const storePanelMap: Record<string, boolean> | undefined =
+            storeSettings?.panel_ui?.STORE_ADMIN;
+          // Build the list of module keys explicitly hidden store-wide.
+          const hiddenByStorePanel = storePanelMap
+            ? Object.entries(storePanelMap)
+                .filter(([, allowed]) => allowed === false)
+                .map(([key]) => key)
+            : [];
+
+          // Layer 3: user panel UI (the existing per-user `panel_ui` map — comes in
+          // as `visibleModules` from `getVisibleModules$()` — already merged with
+          // defaults and the active app_type).
+
+          // Layer 4: store_type (modality) — physical/popup/kiosko hide ecommerce,
+          // online hides POS / cash registers, hybrid shows everything.
+          // Prefer store_settings.general.store_type (updated on save) over user.store.store_type
+          // (login snapshot).
           const storeType = storeSettings?.general?.store_type || loginStoreType;
-          // Remove modules hidden by store type from visible list
           const hiddenByStoreType =
             this.storeTypeHiddenModules[storeType || ''] || [];
-          const effectiveModules =
-            hiddenByStoreType.length > 0
-              ? visibleModules.filter((m) => !hiddenByStoreType.includes(m))
-              : visibleModules;
+
+          // Layers 5+6 (operating scope / fiscal scope / fiscal area / subscription)
+          // run inside filterItemsRecursive below.
+          const effectiveModules = visibleModules.filter(
+            (m) =>
+              !hiddenByIndustries.includes(m) &&
+              !hiddenByStorePanel.includes(m) &&
+              !hiddenByStoreType.includes(m),
+          );
+
           const operatingScope: OrganizationOperatingScope =
             (organization?.operating_scope as
               | OrganizationOperatingScope

@@ -89,6 +89,10 @@ export interface OrgSupplierRow {
   contact_person?: string | null;
   document_number?: string | null;
   tax_id?: string | null;
+  // Fiscal classification (Colombian withholdings — "el QUIEN")
+  tax_regime?: string | null;
+  person_type?: string | null;
+  is_self_withholder?: boolean | null;
   email?: string | null;
   phone?: string | null;
   mobile?: string | null;
@@ -112,7 +116,10 @@ export interface CreateOrgSupplierRequest {
   mobile?: string;
   website?: string;
   tax_id?: string;
+  // Fiscal classification (Colombian withholdings — "el QUIEN")
   tax_regime?: string;
+  person_type?: string;
+  is_self_withholder?: boolean;
   document_type?: string;
   verification_digit?: string;
   payment_terms?: string;

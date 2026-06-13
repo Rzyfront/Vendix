@@ -10,6 +10,7 @@ import {
   CreateTaxCategoryDto,
   UpdateTaxCategoryDto,
   TaxCategoryQueryDto,
+  TaxFiscalType,
 } from './dto';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
@@ -82,10 +83,16 @@ export class TaxesService {
       name: string;
       rate: number;
       amount: number;
+      tax_type: TaxFiscalType;
     }[] = [];
 
     for (const assignment of assignments) {
       if (assignment.tax_categories?.tax_rates) {
+        // Fiscal type is owned by the category (source of truth) and carried
+        // down to each rate row so the downstream breakdown stays typed.
+        const taxType =
+          (assignment.tax_categories.tax_type as TaxFiscalType | null) ??
+          TaxFiscalType.IVA;
         for (const rate of assignment.tax_categories.tax_rates) {
           const rateVal = Number(rate.rate);
           const amount = basePrice * rateVal;
@@ -95,6 +102,7 @@ export class TaxesService {
             name: rate.name,
             rate: rateVal,
             amount,
+            tax_type: taxType,
           });
         }
       }
@@ -119,6 +127,7 @@ export class TaxesService {
       data: {
         name: createTaxCategoryDto.name,
         description: createTaxCategoryDto.description,
+        tax_type: createTaxCategoryDto.tax_type ?? TaxFiscalType.IVA,
         store_id: context.store_id,
         tax_rates: {
           create: {

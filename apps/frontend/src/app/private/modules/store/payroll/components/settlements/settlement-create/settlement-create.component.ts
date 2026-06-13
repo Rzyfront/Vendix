@@ -88,8 +88,8 @@ import {
               formControlName="notes"
               rows="3"
               class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm
-                     text-text-primary placeholder-text-secondary focus:border-primary
-                     focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                     text-text-primary placeholder-text-secondary focus:border-primary-600
+                     focus:outline-none focus:ring-1 focus:ring-primary-600 resize-none"
               placeholder="Observaciones opcionales..."
             ></textarea>
           </div>

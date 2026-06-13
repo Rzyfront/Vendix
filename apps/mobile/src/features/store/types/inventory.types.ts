@@ -64,10 +64,18 @@ export interface Supplier {
   id: string;
   name: string;
   code?: string;
+  contact_person?: string;
   email?: string;
   phone?: string;
+  mobile?: string;
+  website?: string;
+  tax_id?: string;
+  payment_terms?: string;
+  currency?: string;
+  lead_time_days?: number | null;
+  notes?: string;
   address?: string;
-  state: 'active' | 'inactive';
+  is_active: boolean;
   created_at: string;
 }
 
@@ -77,7 +85,7 @@ export interface Location {
   code?: string;
   type: 'warehouse' | 'store' | 'virtual';
   address?: string;
-  state: 'active' | 'inactive';
+  is_active: boolean;
 }
 
 export type PurchaseOrderStatus =

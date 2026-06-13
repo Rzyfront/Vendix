@@ -113,6 +113,7 @@
                   formControlName="address_line1"
                   placeholder="Calle y numero"
                   [control]="address_form.get('address_line1')"
+                  [error]="getFieldError('address_line1')"
                   [required]="true"
                 ></app-input>
 
@@ -120,6 +121,8 @@
                   label="Apartamento, oficina, etc. (opcional)"
                   formControlName="address_line2"
                   placeholder="Apto, piso, oficina"
+                  [control]="address_form.get('address_line2')"
+                  [error]="getFieldError('address_line2')"
                 ></app-input>
 
                 <div class="form-row">
@@ -132,35 +135,60 @@
                     [required]="true"
                   ></app-selector>
 
-                  <app-selector
-                    label="Departamento/Estado"
-                    formControlName="state_province"
-                    [options]="departmentOptions"
-                    [placeholder]="
-                      loading_departments()
-                        ? 'Cargando...'
-                        : 'Selecciona un departamento'
-                    "
-                    [errorText]="getFieldError('state_province')"
-                  ></app-selector>
+                  @if (isColombia()) {
+                    <app-selector
+                      label="Departamento/Estado"
+                      formControlName="state_province"
+                      [options]="departmentOptions"
+                      [placeholder]="
+                        loading_departments()
+                          ? 'Cargando...'
+                          : 'Selecciona un departamento'
+                      "
+                      [errorText]="getFieldError('state_province')"
+                      [required]="true"
+                    ></app-selector>
+                  } @else {
+                    <app-input
+                      label="Departamento/Estado"
+                      formControlName="state_province"
+                      placeholder="Departamento o estado"
+                      [control]="address_form.get('state_province')"
+                      [error]="getFieldError('state_province')"
+                      [required]="true"
+                    ></app-input>
+                  }
                 </div>
 
                 <div class="form-row">
-                  <app-selector
-                    label="Ciudad"
-                    formControlName="city"
-                    [options]="cityOptions"
-                    [placeholder]="
-                      loading_cities() ? 'Cargando...' : 'Selecciona una ciudad'
-                    "
-                    [errorText]="getFieldError('city')"
-                    [required]="true"
-                  ></app-selector>
+                  @if (isColombia()) {
+                    <app-selector
+                      label="Ciudad"
+                      formControlName="city"
+                      [options]="cityOptions"
+                      [placeholder]="
+                        loading_cities() ? 'Cargando...' : 'Selecciona una ciudad'
+                      "
+                      [errorText]="getFieldError('city')"
+                      [required]="true"
+                    ></app-selector>
+                  } @else {
+                    <app-input
+                      label="Ciudad"
+                      formControlName="city"
+                      placeholder="Ciudad"
+                      [control]="address_form.get('city')"
+                      [error]="getFieldError('city')"
+                      [required]="true"
+                    ></app-input>
+                  }
 
                   <app-input
                     label="Codigo Postal"
                     formControlName="postal_code"
                     placeholder="Codigo postal"
+                    [control]="address_form.get('postal_code')"
+                    [error]="getFieldError('postal_code')"
                   ></app-input>
                 </div>
 
@@ -170,6 +198,7 @@
                   type="tel"
                   placeholder="Telefono de contacto"
                   [control]="address_form.get('phone_number')"
+                  [error]="getFieldError('phone_number')"
                   [required]="true"
                 ></app-input>
 
@@ -438,9 +467,15 @@
               variant="primary"
               (clicked)="nextStep()"
               [disabled]="
-                bookingStep !== null &&
-                step() === bookingStep &&
-                !allBookingSlotsSelected
+                (bookingStep !== null &&
+                  step() === bookingStep &&
+                  !allBookingSlotsSelected) ||
+                (step() === 1 &&
+                  !cartHasOnlyServices &&
+                  !canProceedFromAddress()) ||
+                (step() === paymentStep &&
+                  !cartHasOnlyServices &&
+                  shipping_options().length === 0)
               "
             >
               Continuar

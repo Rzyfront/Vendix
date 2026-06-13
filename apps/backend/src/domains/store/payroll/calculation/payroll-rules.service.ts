@@ -50,6 +50,34 @@ export class PayrollRulesService {
     return this.mergeRules(this.mergeRules(base, db_rules), store_rules);
   }
 
+  /**
+   * Resolves the UVT value (COP) for a fiscal year from uvt_values.
+   * Precedence: entity-specific row → org-level default (accounting_entity_id
+   * null). Mirrors the resolution used by
+   * PayrollFlowService.persistAcceptedRunWithholdings. The store-scoped
+   * Prisma client injects the organization filter automatically
+   * (uvt_values is org-scoped). Returns null when no value is configured.
+   */
+  async getUvtValueForYear(
+    year: number,
+    accounting_entity_id: number | null,
+  ): Promise<number | null> {
+    const entity_uvt =
+      accounting_entity_id != null
+        ? await this.store_prisma.uvt_values.findFirst({
+            where: { accounting_entity_id, year },
+          })
+        : null;
+
+    const uvt =
+      entity_uvt ??
+      (await this.store_prisma.uvt_values.findFirst({
+        where: { accounting_entity_id: null, year },
+      }));
+
+    return uvt ? Number(uvt.value_cop) : null;
+  }
+
   private mergeRules(
     base: PayrollRules,
     override?: Partial<PayrollRules>,

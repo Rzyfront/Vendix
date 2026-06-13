@@ -1,7 +1,15 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, signal, inject, DestroyRef } from '@angular/core';
 import { Observable, of, throwError, forkJoin } from 'rxjs';
-import { catchError, delay, map, tap } from 'rxjs/operators';
-import { toObservable } from '@angular/core/rxjs-interop';
+import {
+  catchError,
+  delay,
+  map,
+  tap,
+  debounceTime,
+  distinctUntilChanged,
+  switchMap,
+} from 'rxjs/operators';
+import { toObservable, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   CartItem,
   CartSummary,
@@ -32,6 +40,8 @@ import {
   PriceTier,
   ProductPriceTierOverride,
 } from '../../price-tiers/interfaces';
+import { WithholdingTaxService } from '../../withholding-tax/services/withholding-tax.service';
+import { WithholdingPreviewResult } from '../../withholding-tax/interfaces/withholding.interface';
 
 @Injectable({
   providedIn: 'root',
@@ -40,10 +50,78 @@ export class PosCartService {
   readonly cartState = signal<CartState>(this.getInitialState());
   readonly loading = signal<boolean>(false);
 
+  private destroyRef = inject(DestroyRef);
+  private withholdingService = inject(WithholdingTaxService);
+
   constructor(
     private productService: PosProductService,
     private priceResolver: PriceResolverService,
-  ) { }
+  ) {
+    this.initWithholdingPreview();
+  }
+
+  /**
+   * Reactive withholding preview (role='suffered' — the CUSTOMER retains us on
+   * a sale). Listens to the cart and fires the backend preview ONLY when the
+   * withholding inputs actually change (customer, base subtotal, IVA), with a
+   * debounce + switchMap to avoid spamming the endpoint and to cancel stale
+   * in-flight requests. The backend is the single source of truth; we just
+   * store the resolved `total_withholding` on the summary. Never throws — a
+   * failed preview leaves the cart total untouched (withholding 0).
+   */
+  private initWithholdingPreview(): void {
+    toObservable(this.cartState)
+      .pipe(
+        map((state) => {
+          const customerId = Number(state.customer?.id ?? 0) || 0;
+          const base = Number(state.summary.subtotal ?? 0) || 0;
+          const ivaAmount = Number(state.summary.taxAmount ?? 0) || 0;
+          return { customerId, base, ivaAmount };
+        }),
+        distinctUntilChanged(
+          (a, b) =>
+            a.customerId === b.customerId &&
+            a.base === b.base &&
+            a.ivaAmount === b.ivaAmount,
+        ),
+        debounceTime(300),
+        switchMap(({ customerId, base, ivaAmount }) => {
+          // No counterparty or no base → no call, reset to 0.
+          if (customerId <= 0 || base <= 0) {
+            return of({ lines: [], total_withholding: 0 });
+          }
+          return this.withholdingService.previewWithholding({
+            role: 'suffered',
+            customer_id: customerId,
+            base,
+            ivaAmount,
+          });
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((result) => this.applyWithholdingToSummary(result));
+  }
+
+  /** Patch the current summary with the backend-resolved withholding. */
+  private applyWithholdingToSummary(result: WithholdingPreviewResult): void {
+    const current = this.cartState();
+    const amount = Number(result?.total_withholding ?? 0) || 0;
+    const lines = result?.lines ?? [];
+    if (
+      (current.summary.withholdingAmount ?? 0) === amount &&
+      (current.summary.withholdingLines?.length ?? 0) === lines.length
+    ) {
+      return; // No-op: avoids a redundant signal write / re-render loop.
+    }
+    this.cartState.set({
+      ...current,
+      summary: {
+        ...current.summary,
+        withholdingAmount: amount,
+        withholdingLines: lines,
+      },
+    });
+  }
 
   // Observable getters
   get cartState$(): Observable<CartState> {
@@ -1052,6 +1130,11 @@ export class PosCartService {
     const itemCount = items.length;
     const totalItems = items.reduce((sum, item) => sum + item.quantity, 0);
 
+    // Preserve the last backend-resolved withholding so the line does not flash
+    // to 0 between an item change and the debounced preview recompute. The
+    // reactive preview re-fires whenever subtotal/IVA/customer change.
+    const previousSummary = this.cartState().summary;
+
     return {
       subtotal,
       taxAmount,
@@ -1059,6 +1142,8 @@ export class PosCartService {
       total,
       itemCount,
       totalItems,
+      withholdingAmount: previousSummary?.withholdingAmount ?? 0,
+      withholdingLines: previousSummary?.withholdingLines,
     };
   }
 

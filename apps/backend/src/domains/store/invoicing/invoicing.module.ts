@@ -16,9 +16,11 @@ import { DianConfigService } from './dian-config/dian-config.service';
 import { DianTestService } from './dian-config/dian-test.service';
 import { InvoicePdfService } from './services/invoice-pdf.service';
 import { InvoiceRetryQueueService } from './services/invoice-retry-queue.service';
+import { InvoiceRetryListener } from './services/invoice-retry.listener';
 import { FiscalTransmissionLedgerService } from './services/fiscal-transmission-ledger.service';
 import { ManualCertificateIssuerAdapter } from './dian-config/certificates/manual-certificate-issuer.adapter';
 import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
+import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
 
 @Module({
   imports: [
@@ -27,6 +29,7 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
     S3Module,
     InvoiceProviderModule,
     DianDirectModule,
+    WithholdingTaxModule,
   ],
   controllers: [
     DianConfigController,
@@ -43,6 +46,7 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
     DianTestService,
     InvoicePdfService,
     InvoiceRetryQueueService,
+    InvoiceRetryListener,
     FiscalTransmissionLedgerService,
     ManualCertificateIssuerAdapter,
     ModuleFlowGuard,
@@ -50,6 +54,7 @@ import { ModuleFlowGuard } from '../../../common/guards/module-flow.guard';
   exports: [
     InvoicingService,
     InvoiceFlowService,
+    CreditNotesService,
     InvoicePdfService,
     InvoiceRetryQueueService,
     FiscalTransmissionLedgerService,

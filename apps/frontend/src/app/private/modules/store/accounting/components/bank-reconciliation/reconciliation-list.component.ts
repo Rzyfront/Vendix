@@ -129,7 +129,7 @@ import {
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
               ></div>
             </div>
           }

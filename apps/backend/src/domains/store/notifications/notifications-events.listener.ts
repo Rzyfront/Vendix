@@ -81,17 +81,41 @@ export class NotificationsEventsListener {
   @OnEvent('stock.low')
   async handleLowStock(event: {
     store_id: number;
+    location_id?: number;
     product_id: number;
     product_name: string;
     quantity: number;
     threshold: number;
   }) {
+    // Look up the location name, scope-checked to the event's store_id to
+    // avoid leaking warehouse names across tenants. location_id may be
+    // undefined if the stock write didn't pass a location (defensive).
+    let locationName: string | null = null;
+    if (event.location_id != null) {
+      const location = await this.global_prisma.inventory_locations.findFirst({
+        where: { id: event.location_id, store_id: event.store_id },
+        select: { name: true },
+      });
+      locationName = location?.name ?? null;
+    }
+
+    const locationSuffix = locationName ? ` en ${locationName}` : '';
+    const titleWithLocation = locationName
+      ? `Stock Bajo — ${locationName}`
+      : 'Stock Bajo';
+
     await this.notifications_service.createAndBroadcast(
       event.store_id,
       'low_stock',
-      'Stock Bajo',
-      `${event.product_name} tiene solo ${event.quantity} unidades (umbral: ${event.threshold})`,
-      { product_id: event.product_id, quantity: event.quantity },
+      titleWithLocation,
+      `${event.product_name} tiene solo ${event.quantity} unidades (umbral: ${event.threshold})${locationSuffix}`,
+      {
+        product_id: event.product_id,
+        location_id: event.location_id ?? null,
+        location_name: locationName,
+        quantity: event.quantity,
+        threshold: event.threshold,
+      },
     );
   }
 

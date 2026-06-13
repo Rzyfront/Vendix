@@ -19,5 +19,11 @@ export interface ExogenousLineData {
   payment_amount: number;
   tax_amount: number;
   withholding_amount: number;
+  /**
+   * Rol de la retención que originó la línea (trazabilidad):
+   * - 'practiced': retención que la empresa practicó a un proveedor (Formato 1001).
+   * - 'suffered': retención que un cliente agente retenedor practicó a la empresa (Formato 1003).
+   */
+  role?: 'practiced' | 'suffered';
   line_data?: Record<string, any>;
 }

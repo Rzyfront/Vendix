@@ -1,6 +1,7 @@
 import { StoreSettings } from '../interfaces/store-settings.interface';
 import { CURRENT_SCHEMA_VERSION } from '../migrations/settings-migrator.service';
 import { createDefaultFiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
+import { StoreIndustry } from '../../stores/dto/index';
 
 export function getDefaultStoreSettings(): StoreSettings {
   return {
@@ -53,6 +54,7 @@ export function getDefaultStoreSettings(): StoreSettings {
       currency: 'COP',
       language: 'es',
       tax_included: false,
+      industries: [StoreIndustry.RETAIL],
     },
     inventory: {
       low_stock_threshold: 10,

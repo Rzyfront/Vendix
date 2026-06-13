@@ -181,6 +181,13 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/subscriptions/subscriptions.routes'
           ).then((m) => m.SUBSCRIPTIONS_ROUTES),
       },
+      {
+        path: 'fiscal',
+        loadChildren: () =>
+          import(
+            '../../private/modules/super-admin/fiscal/fiscal.routes'
+          ).then((m) => m.FISCAL_ROUTES),
+      },
     ],
   },
 ];

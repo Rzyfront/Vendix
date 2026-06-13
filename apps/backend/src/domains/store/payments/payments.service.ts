@@ -22,6 +22,7 @@ import {
 } from './dto';
 import { PaymentError, PaymentErrorCodes, LEGACY_TO_NEW } from './utils';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { buildTaxBreakdown } from 'src/common/interfaces/tax-breakdown.interface';
 import { resolveCostPrice } from '../orders/utils/resolve-cost-price';
 import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
 import { PriceResolverService } from '../products/services/price-resolver.service';
@@ -44,6 +45,8 @@ import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { WompiEnvironment } from './processors/wompi/wompi.types';
 import { WebhookHandlerService } from './services/webhook-handler.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
+import type { WithholdingResolution } from '../withholding-tax/withholding-flow.service';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -85,6 +88,7 @@ export class PaymentsService {
     private readonly wompiProcessor: WompiProcessor,
     private readonly webhookHandler: WebhookHandlerService,
     private readonly priceResolverService: PriceResolverService,
+    private readonly withholdingFlow: WithholdingFlowService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -919,6 +923,52 @@ export class PaymentsService {
         // 4. Emit order/payment events — drafts skip ALL events because they
         // are not real sales (no accounting, no credit_sale, no COGS).
         if (!createPosPaymentDto.is_draft) {
+          // Typed tax breakdown so accounting posts one journal line per fiscal
+          // type (IVA → 2408, INC → 2436, ICA → 241205) instead of collapsing to
+          // 2408. Read from the persisted, typed order_item_taxes rows.
+          const orderItemsWithTaxes = await tx.order_items.findMany({
+            where: { order_id: order.id },
+            select: {
+              order_item_taxes: { select: { tax_type: true, tax_amount: true } },
+            },
+          });
+          const tax_breakdown = buildTaxBreakdown(
+            orderItemsWithTaxes.flatMap((i) => i.order_item_taxes || []),
+          );
+
+          // CASO 2 (suffered): a customer who is a withholding agent retains
+          // us on this sale, turning the withheld amount into an advance asset
+          // (1355). Resolve ONCE here so both the payment.received and the
+          // credit_sale.created branches (mutually exclusive) share the same
+          // result without duplicating work or persistence. Zero-regression:
+          // tenant.is_withholding_agent=false or no customer_id → lines:[]; we
+          // degrade to an empty resolution on any failure so the sale never
+          // breaks because of withholding.
+          let wh: WithholdingResolution = {
+            lines: [],
+            uvt_value_used: 0,
+            counterparty_type: null,
+          };
+          try {
+            const customer_id = order.customer_id
+              ? Number(order.customer_id)
+              : null;
+            wh = await this.withholdingFlow.resolveSuffered({
+              organization_id: order.stores?.organization_id,
+              store_id: createPosPaymentDto.store_id,
+              customer_id,
+              base: Number(order.subtotal_amount || 0),
+              ivaAmount: Number(order.tax_amount || 0),
+            });
+          } catch (error) {
+            this.logger.warn(
+              `resolveSuffered failed for order ${order.id}; degrading to no withholding: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            wh = { lines: [], uvt_value_used: 0, counterparty_type: null };
+          }
+
           // 4a. Emit order.created event
           this.eventEmitter.emit('order.created', {
             store_id: createPosPaymentDto.store_id,
@@ -939,12 +989,31 @@ export class PaymentsService {
               amount: payment.amount,
               subtotal_amount: Number(order.subtotal_amount || 0),
               tax_amount: Number(order.tax_amount || 0),
+              tax_breakdown,
+              withholding_breakdown: wh.lines,
               discount_amount: Number(order.discount_amount || 0),
               currency: payment.currency || createPosPaymentDto.currency,
               payment_method:
                 payment.store_payment_method?.system_payment_method
                   ?.display_name || 'Unknown',
               user_id: user.id,
+            });
+
+            // Persist suffered withholding once for the immediate-payment
+            // branch (mutually exclusive with credit_sale.created). Safe to
+            // call unconditionally: persistWithholdingLines filters empty/
+            // concept-less lines and writes nothing when wh.lines is empty.
+            await this.withholdingFlow.persistWithholdingLines({
+              organization_id: order.stores?.organization_id,
+              store_id: createPosPaymentDto.store_id,
+              invoice_id: null,
+              customer_id: order.customer_id
+                ? Number(order.customer_id)
+                : null,
+              role: 'suffered',
+              counterparty_type: wh.counterparty_type,
+              uvt_value_used: wh.uvt_value_used,
+              lines: wh.lines,
             });
 
             // 5b. Emit order.completed for COGS on direct POS sales
@@ -972,9 +1041,28 @@ export class PaymentsService {
               order_number: order.order_number,
               subtotal_amount: Number(order.subtotal_amount || 0),
               tax_amount: Number(order.tax_amount || 0),
+              tax_breakdown,
+              withholding_breakdown: wh.lines,
               discount_amount: Number(order.discount_amount || 0),
               total_amount: Number(order.grand_total || 0),
               user_id: user.id,
+            });
+
+            // Persist suffered withholding once for the credit-sale branch
+            // (mutually exclusive with payment.received). Safe to call
+            // unconditionally: persistWithholdingLines writes nothing when
+            // wh.lines is empty.
+            await this.withholdingFlow.persistWithholdingLines({
+              organization_id: order.stores?.organization_id,
+              store_id: createPosPaymentDto.store_id,
+              invoice_id: null,
+              customer_id: order.customer_id
+                ? Number(order.customer_id)
+                : null,
+              role: 'suffered',
+              counterparty_type: wh.counterparty_type,
+              uvt_value_used: wh.uvt_value_used,
+              lines: wh.lines,
             });
           }
         }
@@ -1974,6 +2062,7 @@ export class PaymentsService {
         name: string;
         rate: number;
         amount: number;
+        tax_type?: string;
       }[];
     };
     costPrice: number | null;
@@ -2062,6 +2151,7 @@ export class PaymentsService {
           tax_name: tax.name,
           tax_rate: this.roundRate(tax.rate),
           tax_amount: this.roundMoney(tax.amount * params.lineUnits),
+          tax_type: tax.tax_type ?? 'iva',
           is_compound: false,
         })),
       };

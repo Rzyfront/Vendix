@@ -56,8 +56,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-zoneless-signals` |
 | Accruing partner commissions or running partner payout batches | `vendix-saas-billing` |
 | Adding MCP resources or tools | `vendix-mcp-server` |
+| Adding a fiscal declaration calculator or DIAN tax scheme code | `vendix-tax-typing` |
 | Adding a monthly or daily Redis quota counter | `vendix-redis-quota` |
 | Adding a new AI provider | `vendix-ai-platform-core` |
+| Adding a new consumption tax (IBUA, ICUI, INC variant) | `vendix-tax-typing` |
+| Adding a new tax_type value to the fiscal system | `vendix-tax-typing` |
 | Adding backend permissions | `vendix-permissions` |
 | Adding chat features | `vendix-ai-chat` |
 | Adding dependencies to apps/mobile/package.json | `mobile-dev` |
@@ -132,6 +135,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging AI request failures | `vendix-ai-platform-core` |
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
 | Debugging Prisma WhereUnique/AND errors in scoped queries | `vendix-prisma-scopes` |
+| Debugging a tax posting to the wrong PUC account | `vendix-tax-typing` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
@@ -233,6 +237,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | When editing schema.prisma, creating migrations, or using Prisma client | `vendix-prisma` |
 | When working with pricing that includes taxes/fees, creating UI components for pricing, or implementing price calculations | `vendix-calculated-pricing` |
 | Wiring the subscription-paywall HTTP interceptor on the frontend | `vendix-subscription-gate` |
+| Wiring withholding (retefuente/reteiva/reteica) accounting or declarations | `vendix-tax-typing` |
 | Working across apps or shared libraries | `vendix-core` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
@@ -289,9 +294,19 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
+| Saving or consulting persistent project memory with Engram (mem_save, mem_search, mem_context, mem_sync) | `vendix-engram` |
+| Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
+| Self-bootstrapping Engram on a fresh dev machine (detect → ask → run scripts/engram-bootstrap.sh) | `vendix-engram` |
+| Upgrading Engram sync from manual to pre-push hook (run scripts/install-engram-hooks.sh) | `vendix-engram` |
 | changes with database migrations | `git-workflow` |
 | git commit, git push, create PR, create branch | `git-workflow` |
 | resolve merge conflicts | `git-workflow` |
+| Branching off or rebasing onto origin/dev before work (git-workflow RULE 5) | `git-workflow` |
+| Pulling the latest Engram memories (engram sync --import) before starting work (RULE 6) | `git-workflow` |
+| Saving an Engram memory before pushing non-trivial changes (RULE 7) | `git-workflow` |
+| Running the 80% pass gate (pr-code-review) before merging a PR (RULE 8) | `git-workflow` + `pr-code-review` |
+| Reviewing a PR with the 7 categories and posting a review | `pr-code-review` |
+| Re-developing solutions identified by a code review below 80% | `pr-code-review` |
 
 ---
 
@@ -320,7 +335,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | --------------------------------- | ----------------------------- | ------------ | --------------------------------------------------------------------------- |
 | **`how-to-dev`**                  | **ALWAYS**                    | **CRITICAL** | Mandatory ultra-obligatory dev flow                                         |
 | **`Vendix-core`**                  | **ALWAYS**                    | **CRITICAL** | Core patterns and conventions                                               |
-| **`git-workflow`**                | **ALWAYS**                    | **CRITICAL** | Git commit, PR, branching and conflict rules                                |
+| **`git-workflow`**                | **ALWAYS**                    | **CRITICAL** | Git commit, PR, branching, conflict rules, and the 4 hard gates: branches current with `origin/dev` (R5), Engram memories pulled at start of work (R6), Engram memory saved before push (R7), 80% PR review gate (R8) |
 | **`vendix-zoneless-signals`**     | **ANY FRONTEND FILE**         | **CRITICAL** | Zoneless + Signals (Angular 20) — violaciones producen bugs silenciosos     |
 | **`knowledge-gap`**               | **UNKNOWN PATTERN**           | **HIGH**     | Protocol for new/undefined patterns                                         |
 
@@ -390,3 +405,74 @@ Each AI provider requires specific configuration paths. Run `./skills/setup.sh` 
 ./skills/setup.sh --gemini     # Gemini only
 ./skills/setup.sh --opencode   # OpenCode only
 ```
+
+---
+
+## 🧠 Memoria persistente (Engram)
+
+Este proyecto usa **Engram** como sistema de memoria compartida entre devs y agentes AI. Un binario Go + SQLite + FTS5 que vive en `~/.engram/` y se sincroniza con el repo como chunks comprimidos en `.engram/chunks/`.
+
+### Install (una vez por máquina)
+
+```bash
+brew install gentleman-programming/tap/engram
+engram setup <agente>   # opencode | claude-code | gemini-cli | codex | pi
+engram doctor           # verifica que todo esté sano
+```
+
+Si el agente ya estaba corriendo, **reiniciarlo** para que recargue el MCP server.
+
+### Convenciones para AI agents
+
+- **Scope del proyecto:** usar siempre `--project vendix` (o el nombre del repo) en cada `mem_save` / `mem_search`.
+- **Al iniciar sesión:** correr `mem_context vendix` para recordar el contexto del repo antes de proponer cambios.
+- **Antes de un cambio grande:** correr `mem_search <keyword> --project vendix` para saber si ya se intentó algo parecido.
+- **Al cerrar trabajo significativo** (bugfix, decisión de arquitectura, hallazgo no obvio): correr `mem_save` con el patrón:
+  - **What:** qué se hizo
+  - **Why:** por qué se hizo así
+  - **Where:** ruta / archivo / dominio
+  - **Learned:** qué quedó aprendido que el próximo dev/agente debe saber
+- **Si aparece conflicto:** dejar que `mem_judge` lo marque y resolver conscientemente — no sobrescribir a ciegas.
+
+### Sync con el equipo (git chunks)
+
+Las memorias viven en `~/.engram/engram.db` local y se sincronizan al repo como **chunks comprimidos en `.engram/chunks/`** (no la DB completa — `.gitignore` lo bloquea).
+
+**Al final del día / antes de un commit relevante:**
+
+```bash
+./scripts/engram-sync.sh         # exporta y stagea chunks
+git commit -m "chore(engram): sync memories"
+```
+
+**En otra máquina, al clonar o pull-ear:**
+
+```bash
+./scripts/engram-import.sh      # importa los chunks del equipo
+```
+
+### Reglas duras
+
+- **NO** commitear `~/.engram/engram.db` ni credenciales (el `.gitignore` ya lo bloquea, pero verificar antes de cada PR).
+- **NO** guardar secretos (API keys, tokens, passwords) en memorias — Engram es texto plano dentro de chunks.
+- **NO** usar Engram para notas temporales de debug; es para conocimiento durable del proyecto.
+
+### Health check
+
+```bash
+engram doctor                    # diagnóstico read-only
+engram stats                     # conteo de memorias
+engram conflicts list --project vendix  # ver memorias en conflicto
+```
+
+### 🤖 Onboarding automático (para el agente AI)
+
+Si un dev abre este repo y el agente detecta que Engram **no está instalado** (`command -v engram` falla) o que `.engram/chunks/` está presente pero la DB local está vacía:
+
+1. **Preguntar al dev** si quiere activar la memoria persistente del equipo.
+2. Si dice que sí, correr `./scripts/engram-bootstrap.sh --agent <agente>` (auto-detecta: opencode / claude-code / gemini-cli / codex / pi).
+3. Pedirle que **reinicie su agente** para que recargue el MCP subprocess.
+4. Verificar con `engram stats` y mostrar el conteo.
+
+El script es **idempotente**: si Engram ya está, no hace nada. No instalar brew packages sin confirmación explícita del usuario.
+

@@ -803,6 +803,28 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
       }));
     }
 
+    // Incapacidades
+    if (earnings.disabilities && Array.isArray(earnings.disabilities)) {
+      result.disabilities = earnings.disabilities.map((d: any) => ({
+        start_date: d.start_date,
+        end_date: d.end_date,
+        quantity: Number(d.quantity || 0),
+        type: Number(d.type || 1),
+        payment: Number(d.payment || 0),
+      }));
+    }
+
+    // Licencias
+    if (earnings.licenses && Array.isArray(earnings.licenses)) {
+      result.licenses = earnings.licenses.map((l: any) => ({
+        start_date: l.start_date,
+        end_date: l.end_date,
+        quantity: Number(l.quantity || 0),
+        type: l.type || 'remunerada',
+        payment: Number(l.payment || 0),
+      }));
+    }
+
     return result;
   }
 
@@ -816,9 +838,14 @@ export class DianPayrollProvider implements PayrollProviderAdapter {
 
     return {
       health_pct: Number(deductions.health_pct || 4),
-      health_amount: Number(deductions.health_amount || 0),
+      // The calculation service persists `health`/`pension`; some legacy
+      // items used `health_amount`/`pension_amount`. Read both so the DSPNE
+      // XML never emits $0 for a real deduction.
+      health_amount: Number(deductions.health_amount ?? deductions.health ?? 0),
       pension_pct: Number(deductions.pension_pct || 4),
-      pension_amount: Number(deductions.pension_amount || 0),
+      pension_amount: Number(
+        deductions.pension_amount ?? deductions.pension ?? 0,
+      ),
       solidarity_fund_pct: deductions.solidarity_fund_pct
         ? Number(deductions.solidarity_fund_pct)
         : undefined,

@@ -34,6 +34,11 @@ export const EXOGENOUS_FORMATS = {
     name: 'Saldos cuentas por pagar',
     description: 'Saldos de cuentas por pagar al 31 de diciembre',
   },
+  '2276': {
+    code: '2276',
+    name: 'Rentas de trabajo y pensiones',
+    description: 'Pagos por rentas de trabajo (nómina) — formato 2276 v4',
+  },
 } as const;
 
 export type ExogenousFormatCode = keyof typeof EXOGENOUS_FORMATS;

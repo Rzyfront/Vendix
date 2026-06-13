@@ -1,4 +1,4 @@
-import { Component, input, output, inject } from '@angular/core';
+import { Component, input, output, inject, computed } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 
@@ -66,12 +66,30 @@ const PAYMENT_TERM_LABELS = {
             <span>Impuestos</span>
             <span>{{ formatCurrency(summary().tax_amount) }}</span>
           </div>
-    
+
+          <!--
+            Retención (preview). role='practiced': nosotros retenemos al
+            proveedor; reduce el neto a pagar. Fuente única de verdad: endpoint
+            backend /store/withholding-tax/preview. Solo se muestra cuando hay
+            retención resuelta (> 0).
+          -->
+          @if (withholdingAmount() > 0) {
+            <div class="flex justify-between text-sm text-[var(--color-text-secondary)]">
+              <span class="flex items-center gap-1">
+                <app-icon name="minus" [size]="14" class="text-amber-600"></app-icon>
+                Retención
+              </span>
+              <span class="font-medium text-amber-700">-{{ formatCurrency(withholdingAmount()) }}</span>
+            </div>
+          }
+
           <div class="h-px bg-[var(--color-border)] my-2"></div>
-    
+
           <div class="flex justify-between">
-            <span class="text-[var(--color-text-primary)] font-semibold">Total</span>
-            <span class="text-[var(--color-text-primary)] text-lg font-bold">{{ formatCurrency(summary().total + shippingCost) }}</span>
+            <span class="text-[var(--color-text-primary)] font-semibold">{{
+              withholdingAmount() > 0 ? 'Neto a pagar' : 'Total'
+            }}</span>
+            <span class="text-[var(--color-text-primary)] text-lg font-bold">{{ formatCurrency(netTotal()) }}</span>
           </div>
         </div>
       </div>
@@ -185,6 +203,15 @@ export class PopSummaryComponent {
   readonly printOrder = output<void>();
   readonly clearCart = output<void>();
 
+  /**
+   * Net withholding the tenant practices on the supplier (role='practiced'),
+   * resolved server-side via the preview endpoint. Reduces the net to pay.
+   * 0 when there is no supplier or no applicable withholding.
+   */
+  readonly withholdingAmount = computed(
+    () => Number(this.summary()?.withholding_amount ?? 0) || 0,
+  );
+
   shippingCost: number = 0;
   selectedPaymentPreset: string = '';
   customPaymentTerms: string = '';
@@ -261,6 +288,17 @@ export class PopSummaryComponent {
       state.locationId &&
       state.items.length > 0
     );
+  }
+
+  /**
+   * Net to pay the supplier = gross total (incl. shipping) - withholding
+   * practiced (preview). `shippingCost` is a mutable field updated by the
+   * ngModel, so this stays a method evaluated in the template rather than a
+   * computed signal.
+   */
+  public netTotal(): number {
+    const gross = Number(this.summary()?.total ?? 0) + Number(this.shippingCost || 0);
+    return Math.max(0, gross - this.withholdingAmount());
   }
 
   public formatCurrency(value: number): string {

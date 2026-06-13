@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsEmail,
   IsIn,
   IsNotEmpty,
@@ -48,4 +49,25 @@ export class CreateCustomerDto {
       'El teléfono solo puede contener números y los símbolos + # * ( ) -',
   })
   phone?: string | null;
+
+  @ApiPropertyOptional({ description: 'Tax regime (fiscal classification)' })
+  @IsOptional()
+  @IsString()
+  tax_regime?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Person type for withholding resolution',
+    enum: ['NATURAL', 'JURIDICA'],
+  })
+  @IsOptional()
+  @IsString()
+  person_type?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Whether the customer is a withholding agent (agente de retención)',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_withholding_agent?: boolean;
 }

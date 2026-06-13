@@ -234,9 +234,18 @@ export interface CreateTransferDto {
 export interface CreateSupplierDto {
   name: string;
   code?: string;
+  contact_person?: string;
   email?: string;
   phone?: string;
+  mobile?: string;
+  website?: string;
+  tax_id?: string;
+  payment_terms?: string;
+  currency?: string;
+  lead_time_days?: number | null;
+  notes?: string;
   address?: string;
+  is_active?: boolean;
 }
 
 export type UpdateSupplierDto = Partial<CreateSupplierDto>;
@@ -246,6 +255,7 @@ export interface CreateLocationDto {
   code?: string;
   type: 'warehouse' | 'store' | 'virtual';
   address?: string;
+  is_active?: boolean;
 }
 
 export type UpdateLocationDto = Partial<CreateLocationDto>;
@@ -352,7 +362,7 @@ export const InventoryService = {
 
   async updateSupplier(id: string, dto: UpdateSupplierDto): Promise<Supplier> {
     const endpoint = Endpoints.STORE.INVENTORY.SUPPLIERS.UPDATE.replace(':id', id);
-    const res = await apiClient.put(endpoint, dto);
+    const res = await apiClient.patch(endpoint, dto);
     return unwrap<Supplier>(res);
   },
 
@@ -378,8 +388,13 @@ export const InventoryService = {
 
   async updateLocation(id: string, dto: UpdateLocationDto): Promise<Location> {
     const endpoint = Endpoints.STORE.INVENTORY.LOCATIONS.UPDATE.replace(':id', id);
-    const res = await apiClient.put(endpoint, dto);
+    const res = await apiClient.patch(endpoint, dto);
     return unwrap<Location>(res);
+  },
+
+  async deleteLocation(id: string): Promise<void> {
+    const endpoint = Endpoints.STORE.INVENTORY.LOCATIONS.DELETE.replace(':id', id);
+    await apiClient.delete(endpoint);
   },
 
   async createPurchaseOrder(dto: CreatePurchaseOrderDto): Promise<PurchaseOrder> {

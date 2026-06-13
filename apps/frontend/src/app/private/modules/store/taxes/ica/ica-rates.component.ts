@@ -2,11 +2,13 @@ import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IcaService } from './services/ica.service';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
+import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
+import { IcaReportSectionComponent } from './components/ica-report-section.component';
 
 @Component({
   selector: 'app-ica-rates',
   standalone: true,
-  imports: [StatsComponent],
+  imports: [StatsComponent, IcaReportSectionComponent],
   template: `
     <div class="w-full">
       <!-- Stats -->
@@ -14,8 +16,8 @@ import { StatsComponent } from '../../../../../shared/components/stats/stats.com
         <div class="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible">
           <app-stats title="Tarifa Actual" [value]="storeRate()?.rate_per_mil ? storeRate()!.rate_per_mil + '‰' : 'N/A'" icon="percent" color="blue"></app-stats>
           <app-stats title="Municipio" [value]="storeRate()?.municipality_name || 'No configurado'" icon="map-pin" color="green"></app-stats>
-          <app-stats title="ICA del Mes" [value]="'$0'" icon="trending-up" color="orange"></app-stats>
-          <app-stats title="ICA del Año" [value]="'$0'" icon="calendar" color="purple"></app-stats>
+          <app-stats title="ICA del Mes" [value]="monthIca()" icon="trending-up" color="orange"></app-stats>
+          <app-stats title="ICA del Año" [value]="yearIca()" icon="calendar" color="purple"></app-stats>
         </div>
       </div>
 
@@ -30,6 +32,9 @@ import { StatsComponent } from '../../../../../shared/components/stats/stats.com
           </p>
         </div>
       }
+
+      <!-- Report by Period -->
+      <app-ica-report-section></app-ica-report-section>
 
       <!-- Rates Table -->
       <div class="bg-white dark:bg-gray-800 rounded-lg shadow mt-4">
@@ -69,10 +74,13 @@ import { StatsComponent } from '../../../../../shared/components/stats/stats.com
 })
 export class IcaRatesComponent {
   private service = inject(IcaService);
+  private currencyService = inject(CurrencyFormatService);
   private destroyRef = inject(DestroyRef);
 
   rates = signal<any[]>([]);
   storeRate = signal<any>(null);
+  monthIca = signal('—');
+  yearIca = signal('—');
 
   constructor() {
     this.service.getRates({ limit: 50 })
@@ -86,5 +94,34 @@ export class IcaRatesComponent {
         next: (res: any) => { this.storeRate.set(res.data || null); },
         error: () => { /* Store may not have municipality configured */ },
       });
+    this.loadIcaTotals();
+  }
+
+  private loadIcaTotals(): void {
+    const now = new Date();
+    const monthPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const yearPeriod = `${now.getFullYear()}`;
+
+    this.service.getReport(monthPeriod)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          this.monthIca.set(this.formatCurrency(res.data?.total_ica));
+        },
+        error: () => this.monthIca.set('—'),
+      });
+
+    this.service.getReport(yearPeriod)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          this.yearIca.set(this.formatCurrency(res.data?.total_ica));
+        },
+        error: () => this.yearIca.set('—'),
+      });
+  }
+
+  private formatCurrency(value: any): string {
+    return this.currencyService.format(Number(value) || 0, 0);
   }
 }

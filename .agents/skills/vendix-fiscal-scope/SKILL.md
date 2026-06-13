@@ -7,7 +7,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Working with organizations.fiscal_scope"
@@ -52,6 +52,16 @@ Fiscal scope is independent from operating scope. Operating scope controls opera
 - `accounting_entities` must include `fiscal_scope`; fiscal uniqueness must include fiscal scope and protect active consolidated entities where `store_id IS NULL`.
 - `dian_configurations.store_id` remains the compatibility anchor, with `accounting_entity_id` derived from fiscal scope.
 - `fiscal_scope_audit_log` is separate from `operating_scope_audit_log`.
+
+## Entity Resolution Rules (write/read symmetry)
+
+- Write side (`FiscalScopeService.ensureFiscalAccountingEntity`) and read side (`StorePrismaService.resolveFiscalEntityForContext`) must resolve the **same** accounting entity. The canonical lookup predicate is `{ organization_id, store_id, scope, fiscal_scope }` — the mirror of the DB unique `accounting_entities_org_store_scope_fiscal_scope_key`.
+- Never relax one side without the other: an entity found on write but not on read produces ghost rows (persisted but invisible in scoped lists). This caused invisible `invoice_resolutions` (fixed by migration `20260609133158_align_accounting_entities_fiscal_scope`).
+- `is_active: true` belongs to the **read** predicate only. Writes must not implicitly reactivate or bypass a deactivated entity; if write-side lookup misses because the entity is inactive, surface the error instead of creating a duplicate (the unique constraint will reject it).
+- Models listed in `StorePrismaService.fiscal_entity_required_models` have a NOT NULL `accounting_entity_id` (e.g. `invoice_resolutions`, `payroll_runs`, `fiscal_obligations`, `tax_declaration_drafts`, `fiscal_close_sessions`, `fiscal_transmissions`, `fiscal_evidences`, `fiscal_operation_events`). For them:
+  - Never filter with `accounting_entity_id: null` — Prisma rejects null filters on required fields (`PrismaClientValidationError`), and the legacy null-entity branch is meaningless.
+  - Scope strictly by `accounting_entity_id: <resolved_id>`; when no entity resolves, use `accounting_entity_id: { in: [] }` to return a guaranteed-empty set.
+- When adding a model to `fiscal_entity_scoped_models`, check the nullability of its `accounting_entity_id` column and register it in `fiscal_entity_required_models` if NOT NULL.
 
 ## Reporting Rules
 

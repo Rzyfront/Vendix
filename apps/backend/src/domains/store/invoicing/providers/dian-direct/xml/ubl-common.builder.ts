@@ -287,10 +287,12 @@ export class UblCommonBuilder {
     taxes: ProviderInvoiceTax[],
     currency: string,
   ): void {
-    // Group taxes by tax code
+    // Group taxes by DIAN scheme code (tax_type-aware): IVA→01, INC→04, ICA→03.
+    // This is the document-level TaxTotal DIAN validates, so IVA and INC must
+    // land in separate TaxSubtotal blocks with their own scheme.
     const tax_groups = new Map<string, ProviderInvoiceTax[]>();
     for (const tax of taxes) {
-      const code = UblCommonBuilder.resolveTaxCode(tax.tax_name);
+      const code = UblCommonBuilder.resolveTaxCodeFromTax(tax);
       if (!tax_groups.has(code)) {
         tax_groups.set(code, []);
       }
@@ -390,11 +392,15 @@ export class UblCommonBuilder {
         .att('currencyID', currency)
         .txt(line_tax.toFixed(2));
 
-      // Use first tax rate as line tax rate
+      // Line-level tax code/rate. invoice_taxes is header-level (not persisted
+      // per item), so a line inherits the invoice's primary tax. The code is
+      // resolved tax_type-first for correctness on single-tax invoices (a pure
+      // INC restaurant bill emits scheme 04, not 01). Mixed IVA+INC invoices
+      // are reconciled at the authoritative document-level TaxTotal above.
       const tax_rate = taxes.length > 0 ? taxes[0].tax_rate : '19.00';
       const tax_code =
         taxes.length > 0
-          ? UblCommonBuilder.resolveTaxCode(taxes[0].tax_name)
+          ? UblCommonBuilder.resolveTaxCodeFromTax(taxes[0])
           : DIAN_TAX_CODES.IVA;
 
       const subtotal = line_tax_total.ele(UBL_NAMESPACES.CAC, 'TaxSubtotal');
@@ -451,6 +457,24 @@ export class UblCommonBuilder {
       return DIAN_TAX_CODES.ICA;
     }
     return DIAN_TAX_CODES.IVA; // Default
+  }
+
+  /**
+   * Resolves the DIAN tax scheme code for a tax row, prioritizing the persisted
+   * fiscal type over the tax_name heuristic. This makes IVA (01), INC (04) and
+   * ICA (03) deterministic regardless of how the tax was named by the user.
+   */
+  static resolveTaxCodeFromTax(tax: ProviderInvoiceTax): string {
+    switch ((tax.tax_type || '').toLowerCase()) {
+      case 'iva':
+        return DIAN_TAX_CODES.IVA;
+      case 'inc':
+        return DIAN_TAX_CODES.INC;
+      case 'ica':
+        return DIAN_TAX_CODES.ICA;
+      default:
+        return UblCommonBuilder.resolveTaxCode(tax.tax_name);
+    }
   }
 
   /**

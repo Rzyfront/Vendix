@@ -5,6 +5,10 @@ export interface WithholdingCalculationResult {
   uvt_threshold_cop: number;
   concept_code: string;
   concept_name: string;
+  /** Fiscal withholding type of the concept (retefuente | reteiva | reteica). */
+  withholding_type?: 'retefuente' | 'reteiva' | 'reteica';
+  /** Per-concept PUC account override; null when Block C resolves the default. */
+  account_code?: string | null;
 }
 
 export interface WithholdingCertificateData {

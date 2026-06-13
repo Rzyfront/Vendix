@@ -25,6 +25,7 @@ import {
   IconComponent,
   InputComponent,
   InputsearchComponent,
+  ModalComponent,
   PaginationComponent,
   SelectorComponent,
   ToastService,
@@ -36,10 +37,16 @@ import {
   StickyHeaderComponent,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import {
+  CreatePlatformResolutionDto,
+  PatchVendorSupportFiscalConfigDto,
+  PlatformResolution,
+  PlatformResolutionDocumentType,
   SubscriptionFiscalEnvironment,
   SubscriptionFiscalStatus,
   SubscriptionFiscalTransmission,
   UpsertSubscriptionFiscalConfigDto,
+  VendorSupportFiscalConfig,
+  VendorSupportFiscalTransmission,
 } from '../../interfaces/fiscal-billing.interface';
 import { FiscalBillingAdminService } from '../../services/fiscal-billing-admin.service';
 
@@ -59,6 +66,36 @@ interface FiscalConfigFormControls {
   auto_issue: FormControl<boolean>;
   confirm_production: FormControl<boolean>;
 }
+
+interface ResolutionFormControls {
+  prefix: FormControl<string | null>;
+  document_type: FormControl<PlatformResolutionDocumentType>;
+  environment: FormControl<SubscriptionFiscalEnvironment>;
+  rango_inicial: FormControl<number | null>;
+  rango_final: FormControl<number | null>;
+  technical_key: FormControl<string | null>;
+  resolution_number: FormControl<string | null>;
+  resolution_date: FormControl<string | null>;
+  valid_from: FormControl<string | null>;
+  valid_to: FormControl<string | null>;
+}
+
+interface VendorSupportFiscalFormControls {
+  is_enabled: FormControl<boolean>;
+  auto_transmit: FormControl<boolean>;
+  environment: FormControl<SubscriptionFiscalEnvironment>;
+  invoice_resolution_id: FormControl<string | null>;
+}
+
+const rangoFinalGreaterValidator: ValidatorFn = (
+  group: AbstractControl,
+): ValidationErrors | null => {
+  const inicio = Number(group.get('rango_inicial')?.value);
+  const fin = Number(group.get('rango_final')?.value);
+  if (!Number.isFinite(inicio) || !Number.isFinite(fin)) return null;
+  if (fin <= inicio) return { rango_final_invalid: true };
+  return null;
+};
 
 const numericIdValidator = Validators.pattern(/^[1-9]\d*$/);
 
@@ -96,6 +133,7 @@ const confirmProductionValidator: ValidatorFn = (
     IconComponent,
     InputComponent,
     InputsearchComponent,
+    ModalComponent,
     PaginationComponent,
     SelectorComponent,
     ToggleComponent,
@@ -171,6 +209,119 @@ export class FiscalBillingComponent {
   ]);
   readonly statusFilterControl = this.fb.control<string | null>('');
   readonly environmentFilterControl = this.fb.control<string | null>('');
+
+  // ─────────────────────────────────────────────────────────
+  // Platform DIAN resolutions
+  // ─────────────────────────────────────────────────────────
+  readonly resolutions = signal<PlatformResolution[]>([]);
+  readonly loadingResolutions = signal(false);
+  readonly resolutionModalOpen = signal(false);
+  readonly savingResolution = signal(false);
+  readonly resolutionFormInvalid = signal(true);
+
+  readonly documentTypeOptions = [
+    { value: 'sales_invoice', label: 'Factura electrónica' },
+    { value: 'support_document', label: 'Documento soporte' },
+  ];
+
+  readonly resolutionForm: FormGroup<ResolutionFormControls> =
+    this.fb.group<ResolutionFormControls>(
+      {
+        prefix: this.fb.control<string | null>(null, [
+          Validators.required,
+          Validators.maxLength(4),
+        ]),
+        document_type: this.fb.nonNullable.control<PlatformResolutionDocumentType>(
+          'sales_invoice',
+          [Validators.required],
+        ),
+        environment:
+          this.fb.nonNullable.control<SubscriptionFiscalEnvironment>('test', [
+            Validators.required,
+          ]),
+        rango_inicial: this.fb.control<number | null>(null, [
+          Validators.required,
+          Validators.min(1),
+        ]),
+        rango_final: this.fb.control<number | null>(null, [
+          Validators.required,
+          Validators.min(2),
+        ]),
+        technical_key: this.fb.control<string | null>(null),
+        resolution_number: this.fb.control<string | null>(null),
+        resolution_date: this.fb.control<string | null>(null),
+        valid_from: this.fb.control<string | null>(null),
+        valid_to: this.fb.control<string | null>(null),
+      },
+      { validators: rangoFinalGreaterValidator },
+    );
+
+  // ─────────────────────────────────────────────────────────
+  // Vendor Support fiscal (documento soporte)
+  // ─────────────────────────────────────────────────────────
+  readonly vendorSupportConfig = signal<VendorSupportFiscalConfig | null>(null);
+  readonly loadingVendorSupport = signal(false);
+  readonly savingVendorSupport = signal(false);
+  readonly vendorSupportTransmissions = signal<VendorSupportFiscalTransmission[]>(
+    [],
+  );
+  readonly loadingVendorSupportTransmissions = signal(false);
+  readonly retryingVendorSupportId = signal<number | null>(null);
+  readonly vendorSupportPagination = signal({
+    page: 1,
+    limit: 20,
+    total: 0,
+    totalPages: 0,
+  });
+
+  readonly vendorSupportForm: FormGroup<VendorSupportFiscalFormControls> =
+    this.fb.group<VendorSupportFiscalFormControls>({
+      is_enabled: this.fb.nonNullable.control(false),
+      auto_transmit: this.fb.nonNullable.control(false),
+      environment:
+        this.fb.nonNullable.control<SubscriptionFiscalEnvironment>('test'),
+      invoice_resolution_id: this.fb.control<string | null>(null, [
+        optionalNumericIdValidator,
+      ]),
+    });
+
+  readonly vendorSupportIsEnabled = signal(false);
+
+  readonly vendorSupportResolutionOptions = computed(() => {
+    const env = this.vendorSupportForm.controls.environment.value;
+    return [
+      { value: '', label: 'Sin resolución asignada' },
+      ...this.resolutions()
+        .filter(
+          (r) =>
+            r.document_type === 'support_document' &&
+            r.is_active &&
+            r.environment === env,
+        )
+        .map((r) => ({
+          value: String(r.id),
+          label: `${r.prefix} · rango ${r.range_from}-${r.range_to}`,
+        })),
+    ];
+  });
+
+  readonly salesInvoiceResolutionOptions = computed(() => {
+    const env = this.form.controls.environment.value;
+    return [
+      { value: '', label: 'Sin resolución asignada' },
+      ...this.resolutions()
+        .filter(
+          (r) =>
+            r.document_type === 'sales_invoice' &&
+            r.is_active &&
+            r.environment === env,
+        )
+        .map((r) => ({
+          value: String(r.id),
+          label: `${r.prefix} · rango ${r.range_from}-${r.range_to}`,
+        })),
+    ];
+  });
 
   readonly environmentOptions = [
     { value: 'test', label: 'Sandbox DIAN' },
@@ -256,6 +407,26 @@ export class FiscalBillingComponent {
   constructor() {
     this.loadStatus();
     this.loadTransmissions();
+    this.loadResolutions();
+    this.loadVendorSupportConfig();
+    this.loadVendorSupportTransmissions();
+
+    this.resolutionForm.statusChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.resolutionFormInvalid.set(this.resolutionForm.invalid);
+      });
+
+    this.vendorSupportForm.controls.is_enabled.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((enabled) => {
+        this.vendorSupportIsEnabled.set(enabled);
+        if (!enabled) {
+          this.vendorSupportForm.controls.auto_transmit.setValue(false, {
+            emitEvent: false,
+          });
+        }
+      });
 
     this.form.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -656,6 +827,251 @@ export class FiscalBillingComponent {
     if (reason === 'subscription_invoice_not_paid') {
       return 'La factura SaaS aún no está pagada';
     }
+    if (reason === 'vendor_support_fiscal_disabled') {
+      return 'El documento soporte electrónico está desactivado';
+    }
+    if (reason === 'vendor_support_fiscal_auto_transmit_disabled') {
+      return 'La transmisión automática está desactivada';
+    }
+    if (reason === 'vendor_support_not_approved') {
+      return 'El documento soporte aún no está aprobado';
+    }
     return reason;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Resoluciones DIAN plataforma
+  // ─────────────────────────────────────────────────────────
+
+  loadResolutions(): void {
+    this.loadingResolutions.set(true);
+    this.fiscal
+      .listResolutions()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (rows) => {
+          this.resolutions.set(rows);
+          this.loadingResolutions.set(false);
+        },
+        error: () => {
+          this.toast.error(
+            'No se pudieron cargar las resoluciones DIAN',
+            'Error',
+          );
+          this.loadingResolutions.set(false);
+        },
+      });
+  }
+
+  openResolutionModal(): void {
+    this.resolutionForm.reset({
+      prefix: null,
+      document_type: 'sales_invoice',
+      environment: this.selectedEnvironment(),
+      rango_inicial: null,
+      rango_final: null,
+      technical_key: null,
+      resolution_number: null,
+      resolution_date: null,
+      valid_from: null,
+      valid_to: null,
+    });
+    this.resolutionFormInvalid.set(this.resolutionForm.invalid);
+    this.resolutionModalOpen.set(true);
+  }
+
+  closeResolutionModal(): void {
+    this.resolutionModalOpen.set(false);
+  }
+
+  onCreateResolution(): void {
+    if (this.savingResolution()) return;
+    if (this.resolutionForm.invalid) {
+      this.resolutionForm.markAllAsTouched();
+      return;
+    }
+    const value = this.resolutionForm.getRawValue();
+    const dto: CreatePlatformResolutionDto = {
+      prefix: value.prefix!.trim(),
+      document_type: value.document_type,
+      environment: value.environment,
+      rango_inicial: Number(value.rango_inicial),
+      rango_final: Number(value.rango_final),
+    };
+    if (value.technical_key?.trim()) dto.technical_key = value.technical_key.trim();
+    if (value.resolution_number?.trim()) {
+      dto.resolution_number = value.resolution_number.trim();
+    }
+    if (value.resolution_date) dto.resolution_date = value.resolution_date;
+    if (value.valid_from) dto.valid_from = value.valid_from;
+    if (value.valid_to) dto.valid_to = value.valid_to;
+
+    this.savingResolution.set(true);
+    this.fiscal
+      .createResolution(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.savingResolution.set(false);
+          this.resolutionModalOpen.set(false);
+          this.toast.success('Resolución DIAN creada', 'Plataforma');
+          this.loadResolutions();
+        },
+        error: (err: { error?: { message?: string } }) => {
+          this.savingResolution.set(false);
+          this.toast.error(
+            err?.error?.message ?? 'No se pudo crear la resolución',
+            'Error',
+          );
+        },
+      });
+  }
+
+  resolutionDocTypeLabel(type: string): string {
+    if (type === 'sales_invoice') return 'Factura';
+    if (type === 'support_document') return 'Doc. soporte';
+    return type;
+  }
+
+  // ─────────────────────────────────────────────────────────
+  // Vendor Support Document fiscal
+  // ─────────────────────────────────────────────────────────
+
+  loadVendorSupportConfig(): void {
+    this.loadingVendorSupport.set(true);
+    this.fiscal
+      .getVendorSupportFiscalConfig()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (config) => {
+          this.vendorSupportConfig.set(config);
+          this.applyVendorSupportConfigToForm(config);
+          this.loadingVendorSupport.set(false);
+        },
+        error: () => {
+          this.toast.error(
+            'No se pudo cargar la configuración de documento soporte',
+            'Error',
+          );
+          this.loadingVendorSupport.set(false);
+        },
+      });
+  }
+
+  loadVendorSupportTransmissions(): void {
+    this.loadingVendorSupportTransmissions.set(true);
+    const pagination = this.vendorSupportPagination();
+    this.fiscal
+      .listVendorSupportTransmissions({
+        page: pagination.page,
+        limit: pagination.limit,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.vendorSupportTransmissions.set(res.data ?? []);
+          this.vendorSupportPagination.update((p) => ({
+            ...p,
+            total: res.meta?.total ?? 0,
+            totalPages: res.meta?.totalPages ?? 0,
+          }));
+          this.loadingVendorSupportTransmissions.set(false);
+        },
+        error: () => {
+          this.toast.error(
+            'No se pudo cargar el registro de documento soporte',
+            'Error',
+          );
+          this.loadingVendorSupportTransmissions.set(false);
+        },
+      });
+  }
+
+  onSaveVendorSupportConfig(): void {
+    if (this.savingVendorSupport()) return;
+    const value = this.vendorSupportForm.getRawValue();
+    const dto: PatchVendorSupportFiscalConfigDto = {
+      is_enabled: value.is_enabled,
+      auto_transmit: value.auto_transmit,
+      environment: value.environment,
+    };
+    const resolutionId = this.parseOptionalId(value.invoice_resolution_id);
+    if (resolutionId) dto.invoice_resolution_id = resolutionId;
+
+    this.savingVendorSupport.set(true);
+    this.fiscal
+      .patchVendorSupportFiscalConfig(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (config) => {
+          this.vendorSupportConfig.set(config);
+          this.applyVendorSupportConfigToForm(config);
+          this.savingVendorSupport.set(false);
+          this.toast.success(
+            'Configuración de documento soporte guardada',
+            'Plataforma',
+          );
+          this.loadVendorSupportTransmissions();
+        },
+        error: (err: { error?: { message?: string } }) => {
+          this.savingVendorSupport.set(false);
+          this.toast.error(
+            err?.error?.message ?? 'No se pudo guardar la configuración',
+            'Error',
+          );
+        },
+      });
+  }
+
+  onRetryVendorSupport(row: VendorSupportFiscalTransmission): void {
+    if (row.transmission_status === 'accepted' || this.retryingVendorSupportId()) {
+      return;
+    }
+    this.retryingVendorSupportId.set(row.id);
+    this.fiscal
+      .retryVendorSupportTransmission(row.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.retryingVendorSupportId.set(null);
+          this.toast.success('Reintento solicitado', 'Documento soporte');
+          this.loadVendorSupportTransmissions();
+          this.loadVendorSupportConfig();
+        },
+        error: (err: { error?: { message?: string } }) => {
+          this.retryingVendorSupportId.set(null);
+          this.toast.error(
+            err?.error?.message ?? 'No se pudo reintentar la transmisión',
+            'Error',
+          );
+        },
+      });
+  }
+
+  canRetryVendorSupport(row: VendorSupportFiscalTransmission): boolean {
+    return row.transmission_status !== 'accepted';
+  }
+
+  changeVendorSupportPage(page: number): void {
+    this.vendorSupportPagination.update((p) => ({ ...p, page }));
+    this.loadVendorSupportTransmissions();
+  }
+
+  private applyVendorSupportConfigToForm(
+    config: VendorSupportFiscalConfig,
+  ): void {
+    const settings = config.settings;
+    this.vendorSupportForm.patchValue(
+      {
+        is_enabled: settings.is_enabled,
+        auto_transmit: settings.auto_transmit,
+        environment: settings.environment,
+        invoice_resolution_id: settings.invoice_resolution_id
+          ? String(settings.invoice_resolution_id)
+          : null,
+      },
+      { emitEvent: false },
+    );
+    this.vendorSupportIsEnabled.set(settings.is_enabled);
   }
 }

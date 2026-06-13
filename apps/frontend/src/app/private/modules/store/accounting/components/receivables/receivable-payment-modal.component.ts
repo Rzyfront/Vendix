@@ -53,7 +53,7 @@ import {
             </div>
             <div class="flex justify-between text-sm">
               <span class="text-gray-500">Saldo Pendiente</span>
-              <span class="font-semibold text-primary font-mono">{{
+              <span class="font-semibold text-primary-600 font-mono">{{
                 formatted_balance
               }}</span>
             </div>

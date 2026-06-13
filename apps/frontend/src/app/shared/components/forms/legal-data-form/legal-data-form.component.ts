@@ -233,31 +233,33 @@ const ALPHANUMERIC_DOCUMENT_TYPES: ReadonlySet<NitType> = new Set<NitType>([
         }
       </div>
 
-      <fieldset class="space-y-2">
-        <legend class="text-sm font-medium text-text-primary">
-          Responsabilidades tributarias (RUT)
-        </legend>
-        <p class="text-xs text-text-secondary mb-2">
-          Marca todas las responsabilidades registradas en tu RUT. La principal
-          (la de arriba) debe estar entre las marcadas.
-        </p>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-          @for (resp of taxResponsibilities; track resp.code) {
-            <label
-              class="flex items-start gap-2 text-sm cursor-pointer p-2 rounded border border-border hover:bg-gray-50"
-            >
-              <input
-                type="checkbox"
-                class="mt-0.5"
-                [checked]="isResponsibilityChecked(resp.code)"
-                [disabled]="disabled()"
-                (change)="onResponsibilityToggle(resp.code, $event)"
-              />
-              <span class="text-text-secondary">{{ resp.label }}</span>
-            </label>
-          }
-        </div>
-      </fieldset>
+      @if (showResponsibilities()) {
+        <fieldset class="space-y-2">
+          <legend class="text-sm font-medium text-text-primary">
+            Responsabilidades tributarias (RUT)
+          </legend>
+          <p class="text-xs text-text-secondary mb-2">
+            Marca todas las responsabilidades registradas en tu RUT. La principal
+            (la de arriba) debe estar entre las marcadas.
+          </p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+            @for (resp of taxResponsibilities; track resp.code) {
+              <label
+                class="flex items-start gap-2 text-sm cursor-pointer p-2 rounded border border-border hover:bg-gray-50"
+              >
+                <input
+                  type="checkbox"
+                  class="mt-0.5"
+                  [checked]="isResponsibilityChecked(resp.code)"
+                  [disabled]="disabled()"
+                  (change)="onResponsibilityToggle(resp.code, $event)"
+                />
+                <span class="text-text-secondary">{{ resp.label }}</span>
+              </label>
+            }
+          </div>
+        </fieldset>
+      }
     </form>
   `,
 })
@@ -265,6 +267,13 @@ export class LegalDataFormComponent {
   // ── Inputs / Outputs ──────────────────────────────────────
   readonly initialValue = input<Partial<LegalDataValue> | null>(null);
   readonly disabled = input<boolean>(false);
+  /**
+   * Permite ocultar el fieldset de responsabilidades (casilla 53) cuando el
+   * contenedor las gestiona con su propia UI (p. ej. el tab "Identidad" del
+   * Centro Fiscal, que las renderiza como toggles desde el catálogo DIAN).
+   * Default `true` para no alterar el wizard de activación.
+   */
+  readonly showResponsibilities = input<boolean>(true);
 
   readonly valueChange = output<LegalDataValue>();
   readonly validityChange = output<boolean>();

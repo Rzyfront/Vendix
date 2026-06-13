@@ -24,6 +24,7 @@ import {
   SelectorComponent,
   IconComponent,
   InputsearchComponent,
+  ToggleComponent,
   DialogService } from '../../../../../shared/components';
 import {
   DOCUMENT_TYPES,
@@ -49,7 +50,8 @@ import { StoreContextService } from '../../../../../core/services/store-context.
     InputComponent,
     SelectorComponent,
     IconComponent,
-    InputsearchComponent
+    InputsearchComponent,
+    ToggleComponent
 ],
   template: `
     <app-modal
@@ -407,6 +409,36 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   >
                 </app-input>
               </div>
+              <!-- Información fiscal -->
+              <div class="pt-2 border-t border-[var(--color-border)]">
+                <h3 class="text-sm font-semibold text-[var(--color-text-primary)] mb-3">
+                  Información fiscal
+                </h3>
+                <div class="grid grid-cols-2 gap-4">
+                  <app-selector
+                    formControlName="taxRegime"
+                    label="Régimen tributario"
+                    [options]="taxRegimeOptions"
+                    [size]="'md'"
+                    [placeholder]="'Seleccionar'"
+                    >
+                  </app-selector>
+                  <app-selector
+                    formControlName="personType"
+                    label="Tipo de persona"
+                    [options]="personTypeOptions"
+                    [size]="'md'"
+                    [placeholder]="'Seleccionar'"
+                    >
+                  </app-selector>
+                </div>
+                <div class="flex items-center gap-3 mt-4">
+                  <app-toggle
+                    formControlName="isWithholdingAgent"
+                    label="¿Es agente retenedor?"
+                  ></app-toggle>
+                </div>
+              </div>
             </form>
           </div>
         }
@@ -557,6 +589,19 @@ export class PosCustomerModalComponent {
     label: opt.label,
   }));
 
+  /** Opciones de régimen tributario (clasificación fiscal del cliente). */
+  readonly taxRegimeOptions = [
+    { value: 'COMUN', label: 'Régimen común' },
+    { value: 'SIMPLIFICADO', label: 'Régimen simplificado' },
+    { value: 'GRAN_CONTRIBUYENTE', label: 'Gran contribuyente' },
+  ];
+
+  /** Opciones de tipo de persona. */
+  readonly personTypeOptions = [
+    { value: 'NATURAL', label: 'Persona natural' },
+    { value: 'JURIDICA', label: 'Persona jurídica' },
+  ];
+
   /** Tipo de documento seleccionado (reactivo a cambios del FormControl). */
   readonly selectedDocumentType = signal<DocumentTypeOption | undefined>(undefined);
 
@@ -632,7 +677,10 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       lastName: ['', [Validators.required, Validators.minLength(2)]],
       phone: ['', [Validators.required, Validators.minLength(7)]],
       documentType: [''],
-      documentNumber: ['', [Validators.required]] });
+      documentNumber: ['', [Validators.required]],
+      taxRegime: [''],
+      personType: [''],
+      isWithholdingAgent: [false] });
   }
 
   private setupSearchSubscription(): void {
@@ -716,7 +764,10 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
         lastName: this.customer()!.last_name,
         phone: this.customer()!.phone || '',
         documentType: this.customer()!.document_type || '',
-        documentNumber: this.customer()!.document_number || '' });
+        documentNumber: this.customer()!.document_number || '',
+        taxRegime: this.customer()!.tax_regime || '',
+        personType: this.customer()!.person_type || '',
+        isWithholdingAgent: this.customer()!.is_withholding_agent ?? false });
     }
   }
 
@@ -785,7 +836,11 @@ private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+di
       last_name: formData.lastName || undefined,
       phone: formData.phone || undefined,
       document_type: formData.documentType,
-      document_number: formData.documentNumber };
+      document_number: formData.documentNumber,
+      // Mapeo camelCase (form) -> snake_case (request backend).
+      tax_regime: formData.taxRegime || undefined,
+      person_type: formData.personType || undefined,
+      is_withholding_agent: formData.isWithholdingAgent ?? false };
 
     if (this.customer()) {
       // Update existing customer

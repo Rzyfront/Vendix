@@ -60,6 +60,9 @@ export class DefaultPanelUIService {
         fiscal_obligations: true,
         fiscal_declarations: true,
         fiscal_close: true,
+        fiscal_audit: true,
+        // @deprecated — fusionadas en fiscal_audit; se conservan porque
+        // settings persistidos de usuarios pueden referenciarlas.
         fiscal_evidence: true,
         fiscal_history: true,
         fiscal_rules: true,
@@ -148,6 +151,9 @@ export class DefaultPanelUIService {
         fiscal_obligations: true,
         fiscal_declarations: true,
         fiscal_close: true,
+        fiscal_audit: true,
+        // @deprecated — fusionadas en fiscal_audit; se conservan porque
+        // settings persistidos de usuarios pueden referenciarlas.
         fiscal_evidence: true,
         fiscal_history: true,
         fiscal_rules: true,

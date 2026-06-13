@@ -18,15 +18,18 @@ export class ExogenousGeneratorService {
     store_id: number | null,
     year: number,
   ): Promise<ExogenousLineData[]> {
+    // Formato 1001 = pagos y retenciones PRACTICADAS por la empresa a sus
+    // proveedores. El tercero es el PROVEEDOR. Solo role='practiced'.
     const where_clause: any = {
       organization_id,
       year,
+      role: 'practiced',
     };
     if (store_id) where_clause.store_id = store_id;
 
     const calculations = await (
       this.prisma as any
-    ).client.withholding_calculations.findMany({
+    ).withoutScope().withholding_calculations.findMany({
       where: where_clause,
       include: {
         supplier: {
@@ -75,6 +78,7 @@ export class ExogenousGeneratorService {
       payment_amount: data.base,
       tax_amount: 0,
       withholding_amount: data.withholding,
+      role: 'practiced' as const,
     }));
   }
 
@@ -91,7 +95,7 @@ export class ExogenousGeneratorService {
 
     const invoices_with_iva = await (
       this.prisma as any
-    ).client.invoices.findMany({
+    ).withoutScope().invoices.findMany({
       where: {
         organization_id,
         ...store_filter,
@@ -100,10 +104,24 @@ export class ExogenousGeneratorService {
           lt: new Date(`${year + 1}-01-01`),
         },
         status: { in: ['validated', 'accepted'] },
-        invoice_taxes: { some: { tax_name: { contains: 'IVA' } } },
+        invoice_taxes: {
+          some: {
+            OR: [
+              { tax_type: 'iva' },
+              { tax_type: null, tax_name: { contains: 'IVA' } },
+            ],
+          },
+        },
       },
       include: {
-        invoice_taxes: { where: { tax_name: { contains: 'IVA' } } },
+        invoice_taxes: {
+          where: {
+            OR: [
+              { tax_type: 'iva' },
+              { tax_type: null, tax_name: { contains: 'IVA' } },
+            ],
+          },
+        },
       },
     });
 
@@ -157,11 +175,11 @@ export class ExogenousGeneratorService {
   ): Promise<ExogenousLineData[]> {
     const store_filter = store_id ? { store_id } : {};
 
-    const invoices = await (this.prisma as any).client.invoices.findMany({
+    const invoices = await (this.prisma as any).withoutScope().invoices.findMany({
       where: {
         organization_id,
         ...store_filter,
-        invoice_type: 'FV',
+        invoice_type: 'sales_invoice',
         status: { in: ['validated', 'accepted'] },
         issue_date: {
           gte: new Date(`${year}-01-01`),
@@ -220,7 +238,7 @@ export class ExogenousGeneratorService {
 
     const entries = await (
       this.prisma as any
-    ).client.accounting_entry_lines.findMany({
+    ).withoutScope().accounting_entry_lines.findMany({
       where: {
         entry: {
           organization_id,
@@ -279,9 +297,11 @@ export class ExogenousGeneratorService {
    * Query accounting_entry_lines en cuentas 22xx
    */
   /**
-   * Formato 1003: Retenciones recibidas (practicadas por terceros a la empresa)
-   * Agrupa withholding_calculations donde la empresa es el sujeto retenido,
-   * agrupando por NIT del agente retenedor (supplier)
+   * Formato 1003: Retenciones que me PRACTICARON (role='suffered').
+   * La empresa es el sujeto retenido; el tercero NO es un proveedor sino el
+   * CLIENTE AGENTE RETENEDOR que practicó la retención. Por eso se agrupa por
+   * el identificador fiscal del customer (users.document_number), no por
+   * supplier.
    */
   async generateFormat1003(
     organization_id: number,
@@ -291,27 +311,31 @@ export class ExogenousGeneratorService {
     const where_clause: any = {
       organization_id,
       year,
+      role: 'suffered',
     };
     if (store_id) where_clause.store_id = store_id;
 
     const calculations = await (
       this.prisma as any
-    ).client.withholding_calculations.findMany({
+    ).withoutScope().withholding_calculations.findMany({
       where: where_clause,
       include: {
-        supplier: {
-          select: { name: true, tax_id: true, verification_digit: true },
+        customer: {
+          select: {
+            first_name: true,
+            last_name: true,
+            document_number: true,
+          },
         },
         concept: { select: { code: true, name: true } },
       },
     });
 
-    // Group by supplier NIT (agente retenedor)
+    // Group by customer document_number (agente retenedor)
     const grouped = new Map<
       string,
       {
         name: string;
-        dv?: string;
         base: number;
         withholding: number;
         concept: string;
@@ -319,9 +343,12 @@ export class ExogenousGeneratorService {
     >();
 
     for (const calc of calculations) {
-      const nit = calc.supplier?.tax_id || 'SIN_NIT';
+      const nit = calc.customer?.document_number || 'SIN_NIT';
       const concept_code = calc.concept?.code || 'RTE_OTROS';
       const key = `${nit}_${concept_code}`;
+      const customerName = calc.customer
+        ? `${calc.customer.first_name ?? ''} ${calc.customer.last_name ?? ''}`.trim()
+        : '';
       const existing = grouped.get(key);
 
       if (existing) {
@@ -329,8 +356,7 @@ export class ExogenousGeneratorService {
         existing.withholding += Number(calc.withholding_amount);
       } else {
         grouped.set(key, {
-          name: calc.supplier?.name || 'Sin retenedor',
-          dv: calc.supplier?.verification_digit || undefined,
+          name: customerName || 'Sin retenedor',
           base: Number(calc.base_amount),
           withholding: Number(calc.withholding_amount),
           concept: concept_code,
@@ -341,11 +367,11 @@ export class ExogenousGeneratorService {
     return Array.from(grouped.entries()).map(([key, data]) => ({
       third_party_nit: key.split('_')[0],
       third_party_name: data.name,
-      third_party_dv: data.dv,
       concept_code: data.concept,
       payment_amount: data.base,
       tax_amount: 0,
       withholding_amount: data.withholding,
+      role: 'suffered' as const,
     }));
   }
 
@@ -362,11 +388,11 @@ export class ExogenousGeneratorService {
     const store_filter = store_id ? { store_id } : {};
 
     // Facturas de compra con proveedores en régimen simple
-    const invoices = await (this.prisma as any).client.invoices.findMany({
+    const invoices = await (this.prisma as any).withoutScope().invoices.findMany({
       where: {
         organization_id,
         ...store_filter,
-        invoice_type: { in: ['FC', 'FV'] }, // FC = factura de compra
+        invoice_type: { in: ['purchase_invoice', 'sales_invoice'] }, // factura de compra y venta
         status: { in: ['validated', 'accepted'] },
         issue_date: {
           gte: new Date(`${year}-01-01`),
@@ -385,7 +411,14 @@ export class ExogenousGeneratorService {
             tax_regime: true,
           },
         },
-        invoice_taxes: { where: { tax_name: { contains: 'IVA' } } },
+        invoice_taxes: {
+          where: {
+            OR: [
+              { tax_type: 'iva' },
+              { tax_type: null, tax_name: { contains: 'IVA' } },
+            ],
+          },
+        },
       },
     });
 
@@ -443,7 +476,7 @@ export class ExogenousGeneratorService {
 
     const entries = await (
       this.prisma as any
-    ).client.accounting_entry_lines.findMany({
+    ).withoutScope().accounting_entry_lines.findMany({
       where: {
         entry: {
           organization_id,
@@ -491,5 +524,203 @@ export class ExogenousGeneratorService {
         line_data: { account_code: code, account_name: data.account_name },
       }))
       .filter((line) => line.payment_amount !== 0);
+  }
+
+  /**
+   * Formato 2276: Rentas de trabajo y pensiones (v4).
+   *
+   * Fuente A: payroll_items de runs del año (period_start dentro del año)
+   * aceptados ante DIAN (item.dian_status='accepted') o de runs en estado
+   * accepted/paid. Agrega por employee.document_number:
+   * - salarios: earnings.base_salary + overtime[].amount + commissions +
+   *   bonuses[].taxable
+   * - prestaciones: pagos de vacations/disabilities/licenses
+   * - aportes_salud / aportes_pension: deductions.health / deductions.pension
+   * - retefuente: deductions.retention por empleado.
+   *
+   * Fuente B: withholding_calculations (role='practiced',
+   * counterparty_type='employee', year) es la fuente canónica del TOTAL de
+   * retefuente laboral; esas filas no llevan FK al empleado, por lo que la
+   * atribución por tercero usa deductions.retention (espejo 1:1 creado por
+   * payroll-flow al aceptar DIAN). Si los totales divergen se loguea warning.
+   */
+  async generateFormat2276(
+    organization_id: number,
+    store_id: number | null,
+    year: number,
+  ): Promise<ExogenousLineData[]> {
+    const run_filter: any = {
+      organization_id,
+      period_start: {
+        gte: new Date(`${year}-01-01`),
+        lt: new Date(`${year + 1}-01-01`),
+      },
+    };
+    if (store_id) run_filter.store_id = store_id;
+
+    const items = await (this.prisma as any).withoutScope().payroll_items.findMany({
+      where: {
+        payroll_run: run_filter,
+        OR: [
+          { dian_status: 'accepted' },
+          { payroll_run: { status: { in: ['accepted', 'paid'] } } },
+        ],
+      },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            document_type: true,
+            document_number: true,
+          },
+        },
+        payroll_run: { select: { id: true, status: true } },
+      },
+    });
+
+    const num = (value: unknown): number => {
+      if (typeof value === 'number') return isNaN(value) ? 0 : value;
+      if (typeof value === 'string') {
+        const parsed = Number(value);
+        return isNaN(parsed) ? 0 : parsed;
+      }
+      return 0;
+    };
+
+    const grouped = new Map<
+      string,
+      {
+        name: string;
+        document_type: string | null;
+        salarios: number;
+        prestaciones: number;
+        aportes_salud: number;
+        aportes_pension: number;
+        retefuente: number;
+      }
+    >();
+
+    for (const item of items) {
+      const nit = item.employee?.document_number || 'SIN_NIT';
+      const name = item.employee
+        ? `${item.employee.first_name ?? ''} ${item.employee.last_name ?? ''}`.trim()
+        : 'Sin empleado';
+
+      const earnings =
+        item.earnings && typeof item.earnings === 'object'
+          ? (item.earnings as Record<string, unknown>)
+          : {};
+      const deductions =
+        item.deductions && typeof item.deductions === 'object'
+          ? (item.deductions as Record<string, unknown>)
+          : {};
+
+      // Salarios: salario base + horas extra + comisiones + bonos salariales
+      let salarios = num(earnings.base_salary) || num(item.base_salary);
+      if (Array.isArray(earnings.overtime)) {
+        for (const entry of earnings.overtime) {
+          if (entry && typeof entry === 'object') {
+            salarios += num((entry as Record<string, unknown>).amount);
+          }
+        }
+      }
+      salarios += num(earnings.commissions);
+      if (Array.isArray(earnings.bonuses)) {
+        for (const entry of earnings.bonuses) {
+          if (entry && typeof entry === 'object') {
+            salarios += num((entry as Record<string, unknown>).taxable);
+          }
+        }
+      }
+
+      // Prestaciones: pagos de vacaciones, incapacidades y licencias
+      let prestaciones = 0;
+      for (const key of ['vacations', 'disabilities', 'licenses']) {
+        const entries = earnings[key];
+        if (Array.isArray(entries)) {
+          for (const entry of entries) {
+            if (entry && typeof entry === 'object') {
+              prestaciones += num((entry as Record<string, unknown>).payment);
+            }
+          }
+        }
+      }
+
+      const aportes_salud = num(deductions.health);
+      const aportes_pension = num(deductions.pension);
+      const retefuente = num(deductions.retention);
+
+      const existing = grouped.get(nit);
+      if (existing) {
+        existing.salarios += salarios;
+        existing.prestaciones += prestaciones;
+        existing.aportes_salud += aportes_salud;
+        existing.aportes_pension += aportes_pension;
+        existing.retefuente += retefuente;
+      } else {
+        grouped.set(nit, {
+          name,
+          document_type: item.employee?.document_type || null,
+          salarios,
+          prestaciones,
+          aportes_salud,
+          aportes_pension,
+          retefuente,
+        });
+      }
+    }
+
+    // Fuente B: cross-check contra la fuente canónica de retefuente laboral.
+    const wht_where: any = {
+      organization_id,
+      year,
+      role: 'practiced',
+      counterparty_type: 'employee',
+    };
+    if (store_id) wht_where.store_id = store_id;
+
+    const canonical = await (
+      this.prisma as any
+    ).withoutScope().withholding_calculations.aggregate({
+      where: wht_where,
+      _sum: { withholding_amount: true },
+      _count: true,
+    });
+
+    const canonical_total = Number(canonical?._sum?.withholding_amount || 0);
+    const items_total = Array.from(grouped.values()).reduce(
+      (sum, g) => sum + g.retefuente,
+      0,
+    );
+
+    if (
+      canonical?._count > 0 &&
+      Math.abs(canonical_total - items_total) > 1
+    ) {
+      this.logger.warn(
+        `Formato 2276 (org ${organization_id}, año ${year}): retefuente de payroll_items ` +
+          `(${items_total.toFixed(2)}) difiere del total canónico en withholding_calculations ` +
+          `(${canonical_total.toFixed(2)}). Revise runs aceptados sin calculations o backfills.`,
+      );
+    }
+
+    return Array.from(grouped.entries()).map(([nit, data]) => ({
+      third_party_nit: nit,
+      third_party_name: data.name,
+      concept_code: 'RENTAS_TRABAJO',
+      payment_amount: data.salarios + data.prestaciones,
+      tax_amount: 0,
+      withholding_amount: data.retefuente,
+      line_data: {
+        document_type: data.document_type,
+        salarios: data.salarios,
+        prestaciones: data.prestaciones,
+        aportes_salud: data.aportes_salud,
+        aportes_pension: data.aportes_pension,
+        retefuente: data.retefuente,
+      },
+    }));
   }
 }

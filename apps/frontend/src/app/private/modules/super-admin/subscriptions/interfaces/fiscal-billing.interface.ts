@@ -147,3 +147,133 @@ export interface PaginatedEnvelope<T> {
     totalPages: number;
   };
 }
+
+// ─────────────────────────────────────────────────────────
+// Platform DIAN Resolutions
+// ─────────────────────────────────────────────────────────
+
+export type PlatformResolutionDocumentType =
+  | 'sales_invoice'
+  | 'support_document';
+
+export interface PlatformResolution {
+  id: number;
+  prefix: string;
+  document_type: PlatformResolutionDocumentType;
+  resolution_number: string | null;
+  resolution_date: string | null;
+  range_from: number;
+  range_to: number;
+  current_number: number;
+  valid_from: string | null;
+  valid_to: string | null;
+  is_active: boolean;
+  technical_key?: string | null;
+  environment: SubscriptionFiscalEnvironment;
+  organization_id: number;
+  accounting_entity_id: number;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface CreatePlatformResolutionDto {
+  prefix: string;
+  document_type: PlatformResolutionDocumentType;
+  environment: SubscriptionFiscalEnvironment;
+  rango_inicial: number;
+  rango_final: number;
+  technical_key?: string;
+  resolution_number?: string;
+  resolution_date?: string;
+  valid_from?: string;
+  valid_to?: string;
+}
+
+export interface ListPlatformResolutionsQuery {
+  document_type?: PlatformResolutionDocumentType;
+  environment?: SubscriptionFiscalEnvironment;
+  is_active?: boolean;
+}
+
+// ─────────────────────────────────────────────────────────
+// Vendor Support Document Fiscal (documento soporte)
+// ─────────────────────────────────────────────────────────
+
+export interface VendorSupportFiscalSettings {
+  is_enabled: boolean;
+  auto_transmit: boolean;
+  environment: SubscriptionFiscalEnvironment;
+  dian_configuration_id: number | null;
+  invoice_resolution_id: number | null;
+  updated_by_user_id?: number | null;
+  updated_at?: string | null;
+}
+
+export interface VendorSupportFiscalConfig {
+  settings: VendorSupportFiscalSettings;
+  platform_organization_id: number | null;
+  accounting_entity_id: number | null;
+  dian_config: MaskedDianConfiguration | null;
+  resolution: FiscalResolutionView | null;
+  stats: {
+    accepted: number;
+    errors: number;
+    pending: number;
+  };
+}
+
+export interface PatchVendorSupportFiscalConfigDto {
+  is_enabled: boolean;
+  auto_transmit: boolean;
+  environment: SubscriptionFiscalEnvironment;
+  invoice_resolution_id?: number;
+}
+
+export interface VendorSupportFiscalTransmission {
+  id: number;
+  accounting_entity_id: number;
+  dian_configuration_id: number | null;
+  document_type: string;
+  source_type: string;
+  source_id: number;
+  document_number: string;
+  transmission_status: string;
+  dian_status: string;
+  accounting_status: string;
+  tracking_id?: string | null;
+  cuds?: string | null;
+  qr_code?: string | null;
+  pdf_url?: string | null;
+  error_message?: string | null;
+  retry_count: number;
+  sent_at?: string | null;
+  accepted_at?: string | null;
+  rejected_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  dian_configuration?: {
+    id: number;
+    name: string;
+    environment: SubscriptionFiscalEnvironment;
+    enablement_status: string;
+  } | null;
+  vendor_support_document?: {
+    id: number;
+    invoice_number: string;
+    status: string;
+    total: string | number;
+    currency: string;
+    vendor_nit: string;
+    vendor_name: string;
+    issue_date: string;
+    created_at?: string | null;
+  } | null;
+}
+
+export interface VendorSupportFiscalQuery {
+  page?: number;
+  limit?: number;
+  status?: string;
+  environment?: SubscriptionFiscalEnvironment;
+  search?: string;
+}

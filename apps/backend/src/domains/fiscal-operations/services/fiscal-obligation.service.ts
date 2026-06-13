@@ -8,12 +8,14 @@ import {
   fiscal_obligation_status_enum,
   fiscal_obligation_type_enum,
   Prisma,
+  withholding_type_enum,
 } from '@prisma/client';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { FiscalStatusResolverService } from '@common/services/fiscal-status-resolver.service';
 import { FiscalOperationsContext } from './fiscal-context-resolver.service';
 import {
+  buildDateRangeFilter,
   defaultAnnualDueDate,
   defaultMonthlyDueDate,
   resolveFiscalPeriodRange,
@@ -24,6 +26,22 @@ import {
   GenerateFiscalObligationsDto,
 } from '../dto/fiscal-operations.dto';
 import { FiscalAuditService } from './fiscal-audit.service';
+import {
+  VAT_PERIODICITIES,
+  VatPeriodicity,
+} from '../constants/fiscal-responsibilities.catalog';
+
+/** RUT casilla 53 — 'O-48' Responsable de IVA. */
+const VAT_RESPONSIBLE_CODE = 'O-48';
+
+/** Meses en los que vence cada periodicidad de IVA (art. 600 ET). */
+const VAT_BIMONTHLY_MONTHS = [2, 4, 6, 8, 10, 12];
+const VAT_FOUR_MONTHLY_MONTHS = [4, 8, 12];
+
+interface ContextFiscalData {
+  tax_responsibilities?: unknown;
+  vat_periodicity?: unknown;
+}
 
 const FINAL_STATUSES: fiscal_obligation_status_enum[] = [
   'approved',
@@ -405,7 +423,7 @@ export class FiscalObligationService {
 
   private async defaultTypesForContext(
     context: FiscalOperationsContext,
-    period: { period_month: number | null; period_quarter: number | null },
+    period: ReturnType<typeof resolveFiscalPeriodRange>,
   ): Promise<fiscal_obligation_type_enum[]> {
     const { fiscal_status } = await this.fiscalStatus.getStatusBlock(
       context.organization_id,
@@ -419,7 +437,29 @@ export class FiscalObligationService {
     ) {
       types.add('electronic_invoice_review');
       types.add('support_document_review');
-      types.add('vat_return');
+      // Condicionado por responsabilidades RUT (casilla 53). Regla
+      // conservadora: solo aplica cuando tax_responsibilities existe y es un
+      // array no vacío; sin datos se conserva el comportamiento legacy
+      // (generar vat_return + inc_return siempre).
+      const fiscalData = await this.fiscalDataForContext(context);
+      const responsibilities = Array.isArray(fiscalData?.tax_responsibilities)
+        ? fiscalData.tax_responsibilities.filter(
+            (code): code is string => typeof code === 'string',
+          )
+        : [];
+
+      if (responsibilities.length === 0) {
+        types.add('vat_return');
+        types.add('inc_return');
+      } else if (responsibilities.includes(VAT_RESPONSIBLE_CODE)) {
+        // O-48 habilita IVA (según periodicidad declarada) e INC.
+        types.add('inc_return');
+        if (this.vatReturnAppliesForPeriod(fiscalData, period)) {
+          types.add('vat_return');
+        }
+      }
+      // Con responsabilidades declaradas pero sin O-48 (ej. O-49 no
+      // responsable de IVA) no se generan vat_return ni inc_return.
     }
 
     if (
@@ -429,9 +469,26 @@ export class FiscalObligationService {
       types.add('monthly_close');
       types.add('bank_reconciliation');
       types.add('inventory_valuation');
-      types.add('withholding_return');
-      types.add('reteiva_return');
-      types.add('reteica_return');
+      // Role-aware: las obligaciones de retención solo se generan cuando
+      // existen retenciones role='practiced' en el periodo (lo suffered es
+      // crédito a favor, no genera obligación de pago/declaración propia).
+      const { typed, hasUntypedLegacy } =
+        await this.practicedWithholdingTypesForPeriod(
+          context.accounting_entity_id,
+          period,
+        );
+      if (typed.has('retefuente')) types.add('withholding_return');
+      if (typed.has('reteiva')) types.add('reteiva_return');
+      if (typed.has('reteica')) types.add('reteica_return');
+      if (hasUntypedLegacy) {
+        // Filas legacy sin withholding_type: no es posible saber a qué retorno
+        // pertenecen. Criterio conservador: sobre-generar es recuperable (la
+        // obligación se marca not_applicable); sub-generar arriesga plazos
+        // DIAN, así que se agregan las tres.
+        types.add('withholding_return');
+        types.add('reteiva_return');
+        types.add('reteica_return');
+      }
       types.add('ica_return');
     }
 
@@ -451,6 +508,95 @@ export class FiscalObligationService {
     }
 
     return Array.from(types);
+  }
+
+  /**
+   * Lee `settings.fiscal_data` para el contexto fiscal, scope-aware:
+   * organization_settings cuando fiscal_scope=ORGANIZATION, store_settings
+   * (por store_id) cuando STORE. Mismo patrón que
+   * `FiscalStatusService.readLegalData`. Solo lectura — fiscal-operations
+   * jamás escribe settings.
+   */
+  private async fiscalDataForContext(
+    context: FiscalOperationsContext,
+  ): Promise<ContextFiscalData | null> {
+    const settingsRow =
+      context.fiscal_scope === 'ORGANIZATION'
+        ? await this.prisma.organization_settings.findUnique({
+            where: { organization_id: context.organization_id },
+            select: { settings: true },
+          })
+        : context.store_id
+          ? await this.prisma.store_settings.findUnique({
+              where: { store_id: context.store_id },
+              select: { settings: true },
+            })
+          : null;
+
+    const settings = (settingsRow?.settings as any) || {};
+    return settings.fiscal_data && typeof settings.fiscal_data === 'object'
+      ? (settings.fiscal_data as ContextFiscalData)
+      : null;
+  }
+
+  /**
+   * Decide si la declaración de IVA aplica al periodo según la periodicidad
+   * declarada (`vat_periodicity`, default bimonthly). Solo filtra periodos
+   * MENSUALES; para periodos anuales/trimestrales conserva el comportamiento
+   * actual (siempre aplica).
+   */
+  private vatReturnAppliesForPeriod(
+    fiscalData: ContextFiscalData | null,
+    period: { period_month: number | null },
+  ): boolean {
+    if (!period.period_month) return true;
+
+    const periodicity: VatPeriodicity = VAT_PERIODICITIES.includes(
+      fiscalData?.vat_periodicity as VatPeriodicity,
+    )
+      ? (fiscalData!.vat_periodicity as VatPeriodicity)
+      : 'bimonthly';
+
+    if (periodicity === 'monthly') return true;
+    if (periodicity === 'four_monthly') {
+      return VAT_FOUR_MONTHLY_MONTHS.includes(period.period_month);
+    }
+    return VAT_BIMONTHLY_MONTHS.includes(period.period_month);
+  }
+
+  /**
+   * Agrupa las retenciones PRACTICADAS de la entidad fiscal en el periodo por
+   * withholding_type. Las filas legacy sin tipo (withholding_type null) se
+   * reportan aparte para que el caller decida de forma conservadora.
+   */
+  private async practicedWithholdingTypesForPeriod(
+    accountingEntityId: number,
+    period: { period_start: Date; period_end: Date },
+  ): Promise<{ typed: Set<withholding_type_enum>; hasUntypedLegacy: boolean }> {
+    const groups = await this.prisma.withholding_calculations.groupBy({
+      by: ['withholding_type'],
+      where: {
+        accounting_entity_id: accountingEntityId,
+        role: 'practiced',
+        created_at: buildDateRangeFilter(
+          period.period_start,
+          period.period_end,
+        ),
+      },
+      _count: { _all: true },
+    });
+
+    const typed = new Set<withholding_type_enum>();
+    let hasUntypedLegacy = false;
+    for (const group of groups) {
+      if (group.withholding_type) {
+        typed.add(group.withholding_type);
+      } else {
+        hasUntypedLegacy = true;
+      }
+    }
+
+    return { typed, hasUntypedLegacy };
   }
 
   private resolveDueDate(

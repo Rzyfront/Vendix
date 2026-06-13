@@ -76,7 +76,7 @@ import {
             </div>
             <div>
               <p class="text-xs text-gray-500">Valor en Libros</p>
-              <p class="text-sm font-bold font-mono text-primary">{{ (asset()?.book_value ?? 0) | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
+              <p class="text-sm font-bold font-mono text-primary-600">{{ (asset()?.book_value ?? 0) | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Valor Residual</p>
@@ -118,14 +118,14 @@ import {
             <div class="flex gap-4">
               <button
                 class="py-2 px-1 text-sm font-medium border-b-2 transition-colors"
-                [class]="active_tab === 'schedule' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                [class]="active_tab === 'schedule' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
                 (click)="active_tab = 'schedule'"
               >
                 Depreciacion Proyectada
               </button>
               <button
                 class="py-2 px-1 text-sm font-medium border-b-2 transition-colors"
-                [class]="active_tab === 'history' ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                [class]="active_tab === 'history' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
                 (click)="active_tab = 'history'"
               >
                 Historial Ejecutado
@@ -137,7 +137,7 @@ import {
           @if (active_tab === 'schedule') {
             @if (is_loading_schedule) {
               <div class="flex justify-center py-8">
-                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
               </div>
             } @else if (schedule.length === 0) {
               <p class="text-sm text-gray-400 text-center py-6">No hay cronograma disponible.</p>
@@ -173,7 +173,7 @@ import {
           @if (active_tab === 'history') {
             @if (is_loading_history) {
               <div class="flex justify-center py-8">
-                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
               </div>
             } @else if (history.length === 0) {
               <p class="text-sm text-gray-400 text-center py-6">No se han ejecutado depreciaciones aun.</p>

@@ -1,19 +1,30 @@
 import { Component, inject, input, output, effect } from '@angular/core';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { FormBuilder, FormGroup, Validators, ValidatorFn } from '@angular/forms';
 
 import {
   ModalComponent,
   InputComponent,
   ButtonComponent,
+  MultiSelectorComponent,
+  MultiSelectorOption,
 } from '../../../../../shared/components/index';
+import {
+  STORE_INDUSTRIES,
+  StoreIndustry,
+} from '../../../../../shared/constants/industry-modules.constant';
 import {
   StoreListItem,
   UpdateStoreDto,
   StoreState,
   StoreType,
 } from '../interfaces/store.interface';
+
+const nonEmptyArray: ValidatorFn = (control) => {
+  const v = control.value;
+  return Array.isArray(v) && v.length > 0 ? null : { required: true };
+};
 
 @Component({
   selector: 'app-store-edit-modal',
@@ -23,7 +34,8 @@ import {
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent
+    ButtonComponent,
+    MultiSelectorComponent,
 ],
   template: `
     <app-modal
@@ -121,6 +133,14 @@ import {
                 </select>
               </div>
             </div>
+
+            <app-multi-selector
+              formControlName="industries"
+              label="Tipos de Negocio"
+              [options]="industryOptions"
+              [required]="true"
+              helpText="Si tu negocio combina varias industrias, marca todas las que apliquen."
+            ></app-multi-selector>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 formControlName="domain"
@@ -290,6 +310,7 @@ export class StoreEditModalComponent {
       city: [''],
       country: [''],
       store_type: [StoreType.PHYSICAL, [Validators.required]],
+      industries: [['retail'], { validators: [nonEmptyArray] }],
       is_active: [true, [Validators.required]],
       domain: [''],
       timezone: [''],
@@ -313,6 +334,24 @@ export class StoreEditModalComponent {
     });
   }
 
+  readonly industryOptions: MultiSelectorOption[] = STORE_INDUSTRIES.map((id) => ({
+    value: id,
+    label: this.getIndustryLabel(id),
+  }));
+
+  private getIndustryLabel(id: StoreIndustry): string {
+    switch (id) {
+      case 'retail':
+        return 'Retail';
+      case 'restaurant':
+        return 'Restaurante';
+      case 'manufacturing':
+        return 'Manufactura';
+      case 'service':
+        return 'Servicios';
+    }
+  }
+
   private populateForm(store: StoreListItem): void {
     const primaryAddress =
       store.addresses?.find((addr) => addr.is_primary) || store.addresses?.[0];
@@ -329,6 +368,10 @@ export class StoreEditModalComponent {
       city: primaryAddress?.city || '',
       country: primaryAddress?.country_code || '',
       store_type: store.store_type || StoreType.PHYSICAL,
+      industries:
+        Array.isArray(store.industries) && store.industries.length > 0
+          ? store.industries
+          : (['retail'] as StoreIndustry[]),
       is_active: store.is_active !== undefined ? store.is_active : true,
       domain: '',
       timezone: store.timezone || '',
@@ -358,6 +401,9 @@ export class StoreEditModalComponent {
       city: formData.city || undefined,
       country: formData.country || undefined,
       store_type: formData.store_type as StoreType,
+      industries: Array.isArray(formData.industries) && formData.industries.length > 0
+        ? (formData.industries as StoreIndustry[])
+        : (['retail'] as StoreIndustry[]),
       is_active: formData.is_active as boolean,
       domain: formData.domain || undefined,
       timezone: formData.timezone || undefined,
@@ -387,6 +433,7 @@ export class StoreEditModalComponent {
       city: '',
       country: '',
       store_type: StoreType.PHYSICAL,
+      industries: ['retail'],
       is_active: true,
       domain: '',
       timezone: '',

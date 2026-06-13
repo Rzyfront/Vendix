@@ -170,6 +170,7 @@ export const Endpoints = {
         LIST: '/store/inventory/locations',
         CREATE: '/store/inventory/locations',
         UPDATE: '/store/inventory/locations/:id',
+        DELETE: '/store/inventory/locations/:id',
       },
       CONSOLIDATED_STOCK: '/store/inventory/consolidated-stock/product/:productId',
       STOCK_ALERTS: '/store/inventory/stock-levels/alerts',

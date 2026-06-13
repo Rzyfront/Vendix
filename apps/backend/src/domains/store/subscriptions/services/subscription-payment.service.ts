@@ -1573,7 +1573,7 @@ export class SubscriptionPaymentService {
       'Subscription refund',
     );
 
-    return this.prisma.$transaction(async (tx: any) => {
+    const updatedPayment = await this.prisma.$transaction(async (tx: any) => {
       const isFullRefund =
         !amount ||
         new Prisma.Decimal(amount).greaterThanOrEqualTo(existing.amount);
@@ -1608,6 +1608,27 @@ export class SubscriptionPaymentService {
 
       return updatedPayment;
     });
+
+    // RNC-MF-3: notify the platform accounting pipeline so Vendix's books
+    // reverse the SaaS revenue (DR 4175 / CR 1110). Emit AFTER the
+    // transaction commits and only when the gateway actually returned
+    // money — a failed gateway refund must not produce a journal entry.
+    if (refundResult.success) {
+      try {
+        this.eventEmitter.emit('subscription.payment.refunded', {
+          refundEventId: updatedPayment.id,
+          amount: refundAmount,
+          entryDate: new Date(),
+          userId: undefined,
+        });
+      } catch (e: any) {
+        this.logger.warn(
+          `subscription.payment.refunded emit failed for payment=${updatedPayment.id}: ${e?.message ?? e}`,
+        );
+      }
+    }
+
+    return updatedPayment;
   }
 
   // ------------------------------------------------------------------
@@ -2213,10 +2234,17 @@ export class SubscriptionPaymentService {
     // When called with an external tx, the emit fires before tx commits —
     // this is safe because subscription.payment.failed is best-effort
     // observability. When called standalone (charge() path), emits immediately.
+    //
+    // RNC-MF-3: `amount` + `entryDate` are added for the platform accounting
+    // listener (saas_bad_debt auto-entry). They are strictly additive — the
+    // existing SubscriptionStateListener only reads invoiceId/paymentId/
+    // subscriptionId/storeId and ignores unknown fields.
     this.eventEmitter.emit('subscription.payment.failed', {
       invoiceId,
       paymentId,
       reason,
+      amount: updatedPayment.amount,
+      entryDate: new Date(),
     });
 
     return updatedPayment;

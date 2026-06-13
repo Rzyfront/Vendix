@@ -26,7 +26,19 @@ import { IconComponent } from '../../icon/icon.component';
 import { ButtonComponent } from '../../button/button.component';
 
 export type TaxMode = 'defaults' | 'custom';
-export type TaxType = 'VAT' | 'ICA' | 'WITHHOLDING';
+export type TaxType = 'VAT' | 'INC' | 'ICA' | 'WITHHOLDING';
+
+/**
+ * Maps the UI tax type to the backend fiscal `tax_type` contract
+ * ('iva' | 'inc' | 'ica' | 'withholding'). Persisting this is what routes each
+ * tax to its own PUC account, declaration and DIAN scheme.
+ */
+export const UI_TO_FISCAL_TAX_TYPE: Record<TaxType, string> = {
+  VAT: 'iva',
+  INC: 'inc',
+  ICA: 'ica',
+  WITHHOLDING: 'withholding',
+};
 
 export interface TaxRow {
   name: string;
@@ -54,6 +66,7 @@ const DEFAULT_TAXES: TaxRow[] = [
   { name: 'IVA 19%', percentage: 19, type: 'VAT' },
   { name: 'IVA 5%', percentage: 5, type: 'VAT' },
   { name: 'IVA Exento', percentage: 0, type: 'VAT' },
+  { name: 'Impoconsumo 8%', percentage: 8, type: 'INC' },
   { name: 'ICA Bogotá', percentage: 0.966, type: 'ICA' },
   { name: 'Retención en la Fuente 2.5%', percentage: 2.5, type: 'WITHHOLDING' },
 ];
@@ -175,6 +188,7 @@ export class DefaultTaxesFormComponent {
 
   readonly typeOptions: SelectorOption[] = [
     { value: 'VAT', label: 'IVA' },
+    { value: 'INC', label: 'Impoconsumo (INC)' },
     { value: 'ICA', label: 'ICA' },
     { value: 'WITHHOLDING', label: 'Retención' },
   ];

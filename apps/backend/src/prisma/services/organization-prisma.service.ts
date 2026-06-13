@@ -61,6 +61,7 @@ export class OrganizationPrismaService extends BasePrismaService {
     'employees',
     'payroll_runs',
     'payroll_items',
+    'payroll_novelties',
     'partner_plan_overrides',
     'partner_commissions',
     'partner_payout_batches',
@@ -456,6 +457,10 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   get payroll_items() {
     return this.scoped_client.payroll_items;
+  }
+
+  get payroll_novelties() {
+    return this.scoped_client.payroll_novelties;
   }
 
   get partner_plan_overrides() {

@@ -14,6 +14,8 @@ export enum StoreState {
   ARCHIVED = 'archived',
 }
 
+export type StoreIndustry = 'retail' | 'restaurant' | 'manufacturing' | 'service';
+
 export interface Store {
   id: number;
   name: string;
@@ -34,6 +36,7 @@ export interface Store {
   currency_code?: string;
   operating_hours?: OperatingHours;
   store_type: StoreType;
+  industries?: StoreIndustry[];
   is_active: boolean;
   manager_user_id?: number;
   settings?: StoreSettings;
@@ -73,6 +76,7 @@ export interface StoreListItem {
   slug: string;
   store_code: string;
   store_type: StoreType;
+  industries?: StoreIndustry[];
   timezone: string;
   is_active: boolean;
   manager_user_id?: number;
@@ -144,6 +148,7 @@ export interface CreateStoreDto {
   currency_code?: string;
   operating_hours?: OperatingHours;
   store_type: StoreType;
+  industries?: StoreIndustry[];
   is_active: boolean;
   manager_user_id?: number;
   description?: string;
@@ -159,6 +164,7 @@ export interface UpdateStoreDto {
   name?: string;
   is_active?: boolean;
   store_type?: StoreType;
+  industries?: StoreIndustry[];
   manager_user_id?: number;
   description?: string;
   email?: string;

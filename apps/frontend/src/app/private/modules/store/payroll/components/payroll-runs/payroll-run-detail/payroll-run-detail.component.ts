@@ -28,7 +28,20 @@ import {
   sendPayrollRunFailure,
   payPayrollRunFailure,
 } from '../../../state/actions/payroll.actions';
-import { PayrollRun, PayrollItem } from '../../../interfaces/payroll.interface';
+import {
+  PayrollRun,
+  PayrollItem,
+  PayrollNovelty,
+} from '../../../interfaces/payroll.interface';
+import { PayrollService } from '../../../services/payroll.service';
+import {
+  getNoveltyTypeLabel,
+  getNoveltyUnit,
+} from '../../novelties/novelty-labels';
+import {
+  formatDateOnlyUTC,
+  toUTCDateString,
+} from '../../../../../../../shared/utils/date.util';
 import {
   ModalComponent,
   ButtonComponent,
@@ -150,6 +163,37 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
                 (rowClick)="onEmployeeClick($event)"
                 emptyMessage="No hay empleados en esta nomina"
               ></app-responsive-data-view>
+            </div>
+          }
+
+          <!-- 5b. NOVEDADES APLICADAS (read-only, agrupadas por empleado) -->
+          @if (groupedNovelties().length > 0) {
+            <div>
+              <h3 class="text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide mb-3">
+                Novedades Aplicadas
+              </h3>
+              <div class="space-y-3">
+                @for (group of groupedNovelties(); track group.key) {
+                  <div class="p-3 bg-[var(--color-background)] rounded-lg">
+                    <p class="text-xs font-semibold text-[var(--color-text-primary)] mb-2">
+                      {{ group.employeeName }}
+                    </p>
+                    <div class="space-y-1">
+                      @for (novelty of group.novelties; track novelty.id) {
+                        <div class="flex items-center justify-between gap-2 text-xs py-0.5">
+                          <span class="text-[var(--color-text-secondary)]">
+                            {{ getNoveltyLabel(novelty) }}
+                            <span class="text-[10px]">· {{ getNoveltyDates(novelty) }}</span>
+                          </span>
+                          <span class="font-medium text-[var(--color-text-primary)] whitespace-nowrap">
+                            {{ getNoveltyQuantity(novelty) }}
+                          </span>
+                        </div>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
             </div>
           }
 
@@ -286,6 +330,7 @@ export class PayrollRunDetailComponent {
   readonly isOpenChange = output<boolean>();
 
   private currencyService = inject(CurrencyFormatService);
+  private payrollService = inject(PayrollService);
   private store = inject(Store);
   private actions$ = inject(Actions);
   private destroyRef = inject(DestroyRef);
@@ -318,6 +363,13 @@ private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation to
 
   // ── ResponsiveDataView ────────────────────────────────
   readonly employeeTableData = signal<any[]>([]);
+
+  // ── Novedades aplicadas (read-only) ───────────────────
+  readonly groupedNovelties = signal<
+    Array<{ key: string; employeeName: string; novelties: PayrollNovelty[] }>
+  >([]);
+  /** Evita recargar novedades si el run no cambió de id/estado. */
+  private lastNoveltiesKey = '';
 
   employeeColumns: TableColumn[] = [
     {
@@ -388,6 +440,7 @@ private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation to
       const run = this.payrollRun();
       this.updateStatusIndex();
       this.rebuildTableData();
+      this.loadAppliedNovelties(run);
     });
 
     this.destroyRef.onDestroy(() => {
@@ -585,6 +638,90 @@ private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation to
     this.fastTrackCurrentLabel.set('');
     this.loading.set(false);
     this.fastTrackCancel$.next();
+  }
+
+  // ── Novedades aplicadas ───────────────────────────────
+
+  /**
+   * Carga las novedades aplicadas a este run. El endpoint de novelties no
+   * filtra por payroll_run_id, así que se acota por el período del run y se
+   * filtra client-side por payroll_run_id.
+   */
+  private loadAppliedNovelties(run: PayrollRun | null): void {
+    if (!run || run.status === 'draft') {
+      this.lastNoveltiesKey = '';
+      this.groupedNovelties.set([]);
+      return;
+    }
+
+    const key = `${run.id}:${run.status}`;
+    if (key === this.lastNoveltiesKey) return;
+    this.lastNoveltiesKey = key;
+
+    this.payrollService
+      .getNovelties({
+        status: 'applied',
+        date_from: toUTCDateString(new Date(run.period_start)),
+        date_to: toUTCDateString(new Date(run.period_end)),
+        limit: 500,
+      })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const runNovelties = (res.data || []).filter(
+            (novelty) =>
+              novelty.payroll_run_id === run.id ||
+              novelty.payroll_run?.id === run.id,
+          );
+          this.groupedNovelties.set(this.groupByEmployee(runNovelties));
+        },
+        error: () => this.groupedNovelties.set([]),
+      });
+  }
+
+  private groupByEmployee(
+    novelties: PayrollNovelty[],
+  ): Array<{ key: string; employeeName: string; novelties: PayrollNovelty[] }> {
+    const groups = new Map<string, { employeeName: string; novelties: PayrollNovelty[] }>();
+    for (const novelty of novelties) {
+      const key = String(novelty.employee_id);
+      if (!groups.has(key)) {
+        groups.set(key, {
+          employeeName: novelty.employee
+            ? `${novelty.employee.first_name} ${novelty.employee.last_name}`
+            : `Empleado #${novelty.employee_id}`,
+          novelties: [],
+        });
+      }
+      groups.get(key)!.novelties.push(novelty);
+    }
+    return Array.from(groups.entries()).map(([key, group]) => ({ key, ...group }));
+  }
+
+  getNoveltyLabel(novelty: PayrollNovelty): string {
+    return getNoveltyTypeLabel(novelty.novelty_type);
+  }
+
+  getNoveltyDates(novelty: PayrollNovelty): string {
+    if (!novelty.date_start) return '-';
+    const start = formatDateOnlyUTC(novelty.date_start);
+    if (novelty.date_end) {
+      return `${start} — ${formatDateOnlyUTC(novelty.date_end)}`;
+    }
+    return start;
+  }
+
+  getNoveltyQuantity(novelty: PayrollNovelty): string {
+    const unit = getNoveltyUnit(novelty.novelty_type);
+    if (unit === 'hours') {
+      return novelty.hours != null ? `${Number(novelty.hours)} h` : '-';
+    }
+    if (unit === 'days') {
+      return novelty.days != null ? `${Number(novelty.days)} días` : '-';
+    }
+    return novelty.amount != null
+      ? this.currencyService.format(Number(novelty.amount))
+      : '-';
   }
 
   // ── Helpers ───────────────────────────────────────────

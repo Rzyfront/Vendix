@@ -4,11 +4,13 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../../../../../../environments/environment';
 import { ApiResponse } from '../../../services/org-accounting.service';
 import {
-  WithholdingConcept,
   WithholdingStats,
   UvtValue,
-  CreateConceptDto,
 } from '../../../../../store/withholding-tax/interfaces/withholding.interface';
+import {
+  OrgWithholdingConcept,
+  OrgCreateConceptDto,
+} from '../interfaces/org-withholding.interface';
 
 /**
  * Organization-scoped withholding-tax service.
@@ -25,15 +27,15 @@ export class OrgWithholdingTaxService {
   private readonly http = inject(HttpClient);
   private readonly apiUrl = environment.apiUrl;
 
-  getConcepts(query?: Record<string, any>): Observable<ApiResponse<WithholdingConcept[]>> {
-    return this.http.get<ApiResponse<WithholdingConcept[]>>(
+  getConcepts(query?: Record<string, any>): Observable<ApiResponse<OrgWithholdingConcept[]>> {
+    return this.http.get<ApiResponse<OrgWithholdingConcept[]>>(
       `${this.apiUrl}/organization/withholding-tax/concepts`,
       { params: this.toParams(query) },
     );
   }
 
-  createConcept(dto: CreateConceptDto, query?: Record<string, any>): Observable<ApiResponse<WithholdingConcept>> {
-    return this.http.post<ApiResponse<WithholdingConcept>>(
+  createConcept(dto: OrgCreateConceptDto, query?: Record<string, any>): Observable<ApiResponse<OrgWithholdingConcept>> {
+    return this.http.post<ApiResponse<OrgWithholdingConcept>>(
       `${this.apiUrl}/organization/withholding-tax/concepts`,
       dto,
       { params: this.toParams(query) },
@@ -42,10 +44,10 @@ export class OrgWithholdingTaxService {
 
   updateConcept(
     id: number,
-    dto: Partial<CreateConceptDto> & { is_active?: boolean },
+    dto: Partial<OrgCreateConceptDto>,
     query?: Record<string, any>,
-  ): Observable<ApiResponse<WithholdingConcept>> {
-    return this.http.put<ApiResponse<WithholdingConcept>>(
+  ): Observable<ApiResponse<OrgWithholdingConcept>> {
+    return this.http.put<ApiResponse<OrgWithholdingConcept>>(
       `${this.apiUrl}/organization/withholding-tax/concepts/${id}`,
       dto,
       { params: this.toParams(query) },

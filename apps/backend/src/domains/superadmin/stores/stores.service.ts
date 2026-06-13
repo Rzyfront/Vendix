@@ -103,6 +103,7 @@ export class StoresService {
       search,
       organization_id,
       store_type,
+      industries,
       include_non_production,
     } = query;
     const skip = (page - 1) * Number(limit);
@@ -122,6 +123,13 @@ export class StoresService {
 
     if (store_type) {
       where.store_type = store_type;
+    }
+
+    // OR semantics: a store matches if it has at least one of the
+    // requested industries. `ArrayMinSize(1)` is enforced at the DTO
+    // layer, so we only need a defensive length check here.
+    if (industries?.length) {
+      where.industries = { hasSome: industries };
     }
 
     // Filter stores by organization mode (exclude demo/test by default)

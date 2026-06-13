@@ -9,6 +9,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { TaxFiscalType } from '../../taxes/dto';
 
 export class CreateInvoiceItemDto {
   @IsOptional()
@@ -65,6 +66,11 @@ export class CreateInvoiceTaxDto {
   @IsNumber()
   @Type(() => Number)
   tax_amount: number;
+
+  /** Fiscal classification (iva/inc/ica/...). Defaults to iva when omitted. */
+  @IsOptional()
+  @IsEnum(TaxFiscalType)
+  tax_type?: TaxFiscalType;
 }
 
 export class CreateInvoiceDto {

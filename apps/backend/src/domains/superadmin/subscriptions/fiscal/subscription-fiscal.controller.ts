@@ -24,6 +24,8 @@ import { UserRole } from '../../../auth/enums/user-role.enum';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import {
+  CreatePlatformResolutionDto,
+  ListPlatformResolutionsQueryDto,
   RetrySubscriptionFiscalDto,
   SubscriptionFiscalQueryDto,
   UpsertSubscriptionFiscalConfigDto,
@@ -128,5 +130,26 @@ export class SubscriptionFiscalController {
   ): Promise<any> {
     const result = await this.fiscalService.retryTransmission(id);
     return this.responseService.success(result, 'Fiscal transmission retry requested');
+  }
+
+  @Get('resolutions')
+  @Permissions('superadmin:subscriptions:fiscal:read')
+  @ApiOperation({ summary: 'List platform DIAN invoice resolutions' })
+  async listResolutions(
+    @Query() query: ListPlatformResolutionsQueryDto,
+  ): Promise<any> {
+    const data = await this.fiscalService.listResolutions(query);
+    return this.responseService.success(data, 'Platform resolutions retrieved');
+  }
+
+  @Post('resolutions')
+  @HttpCode(HttpStatus.CREATED)
+  @Permissions('superadmin:subscriptions:fiscal:write')
+  @ApiOperation({ summary: 'Create a platform DIAN invoice resolution' })
+  async createResolution(
+    @Body() dto: CreatePlatformResolutionDto,
+  ): Promise<any> {
+    const result = await this.fiscalService.createResolution(dto);
+    return this.responseService.created(result, 'Platform resolution created');
   }
 }

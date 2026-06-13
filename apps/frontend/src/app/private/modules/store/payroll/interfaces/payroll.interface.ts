@@ -61,14 +61,89 @@ export interface PayrollItem {
   employee?: Employee;
   base_salary: number;
   worked_days: number;
-  earnings: Record<string, number>;
-  deductions: Record<string, number>;
+  /**
+   * Earnings JSON. Besides flat numeric keys it may carry detail arrays
+   * (overtime, vacations, disabilities, licenses, bonuses) and a numeric
+   * commissions key — same shapes persisted by the backend calculation.
+   */
+  earnings: PayrollItemEarnings;
+  deductions: PayrollItemDeductions;
   employer_costs: Record<string, number>;
   provisions?: Record<string, number> | null;
   total_earnings: number;
   total_deductions: number;
   total_employer_costs: number;
   net_pay: number;
+}
+
+export interface OvertimeEarningDetail {
+  type: string;
+  hours: number;
+  percentage: number;
+  amount: number;
+}
+
+export interface VacationEarningDetail {
+  start_date: string;
+  end_date: string;
+  quantity: number;
+  payment: number;
+}
+
+export interface DisabilityEarningDetail {
+  start_date: string;
+  end_date: string;
+  quantity: number;
+  type: number;
+  payment: number;
+}
+
+export interface LicenseEarningDetail {
+  start_date: string;
+  end_date: string;
+  quantity: number;
+  type: string;
+  payment: number;
+}
+
+export interface BonusEarningDetail {
+  taxable: number;
+  non_taxable: number;
+}
+
+export interface PayrollItemEarnings {
+  base_salary?: number;
+  transport_subsidy?: number;
+  overtime?: OvertimeEarningDetail[];
+  vacations?: VacationEarningDetail[];
+  disabilities?: DisabilityEarningDetail[];
+  licenses?: LicenseEarningDetail[];
+  bonuses?: BonusEarningDetail[];
+  commissions?: number;
+  total?: number;
+  [key: string]: unknown;
+}
+
+/** Detalle retefuente art. 383 ET procedimiento 1 (opcional en runs históricos). */
+export interface RetentionDetails {
+  retention: number;
+  base_depurada: number;
+  base_uvt: number;
+  exempt_amount: number;
+  marginal_rate: number;
+  uvt_value: number;
+  method: 'art383_proc1';
+}
+
+export interface PayrollItemDeductions {
+  health?: number;
+  pension?: number;
+  retention?: number;
+  advance_deduction?: number;
+  other_deductions?: Array<{ description: string; amount: number }>;
+  retention_details?: RetentionDetails;
+  total?: number;
+  [key: string]: unknown;
 }
 
 // Payroll Rules (configurable per year)
@@ -369,4 +444,144 @@ export interface PayrollUpdateAvailable {
   published_at: string | null;
   has_diff: boolean;
   diff: Record<string, { current: any; system: any }>;
+}
+
+// ─── Novelty Interfaces ─────────────────────────────────────
+
+export type NoveltyType =
+  | 'overtime_diurna'
+  | 'overtime_nocturna'
+  | 'overtime_dominical_diurna'
+  | 'overtime_dominical_nocturna'
+  | 'surcharge_nocturno'
+  | 'surcharge_dominical'
+  | 'incapacity_general'
+  | 'incapacity_laboral'
+  | 'vacation'
+  | 'leave_paid'
+  | 'leave_unpaid'
+  | 'bonus'
+  | 'commission'
+  | 'other_deduction';
+
+export type NoveltyStatus = 'pending' | 'applied' | 'cancelled';
+
+export interface PayrollNovelty {
+  id: number;
+  organization_id?: number;
+  employee_id: number;
+  novelty_type: NoveltyType;
+  status: NoveltyStatus;
+  date_start: string;
+  date_end?: string | null;
+  hours?: number | null;
+  days?: number | null;
+  percentage?: number | null;
+  amount?: number | null;
+  notes?: string | null;
+  payroll_run_id?: number | null;
+  employee?: {
+    id?: number;
+    first_name: string;
+    last_name: string;
+    document_number?: string;
+    employee_code?: string;
+  };
+  payroll_run?: {
+    id: number;
+    payroll_number: string;
+    status: string;
+  } | null;
+  created_by_user?: { id: number; first_name: string; last_name: string } | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateNoveltyDto {
+  employee_id: number;
+  novelty_type: NoveltyType;
+  date_start: string;
+  date_end?: string;
+  hours?: number;
+  days?: number;
+  percentage?: number;
+  amount?: number;
+  notes?: string;
+}
+
+export type UpdateNoveltyDto = Partial<CreateNoveltyDto>;
+
+export interface QueryNoveltyDto {
+  search?: string;
+  page?: number;
+  limit?: number;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+  employee_id?: number;
+  novelty_type?: NoveltyType;
+  status?: NoveltyStatus;
+  date_from?: string;
+  date_to?: string;
+}
+
+export interface NoveltyListResponse {
+  data: PayrollNovelty[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage?: boolean;
+    hasPreviousPage?: boolean;
+  };
+}
+
+// ─── PILA Interfaces ────────────────────────────────────────
+
+export interface PilaNoveltyFlags {
+  vacation: boolean;
+  incapacity_general: boolean;
+  incapacity_laboral: boolean;
+  unpaid_leave: boolean;
+}
+
+export interface PilaEmployeeRow {
+  employee_id: number;
+  document_type: string;
+  document_number: string;
+  full_name: string;
+  ibc: number;
+  worked_days: number;
+  arl_risk_level: number | null;
+  health_employee: number;
+  health_employer: number;
+  pension_employee: number;
+  pension_employer: number;
+  arl: number;
+  sena: number;
+  icbf: number;
+  compensation_fund: number;
+  novelty_flags: PilaNoveltyFlags;
+  total: number;
+}
+
+export interface PilaTotals {
+  ibc?: number;
+  health_employee?: number;
+  health_employer?: number;
+  pension_employee?: number;
+  pension_employer?: number;
+  arl?: number;
+  sena?: number;
+  icbf?: number;
+  compensation_fund?: number;
+  total?: number;
+  [key: string]: number | undefined;
+}
+
+export interface PilaReport {
+  year: number;
+  month: number;
+  employees: PilaEmployeeRow[];
+  totals: PilaTotals;
 }

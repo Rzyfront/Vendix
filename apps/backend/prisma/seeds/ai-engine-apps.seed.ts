@@ -577,24 +577,10 @@ Devuelve SOLO este JSON:
         updates.model_type = app.model_type;
       }
 
-      // These AI apps are system-owned (no user UI to edit their prompts).
-      // Reconcile system_prompt and prompt_template canonically so guardrails
-      // (inventario cerrado, prohibicion de SKUs, tono profesional, etc.)
-      // reach existing DBs without manual intervention.
-      const SYSTEM_OWNED_APP_KEYS = new Set([
-        'marketing_ad_prompt_specialist',
-        'marketing_ad_image_generator',
-        'marketing_ad_post_copywriter',
-        'product_image_enhancer',
-      ]);
-      if (SYSTEM_OWNED_APP_KEYS.has(app.key)) {
-        if (existing.system_prompt !== app.system_prompt) {
-          updates.system_prompt = app.system_prompt;
-        }
-        if (existing.prompt_template !== app.prompt_template) {
-          updates.prompt_template = app.prompt_template;
-        }
-      }
+      // Prompts (system_prompt / prompt_template) are NEVER reconciled here:
+      // they are editable from the super-admin panel and prod customizations
+      // must survive deploys. Prompt changes in this seed only apply to new
+      // installs; existing rows keep whatever is in the DB.
 
       if (Object.keys(updates).length) {
         await client.ai_engine_applications.update({

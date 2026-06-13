@@ -29,6 +29,7 @@ import { AccountMappingService } from './account-mappings/account-mapping.servic
 // Auto Entries
 import { AutoEntryService } from './auto-entries/auto-entry.service';
 import { AccountingEventsListener } from './auto-entries/accounting-events.listener';
+import { PlatformOrgService } from '../../../common/services/platform-org.service';
 
 // Bank Reconciliation
 import { BankAccountsController } from './bank-reconciliation/bank-accounts.controller';
@@ -91,6 +92,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     AccountMappingService,
     AutoEntryService,
     AccountingEventsListener,
+    PlatformOrgService,
     BankAccountsService,
     BankTransactionsService,
     ReconciliationService,

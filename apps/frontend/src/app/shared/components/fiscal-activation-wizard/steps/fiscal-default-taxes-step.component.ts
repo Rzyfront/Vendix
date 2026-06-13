@@ -21,6 +21,7 @@ import {
   DefaultTaxesFormComponent,
   DefaultTaxesValue,
   TaxRow,
+  UI_TO_FISCAL_TAX_TYPE,
 } from '../../forms/default-taxes-form/default-taxes-form.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 
@@ -130,6 +131,12 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
     const normalized = name.toLowerCase();
     if (normalized.includes('ica')) return 'ICA';
     if (normalized.includes('ret')) return 'WITHHOLDING';
+    if (
+      normalized.includes('consumo') ||
+      normalized.includes('impoconsumo') ||
+      normalized.includes('inc')
+    )
+      return 'INC';
     return 'VAT';
   }
 
@@ -192,6 +199,7 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
             this.http.post(this.baseUrl(), {
               name: row.name,
               type: this.mapType(row.type),
+              tax_type: UI_TO_FISCAL_TAX_TYPE[row.type],
               rate: row.percentage,
               is_inclusive: false,
               ...this.service.storeContext(),

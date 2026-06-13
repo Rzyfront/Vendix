@@ -419,7 +419,7 @@ export class OrgLocationsService {
    *   - `is_central_warehouse`: `true`
    *   - `store_id`: `null` (DB CHECK constraint)
    *   - `is_active`: `true`
-   *   - `is_default`: `false`
+   *   - `is_default`: `true` (it is the organization's principal warehouse)
    *
    * Uses the provided `tx` client when given; falls back to
    * `globalPrisma.withoutScope()` so this method is safe to invoke from

@@ -60,7 +60,7 @@ import {
                 </div>
                 <div class="flex items-center gap-1 ml-2">
                   <button (click)="editCategory(cat)"
-                          class="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary">
+                          class="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary-600">
                     <app-icon name="edit" [size]="14"></app-icon>
                   </button>
                   <button (click)="deleteCategory(cat)"

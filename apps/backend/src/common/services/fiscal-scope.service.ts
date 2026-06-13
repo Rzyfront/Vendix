@@ -141,6 +141,44 @@ export class FiscalScopeService {
     });
   }
 
+  /**
+   * READ-ONLY lookup of the fiscal accounting entity id.
+   *
+   * Unlike resolveAccountingEntityForFiscal, this method NEVER creates rows
+   * and NEVER throws when the entity does not exist yet — it simply returns
+   * null so read paths can skip the entity filter without side effects.
+   */
+  async findFiscalAccountingEntityId(
+    params: ResolveFiscalAccountingEntityParams,
+  ): Promise<number | null> {
+    const client = params.tx || this.prisma.withoutScope();
+    const fiscalScope = await this.getFiscalScope(params.organization_id, client);
+
+    if (fiscalScope === 'ORGANIZATION' || params.store_id == null) {
+      const entity = await client.accounting_entities.findFirst({
+        where: {
+          organization_id: params.organization_id,
+          store_id: null,
+          scope: 'ORGANIZATION',
+          fiscal_scope: 'ORGANIZATION',
+        },
+        select: { id: true },
+      });
+      return entity?.id ?? null;
+    }
+
+    const entity = await client.accounting_entities.findFirst({
+      where: {
+        organization_id: params.organization_id,
+        store_id: params.store_id,
+        scope: 'STORE',
+        fiscal_scope: 'STORE',
+      },
+      select: { id: true },
+    });
+    return entity?.id ?? null;
+  }
+
   async resolveFiscalContext(
     params: ResolveFiscalAccountingEntityParams,
   ): Promise<FiscalContext> {
@@ -215,6 +253,7 @@ export class FiscalScopeService {
           organization_id: params.organization_id,
           store_id: null,
           scope: 'ORGANIZATION',
+          fiscal_scope: 'ORGANIZATION',
         },
       });
       if (existing) return existing;
@@ -246,6 +285,7 @@ export class FiscalScopeService {
               organization_id: params.organization_id,
               store_id: null,
               scope: 'ORGANIZATION',
+              fiscal_scope: 'ORGANIZATION',
             },
           });
           if (created) return created;
@@ -263,6 +303,7 @@ export class FiscalScopeService {
         organization_id: params.organization_id,
         store_id: params.store_id,
         scope: 'STORE',
+        fiscal_scope: 'STORE',
       },
     });
     if (existing) return existing;
@@ -312,6 +353,7 @@ export class FiscalScopeService {
             organization_id: params.organization_id,
             store_id: params.store_id,
             scope: 'STORE',
+            fiscal_scope: 'STORE',
           },
         });
         if (created) return created;

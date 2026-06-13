@@ -16,18 +16,26 @@ import {
   FiscalOperationsContext,
   FiscalContextResolverService,
 } from './services/fiscal-context-resolver.service';
+import { FiscalFlowStateService } from './services/fiscal-flow-state.service';
 import { FiscalObligationService } from './services/fiscal-obligation.service';
 import { TaxDeclarationDraftService } from './services/tax-declaration-draft.service';
 import { FiscalCloseService } from './services/fiscal-close.service';
 import { FiscalEvidenceService } from './services/fiscal-evidence.service';
 import { FiscalRulesService } from './services/fiscal-rules.service';
 import { FiscalAuditService } from './services/fiscal-audit.service';
+import { FiscalConfigChecklistService } from './services/fiscal-config-checklist.service';
+import {
+  CreateFiscalRuleSetDto,
+  FiscalConfigChecklistQueryDto,
+  UpdateFiscalRuleSetDto,
+} from './dto/fiscal-rules.dto';
 import {
   AttachFiscalEvidenceDto,
   ChangeFiscalObligationStatusDto,
   CreateFiscalCloseSessionDto,
   CreateTaxDeclarationDraftDto,
   FiscalCloseQueryDto,
+  FiscalFlowStateQueryDto,
   FiscalHistoryQueryDto,
   FiscalListQueryDto,
   FiscalRulesQueryDto,
@@ -36,18 +44,24 @@ import {
   OverrideFiscalCloseCheckDto,
   ReopenFiscalCloseDto,
 } from './dto/fiscal-operations.dto';
+import {
+  FISCAL_RESPONSIBILITIES_CATALOG,
+  FISCAL_RESPONSIBILITIES_CATALOG_VERSION,
+} from './constants/fiscal-responsibilities.catalog';
 
 @Controller('organization/fiscal')
 @UseGuards(PermissionsGuard)
 export class OrganizationFiscalController {
   constructor(
     private readonly contextResolver: FiscalContextResolverService,
+    private readonly flowState: FiscalFlowStateService,
     private readonly obligations: FiscalObligationService,
     private readonly declarations: TaxDeclarationDraftService,
     private readonly closeService: FiscalCloseService,
     private readonly evidence: FiscalEvidenceService,
     private readonly rules: FiscalRulesService,
     private readonly audit: FiscalAuditService,
+    private readonly checklist: FiscalConfigChecklistService,
     private readonly response: ResponseService,
   ) {}
 
@@ -80,6 +94,15 @@ export class OrganizationFiscalController {
   async overview(@Query() query: FiscalListQueryDto) {
     const contexts = await this.readContexts(query);
     return this.response.success(await this.obligations.getOverview(contexts));
+  }
+
+  @Get('flow-state')
+  @Permissions('organization:fiscal:dashboard:read')
+  async getFlowState(@Query() query: FiscalFlowStateQueryDto) {
+    const contexts = await this.readContexts(query);
+    return this.response.success(
+      await this.flowState.getFlowState(contexts, query),
+    );
   }
 
   @Get('history')
@@ -334,5 +357,73 @@ export class OrganizationFiscalController {
   async listRules(@Query() query: FiscalRulesQueryDto) {
     const contexts = await this.readContexts(query);
     return this.response.success(await this.rules.list(contexts, query));
+  }
+
+  /**
+   * Catálogo estático y versionado de responsabilidades DIAN (RUT casilla 53).
+   * No depende del contexto fiscal: la UI lo usa para labels/tooltips y para
+   * explicar qué obligaciones habilita cada responsabilidad.
+   */
+  @Get('responsibilities/catalog')
+  @Permissions('organization:fiscal:dashboard:read')
+  getResponsibilitiesCatalog() {
+    return this.response.success({
+      version: FISCAL_RESPONSIBILITIES_CATALOG_VERSION,
+      responsibilities: FISCAL_RESPONSIBILITIES_CATALOG,
+    });
+  }
+
+  /**
+   * Checklist de configuración fiscal (read-only). Para organizaciones con
+   * fiscal_scope STORE se requiere `store_id` (misma regla de entidad única
+   * que las mutaciones fiscales).
+   */
+  @Get('config-checklist')
+  @Permissions('organization:fiscal:dashboard:read')
+  async getConfigChecklist(@Query() query: FiscalConfigChecklistQueryDto) {
+    const context = await this.contextResolver.resolveForOrganization({
+      store_id: query.store_id,
+      require_single_entity: true,
+    });
+    return this.response.success(await this.checklist.build(context));
+  }
+
+  @Post('rules')
+  @Permissions('organization:fiscal:rules:manage')
+  async createRule(@Body() dto: CreateFiscalRuleSetDto) {
+    return this.response.created(
+      await this.rules.createRuleSet(dto),
+      'Fiscal rule set created',
+    );
+  }
+
+  @Patch('rules/:id')
+  @Permissions('organization:fiscal:rules:manage')
+  async updateRule(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateFiscalRuleSetDto,
+  ) {
+    return this.response.updated(
+      await this.rules.updateRuleSet(id, dto),
+      'Fiscal rule set updated',
+    );
+  }
+
+  @Post('rules/:id/activate')
+  @Permissions('organization:fiscal:rules:manage')
+  async activateRule(@Param('id', ParseIntPipe) id: number) {
+    return this.response.updated(
+      await this.rules.activateRuleSet(id),
+      'Fiscal rule set activated',
+    );
+  }
+
+  @Post('rules/:id/archive')
+  @Permissions('organization:fiscal:rules:manage')
+  async archiveRule(@Param('id', ParseIntPipe) id: number) {
+    return this.response.updated(
+      await this.rules.archiveRuleSet(id),
+      'Fiscal rule set archived',
+    );
   }
 }

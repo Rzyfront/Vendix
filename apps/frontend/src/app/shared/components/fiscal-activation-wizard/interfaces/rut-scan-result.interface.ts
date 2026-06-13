@@ -15,9 +15,13 @@ export type RutTaxRegime = 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
 
 /**
  * Tenant scope used to resolve the scanner endpoint. ORG_ADMIN users post to
- * the `organization` namespace; everyone else posts to `store`.
+ * the `organization` namespace; everyone else posts to `store`. El scope
+ * `platform` (super-admin fiscal) se acepta a nivel de tipos para que el
+ * `FiscalIdentityPanelComponent` pueda reusar este modal en el tab
+ * "Identidad" de la plataforma; el modal quedará deshabilitado a nivel
+ * UI si el backend no expone un endpoint equivalente.
  */
-export type RutScannerScope = 'store' | 'organization';
+export type RutScannerScope = 'store' | 'organization' | 'platform';
 
 export interface RutScanResult {
   /** Tax identification number (NIT) without the verification digit. */

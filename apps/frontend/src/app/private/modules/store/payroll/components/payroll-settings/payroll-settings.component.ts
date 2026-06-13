@@ -249,7 +249,7 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
       @if (loading()) {
         <div class="flex items-center justify-center py-12">
           <div
-            class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"
+            class="w-6 h-6 border-2 border-primary-600 border-t-transparent rounded-full animate-spin"
           ></div>
           <span class="ml-3 text-sm text-text-secondary"
             >Cargando reglas...</span
@@ -293,7 +293,7 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
                           {{ field.label }}
                           @if (isModified(field.key)) {
                             <span
-                              class="ml-1 inline-block w-1.5 h-1.5 bg-primary rounded-full align-middle"
+                              class="ml-1 inline-block w-1.5 h-1.5 bg-primary-600 rounded-full align-middle"
                               title="Modificado"
                             ></span>
                           }
@@ -309,7 +309,7 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
                               [ngModel]="getFieldValue(field.key)"
                               (ngModelChange)="onFieldChange(field.key, $event)"
                               [disabled]="field.readonly"
-                              class="w-full pl-6 pr-2 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                              class="w-full pl-6 pr-2 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-600/40 focus:border-primary-600/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                               step="100"
                             />
                           }
@@ -321,7 +321,7 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
                                 onPercentChange(field.key, $event)
                               "
                               [disabled]="field.readonly"
-                              class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                              class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-600/40 focus:border-primary-600/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                               step="0.01"
                             />
                             <span
@@ -335,7 +335,7 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
                               [ngModel]="getFieldValue(field.key)"
                               (ngModelChange)="onFieldChange(field.key, $event)"
                               [disabled]="field.readonly"
-                              class="w-full px-2.5 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                              class="w-full px-2.5 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-600/40 focus:border-primary-600/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                               step="1"
                             />
                           }
@@ -363,7 +363,7 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
                           Nivel {{ level }}
                           @if (isArlModified(level)) {
                             <span
-                              class="ml-1 inline-block w-1.5 h-1.5 bg-primary rounded-full align-middle"
+                              class="ml-1 inline-block w-1.5 h-1.5 bg-primary-600 rounded-full align-middle"
                             ></span>
                           }
                         </label>
@@ -372,7 +372,7 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
                             type="number"
                             [ngModel]="getArlPercent(level)"
                             (ngModelChange)="onArlChange(level, $event)"
-                            class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition-colors"
+                            class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-600/40 focus:border-primary-600/40 transition-colors"
                             step="0.001"
                           />
                           <span

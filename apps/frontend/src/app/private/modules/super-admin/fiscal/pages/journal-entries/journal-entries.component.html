@@ -1,0 +1,305 @@
+<div class="w-full overflow-x-hidden">
+  <!-- Stats: Sticky on mobile, static on desktop -->
+  <div
+    class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+  >
+    <app-stats
+      title="Asientos"
+      [value]="stats().total"
+      smallText="En el rango seleccionado"
+      iconName="book"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    />
+    <app-stats
+      title="Débito"
+      [value]="formatMoney(stats().totalDebit)"
+      smallText="Σ DR del rango"
+      iconName="arrow-down-circle"
+      iconBgColor="bg-emerald-100"
+      iconColor="text-emerald-600"
+    />
+    <app-stats
+      title="Crédito"
+      [value]="formatMoney(stats().totalCredit)"
+      smallText="Σ CR del rango"
+      iconName="arrow-up-circle"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+    />
+    <app-stats
+      title="Manuales"
+      [value]="stats().manualCount"
+      smallText="Origen: manual"
+      iconName="file-text"
+      iconBgColor="bg-purple-100"
+      iconColor="text-purple-600"
+    />
+  </div>
+
+  <!-- Unified Container: Sticky Search + Filters + Data -->
+  <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]" overflow="visible">
+    <!-- Sticky Search Header -->
+    <div
+      class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+             md:mt-0 md:static md:bg-transparent md:px-4 md:py-4 md:border-b md:border-border"
+    >
+      <div
+        class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+      >
+        <h2
+          class="text-[13px] font-bold text-gray-600 tracking-wide
+                 md:text-lg md:font-semibold md:text-text-primary"
+        >
+          Libro Diario ({{ pagination().total }})
+        </h2>
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <app-inputsearch
+            class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            size="sm"
+            placeholder="Buscar por descripción o número…"
+            [debounceTime]="400"
+            (searchChange)="onSearch($event)"
+          />
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="openModal()"
+          >
+            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+            <span class="hidden sm:inline">Asiento Manual</span>
+            <span class="sm:hidden">Nuevo</span>
+          </app-button>
+        </div>
+      </div>
+
+      <!-- Filters row -->
+      <div class="mt-2 md:mt-3 grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-3">
+        <div class="md:col-span-3">
+          <app-selector
+            size="sm"
+            variant="outline"
+            label="Origen"
+            [options]="sourceTypeOptions"
+            [ngModel]="sourceTypeFilter()"
+            (ngModelChange)="onSourceTypeChange($any($event))"
+          />
+        </div>
+        <div class="md:col-span-3">
+          <app-selector
+            size="sm"
+            variant="outline"
+            label="Periodo fiscal"
+            [options]="periodFilterOptions()"
+            [ngModel]="periodFilter()"
+            (ngModelChange)="onPeriodFilterChange($any($event))"
+          />
+        </div>
+        <div class="md:col-span-3">
+          <app-input
+            label="Desde"
+            type="date"
+            size="sm"
+            [control]="dateRange.controls.from"
+          />
+        </div>
+        <div class="md:col-span-3">
+          <app-input
+            label="Hasta"
+            type="date"
+            size="sm"
+            [control]="dateRange.controls.to"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading -->
+    @if (loading()) {
+      <div class="p-4 md:p-6 text-center">
+        <app-spinner size="md" label="Cargando asientos…"></app-spinner>
+      </div>
+    }
+
+    <!-- Empty -->
+    @if (!loading() && entries().length === 0) {
+      <app-empty-state
+        icon="file-text"
+        title="Sin asientos"
+        description="No se encontraron asientos contables con los filtros actuales."
+        [showActionButton]="false"
+      ></app-empty-state>
+    }
+
+    <!-- Data -->
+    @if (!loading() && entries().length > 0) {
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        <app-responsive-data-view
+          [data]="entries()"
+          [columns]="columns"
+          [cardConfig]="cardConfig"
+          [actions]="actions"
+          [loading]="loading()"
+          [sortable]="true"
+          (sort)="onSort($event)"
+          (rowClick)="onRowClick($any($event))"
+        />
+        <div class="mt-4 flex justify-center">
+          <app-pagination
+            [currentPage]="pagination().page"
+            [totalPages]="pagination().totalPages"
+            [total]="pagination().total"
+            [limit]="pagination().limit"
+            infoStyle="range"
+            (pageChange)="onPageChange($any($event))"
+          />
+        </div>
+      </div>
+    }
+  </app-card>
+</div>
+
+<!-- Manual entry modal -->
+<app-modal
+  [isOpen]="modalOpen()"
+  title="Asiento manual"
+  subtitle="Crea un asiento contable con dos o más líneas balanceadas (DR = CR)"
+  size="xl-mid"
+  (closed)="closeModal()"
+>
+  <form
+    [formGroup]="form"
+    (ngSubmit)="onSubmit()"
+    class="space-y-4"
+    autocomplete="off"
+  >
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <app-input
+        label="Fecha"
+        type="date"
+        [required]="true"
+        [control]="form.controls.entry_date"
+      />
+      <div class="md:col-span-2">
+        <app-selector
+          label="Periodo fiscal"
+          [required]="true"
+          [options]="periodOptions()"
+          [ngModel]="form.controls.fiscal_period_id.value"
+          (ngModelChange)="form.controls.fiscal_period_id.setValue($any($event))"
+        />
+      </div>
+    </div>
+
+    <app-input
+      label="Descripción"
+      placeholder="Concepto del asiento"
+      [required]="true"
+      [control]="form.controls.description"
+    />
+
+    <div>
+      <div class="flex items-center justify-between mb-2">
+        <h4 class="text-sm font-semibold text-text-primary">Líneas</h4>
+        <app-button
+          variant="outline"
+          size="sm"
+          label="+ Añadir línea"
+          (clicked)="addLine()"
+        />
+      </div>
+
+      <div formArrayName="lines" class="space-y-2">
+        @for (line of linesArray.controls; track $index; let i = $index) {
+          <div
+            [formGroupName]="i"
+            class="grid grid-cols-12 gap-2 items-end p-2 rounded-lg border border-border bg-background"
+          >
+            <div class="col-span-12 md:col-span-3">
+              <app-input
+                label="Cuenta"
+                placeholder="Ej. 110505"
+                [required]="true"
+                [control]="line.controls.account_code"
+              />
+            </div>
+            <div class="col-span-12 md:col-span-4">
+              <app-input
+                label="Descripción"
+                [control]="line.controls.description"
+              />
+            </div>
+            <div class="col-span-6 md:col-span-2">
+              <app-input
+                label="Débito"
+                type="number"
+                [control]="line.controls.debit_amount"
+              />
+            </div>
+            <div class="col-span-6 md:col-span-2">
+              <app-input
+                label="Crédito"
+                type="number"
+                [control]="line.controls.credit_amount"
+              />
+            </div>
+            <div class="col-span-12 md:col-span-1 flex justify-end">
+              @if (linesArray.length > 2) {
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  label="Quitar"
+                  (clicked)="removeLine(i)"
+                />
+              }
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+
+    <!-- Live balance indicator -->
+    <div
+      class="flex items-center justify-between rounded-lg border p-3"
+      [class.border-border]="balanced()"
+      [class.bg-surface]="balanced()"
+      [class.border-red-300]="!balanced()"
+      [class.bg-red-50]="!balanced()"
+    >
+      <div class="text-sm">
+        <span class="text-text-secondary">DR </span>
+        <span class="font-mono font-semibold">{{ totalDebit() | currency }}</span>
+        <span class="text-text-secondary"> / CR </span>
+        <span class="font-mono font-semibold">{{ totalCredit() | currency }}</span>
+      </div>
+      <div
+        class="text-sm font-semibold"
+        [class.text-emerald-600]="balanced()"
+        [class.text-red-600]="!balanced()"
+      >
+        @if (balanced()) {
+          Balanceado
+        } @else {
+          Diferencia: {{ balanceDelta() | currency }}
+        }
+      </div>
+    </div>
+  </form>
+
+  <div slot="footer" class="flex items-center justify-end gap-2">
+    <app-button
+      variant="outline"
+      size="md"
+      label="Cancelar"
+      (clicked)="closeModal()"
+    />
+    <app-button
+      variant="primary"
+      size="md"
+      label="Crear asiento"
+      [loading]="saving()"
+      [disabled]="submitDisabled()"
+      (clicked)="onSubmit()"
+    />
+  </div>
+</app-modal>

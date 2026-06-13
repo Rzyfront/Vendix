@@ -83,6 +83,13 @@ export interface SetupStoreData {
   name: string;
   description?: string;
   store_type?: 'physical' | 'online' | 'hybrid';
+  /**
+   * Store industries (multi-select). Mirrors `stores.industries` on the
+   * backend. The wizard always sends at least `['retail']` (the default);
+   * the store-setup-step multi-toggle cards let the user add or remove
+   * entries before submit.
+   */
+  industries?: ('retail' | 'restaurant' | 'manufacturing' | 'service')[];
   timezone?: string;
   currency?: string;
   address_line1?: string;

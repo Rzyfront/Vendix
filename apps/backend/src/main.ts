@@ -96,6 +96,7 @@ async function bootstrap() {
     'http://localhost:4200',
     'http://localhost',
     'http://localhost:3000',
+    'http://localhost:8081',
     // Production - Dynamically generated using BASE_DOMAIN env var
     `https://${baseDomain}`,
     `https://www.${baseDomain}`,

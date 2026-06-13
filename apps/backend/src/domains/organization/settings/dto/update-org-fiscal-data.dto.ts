@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsBoolean,
   IsEnum,
   IsIn,
   IsInt,
@@ -133,6 +134,17 @@ export class UpdateOrgFiscalDataDto {
   tax_responsibilities?: string[];
 
   @ApiPropertyOptional({
+    enum: ['monthly', 'bimonthly', 'four_monthly'],
+    example: 'bimonthly',
+    description:
+      'Periodicidad de la declaración de IVA (art. 600 ET). Solo aplica si el tenant es responsable de IVA (O-48). Ausente ⇒ bimonthly.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['monthly', 'bimonthly', 'four_monthly'])
+  vat_periodicity?: 'monthly' | 'bimonthly' | 'four_monthly';
+
+  @ApiPropertyOptional({
     example: 'O-15',
     maxLength: 32,
     description:
@@ -142,4 +154,22 @@ export class UpdateOrgFiscalDataDto {
   @IsString()
   @MaxLength(32)
   tax_scheme?: string;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Whether this tenant acts as a withholding agent (retenedor) on purchases. Absent ⇒ false.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_withholding_agent?: boolean;
+
+  @ApiPropertyOptional({
+    example: false,
+    description:
+      'Whether this tenant is a self-withholder (autorretenedor) and may be subject to being withheld. Absent ⇒ false.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  is_self_withholder?: boolean;
 }

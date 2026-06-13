@@ -133,7 +133,7 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
               ></div>
             </div>
           }
@@ -290,7 +290,7 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                   <div class="col-span-2 flex items-center justify-end gap-1">
                     <button
                       (click)="editAccount(account)"
-                      class="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary"
+                      class="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary-600"
                     >
                       <app-icon name="edit" [size]="14"></app-icon>
                     </button>

@@ -353,6 +353,11 @@ export class CustomersService {
         phone: this.normalizeOptionalString(dto.phone),
         document_type: normalizedDoc.type,
         document_number: normalizedDoc.number,
+        tax_regime: this.normalizeOptionalString(dto.tax_regime),
+        person_type: this.normalizeOptionalString(dto.person_type),
+        ...(dto.is_withholding_agent !== undefined
+          ? { is_withholding_agent: dto.is_withholding_agent }
+          : {}),
         username: username,
         email_verified: false,
         organization_id: store.organization_id,
@@ -540,6 +545,18 @@ export class CustomersService {
           dto.document_number !== undefined ? normalizedDoc.number : undefined,
         document_type:
           dto.document_type !== undefined ? normalizedDoc.type : undefined,
+        tax_regime:
+          dto.tax_regime !== undefined
+            ? this.normalizeOptionalString(dto.tax_regime)
+            : undefined,
+        person_type:
+          dto.person_type !== undefined
+            ? this.normalizeOptionalString(dto.person_type)
+            : undefined,
+        is_withholding_agent:
+          dto.is_withholding_agent !== undefined
+            ? dto.is_withholding_agent
+            : undefined,
         email: dto.email, // Can we update email? Usually requires verification, but for CRUD basic...
       },
     });

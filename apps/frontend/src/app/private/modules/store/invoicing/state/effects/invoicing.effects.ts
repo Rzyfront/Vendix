@@ -367,11 +367,11 @@ export class InvoicingEffects {
           map((response) =>
             InvoicingActions.loadResolutionsSuccess({ resolutions: response.data })
           ),
-          catchError((error) =>
-            of(InvoicingActions.loadResolutionsFailure({
-              error: error.error?.message || error.message || 'Error loading resolutions'
-            }))
-          )
+          catchError((error) => {
+            const msg = extractApiErrorMessage(error);
+            this.toastService.error(msg);
+            return of(InvoicingActions.loadResolutionsFailure({ error: msg }));
+          })
         )
       )
     )
@@ -383,14 +383,15 @@ export class InvoicingEffects {
       ofType(InvoicingActions.createResolution),
       switchMap(({ resolution }) =>
         this.invoicingService.createResolution(resolution).pipe(
-          map((response) =>
-            InvoicingActions.createResolutionSuccess({ resolution: response.data })
-          ),
-          catchError((error) =>
-            of(InvoicingActions.createResolutionFailure({
-              error: error.error?.message || error.message || 'Error creating resolution'
-            }))
-          )
+          map((response) => {
+            this.toastService.success('Resolución creada');
+            return InvoicingActions.createResolutionSuccess({ resolution: response.data });
+          }),
+          catchError((error) => {
+            const msg = extractApiErrorMessage(error);
+            this.toastService.error(msg);
+            return of(InvoicingActions.createResolutionFailure({ error: msg }));
+          })
         )
       )
     )
@@ -402,14 +403,15 @@ export class InvoicingEffects {
       ofType(InvoicingActions.updateResolution),
       switchMap(({ id, resolution }) =>
         this.invoicingService.updateResolution(id, resolution).pipe(
-          map((response) =>
-            InvoicingActions.updateResolutionSuccess({ resolution: response.data })
-          ),
-          catchError((error) =>
-            of(InvoicingActions.updateResolutionFailure({
-              error: error.error?.message || error.message || 'Error updating resolution'
-            }))
-          )
+          map((response) => {
+            this.toastService.success('Resolución actualizada');
+            return InvoicingActions.updateResolutionSuccess({ resolution: response.data });
+          }),
+          catchError((error) => {
+            const msg = extractApiErrorMessage(error);
+            this.toastService.error(msg);
+            return of(InvoicingActions.updateResolutionFailure({ error: msg }));
+          })
         )
       )
     )
