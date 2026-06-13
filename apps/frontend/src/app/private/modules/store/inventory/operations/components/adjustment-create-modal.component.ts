@@ -1,4 +1,4 @@
-import {Component, input, output, inject, effect, untracked, signal, ViewChild, DestroyRef} from '@angular/core';
+import {Component, input, output, inject, effect, signal, ViewChild, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -560,20 +560,27 @@ export class AdjustmentCreateModalComponent {
   }
 
   constructor() {
-    // Reset solo en la transicion de apertura (isOpen). resetModal() lee
-    // preselectedProduct() vía hasPreselected; sin untracked el effect quedaria
-    // suscrito a ese input — que cambia de identidad en cada CD del padre
-    // (getter adjustmentPreselectedProduct) — y re-ejecutaria el reset borrando
-    // selectedLocation tras seleccionarla, dejando "Continuar" siempre disabled.
+    // Reset SOLO en la transición de apertura (false → true) del modal.
+    // El effect ahora depende únicamente de isOpen(); la guarda de flanco
+    // evita que cualquier re-ejecución posterior borre selectedLocation
+    // mientras el usuario está interactuando con el dropdown.
+    let previousIsOpen = false;
     effect(() => {
-      if (this.isOpen()) {
-        untracked(() => this.resetModal());
+      const isOpen = this.isOpen();
+      if (isOpen && !previousIsOpen) {
+        this.resetModal();
       }
+      previousIsOpen = isOpen;
     });
   }
 
-  onLocationChange(value: any): void {
-    this.selectedLocation.set(value ? +value : null);
+  onLocationChange(value: string | number | null): void {
+    let id: number | null = null;
+    if (value !== null && value !== undefined && value !== '') {
+      const parsed = typeof value === 'number' ? value : Number(value);
+      if (Number.isFinite(parsed)) id = parsed;
+    }
+    this.selectedLocation.set(id);
     this.adjustmentItems = [];
     this.productSearchResults.set([]);
   }
