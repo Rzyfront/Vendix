@@ -12,6 +12,7 @@ export { SpinnerComponent } from './spinner/spinner.component';
 export { ModalComponent } from './modal/modal.component';
 export { ToggleComponent } from './toggle/toggle.component';
 export { SettingToggleComponent } from './setting-toggle/setting-toggle.component';
+export { PanelUiModulesEditorComponent } from './panel-ui-modules-editor/panel-ui-modules-editor.component';
 export { DropdownComponent } from './dropdown/dropdown.component';
 export { ToastContainerComponent } from './toast/toast-container.component';
 export { ToastService } from './toast/toast.service';

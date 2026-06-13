@@ -96,68 +96,15 @@
       </span>
     </p>
 
-    <!-- Sección A: módulos con children (agrupados con árbol visual) -->
-    <div class="compact-modules-grid">
-      @for (parent of modulesWithChildren; track parent.key) {
-        <div class="module-group is-parent">
-          <div class="toggle-wrapper">
-            <app-setting-toggle
-              [formControl]="panelUiControl(parent.key)"
-              [label]="parent.label"
-              [description]="parent.description"
-              (changed)="onParentToggle($event, parent)"
-            ></app-setting-toggle>
-            @if (isModuleHiddenByIndustry(parent.key)) {
-              <p class="text-[10px] text-gray-400 italic pl-3 mt-1">
-                No disponible para tu industria
-              </p>
-            }
-          </div>
-          <div class="children-grid">
-            @for (child of parent.children; track child.key) {
-              <div class="child-item">
-                <app-setting-toggle
-                  [formControl]="panelUiControl(child.key)"
-                  [label]="child.label"
-                  (changed)="onPanelUiToggle(child.key)"
-                ></app-setting-toggle>
-                @if (isModuleHiddenByIndustry(child.key)) {
-                  <p class="text-[10px] text-gray-400 italic pl-3 mt-0.5">
-                    No disponible para tu industria
-                  </p>
-                }
-              </div>
-            }
-          </div>
-        </div>
-      }
-    </div>
-
-    <!-- Sección B: módulos standalone (Herramientas Directas) -->
-    @if (standaloneModules.length > 0) {
-      <div class="standalone-container mt-2">
-        <h5 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">
-          Herramientas Directas
-        </h5>
-        <div class="compact-modules-grid">
-          @for (m of standaloneModules; track m.key) {
-            <div class="module-group">
-              <app-setting-toggle
-                [formControl]="panelUiControl(m.key)"
-                [label]="m.label"
-                [description]="m.description"
-                (changed)="onPanelUiToggle(m.key)"
-              ></app-setting-toggle>
-              @if (isModuleHiddenByIndustry(m.key)) {
-                <p class="text-[10px] text-gray-400 italic pl-3 mt-1">
-                  No disponible para tu industria
-                </p>
-              }
-            </div>
-          }
-        </div>
-      </div>
-    }
+    <app-panel-ui-modules-editor
+      appType="STORE_ADMIN"
+      [value]="editorValue()"
+      [hiddenByIndustry]="hiddenByIndustry()"
+      [hiddenByStore]="hiddenByStore()"
+      [searchable]="false"
+      [parentSync]="true"
+      (valueChange)="onModulesChange($event)"
+    ></app-panel-ui-modules-editor>
 
     <div slot="footer" class="flex justify-end">
       <button
