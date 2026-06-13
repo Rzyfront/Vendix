@@ -21,6 +21,7 @@ import { SettingToggleComponent } from '../setting-toggle/setting-toggle.compone
 import { InputsearchComponent } from '../inputsearch/inputsearch.component';
 import { ThemeService } from '../../../core/services/theme.service';
 import { APP_MODULES } from '../../constants/app-modules.constant';
+import { getModulesHiddenByIndustries } from '../../constants/industry-modules.constant';
 
 @Component({
   selector: 'app-settings-modal',
@@ -192,6 +193,13 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
                           [isNew]="isNewModule(module.key)"
                           (changed)="onParentToggle($event, module)"
                         ></app-setting-toggle>
+                        @if (isPanelToggleGated(module.key)) {
+                          <div class="flex flex-wrap gap-1 mt-1 ml-2">
+                            @for (reason of getPanelToggleReasons(module.key); track reason) {
+                              <span class="panel-toggle-reason-badge">{{ reason }}</span>
+                            }
+                          </div>
+                        }
                       </div>
                       <div class="children-grid">
                         @for (child of module.children; track child) {
@@ -204,6 +212,13 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
                               [label]="child.label"
                               [isNew]="isNewModule(child.key)"
                             ></app-setting-toggle>
+                            @if (isPanelToggleGated(child.key)) {
+                              <div class="flex flex-wrap gap-1 mt-1 ml-2">
+                                @for (reason of getPanelToggleReasons(child.key); track reason) {
+                                  <span class="panel-toggle-reason-badge">{{ reason }}</span>
+                                }
+                              </div>
+                            }
                           </div>
                         }
                       </div>
@@ -229,6 +244,13 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
                           [description]="module.description"
                           [isNew]="isNewModule(module.key)"
                         ></app-setting-toggle>
+                        @if (isPanelToggleGated(module.key)) {
+                          <div class="flex flex-wrap gap-1 mt-1 ml-2">
+                            @for (reason of getPanelToggleReasons(module.key); track reason) {
+                              <span class="panel-toggle-reason-badge">{{ reason }}</span>
+                            }
+                          </div>
+                        }
                       </div>
                     }
                   </div>
@@ -350,6 +372,21 @@ export class SettingsModalComponent {
         language: ['es'],
         theme: ['default'],
       }),
+    });
+
+    // Reactive: re-apply the industry ∩ store_panel ceiling whenever the
+    // underlying sources change. The effect re-runs when `userIndustries()`
+    // or `storeSettings()` emit, so the toggles become disabled the moment
+    // the data is available — even if it arrives after the initial form
+    // patch (which is the common case: the form initializes with the
+    // initial empty array / null store settings, then the auth state loads).
+    effect(() => {
+      // Touch the signals so the effect tracks them.
+      this.authFacade.userIndustries();
+      this.authFacade.storeSettings();
+      if (this.settingsForm) {
+        this.syncGatedDisabledState('STORE_ADMIN');
+      }
     });
 
     // Check permissions synchronously
@@ -516,6 +553,72 @@ export class SettingsModalComponent {
   }
 
   /**
+   * Industry ∩ store_panel ceiling — only applies to `STORE_ADMIN` (industries
+   * are store-scoped; `ORG_ADMIN` is untouched). The `setting-toggle` CVA
+   * receives the disabled state via the form control's `disable()` call, so
+   * the visual disabled state in this component is fully driven by these
+   * helper methods + the existing `syncChildControlStates()`.
+   */
+  private isStorePanelHidden(moduleKey: string): boolean {
+    if (this.currentAppType !== 'STORE_ADMIN') return false;
+    const storePanelMap: Record<string, boolean> | undefined =
+      this.authFacade.storeSettings()?.panel_ui?.STORE_ADMIN;
+    return storePanelMap?.[moduleKey] === false;
+  }
+
+  private isIndustryHidden(moduleKey: string): boolean {
+    if (this.currentAppType !== 'STORE_ADMIN') return false;
+    const hidden = getModulesHiddenByIndustries(
+      this.authFacade.userIndustries(),
+    );
+    return hidden.includes(moduleKey);
+  }
+
+  /**
+   * Public helper used by the template to render a disabled toggle when the
+   * module is industry-hidden and/or store-panel-hidden. Both flags are
+   * checked only for the `STORE_ADMIN` app_type; `ORG_ADMIN` is never gated
+   * (industries are store-scoped, per the `vendix-panel-ui` rules).
+   */
+  isPanelToggleGated(moduleKey: string): boolean {
+    return this.isIndustryHidden(moduleKey) || this.isStorePanelHidden(moduleKey);
+  }
+
+  /**
+   * Returns the ordered list of reason labels to render next to a gated
+   * toggle. The order is stable: `Industria` (industry ceiling) first,
+   * then `Tienda` (store panel UI). Empty list when not gated.
+   */
+  getPanelToggleReasons(moduleKey: string): string[] {
+    const reasons: string[] = [];
+    if (this.isIndustryHidden(moduleKey)) reasons.push('Industria');
+    if (this.isStorePanelHidden(moduleKey)) reasons.push('Tienda');
+    return reasons;
+  }
+
+  /**
+   * Disable every form control in the panel_ui group that is industry-hidden
+   * or store-panel-hidden. Gated controls are NOT modified when a parent
+   * is toggled — they stay disabled and are excluded from the save diff so
+   * the persisted user value is preserved untouched.
+   */
+  private syncGatedDisabledState(appType: string): void {
+    if (appType !== 'STORE_ADMIN') return;
+    const panelGroup = this.settingsForm.get(`panel_ui.${appType}`);
+    if (!panelGroup) return;
+
+    this.getAllModulesForAppType(appType).forEach((module: any) => {
+      const ctrl = panelGroup.get(module.key);
+      if (!ctrl) return;
+      if (this.isPanelToggleGated(module.key)) {
+        ctrl.disable({ emitEvent: false });
+      } else {
+        ctrl.enable({ emitEvent: false });
+      }
+    });
+  }
+
+  /**
    * Get parent modules (modules with isParent flag) plus standalone modules
    * @param appType - The app type to get modules for
    * @returns Array of parent and standalone modules
@@ -654,6 +757,41 @@ export class SettingsModalComponent {
       });
   }
 
+  /**
+   * Build the panel_ui diff for the current app_type. For `STORE_ADMIN`,
+   * modules gated by industry or the store panel UI are excluded: their
+   * stored user value is preserved untouched, so if the ceiling later
+   * re-allows the module the user's previous preference resurfaces.
+   * For `ORG_ADMIN`, every form value is forwarded (no ceiling applies).
+   */
+  private buildPanelUiDiff(
+    appType: string,
+    formValue: any,
+    currentConfig: any,
+  ): Record<string, boolean> {
+    const formValues: Record<string, boolean> =
+      formValue?.panel_ui?.[appType] || {};
+    const storedValues: Record<string, boolean> =
+      currentConfig?.panel_ui?.[appType] || {};
+
+    if (appType !== 'STORE_ADMIN') {
+      return { ...formValues };
+    }
+
+    const diff: Record<string, boolean> = {};
+    for (const module of this.getAllModulesForAppType(appType)) {
+      if (this.isPanelToggleGated(module.key)) {
+        if (Object.prototype.hasOwnProperty.call(storedValues, module.key)) {
+          diff[module.key] = storedValues[module.key];
+        }
+        // else: omit from the diff (absent = allowed = default).
+      } else {
+        diff[module.key] = formValues[module.key] ?? false;
+      }
+    }
+    return diff;
+  }
+
   initializeForm(config: any) {
     // Build patch object efficiently
     const patchObj: any = {
@@ -682,6 +820,10 @@ export class SettingsModalComponent {
     // Sync disabled state of child controls based on each parent's value
     this.syncChildControlStates('ORG_ADMIN', patchObj.panel_ui.ORG_ADMIN);
     this.syncChildControlStates('STORE_ADMIN', patchObj.panel_ui.STORE_ADMIN);
+
+    // Apply the industry ∩ store_panel ceiling on the STORE_ADMIN map.
+    // Gated controls are disabled and will be excluded from the save diff.
+    this.syncGatedDisabledState('STORE_ADMIN');
   }
 
   getModulesForAppType(appType: string): any[] {
@@ -744,10 +886,16 @@ export class SettingsModalComponent {
           // 🔥 NO actualizar 'app' - mantener el valor actual del usuario
           // app: formValue.app,  // ❌ ESTO CAUSA EL BUG - elimina esta línea
 
-          // Merge panel_ui: preservar app types no editados y actualizar solo el actual
+          // Merge panel_ui: preservar app types no editados y actualizar solo el actual.
+          // For STORE_ADMIN, the diff excludes modules gated by industry or the
+          // store panel UI (their stored user value is preserved untouched).
           panel_ui: {
             ...currentConfig.panel_ui, // Preservar todos los app types existentes
-            [this.currentAppType]: formValue.panel_ui[this.currentAppType], // ✅ Actualizar solo el app type que se está editando
+            [this.currentAppType]: this.buildPanelUiDiff(
+              this.currentAppType,
+              formValue,
+              currentConfig,
+            ),
           },
 
           // Merge preferences: preservar preferencias existentes

@@ -1,6 +1,11 @@
 import type { FiscalStatusBlock } from './fiscal-status.model';
 import type { StoreIndustry } from '../../shared/constants/industry-modules.constant';
 
+export interface PanelUISettings {
+  STORE_ADMIN?: Record<string, boolean>;
+  STORE_ECOMMERCE?: Record<string, boolean>;
+}
+
 export interface StoreSettings {
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -12,6 +17,7 @@ export interface StoreSettings {
   app: AppSettings;
   operations?: OperationsSettings;
   fiscal_status?: FiscalStatusBlock;
+  panel_ui?: PanelUISettings;
 }
 
 export interface AppSettings {

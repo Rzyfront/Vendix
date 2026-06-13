@@ -299,3 +299,21 @@
     grid-template-columns: 1fr;
   }
 }
+
+// ==================== Panel Toggle Reason Badge ====================
+// Rendered next to disabled toggles so the user understands why a
+// module cannot be enabled (industry ceiling, store panel UI, or both).
+.panel-toggle-reason-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  background: rgba(107, 114, 128, 0.12);
+  color: #4b5563;
+  border: 1px solid rgba(107, 114, 128, 0.35);
+  line-height: 1.3;
+}

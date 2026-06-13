@@ -57,4 +57,37 @@
       }
     }
   </div>
+
+  <!-- Panel UI - "Módulos de la Tienda" card (full width, below type consequences) -->
+  <div class="mt-6 rounded-lg border border-gray-200 bg-white px-4 py-4">
+    <div class="flex items-center justify-between mb-2">
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Módulos de la Tienda</h4>
+      <span class="text-[10px] text-gray-400">STORE_ADMIN</span>
+    </div>
+    <p class="text-[11px] text-gray-500 leading-relaxed mb-3">
+      Apaga un módulo para ocultarlo del menú lateral a <strong>todos los usuarios</strong> de la tienda.
+      <span class="block mt-1">
+        <strong>Apagado</strong> = oculto para todos. <strong>Ausente / encendido</strong> = permitido (segun la configuracion por usuario).
+      </span>
+    </p>
+
+    <div class="space-y-1.5">
+      @for (module of modules; track module.key) {
+        <div [class.pl-6]="isChildModule(module.key)">
+          <app-setting-toggle
+            [formControl]="panelUiControl(module.key)"
+            [label]="module.label"
+            [description]="module.description"
+            [disabled]="isModuleHiddenByIndustry(module.key)"
+            (changed)="onPanelUiToggle(module.key)"
+          ></app-setting-toggle>
+          @if (isModuleHiddenByIndustry(module.key)) {
+            <p class="text-[10px] text-gray-400 italic pl-3 -mt-1 mb-1">
+              No disponible para tu industria
+            </p>
+          }
+        </div>
+      }
+    </div>
+  </div>
 </div>

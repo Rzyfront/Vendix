@@ -656,6 +656,12 @@ export class OnboardingModalComponent {
       name: ['', Validators.required],
       description: [''],
       store_type: ['hybrid', Validators.required],
+      // Multi-select industry picker (at least one required). Default
+      // `['retail']` keeps the existing tenant behavior untouched; the
+      // store-setup-step renders multi-toggle cards that mutate this
+      // array in place. The backend DTO also enforces `@ArrayMinSize(1)`
+      // as a server-side safety net.
+      industries: [['retail'], Validators.required],
       timezone: ['America/Bogota', Validators.required],
       currency: ['COP', Validators.required],
       // Address fields are now optional as requested

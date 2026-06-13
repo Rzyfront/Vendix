@@ -19,6 +19,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { Store } from '@ngrx/store';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   InputComponent,
   ButtonComponent,
@@ -37,6 +38,7 @@ import {
   APP_MODULES,
   AppModule,
 } from '../../../../../../shared/constants/app-modules.constant';
+import { getModulesHiddenByIndustries } from '../../../../../../shared/constants/industry-modules.constant';
 import { StoreUser } from '../interfaces/store-user.interface';
 import * as StoreUsersActions from '../state/actions/store-users.actions';
 import {
@@ -366,7 +368,15 @@ import {
                               getPanelUIValue(activePanelUITab(), module.key)
                             "
                             (changed)="onParentToggle($event, module)"
+                            [disabled]="isToggleGated(module.key)"
                           />
+                          @if (isToggleGated(module.key)) {
+                            <div class="flex flex-wrap gap-1 mt-1 ml-2">
+                              @for (reason of getToggleReasons(module.key); track reason) {
+                                <span class="panel-toggle-reason-badge">{{ reason }}</span>
+                              }
+                            </div>
+                          }
                         </div>
                         @if (module.children?.length) {
                           <div class="children-grid">
@@ -384,12 +394,20 @@ import {
                                     togglePanelUI(activePanelUITab(), child.key)
                                   "
                                   [disabled]="
+                                    isToggleGated(child.key) ||
                                     !getPanelUIValue(
                                       activePanelUITab(),
                                       module.key
                                     )
                                   "
                                 />
+                                @if (isToggleGated(child.key)) {
+                                  <div class="flex flex-wrap gap-1 mt-1 ml-2">
+                                    @for (reason of getToggleReasons(child.key); track reason) {
+                                      <span class="panel-toggle-reason-badge">{{ reason }}</span>
+                                    }
+                                  </div>
+                                }
                               </div>
                             }
                           </div>
@@ -421,7 +439,15 @@ import {
                               (changed)="
                                 togglePanelUI(activePanelUITab(), module.key)
                               "
+                              [disabled]="isToggleGated(module.key)"
                             />
+                            @if (isToggleGated(module.key)) {
+                              <div class="flex flex-wrap gap-1 mt-1 ml-2">
+                                @for (reason of getToggleReasons(module.key); track reason) {
+                                  <span class="panel-toggle-reason-badge">{{ reason }}</span>
+                                }
+                              </div>
+                            }
                           </div>
                         }
                       </div>
@@ -633,6 +659,24 @@ import {
           columns: 1;
         }
       }
+
+      /* Reason badge next to a gated toggle (industry ceiling or
+         store panel UI), so the admin understands why the module
+         cannot be enabled. */
+      .panel-toggle-reason-badge {
+        display: inline-flex;
+        align-items: center;
+        font-size: 9px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 1px 6px;
+        border-radius: 9999px;
+        background: rgba(107, 114, 128, 0.12);
+        color: #4b5563;
+        border: 1px solid rgba(107, 114, 128, 0.35);
+        line-height: 1.3;
+      }
     `,
   ],
 })
@@ -644,6 +688,7 @@ export class StoreUserEditModalComponent implements OnChanges {
 
   private store = inject(Store);
   private fb = inject(FormBuilder);
+  private authFacade = inject(AuthFacade);
 
   userDetail = this.store.selectSignal(selectUserDetail);
   detailLoading = this.store.selectSignal(selectDetailLoading);
@@ -652,6 +697,13 @@ export class StoreUserEditModalComponent implements OnChanges {
   activeTab = signal('info');
   selectedRoleIds = signal<Set<number>>(new Set());
   localPanelUI = signal<Record<string, Record<string, boolean>>>({});
+  /**
+   * Snapshot of the user's `panel_ui` at the time the detail loaded.
+   * Used in the save diff so modules gated by industry or the store
+   * panel UI keep their stored user value untouched — if the ceiling
+   * later re-allows the module, the user's previous preference resurfaces.
+   */
+  originalPanelUI = signal<Record<string, Record<string, boolean>>>({});
   activePanelUITab = signal('STORE_ADMIN');
   moduleSearchTerm = signal('');
 
@@ -770,9 +822,11 @@ export class StoreUserEditModalComponent implements OnChanges {
           phone: detail.phone || '',
         });
         this.selectedRoleIds.set(new Set(detail.roles?.map((r) => r.id) || []));
-        this.localPanelUI.set(
-          detail.panel_ui ? JSON.parse(JSON.stringify(detail.panel_ui)) : {},
-        );
+        const snapshot = detail.panel_ui
+          ? JSON.parse(JSON.stringify(detail.panel_ui))
+          : {};
+        this.localPanelUI.set(snapshot);
+        this.originalPanelUI.set(JSON.parse(JSON.stringify(snapshot)));
       }
     });
   }
@@ -838,6 +892,7 @@ export class StoreUserEditModalComponent implements OnChanges {
   }
 
   togglePanelUI(appType: string, key: string): void {
+    if (this.isToggleGated(key, appType)) return;
     this.setLocalPanelUIValue(
       appType,
       key,
@@ -847,12 +902,56 @@ export class StoreUserEditModalComponent implements OnChanges {
 
   onParentToggle(isEnabled: boolean, parentModule: AppModule): void {
     const appType = this.activePanelUITab();
+    if (this.isToggleGated(parentModule.key, appType)) return;
     this.setLocalPanelUIValue(appType, parentModule.key, isEnabled);
     if (parentModule.children) {
       parentModule.children.forEach((child) => {
+        // Children gated by industry / store panel UI keep their stored
+        // value — the parent toggle does not cascade onto them.
+        if (this.isToggleGated(child.key, appType)) return;
         this.setLocalPanelUIValue(appType, child.key, isEnabled);
       });
     }
+  }
+
+  /**
+   * Industry ∩ store_panel ceiling — only applies to `STORE_ADMIN`
+   * (industries are store-scoped; `ORG_ADMIN` is untouched, per the
+   * `vendix-panel-ui` rules).
+   */
+  isToggleGated(key: string, appType?: string): boolean {
+    const effectiveAppType = appType ?? this.activePanelUITab();
+    if (effectiveAppType !== 'STORE_ADMIN') return false;
+    return (
+      this.isIndustryHidden(key) || this.isStorePanelHidden(key)
+    );
+  }
+
+  /**
+   * Ordered reason labels for a gated toggle. Empty list when not gated.
+   * Order: `Industria` (industry ceiling) first, then `Tienda` (store
+   * panel UI).
+   */
+  getToggleReasons(key: string, appType?: string): string[] {
+    const effectiveAppType = appType ?? this.activePanelUITab();
+    if (effectiveAppType !== 'STORE_ADMIN') return [];
+    const reasons: string[] = [];
+    if (this.isIndustryHidden(key)) reasons.push('Industria');
+    if (this.isStorePanelHidden(key)) reasons.push('Tienda');
+    return reasons;
+  }
+
+  private isStorePanelHidden(key: string): boolean {
+    const storePanelMap: Record<string, boolean> | undefined =
+      this.authFacade.storeSettings()?.panel_ui?.STORE_ADMIN;
+    return storePanelMap?.[key] === false;
+  }
+
+  private isIndustryHidden(key: string): boolean {
+    const hidden = getModulesHiddenByIndustries(
+      this.authFacade.userIndustries(),
+    );
+    return hidden.includes(key);
   }
 
   onModuleSearch(term: string): void {
@@ -865,9 +964,39 @@ export class StoreUserEditModalComponent implements OnChanges {
     this.store.dispatch(
       StoreUsersActions.updateUserPanelUI({
         id: currentUser.id,
-        panel_ui: this.localPanelUI(),
+        panel_ui: this.buildPanelUIDiff(),
       }),
     );
+  }
+
+  /**
+   * Build the per-user panel_ui save payload. For the active app_type,
+   * keys gated by industry or the store panel UI are excluded — the
+   * user's original stored value is preserved so the module resurfaces
+   * if the ceiling later lifts. Other app_types are forwarded as-is.
+   */
+  private buildPanelUIDiff(): Record<string, Record<string, boolean>> {
+    const appType = this.activePanelUITab();
+    const local = JSON.parse(JSON.stringify(this.localPanelUI()));
+    const original = JSON.parse(JSON.stringify(this.originalPanelUI()));
+
+    if (appType !== 'STORE_ADMIN') {
+      return local;
+    }
+
+    const localForApp: Record<string, boolean> = local[appType] || {};
+    const originalForApp: Record<string, boolean> = original[appType] || {};
+    const mergedForApp: Record<string, boolean> = { ...originalForApp };
+
+    for (const key of Object.keys(localForApp)) {
+      if (this.isToggleGated(key, appType)) continue;
+      mergedForApp[key] = localForApp[key];
+    }
+
+    return {
+      ...local,
+      [appType]: mergedForApp,
+    };
   }
 
   private setLocalPanelUIValue(
