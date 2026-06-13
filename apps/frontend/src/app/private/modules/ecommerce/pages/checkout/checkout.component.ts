@@ -810,6 +810,16 @@ export class CheckoutComponent implements OnInit {
 
     // Payment step validation
     if (this.step() === this.paymentStep) {
+      // Sin opciones de envío para esta ubicación (carrito físico): el pedido
+      // no se puede despachar, así que bloqueamos el avance. Espejo del botón
+      // "Continuar" deshabilitado, como defensa en profundidad.
+      if (!this.cartHasOnlyServices && this.shipping_options().length === 0) {
+        this.error_message.set(
+          'No hay opciones de envío disponibles para esta ubicación. Por favor revisa tu dirección.',
+        );
+        return;
+      }
+
       if (!this.selected_payment_method_id()) {
         this.error_message.set('Por favor selecciona un método de pago');
         return;

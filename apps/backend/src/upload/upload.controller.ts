@@ -15,7 +15,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
 import { ErrorCodes, VendixHttpException } from '@common/errors';
-import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
+import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import {
   ApiTags,
   ApiOperation,

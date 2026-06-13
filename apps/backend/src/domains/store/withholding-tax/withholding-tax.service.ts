@@ -5,6 +5,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { WithholdingCalculatorService } from './withholding-calculator.service';
 import { WithholdingFlowService } from './withholding-flow.service';
 import {
@@ -23,6 +24,7 @@ export class WithholdingTaxService {
     private readonly calculator: WithholdingCalculatorService,
     private readonly event_emitter: EventEmitter2,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly fiscalGate: FiscalGateService,
     private readonly withholdingFlow: WithholdingFlowService,
   ) {}
 
@@ -194,6 +196,21 @@ export class WithholdingTaxService {
     total_withholding: number;
   }> {
     const context = RequestContextService.getContext()!;
+
+    // Fiscal gate (defense in depth): retefuente is an `accounting` subfeature.
+    // When the tenant's accounting area is not ACTIVE/LOCKED, skip the fiscal
+    // computation entirely and return an empty preview — never reach the UVT
+    // lookup (which would otherwise throw WHT_UVT_NOT_FOUND on a non-fiscal
+    // tenant). `isAreaEnabled` resolves store-vs-org by `fiscal_scope` and is
+    // fail-closed. No throw here: a preview must degrade gracefully.
+    const accountingActive = await this.fiscalGate.isAreaEnabled(
+      context.organization_id!,
+      context.store_id ?? null,
+      'accounting',
+    );
+    if (!accountingActive) {
+      return { lines: [], total_withholding: 0 };
+    }
 
     const resolution =
       dto.role === 'practiced'

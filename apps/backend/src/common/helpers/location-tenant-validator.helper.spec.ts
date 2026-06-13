@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { OrganizationPrismaService } from '../../prisma/services/organization-prisma.service';
+import { VendixHttpException, ErrorCodes } from '../errors';
 import { LocationTenantValidator } from './location-tenant-validator.helper';
 
 type LocationRow = {

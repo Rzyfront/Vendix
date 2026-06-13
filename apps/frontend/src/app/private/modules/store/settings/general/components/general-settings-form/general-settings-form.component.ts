@@ -24,6 +24,7 @@ import {
   MultiSelectorOption,
 } from '../../../../../../../shared/components/multi-selector/multi-selector.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
+import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import {
   STORE_INDUSTRIES,
   StoreIndustry,
@@ -73,6 +74,7 @@ interface PanelUiEntry {
     SelectorComponent,
     MultiSelectorComponent,
     SettingToggleComponent,
+    ModalComponent,
   ],
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],
@@ -107,7 +109,20 @@ export class GeneralSettingsForm implements OnInit {
 
   readonly modules: ReadonlyArray<PanelUiEntry> = this.storeModules;
 
+  // Vistas agrupadas (estructura anidada) para el layout tipo árbol del modal.
+  // El form sigue siendo plano (panelUiForm por key); esto solo organiza el render.
+  private readonly rawStoreModules = APP_MODULES.STORE_ADMIN as AppModule[];
+  readonly modulesWithChildren: AppModule[] = this.rawStoreModules.filter(
+    (m) => !!m.isParent && (m.children?.length ?? 0) > 0,
+  );
+  readonly standaloneModules: AppModule[] = this.rawStoreModules.filter(
+    (m) => !m.isParent || (m.children?.length ?? 0) === 0,
+  );
+
   readonly modulesHiddenByIndustries = signal<string[]>([]);
+
+  readonly modulesModalOpen = signal(false);
+  readonly offModulesCount = signal(0);
 
   constructor() {
     effect(() => {
@@ -294,6 +309,26 @@ export class GeneralSettingsForm implements OnInit {
   onPanelUiToggle(key: string) {
     if (this.isModuleHiddenByIndustry(key)) return;
     this.emitPanelUiChange();
+    this.recomputeOffCount();
+  }
+
+  // El padre gobierna a sus children: al apagarlo, los children quedan en false
+  // y disabled; al encenderlo, se habilitan (salvo los ocultos por industria).
+  // Los children NO gobiernan al padre.
+  onParentToggle(isEnabled: boolean, parent: AppModule): void {
+    for (const child of parent.children ?? []) {
+      if (this.isModuleHiddenByIndustry(child.key)) continue;
+      const ctrl = this.panelUiForm.get(child.key);
+      if (!ctrl) continue;
+      ctrl.setValue(isEnabled, { emitEvent: false });
+      if (isEnabled) {
+        ctrl.enable({ emitEvent: false });
+      } else {
+        ctrl.disable({ emitEvent: false });
+      }
+    }
+    this.emitPanelUiChange();
+    this.recomputeOffCount();
   }
 
   private syncPanelUiDisabledState(): void {
@@ -308,6 +343,33 @@ export class GeneralSettingsForm implements OnInit {
         ctrl.enable({ emitEvent: false });
       }
     }
+    // Los children quedan disabled si su padre está apagado (valor preservado),
+    // para que el árbol se lea como apagado de forma consistente.
+    for (const parent of this.modulesWithChildren) {
+      const parentOff = this.panelUiForm.get(parent.key)?.value === false;
+      for (const child of parent.children ?? []) {
+        const childCtrl = this.panelUiForm.get(child.key);
+        if (!childCtrl) continue;
+        if (hidden.includes(child.key)) continue; // ya disabled arriba
+        if (parentOff) {
+          childCtrl.disable({ emitEvent: false });
+        } else {
+          childCtrl.enable({ emitEvent: false });
+        }
+      }
+    }
+    this.recomputeOffCount();
+  }
+
+  private recomputeOffCount(): void {
+    const hidden = this.modulesHiddenByIndustries();
+    let count = 0;
+    for (const m of this.storeModules) {
+      if (hidden.includes(m.key)) continue;
+      const ctrl = this.panelUiForm.get(m.key);
+      if (ctrl && ctrl.value === false) count++;
+    }
+    this.offModulesCount.set(count);
   }
 
   private emitPanelUiChange(): void {

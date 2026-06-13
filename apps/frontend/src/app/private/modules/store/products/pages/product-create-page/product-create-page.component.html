@@ -415,20 +415,6 @@
                 tooltipText="Selecciona las tarifas que aplican a este producto. Solo las seleccionadas mostrarán precio, margen y cantidad por empaque configurables."
               ></app-multi-selector>
 
-              <!-- Available tiers preview -->
-              <div class="flex flex-wrap items-center gap-1.5">
-                <span class="text-xs text-gray-400"
-                  >Tarifas disponibles:</span
-                >
-                @for (row of priceTierRows(); track row.tier.id) {
-                  <app-badge
-                    [variant]="row.enabled ? 'primary' : 'neutral'"
-                    size="sm"
-                    >{{ row.tier.name }}</app-badge
-                  >
-                }
-              </div>
-
               <!-- Step 2: configurable rows for SELECTED tiers only -->
               @if (selectedPriceTierRows().length === 0) {
                 <div
@@ -440,7 +426,12 @@
                     class="text-gray-500 shrink-0 mt-0.5"
                   ></app-icon>
                   <span>
-                    Selecciona al menos una tarifa arriba para configurar su
+                    Hay {{ priceTierRows().length }}
+                    {{
+                      priceTierRows().length === 1
+                        ? 'tarifa disponible'
+                        : 'tarifas disponibles'
+                    }}. Selecciona al menos una arriba para configurar su
                     precio, margen y cantidad por empaque.
                   </span>
                 </div>
@@ -1819,8 +1810,8 @@
               </p>
               <app-multi-selector
                 label="Promociones"
-                [options]="promotionOptions"
-                [ngModel]="productPromotionIds"
+                [options]="promotionOptions()"
+                [ngModel]="productPromotionIds()"
                 [ngModelOptions]="{ standalone: true }"
                 (valueChange)="onPromotionsChange($event)"
                 placeholder="Seleccionar promociones..."
@@ -2106,8 +2097,8 @@
           </p>
           <app-multi-selector
             label="Promociones"
-            [options]="promotionOptions"
-            [ngModel]="productPromotionIds"
+            [options]="promotionOptions()"
+            [ngModel]="productPromotionIds()"
             [ngModelOptions]="{ standalone: true }"
             (valueChange)="onPromotionsChange($event)"
             placeholder="Seleccionar promociones..."

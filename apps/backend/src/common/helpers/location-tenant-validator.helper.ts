@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { OrganizationPrismaService } from '../../prisma/services/organization-prisma.service';
+import { VendixHttpException, ErrorCodes } from '../errors';
 
 export type LocationTenantContext = {
   organization_id: number;

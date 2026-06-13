@@ -21,7 +21,7 @@ import {
 } from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
-import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
+import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 import { OrgLocationsService } from '../inventory/locations/org-locations.service';
 import { SettingsService } from '../../store/settings/settings.service';

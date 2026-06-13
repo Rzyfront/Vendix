@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, stores, inventory_locations, addresses } from '@prisma/client';
-import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
-import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { OrganizationPrismaService } from '../../prisma/services/organization-prisma.service';
+import { VendixHttpException, ErrorCodes } from '../errors';
 
 /**
  * Input shape for bootstrapping a store with its default inventory location.

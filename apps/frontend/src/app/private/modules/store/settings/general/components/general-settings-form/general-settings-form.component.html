@@ -9,7 +9,7 @@
         <app-selector [formControl]="storeTypeControl" label="Tipo de Tienda" [options]="storeTypes"
         (valueChange)="onFieldChange()" size="sm"></app-selector>
         <app-multi-selector
-          formControlName="industries"
+          [formControl]="industriesControl"
           label="Tipos de Negocio"
           [options]="industryOptions"
           size="sm"
@@ -58,36 +58,115 @@
     }
   </div>
 
-  <!-- Panel UI - "Módulos de la Tienda" card (full width, below type consequences) -->
-  <div class="mt-6 rounded-lg border border-gray-200 bg-white px-4 py-4">
-    <div class="flex items-center justify-between mb-2">
-      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Módulos de la Tienda</h4>
-      <span class="text-[10px] text-gray-400">STORE_ADMIN</span>
+  <!-- Panel UI - "Módulos de la Tienda" trigger + modal (full width, below type consequences) -->
+  <div class="mt-6 rounded-lg border border-gray-200 bg-white px-4 py-3 flex items-center justify-between gap-4">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2">
+        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Módulos de la Tienda</h4>
+        @if (offModulesCount() > 0) {
+          <span class="text-[10px] font-semibold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">
+            {{ offModulesCount() }} {{ offModulesCount() === 1 ? 'oculto' : 'ocultos' }}
+          </span>
+        }
+      </div>
+      <p class="text-[11px] text-gray-500 leading-relaxed mt-0.5">
+        Controla qué módulos ve el menú lateral de tu equipo.
+      </p>
     </div>
-    <p class="text-[11px] text-gray-500 leading-relaxed mb-3">
+    <button
+      type="button"
+      class="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+      (click)="modulesModalOpen.set(true)"
+    >
+      Gestionar
+    </button>
+  </div>
+
+  <!-- Modal: Módulos de la Tienda -->
+  <app-modal
+    [(isOpen)]="modulesModalOpen"
+    title="Módulos de la Tienda"
+    subtitle="STORE_ADMIN — visibilidad en el menú lateral"
+    size="lg"
+  >
+    <p class="text-[12px] text-gray-500 leading-relaxed mb-3">
       Apaga un módulo para ocultarlo del menú lateral a <strong>todos los usuarios</strong> de la tienda.
       <span class="block mt-1">
         <strong>Apagado</strong> = oculto para todos. <strong>Ausente / encendido</strong> = permitido (segun la configuracion por usuario).
       </span>
     </p>
 
-    <div class="space-y-1.5">
-      @for (module of modules; track module.key) {
-        <div [class.pl-6]="isChildModule(module.key)">
-          <app-setting-toggle
-            [formControl]="panelUiControl(module.key)"
-            [label]="module.label"
-            [description]="module.description"
-            [disabled]="isModuleHiddenByIndustry(module.key)"
-            (changed)="onPanelUiToggle(module.key)"
-          ></app-setting-toggle>
-          @if (isModuleHiddenByIndustry(module.key)) {
-            <p class="text-[10px] text-gray-400 italic pl-3 -mt-1 mb-1">
-              No disponible para tu industria
-            </p>
-          }
+    <!-- Sección A: módulos con children (agrupados con árbol visual) -->
+    <div class="compact-modules-grid">
+      @for (parent of modulesWithChildren; track parent.key) {
+        <div class="module-group is-parent">
+          <div class="toggle-wrapper">
+            <app-setting-toggle
+              [formControl]="panelUiControl(parent.key)"
+              [label]="parent.label"
+              [description]="parent.description"
+              (changed)="onParentToggle($event, parent)"
+            ></app-setting-toggle>
+            @if (isModuleHiddenByIndustry(parent.key)) {
+              <p class="text-[10px] text-gray-400 italic pl-3 mt-1">
+                No disponible para tu industria
+              </p>
+            }
+          </div>
+          <div class="children-grid">
+            @for (child of parent.children; track child.key) {
+              <div class="child-item">
+                <app-setting-toggle
+                  [formControl]="panelUiControl(child.key)"
+                  [label]="child.label"
+                  (changed)="onPanelUiToggle(child.key)"
+                ></app-setting-toggle>
+                @if (isModuleHiddenByIndustry(child.key)) {
+                  <p class="text-[10px] text-gray-400 italic pl-3 mt-0.5">
+                    No disponible para tu industria
+                  </p>
+                }
+              </div>
+            }
+          </div>
         </div>
       }
     </div>
-  </div>
+
+    <!-- Sección B: módulos standalone (Herramientas Directas) -->
+    @if (standaloneModules.length > 0) {
+      <div class="standalone-container mt-2">
+        <h5 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+          Herramientas Directas
+        </h5>
+        <div class="compact-modules-grid">
+          @for (m of standaloneModules; track m.key) {
+            <div class="module-group">
+              <app-setting-toggle
+                [formControl]="panelUiControl(m.key)"
+                [label]="m.label"
+                [description]="m.description"
+                (changed)="onPanelUiToggle(m.key)"
+              ></app-setting-toggle>
+              @if (isModuleHiddenByIndustry(m.key)) {
+                <p class="text-[10px] text-gray-400 italic pl-3 mt-1">
+                  No disponible para tu industria
+                </p>
+              }
+            </div>
+          }
+        </div>
+      </div>
+    }
+
+    <div slot="footer" class="flex justify-end">
+      <button
+        type="button"
+        class="inline-flex items-center rounded-md bg-primary-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+        (click)="modulesModalOpen.set(false)"
+      >
+        Listo
+      </button>
+    </div>
+  </app-modal>
 </div>

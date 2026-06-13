@@ -9,7 +9,7 @@ import { EmailModule } from '../../../email/email.module';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { DomainGeneratorHelper } from '../../../common/helpers/domain-generator.helper';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
-import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
+import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { OrgInventoryModule } from '../inventory/inventory.module';
 import { SettingsModule } from '../../store/settings/settings.module';
 import { SettingsModule as OrgSettingsModule } from '../settings/settings.module';

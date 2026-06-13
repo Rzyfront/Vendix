@@ -27,6 +27,7 @@ import {
 import { PurchaseOrder } from '../../interfaces';
 import { WithholdingTaxService } from '../../../withholding-tax/services/withholding-tax.service';
 import { WithholdingPreviewResult } from '../../../withholding-tax/interfaces/withholding.interface';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 /**
  * Lot/Batch information for purchase order items (extended for service use)
@@ -67,6 +68,7 @@ const INITIAL_STATE: PopCartState = {
 export class PopCartService {
   private destroyRef = inject(DestroyRef);
   private withholdingService = inject(WithholdingTaxService);
+  private authFacade = inject(AuthFacade);
   private _cartState = signal<PopCartState>(INITIAL_STATE);
   private _loading = signal<boolean>(false);
   public cartState$ = toObservable(this._cartState);
@@ -101,8 +103,16 @@ export class PopCartService {
         ),
         debounceTime(300),
         switchMap(({ supplierId, base, ivaAmount }) => {
-          // No counterparty or no base → no call, reset to 0.
-          if (supplierId <= 0 || base <= 0) {
+          // Fiscal gate: retefuente is an `accounting` subfeature. Skip the
+          // preview entirely when the tenant's accounting area is not ACTIVE/
+          // LOCKED. `activeFiscalAreas()` already resolves store-vs-org by
+          // `fiscal_scope`, and its initialValue [] keeps the default safe
+          // (no fiscal call while the fiscal status is still unknown).
+          const fiscalActive = this.authFacade
+            .activeFiscalAreas()
+            .includes('accounting');
+          // No fiscal ops, no counterparty, or no base → no call, reset to 0.
+          if (!fiscalActive || supplierId <= 0 || base <= 0) {
             return of({ lines: [], total_withholding: 0 });
           }
           return this.withholdingService.previewWithholding({

@@ -15,6 +15,7 @@ import { purchase_order_status_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { toTitleCase } from '@common/utils/format.util';
+import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import {
   CostingService,
@@ -193,23 +194,27 @@ export class PurchaseOrdersService {
             basePrice = cost * (1 + margin / 100);
           }
 
-          // Resolve Brand: trim + lowercase for search, Title Case for creation
+          // Resolve Brand: derive a deterministic slug (mirrors the categories
+          // block below) and search/create scoped by store_id. `brands` requires
+          // a non-null `slug` and enforces @@unique([store_id, slug]) +
+          // @@unique([store_id, name]); searching and creating by slug+store_id
+          // keeps a PO-created brand indistinguishable from a UI-created one.
           let brandId: number | undefined;
-          if (item.brand_name) {
-            const normalizedBrandName = item.brand_name.trim().toLowerCase();
-            if (normalizedBrandName) {
+          if (item.brand_name?.trim()) {
+            const brandName = item.brand_name.trim();
+            const brandSlug = generateSlug(brandName);
+            if (brandSlug) {
               const brand = await tx.brands.findFirst({
-                where: {
-                  name: { equals: normalizedBrandName, mode: 'insensitive' },
-                },
+                where: { slug: brandSlug, store_id: storeId },
               });
               if (brand) {
                 brandId = brand.id;
               } else {
-                const titleCaseBrandName = toTitleCase(item.brand_name.trim());
                 const newBrand = await tx.brands.create({
                   data: {
-                    name: titleCaseBrandName,
+                    name: toTitleCase(brandName),
+                    slug: brandSlug,
+                    store_id: storeId,
                     description: 'Creada automáticamente por carga masiva PO',
                     state: 'active',
                   },
