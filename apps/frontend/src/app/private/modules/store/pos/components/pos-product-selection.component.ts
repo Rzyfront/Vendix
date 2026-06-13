@@ -734,7 +734,9 @@ export class PosProductSelectionComponent {
       include_stock: true,
     };
 
-    filters.is_sellable = true;
+    if (this.restaurantIntegration.isRestaurantMode()) {
+      filters.is_sellable = true;
+    }
 
     if (this.searchQuery()) {
       filters.query = this.searchQuery();
