@@ -76,6 +76,9 @@ import { PosScheduleModalComponent } from './components/pos-schedule-modal.compo
 import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.component';
 import { ReservationFormModalComponent } from '../reservations/components/reservation-form-modal/reservation-form-modal.component';
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
+import { PosRestaurantIntegrationService } from './services/pos-restaurant-integration.service';
+import { PosOpenTableModalComponent } from './components/pos-open-table-modal.component';
+import { PosSplitBillModalComponent } from './components/pos-split-bill-modal.component';
 import { TaxesService } from '../products/services/taxes.service';
 import { TaxCategory } from '../products/interfaces';
 
@@ -122,6 +125,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     LayawayConfigModalComponent,
     ReservationFormModalComponent,
     PosAISummaryModalComponent,
+    PosOpenTableModalComponent,
+    PosSplitBillModalComponent,
   ],
   template: `
     <div class="flex flex-col overflow-hidden pos-container">
@@ -384,11 +389,16 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 [isEditMode]="isEditMode()"
                 [isQuotationMode]="isQuotationMode()"
                 [isLayawayMode]="isLayawayMode()"
+                [restaurantMode]="restaurantIntegration.isRestaurantMode()"
+                [hasOpenTableSession]="restaurantIntegration.hasOpenTableSession()"
                 (saveDraft)="onSaveDraft()"
                 (shipping)="onShipping()"
                 (checkout)="onCheckout()"
                 (quote)="onQuote()"
                 (layaway)="onLayaway()"
+                (openTable)="showOpenTableModal.set(true)"
+                (fireKitchen)="onFireKitchen()"
+                (splitBill)="showSplitBillModal.set(true)"
               ></app-pos-cart>
             </div>
           </div>
@@ -417,6 +427,8 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [isQuotationMode]="isQuotationMode()"
           [isLayawayMode]="isLayawayMode()"
           [canCreateCustomItems]="canCreateCustomItems()"
+          [restaurantMode]="restaurantIntegration.isRestaurantMode()"
+          [hasOpenTableSession]="restaurantIntegration.hasOpenTableSession()"
           (viewCart)="onOpenCartModal()"
           (customItem)="openCustomItemModal()"
           (saveDraft)="onSaveDraft()"
@@ -424,6 +436,9 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           (checkout)="onCheckout()"
           (quote)="onQuote()"
           (layaway)="onLayaway()"
+          (openTable)="showOpenTableModal.set(true)"
+          (fireKitchen)="onFireKitchen()"
+          (splitBill)="showSplitBillModal.set(true)"
         ></app-pos-mobile-footer>
       }
 
@@ -676,6 +691,23 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           (close)="showLayawayConfigModal.set(false)"
         ></app-layaway-config-modal>
       }
+
+      <!-- Restaurant ops (Fase H): Open Table + Split Bill modals -->
+      @defer (when showOpenTableModal() && restaurantIntegration.isRestaurantMode()) {
+        <app-pos-open-table-modal
+          [isOpen]="showOpenTableModal()"
+          (isOpenChange)="showOpenTableModal.set($event)"
+          (sessionOpened)="onTableSessionOpened($event)"
+        ></app-pos-open-table-modal>
+      }
+
+      @defer (when showSplitBillModal() && restaurantIntegration.hasOpenTableSession()) {
+        <app-pos-split-bill-modal
+          [isOpen]="showSplitBillModal()"
+          (isOpenChange)="showSplitBillModal.set($event)"
+          (splitCompleted)="onSplitBillCompleted($event)"
+        ></app-pos-split-bill-modal>
+      }
     </div>
   `,
   styles: [
@@ -901,6 +933,10 @@ export class PosComponent {
   isLayawayMode = signal(false);
   showLayawayConfigModal = signal(false);
 
+  // Restaurant ops (Fase H): modals gated on `isRestaurantMode`
+  showOpenTableModal = signal(false);
+  showSplitBillModal = signal(false);
+
   // Mobile detection signal
   isMobile = signal(false);
 
@@ -949,6 +985,7 @@ export class PosComponent {
   private authFacade = inject(AuthFacade);
   private taxesService = inject(TaxesService);
   private currencyService = inject(CurrencyFormatService);
+  private restaurantIntegration = inject(PosRestaurantIntegrationService);
 
   readonly canCreateCustomItems = computed(() =>
     this.hasPermission('store:pos:custom_items:create'),
@@ -1342,6 +1379,133 @@ export class PosComponent {
             err?.error?.message || 'Error al crear plan separé',
           );
         },
+      });
+  }
+
+  // ─── Restaurant ops handlers (Fase H) ─────────────────────────────
+  // These stay minimal: the heavy lifting lives in
+  // PosRestaurantIntegrationService + the kitchen-fire / table-sessions /
+  // split-order backend modules. The component only orchestrates the
+  // user-facing flow: open a session, fire items, split the bill.
+
+  onTableSessionOpened(_result: any): void {
+    // Session is already cached in PosRestaurantIntegrationService.currentTableSession
+    // by the modal. We clear the local cart so the operator starts adding
+    // items to the table session via the add-items endpoint.
+    this.cartService
+      .clearCart()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          const orderId = this.restaurantIntegration.currentTableSession()?.order_id;
+          this.currentOrderId.set(orderId != null ? String(orderId) : null);
+        },
+        error: () => undefined,
+      });
+  }
+
+  onFireKitchen(): void {
+    const session = this.restaurantIntegration.currentTableSession();
+    if (!session?.order_id) {
+      this.toastService.error('Abre una mesa antes de enviar a cocina');
+      return;
+    }
+
+    const cart = this.cartState();
+    const items: Array<{ product_id: number; quantity: number; product_variant_id?: number }> = [];
+    for (const it of cart?.items ?? []) {
+      if (it.itemType === 'custom') continue;
+      const productId = parseInt(
+        typeof it.product.id === 'string'
+          ? it.product.id
+          : String(it.product.id),
+        10,
+      );
+      if (!Number.isFinite(productId)) continue;
+      const line: { product_id: number; quantity: number; product_variant_id?: number } = {
+        product_id: productId,
+        quantity: it.quantity,
+      };
+      if (it.variant_id != null) {
+        line.product_variant_id = it.variant_id;
+      }
+      items.push(line);
+    }
+
+    if (items.length === 0) {
+      this.toastService.warning('Agrega productos al carrito antes de enviar a cocina');
+      return;
+    }
+
+    this.loading.set(true);
+    this.restaurantIntegration
+      .addItemsToTableSession(session.id, items)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (updatedSession) => {
+          const orderItemIds = (updatedSession.order?.order_items ?? [])
+            .filter(
+              (it) =>
+                items.some(
+                  (i) =>
+                    i.product_id === it.product_id &&
+                    i.quantity === it.quantity,
+                ),
+            )
+            .map((it) => it.id);
+          if (orderItemIds.length === 0) {
+            this.loading.set(false);
+            this.toastService.success('Items enviados a la mesa');
+            return;
+          }
+          this.restaurantIntegration
+            .fireOrderItems(session.order_id, orderItemIds)
+            .pipe(takeUntilDestroyed(this.destroyRef))
+            .subscribe({
+              next: (fireResult) => {
+                this.loading.set(false);
+                this.toastService.success(
+                  `Enviado a cocina (ticket #${fireResult.kitchen_ticket_id})`,
+                );
+                this.cartService
+                  .clearCart()
+                  .pipe(takeUntilDestroyed(this.destroyRef))
+                  .subscribe({ next: () => undefined, error: () => undefined });
+                this.restaurantIntegration
+                  .refreshTableSession(session.id)
+                  .pipe(takeUntilDestroyed(this.destroyRef))
+                  .subscribe({
+                    next: () => undefined,
+                    error: () => undefined,
+                  });
+              },
+              error: (err) => {
+                this.loading.set(false);
+                this.toastService.error(
+                  err?.message || 'Error al enviar a cocina',
+                );
+              },
+            });
+        },
+        error: (err) => {
+          this.loading.set(false);
+          this.toastService.error(
+            err?.message || 'Error al agregar items a la mesa',
+          );
+        },
+      });
+  }
+
+  onSplitBillCompleted(_result: any): void {
+    // Refresh the table session so the operator sees the updated order_items.
+    const session = this.restaurantIntegration.currentTableSession();
+    if (!session) return;
+    this.restaurantIntegration
+      .refreshTableSession(session.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => undefined,
+        error: () => undefined,
       });
   }
 

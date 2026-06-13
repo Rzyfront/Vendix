@@ -54,6 +54,11 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { SocialSalesModule } from './social-sales/social-sales.module';
 import { MarketingAdCreativesModule } from './marketing-ad-creatives/marketing-ad-creatives.module';
 import { PriceTiersModule } from './price-tiers/price-tiers.module';
+import { RecipesModule } from './recipes/recipes.module';
+import { ProductionOrdersModule } from './production/production.module';
+import { KitchenFireModule } from './kitchen-fire/kitchen-fire.module';
+import { TablesModule } from './tables/tables.module';
+import { MenusModule } from './menus/menus.module';
 
 @Module({
   imports: [
@@ -110,6 +115,11 @@ import { PriceTiersModule } from './price-tiers/price-tiers.module';
     SocialSalesModule,
     MarketingAdCreativesModule,
     PriceTiersModule,
+    RecipesModule,
+    ProductionOrdersModule,
+    KitchenFireModule,
+    TablesModule,
+    MenusModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

@@ -1,0 +1,158 @@
+<div class="space-y-3">
+  <!-- Header row -->
+  <div class="flex items-center justify-between">
+    <div>
+      <h3 class="text-base md:text-lg font-semibold text-text-primary">
+        Componentes de la receta
+      </h3>
+      <p class="text-sm text-text-secondary">
+        Lista de insumos y sub-recetas que componen el rendimiento.
+      </p>
+    </div>
+    <app-button
+      variant="primary"
+      size="sm"
+      iconName="plus"
+      (click)="addItem()"
+    >
+      Agregar componente
+    </app-button>
+  </div>
+
+  <!-- Empty state -->
+  @if (items().length === 0) {
+    <div
+      class="border border-dashed border-border rounded-lg p-6 text-center text-sm text-text-secondary"
+    >
+      Aún no has agregado componentes. Usa el botón
+      <span class="font-semibold">"Agregar componente"</span> para empezar.
+    </div>
+  }
+
+  <!-- Rows -->
+  <div class="space-y-3">
+    @for (row of items().controls; track row; let i = $index) {
+      <div
+        class="border border-border rounded-lg p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-background"
+        [formGroup]="row"
+      >
+        <!-- Componente -->
+        <div class="md:col-span-5">
+          <label class="text-xs font-semibold text-text-secondary uppercase">
+            Componente
+          </label>
+          <button
+            type="button"
+            class="mt-1 w-full text-left px-3 py-2 border border-border rounded-md hover:border-primary transition-colors bg-background text-sm"
+            (click)="openPicker(i)"
+          >
+            @if (row.value.component_product_id) {
+              <span class="font-medium text-text-primary">
+                {{ productLabel(row.value.component_product_id) }}
+              </span>
+              @if (productUnit(row.value.component_product_id)) {
+                <span class="ml-1 text-xs text-text-secondary">
+                  ({{ productUnit(row.value.component_product_id) }})
+                </span>
+              }
+            } @else {
+              <span class="text-text-secondary">Selecciona un ingrediente</span>
+            }
+          </button>
+        </div>
+
+        <!-- Cantidad -->
+        <div class="md:col-span-2">
+          <app-input
+            label="Cantidad"
+            type="number"
+            formControlName="quantity"
+            placeholder="0"
+            [min]="0"
+            step="0.0001"
+          />
+        </div>
+
+        <!-- Unidad (read-only) -->
+        <div class="md:col-span-1">
+          <label class="text-xs font-semibold text-text-secondary uppercase">
+            Unidad
+          </label>
+          <p class="mt-1 text-sm text-text-primary">
+            {{ productUnit(row.value.component_product_id) || '—' }}
+          </p>
+        </div>
+
+        <!-- Merma % -->
+        <div class="md:col-span-2">
+          <app-input
+            label="Merma %"
+            type="number"
+            formControlName="waste_percent"
+            placeholder="0"
+            [min]="0"
+            [max]="100"
+            step="0.5"
+          />
+        </div>
+
+        <!-- Opcional -->
+        <div class="md:col-span-1 flex items-center">
+          <app-setting-toggle
+            formControlName="is_optional"
+            label="Opcional"
+          />
+        </div>
+
+        <!-- Eliminar -->
+        <div class="md:col-span-1 flex md:justify-end">
+          <button
+            type="button"
+            class="text-red-500 hover:text-red-700 p-2 rounded"
+            (click)="removeItem(i)"
+            aria-label="Eliminar componente"
+          >
+            <app-icon name="trash-2" [size]="18" />
+          </button>
+        </div>
+      </div>
+    }
+  </div>
+
+  <!-- Picker modal -->
+  @if (pickerIndex() !== null) {
+    <app-modal
+      [isOpen]="pickerIndex() !== null"
+      title="Seleccionar ingrediente"
+      size="md"
+      (close)="closePicker()"
+    >
+      <div class="space-y-3">
+        <p class="text-sm text-text-secondary">
+          Elige un producto con la marca
+          <span class="font-semibold">"Insumo"</span> activada. Estos son los
+          productos marcados como materia prima en la tienda.
+        </p>
+
+        <form [formGroup]="pickerForm">
+          <app-selector
+            formControlName="selected"
+            label="Ingrediente"
+            placeholder="Buscar ingrediente..."
+            [options]="pickerOptions()"
+            [required]="true"
+          />
+        </form>
+      </div>
+
+      <div modal-footer class="flex justify-end gap-2">
+        <app-button variant="outline" (click)="closePicker()">
+          Cancelar
+        </app-button>
+        <app-button variant="primary" (click)="confirmPicker()">
+          Seleccionar
+        </app-button>
+      </div>
+    </app-modal>
+  }
+</div>

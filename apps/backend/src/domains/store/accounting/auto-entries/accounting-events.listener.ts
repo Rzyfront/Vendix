@@ -498,6 +498,72 @@ export class AccountingEventsListener {
     }
   }
 
+  @OnEvent('production.completed')
+  async handleProductionCompleted(event: {
+    production_order_id: number;
+    organization_id: number;
+    store_id?: number;
+    product_name: string;
+    produced_qty: number;
+    produced_unit_cost: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      await this.auto_entry_service.onProductionCompleted({
+        production_order_id: event.production_order_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        product_name: event.product_name,
+        produced_qty: Number(event.produced_qty),
+        produced_unit_cost: Number(event.produced_unit_cost),
+        total_cost: Number(event.total_cost),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for production.completed #${event.production_order_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for production.completed #${event.production_order_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  @OnEvent('kitchen.fired')
+  async handleKitchenFired(event: {
+    kitchen_ticket_id: number;
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    consumed_line_count: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'inventory'))) return;
+      await this.auto_entry_service.onKitchenFired({
+        kitchen_ticket_id: event.kitchen_ticket_id,
+        order_id: event.order_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        total_cost: Number(event.total_cost),
+        consumed_line_count: Number(event.consumed_line_count),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for kitchen.fired ticket #${event.kitchen_ticket_id} (order #${event.order_id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for kitchen.fired #${event.kitchen_ticket_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   @OnEvent('refund.completed')
   async handleRefundCompleted(event: {
     refund_id: number;

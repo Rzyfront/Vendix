@@ -256,6 +256,27 @@ export class CreateProductDto {
   @Type(() => Boolean)
   has_multiple_price_tiers?: boolean;
 
+  // ===== Restaurant Suite toggles (Fase A additive, exposed in Fase B) =====
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_sellable?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_ingredient?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_combo?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_batch_produced?: boolean;
+
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -511,6 +532,27 @@ export class UpdateProductDto {
   @Type(() => Boolean)
   has_multiple_price_tiers?: boolean;
 
+  // ===== Restaurant Suite toggles (Fase A additive, exposed in Fase B) =====
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_sellable?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_ingredient?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_combo?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_batch_produced?: boolean;
+
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -722,6 +764,18 @@ export class ProductQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   requires_booking?: boolean;
+
+  /**
+   * Restaurant Suite (Fase H) — when supplied, the listing is filtered to
+   * products whose `is_sellable` flag matches this value. The POS always
+   * sends `is_sellable=true` to hide pure ingredients (Phase A). Defaults
+   * to undefined to keep retail catalog reads byte-identical to today
+   * (existing products all have `is_sellable=true` by default anyway).
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_sellable?: boolean;
 }
 
 // Product Variants DTOs
@@ -1307,6 +1361,23 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsBoolean()
   has_multiple_price_tiers?: boolean;
+
+  // ===== Restaurant Suite toggles (Fase A additive, exposed in Fase B) =====
+  @IsOptional()
+  @IsBoolean()
+  is_sellable?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  is_ingredient?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  is_combo?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  is_batch_produced?: boolean;
 
   @IsOptional()
   @IsArray()

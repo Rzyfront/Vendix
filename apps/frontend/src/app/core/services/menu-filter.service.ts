@@ -111,6 +111,18 @@ export class MenuFilterService {
     // Gastos
     Gastos: 'expenses',
 
+    // Restaurant Operations (Fase I) — padre + 5 submódulos.
+    // Los subitems se mapean con su propia key para que el toggle
+    // "Módulos del Panel" pueda prender/apagar cada submódulo de forma
+    // granular. El padre "Operaciones de Restaurante" mapea al key padre
+    // para que el sidebar renderice el grupo cuando la industria lo permita.
+    'Operaciones de Restaurante': 'restaurant_ops',
+    Recetas: 'restaurant_ops_recipes',
+    Producción: 'restaurant_ops_production',
+    Comandas: 'restaurant_ops_kds',
+    Mesas: 'restaurant_ops_tables',
+    Cartas: 'restaurant_ops_menus',
+
     // ERP Modules
     Facturación: 'invoicing',
     Facturas: 'invoicing_invoices',

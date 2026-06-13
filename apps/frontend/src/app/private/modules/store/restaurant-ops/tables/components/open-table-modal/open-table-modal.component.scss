@@ -1,0 +1,25 @@
+.table-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-background, #f9fafb);
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--color-border, #e5e7eb);
+
+  .info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.125rem;
+
+    strong {
+      font-weight: 600;
+      color: var(--color-text-primary, #111827);
+    }
+
+    span {
+      font-size: 0.8rem;
+      color: var(--color-text-secondary, #6b7280);
+    }
+  }
+}

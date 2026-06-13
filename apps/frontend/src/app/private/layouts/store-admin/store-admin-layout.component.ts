@@ -562,6 +562,41 @@ export class StoreAdminLayoutComponent {
       route: '/admin/expenses',
     },
     {
+      // Restaurant Operations (Restaurant Suite — Fase I). The whole group
+      // is hidden by INDUSTRY_HIDDEN_MODULES for retail/manufacturing/service
+      // stores; visible only when the store's industry includes `restaurant`.
+      // Industry gating runs upstream in MenuFilterService.getModulesHiddenByIndustries.
+      label: 'Operaciones de Restaurante',
+      icon: 'utensils-crossed',
+      children: [
+        {
+          label: 'Recetas',
+          icon: 'book-open',
+          route: '/admin/restaurant-ops/recipes',
+        },
+        {
+          label: 'Producción',
+          icon: 'chef-hat',
+          route: '/admin/restaurant-ops/production',
+        },
+        {
+          label: 'Comandas',
+          icon: 'flame',
+          route: '/admin/restaurant-ops/kds',
+        },
+        {
+          label: 'Mesas',
+          icon: 'square-stack',
+          route: '/admin/restaurant-ops/tables',
+        },
+        {
+          label: 'Cartas',
+          icon: 'menu-square',
+          route: '/admin/restaurant-ops/menus',
+        },
+      ],
+    },
+    {
       // Fiscal umbrella — one sidebar group consolidating every fiscal surface
       // for stores that OWN their fiscal scope. Each child is a leaf whose
       // module renders its own sub-sections as internal sticky-header tabs

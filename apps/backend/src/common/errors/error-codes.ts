@@ -2490,6 +2490,263 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Unsupported legal document type',
   },
+
+  // Recipes (BOM) — Restaurant Suite Fase B
+  RECIPE_NOT_FOUND: {
+    code: 'RECIPE_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Receta no encontrada',
+  },
+  RECIPE_DUP_PRODUCT: {
+    code: 'RECIPE_DUP_PRODUCT',
+    httpStatus: 409,
+    devMessage: 'Ya existe una receta para este producto en la tienda',
+  },
+  RECIPE_YIELD_PRODUCT_NOT_FOUND: {
+    code: 'RECIPE_YIELD_PRODUCT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'El producto de rendimiento no existe o no pertenece a la tienda',
+  },
+  RECIPE_COMPONENT_NOT_FOUND: {
+    code: 'RECIPE_COMPONENT_NOT_FOUND',
+    httpStatus: 404,
+    devMessage:
+      'El producto componente no existe o no pertenece a la tienda',
+  },
+  RECIPE_SELF_REFERENCE: {
+    code: 'RECIPE_SELF_REFERENCE',
+    httpStatus: 422,
+    devMessage: 'Una receta no puede ser su propio componente',
+  },
+  RECIPE_CYCLE_DETECTED: {
+    code: 'RECIPE_CYCLE_DETECTED',
+    httpStatus: 422,
+    devMessage:
+      'La asignación generaría un ciclo en la jerarquía de sub-recetas',
+  },
+  RECIPE_ITEM_DUP: {
+    code: 'RECIPE_ITEM_DUP',
+    httpStatus: 409,
+    devMessage:
+      'Ya existe un componente con este producto en la receta',
+  },
+  RECIPE_ITEM_NOT_FOUND: {
+    code: 'RECIPE_ITEM_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Componente de receta no encontrado',
+  },
+
+  // Production Orders (sub-recipe batch stock) — Restaurant Suite Fase C
+  PRODUCTION_ORDER_NOT_FOUND: {
+    code: 'PRODUCTION_ORDER_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Orden de producción no encontrada',
+  },
+  PRODUCTION_ORDER_INVALID_STATE: {
+    code: 'PRODUCTION_ORDER_INVALID_STATE',
+    httpStatus: 409,
+    devMessage: 'Transición de estado inválida para la orden de producción',
+  },
+  PRODUCTION_ORDER_NOT_BATCH: {
+    code: 'PRODUCTION_ORDER_NOT_BATCH',
+    httpStatus: 422,
+    devMessage:
+      'El producto no admite producción en lote (no es `prepared` o no tiene `is_batch_produced=true`)',
+  },
+  PRODUCTION_RECIPE_MISMATCH: {
+    code: 'PRODUCTION_RECIPE_MISMATCH',
+    httpStatus: 422,
+    devMessage: 'La receta no pertenece al producto seleccionado',
+  },
+  PRODUCTION_RECIPE_INACTIVE: {
+    code: 'PRODUCTION_RECIPE_INACTIVE',
+    httpStatus: 422,
+    devMessage: 'La receta está inactiva',
+  },
+  PRODUCTION_RECIPE_EMPTY: {
+    code: 'PRODUCTION_RECIPE_EMPTY',
+    httpStatus: 422,
+    devMessage: 'La receta no tiene componentes para consumir',
+  },
+  PRODUCTION_INVALID_QTY: {
+    code: 'PRODUCTION_INVALID_QTY',
+    httpStatus: 422,
+    devMessage: 'La cantidad producida debe ser mayor a 0',
+  },
+  // ── Kitchen Fire (Restaurant Suite Fase D) ─────────────────────────
+  KITCHEN_FIRE_ORDER_NOT_FOUND: {
+    code: 'KITCHEN_FIRE_ORDER_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Orden no encontrada para enviar a cocina',
+  },
+  KITCHEN_FIRE_ITEM_NOT_FOUND: {
+    code: 'KITCHEN_FIRE_ITEM_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Item de orden no encontrado o no pertenece a la orden',
+  },
+  KITCHEN_FIRE_NO_ITEMS: {
+    code: 'KITCHEN_FIRE_NO_ITEMS',
+    httpStatus: 422,
+    devMessage: 'Debe proporcionar al menos un order_item_id para enviar a cocina',
+  },
+  KITCHEN_FIRE_ALL_ALREADY_CONSUMED: {
+    code: 'KITCHEN_FIRE_ALL_ALREADY_CONSUMED',
+    httpStatus: 409,
+    devMessage: 'Todos los items ya fueron enviados a cocina (idempotente)',
+  },
+  KITCHEN_FIRE_NO_RECIPE: {
+    code: 'KITCHEN_FIRE_NO_RECIPE',
+    httpStatus: 422,
+    devMessage: 'El producto preparado no tiene una receta activa asociada',
+  },
+  KITCHEN_FIRE_RECIPE_INACTIVE: {
+    code: 'KITCHEN_FIRE_RECIPE_INACTIVE',
+    httpStatus: 422,
+    devMessage: 'La receta asociada al producto está inactiva',
+  },
+  // ── Tables & Table Sessions (Restaurant Suite Fase E) ─────────
+  TABLE_NOT_FOUND: {
+    code: 'TABLE_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Mesa no encontrada',
+  },
+  TABLE_DUP_NAME: {
+    code: 'TABLE_DUP_NAME',
+    httpStatus: 409,
+    devMessage: 'Ya existe una mesa con ese nombre en la tienda',
+  },
+  TABLE_INVALID_STATUS: {
+    code: 'TABLE_INVALID_STATUS',
+    httpStatus: 409,
+    devMessage:
+      'Estado de mesa no válido para la operación solicitada',
+  },
+  TABLE_SESSION_NOT_FOUND: {
+    code: 'TABLE_SESSION_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Sesión de mesa no encontrada',
+  },
+  TABLE_SESSION_ALREADY_OPEN: {
+    code: 'TABLE_SESSION_ALREADY_OPEN',
+    httpStatus: 409,
+    devMessage: 'La mesa ya tiene una sesión abierta',
+  },
+  TABLE_SESSION_CLOSED: {
+    code: 'TABLE_SESSION_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'La sesión de mesa está cerrada; no se pueden agregar más items',
+  },
+  TABLE_SESSION_ORDER_NOT_DRAFT: {
+    code: 'TABLE_SESSION_ORDER_NOT_DRAFT',
+    httpStatus: 409,
+    devMessage:
+      'La orden asociada a la sesión no está en estado draft',
+  },
+  TABLE_SESSION_ADD_ITEMS_INVALID: {
+    code: 'TABLE_SESSION_ADD_ITEMS_INVALID',
+    httpStatus: 422,
+    devMessage:
+      'Items inválidos para agregar a la sesión de mesa',
+  },
+  // ── Split Order (Restaurant Suite Fase E) ────────────────────
+  SPLIT_ORDER_NOT_FOUND: {
+    code: 'SPLIT_ORDER_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Orden a dividir no encontrada',
+  },
+  SPLIT_ORDER_NOT_DRAFT: {
+    code: 'SPLIT_ORDER_NOT_DRAFT',
+    httpStatus: 409,
+    devMessage:
+      'Solo se pueden dividir órdenes en estado draft (cuenta abierta)',
+  },
+  SPLIT_ORDER_EMPTY: {
+    code: 'SPLIT_ORDER_EMPTY',
+    httpStatus: 422,
+    devMessage: 'La orden no tiene items para dividir',
+  },
+  SPLIT_ORDER_ITEMS_MISSING: {
+    code: 'SPLIT_ORDER_ITEMS_MISSING',
+    httpStatus: 422,
+    devMessage:
+      'Los grupos de items para dividir deben cubrir todos los items de la orden (sin solapamientos)',
+  },
+  SPLIT_ORDER_INVALID_NSPLITS: {
+    code: 'SPLIT_ORDER_INVALID_NSPLITS',
+    httpStatus: 422,
+    devMessage: 'El número de partes para dividir debe ser >= 2',
+  },
+  // ── KDS (Restaurant Suite Fase F) ──────────────────────────────
+  KITCHEN_TICKET_NOT_FOUND: {
+    code: 'KITCHEN_TICKET_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Ticket de cocina no encontrado',
+  },
+  KITCHEN_TICKET_INVALID_STATE: {
+    code: 'KITCHEN_TICKET_INVALID_STATE',
+    httpStatus: 409,
+    devMessage: 'Transición de estado del ticket no permitida',
+  },
+  KITCHEN_TICKET_STREAM_NO_CONTEXT: {
+    code: 'KITCHEN_TICKET_STREAM_NO_CONTEXT',
+    httpStatus: 400,
+    devMessage: 'No hay contexto de tienda para abrir el stream KDS',
+  },
+  // ── Menus / Carta (Restaurant Suite Fase G) ────────────────────────────
+  MENU_NOT_FOUND: {
+    code: 'MENU_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Menú no encontrado en la tienda',
+  },
+  MENU_DUP_NAME: {
+    code: 'MENU_DUP_NAME',
+    httpStatus: 409,
+    devMessage: 'Ya existe un menú con ese nombre en la tienda',
+  },
+  MENU_SECTION_NOT_FOUND: {
+    code: 'MENU_SECTION_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Sección de menú no encontrada',
+  },
+  MENU_SECTION_DUP_NAME: {
+    code: 'MENU_SECTION_DUP_NAME',
+    httpStatus: 409,
+    devMessage: 'Ya existe una sección con ese nombre en el menú',
+  },
+  MENU_SECTION_ITEM_NOT_FOUND: {
+    code: 'MENU_SECTION_ITEM_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Producto de la sección de menú no encontrado',
+  },
+  MENU_SECTION_ITEM_DUP: {
+    code: 'MENU_SECTION_ITEM_DUP',
+    httpStatus: 409,
+    devMessage: 'El producto ya está agregado a la sección',
+  },
+  MENU_AVAILABILITY_NOT_FOUND: {
+    code: 'MENU_AVAILABILITY_NOT_FOUND',
+    httpStatus: 404,
+    devMessage: 'Ventana de disponibilidad no encontrada',
+  },
+  MENU_AVAILABILITY_INVALID_TIME: {
+    code: 'MENU_AVAILABILITY_INVALID_TIME',
+    httpStatus: 422,
+    devMessage:
+      'Ventana de disponibilidad con horas inválidas (formato HH:mm, fin > inicio)',
+  },
+  MENU_AVAILABILITY_INVALID_TARGET: {
+    code: 'MENU_AVAILABILITY_INVALID_TARGET',
+    httpStatus: 422,
+    devMessage:
+      'La ventana de disponibilidad debe estar asociada a un menú o a una sección, pero no a ambos ni a ninguno',
+  },
+  MENU_PRODUCT_NOT_SELLABLE: {
+    code: 'MENU_PRODUCT_NOT_SELLABLE',
+    httpStatus: 422,
+    devMessage:
+      'El producto no es vendible (is_sellable=false) y no puede agregarse a la carta',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {

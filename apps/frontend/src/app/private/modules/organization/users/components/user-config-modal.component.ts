@@ -220,7 +220,7 @@ const CATALOG_APP_TYPES: PanelUiAppType[] = ['STORE_ADMIN', 'ORG_ADMIN'];
                   @if (isCatalogAppType(activePanelUiTab())) {
                     <app-panel-ui-modules-editor
                       [appType]="activePanelUiTab()"
-                      [value]="localPanelUi()[activePanelUiTab()] || {}"
+                      [value]="editorValue()"
                       [hiddenByIndustry]="[]"
                       [hiddenByStore]="[]"
                       [searchable]="true"
@@ -382,12 +382,10 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
     VENDIX_LANDING: null,
   });
 
-  readonly jsonForActiveAppType = computed<string>(
-    () => this.jsonStrings()[this.activePanelUiTab()] || '{}',
-  );
-
-  readonly jsonErrorForActiveAppType = computed<string | null>(
-    () => this.jsonErrors()[this.activePanelUiTab()] ?? null,
+  /** Resolved boolean map for the active catalog tab, fed to the shared
+   *  editor. Mirrors the store/user consumers (absent / `true` = allowed). */
+  readonly editorValue = computed<Record<string, boolean>>(
+    () => this.localPanelUi()[this.activePanelUiTab()] ?? {},
   );
 
   readonly hasJsonError = computed<boolean>(() => {

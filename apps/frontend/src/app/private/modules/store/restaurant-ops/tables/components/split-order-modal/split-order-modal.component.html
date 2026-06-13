@@ -1,0 +1,173 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onCancel()"
+  [size]="'xl'"
+  title="Dividir cuenta"
+  subtitle="Divide el total entre varios comensales o por items específicos"
+>
+  <!-- Tabs -->
+  <div class="tabs" role="tablist">
+    <button
+      type="button"
+      class="tab"
+      [class.active]="activeTab() === 'items'"
+      role="tab"
+      (click)="setTab('items')"
+    >
+      <app-icon name="list" [size]="16"></app-icon>
+      Por items
+    </button>
+    <button
+      type="button"
+      class="tab"
+      [class.active]="activeTab() === 'amount'"
+      role="tab"
+      (click)="setTab('amount')"
+    >
+      <app-icon name="dollar-sign" [size]="16"></app-icon>
+      Por monto
+    </button>
+  </div>
+
+  <!-- By items -->
+  @if (activeTab() === 'items') {
+    <div class="tab-panel">
+      <p class="hint">
+        Crea un grupo por comensal. Marca los items que le corresponden.
+        Cada item solo puede estar en un grupo.
+      </p>
+
+      <div class="groups">
+        @for (group of itemGroups(); track trackByIndex($index); let i = $index) {
+          <div class="group-card">
+            <div class="group-header">
+              <strong>Comensal {{ i + 1 }}</strong>
+              @if (itemGroups().length > 2) {
+                <button
+                  type="button"
+                  class="remove-btn"
+                  (click)="removeGroup(i)"
+                  aria-label="Eliminar grupo"
+                >
+                  <app-icon name="trash" [size]="14"></app-icon>
+                </button>
+              }
+            </div>
+
+            <div class="item-picker">
+              @for (item of items(); track trackById($index, item)) {
+                <label
+                  class="item-check"
+                  [class.is-checked]="isItemInGroup(item.id, i)"
+                  [class.is-locked]="
+                    isItemAssigned(item.id) && !isItemInGroup(item.id, i)
+                  "
+                >
+                  <input
+                    type="checkbox"
+                    [checked]="isItemInGroup(item.id, i)"
+                    (change)="toggleItemInGroup(item.id, i)"
+                  />
+                  <div class="item-info">
+                    <span class="item-name">{{ item.product_name }}</span>
+                    <span class="item-qty">× {{ item.quantity }}</span>
+                  </div>
+                  <span class="item-total">
+                    {{ item.total_price | currency }}
+                  </span>
+                </label>
+              }
+            </div>
+
+            <div class="group-footer">
+              <span>Total del comensal:</span>
+              <strong>{{ getGroupTotal(i) | currency }}</strong>
+            </div>
+          </div>
+        }
+      </div>
+
+      <button type="button" class="add-group" (click)="addGroup()">
+        <app-icon name="plus" [size]="14"></app-icon>
+        Agregar otro comensal
+      </button>
+
+      <div class="status-bar" [class.ok]="allItemsAssigned()">
+        {{ itemsAssigned().size }} / {{ items().length }} items asignados
+      </div>
+    </div>
+  }
+
+  <!-- By amount -->
+  @if (activeTab() === 'amount') {
+    <div class="tab-panel">
+      <p class="hint">
+        Divide el total en N partes iguales o personalizadas.
+      </p>
+
+      <div class="mode-toggle">
+        <button
+          type="button"
+          class="mode-btn"
+          [class.active]="splitMode() === 'equal'"
+          (click)="setMode('equal')"
+        >
+          Partes iguales
+        </button>
+        <button
+          type="button"
+          class="mode-btn"
+          [class.active]="splitMode() === 'custom'"
+          (click)="setMode('custom')"
+        >
+          Personalizado
+        </button>
+      </div>
+
+      <div class="nsplits">
+        <app-input
+          [formControl]="$any(form.controls['n_splits'])"
+          label="Número de partes"
+          type="number"
+          [min]="2"
+          [max]="20"
+          customWrapperClass="mt-0"
+        />
+      </div>
+
+      @if (splitMode() === 'custom') {
+        <div class="custom-amounts">
+          @for (amount of customAmounts(); track trackByIndex($index); let i = $index) {
+            <app-input
+              [formControl]="amountControlAt(i)"
+              [label]="'Parte ' + (i + 1)"
+              type="number"
+              [min]="0"
+              currency
+              currencyDecimals="2"
+            />
+          }
+        </div>
+        <div
+          class="status-bar"
+          [class.ok]="customSumMatches()"
+          [class.bad]="!customSumMatches()"
+        >
+          Suma: {{ customSum() | currency }} / {{ orderTotal() | currency }}
+        </div>
+      }
+    </div>
+  }
+
+  <div slot="footer" class="flex justify-end gap-2">
+    <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
+    <app-button
+      variant="primary"
+      [loading]="loading()"
+      (clicked)="onSubmit()"
+    >
+      Dividir cuenta
+    </app-button>
+  </div>
+</app-modal>

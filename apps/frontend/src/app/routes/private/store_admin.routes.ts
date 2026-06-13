@@ -618,6 +618,54 @@ export const storeAdminRoutes: Routes = [
             '../../private/modules/store/price-tiers/routes/price-tiers.routes'
           ).then((m) => m.priceTiersRoutes),
       },
+      // Restaurant Ops (Phase B — Recipes, Phase C — Production,
+      // Phase F — KDS). The root /admin/restaurant-ops keeps Recipes as
+      // the default child so the existing deep-links still work.
+      {
+        path: 'restaurant-ops',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'recipes',
+          },
+          {
+            path: 'recipes',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/restaurant-ops/recipes/routes/recipes.routes'
+              ).then((m) => m.recipesRoutes),
+          },
+          {
+            path: 'production',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/restaurant-ops/production/routes/production.routes'
+              ).then((m) => m.productionOrdersRoutes),
+          },
+          {
+            path: 'kds',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/restaurant-ops/kds/routes/kds.routes'
+              ).then((m) => m.kdsRoutes),
+          },
+          {
+            path: 'tables',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/restaurant-ops/tables/routes/tables.routes'
+              ).then((m) => m.tablesRoutes),
+          },
+          {
+            path: 'menus',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/restaurant-ops/menus/routes/menus.routes'
+              ).then((m) => m.menusRoutes),
+          },
+        ],
+      },
       // Subscription Routes
       {
         path: 'subscription',

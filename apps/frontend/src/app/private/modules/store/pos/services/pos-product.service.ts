@@ -152,6 +152,13 @@ export interface SearchFilters {
   pos_optimized?: boolean;
   barcode?: string;
   include_stock?: boolean;
+  /**
+   * Restaurant Suite (Fase H) — when true, the listing is restricted
+   * to products with `is_sellable=true`, hiding pure ingredients
+   * from the POS product picker. The backend enforces this in the
+   * scoped products query; the POS sends it explicitly for clarity.
+   */
+  is_sellable?: boolean;
 }
 
 export interface SearchResult {
@@ -308,6 +315,10 @@ export class PosProductService {
 
     if (filters.include_stock) {
       query.include_stock = 'true';
+    }
+
+    if (filters.is_sellable !== undefined) {
+      query.is_sellable = filters.is_sellable ? 'true' : 'false';
     }
 
     const params = this.buildParams(query);

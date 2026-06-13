@@ -1,0 +1,147 @@
+<div class="w-full overflow-x-hidden">
+  <!-- Sticky Header -->
+  <app-sticky-header
+    title="Recetas (BOM)"
+    subtitle="Lista de materiales para producir tus platos y productos"
+    icon="chef-hat"
+    variant="glass"
+    [actions]="[
+      {
+        id: 'create',
+        label: 'Nueva Receta',
+        icon: 'plus',
+        variant: 'primary',
+      },
+    ]"
+    (actionClicked)="onActionClick($event)"
+  />
+
+  <!-- Stats Grid -->
+  <div
+    class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
+  >
+    <app-stats
+      title="Total Recetas"
+      [value]="stats().total"
+      smallText="Recetas registradas en la tienda"
+      iconName="chef-hat"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    />
+    <app-stats
+      title="Activas"
+      [value]="stats().active"
+      smallText="Disponibles para producción"
+      iconName="check-circle"
+      iconBgColor="bg-green-100"
+      iconColor="text-green-600"
+    />
+    <app-stats
+      title="Inactivas"
+      [value]="stats().inactive"
+      smallText="Ocultas para producción"
+      iconName="x-circle"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+    />
+    <app-stats
+      title="Componentes"
+      [value]="stats().totalItems"
+      smallText="Líneas de ingredientes listadas"
+      iconName="list"
+      iconBgColor="bg-purple-100"
+      iconColor="text-purple-600"
+    />
+  </div>
+
+  <!-- List Container -->
+  <app-card [responsive]="true" [padding]="false" overflow="visible">
+    <!-- Search row -->
+    <div
+      class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+    >
+      <div
+        class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+      >
+        <h2
+          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+        >
+          Recetas ({{ totalItems() }})
+        </h2>
+
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <app-inputsearch
+            class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            size="sm"
+            placeholder="Buscar receta..."
+            [debounceTime]="300"
+            [ngModel]="searchTerm()"
+            (ngModelChange)="onSearch($event)"
+          />
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            [filters]="filterConfigs"
+            [filterValues]="filterValues"
+            [actions]="dropdownActions()"
+            [isLoading]="isLoading()"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="clearFilters()"
+            (actionClick)="onActionClick($event)"
+          />
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    @if (isLoading()) {
+      <div class="p-4 md:p-6 text-center">
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
+        <p class="mt-2 text-text-secondary">Cargando recetas...</p>
+      </div>
+    }
+
+    <!-- Empty State -->
+    @if (!isLoading() && recipes().length === 0) {
+      <app-empty-state
+        icon="chef-hat"
+        [title]="getEmptyStateTitle()"
+        [description]="getEmptyStateDescription()"
+        actionButtonText="Crear Receta"
+        [showActionButton]="!hasFilters"
+        [showRefreshButton]="true"
+        [showClearFilters]="hasFilters"
+        (actionClick)="createRecipe()"
+        (refreshClick)="loadRecipes()"
+        (clearFiltersClick)="clearFilters()"
+      />
+    }
+
+    <!-- Data View -->
+    @if (!isLoading() && recipes().length > 0) {
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        <app-responsive-data-view
+          [data]="recipes()"
+          [columns]="tableColumns"
+          [cardConfig]="cardConfig"
+          [actions]="tableActions()"
+          [loading]="isLoading()"
+          [sortable]="true"
+          emptyMessage="No hay recetas registradas"
+          emptyIcon="chef-hat"
+          (rowClick)="onRowClick($event)"
+        />
+        <div class="mt-4 flex justify-center">
+          <app-pagination
+            [currentPage]="filters().page"
+            [totalPages]="totalPages()"
+            [total]="totalItems()"
+            [limit]="filters().limit"
+            (pageChange)="onPageChange($event)"
+          />
+        </div>
+      </div>
+    }
+  </app-card>
+</div>

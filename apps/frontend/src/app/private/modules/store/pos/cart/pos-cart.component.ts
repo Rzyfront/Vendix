@@ -290,6 +290,40 @@ import {
                   <span>Envío</span>
                 </button>
               </div>
+              @if (restaurantMode()) {
+                <div class="cart-actions-row cart-restaurant-row">
+                  <button
+                    type="button"
+                    class="cart-btn restaurant-btn open-table-btn"
+                    (click)="openTable.emit()"
+                    [disabled]="hasOpenTableSession()"
+                    title="Abrir mesa"
+                  >
+                    <app-icon name="layout-grid" [size]="16"></app-icon>
+                    <span>Abrir mesa</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="cart-btn restaurant-btn fire-btn"
+                    (click)="fireKitchen.emit()"
+                    [disabled]="!hasOpenTableSession() || isEmpty()"
+                    title="Enviar a cocina"
+                  >
+                    <app-icon name="flame" [size]="16"></app-icon>
+                    <span>Enviar a cocina</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="cart-btn restaurant-btn split-btn"
+                    (click)="splitBill.emit()"
+                    [disabled]="!hasOpenTableSession()"
+                    title="Dividir cuenta"
+                  >
+                    <app-icon name="users" [size]="16"></app-icon>
+                    <span>Dividir cuenta</span>
+                  </button>
+                </div>
+              }
               <button
                 type="button"
                 class="cart-btn checkout-btn"
@@ -734,6 +768,37 @@ import {
         border-color: var(--color-text-secondary);
       }
 
+      .cart-restaurant-row {
+        margin-top: 2px;
+      }
+
+      .restaurant-btn {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-text-primary);
+        padding: 10px 6px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .restaurant-btn:hover:not(:disabled) {
+        background: var(--color-primary);
+        color: white;
+        border-color: var(--color-primary);
+      }
+
+      .fire-btn {
+        background: rgba(249, 115, 22, 0.08);
+        border-color: rgba(249, 115, 22, 0.35);
+        color: rgb(194, 65, 12);
+      }
+
+      .fire-btn:hover:not(:disabled) {
+        background: rgb(249, 115, 22);
+        color: white;
+        border-color: rgb(249, 115, 22);
+      }
+
       .shipping-btn {
         background: var(--color-primary);
         color: white;
@@ -827,11 +892,16 @@ private cartService = inject(PosCartService);
   readonly isEditMode = input<boolean>(false);
   readonly isQuotationMode = input<boolean>(false);
   readonly isLayawayMode = input<boolean>(false);
+  readonly restaurantMode = input<boolean>(false);
+  readonly hasOpenTableSession = input<boolean>(false);
   readonly saveDraft = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
+  readonly openTable = output<void>();
+  readonly fireKitchen = output<void>();
+  readonly splitBill = output<void>();
 
   constructor() {
     this.taxesService

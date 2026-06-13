@@ -1,0 +1,67 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    title="Nueva Producción"
+    subtitle="Crear una orden de producción (sub-receta en lote)"
+    icon="flame"
+    variant="glass"
+  />
+
+  <div class="px-2 py-3 md:p-4">
+    <app-card title="Datos de la producción" subtitle="Define el producto preparado, la receta y la cantidad planeada">
+      <form
+        [formGroup]="form"
+        (ngSubmit)="onSubmit()"
+        class="grid grid-cols-1 md:grid-cols-2 gap-4"
+      >
+        <app-input
+          type="number"
+          label="ID Producto preparado"
+          placeholder="Ej. 50"
+          helperText="ID del producto con is_batch_produced=true"
+          [formControl]="productIdControl"
+        />
+
+        <app-input
+          type="number"
+          label="ID Receta"
+          placeholder="Ej. 7"
+          helperText="ID de la receta asociada al producto"
+          [formControl]="recipeIdControl"
+        />
+
+        <app-input
+          type="number"
+          label="Cantidad planeada"
+          placeholder="Ej. 10"
+          helperText="En la unidad de rendimiento de la receta (yield_unit)"
+          [formControl]="plannedQtyControl"
+        />
+
+        <app-textarea
+          label="Notas (opcional)"
+          placeholder="Notas internas de la producción"
+          [formControl]="notesControl"
+          [rows]="3"
+        />
+
+        <div class="md:col-span-2 flex flex-col-reverse md:flex-row md:justify-end gap-2 pt-2">
+          <app-button
+            variant="outline"
+            label="Cancelar"
+            icon="x"
+            (click)="onCancel()"
+            [disabled]="isSubmitting()"
+          />
+          <app-button
+            variant="primary"
+            type="submit"
+            label="Crear producción"
+            icon="check"
+            [disabled]="isSubmitting() || form.invalid"
+            [loading]="isSubmitting()"
+          />
+        </div>
+      </form>
+    </app-card>
+  </div>
+</div>

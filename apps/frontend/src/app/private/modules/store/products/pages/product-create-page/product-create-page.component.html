@@ -816,6 +816,35 @@
             >
             </app-setting-toggle>
 
+            <!-- Restaurant Suite toggles (Fase B) -->
+            <app-setting-toggle
+              formControlName="is_sellable"
+              label="Vendible"
+              description="Visible y vendible en carta, POS y ecommerce"
+            >
+            </app-setting-toggle>
+
+            <app-setting-toggle
+              formControlName="is_ingredient"
+              label="Es insumo"
+              description="Apto para usarse como componente de recetas (BOM)"
+            >
+            </app-setting-toggle>
+
+            <app-setting-toggle
+              formControlName="is_combo"
+              label="Es combo / menú fijo"
+              description="Plato que agrupa varios productos a precio fijo"
+            >
+            </app-setting-toggle>
+
+            <app-setting-toggle
+              formControlName="is_batch_produced"
+              label="Producido en lote"
+              description="Sub-receta que se produce y mantiene stock propio"
+            >
+            </app-setting-toggle>
+
             <!-- Row 2: Variantes + Inventario -->
             <div>
               <app-setting-toggle

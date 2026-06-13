@@ -72,6 +72,20 @@ export class StorePrismaService extends BasePrismaService {
     'subscription_payments',
     'subscription_events',
     'price_tiers',
+    // ===== Restaurant Suite Foundation (Fase A) =====
+    // All 11 new models carry store_id and follow the same direct-store
+    // scoping pattern as the rest of the array.
+    'recipes',
+    'recipe_items',
+    'production_orders',
+    'tables',
+    'table_sessions',
+    'kitchen_tickets',
+    'kitchen_ticket_items',
+    'menus',
+    'menu_sections',
+    'menu_section_items',
+    'menu_availability_windows',
   ];
 
   private readonly fiscal_entity_scoped_models = [
@@ -1523,6 +1537,51 @@ export class StorePrismaService extends BasePrismaService {
 
   get product_price_tier_assignments() {
     return this.scoped_client.product_price_tier_assignments;
+  }
+
+  // ===== Restaurant Suite Foundation (Fase A) =====
+  get recipes() {
+    return this.scoped_client.recipes;
+  }
+
+  get recipe_items() {
+    return this.scoped_client.recipe_items;
+  }
+
+  get production_orders() {
+    return this.scoped_client.production_orders;
+  }
+
+  get tables() {
+    return this.scoped_client.tables;
+  }
+
+  get table_sessions() {
+    return this.scoped_client.table_sessions;
+  }
+
+  get kitchen_tickets() {
+    return this.scoped_client.kitchen_tickets;
+  }
+
+  get kitchen_ticket_items() {
+    return this.scoped_client.kitchen_ticket_items;
+  }
+
+  get menus() {
+    return this.scoped_client.menus;
+  }
+
+  get menu_sections() {
+    return this.scoped_client.menu_sections;
+  }
+
+  get menu_section_items() {
+    return this.scoped_client.menu_section_items;
+  }
+
+  get menu_availability_windows() {
+    return this.scoped_client.menu_availability_windows;
   }
 
   // Global tables (no store scoping)

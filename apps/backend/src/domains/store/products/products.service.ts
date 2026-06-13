@@ -723,6 +723,7 @@ export class ProductsService {
       track_inventory,
       product_type,
       requires_booking,
+      is_sellable,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -759,6 +760,7 @@ export class ProductsService {
       ...(track_inventory !== undefined && { track_inventory }),
       ...(product_type && { product_type }),
       ...(requires_booking !== undefined && { requires_booking }),
+      ...(is_sellable !== undefined && { is_sellable }),
     };
 
     // Resolve POS stock scope so we can constrain the stock_levels includes at

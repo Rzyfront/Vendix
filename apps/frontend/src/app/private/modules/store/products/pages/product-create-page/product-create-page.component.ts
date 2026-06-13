@@ -991,6 +991,11 @@ export class ProductCreatePageComponent {
         preparation_time_minutes: [null as number | null],
         // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
         has_multiple_price_tiers: [false],
+        // ===== Restaurant Suite toggles (Fase B) =====
+        is_sellable: [true],
+        is_ingredient: [false],
+        is_combo: [false],
+        is_batch_produced: [false],
       },
       {
         validators: [saleLessThanBaseValidator()],
@@ -1153,6 +1158,11 @@ export class ProductCreatePageComponent {
       preparation_time_minutes: product.preparation_time_minutes || null,
       // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
       has_multiple_price_tiers: !!product.has_multiple_price_tiers,
+      // Restaurant Suite toggles (Fase B)
+      is_sellable: product.is_sellable !== false,
+      is_ingredient: !!product.is_ingredient,
+      is_combo: !!product.is_combo,
+      is_batch_produced: !!product.is_batch_produced,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -2503,6 +2513,11 @@ export class ProductCreatePageComponent {
           ? this.enabledPriceTierIdsFromRows()
           : (this.product?.enabled_price_tier_ids ?? [])
         : [],
+      // Restaurant Suite toggles (Fase B)
+      is_sellable: formValue.is_sellable !== false,
+      is_ingredient: !!formValue.is_ingredient,
+      is_combo: !!formValue.is_combo,
+      is_batch_produced: !!formValue.is_batch_produced,
     };
 
     // Add Variants - ALWAYS send the array so the backend can handle the toggle

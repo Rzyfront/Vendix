@@ -1,0 +1,58 @@
+<div class="grid gap-3" [style.grid-template-columns]="'repeat(auto-fill, minmax(140px, 1fr))'">
+  @for (cell of groupedTables(); track trackByTableId($index, cell)) {
+    <button
+      type="button"
+      class="table-cell"
+      [class.is-occupied]="cell.isOccupied"
+      [class.is-available]="cell.displayStatus === 'available'"
+      [class.is-reserved]="cell.displayStatus === 'reserved'"
+      [class.is-cleaning]="cell.displayStatus === 'cleaning'"
+      [style.--cell-color]="cell.statusColor"
+      (click)="onTableClick(cell.table)"
+      [attr.aria-label]="
+        'Mesa ' +
+        cell.table.name +
+        ' - ' +
+        cell.statusLabel
+      "
+    >
+      <div class="cell-header">
+        <span class="table-name">{{ cell.table.name }}</span>
+        @if (cell.table.zone) {
+          <span class="zone">{{ cell.table.zone }}</span>
+        }
+      </div>
+
+      <div class="cell-body">
+        @if (cell.table.capacity) {
+          <span class="capacity">
+            <app-icon name="users" [size]="14"></app-icon>
+            {{ cell.table.capacity }}
+          </span>
+        }
+        @if (cell.guestCount != null && cell.isOccupied) {
+          <span class="guests">
+            <app-icon name="user" [size]="14"></app-icon>
+            {{ cell.guestCount }}
+          </span>
+        }
+      </div>
+
+      <div class="cell-footer">
+        <span class="status-pill" [style.background-color]="cell.statusColor">
+          {{ cell.statusLabel }}
+        </span>
+        @if (cell.isOccupied && cell.table.active_session) {
+          <span class="session-id">#{{ cell.table.active_session.id }}</span>
+        }
+      </div>
+    </button>
+  }
+</div>
+
+@if (groupedTables().length === 0) {
+  <div class="empty-state">
+    <app-icon name="table" [size]="32"></app-icon>
+    <p>No hay mesas configuradas todavía.</p>
+  </div>
+}

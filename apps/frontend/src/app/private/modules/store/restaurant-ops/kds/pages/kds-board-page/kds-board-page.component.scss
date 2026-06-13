@@ -1,0 +1,108 @@
+:host {
+  display: block;
+  min-height: 100%;
+}
+
+.kds-board {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0 0 1rem;
+  min-height: 100%;
+}
+
+.kds-board__error {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin: 0 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #b91c1c;
+  font-size: 0.8rem;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.kds-board__reconnect {
+  margin-left: auto;
+  font-weight: 600;
+  color: #7f1d1d;
+  font-variant-numeric: tabular-nums;
+}
+
+.kds-board__columns {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.75rem;
+  padding: 0 0.5rem;
+}
+
+@media (min-width: 768px) {
+  .kds-board__columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1280px) {
+  .kds-board__columns {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.kds-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  border-radius: 12px;
+  padding: 0.5rem;
+  min-height: 200px;
+}
+
+[data-column='pending'] {
+  border-top: 3px solid rgba(107, 114, 128, 0.5);
+}
+[data-column='in_preparation'] {
+  border-top: 3px solid rgba(251, 146, 60, 0.7);
+}
+[data-column='ready'] {
+  border-top: 3px solid rgba(16, 185, 129, 0.7);
+}
+[data-column='delivered'] {
+  border-top: 3px solid rgba(59, 130, 246, 0.6);
+  opacity: 0.85;
+}
+
+.kds-column__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 0.25rem;
+}
+
+.kds-column__title {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary, #4b5563);
+}
+
+.kds-column__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.kds-column__empty {
+  margin: 0;
+  padding: 1rem 0.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--color-text-tertiary, #9ca3af);
+  font-style: italic;
+}

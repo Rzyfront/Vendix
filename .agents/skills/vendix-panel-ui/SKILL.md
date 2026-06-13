@@ -210,16 +210,50 @@ This order matters: industry caps what the store card can toggle, the store card
 caps what the user can toggle, the user choice is the final on/off. Existing layers
 (store_type / flows / scopes / subscription) layer on top and remain unchanged.
 
+## Render Único — `app-panel-ui-modules-editor`
+
+**Single render source.** The module-tree UI (parent→children grouping, "Herramientas
+Directas", parent/child cascade, gating display, search, "Nuevo" badge) lives in ONE
+shared presentational component — never re-implement the tree in a consumer:
+
+`apps/frontend/src/app/shared/components/panel-ui-modules-editor/panel-ui-modules-editor.component.ts`
+
+It is **storage-agnostic**: receives a resolved `Record<string, boolean>` for a single
+`app_type` and emits the updated map. The consumer owns persistence + save semantics.
+Adding a module to `APP_MODULES` therefore appears in **every** surface automatically.
+
+### Contract
+
+| Member | Meaning |
+| --- | --- |
+| `appType` (input, required) | Which `APP_MODULES[appType]` catalog to render |
+| `value` (input, required) | Resolved `Record<string,boolean>` for that `app_type`; absent / `true` = allowed |
+| `hiddenByIndustry` / `hiddenByStore` (inputs) | Gated keys → rendered disabled + reason badge ("Industria"/"Tienda") |
+| `newKeys` (input) | Keys that show the "Nuevo" badge (per-user discovery) |
+| `searchable`, `parentSync`, `readOnly` (inputs) | UI toggles |
+| `valueChange` (output) | Full `Record<string,boolean>` for the `app_type`, **omitting gated keys** so the consumer merges straight into its store |
+
+### Consumers (all four use the shared component)
+
+| Surface | Storage the consumer owns | Save semantics |
+| --- | --- | --- |
+| `general-settings-form` (store, `/admin/settings/general`) | mirror map from `panelUi` input | emits `{ STORE_ADMIN: { key:false } }` (only OFF keys) |
+| `settings-modal` (user's own config) | nested `FormGroup` `panel_ui.{appType}.{key}` | `buildPanelUiDiff` excludes gated, preserves stored value |
+| `store-user-edit-modal` (admin edits a store user) | signal `localPanelUI[appType][key]` | `buildPanelUIDiff` from `originalPanelUI` snapshot, excludes gated |
+| `user-config-modal` (org user) | `localPanelUi` map per `app_type` | full nested map; catalog tabs use the editor, `STORE_ECOMMERCE`/`VENDIX_LANDING` stay on "Avanzado (JSON)" (no catalog yet) |
+
 ## Gating of Per-User Config Surfaces
 
 The two per-user panel-UI config UIs must **gate** their toggles by the **industry ∩
 store panel UI** ceiling, so a user toggle can never enable a module above the
-ceiling.
+ceiling. Both render through `app-panel-ui-modules-editor` (see above); each computes
+the gating arrays from the single sources and passes them in — the component only
+displays the disabled state + badge and omits gated keys on emit.
 
 | Surface | File | App type(s) gated |
 | --- | --- | --- |
-| User's own config ("Módulos del Panel") | `apps/frontend/src/app/shared/components/settings-modal/settings-modal.component.ts` (~459-524) | `STORE_ADMIN` (industries are store-scoped; `ORG_ADMIN` is untouched) |
-| Admin edits another user (pestaña "Modulos") | `apps/frontend/src/app/private/modules/store/settings/users/components/store-user-edit-modal.component.ts` (~703-733) | `STORE_ADMIN` |
+| User's own config ("Módulos del Panel") | `apps/frontend/src/app/shared/components/settings-modal/settings-modal.component.ts` | `STORE_ADMIN` (industries are store-scoped; `ORG_ADMIN` is untouched) |
+| Admin edits another user (pestaña "Modulos") | `apps/frontend/src/app/private/modules/store/settings/users/components/store-user-edit-modal.component.ts` | `STORE_ADMIN` |
 
 ### Gating rule (mandatory)
 

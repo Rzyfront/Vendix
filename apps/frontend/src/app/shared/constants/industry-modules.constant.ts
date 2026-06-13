@@ -14,17 +14,17 @@ export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
  *   TS enum values that cross the wire — NOT the UPPER_CASE keys).
  * - Value: module keys to hide for that industry.
  *
- * The arrays are intentionally EMPTY in this plan (foundation only).
- * Follow-up plans (restaurant Operations / recipes, KDS, manufacturing
- * workflows) will populate this map. Until then, every value is `[]` and
- * `getModulesHiddenByIndustries` returns `[]` for any combination of
- * industries — the sidebar is byte-identical to today.
+ * Phase I (Restaurant Suite): the `restaurant_ops` parent module is hidden for
+ * every industry EXCEPT `restaurant`. Retail, manufacturing and service stores
+ * never see it; the OR-semantics in `getModulesHiddenByIndustries` keeps a
+ * multi-industry store (e.g. hotel = `service` + `restaurant`) visible because
+ * the module is NOT hidden in the `restaurant` half of the intersection.
  */
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
-  retail: [],
+  retail: ['restaurant_ops'],
   restaurant: [],
-  manufacturing: [],
-  service: [],
+  manufacturing: ['restaurant_ops'],
+  service: ['restaurant_ops'],
 };
 
 /**

@@ -160,22 +160,25 @@ model users {
   consultation_notes_created     customer_consultation_notes[] @relation("consultation_notes_created_by")
 
   // Operating scope audit trail (Phase 4 wizard)
-  operating_scope_audit_changes  operating_scope_audit_log[] @relation("operating_scope_audit_changed_by")
-  fiscal_scope_audit_changes     fiscal_scope_audit_log[]    @relation("fiscal_scope_audit_changed_by")
-  fiscal_status_audit_changes    fiscal_status_audit_log[]   @relation("fiscal_status_audit_changed_by")
-  fiscal_obligations_assigned    fiscal_obligations[]        @relation("fiscal_obligations_assigned_to")
-  fiscal_obligations_approved    fiscal_obligations[]        @relation("fiscal_obligations_approved_by")
-  fiscal_obligations_created     fiscal_obligations[]        @relation("fiscal_obligations_created_by")
-  vendor_support_documents_created vendor_support_documents[] @relation("vendor_doc_created_by")
-  tax_declarations_approved      tax_declaration_drafts[]    @relation("tax_declarations_approved_by")
-  tax_declarations_created       tax_declaration_drafts[]    @relation("tax_declarations_created_by")
-  fiscal_close_sessions_started  fiscal_close_sessions[]     @relation("fiscal_close_sessions_started_by")
-  fiscal_close_sessions_approved fiscal_close_sessions[]     @relation("fiscal_close_sessions_approved_by")
-  fiscal_close_sessions_closed   fiscal_close_sessions[]     @relation("fiscal_close_sessions_closed_by")
-  fiscal_close_checks_resolved   fiscal_close_checks[]       @relation("fiscal_close_checks_resolved_by")
-  fiscal_rule_sets_created       fiscal_rule_sets[]          @relation("fiscal_rule_sets_created_by")
-  fiscal_operation_events_actor  fiscal_operation_events[]   @relation("fiscal_operation_events_actor")
-  customer_withholdings          withholding_calculations[]  @relation("customer_withholdings")
+  operating_scope_audit_changes    operating_scope_audit_log[] @relation("operating_scope_audit_changed_by")
+  fiscal_scope_audit_changes       fiscal_scope_audit_log[]    @relation("fiscal_scope_audit_changed_by")
+  fiscal_status_audit_changes      fiscal_status_audit_log[]   @relation("fiscal_status_audit_changed_by")
+  fiscal_obligations_assigned      fiscal_obligations[]        @relation("fiscal_obligations_assigned_to")
+  fiscal_obligations_approved      fiscal_obligations[]        @relation("fiscal_obligations_approved_by")
+  fiscal_obligations_created       fiscal_obligations[]        @relation("fiscal_obligations_created_by")
+  vendor_support_documents_created vendor_support_documents[]  @relation("vendor_doc_created_by")
+  tax_declarations_approved        tax_declaration_drafts[]    @relation("tax_declarations_approved_by")
+  tax_declarations_created         tax_declaration_drafts[]    @relation("tax_declarations_created_by")
+  fiscal_close_sessions_started    fiscal_close_sessions[]     @relation("fiscal_close_sessions_started_by")
+  fiscal_close_sessions_approved   fiscal_close_sessions[]     @relation("fiscal_close_sessions_approved_by")
+  fiscal_close_sessions_closed     fiscal_close_sessions[]     @relation("fiscal_close_sessions_closed_by")
+  fiscal_close_checks_resolved     fiscal_close_checks[]       @relation("fiscal_close_checks_resolved_by")
+  fiscal_rule_sets_created         fiscal_rule_sets[]          @relation("fiscal_rule_sets_created_by")
+  fiscal_operation_events_actor    fiscal_operation_events[]   @relation("fiscal_operation_events_actor")
+  customer_withholdings            withholding_calculations[]  @relation("customer_withholdings")
+
+  // Restaurant Suite Foundation (Fase A) — back-relations
+  table_sessions_opened table_sessions[] @relation("table_sessions_opened_by")
 
   @@index([email_verified])
   @@index([state])
@@ -754,6 +757,16 @@ model stores {
   // Multi-tarifa (Phase 1: price tiers)
   price_tiers price_tiers[]
 
+  // Restaurant Suite Foundation (Fase A) — back-relations
+  recipes                   recipes[]
+  production_orders         production_orders[]
+  tables                    tables[]
+  table_sessions            table_sessions[]
+  kitchen_tickets           kitchen_tickets[]
+  menus                     menus[]
+  menu_sections             menu_sections[]
+  menu_availability_windows menu_availability_windows[]
+
   @@unique([organization_id, slug])
   @@index([onboarding])
 }
@@ -998,8 +1011,8 @@ model order_item_taxes {
   tax_type      tax_type_enum?
   is_compound   Boolean?
   created_at    DateTime?      @default(now()) @db.Timestamp(6)
-  order_items   order_items @relation(fields: [order_item_id], references: [id], onUpdate: NoAction)
-  tax_rates     tax_rates?  @relation(fields: [tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order_items   order_items    @relation(fields: [order_item_id], references: [id], onUpdate: NoAction)
+  tax_rates     tax_rates?     @relation(fields: [tax_rate_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 }
 
 model order_items {
@@ -1037,6 +1050,12 @@ model order_items {
   applied_price_tier_id            Int?
   applied_price_tier_name_snapshot String?                  @db.VarChar(255)
   stock_units_consumed             Int?
+  // Restaurant Suite Fase D — guard anti-doble-descuento.
+  // Marcado por KitchenFireService al enviar el item a cocina (fire-to-kitchen).
+  // PaymentsService.updateInventoryFromOrder lo salta si está true para que
+  // el descuento NO se vuelva a aplicar al pagar. Default false → no afecta
+  // el flujo retail existente.
+  inventory_consumed_at_fire       Boolean                  @default(false)
   created_at                       DateTime?                @default(now()) @db.Timestamp(6)
   updated_at                       DateTime?                @default(now()) @db.Timestamp(6)
   inventory_transactions           inventory_transactions[]
@@ -1046,6 +1065,9 @@ model order_items {
   product_variants                 product_variants?        @relation(fields: [product_variant_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   applied_price_tier               price_tiers?             @relation("order_items_applied_price_tier", fields: [applied_price_tier_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   refund_items                     refund_items[]
+
+  // Restaurant Suite Foundation (Fase A) — back-relation
+  kitchen_ticket_items kitchen_ticket_items[]
 }
 
 model orders {
@@ -1110,6 +1132,10 @@ model orders {
 
   // Invoice Data Requests
   invoice_data_requests invoice_data_requests[]
+
+  // Restaurant Suite Foundation (Fase A) — back-relations
+  table_sessions  table_sessions[]
+  kitchen_tickets kitchen_tickets[]
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -1291,92 +1317,105 @@ model product_variants {
 }
 
 model products {
-  id                              Int                              @id @default(autoincrement())
-  store_id                        Int
-  brand_id                        Int?
-  name                            String                           @db.VarChar(255)
-  slug                            String                           @db.VarChar(255)
-  description                     String?
-  base_price                      Decimal                          @db.Decimal(12, 2)
-  cost_price                      Decimal?                         @db.Decimal(12, 2)
-  profit_margin                   Decimal?                         @db.Decimal(5, 2)
-  sku                             String?                          @db.VarChar(100)
-  stock_quantity                  Int?                             @default(0)
-  state                           product_state_enum               @default(inactive)
-  pricing_type                    pricing_type_enum                @default(unit)
-  product_type                    product_type_enum                @default(physical)
-  service_duration_minutes        Int?
-  service_modality                service_modality_enum?
-  service_pricing_type            service_pricing_type_enum?
-  requires_booking                Boolean                          @default(false)
-  booking_mode                    booking_mode_enum                @default(provider_required)
-  buffer_minutes                  Int?                             @default(0)
-  is_recurring                    Boolean                          @default(false)
-  service_instructions            String?                          @db.Text
-  preparation_time_minutes        Int?
-  is_consultation                 Boolean                          @default(false)
-  send_preconsultation            Boolean                          @default(false)
-  consultation_template_id        Int?
-  consultation_template           data_collection_templates?       @relation("product_consultation_template", fields: [consultation_template_id], references: [id], onDelete: SetNull)
-  preconsultation_template_id     Int?
-  preconsultation_template        data_collection_templates?       @relation("product_preconsultation_template", fields: [preconsultation_template_id], references: [id], onDelete: SetNull)
-  available_for_ecommerce         Boolean                          @default(false)
-  is_featured                     Boolean                          @default(false)
-  online_purchase_url             String?                          @db.Text
-  online_purchase_qr_code         String?                          @db.Text
-  online_purchase_domain_id       Int?
-  online_purchase_generated_at    DateTime?                        @db.Timestamp(6)
-  allow_pos_price_override        Boolean                          @default(false)
-  is_on_sale                      Boolean                          @default(false)
-  sale_price                      Decimal?                         @db.Decimal(12, 2)
-  weight                          Decimal?                         @db.Decimal(12, 3)
-  dimensions                      Json?
-  track_inventory                 Boolean                          @default(true)
-  min_stock_level                 Int?                             @default(0)
-  max_stock_level                 Int?                             @default(0)
-  reorder_point                   Int?                             @default(0)
-  reorder_quantity                Int?                             @default(0)
-  requires_serial_numbers         Boolean                          @default(false)
-  requires_batch_tracking         Boolean                          @default(false)
+  id                             Int                              @id @default(autoincrement())
+  store_id                       Int
+  brand_id                       Int?
+  name                           String                           @db.VarChar(255)
+  slug                           String                           @db.VarChar(255)
+  description                    String?
+  base_price                     Decimal                          @db.Decimal(12, 2)
+  cost_price                     Decimal?                         @db.Decimal(12, 2)
+  profit_margin                  Decimal?                         @db.Decimal(5, 2)
+  sku                            String?                          @db.VarChar(100)
+  stock_quantity                 Int?                             @default(0)
+  state                          product_state_enum               @default(inactive)
+  pricing_type                   pricing_type_enum                @default(unit)
+  product_type                   product_type_enum                @default(physical)
+  service_duration_minutes       Int?
+  service_modality               service_modality_enum?
+  service_pricing_type           service_pricing_type_enum?
+  requires_booking               Boolean                          @default(false)
+  booking_mode                   booking_mode_enum                @default(provider_required)
+  buffer_minutes                 Int?                             @default(0)
+  is_recurring                   Boolean                          @default(false)
+  service_instructions           String?                          @db.Text
+  preparation_time_minutes       Int?
+  is_consultation                Boolean                          @default(false)
+  send_preconsultation           Boolean                          @default(false)
+  consultation_template_id       Int?
+  consultation_template          data_collection_templates?       @relation("product_consultation_template", fields: [consultation_template_id], references: [id], onDelete: SetNull)
+  preconsultation_template_id    Int?
+  preconsultation_template       data_collection_templates?       @relation("product_preconsultation_template", fields: [preconsultation_template_id], references: [id], onDelete: SetNull)
+  available_for_ecommerce        Boolean                          @default(false)
+  is_featured                    Boolean                          @default(false)
+  online_purchase_url            String?                          @db.Text
+  online_purchase_qr_code        String?                          @db.Text
+  online_purchase_domain_id      Int?
+  online_purchase_generated_at   DateTime?                        @db.Timestamp(6)
+  allow_pos_price_override       Boolean                          @default(false)
+  is_on_sale                     Boolean                          @default(false)
+  sale_price                     Decimal?                         @db.Decimal(12, 2)
+  weight                         Decimal?                         @db.Decimal(12, 3)
+  dimensions                     Json?
+  track_inventory                Boolean                          @default(true)
+  min_stock_level                Int?                             @default(0)
+  max_stock_level                Int?                             @default(0)
+  reorder_point                  Int?                             @default(0)
+  reorder_quantity               Int?                             @default(0)
+  requires_serial_numbers        Boolean                          @default(false)
+  requires_batch_tracking        Boolean                          @default(false)
+  // ===== Restaurant Suite Foundation (Fase A) =====
+  // These flags are ADDITIVE. Existing products keep default behavior:
+  // is_sellable=true (visible in catalog), is_ingredient=false (not a raw
+  // material), is_combo=false, is_batch_produced=false. Retail flow is
+  // unaffected. stock_unit / purchase_unit / purchase_to_stock_factor are
+  // nullable to preserve backward compatibility for non-restaurant stores.
+  is_sellable                    Boolean                          @default(true)
+  is_ingredient                  Boolean                          @default(false)
+  is_combo                       Boolean                          @default(false)
+  is_batch_produced              Boolean                          @default(false)
+  stock_unit                     String?                          @db.VarChar(20)
+  purchase_unit                  String?                          @db.VarChar(20)
+  purchase_to_stock_factor       Int?
   // Multi-tarifa (Phase 1: price tiers).
   // Packaging quantity (units-per-package) now lives on the price tier
   // (price_tiers.units_per_package) with an optional per-product override
   // (product_price_tier_overrides.override_units_per_package). The product
   // no longer owns packaging fields.
-  has_multiple_price_tiers        Boolean                          @default(false)
-  created_at                      DateTime?                        @default(now()) @db.Timestamp(6)
-  updated_at                      DateTime?                        @default(now()) @db.Timestamp(6)
-  inventory_adjustments           inventory_adjustments[]
-  inventory_batches               inventory_batches[]
-  inventory_movements             inventory_movements[]
-  inventory_serial_numbers        inventory_serial_numbers[]
-  inventory_transactions          inventory_transactions[]
-  order_items                     order_items[]
-  product_categories              product_categories[]
-  product_images                  product_images[]
-  product_tax_assignments         product_tax_assignments[]
-  product_variants                product_variants[]
-  brands                          brands?                          @relation(fields: [brand_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  online_purchase_domain          domain_settings?                 @relation("product_online_purchase_domain", fields: [online_purchase_domain_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  stores                          stores                           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  purchase_order_items            purchase_order_items[]
-  return_order_items              return_order_items[]
-  reviews                         reviews[]
-  sales_order_items               sales_order_items[]
-  stock_levels                    stock_levels[]
-  stock_reservations              stock_reservations[]
-  stock_transfer_items            stock_transfer_items[]
-  supplier_products               supplier_products[]
-  cart_items                      cart_items[]
-  wishlist_items                  wishlist_items[]
-  invoice_items                   invoice_items[]
-  quotation_items                 quotation_items[]
-  promotion_products              promotion_products[]
-  coupon_products                 coupon_products[]
-  marketing_ad_creative_products  marketing_ad_creative_products[]
-  inventory_cost_layers           inventory_cost_layers[]
-  inventory_valuation_snapshots   inventory_valuation_snapshots[]
-  layaway_items                   layaway_items[]
+  has_multiple_price_tiers       Boolean                          @default(false)
+  created_at                     DateTime?                        @default(now()) @db.Timestamp(6)
+  updated_at                     DateTime?                        @default(now()) @db.Timestamp(6)
+  inventory_adjustments          inventory_adjustments[]
+  inventory_batches              inventory_batches[]
+  inventory_movements            inventory_movements[]
+  inventory_serial_numbers       inventory_serial_numbers[]
+  inventory_transactions         inventory_transactions[]
+  order_items                    order_items[]
+  product_categories             product_categories[]
+  product_images                 product_images[]
+  product_tax_assignments        product_tax_assignments[]
+  product_variants               product_variants[]
+  brands                         brands?                          @relation(fields: [brand_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  online_purchase_domain         domain_settings?                 @relation("product_online_purchase_domain", fields: [online_purchase_domain_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  stores                         stores                           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  purchase_order_items           purchase_order_items[]
+  return_order_items             return_order_items[]
+  reviews                        reviews[]
+  sales_order_items              sales_order_items[]
+  stock_levels                   stock_levels[]
+  stock_reservations             stock_reservations[]
+  stock_transfer_items           stock_transfer_items[]
+  supplier_products              supplier_products[]
+  cart_items                     cart_items[]
+  wishlist_items                 wishlist_items[]
+  invoice_items                  invoice_items[]
+  quotation_items                quotation_items[]
+  promotion_products             promotion_products[]
+  coupon_products                coupon_products[]
+  marketing_ad_creative_products marketing_ad_creative_products[]
+  inventory_cost_layers          inventory_cost_layers[]
+  inventory_valuation_snapshots  inventory_valuation_snapshots[]
+  layaway_items                  layaway_items[]
 
   // Bookings
   bookings          bookings[]
@@ -1391,6 +1430,13 @@ model products {
   // Multi-tarifa overrides (Phase 1: price tiers)
   price_tier_overrides           product_price_tier_overrides[]
   product_price_tier_assignments product_price_tier_assignments[]
+
+  // Restaurant Suite Foundation (Fase A) — back-relations
+  recipe                    recipes?
+  recipe_items_as_component recipe_items[]         @relation("recipe_items_component_product")
+  production_orders         production_orders[]
+  menu_section_items        menu_section_items[]
+  kitchen_ticket_items      kitchen_ticket_items[]
 
   @@unique([store_id, slug])
   @@unique([store_id, sku])
@@ -1440,19 +1486,19 @@ model price_tiers {
 }
 
 model product_price_tier_overrides {
-  id             Int       @id @default(autoincrement())
-  product_id     Int
-  variant_id     Int?
-  price_tier_id  Int
+  id                         Int       @id @default(autoincrement())
+  product_id                 Int
+  variant_id                 Int?
+  price_tier_id              Int
   // Explicit override price of the WHOLE PACKAGE. Optional. When present it
   // wins over the tier rule (price_tiers.discount_percentage). When absent the
   // package price is computed as base_unit_price * packSize * (1 - discount/100).
-  override_price Decimal?  @db.Decimal(12, 2)
+  override_price             Decimal?  @db.Decimal(12, 2)
   // Per-product override of the tier packaging quantity. Optional. Wins over
   // price_tiers.units_per_package in the packSize cascade.
   override_units_per_package Int?
-  created_at     DateTime? @default(now()) @db.Timestamp(6)
-  updated_at     DateTime? @default(now()) @db.Timestamp(6)
+  created_at                 DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime? @default(now()) @db.Timestamp(6)
 
   product    products          @relation(fields: [product_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   variant    product_variants? @relation(fields: [variant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -2787,6 +2833,10 @@ enum pricing_type_enum {
 enum product_type_enum {
   physical
   service
+  // Prepared food / beverage produced in-house (restaurant suite).
+  // Distinguished from physical (sold as-is) and service (bookable time).
+  // Default behavior is unchanged: existing rows keep their current value.
+  prepared
 }
 
 enum service_modality_enum {
@@ -3092,6 +3142,10 @@ enum movement_type_enum {
   return
   damage
   expiration
+  // Restaurant suite: ingredient components consumed by a production run
+  // (recipe explosion) and finished product created by a production order.
+  production
+  consumption
 }
 
 enum source_order_type_enum {
@@ -4081,22 +4135,22 @@ model invoices {
 }
 
 model invoice_items {
-  id                 Int       @id @default(autoincrement())
-  invoice_id         Int
-  product_id         Int?
-  product_variant_id Int?
-  description        String    @db.VarChar(500)
-  quantity           Decimal   @db.Decimal(12, 4)
-  unit_price         Decimal   @db.Decimal(12, 2)
-  discount_amount    Decimal   @default(0) @db.Decimal(12, 2)
-  tax_amount         Decimal   @default(0) @db.Decimal(12, 2)
-  total_amount       Decimal   @db.Decimal(12, 2)
+  id                      Int       @id @default(autoincrement())
+  invoice_id              Int
+  product_id              Int?
+  product_variant_id      Int?
+  description             String    @db.VarChar(500)
+  quantity                Decimal   @db.Decimal(12, 4)
+  unit_price              Decimal   @db.Decimal(12, 2)
+  discount_amount         Decimal   @default(0) @db.Decimal(12, 2)
+  tax_amount              Decimal   @default(0) @db.Decimal(12, 2)
+  total_amount            Decimal   @db.Decimal(12, 2)
   // Snapshot of the price tier applied on the source order line (human label),
   // and the real stock units consumed when packaging ("empaque por tarifa")
   // expands the sold quantity. Propagated from order_items at invoice build.
-  applied_price_tier_name String?  @db.VarChar(255)
+  applied_price_tier_name String?   @db.VarChar(255)
   stock_units_consumed    Int?
-  created_at         DateTime? @default(now()) @db.Timestamp(6)
+  created_at              DateTime? @default(now()) @db.Timestamp(6)
 
   invoice         invoices          @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
   product         products?         @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -4698,12 +4752,12 @@ model fiscal_evidences {
   created_by_user_id     Int?
   created_at             DateTime?                 @default(now()) @db.Timestamp(6)
 
-  organization        organizations            @relation(fields: [organization_id], references: [id], onDelete: Restrict)
-  store               stores?                  @relation(fields: [store_id], references: [id], onDelete: Restrict)
-  accounting_entity   accounting_entities      @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
-  fiscal_transmission fiscal_transmissions?    @relation(fields: [fiscal_transmission_id], references: [id], onDelete: Restrict)
-  fiscal_obligations  fiscal_obligations[]     @relation("fiscal_obligation_evidence")
-  tax_declarations    tax_declaration_drafts[] @relation("tax_declaration_evidence")
+  organization        organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store               stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  accounting_entity   accounting_entities       @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  fiscal_transmission fiscal_transmissions?     @relation(fields: [fiscal_transmission_id], references: [id], onDelete: Restrict)
+  fiscal_obligations  fiscal_obligations[]      @relation("fiscal_obligation_evidence")
+  tax_declarations    tax_declaration_drafts[]  @relation("tax_declaration_evidence")
   operation_events    fiscal_operation_events[]
 
   @@unique([fiscal_transmission_id, evidence_type, content_hash])
@@ -4743,13 +4797,13 @@ model fiscal_obligations {
   created_at           DateTime?                     @default(now()) @db.Timestamp(6)
   updated_at           DateTime?                     @updatedAt
 
-  organization       organizations            @relation(fields: [organization_id], references: [id], onDelete: Restrict)
-  store              stores?                  @relation(fields: [store_id], references: [id], onDelete: Restrict)
-  accounting_entity  accounting_entities      @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
-  assigned_to_user   users?                   @relation("fiscal_obligations_assigned_to", fields: [assigned_to_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  approved_by_user   users?                   @relation("fiscal_obligations_approved_by", fields: [approved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  created_by_user    users?                   @relation("fiscal_obligations_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  evidence           fiscal_evidences?        @relation("fiscal_obligation_evidence", fields: [evidence_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  organization       organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store              stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  accounting_entity  accounting_entities       @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  assigned_to_user   users?                    @relation("fiscal_obligations_assigned_to", fields: [assigned_to_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  approved_by_user   users?                    @relation("fiscal_obligations_approved_by", fields: [approved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_by_user    users?                    @relation("fiscal_obligations_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  evidence           fiscal_evidences?         @relation("fiscal_obligation_evidence", fields: [evidence_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   declaration_drafts tax_declaration_drafts[]
   operation_events   fiscal_operation_events[]
 
@@ -4800,13 +4854,13 @@ model tax_declaration_drafts {
   created_at            DateTime?                   @default(now()) @db.Timestamp(6)
   updated_at            DateTime?                   @updatedAt
 
-  organization      organizations           @relation(fields: [organization_id], references: [id], onDelete: Restrict)
-  store             stores?                 @relation(fields: [store_id], references: [id], onDelete: Restrict)
-  accounting_entity accounting_entities     @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
-  obligation        fiscal_obligations?     @relation(fields: [obligation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  evidence          fiscal_evidences?       @relation("tax_declaration_evidence", fields: [evidence_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  approved_by_user  users?                  @relation("tax_declarations_approved_by", fields: [approved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  created_by_user   users?                  @relation("tax_declarations_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  organization      organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store             stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  accounting_entity accounting_entities       @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  obligation        fiscal_obligations?       @relation(fields: [obligation_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  evidence          fiscal_evidences?         @relation("tax_declaration_evidence", fields: [evidence_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  approved_by_user  users?                    @relation("tax_declarations_approved_by", fields: [approved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_by_user   users?                    @relation("tax_declarations_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   lines             tax_declaration_lines[]
   operation_events  fiscal_operation_events[]
 
@@ -4867,13 +4921,13 @@ model fiscal_close_sessions {
   created_at           DateTime?                @default(now()) @db.Timestamp(6)
   updated_at           DateTime?                @updatedAt
 
-  organization      organizations         @relation(fields: [organization_id], references: [id], onDelete: Restrict)
-  store             stores?               @relation(fields: [store_id], references: [id], onDelete: Restrict)
-  accounting_entity accounting_entities   @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
-  fiscal_period     fiscal_periods?       @relation(fields: [fiscal_period_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  started_by_user   users                 @relation("fiscal_close_sessions_started_by", fields: [started_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  approved_by_user  users?                @relation("fiscal_close_sessions_approved_by", fields: [approved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
-  closed_by_user    users?                @relation("fiscal_close_sessions_closed_by", fields: [closed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  organization      organizations             @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store             stores?                   @relation(fields: [store_id], references: [id], onDelete: Restrict)
+  accounting_entity accounting_entities       @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  fiscal_period     fiscal_periods?           @relation(fields: [fiscal_period_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  started_by_user   users                     @relation("fiscal_close_sessions_started_by", fields: [started_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  approved_by_user  users?                    @relation("fiscal_close_sessions_approved_by", fields: [approved_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  closed_by_user    users?                    @relation("fiscal_close_sessions_closed_by", fields: [closed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   checks            fiscal_close_checks[]
   operation_events  fiscal_operation_events[]
 
@@ -5984,7 +6038,7 @@ model withholding_concepts {
 }
 
 model withholding_calculations {
-  id                   Int       @id @default(autoincrement())
+  id                   Int                    @id @default(autoincrement())
   organization_id      Int
   store_id             Int?
   accounting_entity_id Int?
@@ -5995,12 +6049,12 @@ model withholding_calculations {
   role                 withholding_role_enum  @default(practiced)
   counterparty_type    String?                @db.VarChar(20)
   withholding_type     withholding_type_enum?
-  base_amount          Decimal   @db.Decimal(12, 2)
-  withholding_rate     Decimal   @db.Decimal(7, 4)
-  withholding_amount   Decimal   @db.Decimal(12, 2)
-  uvt_value_used       Decimal   @db.Decimal(12, 2)
+  base_amount          Decimal                @db.Decimal(12, 2)
+  withholding_rate     Decimal                @db.Decimal(7, 4)
+  withholding_amount   Decimal                @db.Decimal(12, 2)
+  uvt_value_used       Decimal                @db.Decimal(12, 2)
   year                 Int
-  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  created_at           DateTime?              @default(now()) @db.Timestamp(6)
 
   organization      organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store             stores?              @relation(fields: [store_id], references: [id], onDelete: Cascade)
@@ -7534,30 +7588,30 @@ model saas_metrics_snapshot {
 /// `expense.paid` so the existing AccountingEventsListener posts the matching
 /// journal entries via AutoEntryService (steps 5 of Módulo Fiscal Unificado).
 model vendor_support_documents {
-  id                        Int                                       @id @default(autoincrement())
+  id                        Int                                 @id @default(autoincrement())
   organization_id           Int
-  vendor_nit                String                                    @db.VarChar(20)
-  vendor_name               String                                    @db.VarChar(255)
-  invoice_number            String                                    @db.VarChar(100)
-  issue_date                DateTime                                  @db.Date
-  subtotal                  Decimal?                                  @db.Decimal(18, 4)
-  tax_amount                Decimal?                                  @db.Decimal(18, 4)
-  total                     Decimal                                   @db.Decimal(18, 4)
-  currency                  String                                    @default("COP") @db.VarChar(3)
-  account_code              String                                    @db.VarChar(20)
-  description               String?                                   @db.Text
-  pdf_s3_key                String?                                   @db.Text
-  status                    vendor_support_document_status_enum       @default(pending)
+  vendor_nit                String                              @db.VarChar(20)
+  vendor_name               String                              @db.VarChar(255)
+  invoice_number            String                              @db.VarChar(100)
+  issue_date                DateTime                            @db.Date
+  subtotal                  Decimal?                            @db.Decimal(18, 4)
+  tax_amount                Decimal?                            @db.Decimal(18, 4)
+  total                     Decimal                             @db.Decimal(18, 4)
+  currency                  String                              @default("COP") @db.VarChar(3)
+  account_code              String                              @db.VarChar(20)
+  description               String?                             @db.Text
+  pdf_s3_key                String?                             @db.Text
+  status                    vendor_support_document_status_enum @default(pending)
   approved_journal_entry_id Int?
   paid_journal_entry_id     Int?
   created_by_user_id        Int?
-  created_at                DateTime?                                 @default(now()) @db.Timestamp(6)
-  updated_at                DateTime?                                 @default(now()) @db.Timestamp(6)
+  created_at                DateTime?                           @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?                           @default(now()) @db.Timestamp(6)
 
-  organization         organizations      @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  organization           organizations       @relation(fields: [organization_id], references: [id], onDelete: Restrict)
   approved_journal_entry accounting_entries? @relation("vendor_doc_approved_entry", fields: [approved_journal_entry_id], references: [id], onDelete: SetNull)
   paid_journal_entry     accounting_entries? @relation("vendor_doc_paid_entry", fields: [paid_journal_entry_id], references: [id], onDelete: SetNull)
-  created_by_user       users?             @relation("vendor_doc_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+  created_by_user        users?              @relation("vendor_doc_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull)
 
   @@unique([organization_id, vendor_nit, invoice_number], map: "vendor_support_documents_org_nit_invoice_key")
   @@index([organization_id, status])
@@ -7569,4 +7623,303 @@ enum vendor_support_document_status_enum {
   approved
   paid
   void
+}
+
+// =====================================================================
+// = Restaurant Suite Foundation (Fase A) — data foundation only       =
+// = Phase A adds schema + migration + scope registration. No business  =
+// = logic (services, controllers, DTOs) is wired yet — that is Fase B. =
+// =====================================================================
+
+// Lifecycle states of a production order (recipe-based cooking batch).
+enum production_order_state_enum {
+  // Recipe planned, not yet started in the kitchen.
+  draft
+  // Kitchen has begun preparing the batch.
+  in_progress
+  // Batch finished, finished-goods stock has been credited via
+  // movement_type_enum='production' inventory movements.
+  completed
+  // Cancelled; no inventory effects.
+  cancelled
+}
+
+// Lifecycle of a physical restaurant table / dining zone.
+enum table_status_enum {
+  // Table is open for seating new guests.
+  available
+  // Currently seated (open table_session, unfinished order).
+  occupied
+  // Held for a future reservation / walk-in; not yet seated.
+  reserved
+  // Out of service for cleaning / reset.
+  cleaning
+}
+
+// Lifecycle of a kitchen ticket (a fire order sent to the kitchen).
+enum kitchen_ticket_state_enum {
+  pending
+  in_preparation
+  ready
+  delivered
+  cancelled
+}
+
+// Per-item lifecycle inside a kitchen ticket (some items may fire late).
+enum kitchen_ticket_item_state_enum {
+  pending
+  in_preparation
+  ready
+  delivered
+  cancelled
+}
+
+/// A bill of materials / recipe for a single sellable product. One recipe
+/// per product (UNIQUE on product_id). Components are stored in
+/// recipe_items and must themselves be products in the same store
+/// (is_ingredient=true is a soft signal, not enforced at DB level so
+/// stock items and prepared items can be mixed).
+model recipes {
+  id                Int       @id @default(autoincrement())
+  store_id          Int
+  product_id        Int       @unique
+  yield_quantity    Decimal   @db.Decimal(12, 4)
+  yield_unit        String    @db.VarChar(20)
+  waste_percent     Decimal   @default(0) @db.Decimal(5, 2)
+  preparation_notes String?   @db.Text
+  is_active         Boolean   @default(true)
+  created_at        DateTime? @default(now()) @db.Timestamp(6)
+  updated_at        DateTime? @default(now()) @db.Timestamp(6)
+
+  store             stores              @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  product           products            @relation(fields: [product_id], references: [id], onUpdate: NoAction)
+  items             recipe_items[]
+  production_orders production_orders[]
+
+  @@index([store_id, is_active])
+}
+
+/// A single component line of a recipe. The component is itself a product
+/// (a raw ingredient, a sub-prep, or a stock item).
+model recipe_items {
+  id                   Int       @id @default(autoincrement())
+  recipe_id            Int
+  component_product_id Int
+  quantity             Decimal   @db.Decimal(12, 4)
+  waste_percent        Decimal   @default(0) @db.Decimal(5, 2)
+  is_optional          Boolean   @default(false)
+  created_at           DateTime? @default(now()) @db.Timestamp(6)
+  updated_at           DateTime? @default(now()) @db.Timestamp(6)
+
+  recipe            recipes  @relation(fields: [recipe_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  component_product products @relation("recipe_items_component_product", fields: [component_product_id], references: [id], onUpdate: NoAction)
+
+  @@unique([recipe_id, component_product_id])
+  @@index([component_product_id])
+}
+
+/// A production run that consumes recipe items and produces finished goods.
+/// Stock effects are posted via inventory_movements with
+/// movement_type_enum in ('production', 'consumption') — this table is the
+/// control record (who, when, planned vs actual qty, status).
+model production_orders {
+  id           Int                         @id @default(autoincrement())
+  store_id     Int
+  product_id   Int
+  recipe_id    Int
+  planned_qty  Decimal                     @db.Decimal(12, 4)
+  produced_qty Decimal?                    @db.Decimal(12, 4)
+  status       production_order_state_enum @default(draft)
+  produced_at  DateTime?                   @db.Timestamp(6)
+  created_at   DateTime?                   @default(now()) @db.Timestamp(6)
+  updated_at   DateTime?                   @default(now()) @db.Timestamp(6)
+
+  store   stores   @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  product products @relation(fields: [product_id], references: [id], onUpdate: NoAction)
+  recipe  recipes  @relation(fields: [recipe_id], references: [id], onUpdate: NoAction)
+
+  @@index([store_id, status])
+  @@index([store_id, product_id])
+  @@index([store_id, created_at])
+}
+
+/// A physical table in a restaurant floor. Optional position (pos_x, pos_y)
+/// supports a 2D floor-plan view; the schema is intentionally simple to
+/// allow multiple visualization strategies in Fase B+ frontend.
+model tables {
+  id         Int               @id @default(autoincrement())
+  store_id   Int
+  name       String            @db.VarChar(100)
+  zone       String?           @db.VarChar(100)
+  capacity   Int?
+  status     table_status_enum @default(available)
+  pos_x      Int?
+  pos_y      Int?
+  created_at DateTime?         @default(now()) @db.Timestamp(6)
+  updated_at DateTime?         @default(now()) @db.Timestamp(6)
+
+  store    stores           @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  sessions table_sessions[]
+
+  @@unique([store_id, name])
+  @@index([store_id, status])
+  @@index([store_id, zone])
+}
+
+/// A single "seating" event at a table. One table_session groups an order
+/// and (optionally) a kitchen_ticket stream until the table is closed.
+/// `opened_by` is the staff user (server / cashier) who seated the guests.
+model table_sessions {
+  id          Int       @id @default(autoincrement())
+  store_id    Int
+  table_id    Int
+  order_id    Int
+  opened_by   Int
+  opened_at   DateTime  @default(now()) @db.Timestamp(6)
+  closed_at   DateTime? @db.Timestamp(6)
+  guest_count Int?
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  store  stores @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  table  tables @relation(fields: [table_id], references: [id], onUpdate: NoAction)
+  order  orders @relation(fields: [order_id], references: [id], onUpdate: NoAction)
+  opener users  @relation("table_sessions_opened_by", fields: [opened_by], references: [id], onUpdate: NoAction)
+
+  @@index([store_id, table_id])
+  @@index([store_id, order_id])
+  @@index([store_id, closed_at])
+}
+
+/// A fire order routed to the kitchen (KDS — kitchen display system).
+/// Multiple tickets per order are allowed (e.g. starter, main, dessert
+/// fire in separate waves). Per-item state lives in kitchen_ticket_items.
+model kitchen_tickets {
+  id         Int                       @id @default(autoincrement())
+  store_id   Int
+  order_id   Int
+  table_id   Int?
+  status     kitchen_ticket_state_enum @default(pending)
+  fired_at   DateTime                  @default(now()) @db.Timestamp(6)
+  ready_at   DateTime?                 @db.Timestamp(6)
+  created_at DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at DateTime?                 @default(now()) @db.Timestamp(6)
+
+  store stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  order orders                 @relation(fields: [order_id], references: [id], onUpdate: NoAction)
+  items kitchen_ticket_items[]
+
+  @@index([store_id, status])
+  @@index([store_id, order_id])
+  @@index([store_id, fired_at])
+}
+
+/// A single line on a kitchen ticket. Tracks per-item state and optional
+/// kitchen-side notes (e.g. "no onions", "allergy: gluten").
+model kitchen_ticket_items {
+  id                Int                            @id @default(autoincrement())
+  kitchen_ticket_id Int
+  order_item_id     Int
+  product_id        Int
+  quantity          Int
+  status            kitchen_ticket_item_state_enum @default(pending)
+  notes             String?                        @db.Text
+  created_at        DateTime?                      @default(now()) @db.Timestamp(6)
+  updated_at        DateTime?                      @default(now()) @db.Timestamp(6)
+
+  kitchen_ticket kitchen_tickets @relation(fields: [kitchen_ticket_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  order_item     order_items     @relation(fields: [order_item_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  product        products        @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@index([kitchen_ticket_id])
+  @@index([order_item_id])
+  @@index([product_id])
+  @@index([status])
+}
+
+/// A named menu that bundles sections of products. Multiple menus per store
+/// are allowed (e.g. "Lunch", "Dinner", "Weekend Brunch"). Sections live in
+/// menu_sections; availability windows (time-of-day, day-of-week) live in
+/// menu_availability_windows.
+model menus {
+  id         Int       @id @default(autoincrement())
+  store_id   Int
+  name       String    @db.VarChar(100)
+  is_active  Boolean   @default(true)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  store                stores                      @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  sections             menu_sections[]
+  availability_windows menu_availability_windows[]
+
+  @@unique([store_id, name])
+  @@index([store_id, is_active])
+}
+
+/// A section (e.g. "Entradas", "Platos Fuertes", "Postres") inside a menu.
+/// Sections can themselves be subject to availability windows (e.g. a
+/// "Breakfast" section only available 06:00–11:00) — store_id is denormalized
+/// to support that without traversing the menu relation.
+model menu_sections {
+  id         Int       @id @default(autoincrement())
+  menu_id    Int
+  store_id   Int
+  name       String    @db.VarChar(100)
+  sort_order Int       @default(0)
+  created_at DateTime? @default(now()) @db.Timestamp(6)
+  updated_at DateTime? @default(now()) @db.Timestamp(6)
+
+  menu                 menus                       @relation(fields: [menu_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  store                stores                      @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  items                menu_section_items[]
+  availability_windows menu_availability_windows[]
+
+  @@unique([menu_id, name])
+  @@index([store_id])
+  @@index([menu_id, sort_order])
+}
+
+/// A product that appears inside a menu section. No quantity, no price —
+/// pricing is read live from the product row. `sort_order` is per-section.
+model menu_section_items {
+  id              Int       @id @default(autoincrement())
+  menu_section_id Int
+  product_id      Int
+  sort_order      Int       @default(0)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  menu_section menu_sections @relation(fields: [menu_section_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  product      products      @relation(fields: [product_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
+  @@unique([menu_section_id, product_id])
+  @@index([product_id])
+  @@index([menu_section_id, sort_order])
+}
+
+/// Time-of-day availability rule attached to a menu (whole menu) or a
+/// single menu section. Both FKs are nullable so the same window table can
+/// express menu-level and section-level rules. Exactly one of (menu_id,
+/// menu_section_id) should be non-null at the application layer; the
+/// schema allows both null for system-wide default rules and we leave that
+/// flexibility to Fase B service logic.
+model menu_availability_windows {
+  id              Int       @id @default(autoincrement())
+  store_id        Int
+  menu_id         Int?
+  menu_section_id Int?
+  day_of_week     Int
+  start_time      String    @db.VarChar(8)
+  end_time        String    @db.VarChar(8)
+  created_at      DateTime? @default(now()) @db.Timestamp(6)
+  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+
+  store        stores         @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  menu         menus?         @relation(fields: [menu_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  menu_section menu_sections? @relation(fields: [menu_section_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([store_id, day_of_week])
+  @@index([menu_id])
+  @@index([menu_section_id])
 }

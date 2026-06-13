@@ -127,6 +127,31 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '5295',
     description: 'Faltantes de Inventario',
   },
+  // Restaurant Suite Fase C — sub-recipe batch production.
+  // Produccion is a value transfer between inventory buckets: DR 1435
+  // (finished good received) / CR 1435 (ingredient stock consumed).
+  // Two keys so a custom PUC override (e.g. 1435 vs 1420 vs 1430) can be
+  // applied independently for debit/credit if the org splits sub-inventory.
+  'production.completed.finished_goods': {
+    code: '1435',
+    description: 'Inventario de productos terminados (producción)',
+  },
+  'production.completed.ingredient_consumed': {
+    code: '1435',
+    description: 'Inventario de insumos consumidos (producción)',
+  },
+  // Restaurant Suite Fase D — fire-to-kitchen COGS.
+  // Fired items get their inventory consumed at the moment of fire (not
+  // at sale/payment). Same COGS-vs-inventory shape as order.completed but
+  // with a distinct source_type to keep audit lines independent.
+  'kitchen.fired.cogs': {
+    code: '6135',
+    description: 'Costo de Ventas (fire-to-kitchen)',
+  },
+  'kitchen.fired.inventory': {
+    code: '1435',
+    description: 'Inventario (fire-to-kitchen)',
+  },
   // Phase 1: IVA on direct POS sales
   'payment.received.bank': {
     code: '1110',

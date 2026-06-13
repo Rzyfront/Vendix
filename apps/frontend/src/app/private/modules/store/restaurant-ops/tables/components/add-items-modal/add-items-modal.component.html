@@ -1,0 +1,90 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="onOpenChange($event)"
+  (cancel)="onCancel()"
+  [size]="'lg'"
+  [title]="'Agregar a la cuenta'"
+  subtitle="Selecciona los productos y cantidades para esta mesa"
+>
+  <!-- Search -->
+  <div class="search-bar">
+    <app-input
+      [formControl]="form.controls['search']"
+      label="Buscar producto"
+      placeholder="Escribe el nombre del producto..."
+      [required]="false"
+      (ngModelChange)="onSearchChange($event)"
+      customWrapperClass="mt-0"
+    />
+  </div>
+
+  <!-- Product list -->
+  @if (productsLoading()) {
+    <div class="loading">
+      <app-spinner size="md"></app-spinner>
+      <p>Cargando productos…</p>
+    </div>
+  } @else {
+    <div class="product-list">
+      @for (row of filteredRows(); track trackById($index, row)) {
+        <div class="product-row">
+          <div class="info">
+            <div class="name">{{ row.name }}</div>
+            <div class="meta">
+              @if (row.product_type) {
+                <span class="type">{{ row.product_type }}</span>
+              }
+              <span class="price">
+                {{ row.base_price | currency }}
+              </span>
+            </div>
+          </div>
+          <div class="qty-controls">
+            <button
+              type="button"
+              class="qty-btn"
+              [disabled]="row.quantity <= 0"
+              (click)="decrement(row)"
+              aria-label="Disminuir"
+            >
+              <app-icon name="minus" [size]="14"></app-icon>
+            </button>
+            <span class="qty">{{ row.quantity }}</span>
+            <button
+              type="button"
+              class="qty-btn"
+              (click)="increment(row)"
+              aria-label="Aumentar"
+            >
+              <app-icon name="plus" [size]="14"></app-icon>
+            </button>
+          </div>
+        </div>
+      }
+    </div>
+  }
+
+  @if (hasItems()) {
+    <div class="total-preview">
+      <span>Subtotal estimado:</span>
+      <strong>{{ totalPreview() | currency }}</strong>
+    </div>
+  }
+
+  <div slot="footer" class="flex justify-between items-center gap-2">
+    <span class="text-sm text-text-secondary">
+      {{ productRows().length }} productos disponibles
+    </span>
+    <div class="flex gap-2">
+      <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
+      <app-button
+        variant="primary"
+        [loading]="loading()"
+        [disabled]="!hasItems()"
+        (clicked)="onSubmit()"
+      >
+        Agregar a la cuenta
+      </app-button>
+    </div>
+  </div>
+</app-modal>

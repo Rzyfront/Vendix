@@ -37,6 +37,7 @@ import {
   SearchResult,
 } from '../services/pos-product.service';
 import { PosScaleService } from '../services/pos-scale.service';
+import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';
 import { StockSourcingSuggestionResponse } from '../models/sourcing.model';
@@ -596,6 +597,7 @@ export class PosProductSelectionComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
+  private restaurantIntegration = inject(PosRestaurantIntegrationService);
 
   constructor() {
     this.checkAuthState();
@@ -608,6 +610,12 @@ export class PosProductSelectionComponent {
     effect(() => {
       if (this.refreshTrigger() > 0) {
         this.loadProducts();
+      }
+    });
+
+    effect(() => {
+      if (this.restaurantIntegration.isRestaurantMode()) {
+        this.filterProducts();
       }
     });
   }
@@ -725,6 +733,10 @@ export class PosProductSelectionComponent {
       pos_optimized: true,
       include_stock: true,
     };
+
+    if (this.restaurantIntegration.isRestaurantMode()) {
+      filters.is_sellable = true;
+    }
 
     if (this.searchQuery()) {
       filters.query = this.searchQuery();

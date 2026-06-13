@@ -400,6 +400,7 @@ export class AutoEntryService {
       'payroll.approved': 'auto_payroll',
       'payroll.paid': 'auto_payroll',
       'order.completed': 'auto_inventory',
+      'production.completed': 'auto_inventory',
       'refund.completed': 'auto_return',
       'purchase_order.received': 'auto_purchase',
       'purchase_order.payment': 'auto_purchase',
@@ -1771,6 +1772,137 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Order completed #${data.order_id} - COGS`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * production.completed (Restaurant Suite Fase C)
+   *
+   * Sub-recipe batch production is a value transfer between inventory
+   * buckets: raw ingredients leave the warehouse, the finished batch
+   * enters it. The entry is balanced (DR 1435 finished goods =
+   * CR 1435 ingredients) using the FIFO-weighted unit_cost returned by
+   * the production service.
+   *
+   * Source uniqueness uses `(source_type='production.completed',
+   * source_id=production_order_id)` so re-deliveries of the same event
+   * never produce a second journal entry.
+   */
+  async onProductionCompleted(data: {
+    production_order_id: number;
+    organization_id: number;
+    store_id?: number;
+    product_name: string;
+    produced_qty: number;
+    produced_unit_cost: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    const totalValue = Number(data.total_cost || 0);
+    if (totalValue <= 0) {
+      this.logger.log(
+        `Skipping production.completed auto-entry for order #${data.production_order_id}: total_cost is 0`,
+      );
+      return null;
+    }
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'production.completed.finished_goods',
+        `Productos terminados – ${data.product_name} (${data.produced_qty})`,
+        totalValue,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'production.completed.ingredient_consumed',
+        `Insumos consumidos – ${data.product_name} (${data.produced_qty})`,
+        0,
+        totalValue,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'production.completed',
+      source_id: data.production_order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Producción completada #${data.production_order_id} – ${data.product_name}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * kitchen.fired (Restaurant Suite Fase D)
+   *
+   * Fire-to-kitchen event. Restaurant flow moves the COGS recognition
+   * from "at sale/payment" to "at fire" — the moment the kitchen
+   * receives the order. The journal entry mirrors `onOrderCompleted`
+   * (DR 6135 / CR 1435) but is fired by `KitchenFireService` with the
+   * REAL FIFO cost snapshot returned by the recipe explosion (i.e.
+   * after merma + yield + sub-recipe resolution).
+   *
+   * The amount and currency belong to the per-kitchen-fire batch, not
+   * the order, so we use the kitchen_ticket_id as `source_id`. Re-firing
+   * the same item is impossible: `KitchenFireService` flips
+   * `order_items.inventory_consumed_at_fire=true` and skips the item on
+   * subsequent calls, so this listener will only ever be invoked once
+   * per order_item.
+   *
+   * If `total_cost <= 0` (e.g. the product is a combo with no recipe),
+   * the auto-entry is skipped and a debug line is logged — the fire
+   * itself still succeeds.
+   */
+  async onKitchenFired(data: {
+    kitchen_ticket_id: number;
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    consumed_line_count: number;
+    user_id?: number;
+  }) {
+    const totalValue = Number(data.total_cost || 0);
+    if (totalValue <= 0) {
+      this.logger.log(
+        `Skipping kitchen.fired auto-entry for ticket #${data.kitchen_ticket_id}: total_cost is 0 (no recipe or empty BOM)`,
+      );
+      return null;
+    }
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'kitchen.fired.cogs',
+        `COGS fire-to-kitchen (orden #${data.order_id}, ${data.consumed_line_count} líneas)`,
+        totalValue,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'kitchen.fired.inventory',
+        `Inventario consumido en cocina (orden #${data.order_id})`,
+        0,
+        totalValue,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'kitchen.fired',
+      source_id: data.kitchen_ticket_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Fire-to-kitchen ticket #${data.kitchen_ticket_id} – orden #${data.order_id} (${data.consumed_line_count} líneas)`,
       lines,
       user_id: data.user_id,
     });
