@@ -29,6 +29,11 @@ docs/
 .claude/
 .agent/
 .opencode/
+# Engram: ignore local DB, but keep sync chunks (shared with the team)
+.engram/*
+!.engram/chunks/
+!.engram/manifest.json
+!.engram/.gitkeep
 # Production keys and sensitive docs
 keys/
 vendix-production-key.pem

@@ -6,10 +6,13 @@ import {
   MaxLength,
   MinLength,
   ValidateNested,
+  IsArray,
+  ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { WizardFiscalDataDto } from './wizard-fiscal-data.dto';
+import { StoreIndustry } from '../../../store/stores/dto';
 
 export enum StoreType {
   PHYSICAL = 'physical',
@@ -44,6 +47,20 @@ export class SetupStoreWizardDto {
   @IsOptional()
   @IsEnum(StoreType)
   store_type?: StoreType;
+
+  @ApiPropertyOptional({
+    example: ['retail', 'restaurant'],
+    enum: StoreIndustry,
+    isArray: true,
+    description:
+      'Store industries (multi-select). At least one required. Mirrors ' +
+      '`stores.industries` on the backend; defaults to `["retail"]` when omitted.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
 
   @ApiPropertyOptional({
     example: 'America/Bogota',

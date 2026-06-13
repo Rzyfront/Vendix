@@ -396,7 +396,7 @@ export class SettingsService {
 
     // NUEVO: Actualizar campos de la tabla stores si vienen en general
     if (dto.general) {
-      let { name, logo_url, store_type, timezone } = dto.general;
+      let { name, logo_url, store_type, timezone, industries } = dto.general;
 
       // CRITICAL: Sanitize logo_url to extract S3 key before storing
       // This prevents storing signed URLs that expire after 24 hours
@@ -420,6 +420,11 @@ export class SettingsService {
       if (timezone !== undefined) {
         // Sincronizar timezone con la tabla stores
         storeUpdateData.timezone = timezone;
+      }
+      if (industries !== undefined) {
+        // Sincronizar industries con la tabla stores (Prisma serializa
+        // el array a Postgres `industry_enum[]`).
+        storeUpdateData.industries = industries;
       }
 
       // Actualizar tabla stores si hay campos para actualizar

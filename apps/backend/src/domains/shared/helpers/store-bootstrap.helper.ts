@@ -31,6 +31,15 @@ export interface StoreBootstrapInput {
     logo_url?: string | null;
     onboarding?: boolean;
     is_active?: boolean;
+    /**
+     * Store industries (multi-select). Persisted verbatim to
+     * `stores.industries` (Prisma serializes the array to a Postgres
+     * `industry_enum[]`). Validation (array + non-empty + each-is-enum) is
+     * the caller's responsibility — this helper accepts whatever array
+     * the caller passes and trusts it has been validated upstream
+     * (the wizard DTO enforces `@ArrayMinSize(1)` + `@IsEnum`).
+     */
+    industries?: Prisma.storesCreateInput['industries'];
   };
   address_data?: {
     address_line1: string;
@@ -228,6 +237,7 @@ export class StoreBootstrapHelper {
           manager_user_id: input.store_data.manager_user_id ?? null,
           store_code: input.store_data.store_code ?? null,
           logo_url: input.store_data.logo_url ?? null,
+          industries: input.store_data.industries ?? ['retail'],
           onboarding: input.store_data.onboarding ?? false,
           is_active: input.store_data.is_active ?? true,
           created_at: now,

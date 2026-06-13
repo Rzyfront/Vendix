@@ -1,4 +1,5 @@
 import type { FiscalStatusBlock } from '@common/interfaces/fiscal-status.interface';
+import type { StoreIndustry } from '../../stores/dto/index';
 
 // ============================================================================
 // FISCAL DATA - Legal/tax identity of the store (NIT, regime, address, etc.)
@@ -341,6 +342,7 @@ export interface GeneralSettings {
   name?: string;
   logo_url?: string;
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
+  industries?: StoreIndustry[];
 }
 
 export type InventoryScope = 'main_location' | 'all_locations';

@@ -655,11 +655,18 @@ export class OnboardingWizardService {
       // If name changed, update it. Trial is NOT re-triggered: the store
       // already existed, so any trial that was going to be created has
       // already been handled in the first creation path.
+      // `industries` is only written when the DTO actually carried a value —
+      // the DTO's `@ArrayMinSize(1)` makes a 400 explicit, so an absent
+      // field here means "don't touch the column" and a present array means
+      // "sync it". This mirrors the same-shape pattern used by `store_type`.
       const updatedStore = await this.prismaService.stores.update({
         where: { id: existingStore.id },
         data: {
           name: setupStoreDto.name,
           store_type: setupStoreDto.store_type || 'physical',
+          ...(setupStoreDto.industries !== undefined && {
+            industries: setupStoreDto.industries,
+          }),
           updated_at: new Date(),
         },
       });
@@ -709,6 +716,9 @@ export class OnboardingWizardService {
       async (tx: Prisma.TransactionClient) => {
         // 1) store + optional addresses + inventory_locations (atomic).
         //    The helper guarantees default_location_id is wired on the store.
+        //    `industries` carries the wizard-picked industry list; the
+        //    backend's `['retail']` fallback keeps existing tenants unchanged
+        //    when the DTO is silent (DTO enforces non-empty when present).
         const { store } =
           await this.storeBootstrapHelper.createStoreWithDefaultLocation(
             {
@@ -718,6 +728,7 @@ export class OnboardingWizardService {
                 slug,
                 store_type: (setupStoreDto.store_type as any) || 'physical',
                 timezone: setupStoreDto.timezone || 'America/Mexico_City',
+                industries: (setupStoreDto.industries as any) ?? ['retail'],
               },
               address_data: setupStoreDto.address_line1
                 ? {

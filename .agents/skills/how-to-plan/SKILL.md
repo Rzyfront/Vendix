@@ -354,9 +354,23 @@ After the `## Approval Request` is satisfied, execution moves to `how-to-dev`. T
 - Run the `End-to-End Verification` block before reporting completion.
 - Never replan unless the human explicitly requests it.
 
+**Mandatory gates before any plan is "done":**
+
+Before declaring the work complete, the developer must also satisfy the `git-workflow` skill (RULES 5–8):
+
+- The branch is up to date with `origin/dev` (RULE 5).
+- The latest Engram memories have been pulled at the start of work (RULE 6).
+- A new Engram memory has been saved for any non-trivial decision, gotcha, or pattern introduced by this plan (RULE 7).
+- The resulting PR has been reviewed by the `pr-code-review` skill and passed the 80% threshold (RULE 8).
+
+If any of these gates is not met, the work is **not done** — return to the gate before claiming completion.
+
 ## Related Skills
 
 - `how-to-dev` — Development execution after planning.
+- `git-workflow` — **Required** for branches, commits, pushes, PR review, and the Engram memory lifecycle (RULES 5-8 are post-plan gates).
+- `vendix-engram` — Persistent shared memory used to satisfy RULES 6-7 of `git-workflow`.
+- `pr-code-review` — The 80% pass gate that closes the loop on RULE 8.
 - `agent-teams` — Subagent orchestration for Phase 1 and Phase 2.
 - `skill-creator` — Resolving knowledge gaps by creating or updating skills.
 - `skill-sync` — Synchronizing skill metadata to AGENTS.md / CLAUDE.md after changes.

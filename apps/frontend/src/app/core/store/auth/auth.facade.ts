@@ -95,6 +95,9 @@ export class AuthFacade {
   readonly userStoreType$ = this.store.select(
     AuthSelectors.selectUserStoreType,
   );
+  readonly userIndustries$ = this.store.select(
+    AuthSelectors.selectUserIndustries,
+  );
 
   // Store settings observables
   readonly storeSettings$ = this.store.select(AuthSelectors.selectStoreSettings);
@@ -190,6 +193,15 @@ export class AuthFacade {
   readonly userStoreName = toSignal(this.userStoreName$, { initialValue: null as string | null });
   readonly userStoreSlug = toSignal(this.userStoreSlug$, { initialValue: null as string | null });
   readonly userStoreType = toSignal(this.userStoreType$, { initialValue: null as any });
+  /**
+   * Snapshot of the store's industries from the auth login response
+   * (`user.store.industries`). Used by `MenuFilterService` as a fallback
+   * for the case where `storeSettings$` has not loaded yet. The source
+   * of truth is `store_settings.settings.general.industries`.
+   * Initial value `[]` is required by `vendix-zoneless-signals` rules
+   * for `toSignal` in facades.
+   */
+  readonly userIndustries = toSignal(this.userIndustries$, { initialValue: [] as string[] });
   readonly storeSettings = toSignal(this.storeSettings$, { initialValue: null as any });
   readonly fiscalStatus = toSignal(this.fiscalStatus$, { initialValue: null as any });
   readonly activeFiscalAreas = toSignal(this.activeFiscalAreas$, { initialValue: [] as FiscalArea[] });

@@ -231,6 +231,26 @@ export const selectUserStoreType = createSelector(
   (store: any) => store?.store_type || null,
 );
 
+/**
+ * Snapshot of the store's `industries` array from the auth state's `user.store`
+ * payload (login / env-switch response). The store object on the user may
+ * not always include `industries` (the auth service builds `cleanStore`
+ * with an explicit whitelist of fields — `industries` may be missing until
+ * the auth service is updated to include it). The selector returns
+ * `[]` in that case; `MenuFilterService` falls back to `['retail']`.
+ *
+ * This selector is only the snapshot fallback. The source of truth for
+ * menu filtering is `store_settings.settings.general.industries` (read by
+ * `MenuFilterService` via `storeSettings$`).
+ */
+export const selectUserIndustries = createSelector(
+  selectUserStore,
+  (store: any): string[] => {
+    const industries = store?.industries;
+    return Array.isArray(industries) ? industries : [];
+  },
+);
+
 // Onboarding selectors
 export const selectOnboardingCompleted = createSelector(
   selectAuthState,
