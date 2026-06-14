@@ -64,18 +64,29 @@
           </div>
 
           <div class="space-y-3 md:space-y-4">
-            <!-- Row 1: Nombre | SKU | Slug (3 cols) -->
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
-              <app-input
-                label="Nombre del Producto"
-                formControlName="name"
-                placeholder="Ej. Camiseta Algodón Premium"
-                [error]="getErrorMessage('name')"
-                [required]="true"
-                tooltipText="Nombre visible del producto en catálogo, facturas y buscador. Sé descriptivo y consistente."
-                customWrapperClass="!mt-0"
-              ></app-input>
+            <!-- Row 1: Nombre (full width) -->
+            <app-input
+              label="Nombre del Producto"
+              formControlName="name"
+              placeholder="Ej. Camiseta Algodón Premium"
+              [error]="getErrorMessage('name')"
+              [required]="true"
+              tooltipText="Nombre visible del producto en catálogo, facturas y buscador. Sé descriptivo y consistente."
+              [suffixIcon]="true"
+              [suffixClickable]="true"
+              (suffixClick)="copyName()"
+              customWrapperClass="!mt-0"
+            >
+              <app-icon
+                slot="suffix-icon"
+                name="clipboard"
+                [size]="18"
+                class="text-gray-400 hover:text-gray-600 cursor-pointer"
+              ></app-icon>
+            </app-input>
 
+            <!-- Row 2: SKU | Código de barras | Slug (3 cols) -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
               <app-input
                 label="SKU"
                 formControlName="sku"
@@ -83,6 +94,16 @@
                 [error]="getErrorMessage('sku')"
                 tooltipText="Código interno único del producto. Útil para inventario, etiquetas y búsqueda rápida en POS."
                 customWrapperClass="!mt-0"
+              ></app-input>
+
+              <app-input
+                label="Código de barras"
+                formControlName="barcode"
+                placeholder="Escanea o escribe el código"
+                [error]="getErrorMessage('barcode')"
+                tooltipText="Código escaneable (EAN/UPC) único en la tienda."
+                customWrapperClass="!mt-0"
+                (focusin)="scanTarget.set({ kind: 'product' })"
               ></app-input>
 
               <app-input
@@ -2554,6 +2575,16 @@
                           placeholder="SKU"
                           customWrapperClass="!mt-0"
                         ></app-input>
+                        <app-input
+                          label="Código de barras"
+                          type="text"
+                          size="sm"
+                          [(ngModel)]="variant.barcode"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="Escanea o escribe"
+                          customWrapperClass="!mt-0"
+                          (focusin)="scanTarget.set({ kind: 'variant', index: idx })"
+                        ></app-input>
                       </div>
                       <div class="pt-2">
                         <app-selector
@@ -2639,6 +2670,11 @@
                       class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                     >
                       SKU
+                    </th>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Código de barras
                     </th>
                     <th
                       class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
@@ -2851,6 +2887,18 @@
                           [ngModelOptions]="{ standalone: true }"
                           placeholder="SKU"
                           customWrapperClass="!mt-0"
+                        ></app-input>
+                      </td>
+                      <!-- Barcode -->
+                      <td class="px-3 py-2">
+                        <app-input
+                          type="text"
+                          size="sm"
+                          [(ngModel)]="variant.barcode"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="Escanea o escribe"
+                          customWrapperClass="!mt-0"
+                          (focusin)="scanTarget.set({ kind: 'variant', index: idx })"
                         ></app-input>
                       </td>
                       <!-- track_inventory_override -->

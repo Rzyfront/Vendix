@@ -25,10 +25,10 @@ import { SubscriptionPlan } from '../../interfaces/store-subscription.interface'
 type BillingCycle = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'lifetime';
 
 const CYCLE_ORDER: BillingCycle[] = [
-  'monthly',
-  'quarterly',
-  'semiannual',
   'annual',
+  'semiannual',
+  'quarterly',
+  'monthly',
   'lifetime',
 ];
 
@@ -174,7 +174,7 @@ export class PickerComponent implements OnInit {
     }
 
     if (!selected || !cycles.includes(selected)) {
-      this.selectedCycle.set(cycles.includes('monthly') ? 'monthly' : cycles[0]);
+      this.selectedCycle.set(cycles.includes('annual') ? 'annual' : cycles[0]);
     }
   }
 }

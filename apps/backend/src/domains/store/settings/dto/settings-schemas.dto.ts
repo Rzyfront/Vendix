@@ -321,6 +321,13 @@ export class CashRegisterSettingsDto {
   track_non_cash_payments?: boolean;
 }
 
+export class BarcodeScannerSettingsDto {
+  @ApiProperty({ example: false, required: false })
+  @IsOptional()
+  @IsBoolean()
+  enabled?: boolean;
+}
+
 export class CustomerQueueSettingsDto {
   @IsOptional()
   @IsBoolean()
@@ -376,11 +383,6 @@ export class PosSettingsDto {
   @IsBoolean()
   offline_mode_enabled?: boolean;
 
-  @ApiProperty({ example: false, required: false })
-  @IsOptional()
-  @IsBoolean()
-  require_cash_drawer_open?: boolean;
-
   @ApiProperty({ example: true, required: false })
   @IsOptional()
   @IsBoolean()
@@ -419,6 +421,12 @@ export class PosSettingsDto {
   @ValidateNested()
   @Type(() => CashRegisterSettingsDto)
   cash_register?: CashRegisterSettingsDto;
+
+  @ApiProperty({ type: () => BarcodeScannerSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BarcodeScannerSettingsDto)
+  barcode_scanner?: BarcodeScannerSettingsDto;
 
   @ApiProperty({
     example: true,

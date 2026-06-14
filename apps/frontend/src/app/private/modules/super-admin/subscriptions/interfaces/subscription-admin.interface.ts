@@ -81,6 +81,12 @@ export interface SubscriptionPlan {
   updated_at: string;
   archived_at: string | null;
 
+  // Multi-cycle pricing + rich details (server-authoritative)
+  details_md?: string;
+  plan_group_code?: string;
+  // All pricing rows of the plan group, returned by GET plans/:id
+  pricings?: PlanPricing[];
+
   // Derived helpers (kept for legacy consumers like plan-card / plans table)
   slug: string;            // alias of code
   is_active: boolean;      // state === 'active'

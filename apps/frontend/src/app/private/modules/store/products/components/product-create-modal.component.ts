@@ -33,6 +33,7 @@ import { ProductsService } from '../services/products.service';
 import { CategoriesService } from '../services/categories.service';
 import { BrandsService } from '../services/brands.service';
 import { TaxesService } from '../services/taxes.service';
+import { PosBarcodeService } from '../../pos/services/pos-barcode.service';
 import { CategoryQuickCreateComponent } from './category-quick-create.component';
 import { BrandQuickCreateComponent } from './brand-quick-create.component';
 import { TaxQuickCreateComponent } from './tax-quick-create.component';
@@ -67,6 +68,7 @@ export class ProductCreateModalComponent {
   private router = inject(Router);
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
+  private barcodeService = inject(PosBarcodeService);
 
   readonly isOpen = model<boolean>(false);
   readonly isSubmitting = input<boolean>(false);
@@ -119,6 +121,14 @@ export class ProductCreateModalComponent {
         this.isInitialized.set(false);
       }
     });
+
+    // Scan-to-fill: a barcode scan (gated by barcode_scanner.enabled) overwrites
+    // the barcode control, clearing any residue the burst left in a focused input.
+    this.barcodeService.scans$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((code) => {
+        this.productForm.get('barcode')?.setValue(code);
+      });
   }
 
   private createForm(): FormGroup {
@@ -134,6 +144,7 @@ export class ProductCreateModalComponent {
       description: [''],
       base_price: [null, [Validators.required, Validators.min(0)]],
       sku: [''],
+      barcode: ['', [Validators.maxLength(64)]],
       category_ids: [[]],
       brand_ids: [[]],
       tax_category_ids: [[] as number[]],
@@ -158,6 +169,7 @@ export class ProductCreateModalComponent {
       description: val.description || '',
       base_price: val.base_price || 0,
       sku: val.sku || '',
+      barcode: val.barcode || '',
       category_ids: val.category_ids || [],
       brand_ids: val.brand_ids || [],
       tax_category_ids: val.tax_category_ids || [],
@@ -202,6 +214,7 @@ export class ProductCreateModalComponent {
     this.productForm.patchValue({
       name: prod.name,
       base_price: prod.base_price,
+      barcode: prod.barcode,
       // Try to get category from new structure or legacy if exists
       category_ids:
         (prod as any).category_ids?.length > 0
@@ -331,6 +344,7 @@ export class ProductCreateModalComponent {
       name: val.name,
       base_price: val.base_price,
       sku: val.sku || undefined,
+      barcode: val.barcode || undefined,
       // Map categories to array for backend
       category_ids: val.category_ids || [],
       brand_id: val.brand_ids?.[0] ? Number(val.brand_ids[0]) : null,

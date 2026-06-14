@@ -1268,6 +1268,7 @@ model product_variants {
   id                            Int                             @id @default(autoincrement())
   product_id                    Int
   sku                           String                          @db.VarChar(100)
+  barcode                       String?                         @db.VarChar(64)
   name                          String?                         @db.VarChar(255)
   price_override                Decimal?                        @db.Decimal(12, 2)
   cost_price                    Decimal?                        @db.Decimal(12, 2)
@@ -1314,6 +1315,7 @@ model product_variants {
   price_tier_overrides product_price_tier_overrides[]
 
   @@unique([product_id, sku])
+  @@index([barcode])
 }
 
 model products {
@@ -1327,6 +1329,7 @@ model products {
   cost_price                     Decimal?                         @db.Decimal(12, 2)
   profit_margin                  Decimal?                         @db.Decimal(5, 2)
   sku                            String?                          @db.VarChar(100)
+  barcode                        String?                          @db.VarChar(64)
   stock_quantity                 Int?                             @default(0)
   state                          product_state_enum               @default(inactive)
   pricing_type                   pricing_type_enum                @default(unit)
@@ -1440,7 +1443,9 @@ model products {
 
   @@unique([store_id, slug])
   @@unique([store_id, sku])
+  @@unique([store_id, barcode])
   @@index([store_id, sku])
+  @@index([store_id, barcode])
   @@index([store_id, product_type])
   @@index([store_id, is_featured])
   @@index([store_id, is_consultation])
@@ -7231,6 +7236,8 @@ model subscription_plans {
   is_popular              Boolean                         @default(false)
   sort_order              Int                             @default(0)
   is_default              Boolean                         @default(false)
+  plan_group_code         String?                         @db.VarChar(64)
+  details_md              String?                         @db.Text
   parent_plan_id          Int?
   parent_plan             subscription_plans?             @relation("plan_lineage", fields: [parent_plan_id], references: [id])
   child_plans             subscription_plans[]            @relation("plan_lineage")
@@ -7250,6 +7257,7 @@ model subscription_plans {
 
   @@index([plan_type, state])
   @@index([is_promotional, promo_priority])
+  @@index([plan_group_code])
 }
 
 model partner_plan_overrides {

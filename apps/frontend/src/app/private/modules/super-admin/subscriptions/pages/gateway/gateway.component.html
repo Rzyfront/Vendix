@@ -207,6 +207,62 @@
         </div>
       </div>
 
+      <!-- URL de Eventos (webhook de plataforma) -->
+      <div
+        class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-3"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon
+            name="webhook"
+            [size]="18"
+            customClasses="text-text-primary"
+          ></app-icon>
+          <h2
+            class="text-sm font-semibold text-text-primary uppercase tracking-wide"
+          >
+            URL de Eventos
+          </h2>
+        </div>
+
+        <p class="text-sm text-text-secondary">
+          Registra esta URL en el comercio Wompi
+          <strong>de la plataforma</strong> para que confirme los cobros de
+          suscripción. Es distinta de la URL de las tiendas — no la reutilices.
+        </p>
+
+        <div
+          class="flex items-center gap-2 bg-background border border-border rounded-md px-3 py-2"
+        >
+          <code class="text-xs md:text-sm text-text-primary break-all flex-1">
+            {{ platformWebhookUrl }}
+          </code>
+          <button
+            type="button"
+            class="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline shrink-0"
+            (click)="copyWebhookUrl()"
+          >
+            <app-icon
+              [name]="webhookUrlCopied() ? 'check' : 'copy'"
+              [size]="14"
+            ></app-icon>
+            {{ webhookUrlCopied() ? 'Copiado' : 'Copiar' }}
+          </button>
+        </div>
+
+        <p class="text-xs text-text-secondary">
+          Pégala en
+          <a
+            href="https://comercios.wompi.co"
+            target="_blank"
+            rel="noopener"
+            class="text-primary hover:underline"
+            >comercios.wompi.co</a
+          >
+          → Configuraciones avanzadas → Seguimiento de transacciones → URL de
+          Eventos.
+        </p>
+      </div>
+
       <!-- Configuración -->
       <div
         class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-4"

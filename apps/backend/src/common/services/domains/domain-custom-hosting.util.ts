@@ -108,7 +108,7 @@ export interface DomainHostingRecord {
   certificate_issued_at?: Date | string | null;
 }
 
-const VERIFIED_DOMAIN_STATUSES = new Set([
+export const VERIFIED_DOMAIN_STATUSES = new Set([
   'pending_certificate',
   'issuing_certificate',
   'pending_alias',

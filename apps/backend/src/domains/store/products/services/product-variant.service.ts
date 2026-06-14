@@ -203,6 +203,7 @@ export class ProductVariantService {
       data: {
         product_id: product.id,
         sku: createVariantDto.sku,
+        barcode: createVariantDto.barcode?.trim() || null,
         name: createVariantDto.name,
         attributes: createVariantDto.attributes,
         price_override: priceOverride,
@@ -437,6 +438,12 @@ export class ProductVariantService {
       data: {
         ...variantData,
         price_override: priceOverride,
+        // PATCH semantics: solo normalizar barcode si el DTO lo trae. '' /
+        // whitespace-only → null para mantener consistencia con la ruta de
+        // creación y evitar colisiones con barcodes vacíos.
+        ...(updateVariantDto.barcode !== undefined
+          ? { barcode: updateVariantDto.barcode?.trim() || null }
+          : {}),
         updated_at: new Date(),
       } as any,
     });

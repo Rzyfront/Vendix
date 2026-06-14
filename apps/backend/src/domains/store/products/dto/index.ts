@@ -88,6 +88,11 @@ export class CreateVariantWithStockDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(255)
   name?: string;
 
@@ -209,6 +214,11 @@ export class CreateProductDto {
   @IsString()
   @MaxLength(100)
   sku?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 
   @IsOptional()
   @IsInt()
@@ -480,6 +490,11 @@ export class UpdateProductDto {
   @IsString()
   @MaxLength(100)
   sku?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -789,6 +804,11 @@ export class CreateProductVariantDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(255)
   name?: string;
 
@@ -879,6 +899,11 @@ export class UpdateProductVariantDto {
   @IsString()
   @MaxLength(100)
   sku?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 
   @IsOptional()
   @IsString()
@@ -1217,6 +1242,11 @@ export class UpdateVariantWithStockDto {
   @IsString()
   @MaxLength(100)
   sku?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 
   @IsOptional()
   @IsString()
