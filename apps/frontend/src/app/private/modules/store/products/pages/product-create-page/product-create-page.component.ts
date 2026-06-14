@@ -42,6 +42,7 @@ import {
   CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../../shared/pipes/currency';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   CreateProductDto,
   CreateProductImageDto,
@@ -459,6 +460,41 @@ export class ProductCreatePageComponent {
   private priceTiersService = inject(PriceTiersService);
   private priceTierCache = inject(PriceTierCacheService);
   private http = inject(HttpClient);
+  private readonly authFacade = inject(AuthFacade);
+
+  /**
+   * Industrias EFECTIVAS de la tienda, con la MISMA cascada de fuentes que
+   * `MenuFilterService` (core/services/menu-filter.service.ts):
+   *   1. store_settings.general.industries — fuente de verdad, se actualiza al
+   *      guardar en Ajustes → General (live, no requiere re-login).
+   *   2. user.store.industries — snapshot de login (puede no traer el campo si
+   *      el whitelist de `cleanStore` aún no lo incluye).
+   *   3. ['retail'] — default canónico (columna DB + settings default).
+   * Antes leía solo (1)→userIndustries$ login y devolvía [] cuando el campo
+   * faltaba, ocultando "Plato preparado" en tiendas restaurante.
+   */
+  private readonly storeSettings = toSignal(this.authFacade.storeSettings$, {
+    initialValue: null as { general?: { industries?: string[] } } | null,
+  });
+  private readonly loginIndustries = toSignal(this.authFacade.userIndustries$, {
+    initialValue: [] as string[],
+  });
+  private readonly storeIndustries = computed<string[]>(() => {
+    const fromSettings = this.storeSettings()?.general?.industries;
+    const fromLogin = this.loginIndustries();
+    return (
+      fromSettings ||
+      (Array.isArray(fromLogin) ? fromLogin : null) ||
+      ['retail']
+    );
+  });
+  /**
+   * `true` solo si la tienda tiene la industria `restaurant`. Gatea el tipo
+   * "Plato preparado" y los toggles de la suite restaurante en el formulario.
+   */
+  readonly isRestaurant = computed(() =>
+    this.storeIndustries().includes('restaurant'),
+  );
 
   // Data Collection Templates (for consultation configuration)
   dataCollectionTemplates: {
@@ -557,10 +593,26 @@ export class ProductCreatePageComponent {
     { value: 'weight', label: 'Venta por peso (kg)' },
   ];
 
-  productTypeOptions: { value: string; label: string }[] = [
-    { value: 'physical', label: 'Producto Físico' },
-    { value: 'service', label: 'Servicio' },
-  ];
+  /**
+   * Opciones del selector "Tipo de Producto". "Plato preparado"
+   * (product_type='prepared') solo se ofrece a tiendas con industria
+   * `restaurant`, o si el producto en edición ya es 'prepared' (para no
+   * perder el valor al editarlo en una tienda mal configurada).
+   */
+  readonly productTypeOptions = computed<{ value: string; label: string }[]>(
+    () => {
+      this.formUpdateTrigger(); // reactividad ante cambios del formulario
+      const base = [
+        { value: 'physical', label: 'Producto Físico' },
+        { value: 'service', label: 'Servicio' },
+      ];
+      const current = this.productForm?.get('product_type')?.value;
+      if (this.isRestaurant() || current === 'prepared') {
+        base.push({ value: 'prepared', label: 'Plato preparado' });
+      }
+      return base;
+    },
+  );
 
   serviceModalityOptions: SelectorOption[] = [
     { value: 'in_person', label: 'Presencial' },

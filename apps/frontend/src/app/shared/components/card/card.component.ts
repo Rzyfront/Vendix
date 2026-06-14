@@ -6,6 +6,11 @@ import { NgStyle } from '@angular/common';
   standalone: true,
   imports: [NgStyle],
   host: {
+    // Custom elements default to display:inline, which makes vertical margins
+    // (e.g. a parent `space-y-*`) collapse so stacked cards look glued together.
+    // `block` is the correct default for a card; flex/grid parents still
+    // override it for their items, so this is regression-safe.
+    class: 'block',
     '[class.h-full]': 'fullHeight()',
   },
   template: `
