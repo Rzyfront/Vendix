@@ -1,3 +1,6 @@
+// TODO(shared-types): replace with `export type AppType = DomainApp` from
+// `@vendix/shared-types` once libs/shared-types/index.d.ts is regenerated.
+// Tracked as a Knowledge Gap in the org-admin parity plan.
 export type AppType =
   | 'VENDIX_LANDING'
   | 'VENDIX_ADMIN'
