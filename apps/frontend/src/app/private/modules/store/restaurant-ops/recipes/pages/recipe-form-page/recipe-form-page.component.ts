@@ -20,7 +20,6 @@ import {
 } from '@angular/forms';
 
 import {
-  ButtonComponent,
   CardComponent,
   DialogService,
   IconComponent,
@@ -65,7 +64,6 @@ interface RecipeFormShape {
     SelectorComponent,
     SettingToggleComponent,
     TextareaComponent,
-    ButtonComponent,
     IconComponent,
     RecipeItemsEditorComponent,
   ],
