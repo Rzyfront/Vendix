@@ -2,10 +2,10 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
-  BadRequestException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreateCashRegisterDto } from './dto/create-cash-register.dto';
 import { UpdateCashRegisterDto } from './dto/update-cash-register.dto';
 
@@ -15,7 +15,11 @@ export class CashRegistersService {
 
   private get storeId(): number {
     const context = RequestContextService.getContext();
-    return context.store_id;
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    return store_id;
   }
 
   /**
@@ -31,10 +35,10 @@ export class CashRegistersService {
       select: { id: true },
     });
     if (!location) {
-      throw new BadRequestException({
-        errorCode: 'INV_LOC_001',
-        devMessage: 'Bodega no encontrada para esta tienda',
-      });
+      throw new VendixHttpException(
+        ErrorCodes.INV_LOC_001,
+        'Bodega no encontrada para esta tienda',
+      );
     }
   }
 
