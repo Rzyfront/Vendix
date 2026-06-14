@@ -11,7 +11,11 @@ import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
+  ButtonComponent,
   CardComponent,
+  EmptyStateComponent,
+  IconComponent,
+  InputComponent,
   StickyHeaderComponent,
   StatsComponent,
   ToastService,
@@ -23,33 +27,37 @@ import {
   MenuEngineeringReport,
 } from '../../interfaces';
 import { MenusService } from '../../services';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
+// Cuadrantes BCG. Se conserva un acento de color por cuadrante (mediante el
+// color del icono) pero la tarjeta usa tokens neutros del design system
+// (bg-surface / border-border) en lugar de paletas Tailwind hardcodeadas.
 const QUADRANT_META: Record<
   EngineeringQuadrant,
-  { label: string; description: string; color: string; icon: string }
+  { label: string; description: string; iconColor: string; icon: string }
 > = {
   estrella: {
     label: 'Estrella',
     description: 'Alta popularidad · Alto margen',
-    color: 'bg-green-50 border-green-300',
+    iconColor: 'text-green-600',
     icon: 'star',
   },
   caballo: {
     label: 'Caballo',
     description: 'Alta popularidad · Bajo margen',
-    color: 'bg-amber-50 border-amber-300',
+    iconColor: 'text-amber-600',
     icon: 'trending-up',
   },
   puzzle: {
     label: 'Puzzle',
     description: 'Baja popularidad · Alto margen',
-    color: 'bg-blue-50 border-blue-300',
+    iconColor: 'text-blue-600',
     icon: 'help-circle',
   },
   perro: {
     label: 'Perro',
     description: 'Baja popularidad · Bajo margen',
-    color: 'bg-red-50 border-red-300',
+    iconColor: 'text-red-600',
     icon: 'x-octagon',
   },
 };
@@ -63,6 +71,10 @@ const QUADRANT_META: Record<
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
+    ButtonComponent,
+    IconComponent,
+    InputComponent,
+    EmptyStateComponent,
   ],
   templateUrl: './menu-engineering-page.component.html',
   styleUrl: './menu-engineering-page.component.scss',
@@ -82,9 +94,9 @@ export class MenuEngineeringPageComponent implements OnInit {
     'perro',
   ];
 
-  // Default range: last 30 days.
-  readonly from = signal(this.daysAgoIso(30));
-  readonly to = signal(this.daysAgoIso(0));
+  // Default range: last 30 days (fechas locales, sin corrimiento de zona).
+  readonly from = signal(this.daysAgoLocal(30));
+  readonly to = signal(toLocalDateString());
 
   readonly summary = computed(() => {
     const r = this.report();
@@ -102,6 +114,12 @@ export class MenuEngineeringPageComponent implements OnInit {
       revenue: r.totals.revenue,
       profit: r.totals.profit,
     };
+  });
+
+  /** True cuando el reporte ya cargó y no hay productos en el rango. */
+  readonly isEmpty = computed(() => {
+    const r = this.report();
+    return r != null && (r.total_products ?? 0) === 0;
   });
 
   ngOnInit(): void {
@@ -147,9 +165,9 @@ export class MenuEngineeringPageComponent implements OnInit {
     });
   }
 
-  private daysAgoIso(days: number): string {
+  private daysAgoLocal(days: number): string {
     const d = new Date();
     d.setDate(d.getDate() - days);
-    return d.toISOString().slice(0, 10);
+    return toLocalDateString(d);
   }
 }

@@ -10,30 +10,30 @@
 
   <div class="p-2 md:p-6 space-y-6">
     <app-card title="Rango de análisis" [padding]="true">
-      <div class="flex flex-col md:flex-row gap-2 items-end">
-        <div class="flex-1">
-          <label class="text-xs text-text-secondary block mb-1">Desde</label>
-          <input
-            type="date"
-            class="w-full border border-border rounded-md px-3 py-2 text-sm"
-            [ngModel]="from()"
-            (ngModelChange)="from.set($event)"
-          />
-        </div>
-        <div class="flex-1">
-          <label class="text-xs text-text-secondary block mb-1">Hasta</label>
-          <input
-            type="date"
-            class="w-full border border-border rounded-md px-3 py-2 text-sm"
-            [ngModel]="to()"
-            (ngModelChange)="to.set($event)"
-          />
-        </div>
-        <button
-          type="button"
-          class="px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:opacity-90"
-          (click)="loadReport()"
-        >Recalcular</button>
+      <div class="flex flex-col md:flex-row gap-2 md:items-end">
+        <app-input
+          class="flex-1"
+          label="Desde"
+          [type]="'date'"
+          [ngModel]="from()"
+          (ngModelChange)="from.set($event)"
+        />
+        <app-input
+          class="flex-1"
+          label="Hasta"
+          [type]="'date'"
+          [ngModel]="to()"
+          (ngModelChange)="to.set($event)"
+        />
+        <app-button
+          variant="primary"
+          [loading]="isLoading()"
+          [disabled]="isLoading()"
+          (clicked)="loadReport()"
+        >
+          <app-icon slot="icon" name="refresh-cw" [size]="16" />
+          Recalcular
+        </app-button>
       </div>
     </app-card>
 
@@ -72,40 +72,58 @@
       />
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-      @for (q of quadrants; track q) {
-        <div class="border-2 rounded-md {{ meta[q].color }} p-3">
-          <div class="flex items-center justify-between mb-2">
-            <div>
-              <h3 class="font-semibold text-sm md:text-base">{{ meta[q].label }}</h3>
-              <p class="text-xs text-text-secondary">{{ meta[q].description }}</p>
+    @if (isEmpty()) {
+      <app-empty-state
+        icon="bar-chart-2"
+        title="Sin datos en el rango seleccionado"
+        description="No se registraron ventas de productos en estas fechas. Ajusta el rango de fechas y recalcula."
+        [showActionButton]="false"
+        [showRefreshButton]="false"
+      />
+    } @else {
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        @for (q of quadrants; track q) {
+          <!-- Tarjeta neutra del design system; el acento de color va en el icono. -->
+          <div class="border border-border bg-surface rounded-md p-3">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <app-icon
+                  [name]="meta[q].icon"
+                  [size]="18"
+                  [class]="meta[q].iconColor"
+                />
+                <div>
+                  <h3 class="font-semibold text-sm md:text-base">{{ meta[q].label }}</h3>
+                  <p class="text-xs text-text-secondary">{{ meta[q].description }}</p>
+                </div>
+              </div>
+              <span class="text-lg font-bold">{{ countOf(q) }}</span>
             </div>
-            <span class="text-lg font-bold">{{ countOf(q) }}</span>
-          </div>
 
-          @if (productsOf(q).length === 0) {
-            <p class="text-xs text-text-secondary italic">Sin productos en este cuadrante.</p>
-          } @else {
-            <ul class="space-y-1 max-h-64 overflow-y-auto">
-              @for (p of productsOf(q); track p.product_id) {
-                <li class="flex items-center justify-between bg-white bg-opacity-60 px-2 py-1 rounded text-xs">
-                  <div class="flex flex-col">
-                    <span class="font-medium">{{ p.product_name }}</span>
-                    <span class="text-text-secondary">
-                      {{ p.units_sold }} und · {{ formatCurrency(p.revenue) }} · margen {{ p.margin_pct }}%
-                      @if (!p.has_recipe) {
-                        <span class="text-amber-700">(costo catálogo)</span>
-                      }
-                    </span>
-                  </div>
-                  <span class="text-text-secondary">{{ p.popularity_pct }}%</span>
-                </li>
-              }
-            </ul>
-          }
-        </div>
-      }
-    </div>
+            @if (productsOf(q).length === 0) {
+              <p class="text-xs text-text-secondary italic">Sin productos en este cuadrante.</p>
+            } @else {
+              <ul class="space-y-1 max-h-64 overflow-y-auto">
+                @for (p of productsOf(q); track p.product_id) {
+                  <li class="flex items-center justify-between bg-background px-2 py-1 rounded text-xs">
+                    <div class="flex flex-col">
+                      <span class="font-medium">{{ p.product_name }}</span>
+                      <span class="text-text-secondary">
+                        {{ p.units_sold }} und · {{ formatCurrency(p.revenue) }} · margen {{ p.margin_pct }}%
+                        @if (!p.has_recipe) {
+                          <span class="text-amber-700">(costo catálogo)</span>
+                        }
+                      </span>
+                    </div>
+                    <span class="text-text-secondary">{{ p.popularity_pct }}%</span>
+                  </li>
+                }
+              </ul>
+            }
+          </div>
+        }
+      </div>
+    }
 
     @if (isLoading()) {
       <div class="text-center text-text-secondary text-sm">Cargando reporte…</div>

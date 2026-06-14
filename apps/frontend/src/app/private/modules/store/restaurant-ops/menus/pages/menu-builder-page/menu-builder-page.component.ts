@@ -8,11 +8,17 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
+  ButtonComponent,
   CardComponent,
+  DialogService,
+  IconComponent,
+  InputComponent,
+  SelectorComponent,
+  SelectorOption,
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
@@ -51,9 +57,12 @@ interface ProductOption {
   imports: [
     CommonModule,
     FormsModule,
-    RouterLink,
     StickyHeaderComponent,
     CardComponent,
+    ButtonComponent,
+    IconComponent,
+    InputComponent,
+    SelectorComponent,
   ],
   templateUrl: './menu-builder-page.component.html',
   styleUrl: './menu-builder-page.component.scss',
@@ -62,6 +71,7 @@ export class MenuBuilderPageComponent implements OnInit {
   private readonly menusService = inject(MenusService);
   private readonly productsService = inject(ProductsService);
   private readonly toastService = inject(ToastService);
+  private readonly dialogService = inject(DialogService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -78,6 +88,50 @@ export class MenuBuilderPageComponent implements OnInit {
     start_time: '08:00',
     end_time: '12:00',
   });
+
+  /** Opciones de día de la semana para el app-selector de ventanas. */
+  readonly dayOptions: SelectorOption[] = DAY_LABELS.map((d, i) => ({
+    value: i,
+    label: d,
+  }));
+
+  /** Mapea los productos disponibles al contrato SelectorOption del app-selector. */
+  readonly productSelectorOptions = computed<SelectorOption[]>(() =>
+    this.productOptions().map((p) => ({
+      value: p.id,
+      label:
+        p.name +
+        (p.is_combo ? ' · Combo' : '') +
+        (p.is_sellable === false ? ' · (no vendible)' : ''),
+      description: p.is_combo ? 'Combo' : undefined,
+    })),
+  );
+
+  /**
+   * Patch parcial de newWindow. Los templates de Angular no soportan el
+   * operador spread, así que el merge se hace aquí (en TS) y el template solo
+   * pasa el campo cambiado: (ngModelChange)="updateNewWindow({ start_time: $event })".
+   */
+  updateNewWindow(patch: Partial<CreateAvailabilityWindowDto>): void {
+    this.newWindow.set({ ...this.newWindow(), ...patch });
+  }
+
+  /**
+   * Handler tipado para el app-selector de producto. El CVA emite
+   * `string | number | null`; lo normalizamos a `number | null` aquí (en TS)
+   * para no romper strict templates ni el tipo del signal.
+   */
+  onProductSelect(value: string | number | null): void {
+    this.newItemProductId.set(value == null ? null : Number(value));
+  }
+
+  /**
+   * Handler tipado para el app-selector de día. Normaliza el valor emitido por
+   * el CVA (`string | number | null`) a `number` antes de mergear en newWindow.
+   */
+  onDaySelect(value: string | number | null): void {
+    this.updateNewWindow({ day_of_week: value == null ? 0 : Number(value) });
+  }
 
   readonly totalProductsInMenu = computed(() => {
     const m = this.menu();
@@ -158,8 +212,14 @@ export class MenuBuilderPageComponent implements OnInit {
       });
   }
 
-  deleteSection(section: MenuSection): void {
-    if (!confirm(`¿Eliminar la sección "${section.name}"?`)) return;
+  async deleteSection(section: MenuSection): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Eliminar sección',
+      message: `¿Eliminar la sección "${section.name}"?`,
+      confirmText: 'Eliminar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
     const menu = this.menu();
     if (!menu) return;
     this.menusService
@@ -217,8 +277,14 @@ export class MenuBuilderPageComponent implements OnInit {
       });
   }
 
-  removeItem(section: MenuSection, item: MenuSectionItem): void {
-    if (!confirm('¿Quitar este producto de la sección?')) return;
+  async removeItem(section: MenuSection, item: MenuSectionItem): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Quitar producto',
+      message: '¿Quitar este producto de la sección?',
+      confirmText: 'Eliminar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
     const menu = this.menu();
     if (!menu) return;
     this.menusService
@@ -280,8 +346,14 @@ export class MenuBuilderPageComponent implements OnInit {
       });
   }
 
-  deleteWindow(window: AvailabilityWindow): void {
-    if (!confirm('¿Eliminar la ventana?')) return;
+  async deleteWindow(window: AvailabilityWindow): Promise<void> {
+    const confirmed = await this.dialogService.confirm({
+      title: 'Eliminar ventana',
+      message: '¿Eliminar la ventana?',
+      confirmText: 'Eliminar',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
     this.menusService
       .removeAvailability(window.id)
       .pipe(takeUntilDestroyed(this.destroyRef))

@@ -8,7 +8,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import { FormBuilder, FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ModalComponent,
@@ -16,6 +16,7 @@ import {
   InputComponent,
   IconComponent,
   SpinnerComponent,
+  EmptyStateComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
@@ -47,6 +48,7 @@ interface ProductRow extends SellableProductOption {
     InputComponent,
     IconComponent,
     SpinnerComponent,
+    EmptyStateComponent,
     CurrencyPipe,
   ],
   templateUrl: './add-items-modal.component.html',
@@ -89,11 +91,15 @@ export class AddItemsModalComponent {
     }, 0);
   });
 
-  readonly form: FormGroup;
+  readonly form: FormGroup<{ search: FormControl<string> }>;
+
+  get searchControl(): FormControl<string> {
+    return this.form.controls.search;
+  }
 
   constructor() {
     this.form = this.fb.group({
-      search: [''],
+      search: this.fb.nonNullable.control(''),
     });
   }
 

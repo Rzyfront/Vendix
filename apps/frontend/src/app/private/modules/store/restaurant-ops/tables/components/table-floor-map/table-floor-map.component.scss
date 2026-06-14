@@ -1,5 +1,7 @@
 .table-cell {
-  --cell-color: #6b7280;
+  // Fallback only; the real color is injected via [style.--cell-color]
+  // from TablesService.statusColorVar (design-system tokens).
+  --cell-color: var(--color-text-muted, #6b7280);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -25,23 +27,37 @@
     outline-offset: 2px;
   }
 
+  // Border color is driven by the injected --cell-color token across all
+  // states; the subtle tinted backgrounds use the semantic *-light tokens.
   &.is-occupied {
-    border-color: #dc2626;
-    background: linear-gradient(180deg, #fef2f2 0%, var(--color-surface, #fff) 60%);
+    border-color: var(--cell-color);
+    background: linear-gradient(
+      180deg,
+      var(--color-error-light, rgba(239, 68, 68, 0.1)) 0%,
+      var(--color-surface, #fff) 60%
+    );
   }
 
   &.is-available {
-    border-color: #16a34a;
+    border-color: var(--cell-color);
   }
 
   &.is-reserved {
-    border-color: #eab308;
-    background: linear-gradient(180deg, #fefce8 0%, var(--color-surface, #fff) 60%);
+    border-color: var(--cell-color);
+    background: linear-gradient(
+      180deg,
+      var(--color-warning-light, rgba(251, 146, 60, 0.1)) 0%,
+      var(--color-surface, #fff) 60%
+    );
   }
 
   &.is-cleaning {
-    border-color: #6b7280;
-    background: linear-gradient(180deg, #f3f4f6 0%, var(--color-surface, #fff) 60%);
+    border-color: var(--cell-color);
+    background: linear-gradient(
+      180deg,
+      var(--color-muted-light, rgba(148, 163, 184, 0.1)) 0%,
+      var(--color-surface, #fff) 60%
+    );
   }
 }
 

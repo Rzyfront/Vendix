@@ -2,15 +2,16 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   inject,
   OnDestroy,
   OnInit,
   signal,
+  untracked,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-  CardComponent,
   DialogService,
   StickyHeaderComponent,
   ToastService,
@@ -22,7 +23,6 @@ import {
   KDS_COLUMNS,
   KdsColumn,
   KitchenTicket,
-  KitchenTicketStatus,
 } from '../../interfaces';
 import {
   KdsConnectionState,
@@ -34,16 +34,22 @@ import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-tic
 /**
  * KDS Board — real-time kitchen display.
  *
- * Renders four columns (Pending, In Preparation, Ready, Delivered) and
- * subscribes to the SSE stream via `KdsSseService`. The page:
+ * Renders five columns (Pending, In Preparation, Ready, Delivered,
+ * Cancelled) and subscribes to the SSE stream via `KdsSseService`.
+ * Delivered (green) and Cancelled (red) are kept as separate columns so
+ * the kitchen never confuses an order that left with one that was
+ * voided. The page:
  *  - groups tickets by status (computed signals) so the template can
  *    render a column per state without re-iterating the array;
  *  - delegates the action buttons on each card to its own methods
  *    (`startTicket`, `markTicketReady`, `markTicketDelivered`,
  *    `cancelTicket`) which call the HTTP service and let the SSE
  *    stream reconcile the final state — no optimistic patching here.
- *  - exposes a small connection indicator + reconnect counter so
- *    kitchen staff see when the board is offline.
+ *  - owns a SINGLE 1s `now` ticker shared with every card (instead of
+ *    one timer per card) and pushes it down as an input;
+ *  - shows a connecting loader before the first snapshot, surfaces a
+ *    connection indicator + reconnect counter, and toasts when the
+ *    stream recovers from a failure.
  */
 @Component({
   selector: 'app-kds-board-page',
@@ -51,7 +57,6 @@ import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-tic
   imports: [
     CommonModule,
     StickyHeaderComponent,
-    CardComponent,
     IconComponent,
     BadgeComponent,
     KdsTicketCardComponent,
@@ -81,21 +86,38 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   readonly readyTickets = computed(() =>
     this.tickets().filter((t) => t.status === 'ready'),
   );
+  /** Only delivered tickets — kept separate from cancelled (green column). */
   readonly deliveredTickets = computed(() =>
-    this.tickets().filter(
-      (t) => t.status === 'delivered' || t.status === 'cancelled',
-    ),
+    this.tickets().filter((t) => t.status === 'delivered'),
+  );
+  /** Only cancelled/voided tickets (red column). */
+  readonly cancelledTickets = computed(() =>
+    this.tickets().filter((t) => t.status === 'cancelled'),
   );
 
-  readonly columnCounts = computed(() => ({
+  readonly columnCounts = computed<Record<KdsColumn, number>>(() => ({
     pending: this.pendingTickets().length,
     in_preparation: this.inPreparationTickets().length,
     ready: this.readyTickets().length,
     delivered: this.deliveredTickets().length,
+    cancelled: this.cancelledTickets().length,
   }));
 
   /** Track which ticket ids are mid-mutation so cards can disable buttons. */
   readonly mutatingIds = signal<Set<number>>(new Set());
+
+  /**
+   * Single shared 1s ticker pushed down to every card as `[now]`.
+   * One timer for the whole board instead of one `setInterval` per card.
+   */
+  readonly now = signal(Date.now());
+  private tickHandle: ReturnType<typeof setInterval> | null = null;
+
+  /**
+   * Previous connection state, used by the reconnection effect to detect
+   * the failure → open transition without firing on the initial connect.
+   */
+  private readonly prevState = signal<KdsConnectionState>('idle');
 
   /** Connection indicator label + color for the header chip. */
   readonly connectionLabel = computed(() => {
@@ -130,12 +152,47 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     }
   });
 
+  /**
+   * True while we are establishing the very first connection and have no
+   * tickets yet — used to show a "Conectando a cocina…" loader instead of
+   * a blank board with empty columns.
+   */
+  readonly showInitialLoading = computed(() => {
+    const s = this.connectionState();
+    return (s === 'idle' || s === 'connecting') && this.tickets().length === 0;
+  });
+
+  constructor() {
+    // Toast when the stream recovers from a failure. We track the previous
+    // state in a signal and only fire on (error|reconnecting) → open, never
+    // on the initial idle/connecting → open handshake.
+    effect(() => {
+      const current = this.connectionState();
+      // Read + write prevState OUTSIDE tracking so this effect only
+      // re-runs when connectionState changes — never because of its own
+      // write (which would otherwise loop).
+      const previous = untracked(this.prevState);
+      if (
+        current === 'open' &&
+        (previous === 'error' || previous === 'reconnecting')
+      ) {
+        this.toastService.success('Conexión restablecida', 'Cocina en vivo');
+      }
+      untracked(() => this.prevState.set(current));
+    });
+  }
+
   ngOnInit(): void {
     this.kdsSse.connect(120);
+    this.tickHandle = setInterval(() => this.now.set(Date.now()), 1000);
   }
 
   ngOnDestroy(): void {
     this.kdsSse.disconnect();
+    if (this.tickHandle) {
+      clearInterval(this.tickHandle);
+      this.tickHandle = null;
+    }
   }
 
   refresh(): void {
@@ -155,6 +212,8 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         return this.readyTickets();
       case 'delivered':
         return this.deliveredTickets();
+      case 'cancelled':
+        return this.cancelledTickets();
     }
   }
 
@@ -168,6 +227,25 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         return 'Listos';
       case 'delivered':
         return 'Entregados';
+      case 'cancelled':
+        return 'Cancelados';
+    }
+  }
+
+  /** Badge color per column header. */
+  columnBadgeVariant(
+    column: KdsColumn,
+  ): 'success' | 'warning' | 'error' | 'neutral' | 'info' {
+    switch (column) {
+      case 'ready':
+      case 'delivered':
+        return 'success';
+      case 'in_preparation':
+        return 'warning';
+      case 'cancelled':
+        return 'error';
+      case 'pending':
+        return 'neutral';
     }
   }
 
