@@ -1005,6 +1005,11 @@ export class ProductsService {
                 id: variant.id,
                 name: variant.name,
                 sku: variant.sku,
+                // Barcode de la variante: necesario para que el escaneo en POS
+                // (handleBarcodeScan -> variants.find(v => v.barcode === code))
+                // casa la variante exacta. Sin exponerlo, el scan caía siempre
+                // al modal de selección manual.
+                barcode: variant.barcode,
                 price_override: variant.price_override
                   ? Number(variant.price_override)
                   : null,
@@ -1065,6 +1070,7 @@ export class ProductsService {
             final_price: this.calculateFinalPrice(product),
             active_promotion: activePromotion,
             sku: product.sku,
+            barcode: product.barcode,
             cost_price: product.cost_price,
             profit_margin: product.profit_margin,
             min_stock_level: product.min_stock_level,
@@ -1172,6 +1178,7 @@ export class ProductsService {
                 id: variant.id,
                 name: variant.name,
                 sku: variant.sku,
+                barcode: variant.barcode,
                 price_override: variant.price_override
                   ? Number(variant.price_override)
                   : null,
@@ -1212,6 +1219,7 @@ export class ProductsService {
           final_price: this.calculateFinalPrice(product),
           active_promotion: activePromotion,
           sku: product.sku,
+          barcode: product.barcode,
           cost_price: product.cost_price,
           profit_margin: product.profit_margin,
           min_stock_level: product.min_stock_level,
@@ -1437,6 +1445,10 @@ export class ProductsService {
       is_on_sale: product.is_on_sale,
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
+      // Código de barras: persistido vía `...productData` en update y vía el
+      // bloque explícito en create, pero el form de edición lo lee de ESTE
+      // mapeo de detalle al recargar; sin exponerlo aquí parecía "no guardarse".
+      barcode: product.barcode,
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
       min_stock_level: product.min_stock_level,

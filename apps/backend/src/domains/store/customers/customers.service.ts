@@ -44,6 +44,24 @@ export class CustomersService {
     return { type, number };
   }
 
+  /**
+   * Resuelve el email que se persistirá en `users.email` al crear/actualizar
+   * un cliente. Si el cliente no proporcionó un correo, devuelve un
+   * placeholder interno único (formato `noemail+store-{id}-{nanoid}@vendix.internal`)
+   * que no representa un canal de comunicación real.
+   */
+  private resolveCustomerEmail(
+    email: string | null | undefined,
+    storeId: number,
+  ): string {
+    const trimmed = (email ?? '').trim().toLowerCase();
+    if (trimmed) return trimmed;
+
+    // randomUUID está disponible en Node 16+ vía crypto; evitamos una dep extra.
+    const { randomUUID } = require('crypto') as typeof import('crypto');
+    return `noemail+store-${storeId}-${randomUUID()}@vendix.internal`;
+  }
+
   private async generateUniqueUsername(email: string): Promise<string> {
     let baseUsername = email.split('@')[0];
     // Eliminar caracteres especiales
@@ -292,10 +310,16 @@ export class CustomersService {
       throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
     }
 
+    // Email efectivo para plataforma. Si el cliente no proporcionó uno,
+    // generamos un placeholder interno único (no es un canal de comunicación
+    // real, solo satisface la unicidad de users.email y permite crear el
+    // usuario de plataforma sin obligar al comercio a capturar un correo).
+    const effectiveEmail = this.resolveCustomerEmail(dto.email, storeId);
+
     // Check if user exists in the organization
     const existingUser = await this.prisma.users.findFirst({
       where: {
-        email: dto.email,
+        email: effectiveEmail,
         organization_id: store.organization_id,
       },
     });
@@ -337,7 +361,7 @@ export class CustomersService {
 
     const password = this.generateTemporaryPassword();
     const hashedPassword = await bcrypt.hash(password, 12);
-    const username = await this.generateUniqueUsername(dto.email);
+    const username = await this.generateUniqueUsername(effectiveEmail);
 
     // Convertir nombres a Title Case
     const formatted_first_name = toTitleCase(dto.first_name || '');
@@ -346,7 +370,7 @@ export class CustomersService {
     // Create user
     const user = await this.prisma.users.create({
       data: {
-        email: dto.email,
+        email: effectiveEmail,
         password: hashedPassword,
         first_name: formatted_first_name,
         last_name: formatted_last_name,
