@@ -608,12 +608,8 @@ export class PosProductService {
 
   getProductByBarcode(barcode: string): Observable<Product | null> {
     const params = new HttpParams().set('barcode', barcode);
-    return this.http.get<SearchResult>(this.apiUrl, { params }).pipe(
-      map((response) =>
-        response.products && response.products.length > 0
-          ? response.products[0]
-          : null,
-      ),
+    return this.http.get<any>(this.apiUrl, { params }).pipe(
+      map((response) => this.firstTransformedProduct(response)),
       catchError((error: any) => {
         return of(null);
       }),
@@ -622,16 +618,33 @@ export class PosProductService {
 
   getProductBySku(sku: string): Observable<Product | null> {
     const params = new HttpParams().set('sku', sku);
-    return this.http.get<SearchResult>(this.apiUrl, { params }).pipe(
-      map((response) =>
-        response.products && response.products.length > 0
-          ? response.products[0]
-          : null,
-      ),
+    return this.http.get<any>(this.apiUrl, { params }).pipe(
+      map((response) => this.firstTransformedProduct(response)),
       catchError((error: any) => {
         return of(null);
       }),
     );
+  }
+
+  /**
+   * Desempaqueta el envelope estándar (`{ success, data, meta }`) o un payload
+   * plano, transforma con `transformProducts` (para que el producto traiga la
+   * forma que consume el POS: precios, variantes mapeadas, stock) y devuelve el
+   * primero. Devuelve `null` si la respuesta no trae productos.
+   *
+   * Nota: la búsqueda por `barcode`/`sku` viaja en `response.data`, no en
+   * `response.products`; leer la clave equivocada hacía que el POS reportara
+   * "Producto no encontrado" aunque la API sí lo devolviera.
+   */
+  private firstTransformedProduct(response: any): Product | null {
+    const dataRoot = response?.success ? response.data : response;
+    const list = Array.isArray(dataRoot)
+      ? dataRoot
+      : Array.isArray(dataRoot?.data)
+        ? dataRoot.data
+        : [];
+    if (list.length === 0) return null;
+    return (this.transformProducts(list)[0] as Product) ?? null;
   }
 
   getCategories(): Observable<Category[]> {
