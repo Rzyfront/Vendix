@@ -36,6 +36,9 @@ export enum PricingType {
 export enum ProductType {
   PHYSICAL = 'physical',
   SERVICE = 'service',
+  // Plato/preparación producida in-house (suite restaurante). Ya existe en el
+  // enum Prisma product_type_enum; el DTO debe aceptarlo para crear/editar platos.
+  PREPARED = 'prepared',
 }
 
 export enum ServiceModality {
