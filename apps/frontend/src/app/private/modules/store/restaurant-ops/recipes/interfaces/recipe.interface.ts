@@ -66,7 +66,9 @@ export interface CreateRecipeDto {
   is_active?: boolean;
 }
 
-export type UpdateRecipeDto = Partial<CreateRecipeDto>;
+// product_id binds the recipe to its finished product at creation and is
+// immutable: the backend UpdateRecipeDto whitelist rejects it (400). Omit it.
+export type UpdateRecipeDto = Partial<Omit<CreateRecipeDto, 'product_id'>>;
 
 export interface CreateRecipeItemDto {
   component_product_id: number;
@@ -75,7 +77,12 @@ export interface CreateRecipeItemDto {
   is_optional?: boolean;
 }
 
-export type UpdateRecipeItemDto = Partial<CreateRecipeItemDto>;
+// component_product_id is the immutable FK to the component product: the backend
+// UpdateRecipeItemDto whitelist rejects it (400). Omit it so the type prevents
+// sending it on update — swap a component via remove + add instead.
+export type UpdateRecipeItemDto = Partial<
+  Omit<CreateRecipeItemDto, 'component_product_id'>
+>;
 
 export interface RecipeQuery {
   page?: number;

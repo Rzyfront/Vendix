@@ -283,8 +283,10 @@ export class RecipeFormPageComponent implements OnInit {
     }
 
     const raw = this.form.getRawValue();
-    const dto: CreateRecipeDto = {
-      product_id: raw.product_id as number,
+    // Campos mutables compartidos. product_id NO va aquí: es inmutable tras crear
+    // (el backend recipes.service.update lo ignora y el whitelist del DTO lo
+    // rechaza con 400). Solo se envía al crear.
+    const base = {
       yield_quantity: Number(raw.yield_quantity ?? 0),
       yield_unit: raw.yield_unit,
       waste_percent: Number(raw.waste_percent ?? 0),
@@ -294,8 +296,11 @@ export class RecipeFormPageComponent implements OnInit {
 
     this.isSubmitting.set(true);
     const upsert$ = this.isEditMode()
-      ? this.recipesService.update(this.recipeId() as number, dto)
-      : this.recipesService.create(dto);
+      ? this.recipesService.update(this.recipeId() as number, base)
+      : this.recipesService.create({
+          product_id: raw.product_id as number,
+          ...base,
+        } as CreateRecipeDto);
 
     upsert$
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -344,17 +349,19 @@ export class RecipeFormPageComponent implements OnInit {
     for (const group of this.itemsArray.controls) {
       const raw = group.getRawValue();
       const itemId = raw.id;
-      const itemDto: CreateRecipeItemDto | UpdateRecipeItemDto = {
-        component_product_id: raw.component_product_id as number,
-        quantity: Number(raw.quantity ?? 0),
-        waste_percent: Number(raw.waste_percent ?? 0),
-        is_optional: raw.is_optional,
-      };
 
       if (itemId == null) {
+        // CREATE: component_product_id is required (the immutable FK to the
+        // component product).
+        const createDto: CreateRecipeItemDto = {
+          component_product_id: raw.component_product_id as number,
+          quantity: Number(raw.quantity ?? 0),
+          waste_percent: Number(raw.waste_percent ?? 0),
+          is_optional: raw.is_optional,
+        };
         await new Promise<void>((resolve) => {
           this.recipesService
-            .addItem(recipeId, itemDto as CreateRecipeItemDto)
+            .addItem(recipeId, createDto)
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (created) => {
@@ -369,9 +376,17 @@ export class RecipeFormPageComponent implements OnInit {
         });
       } else {
         currentIds.add(itemId);
+        // UPDATE: component_product_id is NOT updatable — the backend
+        // UpdateRecipeItemDto whitelist rejects it with 400. Swapping a
+        // component means remove + add, not patch.
+        const updateDto: UpdateRecipeItemDto = {
+          quantity: Number(raw.quantity ?? 0),
+          waste_percent: Number(raw.waste_percent ?? 0),
+          is_optional: raw.is_optional,
+        };
         await new Promise<void>((resolve) => {
           this.recipesService
-            .updateItem(recipeId, itemId, itemDto as UpdateRecipeItemDto)
+            .updateItem(recipeId, itemId, updateDto)
             .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => resolve(),

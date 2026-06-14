@@ -18,6 +18,7 @@ import {
   MultiSelectorOption,
   SelectorOption,
   DialogService,
+  TooltipComponent,
 } from '../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
@@ -47,6 +48,7 @@ import { TaxQuickCreateComponent } from './tax-quick-create.component';
     InputComponent,
     IconComponent,
     MultiSelectorComponent,
+    TooltipComponent,
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
     TaxQuickCreateComponent,

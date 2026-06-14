@@ -73,18 +73,19 @@ export class StorePrismaService extends BasePrismaService {
     'subscription_events',
     'price_tiers',
     // ===== Restaurant Suite Foundation (Fase A) =====
-    // All 11 new models carry store_id and follow the same direct-store
-    // scoping pattern as the rest of the array.
+    // Only the 8 models that carry a direct store_id column use direct-store
+    // scoping. The 3 child tables (recipe_items, kitchen_ticket_items,
+    // menu_section_items) have NO store_id column — they are scoped
+    // relationally via their parent (see `relational_scopes` below). Listing
+    // them here would inject `store_id` into their where/data and Prisma would
+    // reject it with "Unknown argument store_id".
     'recipes',
-    'recipe_items',
     'production_orders',
     'tables',
     'table_sessions',
     'kitchen_tickets',
-    'kitchen_ticket_items',
     'menus',
     'menu_sections',
-    'menu_section_items',
     'menu_availability_windows',
   ];
 
@@ -307,6 +308,10 @@ export class StorePrismaService extends BasePrismaService {
       'subscription_events', // Relational
       'product_price_tier_overrides', // Relational (via product.store_id)
       'product_price_tier_assignments', // Relational (via product.store_id)
+      // ===== Restaurant Suite child tables (no store_id, relational scope) =====
+      'recipe_items', // Relational (via recipe.store_id)
+      'kitchen_ticket_items', // Relational (via kitchen_ticket.store_id)
+      'menu_section_items', // Relational (via menu_section.store_id)
     ];
 
     for (const model of all_scoped_models) {
@@ -519,6 +524,12 @@ export class StorePrismaService extends BasePrismaService {
       product_price_tier_assignments: {
         product: { store_id: context.store_id },
       },
+      // ===== Restaurant Suite child tables (scoped via parent store_id) =====
+      recipe_items: { recipe: { store_id: context.store_id } },
+      kitchen_ticket_items: {
+        kitchen_ticket: { store_id: context.store_id },
+      },
+      menu_section_items: { menu_section: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};

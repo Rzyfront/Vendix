@@ -1,6 +1,9 @@
 # Selector
 
-Select/dropdown nativo estilizado con soporte para opciones, labels, validacion y tooltip.
+Select/dropdown estilizado con soporte para opciones, labels, validacion y tooltip.
+Por defecto renderiza un `<select>` nativo. Con `[searchable]="true"` cambia a un
+dropdown personalizado con campo de busqueda (filtra por label y description),
+manteniendo el mismo contrato `ControlValueAccessor` (valor unico).
 
 ## Uso
 
@@ -9,6 +12,9 @@ Select/dropdown nativo estilizado con soporte para opciones, labels, validacion 
 
 <!-- Con validacion -->
 <app-selector label="Categoria" [options]="categoryOptions" [control]="form.get('category')" [required]="true"></app-selector>
+
+<!-- Con busqueda (listas largas) -->
+<app-selector label="Componente" [options]="ingredientOptions" formControlName="component_product_id" [searchable]="true"></app-selector>
 ```
 
 ## Inputs
@@ -27,6 +33,7 @@ Select/dropdown nativo estilizado con soporte para opciones, labels, validacion 
 | `styleVariant` | `FormStyleVariant` | `modern`      | Estilo: `modern` o `classic`             |
 | `options`      | `SelectorOption[]` | `[]`          | Lista de opciones                        |
 | `tooltipText`  | `string`           | -             | Texto para tooltip de ayuda              |
+| `searchable`   | `boolean`          | `false`       | Si `true`, dropdown custom con buscador  |
 
 ## SelectorOption
 

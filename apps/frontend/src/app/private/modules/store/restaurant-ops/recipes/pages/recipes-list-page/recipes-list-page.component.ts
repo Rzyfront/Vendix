@@ -124,10 +124,15 @@ export class RecipesListPageComponent implements OnInit {
         `${value ?? 0} ${row.yield_unit || ''}`.trim(),
     },
     {
-      key: 'items_count',
+      // Key must resolve to a real value on the row: app-table gates the cell on
+      // getNestedValue(item, key) BEFORE running transform, so a non-existent
+      // 'items_count' key rendered "No data" even when the recipe had items.
+      // findAll returns `_count: { items }`, so we point at that nested path.
+      key: '_count.items',
       label: 'Componentes',
       sortable: false,
       priority: 1,
+      defaultValue: '0',
       transform: (_: unknown, row: Recipe) => {
         const count =
           row.items?.length ?? row._count?.items ?? 0;
