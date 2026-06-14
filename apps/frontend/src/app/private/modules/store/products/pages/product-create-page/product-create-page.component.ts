@@ -462,16 +462,38 @@ export class ProductCreatePageComponent {
   private http = inject(HttpClient);
   private readonly authFacade = inject(AuthFacade);
 
-  /** Industrias de la tienda actual (misma fuente que MenuFilterService). */
-  private readonly storeIndustries = toSignal(this.authFacade.userIndustries$, {
+  /**
+   * Industrias EFECTIVAS de la tienda, con la MISMA cascada de fuentes que
+   * `MenuFilterService` (core/services/menu-filter.service.ts):
+   *   1. store_settings.general.industries — fuente de verdad, se actualiza al
+   *      guardar en Ajustes → General (live, no requiere re-login).
+   *   2. user.store.industries — snapshot de login (puede no traer el campo si
+   *      el whitelist de `cleanStore` aún no lo incluye).
+   *   3. ['retail'] — default canónico (columna DB + settings default).
+   * Antes leía solo (1)→userIndustries$ login y devolvía [] cuando el campo
+   * faltaba, ocultando "Plato preparado" en tiendas restaurante.
+   */
+  private readonly storeSettings = toSignal(this.authFacade.storeSettings$, {
+    initialValue: null as { general?: { industries?: string[] } } | null,
+  });
+  private readonly loginIndustries = toSignal(this.authFacade.userIndustries$, {
     initialValue: [] as string[],
+  });
+  private readonly storeIndustries = computed<string[]>(() => {
+    const fromSettings = this.storeSettings()?.general?.industries;
+    const fromLogin = this.loginIndustries();
+    return (
+      fromSettings ||
+      (Array.isArray(fromLogin) ? fromLogin : null) ||
+      ['retail']
+    );
   });
   /**
    * `true` solo si la tienda tiene la industria `restaurant`. Gatea el tipo
    * "Plato preparado" y los toggles de la suite restaurante en el formulario.
    */
   readonly isRestaurant = computed(() =>
-    (this.storeIndustries() ?? []).includes('restaurant'),
+    this.storeIndustries().includes('restaurant'),
   );
 
   // Data Collection Templates (for consultation configuration)
