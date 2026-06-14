@@ -1141,6 +1141,15 @@ export class ProductsService {
           state: product.state,
           pricing_type: String(product.pricing_type),
           product_type: product.product_type,
+          // Flags de la suite restaurante — los consume el selector de
+          // componentes de recetas/combos (filtro client-side en
+          // RecipeIngredientsService: is_ingredient || is_sellable) y los
+          // flujos de producción/KDS. Sin estos campos el listado los omitía
+          // y el selector quedaba vacío.
+          is_sellable: product.is_sellable,
+          is_ingredient: product.is_ingredient,
+          is_combo: product.is_combo,
+          is_batch_produced: product.is_batch_produced,
           track_inventory: product.track_inventory,
           available_for_ecommerce: product.available_for_ecommerce,
           is_featured: product.is_featured,
@@ -1357,6 +1366,13 @@ export class ProductsService {
       state: product.state,
       pricing_type: String(product.pricing_type),
       product_type: product.product_type,
+      // Flags de la suite restaurante. Se persisten vía `...productData` en
+      // create/update, pero el form de edición los lee de ESTE mapeo de
+      // detalle al recargar; sin exponerlos aquí parecían "no guardarse".
+      is_sellable: product.is_sellable,
+      is_ingredient: product.is_ingredient,
+      is_combo: product.is_combo,
+      is_batch_produced: product.is_batch_produced,
       track_inventory: product.track_inventory,
       available_for_ecommerce: product.available_for_ecommerce,
       is_featured: product.is_featured,
