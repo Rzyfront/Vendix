@@ -42,6 +42,7 @@ import {
   CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../../shared/pipes/currency';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   CreateProductDto,
   CreateProductImageDto,
@@ -459,6 +460,19 @@ export class ProductCreatePageComponent {
   private priceTiersService = inject(PriceTiersService);
   private priceTierCache = inject(PriceTierCacheService);
   private http = inject(HttpClient);
+  private readonly authFacade = inject(AuthFacade);
+
+  /** Industrias de la tienda actual (misma fuente que MenuFilterService). */
+  private readonly storeIndustries = toSignal(this.authFacade.userIndustries$, {
+    initialValue: [] as string[],
+  });
+  /**
+   * `true` solo si la tienda tiene la industria `restaurant`. Gatea el tipo
+   * "Plato preparado" y los toggles de la suite restaurante en el formulario.
+   */
+  readonly isRestaurant = computed(() =>
+    (this.storeIndustries() ?? []).includes('restaurant'),
+  );
 
   // Data Collection Templates (for consultation configuration)
   dataCollectionTemplates: {
@@ -557,10 +571,26 @@ export class ProductCreatePageComponent {
     { value: 'weight', label: 'Venta por peso (kg)' },
   ];
 
-  productTypeOptions: { value: string; label: string }[] = [
-    { value: 'physical', label: 'Producto Físico' },
-    { value: 'service', label: 'Servicio' },
-  ];
+  /**
+   * Opciones del selector "Tipo de Producto". "Plato preparado"
+   * (product_type='prepared') solo se ofrece a tiendas con industria
+   * `restaurant`, o si el producto en edición ya es 'prepared' (para no
+   * perder el valor al editarlo en una tienda mal configurada).
+   */
+  readonly productTypeOptions = computed<{ value: string; label: string }[]>(
+    () => {
+      this.formUpdateTrigger(); // reactividad ante cambios del formulario
+      const base = [
+        { value: 'physical', label: 'Producto Físico' },
+        { value: 'service', label: 'Servicio' },
+      ];
+      const current = this.productForm?.get('product_type')?.value;
+      if (this.isRestaurant() || current === 'prepared') {
+        base.push({ value: 'prepared', label: 'Plato preparado' });
+      }
+      return base;
+    },
+  );
 
   serviceModalityOptions: SelectorOption[] = [
     { value: 'in_person', label: 'Presencial' },
