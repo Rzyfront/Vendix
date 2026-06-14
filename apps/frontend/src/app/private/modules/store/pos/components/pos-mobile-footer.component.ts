@@ -3,6 +3,7 @@ import {
   input,
   output,
   inject,
+  computed,
 } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -108,7 +109,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <button
               class="action-btn restaurant-btn fire-btn"
               (click)="fireKitchen.emit()"
-              [disabled]="!hasOpenTableSession() || itemCount() === 0"
+              [disabled]="!canFireKitchen()"
             >
               <app-icon name="flame" [size]="16"></app-icon>
               <span>Cocina</span>
@@ -423,6 +424,18 @@ export class PosMobileFooterComponent {
   readonly canCreateCustomItems = input<boolean>(false);
   readonly restaurantMode = input<boolean>(false);
   readonly hasOpenTableSession = input<boolean>(false);
+  /**
+   * True when the cart holds at least one `prepared` product line not yet
+   * fired. Lets "Cocina" fire a counter (table-less) order without an open
+   * table session (mostrador / para llevar).
+   */
+  readonly hasPreparedItems = input<boolean>(false);
+  /** Fire allowed with items in cart AND (open table OR prepared items). */
+  readonly canFireKitchen = computed(
+    () =>
+      this.itemCount() > 0 &&
+      (this.hasOpenTableSession() || this.hasPreparedItems()),
+  );
 
   readonly viewCart = output<void>();
   readonly customItem = output<void>();

@@ -71,6 +71,12 @@ export interface Product {
   has_variants: boolean;
   product_variants: PosProductVariant[];
   pricing_type?: 'unit' | 'weight';
+  /**
+   * Product type snapshot. `prepared` flags a dish/recipe-backed product whose
+   * inventory is consumed at fire-to-kitchen (restaurant suite). The POS uses
+   * this to decide whether the "Enviar a cocina" action applies to a cart line.
+   */
+  product_type?: string;
   // Multi-tarifa flags (Phase 5). Packaging (units-per-package) is no longer a
   // product field — it lives on the price tier / per-product tier override and
   // is resolved per cart line via PriceResolverService.resolveWithTier.

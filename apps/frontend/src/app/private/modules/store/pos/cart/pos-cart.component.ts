@@ -306,8 +306,12 @@ import {
                     type="button"
                     class="cart-btn restaurant-btn fire-btn"
                     (click)="fireKitchen.emit()"
-                    [disabled]="!hasOpenTableSession() || isEmpty()"
-                    title="Enviar a cocina"
+                    [disabled]="!canFireKitchen()"
+                    [title]="
+                      hasOpenTableSession()
+                        ? 'Enviar a cocina'
+                        : 'Enviar a cocina (mostrador / para llevar)'
+                    "
                   >
                     <app-icon name="flame" [size]="16"></app-icon>
                     <span>Enviar a cocina</span>
@@ -894,6 +898,21 @@ private cartService = inject(PosCartService);
   readonly isLayawayMode = input<boolean>(false);
   readonly restaurantMode = input<boolean>(false);
   readonly hasOpenTableSession = input<boolean>(false);
+  /**
+   * True when the cart holds at least one `prepared` product line not yet
+   * fired. Lets the "Enviar a cocina" action fire a counter (table-less)
+   * order — fire is no longer gated solely on an open table session.
+   */
+  readonly hasPreparedItems = input<boolean>(false);
+  /**
+   * Fire is allowed when the cart is non-empty AND either a table session is
+   * open (dine-in) or there are prepared items to fire (mostrador / takeaway).
+   */
+  readonly canFireKitchen = computed(
+    () =>
+      !this.isEmpty() &&
+      (this.hasOpenTableSession() || this.hasPreparedItems()),
+  );
   readonly saveDraft = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
