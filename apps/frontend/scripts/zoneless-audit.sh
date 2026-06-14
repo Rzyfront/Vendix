@@ -5,8 +5,18 @@
 set -eu
 cd "$(dirname "$0")/../src/app"
 
-# Only check UI state in files that were modified in this PR/branch
-CHANGED_FILES=$(git diff --name-only origin/main...HEAD 2>/dev/null | grep '\.component\.ts$' | tr '\n' ' ' || true)
+# Use the PR's actual base ref (passed from CI via $GITHUB_EVENT_PATH /
+# github.event.pull_request.base.ref). Fall back to 'main' for local runs
+# and for workflows that don't provide a base ref.
+BASE_REF="${BASE_REF:-main}"
+# Sanitize: only allow branch-name safe characters to avoid shell injection
+# from a malformed env var.
+SAFE_BASE=$(printf '%s' "$BASE_REF" | tr -cd '[:alnum:]./_-')
+
+# Only check UI state in files that were modified in this PR/branch.
+# Using the PR's base ref (not hardcoded 'main') avoids flagging files
+# that are in the integration branch but not in this PR's actual diff.
+CHANGED_FILES=$(git diff --name-only "origin/${SAFE_BASE}...HEAD" 2>/dev/null | grep '\.component\.ts$' | tr '\n' ' ' || true)
 
 FAILED=0
 fail() { echo "❌ $1"; FAILED=1; }
