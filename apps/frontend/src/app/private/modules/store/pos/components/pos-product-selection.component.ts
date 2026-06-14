@@ -732,11 +732,13 @@ export class PosProductSelectionComponent {
       state: 'active',
       pos_optimized: true,
       include_stock: true,
+      // El POS es un canal de venta: nunca muestra insumos puros ni productos
+      // marcados como no-vendibles. Filtro universal (no gateado por industria)
+      // para ser consistente con catálogo, mesas y menú, que ya aplican
+      // is_sellable=true en el backend. Seguro en retail: la columna es
+      // NOT NULL DEFAULT TRUE, así que solo oculta lo marcado a propósito.
+      is_sellable: true,
     };
-
-    if (this.restaurantIntegration.isRestaurantMode()) {
-      filters.is_sellable = true;
-    }
 
     if (this.searchQuery()) {
       filters.query = this.searchQuery();

@@ -41,16 +41,9 @@ import { RecipesService } from '../../services';
 import {
   CreateRecipeDto,
   CreateRecipeItemDto,
+  RecipeItemFormControls,
   UpdateRecipeItemDto,
 } from '../../interfaces';
-
-interface RecipeItemFormControls {
-  id: FormControl<number | null>;
-  component_product_id: FormControl<number | null>;
-  quantity: FormControl<number | null>;
-  waste_percent: FormControl<number | null>;
-  is_optional: FormControl<boolean>;
-}
 
 interface RecipeFormShape {
   product_id: FormControl<number | null>;
@@ -255,10 +248,10 @@ export class RecipeFormPageComponent implements OnInit {
 
   // -------------------------------------------------------- Form actions
 
-  onHeaderAction(action: { id: string }): void {
-    if (action.id === 'cancel') {
+  onHeaderAction(actionId: string): void {
+    if (actionId === 'cancel') {
       this.cancel();
-    } else if (action.id === 'save') {
+    } else if (actionId === 'save') {
       this.submit();
     }
   }
@@ -283,7 +276,7 @@ export class RecipeFormPageComponent implements OnInit {
     }
   }
 
-  private submit(): void {
+  submit(): void {
     this.form.markAllAsTouched();
     this.itemsArray.markAllAsTouched();
     if (this.form.invalid || this.itemsArray.invalid) {

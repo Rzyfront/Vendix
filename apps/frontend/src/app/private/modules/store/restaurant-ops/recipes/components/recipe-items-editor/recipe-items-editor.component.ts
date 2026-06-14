@@ -11,7 +11,6 @@ import {
 import {
   FormArray,
   FormBuilder,
-  FormControl,
   FormGroup,
   ReactiveFormsModule,
   Validators,
@@ -22,31 +21,19 @@ import {
   ButtonComponent,
   IconComponent,
   InputComponent,
-  ModalComponent,
   SelectorComponent,
   SelectorOption,
   SettingToggleComponent,
-  TextareaComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
 
-import { RecipeIngredientOption } from '../../interfaces';
+import { RecipeIngredientOption, RecipeItemFormControls } from '../../interfaces';
 import { RecipeIngredientsService } from '../../services';
 
 /**
- * Reactive shape of a single recipe_items row in the form. Mirrors the
- * backend's `recipe_items` write contract.
- */
-interface RecipeItemFormControls {
-  component_product_id: FormControl<number | null>;
-  quantity: FormControl<number | null>;
-  waste_percent: FormControl<number | null>;
-  is_optional: FormControl<boolean>;
-}
-
-/**
  * Editor for the `recipe_items` FormArray. Owns:
- *  - the product selector (filtered to `is_ingredient=true`),
+ *  - the product selector (ingredients for recipes, sellable products for
+ *    combo components),
  *  - quantity + waste percent inputs,
  *  - the optional flag,
  *  - add / remove row actions.
@@ -62,10 +49,8 @@ interface RecipeItemFormControls {
     ButtonComponent,
     IconComponent,
     InputComponent,
-    ModalComponent,
     SelectorComponent,
     SettingToggleComponent,
-    TextareaComponent,
   ],
   templateUrl: './recipe-items-editor.component.html',
   styleUrl: './recipe-items-editor.component.scss',
@@ -85,9 +70,8 @@ export class RecipeItemsEditorComponent implements OnInit {
   readonly ingredients = signal<RecipeIngredientOption[]>([]);
   readonly isLoadingIngredients = signal(false);
 
-  /** Lazy selector modal: which row (index) is currently picking an ingredient. */
-  readonly pickerIndex = signal<number | null>(null);
-  readonly pickerOptions = computed<SelectorOption[]>(() =>
+  /** Options for the per-row inline component selector. */
+  readonly componentOptions = computed<SelectorOption[]>(() =>
     this.ingredients().map((i) => ({
       value: i.id,
       label: i.name + (i.sku ? ` (${i.sku})` : ''),
@@ -95,9 +79,10 @@ export class RecipeItemsEditorComponent implements OnInit {
     })),
   );
 
-  readonly pickerForm = this.fb.nonNullable.group({
-    selected: this.fb.nonNullable.control<number | null>(null),
-  });
+  /** Placeholder shown by the inline selector, reactive to the loading state. */
+  readonly selectorPlaceholder = computed(() =>
+    this.isLoadingIngredients() ? 'Cargando insumos…' : 'Selecciona un componente',
+  );
 
   ngOnInit(): void {
     this.loadIngredients();
@@ -124,6 +109,7 @@ export class RecipeItemsEditorComponent implements OnInit {
     const items = this.items();
     items.push(
       this.fb.nonNullable.group<RecipeItemFormControls>({
+        id: this.fb.nonNullable.control<number | null>(null),
         component_product_id: this.fb.nonNullable.control<number | null>(null, {
           validators: [Validators.required],
         }),
@@ -149,7 +135,7 @@ export class RecipeItemsEditorComponent implements OnInit {
    * async lookup — uses the cached `ingredients()` signal.
    */
   productLabel(productId: number | null | undefined): string {
-    if (productId == null) return 'Selecciona un ingrediente';
+    if (productId == null) return 'Selecciona un componente';
     const found = this.ingredients().find((i) => i.id === productId);
     if (found) {
       return found.name + (found.sku ? ` (${found.sku})` : '');
@@ -163,32 +149,12 @@ export class RecipeItemsEditorComponent implements OnInit {
     return found?.stock_unit ?? '';
   }
 
-  openPicker(index: number): void {
-    this.pickerIndex.set(index);
-    const current = this.items().at(index).get('component_product_id')?.value;
-    this.pickerForm.patchValue({ selected: current ?? null });
-  }
-
-  closePicker(): void {
-    this.pickerIndex.set(null);
-  }
-
-  confirmPicker(): void {
-    const idx = this.pickerIndex();
-    if (idx == null) return;
-    const selected = this.pickerForm.get('selected')?.value as number | null;
-    if (selected == null) {
-      this.toastService.warning('Selecciona un ingrediente primero');
-      return;
-    }
-
-    // The picker form is the canonical source of truth for the modal state;
-    // we explicitly set the FormControl's value (not via ngModel) so it stays
-    // in sync with CVA validation in the parent FormArray.
-    const control = this.items().at(idx).get('component_product_id');
-    control?.setValue(selected);
-    control?.markAsTouched();
-
-    this.closePicker();
+  /**
+   * A row is "unsaved" when it has no persisted `id` yet. The parent form's
+   * create/update/delete reconciliation relies on the same `id` field, so this
+   * is an authoritative state (not a fragile heuristic).
+   */
+  isUnsaved(row: FormGroup<RecipeItemFormControls>): boolean {
+    return row.get('id')?.value == null;
   }
 }

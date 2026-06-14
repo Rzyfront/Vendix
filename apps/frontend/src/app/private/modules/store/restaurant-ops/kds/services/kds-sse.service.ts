@@ -31,10 +31,9 @@ export interface KdsReconnectAttempt {
  * snapshot reconciliation.
  *
  * Design notes (see `vendix-zoneless-signals`):
- *  - State is exposed as SIGNALS (not BehaviorSubject). The KDS page
- *    consumes them via `toSignal` or direct calls. We never use
- *    `markForCheck` / `detectChanges` — zoneless handles change
- *    detection via the signal itself.
+ *  - State is exposed as SIGNALS (not RxJS subjects). The KDS page
+ *    consumes them directly. We never trigger manual change
+ *    detection — zoneless reacts to the signal write itself.
  *  - We do NOT use the global `EventSource` auto-reconnect: the
  *    browser reconnects on TCP errors but at a fixed 3s delay and
  *    without any visibility. Instead we re-create the source ourselves

@@ -209,16 +209,18 @@ export class TablesService {
   }
 
   static statusColorVar(status: TableStatus): string {
-    // Tailwind-ish color tokens consumed by the floor-map component.
+    // Design-system semantic color tokens (defined in styles.scss),
+    // consumed by the floor-map component via [style.--cell-color].
+    // available→success, occupied→error, reserved→warning, cleaning→muted gray.
     switch (status) {
       case 'available':
-        return '#16a34a'; // green-600
+        return 'var(--color-success)';
       case 'occupied':
-        return '#dc2626'; // red-600
+        return 'var(--color-error)';
       case 'reserved':
-        return '#eab308'; // yellow-500
+        return 'var(--color-warning)';
       case 'cleaning':
-        return '#6b7280'; // gray-500
+        return 'var(--color-text-muted)';
     }
   }
 

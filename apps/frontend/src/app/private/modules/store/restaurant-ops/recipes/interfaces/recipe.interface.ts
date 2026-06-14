@@ -6,6 +6,8 @@
  * contracts exposed by `apps/backend/src/domains/store/recipes`.
  */
 
+import { FormControl } from '@angular/forms';
+
 export interface Recipe {
   id: number;
   store_id: number;
@@ -85,9 +87,10 @@ export interface RecipeQuery {
 
 /**
  * Compact shape of a product used by the recipe form to populate the
- * component selector. We deliberately only need a few fields; the list
- * endpoint is filtered server-side with `is_ingredient=true` to keep the
- * dropdown small.
+ * component selector. We deliberately only need a few fields. The list is
+ * filtered client-side to products that are either ingredients
+ * (`is_ingredient=true`) — for regular recipes/sub-recipes — or sellable
+ * products (`is_sellable=true`) — for combo components.
  */
 export interface RecipeIngredientOption {
   id: number;
@@ -97,4 +100,23 @@ export interface RecipeIngredientOption {
   base_price?: number | string | null;
   cost_price?: number | string | null;
   is_ingredient?: boolean;
+  is_sellable?: boolean;
+}
+
+/**
+ * Single source of truth for the reactive shape of a `recipe_items` row.
+ *
+ * Both the recipe form page (which owns the FormArray and needs `id` for the
+ * create/update/delete reconciliation) and the presentational items editor
+ * (which only binds the editable fields) import this exact type, so the
+ * `FormArray<FormGroup<RecipeItemFormControls>>` passed parent→child is a
+ * single, identical type (avoids TS2719 "two unrelated types" errors).
+ */
+export interface RecipeItemFormControls {
+  /** Present for persisted rows; null for newly added rows. */
+  id: FormControl<number | null>;
+  component_product_id: FormControl<number | null>;
+  quantity: FormControl<number | null>;
+  waste_percent: FormControl<number | null>;
+  is_optional: FormControl<boolean>;
 }

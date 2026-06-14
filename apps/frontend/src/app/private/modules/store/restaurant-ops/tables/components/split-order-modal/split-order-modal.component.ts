@@ -18,7 +18,10 @@ import {
   ToggleComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
-import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../../../shared/pipes/index';
 import {
   SplitByItemsDto,
   SplitByAmountDto,
@@ -63,6 +66,7 @@ export class SplitOrderModalComponent {
   private readonly fb = inject(FormBuilder);
   private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly currencyFormat = inject(CurrencyFormatService);
 
   readonly isOpen = input(false);
   readonly loadingInput = input(false, { alias: 'loading' });
@@ -97,11 +101,29 @@ export class SplitOrderModalComponent {
     this.customAmounts().reduce((a, v) => a + (Number(v) || 0), 0),
   );
 
+  /** Tolerance (in currency units) for the custom-amount sum check. */
+  private readonly SUM_TOLERANCE = 0.01;
+
   readonly customSumMatches = computed(() => {
     const total = this.orderTotal();
     if (!total) return false;
-    return Math.abs(this.customSum() - total) < 0.01;
+    return Math.abs(this.customSum() - total) < this.SUM_TOLERANCE;
   });
+
+  /**
+   * Signed gap between the entered custom amounts and the order total.
+   * Positive => the user still needs to assign more (faltan).
+   * Negative => the user assigned too much (sobran).
+   */
+  readonly customSumDiff = computed(() =>
+    this.round2(this.orderTotal() - this.customSum()),
+  );
+
+  /** Absolute magnitude of the gap, for currency display. */
+  readonly customSumDiffAbs = computed(() => Math.abs(this.customSumDiff()));
+
+  /** Whether the user is short of the total (true) or over it (false). */
+  readonly customSumIsShort = computed(() => this.customSumDiff() > 0);
 
   readonly form: FormGroup<{
     n_splits: FormControl<number>;
@@ -124,6 +146,10 @@ export class SplitOrderModalComponent {
     this.form.controls.n_splits.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((v) => this.onNSplitsChange(v ?? 2));
+  }
+
+  get nSplitsControl(): FormControl<number> {
+    return this.form.controls.n_splits;
   }
 
   amountControlAt(i: number): FormControl {
@@ -237,8 +263,11 @@ export class SplitOrderModalComponent {
         this.splitByAmount.emit({ mode: 'equal', n_splits: n });
       } else {
         if (!this.customSumMatches()) {
+          const gap = this.currencyFormat.format(this.customSumDiffAbs());
           this.toastService.error(
-            `La suma de los montos (${this.customSum()}) no coincide con el total (${this.orderTotal()})`,
+            this.customSumIsShort()
+              ? `Faltan ${gap} para cuadrar con el total`
+              : `Sobran ${gap} respecto al total`,
           );
           return;
         }

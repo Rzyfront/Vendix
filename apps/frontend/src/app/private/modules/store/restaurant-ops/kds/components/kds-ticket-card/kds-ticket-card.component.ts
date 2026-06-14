@@ -1,13 +1,8 @@
 import {
   Component,
   computed,
-  inject,
   input,
   output,
-  signal,
-  OnInit,
-  OnDestroy,
-  DestroyRef,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
@@ -28,6 +23,10 @@ import {
  * service call so the SSE stream can race-free update the cache on
  * completion. The card itself only mutates its own `isMutating` signal
  * to disable buttons while the parent is processing.
+ *
+ * The elapsed-time clock is driven by a single shared `now` ticker owned
+ * by the board (passed in via `[now]`) — there is NO per-card timer, so
+ * a board with dozens of tickets still runs exactly one `setInterval`.
  */
 @Component({
   selector: 'app-kds-ticket-card',
@@ -36,22 +35,17 @@ import {
   templateUrl: './kds-ticket-card.component.html',
   styleUrl: './kds-ticket-card.component.scss',
 })
-export class KdsTicketCardComponent implements OnInit, OnDestroy {
+export class KdsTicketCardComponent {
   readonly ticket = input.required<KitchenTicket>();
   readonly isMutating = input<boolean>(false);
   readonly showDelivered = input<boolean>(true);
+  /** Shared millisecond clock pushed down by the board's single ticker. */
+  readonly now = input<number>(Date.now());
 
   readonly startClicked = output<KitchenTicket>();
   readonly readyClicked = output<KitchenTicket>();
   readonly deliverClicked = output<KitchenTicket>();
   readonly cancelClicked = output<KitchenTicket>();
-
-  // Keep the import in the type graph for tree-shakers and IDE hovers.
-  private readonly _ticketsService = inject(KitchenTicketsService);
-
-  /** 1s tick to refresh the elapsed-time label. */
-  private tickHandle: ReturnType<typeof setInterval> | null = null;
-  readonly now = signal(Date.now());
 
   readonly elapsedSeconds = computed(() => {
     const fired = this.toDate(this.ticket().fired_at);
@@ -82,16 +76,10 @@ export class KdsTicketCardComponent implements OnInit, OnDestroy {
     }
   });
 
-  ngOnInit(): void {
-    this.tickHandle = setInterval(() => this.now.set(Date.now()), 1000);
-  }
-
-  ngOnDestroy(): void {
-    if (this.tickHandle) {
-      clearInterval(this.tickHandle);
-      this.tickHandle = null;
-    }
-  }
+  /** True while the ticket is being cooked — used to emphasize the badge. */
+  readonly isInPreparation = computed(
+    () => this.ticket().status === 'in_preparation',
+  );
 
   onStart(): void {
     if (this.isMutating()) return;

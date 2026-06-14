@@ -11,22 +11,19 @@
 
     <div class="p-2 md:p-6 space-y-6">
       <app-card title="Secciones" subtitle="Reordena con las flechas" [padding]="true">
-        <div class="flex flex-col md:flex-row gap-2 mb-4">
-          <input
-            type="text"
+        <div class="flex flex-col md:flex-row gap-2 mb-4 md:items-end">
+          <app-input
+            class="flex-1"
+            [type]="'text'"
             placeholder="Nombre de la nueva sección (Entradas, Platos Fuertes, Postres)"
-            class="flex-1 border border-border rounded-md px-3 py-2 text-sm"
             [ngModel]="newSectionName()"
             (ngModelChange)="newSectionName.set($event)"
             (keyup.enter)="addSection()"
           />
-          <button
-            type="button"
-            class="px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:opacity-90"
-            (click)="addSection()"
-          >
+          <app-button variant="primary" (clicked)="addSection()">
+            <app-icon slot="icon" name="plus" [size]="16" />
             Agregar Sección
-          </button>
+          </app-button>
         </div>
 
         @if (m.sections.length === 0) {
@@ -37,68 +34,60 @@
           <div class="border border-border rounded-md p-3 mb-3">
             <div class="flex items-center justify-between mb-2">
               <div class="flex items-center gap-2">
-                <button
-                  class="px-2 py-1 text-xs border border-border rounded"
-                  (click)="moveSection(section, -1)"
-                >↑</button>
-                <button
-                  class="px-2 py-1 text-xs border border-border rounded"
-                  (click)="moveSection(section, 1)"
-                >↓</button>
+                <app-button variant="outline" size="sm" (clicked)="moveSection(section, -1)">
+                  <app-icon slot="icon" name="chevron-up" [size]="16" />
+                </app-button>
+                <app-button variant="outline" size="sm" (clicked)="moveSection(section, 1)">
+                  <app-icon slot="icon" name="chevron-down" [size]="16" />
+                </app-button>
                 <h3 class="font-semibold text-sm md:text-base">{{ section.name }}</h3>
                 <span class="text-xs text-text-secondary">
                   {{ section.items?.length ?? 0 }} productos
                 </span>
               </div>
-              <button
-                class="text-xs text-red-600 hover:underline"
-                (click)="deleteSection(section)"
-              >Eliminar sección</button>
+              <app-button variant="outline-danger" size="sm" (clicked)="deleteSection(section)">
+                <app-icon slot="icon" name="trash-2" [size]="14" />
+                Eliminar sección
+              </app-button>
             </div>
 
             <ul class="space-y-1 mb-3">
               @for (item of section.items ?? []; track item.id) {
                 <li class="flex items-center justify-between bg-gray-50 px-3 py-2 rounded text-sm">
                   <div class="flex items-center gap-2">
-                    <button
-                      class="px-1 text-xs border border-border rounded"
-                      (click)="moveItem(section, item, -1)"
-                    >↑</button>
-                    <button
-                      class="px-1 text-xs border border-border rounded"
-                      (click)="moveItem(section, item, 1)"
-                    >↓</button>
+                    <app-button variant="outline" size="sm" (clicked)="moveItem(section, item, -1)">
+                      <app-icon slot="icon" name="chevron-up" [size]="14" />
+                    </app-button>
+                    <app-button variant="outline" size="sm" (clicked)="moveItem(section, item, 1)">
+                      <app-icon slot="icon" name="chevron-down" [size]="14" />
+                    </app-button>
                     <span>{{ item.product?.name ?? getProductName(item.product_id) }}</span>
                     @if (item.product?.is_combo) {
                       <span class="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-700">Combo</span>
                     }
                   </div>
-                  <button
-                    class="text-xs text-red-600 hover:underline"
-                    (click)="removeItem(section, item)"
-                  >Quitar</button>
+                  <app-button variant="outline-danger" size="sm" (clicked)="removeItem(section, item)">
+                    <app-icon slot="icon" name="trash-2" [size]="14" />
+                    Quitar
+                  </app-button>
                 </li>
               } @empty {
                 <li class="text-xs text-text-secondary italic">Sin productos en esta sección.</li>
               }
             </ul>
 
-            <div class="flex flex-col md:flex-row gap-2">
-              <select
-                class="flex-1 border border-border rounded-md px-3 py-2 text-sm bg-white"
+            <div class="flex flex-col md:flex-row gap-2 md:items-end">
+              <app-selector
+                class="flex-1"
+                placeholder="Selecciona un producto…"
+                [options]="productSelectorOptions()"
                 [ngModel]="newItemProductId()"
-                (ngModelChange)="newItemProductId.set($event)"
-              >
-                <option [ngValue]="null">Selecciona un producto para agregar…</option>
-                @for (p of productOptions(); track p.id) {
-                  <option [ngValue]="p.id">{{ p.name }} {{ p.is_sellable === false ? '(no vendible)' : '' }}</option>
-                }
-              </select>
-              <button
-                type="button"
-                class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:opacity-90"
-                (click)="addItem(section)"
-              >Agregar producto</button>
+                (ngModelChange)="onProductSelect($event)"
+              />
+              <app-button variant="primary" (clicked)="addItem(section)">
+                <app-icon slot="icon" name="plus" [size]="16" />
+                Agregar producto
+              </app-button>
             </div>
           </div>
         }
@@ -109,33 +98,26 @@
         subtitle="Días y horarios en que la carta está activa (menu-level)"
         [padding]="true"
       >
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-2 mb-4">
-          <select
-            class="border border-border rounded-md px-3 py-2 text-sm bg-white"
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-2 mb-4 md:items-end">
+          <app-selector
+            [options]="dayOptions"
             [ngModel]="newWindow().day_of_week"
-            (ngModelChange)="newWindow.set({ ...newWindow(), day_of_week: $event })"
-          >
-            @for (d of dayLabels; track $index) {
-              <option [ngValue]="$index">{{ d }}</option>
-            }
-          </select>
-          <input
-            type="time"
-            class="border border-border rounded-md px-3 py-2 text-sm"
+            (ngModelChange)="onDaySelect($event)"
+          />
+          <app-input
+            [type]="'time'"
             [ngModel]="newWindow().start_time"
-            (ngModelChange)="newWindow.set({ ...newWindow(), start_time: $event })"
+            (ngModelChange)="updateNewWindow({ start_time: $event })"
           />
-          <input
-            type="time"
-            class="border border-border rounded-md px-3 py-2 text-sm"
+          <app-input
+            [type]="'time'"
             [ngModel]="newWindow().end_time"
-            (ngModelChange)="newWindow.set({ ...newWindow(), end_time: $event })"
+            (ngModelChange)="updateNewWindow({ end_time: $event })"
           />
-          <button
-            type="button"
-            class="px-4 py-2 bg-primary text-white rounded-md text-sm font-medium hover:opacity-90"
-            (click)="addWindow()"
-          >Agregar Ventana</button>
+          <app-button variant="primary" (clicked)="addWindow()">
+            <app-icon slot="icon" name="plus" [size]="16" />
+            Agregar Ventana
+          </app-button>
         </div>
 
         @if (m.availability_windows.length === 0) {
@@ -149,10 +131,10 @@
                 <strong>{{ dayLabels[w.day_of_week] }}</strong>
                 · {{ w.start_time }} – {{ w.end_time }}
               </span>
-              <button
-                class="text-xs text-red-600 hover:underline"
-                (click)="deleteWindow(w)"
-              >Eliminar</button>
+              <app-button variant="outline-danger" size="sm" (clicked)="deleteWindow(w)">
+                <app-icon slot="icon" name="trash-2" [size]="14" />
+                Eliminar
+              </app-button>
             </li>
           }
         </ul>

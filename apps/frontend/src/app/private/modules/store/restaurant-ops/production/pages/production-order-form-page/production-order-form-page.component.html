@@ -13,26 +13,38 @@
         (ngSubmit)="onSubmit()"
         class="grid grid-cols-1 md:grid-cols-2 gap-4"
       >
-        <app-input
-          type="number"
-          label="ID Producto preparado"
-          placeholder="Ej. 50"
-          helperText="ID del producto con is_batch_produced=true"
+        <app-selector
+          label="Producto preparado"
+          placeholder="Selecciona el producto a producir"
+          [options]="productOptions()"
+          [required]="true"
+          [disabled]="isLoadingProducts()"
           [formControl]="productIdControl"
         />
 
-        <app-input
-          type="number"
-          label="ID Receta"
-          placeholder="Ej. 7"
-          helperText="ID de la receta asociada al producto"
+        <app-selector
+          label="Receta"
+          [placeholder]="
+            !productIdControl.value
+              ? 'Primero selecciona un producto'
+              : isLoadingRecipes()
+                ? 'Cargando recetas...'
+                : recipeOptions().length === 0
+                  ? 'Este producto no tiene recetas activas'
+                  : 'Selecciona la receta a producir'
+          "
+          [options]="recipeOptions()"
+          [required]="true"
+          [disabled]="!productIdControl.value || isLoadingRecipes()"
           [formControl]="recipeIdControl"
         />
 
         <app-input
           type="number"
-          label="Cantidad planeada"
+          [label]="'Cantidad planeada (' + (selectedProductUnit() ?? 'unidades') + ')'"
           placeholder="Ej. 10"
+          step="0.01"
+          [min]="0"
           helperText="En la unidad de rendimiento de la receta (yield_unit)"
           [formControl]="plannedQtyControl"
         />
