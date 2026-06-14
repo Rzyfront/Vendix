@@ -1,0 +1,90 @@
+<div class="kds-board">
+  <!-- Header -->
+  <app-sticky-header
+    title="KDS — Pantalla de Cocina"
+    subtitle="Tickets activos en tiempo real (vía SSE)"
+    icon="flame"
+    variant="glass"
+    [actions]="[
+      {
+        id: 'refresh',
+        label: 'Refrescar',
+        icon: 'refresh-cw',
+        variant: 'primary',
+      }
+    ]"
+    (actionClicked)="refresh()"
+  >
+    <app-badge
+      slot="badge"
+      [variant]="connectionVariant()"
+      size="sm"
+      badgeStyle="outline"
+    >
+      <app-icon
+        [name]="
+          connectionState() === 'open' ? 'wifi' :
+          connectionState() === 'error' || connectionState() === 'closed' ? 'wifi-off' :
+          'loader'
+        "
+        [size]="12"
+        [class.animate-spin]="isReconnecting()"
+      />
+      {{ connectionLabel() }}
+    </app-badge>
+  </app-sticky-header>
+
+  @if (lastError()) {
+    <div class="kds-board__error" role="alert">
+      <app-icon name="alert-triangle" [size]="16" />
+      <span>{{ lastError() }}</span>
+      @if (lastReconnect(); as r) {
+        <span class="kds-board__reconnect">
+          Reintento {{ r.attempt }} en {{ (r.nextDelayMs / 1000) | number: '1.0-0' }}s…
+        </span>
+      }
+    </div>
+  }
+
+  <!-- Initial connection loader: avoid flashing an empty board before the
+       first SSE snapshot arrives. -->
+  @if (showInitialLoading()) {
+    <div class="kds-board__loading" role="status" aria-live="polite">
+      <div class="kds-board__spinner" aria-hidden="true"></div>
+      <p class="kds-board__loading-text">Conectando a cocina…</p>
+    </div>
+  } @else {
+    <!-- Columns -->
+    <div class="kds-board__columns">
+      @for (column of columns; track column) {
+        <section class="kds-column" [attr.data-column]="column">
+          <header class="kds-column__header">
+            <h3 class="kds-column__title">{{ columnTitle(column) }}</h3>
+            <app-badge size="xsm" [variant]="columnBadgeVariant(column)">
+              {{ columnCounts()[column] }}
+            </app-badge>
+          </header>
+
+          <div class="kds-column__body">
+            @if (ticketsForColumn(column).length === 0) {
+              <p class="kds-column__empty">Sin tickets</p>
+            } @else {
+              @for (ticket of ticketsForColumn(column); track trackByTicketId($index, ticket)) {
+                <app-kds-ticket-card
+                  [ticket]="ticket"
+                  [now]="now()"
+                  [isMutating]="isMutating(ticket.id)"
+                  [showDelivered]="column === 'delivered' || column === 'cancelled'"
+                  (startClicked)="startTicket($event)"
+                  (readyClicked)="markTicketReady($event)"
+                  (deliverClicked)="markTicketDelivered($event)"
+                  (cancelClicked)="cancelTicket($event)"
+                />
+              }
+            }
+          </div>
+        </section>
+      }
+    </div>
+  }
+</div>

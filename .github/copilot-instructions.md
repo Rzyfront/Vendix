@@ -38,6 +38,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-currency-formatting` |
 | -- | `vendix-customer-auth` |
 | -- | `vendix-date-timezone` |
+| -- | `vendix-engram` |
 | -- | `vendix-frontend` |
 | -- | `vendix-frontend-routing` |
 | -- | `vendix-inventory-stock` |
@@ -77,6 +78,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding new models to domain scopes | `vendix-prisma-scopes` |
 | Adding new payment processors, modifying payment gateway logic, working with payment webhooks | `vendix-payment-processors` |
 | Adding new settings sections to stores or organizations | `vendix-settings-system` |
+| Adding or editing per-industry module rules | `vendix-panel-ui` |
 | Adding or modifying notification types | `vendix-notifications-system` |
 | Adding tool-use to AI features | `vendix-ai-agent-tools` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
@@ -86,6 +88,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Applying @SkipSubscriptionGate to bypass StoreOperationsGuard on a handler/controller | `vendix-subscription-gate` |
 | Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules | `vendix-zoneless-signals` |
 | Binding form controls in Angular templates | `vendix-angular-forms` |
+| Branching off or rebasing onto origin/dev before work | `git-workflow` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
@@ -156,6 +159,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing @Permissions decorators | `vendix-permissions` |
 | Editing Schema | `vendix-prisma-schema` |
 | Editing files in apps/backend/, creating modules, or working with Prisma | `vendix-backend` |
+| Editing industry rules in INDUSTRY_HIDDEN_MODULES | `vendix-panel-ui` |
 | Editing or creating any Angular component under apps/frontend (Zoneless patterns apply) | `vendix-zoneless-signals` |
 | Editing or creating any file under apps/mobile | `mobile-dev` |
 | Editing or creating frontend web code | `vendix-frontend` |
@@ -193,6 +197,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying package.json | `vendix-monorepo-workspaces` |
 | Modifying store_settings or organization_settings | `vendix-settings-system` |
 | Modifying the AI chat widget | `vendix-ai-chat` |
+| Onboarding a new developer to the team's Engram memory | `vendix-engram` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
 | Picking concrete verification mechanisms (Bruno, curl, build, audit, log inspection) per step | `how-to-plan` |
@@ -200,6 +205,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Printing documents with date fields | `vendix-date-timezone` |
 | Protecting backend endpoints with auth, roles, or permissions | `vendix-backend-auth` |
 | Protecting store write operations behind a subscription | `vendix-subscription-gate` |
+| Pulling the latest Engram memories (engram sync --import) before starting work | `git-workflow` |
 | Querying by date ranges in backend | `vendix-date-timezone` |
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
@@ -207,9 +213,14 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
+| Running an automated code review (pr-code-review) on a PR before merging | `git-workflow` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
+| Saving an Engram memory before pushing non-trivial changes | `git-workflow` |
+| Saving or consulting persistent project memory with Engram (mem_save, mem_search, mem_context, mem_sync) | `vendix-engram` |
 | Scoping inventory, suppliers, purchases, accounting, reports, or transfers by store vs organization | `vendix-operating-scope` |
 | Selecting the correct skills for each plan step using the Skill Selection Matrix | `how-to-plan` |
+| Self-bootstrap Engram on a fresh dev machine | `vendix-engram` |
+| Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
@@ -294,19 +305,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
-| Saving or consulting persistent project memory with Engram (mem_save, mem_search, mem_context, mem_sync) | `vendix-engram` |
-| Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
-| Self-bootstrapping Engram on a fresh dev machine (detect → ask → run scripts/engram-bootstrap.sh) | `vendix-engram` |
-| Upgrading Engram sync from manual to pre-push hook (run scripts/install-engram-hooks.sh) | `vendix-engram` |
 | changes with database migrations | `git-workflow` |
 | git commit, git push, create PR, create branch | `git-workflow` |
 | resolve merge conflicts | `git-workflow` |
-| Branching off or rebasing onto origin/dev before work (git-workflow RULE 5) | `git-workflow` |
-| Pulling the latest Engram memories (engram sync --import) before starting work (RULE 6) | `git-workflow` |
-| Saving an Engram memory before pushing non-trivial changes (RULE 7) | `git-workflow` |
-| Running the 80% pass gate (pr-code-review) before merging a PR (RULE 8) | `git-workflow` + `pr-code-review` |
-| Reviewing a PR with the 7 categories and posting a review | `pr-code-review` |
-| Re-developing solutions identified by a code review below 80% | `pr-code-review` |
 
 ---
 

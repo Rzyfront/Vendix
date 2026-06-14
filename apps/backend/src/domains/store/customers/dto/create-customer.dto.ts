@@ -12,10 +12,13 @@ import { DOCUMENT_TYPE_CODES } from '../../../../common/constants/document-types
 import { DocumentNumberMatchesType } from '../../../../common/validators/document-number.validator';
 
 export class CreateCustomerDto {
-  @ApiProperty({ example: 'juan.perez@example.com' })
-  @IsEmail()
-  @IsNotEmpty()
-  email: string;
+  @ApiPropertyOptional({
+    example: 'juan.perez@example.com',
+    description: 'Correo del cliente. Opcional; si se omite, el sistema genera uno interno único.',
+  })
+  @IsOptional()
+  @IsEmail({}, { message: 'Ingresa un correo válido' })
+  email?: string | null;
 
   @ApiProperty({ example: 'Juan' })
   @IsString()

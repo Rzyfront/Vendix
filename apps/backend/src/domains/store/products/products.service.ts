@@ -797,6 +797,7 @@ export class ProductsService {
       track_inventory,
       product_type,
       requires_booking,
+      is_sellable,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -837,6 +838,7 @@ export class ProductsService {
       ...(track_inventory !== undefined && { track_inventory }),
       ...(product_type && { product_type }),
       ...(requires_booking !== undefined && { requires_booking }),
+      ...(is_sellable !== undefined && { is_sellable }),
     };
 
     // Resolve POS stock scope so we can constrain the stock_levels includes at
@@ -1003,6 +1005,11 @@ export class ProductsService {
                 id: variant.id,
                 name: variant.name,
                 sku: variant.sku,
+                // Barcode de la variante: necesario para que el escaneo en POS
+                // (handleBarcodeScan -> variants.find(v => v.barcode === code))
+                // casa la variante exacta. Sin exponerlo, el scan caía siempre
+                // al modal de selección manual.
+                barcode: variant.barcode,
                 price_override: variant.price_override
                   ? Number(variant.price_override)
                   : null,
@@ -1063,6 +1070,7 @@ export class ProductsService {
             final_price: this.calculateFinalPrice(product),
             active_promotion: activePromotion,
             sku: product.sku,
+            barcode: product.barcode,
             cost_price: product.cost_price,
             profit_margin: product.profit_margin,
             min_stock_level: product.min_stock_level,
@@ -1170,6 +1178,7 @@ export class ProductsService {
                 id: variant.id,
                 name: variant.name,
                 sku: variant.sku,
+                barcode: variant.barcode,
                 price_override: variant.price_override
                   ? Number(variant.price_override)
                   : null,
@@ -1210,6 +1219,7 @@ export class ProductsService {
           final_price: this.calculateFinalPrice(product),
           active_promotion: activePromotion,
           sku: product.sku,
+          barcode: product.barcode,
           cost_price: product.cost_price,
           profit_margin: product.profit_margin,
           min_stock_level: product.min_stock_level,
@@ -1218,6 +1228,15 @@ export class ProductsService {
           state: product.state,
           pricing_type: String(product.pricing_type),
           product_type: product.product_type,
+          // Flags de la suite restaurante — los consume el selector de
+          // componentes de recetas/combos (filtro client-side en
+          // RecipeIngredientsService: is_ingredient || is_sellable) y los
+          // flujos de producción/KDS. Sin estos campos el listado los omitía
+          // y el selector quedaba vacío.
+          is_sellable: product.is_sellable,
+          is_ingredient: product.is_ingredient,
+          is_combo: product.is_combo,
+          is_batch_produced: product.is_batch_produced,
           track_inventory: product.track_inventory,
           available_for_ecommerce: product.available_for_ecommerce,
           is_featured: product.is_featured,
@@ -1426,6 +1445,10 @@ export class ProductsService {
       is_on_sale: product.is_on_sale,
       final_price: this.calculateFinalPrice(product),
       sku: product.sku,
+      // Código de barras: persistido vía `...productData` en update y vía el
+      // bloque explícito en create, pero el form de edición lo lee de ESTE
+      // mapeo de detalle al recargar; sin exponerlo aquí parecía "no guardarse".
+      barcode: product.barcode,
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
       min_stock_level: product.min_stock_level,
@@ -1434,6 +1457,13 @@ export class ProductsService {
       state: product.state,
       pricing_type: String(product.pricing_type),
       product_type: product.product_type,
+      // Flags de la suite restaurante. Se persisten vía `...productData` en
+      // create/update, pero el form de edición los lee de ESTE mapeo de
+      // detalle al recargar; sin exponerlos aquí parecían "no guardarse".
+      is_sellable: product.is_sellable,
+      is_ingredient: product.is_ingredient,
+      is_combo: product.is_combo,
+      is_batch_produced: product.is_batch_produced,
       track_inventory: product.track_inventory,
       available_for_ecommerce: product.available_for_ecommerce,
       is_featured: product.is_featured,

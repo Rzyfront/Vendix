@@ -125,16 +125,16 @@ do not gate `ORG_ADMIN` modules).
 ```ts
 // apps/frontend/src/app/shared/constants/industry-modules.constant.ts
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
-  retail:        [],   // intentionally empty in the foundation plan
-  restaurant:    [],
-  manufacturing: [],
-  service:       [],
+  retail:        ['restaurant_ops'],
+  restaurant:    [],   // the ONLY industry that sees the restaurant suite
+  manufacturing: ['restaurant_ops'],
+  service:       ['restaurant_ops'],
 };
 
 export function getModulesHiddenByIndustries(industries: string[]): string[] {
   // OR semantics: a module is hidden only if hidden for EVERY industry of the store.
   // Implementation = set-intersection of the per-industry hidden lists.
-  // If `industries` is empty, falls back to ['retail'] so the call is always defined.
+  // If `industries` is empty/undefined, returns [] (no module hidden).
 }
 ```
 
@@ -144,7 +144,36 @@ export function getModulesHiddenByIndustries(industries: string[]): string[] {
 exactly one source. Adding a new per-industry rule means adding a module key string to
 the relevant industry's array; no other code changes are required.
 
-The map is **intentionally empty** in the foundation plan (per `planning/industry-field-foundation-plan.md`). Follow-up plans (restaurant Operations / recipes, KDS, manufacturing, services) populate the map and may propose a dedicated `vendix-store-industries` skill once real per-industry behavior lands.
+### Inverse gating rule (Restaurant Suite, Phase I)
+
+The first real per-industry rule is **inverse**: the `restaurant_ops` parent module is
+hidden for **every** industry EXCEPT `restaurant`. `retail`, `manufacturing`, and
+`service` list `restaurant_ops` in their arrays; `restaurant` keeps an **empty** array
+so it stays visible. Because `getModulesHiddenByIndustries` uses **OR / set-intersection**
+semantics (a module is hidden only if it is hidden for *all* of the store's industries),
+a multi-industry store such as a hotel (`service` + `restaurant`) still sees
+`restaurant_ops` — the `restaurant` half of the intersection does not hide it, so the
+intersection is empty.
+
+`restaurant_ops` is a **parent** module with 5 children — `restaurant_ops_recipes`,
+`restaurant_ops_production`, `restaurant_ops_kds`, `restaurant_ops_tables`,
+`restaurant_ops_menus` — all registered (value `true`) under `STORE_ADMIN` in
+`DefaultPanelUIService.PANEL_UI_FALLBACK` (`default-panel-ui.service.ts`), catalogued
+in `APP_MODULES.STORE_ADMIN` (`app-modules.constant.ts`, parent + `children[]`), and
+label-mapped in `MenuFilterService.moduleKeyMap` ("Operaciones de Restaurante",
+"Recetas", "Producción", "Comandas", "Mesas", "Cartas"). Hiding the parent via the
+industry layer hides the whole subtree.
+
+**Crossing semantics enforced by this rule:** effective visibility is
+industry ∩ store ∩ user (AND chain — see Triple-Crossing Order). Because the industry
+layer runs **first** and a later step can never widen a module an earlier step hid, an
+industry that hides `restaurant_ops` means **neither** the store panel UI **nor** the
+per-user config can re-enable it. The two per-user config surfaces render those toggles
+**disabled with an "Industria" badge** and exclude them from the save diff.
+
+Follow-up plans (manufacturing, services) may add more industry rules and may propose a
+dedicated `vendix-store-industries` skill once more per-industry behavior lands. See
+`vendix-restaurant-ops` for the suite behind `restaurant_ops`.
 
 ### Snapshot fallback
 
@@ -210,16 +239,50 @@ This order matters: industry caps what the store card can toggle, the store card
 caps what the user can toggle, the user choice is the final on/off. Existing layers
 (store_type / flows / scopes / subscription) layer on top and remain unchanged.
 
+## Render Único — `app-panel-ui-modules-editor`
+
+**Single render source.** The module-tree UI (parent→children grouping, "Herramientas
+Directas", parent/child cascade, gating display, search, "Nuevo" badge) lives in ONE
+shared presentational component — never re-implement the tree in a consumer:
+
+`apps/frontend/src/app/shared/components/panel-ui-modules-editor/panel-ui-modules-editor.component.ts`
+
+It is **storage-agnostic**: receives a resolved `Record<string, boolean>` for a single
+`app_type` and emits the updated map. The consumer owns persistence + save semantics.
+Adding a module to `APP_MODULES` therefore appears in **every** surface automatically.
+
+### Contract
+
+| Member | Meaning |
+| --- | --- |
+| `appType` (input, required) | Which `APP_MODULES[appType]` catalog to render |
+| `value` (input, required) | Resolved `Record<string,boolean>` for that `app_type`; absent / `true` = allowed |
+| `hiddenByIndustry` / `hiddenByStore` (inputs) | Gated keys → rendered disabled + reason badge ("Industria"/"Tienda") |
+| `newKeys` (input) | Keys that show the "Nuevo" badge (per-user discovery) |
+| `searchable`, `parentSync`, `readOnly` (inputs) | UI toggles |
+| `valueChange` (output) | Full `Record<string,boolean>` for the `app_type`, **omitting gated keys** so the consumer merges straight into its store |
+
+### Consumers (all four use the shared component)
+
+| Surface | Storage the consumer owns | Save semantics |
+| --- | --- | --- |
+| `general-settings-form` (store, `/admin/settings/general`) | mirror map from `panelUi` input | emits `{ STORE_ADMIN: { key:false } }` (only OFF keys) |
+| `settings-modal` (user's own config) | nested `FormGroup` `panel_ui.{appType}.{key}` | `buildPanelUiDiff` excludes gated, preserves stored value |
+| `store-user-edit-modal` (admin edits a store user) | signal `localPanelUI[appType][key]` | `buildPanelUIDiff` from `originalPanelUI` snapshot, excludes gated |
+| `user-config-modal` (org user) | `localPanelUi` map per `app_type` | full nested map; catalog tabs use the editor, `STORE_ECOMMERCE`/`VENDIX_LANDING` stay on "Avanzado (JSON)" (no catalog yet) |
+
 ## Gating of Per-User Config Surfaces
 
 The two per-user panel-UI config UIs must **gate** their toggles by the **industry ∩
 store panel UI** ceiling, so a user toggle can never enable a module above the
-ceiling.
+ceiling. Both render through `app-panel-ui-modules-editor` (see above); each computes
+the gating arrays from the single sources and passes them in — the component only
+displays the disabled state + badge and omits gated keys on emit.
 
 | Surface | File | App type(s) gated |
 | --- | --- | --- |
-| User's own config ("Módulos del Panel") | `apps/frontend/src/app/shared/components/settings-modal/settings-modal.component.ts` (~459-524) | `STORE_ADMIN` (industries are store-scoped; `ORG_ADMIN` is untouched) |
-| Admin edits another user (pestaña "Modulos") | `apps/frontend/src/app/private/modules/store/settings/users/components/store-user-edit-modal.component.ts` (~703-733) | `STORE_ADMIN` |
+| User's own config ("Módulos del Panel") | `apps/frontend/src/app/shared/components/settings-modal/settings-modal.component.ts` | `STORE_ADMIN` (industries are store-scoped; `ORG_ADMIN` is untouched) |
+| Admin edits another user (pestaña "Modulos") | `apps/frontend/src/app/private/modules/store/settings/users/components/store-user-edit-modal.component.ts` | `STORE_ADMIN` |
 
 ### Gating rule (mandatory)
 
@@ -461,5 +524,6 @@ rejected a backend clamp of user `panel_ui` writes against the industry ceiling
 - `vendix-frontend-routing` - Lazy routes for modules
 - `vendix-operating-scope` - STORE vs ORGANIZATION visibility
 - `vendix-fiscal-scope` - Fiscal scope filtering
+- `vendix-restaurant-ops` - Suite behind the `restaurant_ops` module gated by the inverse industry rule
 - `how-to-plan` - Must record the two Critical Plan Decisions whenever a plan introduces a module or submodule
 - `planning/industry-field-foundation-plan.md` - Foundation plan that introduced the industry dimension + store panel UI ceiling (Step 11 = this skill update)

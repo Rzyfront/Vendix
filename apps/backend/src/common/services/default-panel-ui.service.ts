@@ -108,6 +108,21 @@ export class DefaultPanelUIService {
         analytics_customers: true,
         analytics_financial: true,
         expenses: true,
+        // Restaurant Operations (Restaurant Suite — Fase I).
+        // Phase I decisions: `default_visible_for_privileged_users=true`
+        // (owner/admin see the parent + submodules on next login for any
+        // restaurant industry store), `show_new_badge=yes` (user dropdown
+        // banner + Settings → "Módulos del Panel" surface the keys as
+        // new until the privileged user activates/toggles them).
+        // Industry gating is enforced separately in
+        // `INDUSTRY_HIDDEN_MODULES` (retail/manufacturing/service hide it
+        // outright; `restaurant` keeps it visible).
+        restaurant_ops: true,
+        restaurant_ops_recipes: true,
+        restaurant_ops_production: true,
+        restaurant_ops_kds: true,
+        restaurant_ops_tables: true,
+        restaurant_ops_menus: true,
         reports: true,
         invoicing: true,
         invoicing_invoices: true,

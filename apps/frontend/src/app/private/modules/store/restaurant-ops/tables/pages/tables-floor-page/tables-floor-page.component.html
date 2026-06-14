@@ -1,0 +1,73 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    title="Mapa de mesas"
+    subtitle="Vista del piso del restaurante. Haz clic en una mesa disponible para abrir cuenta."
+    icon="table"
+    variant="glass"
+    [actions]="[
+      { id: 'refresh', label: 'Refrescar', icon: 'refresh-cw', variant: 'ghost' },
+    ]"
+    (actionClicked)="loadFloor()"
+  />
+
+  <div
+    class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
+  >
+    <app-stats
+      title="Total"
+      [value]="stats().total"
+      smallText="Mesas registradas"
+      iconName="table"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    />
+    <app-stats
+      title="Disponibles"
+      [value]="stats().available"
+      smallText="Listas para abrir cuenta"
+      iconName="check"
+      iconBgColor="bg-green-100"
+      iconColor="text-green-600"
+    />
+    <app-stats
+      title="Ocupadas"
+      [value]="stats().occupied"
+      smallText="Con cuenta abierta"
+      iconName="users"
+      iconBgColor="bg-red-100"
+      iconColor="text-red-600"
+    />
+    <app-stats
+      title="Reservadas / Limpieza"
+      [value]="stats().reserved + stats().cleaning"
+      smallText="Bloqueadas o en reset"
+      iconName="clock"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+    />
+  </div>
+
+  <app-card [responsive]="true" [padding]="false" overflow="visible">
+    @if (isLoading()) {
+      <div class="loading">
+        <app-spinner size="md"></app-spinner>
+        <p>Cargando mapa de mesas…</p>
+      </div>
+    } @else {
+      <div class="p-2 md:p-4">
+        <app-table-floor-map
+          [tables]="tables()"
+          (tableClicked)="onTableClick($event)"
+        />
+      </div>
+    }
+  </app-card>
+
+  <app-open-table-modal
+    [isOpen]="isOpenModalOpen()"
+    [table]="selectedTable()"
+    [loading]="isOpeningSession()"
+    (isOpenChange)="onCloseModal()"
+    (open)="onOpenSession($event)"
+  />
+</div>

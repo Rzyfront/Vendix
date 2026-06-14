@@ -27,17 +27,13 @@ import {
   IconComponent,
   SettingToggleComponent,
   BadgeComponent,
+  PanelUiModulesEditorComponent,
 } from '../../../../../../shared/components/index';
 import type { BadgeVariant } from '../../../../../../shared/components/index';
-import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
 import {
   ScrollableTabsComponent,
   ScrollableTab,
 } from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
-import {
-  APP_MODULES,
-  AppModule,
-} from '../../../../../../shared/constants/app-modules.constant';
 import { getModulesHiddenByIndustries } from '../../../../../../shared/constants/industry-modules.constant';
 import { StoreUser } from '../interfaces/store-user.interface';
 import * as StoreUsersActions from '../state/actions/store-users.actions';
@@ -57,9 +53,8 @@ import {
     ButtonComponent,
     ModalComponent,
     IconComponent,
-    SettingToggleComponent,
     ScrollableTabsComponent,
-    InputsearchComponent,
+    PanelUiModulesEditorComponent,
     BadgeComponent,
   ],
   template: `
@@ -344,125 +339,16 @@ import {
                     </div>
                   }
 
-                  <!-- Busqueda -->
-                  <app-inputsearch
-                    placeholder="Buscar modulos..."
-                    size="sm"
-                    [debounceTime]="200"
-                    (searchChange)="onModuleSearch($event)"
-                    class="block"
+                  <!-- Shared modules editor -->
+                  <app-panel-ui-modules-editor
+                    [appType]="activePanelUITab()"
+                    [value]="editorValue()"
+                    [hiddenByIndustry]="hiddenByIndustry()"
+                    [hiddenByStore]="hiddenByStore()"
+                    [searchable]="true"
+                    [parentSync]="true"
+                    (valueChange)="onEditorValueChange($event)"
                   />
-
-                  <!-- Modulos con hijos -->
-                  <div class="compact-modules-grid">
-                    @for (
-                      module of filteredModulesWithChildren();
-                      track module.key
-                    ) {
-                      <div class="module-group is-parent">
-                        <div class="toggle-wrapper">
-                          <app-setting-toggle
-                            [label]="module.label"
-                            [description]="module.description"
-                            [ngModel]="
-                              getPanelUIValue(activePanelUITab(), module.key)
-                            "
-                            (changed)="onParentToggle($event, module)"
-                            [disabled]="isToggleGated(module.key)"
-                          />
-                          @if (isToggleGated(module.key)) {
-                            <div class="flex flex-wrap gap-1 mt-1 ml-2">
-                              @for (reason of getToggleReasons(module.key); track reason) {
-                                <span class="panel-toggle-reason-badge">{{ reason }}</span>
-                              }
-                            </div>
-                          }
-                        </div>
-                        @if (module.children?.length) {
-                          <div class="children-grid">
-                            @for (child of module.children; track child.key) {
-                              <div class="child-item">
-                                <app-setting-toggle
-                                  [label]="child.label"
-                                  [ngModel]="
-                                    getPanelUIValue(
-                                      activePanelUITab(),
-                                      child.key
-                                    )
-                                  "
-                                  (changed)="
-                                    togglePanelUI(activePanelUITab(), child.key)
-                                  "
-                                  [disabled]="
-                                    isToggleGated(child.key) ||
-                                    !getPanelUIValue(
-                                      activePanelUITab(),
-                                      module.key
-                                    )
-                                  "
-                                />
-                                @if (isToggleGated(child.key)) {
-                                  <div class="flex flex-wrap gap-1 mt-1 ml-2">
-                                    @for (reason of getToggleReasons(child.key); track reason) {
-                                      <span class="panel-toggle-reason-badge">{{ reason }}</span>
-                                    }
-                                  </div>
-                                }
-                              </div>
-                            }
-                          </div>
-                        }
-                      </div>
-                    }
-                  </div>
-
-                  <!-- Herramientas Directas -->
-                  @if (filteredStandaloneModules().length > 0) {
-                    <div class="pt-3 border-t border-border">
-                      <h5
-                        class="text-[11px] font-bold text-text-secondary uppercase tracking-wider mb-3"
-                      >
-                        Herramientas Directas
-                      </h5>
-                      <div class="compact-modules-grid">
-                        @for (
-                          module of filteredStandaloneModules();
-                          track module.key
-                        ) {
-                          <div class="module-group">
-                            <app-setting-toggle
-                              [label]="module.label"
-                              [description]="module.description"
-                              [ngModel]="
-                                getPanelUIValue(activePanelUITab(), module.key)
-                              "
-                              (changed)="
-                                togglePanelUI(activePanelUITab(), module.key)
-                              "
-                              [disabled]="isToggleGated(module.key)"
-                            />
-                            @if (isToggleGated(module.key)) {
-                              <div class="flex flex-wrap gap-1 mt-1 ml-2">
-                                @for (reason of getToggleReasons(module.key); track reason) {
-                                  <span class="panel-toggle-reason-badge">{{ reason }}</span>
-                                }
-                              </div>
-                            }
-                          </div>
-                        }
-                      </div>
-                    </div>
-                  }
-
-                  @if (
-                    moduleSearchTerm() &&
-                    filteredModulesWithChildren().length === 0 &&
-                    filteredStandaloneModules().length === 0
-                  ) {
-                    <p class="text-sm text-text-secondary text-center py-4">
-                      No se encontraron modulos para "{{ moduleSearchTerm() }}"
-                    </p>
-                  }
                 </div>
               }
 
@@ -575,108 +461,6 @@ import {
       :host {
         display: block;
       }
-
-      /* Reusar patron de settings-modal para modulos */
-      .compact-modules-grid {
-        columns: 280px auto;
-        column-gap: 0.75rem;
-      }
-
-      .module-group {
-        display: flex;
-        flex-direction: column;
-        gap: 0.5rem;
-        break-inside: avoid;
-        margin-bottom: 0.75rem;
-        background: var(--color-surface, #fff);
-        border: 1px solid var(--color-border);
-        border-radius: var(--radius-lg, 0.75rem);
-        padding: 0.75rem;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-      }
-
-      .module-group:last-child {
-        margin-bottom: 0;
-      }
-
-      .module-group.is-parent {
-        break-inside: avoid;
-      }
-
-      .children-grid {
-        display: grid;
-        grid-template-columns: 1fr;
-        gap: 0;
-        padding-left: 1rem;
-        margin-top: 0.25rem;
-        position: relative;
-      }
-
-      .children-grid::before {
-        content: '';
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        border-left: 1.5px solid var(--color-secondary);
-        pointer-events: none;
-      }
-
-      .child-item {
-        position: relative;
-        padding: 0.2rem 0;
-      }
-
-      .child-item::before {
-        content: '';
-        position: absolute;
-        left: -1rem;
-        top: 0;
-        width: 0.6rem;
-        height: 50%;
-        border-left: 1.5px solid var(--color-secondary);
-        border-bottom: 1.5px solid var(--color-secondary);
-        border-bottom-left-radius: 6px;
-        pointer-events: none;
-      }
-
-      .child-item::after {
-        content: '';
-        position: absolute;
-        left: -1rem;
-        top: 50%;
-        bottom: 0;
-        border-left: 1.5px solid var(--color-secondary);
-        pointer-events: none;
-      }
-
-      .child-item:last-child::after {
-        display: none;
-      }
-
-      @media (max-width: 768px) {
-        .compact-modules-grid {
-          columns: 1;
-        }
-      }
-
-      /* Reason badge next to a gated toggle (industry ceiling or
-         store panel UI), so the admin understands why the module
-         cannot be enabled. */
-      .panel-toggle-reason-badge {
-        display: inline-flex;
-        align-items: center;
-        font-size: 9px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        padding: 1px 6px;
-        border-radius: 9999px;
-        background: rgba(107, 114, 128, 0.12);
-        color: #4b5563;
-        border: 1px solid rgba(107, 114, 128, 0.35);
-        line-height: 1.3;
-      }
     `,
   ],
 })
@@ -705,7 +489,6 @@ export class StoreUserEditModalComponent implements OnChanges {
    */
   originalPanelUI = signal<Record<string, Record<string, boolean>>>({});
   activePanelUITab = signal('STORE_ADMIN');
-  moduleSearchTerm = signal('');
 
   tabItems: ScrollableTab[] = [
     { id: 'info', label: 'General', icon: 'user' },
@@ -749,50 +532,41 @@ export class StoreUserEditModalComponent implements OnChanges {
     );
   });
 
-  /** Modules with children for the active app_type (filtered by search) */
-  filteredModulesWithChildren = computed(() => {
+  /** `value` for the shared editor — the active app_type's flat map. */
+  readonly editorValue = computed<Record<string, boolean>>(() => {
     const appType = this.activePanelUITab();
-    const modules = (APP_MODULES[appType] || []).filter(
-      (m: AppModule) => m.isParent && m.children && m.children.length > 0,
-    );
-    const term = this.moduleSearchTerm().toLowerCase().trim();
-    if (!term) return modules;
-
-    return modules
-      .map((module: AppModule) => {
-        const parentMatches =
-          module.label.toLowerCase().includes(term) ||
-          (module.description &&
-            module.description.toLowerCase().includes(term));
-        const matchingChildren = (module.children || []).filter(
-          (child: AppModule) =>
-            child.label.toLowerCase().includes(term) ||
-            (child.description &&
-              child.description.toLowerCase().includes(term)),
-        );
-        if (parentMatches) return module;
-        if (matchingChildren.length > 0) {
-          return { ...module, children: matchingChildren };
-        }
-        return null;
-      })
-      .filter(Boolean) as AppModule[];
+    const v = this.localPanelUI()[appType] || {};
+    const result: Record<string, boolean> = {};
+    for (const k of Object.keys(v)) {
+      result[k] = v[k] !== false;
+    }
+    return result;
   });
 
-  /** Standalone modules for the active app_type (filtered by search) */
-  filteredStandaloneModules = computed(() => {
-    const appType = this.activePanelUITab();
-    const modules = (APP_MODULES[appType] || []).filter(
-      (m: AppModule) => !m.isParent || !m.children || m.children.length === 0,
-    );
-    const term = this.moduleSearchTerm().toLowerCase().trim();
-    if (!term) return modules;
-    return modules.filter(
-      (m: AppModule) =>
-        m.label.toLowerCase().includes(term) ||
-        (m.description && m.description.toLowerCase().includes(term)),
+  /** Industry ∩ store_panel ceiling — only applies to `STORE_ADMIN`
+   *  (industries are store-scoped; `ORG_ADMIN` is untouched, per the
+   *  `vendix-panel-ui` rules). Other app_types see no gating. */
+  readonly hiddenByIndustry = computed<string[]>(() => {
+    if (this.activePanelUITab() !== 'STORE_ADMIN') return [];
+    return getModulesHiddenByIndustries(this.authFacade.userIndustries());
+  });
+
+  readonly hiddenByStore = computed<string[]>(() => {
+    if (this.activePanelUITab() !== 'STORE_ADMIN') return [];
+    const storePanelMap: Record<string, boolean> | undefined =
+      this.authFacade.storeSettings()?.panel_ui?.STORE_ADMIN;
+    if (!storePanelMap) return [];
+    return Object.keys(storePanelMap).filter(
+      (k) => storePanelMap[k] === false,
     );
   });
+
+  /** Per-key gating helper used by `buildPanelUIDiff` to mirror the
+   *  same arrays the editor renders against. */
+  private isGated(key: string, appType: string): boolean {
+    if (appType !== 'STORE_ADMIN') return false;
+    return this.hiddenByIndustry().includes(key) || this.hiddenByStore().includes(key);
+  }
 
   constructor() {
     this.infoForm = this.fb.group({
@@ -836,7 +610,6 @@ export class StoreUserEditModalComponent implements OnChanges {
     if (changes['isOpen'] && this.isOpen() && currentUser) {
       this.activeTab.set('info');
       this.activePanelUITab.set('STORE_ADMIN');
-      this.moduleSearchTerm.set('');
       this.passwordForm.reset();
       this.store.dispatch(
         StoreUsersActions.loadUserDetail({ id: currentUser.id }),
@@ -887,75 +660,15 @@ export class StoreUserEditModalComponent implements OnChanges {
 
   // ── Panel UI ───────────────────────────────────────────────────
 
-  getPanelUIValue(appType: string, key: string): boolean {
-    return this.localPanelUI()[appType]?.[key] ?? true;
-  }
-
-  togglePanelUI(appType: string, key: string): void {
-    if (this.isToggleGated(key, appType)) return;
-    this.setLocalPanelUIValue(
-      appType,
-      key,
-      !this.getPanelUIValue(appType, key),
-    );
-  }
-
-  onParentToggle(isEnabled: boolean, parentModule: AppModule): void {
+  /** Patch the active app_type's `localPanelUI` with the editor's emitted
+   *  map. Gated keys are not in the emission (the editor filters them
+   *  out), so their stored value is preserved untouched. */
+  onEditorValueChange(next: Record<string, boolean>): void {
     const appType = this.activePanelUITab();
-    if (this.isToggleGated(parentModule.key, appType)) return;
-    this.setLocalPanelUIValue(appType, parentModule.key, isEnabled);
-    if (parentModule.children) {
-      parentModule.children.forEach((child) => {
-        // Children gated by industry / store panel UI keep their stored
-        // value — the parent toggle does not cascade onto them.
-        if (this.isToggleGated(child.key, appType)) return;
-        this.setLocalPanelUIValue(appType, child.key, isEnabled);
-      });
-    }
-  }
-
-  /**
-   * Industry ∩ store_panel ceiling — only applies to `STORE_ADMIN`
-   * (industries are store-scoped; `ORG_ADMIN` is untouched, per the
-   * `vendix-panel-ui` rules).
-   */
-  isToggleGated(key: string, appType?: string): boolean {
-    const effectiveAppType = appType ?? this.activePanelUITab();
-    if (effectiveAppType !== 'STORE_ADMIN') return false;
-    return (
-      this.isIndustryHidden(key) || this.isStorePanelHidden(key)
-    );
-  }
-
-  /**
-   * Ordered reason labels for a gated toggle. Empty list when not gated.
-   * Order: `Industria` (industry ceiling) first, then `Tienda` (store
-   * panel UI).
-   */
-  getToggleReasons(key: string, appType?: string): string[] {
-    const effectiveAppType = appType ?? this.activePanelUITab();
-    if (effectiveAppType !== 'STORE_ADMIN') return [];
-    const reasons: string[] = [];
-    if (this.isIndustryHidden(key)) reasons.push('Industria');
-    if (this.isStorePanelHidden(key)) reasons.push('Tienda');
-    return reasons;
-  }
-
-  private isStorePanelHidden(key: string): boolean {
-    const storePanelMap: Record<string, boolean> | undefined =
-      this.authFacade.storeSettings()?.panel_ui?.STORE_ADMIN;
-    return storePanelMap?.[key] === false;
-  }
-
-  private isIndustryHidden(key: string): boolean {
-    const hidden = getModulesHiddenByIndustries(
-      this.authFacade.userIndustries(),
-    );
-    return hidden.includes(key);
-  }
-
-  onModuleSearch(term: string): void {
-    this.moduleSearchTerm.set(term);
+    this.localPanelUI.update((prev) => ({
+      ...prev,
+      [appType]: { ...(prev[appType] || {}), ...next },
+    }));
   }
 
   savePanelUI(): void {
@@ -989,7 +702,7 @@ export class StoreUserEditModalComponent implements OnChanges {
     const mergedForApp: Record<string, boolean> = { ...originalForApp };
 
     for (const key of Object.keys(localForApp)) {
-      if (this.isToggleGated(key, appType)) continue;
+      if (this.isGated(key, appType)) continue;
       mergedForApp[key] = localForApp[key];
     }
 
@@ -997,17 +710,6 @@ export class StoreUserEditModalComponent implements OnChanges {
       ...local,
       [appType]: mergedForApp,
     };
-  }
-
-  private setLocalPanelUIValue(
-    appType: string,
-    key: string,
-    value: boolean,
-  ): void {
-    const current = JSON.parse(JSON.stringify(this.localPanelUI()));
-    if (!current[appType]) current[appType] = {};
-    current[appType][key] = value;
-    this.localPanelUI.set(current);
   }
 
   // ── Security ───────────────────────────────────────────────────

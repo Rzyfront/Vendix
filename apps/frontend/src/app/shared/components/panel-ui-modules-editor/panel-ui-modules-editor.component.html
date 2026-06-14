@@ -1,0 +1,103 @@
+<div class="panel-ui-modules-editor">
+  @if (searchable()) {
+    <app-inputsearch
+      placeholder="Buscar módulos..."
+      size="sm"
+      [debounceTime]="200"
+      (searchChange)="onSearch($event)"
+      class="block mb-4"
+    ></app-inputsearch>
+  }
+
+  <!-- SECTION A: Modules WITH Children -->
+  @if (filteredModulesWithChildren().length > 0) {
+    <div class="compact-modules-grid">
+      @for (parent of filteredModulesWithChildren(); track parent.key) {
+        <div
+          class="module-group is-parent"
+          [class.new-module]="isNewKey(parent.key)"
+        >
+          <div class="toggle-wrapper">
+            <app-setting-toggle
+              [formControl]="control(parent.key)"
+              [label]="parent.label"
+              [description]="parent.description"
+              [isNew]="isNewKey(parent.key)"
+              (changed)="onParentToggle($event, parent)"
+            ></app-setting-toggle>
+            @if (isGated(parent.key)) {
+              <div class="flex flex-wrap gap-1 mt-1 ml-2">
+                @for (reason of getReasons(parent.key); track reason) {
+                  <span class="panel-toggle-reason-badge">{{ reason }}</span>
+                }
+              </div>
+            }
+          </div>
+          @if (parent.children?.length) {
+            <div class="children-grid">
+              @for (child of parent.children; track child.key) {
+                <div
+                  class="child-item"
+                  [class.new-module]="isNewKey(child.key)"
+                >
+                  <app-setting-toggle
+                    [formControl]="control(child.key)"
+                    [label]="child.label"
+                    [isNew]="isNewKey(child.key)"
+                    (changed)="onToggle(child.key)"
+                  ></app-setting-toggle>
+                  @if (isGated(child.key)) {
+                    <div class="flex flex-wrap gap-1 mt-1 ml-2">
+                      @for (reason of getReasons(child.key); track reason) {
+                        <span class="panel-toggle-reason-badge">{{ reason }}</span>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
+    </div>
+  }
+
+  <!-- SECTION B: Standalone Modules (Herramientas Directas) -->
+  @if (filteredStandaloneModules().length > 0) {
+    <div class="standalone-container mt-2">
+      <h5 class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3">
+        Herramientas Directas
+      </h5>
+      <div class="compact-modules-grid">
+        @for (m of filteredStandaloneModules(); track m.key) {
+          <div class="module-group" [class.new-module]="isNewKey(m.key)">
+            <app-setting-toggle
+              [formControl]="control(m.key)"
+              [label]="m.label"
+              [description]="m.description"
+              [isNew]="isNewKey(m.key)"
+              (changed)="onToggle(m.key)"
+            ></app-setting-toggle>
+            @if (isGated(m.key)) {
+              <div class="flex flex-wrap gap-1 mt-1 ml-2">
+                @for (reason of getReasons(m.key); track reason) {
+                  <span class="panel-toggle-reason-badge">{{ reason }}</span>
+                }
+              </div>
+            }
+          </div>
+        }
+      </div>
+    </div>
+  }
+
+  @if (
+    searchTerm() &&
+    filteredModulesWithChildren().length === 0 &&
+    filteredStandaloneModules().length === 0
+  ) {
+    <p class="text-sm text-gray-400 text-center py-4">
+      No se encontraron módulos para "{{ searchTerm() }}"
+    </p>
+  }
+</div>

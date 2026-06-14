@@ -58,7 +58,7 @@ export interface Product {
   };
   state: ProductState;
   pricing_type?: 'unit' | 'weight';
-  product_type?: 'physical' | 'service';
+  product_type?: 'physical' | 'service' | 'prepared';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?:
@@ -93,6 +93,16 @@ export interface Product {
   // not on the product.
   has_multiple_price_tiers?: boolean;
   enabled_price_tier_ids?: number[];
+  // ===== Restaurant Suite toggles (Fase A defaults) =====
+  // is_sellable=true, is_ingredient=false, is_combo=false, is_batch_produced=false.
+  // stock_unit / purchase_unit are nullable for non-restaurant stores.
+  is_sellable?: boolean;
+  is_ingredient?: boolean;
+  is_combo?: boolean;
+  is_batch_produced?: boolean;
+  stock_unit?: string | null;
+  purchase_unit?: string | null;
+  purchase_to_stock_factor?: number | null;
   created_at: Date;
   updated_at: Date;
 
@@ -303,7 +313,7 @@ export interface CreateProductDto {
   };
   state?: ProductState;
   pricing_type?: 'unit' | 'weight';
-  product_type?: 'physical' | 'service';
+  product_type?: 'physical' | 'service' | 'prepared';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?:
@@ -321,6 +331,14 @@ export interface CreateProductDto {
   consultation_template_id?: number | null;
   preconsultation_template_id?: number | null;
   preparation_time_minutes?: number;
+  // ===== Restaurant Suite toggles (Fase B) =====
+  is_sellable?: boolean;
+  is_ingredient?: boolean;
+  is_combo?: boolean;
+  is_batch_produced?: boolean;
+  stock_unit?: string | null;
+  purchase_unit?: string | null;
+  purchase_to_stock_factor?: number | null;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
@@ -358,7 +376,7 @@ export interface UpdateProductDto {
   };
   state?: ProductState;
   pricing_type?: 'unit' | 'weight';
-  product_type?: 'physical' | 'service';
+  product_type?: 'physical' | 'service' | 'prepared';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
   service_pricing_type?:
@@ -432,7 +450,13 @@ export interface ProductQueryDto {
   pos_optimized?: boolean;
   barcode?: string;
   include_stock?: boolean;
-  product_type?: 'physical' | 'service';
+  product_type?: 'physical' | 'service' | 'prepared';
+  // Restaurant Suite (Fase B): client-side filter — backend does not
+  // currently accept these in the WHERE clause. They are forwarded anyway
+  // so a future server-side filter can be enabled without touching the
+  // frontend.
+  is_ingredient?: boolean;
+  is_sellable?: boolean;
 }
 
 // Respuestas paginadas

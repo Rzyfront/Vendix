@@ -124,7 +124,7 @@ export class SuperAdminAuditService {
       id: number;
       first_name: string | null;
       last_name: string | null;
-      email: string;
+      email: string | null;
     }
 
     const users =

@@ -4,7 +4,7 @@ export interface OrderPdfData {
   order_number: string;
   order_date: string;
   customer_name: string;
-  customer_email?: string;
+  customer_email?: string | null;
   store_name: string;
   currency: string;
   items: OrderPdfItem[];

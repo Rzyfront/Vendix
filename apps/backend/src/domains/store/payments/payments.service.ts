@@ -2548,6 +2548,13 @@ export class PaymentsService {
     for (const item of order.order_items) {
       if (!item.product_id) continue;
 
+      // Restaurant Suite Fase D — guard anti-doble-descuento.
+      // Items already consumed at fire-to-kitchen must NOT be touched here
+      // (their COGS is recognized at fire, not at payment). Skip them.
+      if (item.inventory_consumed_at_fire === true) {
+        continue;
+      }
+
       const product = await tx.products.findUnique({
         where: { id: item.product_id },
         select: { track_inventory: true, product_type: true },

@@ -43,6 +43,7 @@ import {
   CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../../shared/pipes/currency';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   CreateProductDto,
   CreateProductImageDto,
@@ -464,6 +465,41 @@ export class ProductCreatePageComponent {
   private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
   private barcodeService = inject(PosBarcodeService);
+  private readonly authFacade = inject(AuthFacade);
+
+  /**
+   * Industrias EFECTIVAS de la tienda, con la MISMA cascada de fuentes que
+   * `MenuFilterService` (core/services/menu-filter.service.ts):
+   *   1. store_settings.general.industries — fuente de verdad, se actualiza al
+   *      guardar en Ajustes → General (live, no requiere re-login).
+   *   2. user.store.industries — snapshot de login (puede no traer el campo si
+   *      el whitelist de `cleanStore` aún no lo incluye).
+   *   3. ['retail'] — default canónico (columna DB + settings default).
+   * Antes leía solo (1)→userIndustries$ login y devolvía [] cuando el campo
+   * faltaba, ocultando "Plato preparado" en tiendas restaurante.
+   */
+  private readonly storeSettings = toSignal(this.authFacade.storeSettings$, {
+    initialValue: null as { general?: { industries?: string[] } } | null,
+  });
+  private readonly loginIndustries = toSignal(this.authFacade.userIndustries$, {
+    initialValue: [] as string[],
+  });
+  private readonly storeIndustries = computed<string[]>(() => {
+    const fromSettings = this.storeSettings()?.general?.industries;
+    const fromLogin = this.loginIndustries();
+    return (
+      fromSettings ||
+      (Array.isArray(fromLogin) ? fromLogin : null) ||
+      ['retail']
+    );
+  });
+  /**
+   * `true` solo si la tienda tiene la industria `restaurant`. Gatea el tipo
+   * "Plato preparado" y los toggles de la suite restaurante en el formulario.
+   */
+  readonly isRestaurant = computed(() =>
+    this.storeIndustries().includes('restaurant'),
+  );
 
   // Data Collection Templates (for consultation configuration)
   dataCollectionTemplates: {
@@ -562,10 +598,26 @@ export class ProductCreatePageComponent {
     { value: 'weight', label: 'Venta por peso (kg)' },
   ];
 
-  productTypeOptions: { value: string; label: string }[] = [
-    { value: 'physical', label: 'Producto Físico' },
-    { value: 'service', label: 'Servicio' },
-  ];
+  /**
+   * Opciones del selector "Tipo de Producto". "Plato preparado"
+   * (product_type='prepared') solo se ofrece a tiendas con industria
+   * `restaurant`, o si el producto en edición ya es 'prepared' (para no
+   * perder el valor al editarlo en una tienda mal configurada).
+   */
+  readonly productTypeOptions = computed<{ value: string; label: string }[]>(
+    () => {
+      this.formUpdateTrigger(); // reactividad ante cambios del formulario
+      const base = [
+        { value: 'physical', label: 'Producto Físico' },
+        { value: 'service', label: 'Servicio' },
+      ];
+      const current = this.productForm?.get('product_type')?.value;
+      if (this.isRestaurant() || current === 'prepared') {
+        base.push({ value: 'prepared', label: 'Plato preparado' });
+      }
+      return base;
+    },
+  );
 
   serviceModalityOptions: SelectorOption[] = [
     { value: 'in_person', label: 'Presencial' },
@@ -1036,6 +1088,11 @@ export class ProductCreatePageComponent {
         preparation_time_minutes: [null as number | null],
         // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
         has_multiple_price_tiers: [false],
+        // ===== Restaurant Suite toggles (Fase B) =====
+        is_sellable: [true],
+        is_ingredient: [false],
+        is_combo: [false],
+        is_batch_produced: [false],
       },
       {
         validators: [saleLessThanBaseValidator()],
@@ -1199,6 +1256,11 @@ export class ProductCreatePageComponent {
       preparation_time_minutes: product.preparation_time_minutes || null,
       // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
       has_multiple_price_tiers: !!product.has_multiple_price_tiers,
+      // Restaurant Suite toggles (Fase B)
+      is_sellable: product.is_sellable !== false,
+      is_ingredient: !!product.is_ingredient,
+      is_combo: !!product.is_combo,
+      is_batch_produced: !!product.is_batch_produced,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -2551,6 +2613,11 @@ export class ProductCreatePageComponent {
           ? this.enabledPriceTierIdsFromRows()
           : (this.product?.enabled_price_tier_ids ?? [])
         : [],
+      // Restaurant Suite toggles (Fase B)
+      is_sellable: formValue.is_sellable !== false,
+      is_ingredient: !!formValue.is_ingredient,
+      is_combo: !!formValue.is_combo,
+      is_batch_produced: !!formValue.is_batch_produced,
     };
 
     // Add Variants - ALWAYS send the array so the backend can handle the toggle

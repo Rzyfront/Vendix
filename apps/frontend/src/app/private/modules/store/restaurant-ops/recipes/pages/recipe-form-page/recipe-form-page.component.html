@@ -1,0 +1,105 @@
+<app-sticky-header
+  [title]="isEditMode() ? 'Editar receta' : 'Nueva receta'"
+  [subtitle]="
+    isEditMode()
+      ? 'Modifica el rendimiento, la merma y los componentes de la receta.'
+      : 'Define el rendimiento, la merma y los insumos que componen el plato.'
+  "
+  [actions]="headerActions()"
+  (actionClicked)="onHeaderAction($event)"
+></app-sticky-header>
+
+<form
+  [formGroup]="form"
+  (ngSubmit)="submit()"
+  class="space-y-4 md:space-y-6 px-2 pb-4 md:px-0 md:pb-6"
+>
+  <app-card [responsive]="true" [padding]="true">
+    <div class="space-y-4">
+      <div class="flex items-start gap-2">
+        <app-icon
+          name="utensils"
+          size="18"
+          class="text-primary-600 mt-0.5"
+        ></app-icon>
+        <div>
+          <h2 class="text-base font-bold text-gray-900">
+            Producto de rendimiento
+          </h2>
+          <p class="text-xs text-gray-500 mt-0.5">
+            El plato o sub-receta que se produce con esta lista de insumos.
+            Solo se muestran productos
+            <span class="font-semibold">preparados</span> o marcados como
+            <span class="font-semibold">producidos en lote</span>.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <app-selector
+          formControlName="product_id"
+          label="Producto"
+          placeholder="Selecciona un plato o sub-receta"
+          [options]="yieldOptions()"
+          [required]="true"
+          [disabled]="isEditMode() || isLoadingProducts()"
+          helpText="Una receta solo puede existir una vez por producto. En modo edición este campo se bloquea."
+        />
+
+        <app-input
+          formControlName="yield_unit"
+          label="Unidad de rendimiento"
+          placeholder="Ej. plato, porción, g, ml"
+          [required]="true"
+          [maxlength]="20"
+        />
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <app-input
+          formControlName="yield_quantity"
+          label="Rendimiento"
+          type="number"
+          placeholder="1"
+          [min]="0"
+          step="0.0001"
+          [required]="true"
+          helpText="Cantidad producida por lote de la receta."
+        />
+
+        <app-input
+          formControlName="waste_percent"
+          label="Merma global (%)"
+          type="number"
+          placeholder="0"
+          [min]="0"
+          [max]="100"
+          step="0.5"
+          helpText="Porcentaje de merma esperado para el rendimiento total."
+        />
+
+        <app-setting-toggle
+          formControlName="is_active"
+          label="Receta activa"
+          description="Disponible para producción y costeo."
+        />
+      </div>
+    </div>
+  </app-card>
+
+  <app-card [responsive]="true" [padding]="true">
+    <app-textarea
+      formControlName="preparation_notes"
+      label="Notas de preparación"
+      placeholder="Pasos, técnica, recomendaciones, temperatura, etc."
+      [rows]="4"
+      [maxlength]="2000"
+    />
+  </app-card>
+
+  <!-- overflow visible so the searchable component dropdown is not clipped by
+       the card (default card overflow is hidden on md+). -->
+  <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">
+    <app-recipe-items-editor [items]="itemsArray" />
+  </app-card>
+</form>

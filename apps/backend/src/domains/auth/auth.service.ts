@@ -925,16 +925,18 @@ export class AuthService {
       // Continuar sin organization slug si hay error
     }
 
-    // Enviar email de verificación
-    try {
-      await this.emailService.sendVerificationEmail(
-        userWithRoles.email,
-        verificationToken,
-        `${userWithRoles.first_name} ${userWithRoles.last_name}`,
-        organizationSlug,
-      );
-    } catch (error) {
-      // No fallar el registro si el email no se puede enviar
+    // Enviar email de verificación (solo si el usuario tiene correo)
+    if (userWithRoles.email) {
+      try {
+        await this.emailService.sendVerificationEmail(
+          userWithRoles.email,
+          verificationToken,
+          `${userWithRoles.first_name} ${userWithRoles.last_name}`,
+          organizationSlug,
+        );
+      } catch (error) {
+        // No fallar el registro si el email no se puede enviar
+      }
     }
 
     // Transformar user_roles a roles array simple para compatibilidad
@@ -1188,18 +1190,20 @@ export class AuthService {
         // Continuar sin branding si hay error
       }
 
-      // Customers reciben email con branding de la tienda
-      await this.emailService.sendWelcomeEmail(
-        userWithRoles.email,
-        userWithRoles.first_name,
-        {
-          userType: 'customer',
-          branding,
-          storeName,
-          organizationName,
-          organizationSlug,
-        },
-      );
+      // Customers reciben email con branding de la tienda (si tienen correo)
+      if (userWithRoles.email) {
+        await this.emailService.sendWelcomeEmail(
+          userWithRoles.email,
+          userWithRoles.first_name,
+          {
+            userType: 'customer',
+            branding,
+            storeName,
+            organizationName,
+            organizationSlug,
+          },
+        );
+      }
     } catch (error) {
       // No fallar el registro si el email no se puede enviar
     }
@@ -1485,8 +1489,8 @@ export class AuthService {
         // Continuar sin branding si hay error
       }
 
-      // Staff recibe email con branding de la tienda/organización
-      if (userWithRoles) {
+      // Staff recibe email con branding de la tienda/organización (si tiene correo)
+      if (userWithRoles && userWithRoles.email) {
         await this.emailService.sendWelcomeEmail(
           userWithRoles.email,
           userWithRoles.first_name,
@@ -2387,16 +2391,18 @@ export class AuthService {
       // Continuar sin organization slug si hay error
     }
 
-    // Enviar email de verificación
-    await this.emailService.sendVerificationEmail(
-      user.email,
-      token,
-      user.first_name,
-      organizationSlug,
-    );
+    // Enviar email de verificación y bienvenida (solo si el usuario tiene correo)
+    if (user.email) {
+      await this.emailService.sendVerificationEmail(
+        user.email,
+        token,
+        user.first_name,
+        organizationSlug,
+      );
 
-    // También enviamos email de bienvenida después del registro
-    await this.emailService.sendWelcomeEmail(user.email, user.first_name);
+      // También enviamos email de bienvenida después del registro
+      await this.emailService.sendWelcomeEmail(user.email, user.first_name);
+    }
   }
 
   async verifyEmail(token: string): Promise<{ message: string }> {
@@ -2538,12 +2544,16 @@ export class AuthService {
       },
     });
 
-    // Enviar email de recuperación de contraseña
-    await this.emailService.sendPasswordResetEmail(
-      user.email,
-      token,
-      user.first_name,
-    );
+    // Enviar email de recuperación de contraseña (solo si el usuario tiene correo).
+    // El flujo de "forgot password" se inicia por email, por lo que en la
+    // práctica siempre existe; el guard es defensivo para el tipo nullable.
+    if (user.email) {
+      await this.emailService.sendPasswordResetEmail(
+        user.email,
+        token,
+        user.first_name,
+      );
+    }
 
     // Registrar auditoría de solicitud de recuperación
     await this.auditService.logAuth(

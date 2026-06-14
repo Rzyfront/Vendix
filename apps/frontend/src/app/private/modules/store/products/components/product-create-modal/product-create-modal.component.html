@@ -56,54 +56,9 @@
 
       @if (!isEditMode) {
         <div class="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
-          Este producto se creará como definición comercial, sin mover stock ni activos registrados. La entrada de existencias y costos reales se realiza desde Inventario > POP.
+          Se creará como definición comercial, sin stock ni costos. Regístralos luego en Inventario &gt; POP.
         </div>
       }
-
-      <!-- Category & Brand Row -->
-      <div class="grid grid-cols-2 gap-2 md:gap-4">
-        <div>
-          <div class="flex gap-2 items-end">
-            <app-multi-selector
-              class="flex-1"
-              label="Categoría"
-              [options]="categoryOptions()"
-              formControlName="category_ids"
-              placeholder="Seleccionar categorías..."
-            ></app-multi-selector>
-            <button
-              type="button"
-              (click)="isCategoryCreateOpen.set(true)"
-              class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
-              style="border-radius: var(--radius-sm)"
-            >
-              <app-icon name="plus" size="20"></app-icon>
-            </button>
-          </div>
-          <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
-        </div>
-
-        <div>
-          <div class="flex gap-2 items-end">
-            <app-multi-selector
-              class="flex-1"
-              label="Marca"
-              [options]="brandOptions()"
-              formControlName="brand_ids"
-              placeholder="Seleccionar marca..."
-            ></app-multi-selector>
-            <button
-              type="button"
-              (click)="isBrandCreateOpen.set(true)"
-              class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
-              style="border-radius: var(--radius-sm)"
-            >
-              <app-icon name="plus" size="20"></app-icon>
-            </button>
-          </div>
-          <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
-        </div>
-      </div>
 
       <!-- IVA / Impuestos -->
       <div>
@@ -139,35 +94,40 @@
         <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
       </div>
 
-      <label
-        class="flex items-start justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2"
-      >
-        <span class="min-w-0">
-          <span class="block text-sm font-semibold text-gray-700">
-            Precio editable en POS
-          </span>
-          <span class="block text-xs text-gray-500">
-            Solo usuarios autorizados podrán cambiar el precio al venderlo.
-          </span>
-        </span>
-        <input
-          type="checkbox"
-          formControlName="allow_pos_price_override"
-          class="mt-1 h-4 w-4 accent-primary"
-        />
-      </label>
 
-      <!-- Advanced Link -->
-      <div class="pt-2">
+      <!-- Advanced CTA -->
+      <app-tooltip
+        content="Haz clic para añadir variantes, imágenes, descripción y más opciones al producto"
+        position="top"
+        color="ai"
+        size="md"
+        class="!block !w-full"
+      >
         <button
           type="button"
           (click)="goToAdvancedCreation()"
-          class="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1 transition-colors"
+          class="w-full mt-1 flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border border-dashed border-primary-300 bg-primary-50/50 hover:bg-primary-100 hover:border-primary-400 transition-all group cursor-pointer"
         >
-          <app-icon name="settings" size="14"></app-icon>
-          Configuración avanzada (variantes, imágenes, descripción)
+          <span class="flex items-center gap-2.5 min-w-0">
+            <span class="shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-lg bg-primary-100 text-primary-700 group-hover:bg-primary-200 transition-colors">
+              <app-icon name="settings" size="16"></app-icon>
+            </span>
+            <span class="min-w-0 text-left">
+              <span class="block text-sm font-semibold text-primary-800">
+                Configuración avanzada
+              </span>
+              <span class="block text-xs text-primary-600/80 truncate">
+                Variantes, imágenes, descripción y más
+              </span>
+            </span>
+          </span>
+          <app-icon
+            name="arrow-right"
+            size="18"
+            class="shrink-0 text-primary-500 group-hover:text-primary-700 group-hover:translate-x-0.5 transition-transform"
+          ></app-icon>
         </button>
-      </div>
+      </app-tooltip>
     </form>
   </div>
 
@@ -205,13 +165,6 @@
   (created)="onCategoryCreated($event)"
   (cancel)="isCategoryCreateOpen.set(false)"
 ></app-category-quick-create>
-
-<app-brand-quick-create
-  [isOpen]="isBrandCreateOpen()"
-  (isOpenChange)="isBrandCreateOpen.set($event)"
-  (created)="onBrandCreated($event)"
-  (cancel)="isBrandCreateOpen.set(false)"
-></app-brand-quick-create>
 
 <app-tax-quick-create
   [isOpen]="isTaxCategoryCreateOpen()"

@@ -1,0 +1,146 @@
+<div class="w-full overflow-x-hidden">
+  @if (menu(); as m) {
+    <app-sticky-header
+      [title]="m.name"
+      [subtitle]="'Carta · ' + m.sections.length + ' secciones · ' + totalProductsInMenu() + ' productos'"
+      icon="book-open"
+      variant="glass"
+      [showBackButton]="true"
+      [backRoute]="'/admin/restaurant-ops/menus'"
+    />
+
+    <div class="p-2 md:p-6 space-y-6">
+      <app-card title="Secciones" subtitle="Reordena con las flechas" [padding]="true">
+        <div class="flex flex-col md:flex-row gap-2 mb-4 md:items-end">
+          <app-input
+            class="flex-1"
+            [type]="'text'"
+            placeholder="Nombre de la nueva sección (Entradas, Platos Fuertes, Postres)"
+            [ngModel]="newSectionName()"
+            (ngModelChange)="newSectionName.set($event)"
+            (keyup.enter)="addSection()"
+          />
+          <app-button variant="primary" (clicked)="addSection()">
+            <app-icon slot="icon" name="plus" [size]="16" />
+            Agregar Sección
+          </app-button>
+        </div>
+
+        @if (m.sections.length === 0) {
+          <p class="text-sm text-text-secondary">Aún no hay secciones en esta carta.</p>
+        }
+
+        @for (section of m.sections; track section.id) {
+          <div class="border border-border rounded-md p-3 mb-3">
+            <div class="flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <app-button variant="outline" size="sm" (clicked)="moveSection(section, -1)">
+                  <app-icon slot="icon" name="chevron-up" [size]="16" />
+                </app-button>
+                <app-button variant="outline" size="sm" (clicked)="moveSection(section, 1)">
+                  <app-icon slot="icon" name="chevron-down" [size]="16" />
+                </app-button>
+                <h3 class="font-semibold text-sm md:text-base">{{ section.name }}</h3>
+                <span class="text-xs text-text-secondary">
+                  {{ section.items?.length ?? 0 }} productos
+                </span>
+              </div>
+              <app-button variant="outline-danger" size="sm" (clicked)="deleteSection(section)">
+                <app-icon slot="icon" name="trash-2" [size]="14" />
+                Eliminar sección
+              </app-button>
+            </div>
+
+            <ul class="space-y-1 mb-3">
+              @for (item of section.items ?? []; track item.id) {
+                <li class="flex items-center justify-between bg-gray-50 px-3 py-2 rounded text-sm">
+                  <div class="flex items-center gap-2">
+                    <app-button variant="outline" size="sm" (clicked)="moveItem(section, item, -1)">
+                      <app-icon slot="icon" name="chevron-up" [size]="14" />
+                    </app-button>
+                    <app-button variant="outline" size="sm" (clicked)="moveItem(section, item, 1)">
+                      <app-icon slot="icon" name="chevron-down" [size]="14" />
+                    </app-button>
+                    <span>{{ item.product?.name ?? getProductName(item.product_id) }}</span>
+                    @if (item.product?.is_combo) {
+                      <span class="text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-700">Combo</span>
+                    }
+                  </div>
+                  <app-button variant="outline-danger" size="sm" (clicked)="removeItem(section, item)">
+                    <app-icon slot="icon" name="trash-2" [size]="14" />
+                    Quitar
+                  </app-button>
+                </li>
+              } @empty {
+                <li class="text-xs text-text-secondary italic">Sin productos en esta sección.</li>
+              }
+            </ul>
+
+            <div class="flex flex-col md:flex-row gap-2 md:items-end">
+              <app-selector
+                class="flex-1"
+                placeholder="Selecciona un producto…"
+                [options]="productSelectorOptions()"
+                [ngModel]="newItemProductId()"
+                (ngModelChange)="onProductSelect($event)"
+              />
+              <app-button variant="primary" (clicked)="addItem(section)">
+                <app-icon slot="icon" name="plus" [size]="16" />
+                Agregar producto
+              </app-button>
+            </div>
+          </div>
+        }
+      </app-card>
+
+      <app-card
+        title="Ventanas de Disponibilidad"
+        subtitle="Días y horarios en que la carta está activa (menu-level)"
+        [padding]="true"
+      >
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-2 mb-4 md:items-end">
+          <app-selector
+            [options]="dayOptions"
+            [ngModel]="newWindow().day_of_week"
+            (ngModelChange)="onDaySelect($event)"
+          />
+          <app-input
+            [type]="'time'"
+            [ngModel]="newWindow().start_time"
+            (ngModelChange)="updateNewWindow({ start_time: $event })"
+          />
+          <app-input
+            [type]="'time'"
+            [ngModel]="newWindow().end_time"
+            (ngModelChange)="updateNewWindow({ end_time: $event })"
+          />
+          <app-button variant="primary" (clicked)="addWindow()">
+            <app-icon slot="icon" name="plus" [size]="16" />
+            Agregar Ventana
+          </app-button>
+        </div>
+
+        @if (m.availability_windows.length === 0) {
+          <p class="text-sm text-text-secondary">Sin ventanas. La carta se considera disponible todo el tiempo.</p>
+        }
+
+        <ul class="space-y-1">
+          @for (w of m.availability_windows; track w.id) {
+            <li class="flex items-center justify-between bg-gray-50 px-3 py-2 rounded text-sm">
+              <span>
+                <strong>{{ dayLabels[w.day_of_week] }}</strong>
+                · {{ w.start_time }} – {{ w.end_time }}
+              </span>
+              <app-button variant="outline-danger" size="sm" (clicked)="deleteWindow(w)">
+                <app-icon slot="icon" name="trash-2" [size]="14" />
+                Eliminar
+              </app-button>
+            </li>
+          }
+        </ul>
+      </app-card>
+    </div>
+  } @else {
+    <div class="p-6 text-center text-text-secondary">Cargando carta…</div>
+  }
+</div>

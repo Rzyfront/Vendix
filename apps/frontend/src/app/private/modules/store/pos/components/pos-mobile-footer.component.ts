@@ -3,6 +3,7 @@ import {
   input,
   output,
   inject,
+  computed,
 } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -95,6 +96,34 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <span>Envío</span>
           </button>
         </div>
+        @if (restaurantMode()) {
+          <div class="actions-row restaurant-row">
+            <button
+              class="action-btn restaurant-btn open-table-btn"
+              (click)="openTable.emit()"
+              [disabled]="hasOpenTableSession()"
+            >
+              <app-icon name="layout-grid" [size]="16"></app-icon>
+              <span>Mesa</span>
+            </button>
+            <button
+              class="action-btn restaurant-btn fire-btn"
+              (click)="fireKitchen.emit()"
+              [disabled]="!canFireKitchen()"
+            >
+              <app-icon name="flame" [size]="16"></app-icon>
+              <span>Cocina</span>
+            </button>
+            <button
+              class="action-btn restaurant-btn split-btn"
+              (click)="splitBill.emit()"
+              [disabled]="!hasOpenTableSession()"
+            >
+              <app-icon name="users" [size]="16"></app-icon>
+              <span>Dividir</span>
+            </button>
+          </div>
+        }
         <!-- Row 3: Primary CTA -->
         <button
           class="action-btn checkout-btn checkout-btn-full"
@@ -319,6 +348,35 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         filter: brightness(1.1);
       }
 
+      .restaurant-row {
+        margin-top: 0;
+      }
+
+      .restaurant-btn {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-text-primary);
+        font-size: 12px;
+      }
+
+      .restaurant-btn:hover:not(:disabled) {
+        background: var(--color-primary);
+        color: white;
+        border-color: var(--color-primary);
+      }
+
+      .fire-btn {
+        background: rgba(249, 115, 22, 0.08);
+        border-color: rgba(249, 115, 22, 0.35);
+        color: rgb(194, 65, 12);
+      }
+
+      .fire-btn:hover:not(:disabled) {
+        background: rgb(249, 115, 22);
+        color: white;
+        border-color: rgb(249, 115, 22);
+      }
+
       /* Tablet: Sync with sidebar width */
       @media (min-width: 768px) and (max-width: 1023px) {
         .pos-mobile-footer {
@@ -364,6 +422,20 @@ export class PosMobileFooterComponent {
   readonly isQuotationMode = input<boolean>(false);
   readonly isLayawayMode = input<boolean>(false);
   readonly canCreateCustomItems = input<boolean>(false);
+  readonly restaurantMode = input<boolean>(false);
+  readonly hasOpenTableSession = input<boolean>(false);
+  /**
+   * True when the cart holds at least one `prepared` product line not yet
+   * fired. Lets "Cocina" fire a counter (table-less) order without an open
+   * table session (mostrador / para llevar).
+   */
+  readonly hasPreparedItems = input<boolean>(false);
+  /** Fire allowed with items in cart AND (open table OR prepared items). */
+  readonly canFireKitchen = computed(
+    () =>
+      this.itemCount() > 0 &&
+      (this.hasOpenTableSession() || this.hasPreparedItems()),
+  );
 
   readonly viewCart = output<void>();
   readonly customItem = output<void>();
@@ -372,6 +444,9 @@ export class PosMobileFooterComponent {
   readonly checkout = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
+  readonly openTable = output<void>();
+  readonly fireKitchen = output<void>();
+  readonly splitBill = output<void>();
 
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount);

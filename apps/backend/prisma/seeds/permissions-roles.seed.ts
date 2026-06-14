@@ -425,6 +425,155 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
+    // Recetas / BOM (Restaurant Suite — Fase B)
+    {
+      name: 'store:recipes:read',
+      description: 'Listar recetas (BOM) de la tienda',
+      path: '/api/store/recipes',
+      method: 'GET',
+    },
+    {
+      name: 'store:recipes:create',
+      description: 'Crear receta (BOM)',
+      path: '/api/store/recipes',
+      method: 'POST',
+    },
+    {
+      name: 'store:recipes:update',
+      description: 'Actualizar receta (BOM) o sus componentes',
+      path: '/api/store/recipes/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:recipes:delete',
+      description: 'Desactivar receta (BOM)',
+      path: '/api/store/recipes/:id',
+      method: 'DELETE',
+    },
+
+    // Production Orders / Sub-recipe batch stock (Restaurant Suite — Fase C)
+    {
+      name: 'store:production_orders:read',
+      description: 'Listar órdenes de producción de la tienda',
+      path: '/api/store/production-orders',
+      method: 'GET',
+    },
+    {
+      name: 'store:production_orders:create',
+      description: 'Crear orden de producción (sub-receta en lote)',
+      path: '/api/store/production-orders',
+      method: 'POST',
+    },
+    {
+      name: 'store:production_orders:update',
+      description:
+        'Iniciar/completar/cancelar/editar orden de producción (consume stock + genera stock del producto preparado)',
+      path: '/api/store/production-orders/:id',
+      method: 'PATCH',
+    },
+
+    // Kitchen Fire (Restaurant Suite — Fase D)
+    // Fire-to-kitchen consume + COGS auto-entry seam.
+    {
+      name: 'store:kitchen_fire:create',
+      description:
+        'Enviar items de orden a cocina (consume inventario de insumos + crea ticket + emite COGS)',
+      path: '/api/store/kitchen-fire',
+      method: 'POST',
+    },
+    {
+      name: 'store:kitchen_fire:read',
+      description: 'Listar/consultar tickets de cocina (KDS)',
+      path: '/api/store/kitchen-fire/tickets',
+      method: 'GET',
+    },
+    {
+      name: 'store:kitchen_fire:update',
+      description:
+        'Actualizar estado de ticket de cocina (in_preparation / ready / delivered / cancelled)',
+      path: '/api/store/kitchen-fire/tickets/:id',
+      method: 'PATCH',
+    },
+
+    // Tables (mesas) + Table Sessions (cuenta abierta) — Restaurant Suite — Fase E
+    {
+      name: 'store:tables:read',
+      description: 'Listar/consultar mesas y mapa de mesas de la tienda',
+      path: '/api/store/tables',
+      method: 'GET',
+    },
+    {
+      name: 'store:tables:create',
+      description: 'Crear mesa en la tienda',
+      path: '/api/store/tables',
+      method: 'POST',
+    },
+    {
+      name: 'store:tables:update',
+      description: 'Actualizar mesa (nombre, zona, capacidad, layout)',
+      path: '/api/store/tables/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:tables:delete',
+      description: 'Eliminar mesa de la tienda',
+      path: '/api/store/tables/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:table_sessions:read',
+      description: 'Consultar sesiones de mesa (cuenta abierta)',
+      path: '/api/store/table-sessions/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:table_sessions:create',
+      description:
+        'Abrir sesión de mesa (crea orden draft y vincula table_session)',
+      path: '/api/store/table-sessions',
+      method: 'POST',
+    },
+    {
+      name: 'store:table_sessions:update',
+      description:
+        'Agregar/quitar items, dividir cuenta (split) y cerrar sesión de mesa',
+      path: '/api/store/table-sessions/:id',
+      method: 'PATCH',
+    },
+
+    // Menus / Carta pública (Restaurant Suite — Fase G)
+    {
+      name: 'store:menus:read',
+      description: 'Listar/consultar menús (carta) de la tienda',
+      path: '/api/store/menus',
+      method: 'GET',
+    },
+    {
+      name: 'store:menus:create',
+      description: 'Crear menú (carta) de la tienda',
+      path: '/api/store/menus',
+      method: 'POST',
+    },
+    {
+      name: 'store:menus:update',
+      description: 'Actualizar menú o sus secciones/items/ventanas',
+      path: '/api/store/menus/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:menus:delete',
+      description: 'Desactivar menú de la tienda',
+      path: '/api/store/menus/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:menu_engineering:read',
+      description:
+        'Ingeniería de menú (clasificación estrella/caballo/puzzle/perro)',
+      path: '/api/store/menus/engineering-report',
+      method: 'GET',
+    },
+
     // Órdenes
     {
       name: 'store:orders:create',

@@ -13,6 +13,8 @@ import { distinctUntilChanged, map } from 'rxjs';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import type { QuantityClampEvent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { showStockCapToast } from '../cart/utils/stock-toast';
 import { TooltipComponent } from '../../../../../shared/components/tooltip/tooltip.component';
 import { CartState, CartItem } from '../models/cart.model';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
@@ -191,6 +193,7 @@ import {
                           [editable]="true"
                           [size]="'sm'"
                           (valueChange)="onQuantityChange(item.id, $event)"
+                          (valueClamped)="onQuantityClamped(item, $event)"
                         ></app-quantity-control>
                         @if (isPackageLine(item)) {
                           <span class="package-count-label">
@@ -1032,6 +1035,18 @@ export class PosCartModalComponent {
 
   onQuantityChange(itemId: string, quantity: number): void {
     this.itemQuantityChanged.emit({ itemId, quantity });
+  }
+
+  /**
+   * Manejador del evento `valueClamped` del `quantity-control`.
+   * Se dispara cuando el usuario teclea una cantidad fuera del rango
+   * permitido. Solo el cap superior (max) nos interesa aquí — el cap
+   * inferior ya está manejado por el handler de `valueChange` en el
+   * parent que llama a `updateQuantity`.
+   */
+  onQuantityClamped(item: CartItem, event: QuantityClampEvent): void {
+    if (event.reason !== 'max') return;
+    showStockCapToast(this.toastService, item, event.limit);
   }
 
   onRemoveItem(itemId: string): void {

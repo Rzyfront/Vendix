@@ -21,6 +21,8 @@ import {
 } from '../../../../../shared/components';
 import type { SelectorOption } from '../../../../../shared/components/selector/selector.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import type { QuantityClampEvent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { showStockCapToast } from './utils/stock-toast';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { PosScaleService } from '../services/pos-scale.service';
 import { PosApiService } from '../services/pos-api.service';
@@ -290,6 +292,44 @@ import {
                   <span>Envío</span>
                 </button>
               </div>
+              @if (restaurantMode()) {
+                <div class="cart-actions-row cart-restaurant-row">
+                  <button
+                    type="button"
+                    class="cart-btn restaurant-btn open-table-btn"
+                    (click)="openTable.emit()"
+                    [disabled]="hasOpenTableSession()"
+                    title="Abrir mesa"
+                  >
+                    <app-icon name="layout-grid" [size]="16"></app-icon>
+                    <span>Abrir mesa</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="cart-btn restaurant-btn fire-btn"
+                    (click)="fireKitchen.emit()"
+                    [disabled]="!canFireKitchen()"
+                    [title]="
+                      hasOpenTableSession()
+                        ? 'Enviar a cocina'
+                        : 'Enviar a cocina (mostrador / para llevar)'
+                    "
+                  >
+                    <app-icon name="flame" [size]="16"></app-icon>
+                    <span>Enviar a cocina</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="cart-btn restaurant-btn split-btn"
+                    (click)="splitBill.emit()"
+                    [disabled]="!hasOpenTableSession()"
+                    title="Dividir cuenta"
+                  >
+                    <app-icon name="users" [size]="16"></app-icon>
+                    <span>Dividir cuenta</span>
+                  </button>
+                </div>
+              }
               <button
                 type="button"
                 class="cart-btn checkout-btn"
@@ -525,6 +565,7 @@ import {
                           [editable]="true"
                           [size]="'sm'"
                           (valueChange)="updateQuantity(item.id, $event)"
+                          (valueClamped)="onQuantityClamped(item, $event)"
                         ></app-quantity-control>
                         @if (isPackageLine(item)) {
                           <span class="text-[10px] font-medium text-blue-700 leading-none">
@@ -734,6 +775,37 @@ import {
         border-color: var(--color-text-secondary);
       }
 
+      .cart-restaurant-row {
+        margin-top: 2px;
+      }
+
+      .restaurant-btn {
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-text-primary);
+        padding: 10px 6px;
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .restaurant-btn:hover:not(:disabled) {
+        background: var(--color-primary);
+        color: white;
+        border-color: var(--color-primary);
+      }
+
+      .fire-btn {
+        background: rgba(249, 115, 22, 0.08);
+        border-color: rgba(249, 115, 22, 0.35);
+        color: rgb(194, 65, 12);
+      }
+
+      .fire-btn:hover:not(:disabled) {
+        background: rgb(249, 115, 22);
+        color: white;
+        border-color: rgb(249, 115, 22);
+      }
+
       .shipping-btn {
         background: var(--color-primary);
         color: white;
@@ -827,11 +899,31 @@ private cartService = inject(PosCartService);
   readonly isEditMode = input<boolean>(false);
   readonly isQuotationMode = input<boolean>(false);
   readonly isLayawayMode = input<boolean>(false);
+  readonly restaurantMode = input<boolean>(false);
+  readonly hasOpenTableSession = input<boolean>(false);
+  /**
+   * True when the cart holds at least one `prepared` product line not yet
+   * fired. Lets the "Enviar a cocina" action fire a counter (table-less)
+   * order — fire is no longer gated solely on an open table session.
+   */
+  readonly hasPreparedItems = input<boolean>(false);
+  /**
+   * Fire is allowed when the cart is non-empty AND either a table session is
+   * open (dine-in) or there are prepared items to fire (mostrador / takeaway).
+   */
+  readonly canFireKitchen = computed(
+    () =>
+      !this.isEmpty() &&
+      (this.hasOpenTableSession() || this.hasPreparedItems()),
+  );
   readonly saveDraft = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
   readonly quote = output<void>();
   readonly layaway = output<void>();
+  readonly openTable = output<void>();
+  readonly fireKitchen = output<void>();
+  readonly splitBill = output<void>();
 
   constructor() {
     this.taxesService
@@ -1151,6 +1243,18 @@ private cartService = inject(PosCartService);
             error.message || 'Error al actualizar cantidad',
           );
         } });
+  }
+
+  /**
+   * Manejador del evento `valueClamped` del `quantity-control`.
+   * Se dispara cuando el usuario teclea una cantidad fuera del rango
+   * permitido (mayor al stock o menor al mínimo). Solo el cap superior
+   * (max) nos interesa aquí — el cap inferior ya está manejado por
+   * `updateQuantity` cuando la cantidad es <= 0.
+   */
+  onQuantityClamped(item: CartItem, event: QuantityClampEvent): void {
+    if (event.reason !== 'max') return;
+    showStockCapToast(this.toastService, item, event.limit);
   }
 
   /**

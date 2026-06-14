@@ -37,6 +37,7 @@ import {
   SearchResult,
 } from '../services/pos-product.service';
 import { PosScaleService } from '../services/pos-scale.service';
+import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';
 import { StockSourcingSuggestionResponse } from '../models/sourcing.model';
@@ -596,6 +597,7 @@ export class PosProductSelectionComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
+  private restaurantIntegration = inject(PosRestaurantIntegrationService);
 
   constructor() {
     this.checkAuthState();
@@ -608,6 +610,12 @@ export class PosProductSelectionComponent {
     effect(() => {
       if (this.refreshTrigger() > 0) {
         this.loadProducts();
+      }
+    });
+
+    effect(() => {
+      if (this.restaurantIntegration.isRestaurantMode()) {
+        this.filterProducts();
       }
     });
   }
@@ -724,6 +732,12 @@ export class PosProductSelectionComponent {
       state: 'active',
       pos_optimized: true,
       include_stock: true,
+      // El POS es un canal de venta: nunca muestra insumos puros ni productos
+      // marcados como no-vendibles. Filtro universal (no gateado por industria)
+      // para ser consistente con catálogo, mesas y menú, que ya aplican
+      // is_sellable=true en el backend. Seguro en retail: la columna es
+      // NOT NULL DEFAULT TRUE, así que solo oculta lo marcado a propósito.
+      is_sellable: true,
     };
 
     if (this.searchQuery()) {

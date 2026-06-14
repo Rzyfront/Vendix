@@ -1,4 +1,4 @@
-import {Component, inject, input, output, model, signal, viewChild, effect, ChangeDetectionStrategy, DestroyRef} from '@angular/core';
+import {Component, inject, input, output, model, signal, effect, ChangeDetectionStrategy, DestroyRef, computed} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -17,8 +17,7 @@ import { GlobalFacade } from '../../../core/store/global.facade';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
 import { DialogService, ToastService } from '../index';
-import { SettingToggleComponent } from '../setting-toggle/setting-toggle.component';
-import { InputsearchComponent } from '../inputsearch/inputsearch.component';
+import { PanelUiModulesEditorComponent } from '../panel-ui-modules-editor/panel-ui-modules-editor.component';
 import { ThemeService } from '../../../core/services/theme.service';
 import { APP_MODULES } from '../../constants/app-modules.constant';
 import { getModulesHiddenByIndustries } from '../../constants/industry-modules.constant';
@@ -31,8 +30,7 @@ import { getModulesHiddenByIndustries } from '../../constants/industry-modules.c
     ModalComponent,
     ButtonComponent,
     IconComponent,
-    SettingToggleComponent,
-    InputsearchComponent,
+    PanelUiModulesEditorComponent,
   ],
   template: `
     <app-modal
@@ -64,7 +62,7 @@ import { getModulesHiddenByIndustries } from '../../constants/industry-modules.c
                 @if (!isSingleStore) {
                   <div
                     class="app-type-card"
-                    [class.selected]="currentAppType === 'ORG_ADMIN'"
+                    [class.selected]="currentAppType() === 'ORG_ADMIN'"
                     (click)="selectAppType('ORG_ADMIN')"
                   >
                     <app-icon name="building" [size]="24"></app-icon>
@@ -72,14 +70,14 @@ import { getModulesHiddenByIndustries } from '../../constants/industry-modules.c
                       <h3>Organización</h3>
                       <p>Gestión multi-tienda</p>
                     </div>
-                    @if (currentAppType === 'ORG_ADMIN') {
+                    @if (currentAppType() === 'ORG_ADMIN') {
                       <div class="status-badge">Actual</div>
                     }
                   </div>
                 }
                 <div
                   class="app-type-card"
-                  [class.selected]="currentAppType === 'STORE_ADMIN'"
+                  [class.selected]="currentAppType() === 'STORE_ADMIN'"
                   (click)="selectAppType('STORE_ADMIN')"
                 >
                   <app-icon name="store" [size]="24"></app-icon>
@@ -87,7 +85,7 @@ import { getModulesHiddenByIndustries } from '../../constants/industry-modules.c
                     <h3>Tienda</h3>
                     <p>Operaciones locales</p>
                   </div>
-                  @if (currentAppType === 'STORE_ADMIN') {
+                  @if (currentAppType() === 'STORE_ADMIN') {
                     <div class="status-badge">Actual</div>
                   }
                 </div>
@@ -158,115 +156,27 @@ import { getModulesHiddenByIndustries } from '../../constants/industry-modules.c
             </div>
           </div>
           <hr class="border-gray-100 my-6" />
-          <!-- Modules Configuration - COMPACT GRID -->
+          <!-- Modules Configuration - delegates to the shared editor -->
           <div class="modules-section">
             <div class="flex items-center justify-between mb-4">
               <h4 class="section-header !mb-0">
                 <app-icon name="layout" [size]="20"></app-icon>
-                Módulos del Panel: {{ getAppTypeLabel(currentAppType) }}
+                Módulos del Panel: {{ getAppTypeLabel(currentAppType()) }}
               </h4>
               <span class="text-xs text-gray-400"
                 >Personaliza la visibilidad de tus herramientas</span
               >
             </div>
-            <app-inputsearch
-              placeholder="Buscar módulos..."
-              size="sm"
-              [debounceTime]="200"
-              (searchChange)="onModuleSearch($event)"
-              class="mb-4 block"
-            ></app-inputsearch>
-            <div formGroupName="panel_ui" class="relative">
-              <div [formGroupName]="currentAppType" class="flex flex-col gap-6">
-                <!-- SECTION A: Modules WITH Children (larger cards/areas) -->
-                <div class="compact-modules-grid">
-                  @for (module of filteredModulesWithChildren; track module) {
-                    <div
-                      class="module-group is-parent"
-                      [class.new-module]="isNewModule(module.key)"
-                    >
-                      <div class="toggle-wrapper">
-                        <app-setting-toggle
-                          [formControlName]="module.key"
-                          [label]="module.label"
-                          [description]="module.description"
-                          [isNew]="isNewModule(module.key)"
-                          (changed)="onParentToggle($event, module)"
-                        ></app-setting-toggle>
-                        @if (isPanelToggleGated(module.key)) {
-                          <div class="flex flex-wrap gap-1 mt-1 ml-2">
-                            @for (reason of getPanelToggleReasons(module.key); track reason) {
-                              <span class="panel-toggle-reason-badge">{{ reason }}</span>
-                            }
-                          </div>
-                        }
-                      </div>
-                      <div class="children-grid">
-                        @for (child of module.children; track child) {
-                          <div
-                            class="child-item"
-                            [class.new-module]="isNewModule(child.key)"
-                          >
-                            <app-setting-toggle
-                              [formControlName]="child.key"
-                              [label]="child.label"
-                              [isNew]="isNewModule(child.key)"
-                            ></app-setting-toggle>
-                            @if (isPanelToggleGated(child.key)) {
-                              <div class="flex flex-wrap gap-1 mt-1 ml-2">
-                                @for (reason of getPanelToggleReasons(child.key); track reason) {
-                                  <span class="panel-toggle-reason-badge">{{ reason }}</span>
-                                }
-                              </div>
-                            }
-                          </div>
-                        }
-                      </div>
-                    </div>
-                  }
-                </div>
-                <!-- SECTION B: STANDALONE Modules (grouped together) -->
-                <div class="standalone-container mt-2">
-                  <h5
-                    class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3"
-                  >
-                    Herramientas Directas
-                  </h5>
-                  <div class="compact-modules-grid">
-                    @for (module of filteredStandaloneModules; track module) {
-                      <div
-                        class="module-group"
-                        [class.new-module]="isNewModule(module.key)"
-                      >
-                        <app-setting-toggle
-                          [formControlName]="module.key"
-                          [label]="module.label"
-                          [description]="module.description"
-                          [isNew]="isNewModule(module.key)"
-                        ></app-setting-toggle>
-                        @if (isPanelToggleGated(module.key)) {
-                          <div class="flex flex-wrap gap-1 mt-1 ml-2">
-                            @for (reason of getPanelToggleReasons(module.key); track reason) {
-                              <span class="panel-toggle-reason-badge">{{ reason }}</span>
-                            }
-                          </div>
-                        }
-                      </div>
-                    }
-                  </div>
-                </div>
-                <!-- No results message -->
-                @if (
-                  moduleSearchTerm &&
-                  filteredModulesWithChildren.length === 0 &&
-                  filteredStandaloneModules.length === 0
-                ) {
-                  <p class="text-sm text-gray-400 text-center py-4">
-                    No se encontraron módulos para "{{ moduleSearchTerm }}"
-                  </p>
-                }
-              </div>
-            </div>
+            <app-panel-ui-modules-editor
+              [appType]="currentAppType()"
+              [value]="editorValue()"
+              [hiddenByIndustry]="hiddenByIndustry()"
+              [hiddenByStore]="hiddenByStore()"
+              [newKeys]="newKeysForActiveApp()"
+              [searchable]="true"
+              [parentSync]="true"
+              (valueChange)="onEditorValueChange($event)"
+            ></app-panel-ui-modules-editor>
             @if (hasModuleError()) {
               <div class="text-xs text-red-500 mt-4 flex items-center gap-1">
                 <app-icon name="alert-circle" [size]="14"></app-icon>
@@ -347,16 +257,18 @@ export class SettingsModalComponent {
   readonly loading = signal(false);
   readonly saving = signal(false);
   currentSettings: any = null;
-  currentAppType: string = 'ORG_ADMIN';
+  readonly currentAppType = signal<string>('ORG_ADMIN');
   canChangeAppType: boolean = false;
   isSingleStore = false;
   isOwner = false;
   readonly upgrading = signal(false);
   defaultPanelUi: Record<string, Record<string, boolean>> | null = null;
-  newModuleKeys = new Set<string>();
-  moduleSearchTerm = '';
-  filteredModulesWithChildren: any[] = [];
-  filteredStandaloneModules: any[] = [];
+  /** Per-key new-flag tracker, scoped by `appType::key`. */
+  readonly newModuleKeys = signal<Set<string>>(new Set());
+  /** Flat store of every form's panel_ui value the editor is currently
+   *  showing — kept in sync with the form so the editor sees the resolved
+   *  state on app_type switch and external updates. */
+  readonly panelUiValues = signal<Record<string, Record<string, boolean>>>({});
 
   constructor() {
     const orgAdminControls = this.createPanelUiControls('ORG_ADMIN');
@@ -374,25 +286,48 @@ export class SettingsModalComponent {
       }),
     });
 
-    // Reactive: re-apply the industry ∩ store_panel ceiling whenever the
-    // underlying sources change. The effect re-runs when `userIndustries()`
-    // or `storeSettings()` emit, so the toggles become disabled the moment
-    // the data is available — even if it arrives after the initial form
-    // patch (which is the common case: the form initializes with the
-    // initial empty array / null store settings, then the auth state loads).
-    effect(() => {
-      // Touch the signals so the effect tracks them.
-      this.authFacade.userIndustries();
-      this.authFacade.storeSettings();
-      if (this.settingsForm) {
-        this.syncGatedDisabledState('STORE_ADMIN');
-      }
-    });
-
     // Check permissions synchronously
     this.checkPermissions();
-    this.recomputeFilteredModules();
   }
+
+  /** `value` for the shared editor — derived from the active app_type's
+   *  current form state. Absent keys = allowed (true). */
+  readonly editorValue = computed<Record<string, boolean>>(() => {
+    const appType = this.currentAppType();
+    const v = this.panelUiValues()[appType] || {};
+    const result: Record<string, boolean> = {};
+    for (const k of Object.keys(v)) {
+      result[k] = v[k] !== false;
+    }
+    return result;
+  });
+
+  /** Industry ∩ store_panel ceiling — only applies to `STORE_ADMIN`
+   *  (industries are store-scoped; `ORG_ADMIN` is untouched, per the
+   *  `vendix-panel-ui` rules). Other app_types see no gating. */
+  readonly hiddenByIndustry = computed<string[]>(() => {
+    if (this.currentAppType() !== 'STORE_ADMIN') return [];
+    return getModulesHiddenByIndustries(this.authFacade.userIndustries());
+  });
+
+  readonly hiddenByStore = computed<string[]>(() => {
+    if (this.currentAppType() !== 'STORE_ADMIN') return [];
+    const storePanelMap: Record<string, boolean> | undefined =
+      this.authFacade.storeSettings()?.panel_ui?.STORE_ADMIN;
+    if (!storePanelMap) return [];
+    return Object.keys(storePanelMap).filter(
+      (k) => storePanelMap[k] === false,
+    );
+  });
+
+  /** `newKeys` for the shared editor — scoped to the active app_type. */
+  readonly newKeysForActiveApp = computed<string[]>(() => {
+    const appType = this.currentAppType();
+    const prefix = appType + '::';
+    return Array.from(this.newModuleKeys())
+      .filter((k) => k.startsWith(prefix))
+      .map((k) => k.slice(prefix.length));
+  });
 
   onOpen() {
     this.loadSettings();
@@ -411,11 +346,10 @@ export class SettingsModalComponent {
     this.isOwner = this.authFacade.isOwner();
 
     // Forzar STORE_ADMIN si es SINGLE_STORE
-    if (this.isSingleStore && this.currentAppType === 'ORG_ADMIN') {
-      this.currentAppType = 'STORE_ADMIN';
+    if (this.isSingleStore && this.currentAppType() === 'ORG_ADMIN') {
+      this.currentAppType.set('STORE_ADMIN');
       this.settingsForm.patchValue({ app: 'STORE_ADMIN' });
     }
-    this.recomputeFilteredModules();
   }
 
   onClose() {
@@ -434,77 +368,7 @@ export class SettingsModalComponent {
       this.authFacade.isOwner() || this.authFacade.isAdmin();
   }
 
-  // ===== Nested Module Methods =====
-
-  /**
-   * Check if a parent module is enabled (used to disable children when parent is off)
-   * @param parentKey - The key of the parent module
-   * @returns true if the parent module is enabled
-   */
-  isParentModuleEnabled(parentKey: string): boolean {
-    const control = this.settingsForm.get(
-      `panel_ui.${this.currentAppType}.${parentKey}`,
-    );
-    return control?.value ?? false;
-  }
-
-  /**
-   * Synchronize child module toggles with parent module state
-   *
-   * When a parent module is toggled, all its children should match the parent's state:
-   * - Parent enabled → all children become enabled
-   * - Parent disabled → all children become disabled
-   *
-   * @param isEnabled - The new state of the parent toggle
-   * @param parentModule - The parent module object containing children array
-   */
-  onParentToggle(isEnabled: boolean, parentModule: any): void {
-    // Guard: Only process if parent has children
-    if (!parentModule.children || !Array.isArray(parentModule.children)) {
-      return;
-    }
-
-    // Synchronize each child with the parent's state.
-    // `onlySelf: true` evita que cada control burbujee un recompute al FormGroup raíz
-    // (evitaba N² status/validity passes con muchos hijos → perceptible como lag).
-    parentModule.children.forEach((child: any) => {
-      const controlPath = `panel_ui.${this.currentAppType}.${child.key}`;
-      const childControl = this.settingsForm.get(controlPath);
-
-      if (childControl) {
-        childControl.setValue(isEnabled, { emitEvent: false, onlySelf: true });
-        if (isEnabled) {
-          childControl.enable({ emitEvent: false, onlySelf: true });
-        } else {
-          childControl.disable({ emitEvent: false, onlySelf: true });
-        }
-      }
-    });
-    // Un solo recompute del grupo al final en vez de uno por hijo.
-    this.settingsForm
-      .get(`panel_ui.${this.currentAppType}`)
-      ?.updateValueAndValidity({ emitEvent: false });
-  }
-
-  /**
-   * Get all modules for an app type (flattened for backward compatibility)
-   * @param appType - The app type to get modules for
-   * @returns Array of all modules including children
-   */
-  getAllModulesForAppType(appType: string): any[] {
-    const modules: any[] = [];
-    const appModules = APP_MODULES[appType as keyof typeof APP_MODULES] || [];
-
-    appModules.forEach((module: any) => {
-      modules.push(module);
-      // Add children if they exist
-      if (module.isParent && module.children) {
-        modules.push(...module.children);
-      }
-    });
-
-    return modules;
-  }
+  // ===== Form population helpers =====
 
   private createPanelUiControls(appType: string): Record<string, [boolean]> {
     const controls: Record<string, [boolean]> = {};
@@ -533,182 +397,71 @@ export class SettingsModalComponent {
     return patch;
   }
 
-  private syncChildControlStates(appType: string, patch: Record<string, boolean>): void {
-    APP_MODULES[appType as keyof typeof APP_MODULES]?.forEach((module: any) => {
-      if (!module.isParent || !module.children) return;
+  private getAllModulesForAppType(appType: string): any[] {
+    const modules: any[] = [];
+    const appModules = APP_MODULES[appType as keyof typeof APP_MODULES] || [];
 
-      const parentEnabled = patch[module.key] === true;
-      module.children.forEach((child: any) => {
-        const childControl = this.settingsForm.get(
-          `panel_ui.${appType}.${child.key}`,
-        );
-        if (!childControl) return;
-        if (parentEnabled) {
-          childControl.enable({ emitEvent: false });
-        } else {
-          childControl.disable({ emitEvent: false });
-        }
-      });
-    });
-  }
-
-  /**
-   * Industry ∩ store_panel ceiling — only applies to `STORE_ADMIN` (industries
-   * are store-scoped; `ORG_ADMIN` is untouched). The `setting-toggle` CVA
-   * receives the disabled state via the form control's `disable()` call, so
-   * the visual disabled state in this component is fully driven by these
-   * helper methods + the existing `syncChildControlStates()`.
-   */
-  private isStorePanelHidden(moduleKey: string): boolean {
-    if (this.currentAppType !== 'STORE_ADMIN') return false;
-    const storePanelMap: Record<string, boolean> | undefined =
-      this.authFacade.storeSettings()?.panel_ui?.STORE_ADMIN;
-    return storePanelMap?.[moduleKey] === false;
-  }
-
-  private isIndustryHidden(moduleKey: string): boolean {
-    if (this.currentAppType !== 'STORE_ADMIN') return false;
-    const hidden = getModulesHiddenByIndustries(
-      this.authFacade.userIndustries(),
-    );
-    return hidden.includes(moduleKey);
-  }
-
-  /**
-   * Public helper used by the template to render a disabled toggle when the
-   * module is industry-hidden and/or store-panel-hidden. Both flags are
-   * checked only for the `STORE_ADMIN` app_type; `ORG_ADMIN` is never gated
-   * (industries are store-scoped, per the `vendix-panel-ui` rules).
-   */
-  isPanelToggleGated(moduleKey: string): boolean {
-    return this.isIndustryHidden(moduleKey) || this.isStorePanelHidden(moduleKey);
-  }
-
-  /**
-   * Returns the ordered list of reason labels to render next to a gated
-   * toggle. The order is stable: `Industria` (industry ceiling) first,
-   * then `Tienda` (store panel UI). Empty list when not gated.
-   */
-  getPanelToggleReasons(moduleKey: string): string[] {
-    const reasons: string[] = [];
-    if (this.isIndustryHidden(moduleKey)) reasons.push('Industria');
-    if (this.isStorePanelHidden(moduleKey)) reasons.push('Tienda');
-    return reasons;
-  }
-
-  /**
-   * Disable every form control in the panel_ui group that is industry-hidden
-   * or store-panel-hidden. Gated controls are NOT modified when a parent
-   * is toggled — they stay disabled and are excluded from the save diff so
-   * the persisted user value is preserved untouched.
-   */
-  private syncGatedDisabledState(appType: string): void {
-    if (appType !== 'STORE_ADMIN') return;
-    const panelGroup = this.settingsForm.get(`panel_ui.${appType}`);
-    if (!panelGroup) return;
-
-    this.getAllModulesForAppType(appType).forEach((module: any) => {
-      const ctrl = panelGroup.get(module.key);
-      if (!ctrl) return;
-      if (this.isPanelToggleGated(module.key)) {
-        ctrl.disable({ emitEvent: false });
-      } else {
-        ctrl.enable({ emitEvent: false });
+    appModules.forEach((module: any) => {
+      modules.push(module);
+      if (module.isParent && module.children) {
+        modules.push(...module.children);
       }
     });
+
+    return modules;
   }
 
-  /**
-   * Get parent modules (modules with isParent flag) plus standalone modules
-   * @param appType - The app type to get modules for
-   * @returns Array of parent and standalone modules
-   */
-  getParentModules(appType: string): any[] {
-    return APP_MODULES[appType as keyof typeof APP_MODULES] || [];
+  // ===== App Type & Theme selection =====
+
+  getAppTypeLabel(appType: string): string {
+    const labels: Record<string, string> = {
+      ORG_ADMIN: 'Organización',
+      STORE_ADMIN: 'Tienda',
+    };
+    return labels[appType] || appType;
   }
 
-  /**
-   * Get modules that have children
-   * @param appType - The app type to get modules for
-   * @returns Array of modules with children
-   */
-  getModulesWithChildren(appType: string): any[] {
-    return this.getParentModules(appType).filter(
-      (m) => m.isParent && m.children && m.children.length > 0,
-    );
+  selectAppType(appType: string) {
+    if (!this.canChangeAppType) return;
+    this.currentAppType.set(appType);
+    this.settingsForm.patchValue({ app: appType });
   }
 
-  /**
-   * Get standalone modules (no children)
-   * @param appType - The app type to get modules for
-   * @returns Array of modules without children
-   */
-  getStandaloneModules(appType: string): any[] {
-    return this.getParentModules(appType).filter(
-      (m) => !m.isParent || !m.children || m.children.length === 0,
-    );
+  selectTheme(theme: string) {
+    this.settingsForm.patchValue({
+      preferences: { theme },
+    });
+    // Apply immediate preview
+    this.themeService.applyUserTheme(theme);
   }
 
-  onModuleSearch(term: string): void {
-    this.moduleSearchTerm = term;
-    this.recomputeFilteredModules();
+  // ===== Editor integration =====
+
+  /** Patch the form's `panel_ui.{appType}` group with the editor's emitted
+   *  map. Gated keys are not in the emission (the editor filters them
+   *  out), so their stored value is preserved untouched. The local
+   *  `panelUiValues` mirror is kept in sync so the editor sees the
+   *  resolved state on app_type switch. */
+  onEditorValueChange(next: Record<string, boolean>): void {
+    const appType = this.currentAppType();
+    const group = this.settingsForm.get(`panel_ui.${appType}`);
+    if (!group) return;
+    group.patchValue(next, { emitEvent: false });
+    group.markAsTouched();
+    this.panelUiValues.update((prev) => ({
+      ...prev,
+      [appType]: { ...(prev[appType] || {}), ...next },
+    }));
   }
 
-  private recomputeFilteredModules(): void {
-    const appType = this.currentAppType;
-    const term = this.moduleSearchTerm.toLowerCase().trim();
+  // ===== New module badge =====
 
-    const parentModules = this.getParentModules(appType).filter(
-      (m) => m.isParent && m.children && m.children.length > 0,
-    );
-
-    if (!term) {
-      this.filteredModulesWithChildren = parentModules;
-    } else {
-      this.filteredModulesWithChildren = parentModules
-        .map((module) => {
-          const parentMatches =
-            module.label.toLowerCase().includes(term) ||
-            (module.description &&
-              module.description.toLowerCase().includes(term));
-          const matchingChildren = module.children.filter(
-            (child: any) =>
-              child.label.toLowerCase().includes(term) ||
-              (child.description &&
-                child.description.toLowerCase().includes(term)),
-          );
-          if (parentMatches) return module;
-          if (matchingChildren.length > 0) {
-            return { ...module, children: matchingChildren };
-          }
-          return null;
-        })
-        .filter(Boolean);
-    }
-
-    const standalone = this.getParentModules(appType).filter(
-      (m) => !m.isParent || !m.children || m.children.length === 0,
-    );
-
-    if (!term) {
-      this.filteredStandaloneModules = standalone;
-    } else {
-      this.filteredStandaloneModules = standalone.filter(
-        (m) =>
-          m.label.toLowerCase().includes(term) ||
-          (m.description && m.description.toLowerCase().includes(term)),
-      );
-    }
-  }
-
-  /**
-   * Compute which module keys are new (exist in defaults but not in user config)
-   * Keys are stored as "appType::key" to avoid cross-app-type contamination
-   */
   private computeNewModuleKeys(config: any): void {
-    this.newModuleKeys.clear();
-    if (!this.defaultPanelUi) return;
-
+    const set = new Set<string>();
+    if (!this.defaultPanelUi) {
+      this.newModuleKeys.set(set);
+      return;
+    }
     // Only check editable app types (not STORE_ECOMMERCE or VENDIX_LANDING)
     const editableAppTypes = ['ORG_ADMIN', 'STORE_ADMIN'];
     for (const appType of editableAppTypes) {
@@ -716,45 +469,23 @@ export class SettingsModalComponent {
       const defaultKeys = this.defaultPanelUi[appType] || {};
       for (const key of Object.keys(defaultKeys)) {
         if (!userKeys.hasOwnProperty(key)) {
-          this.newModuleKeys.add(appType + '::' + key);
+          set.add(appType + '::' + key);
         }
       }
     }
+    this.newModuleKeys.set(set);
   }
 
-  isNewModule(key: string): boolean {
-    return this.newModuleKeys.has(this.currentAppType + '::' + key);
-  }
+  // ===== Save / Validation =====
 
-  loadSettings() {
-    this.loading.set(true);
-    this.authService
-      .getSettings()
-      .pipe(finalize(() => this.loading.set(false)))
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-        next: (response) => {
-          const settings = response.data || response;
-          this.currentSettings = settings;
-          this.currentAppType = settings.app_type || 'ORG_ADMIN';
-
-          // Extract and dispatch default_panel_ui for new module detection
-          if (settings.default_panel_ui) {
-            this.defaultPanelUi = settings.default_panel_ui;
-            this.authFacade.setDefaultPanelUi(settings.default_panel_ui);
-            this.computeNewModuleKeys(settings.config || {});
-          }
-
-          this.initializeForm(settings.config || {});
-          this.recomputeFilteredModules();
-        },
-        error: (err) => {
-          console.error('Error loading settings', err);
-          // Initialize with defaults even on error
-          this.currentAppType = 'ORG_ADMIN';
-          this.initializeForm({});
-          this.recomputeFilteredModules();
-        },
-      });
+  hasModuleError(): boolean {
+    const panelUiGroup = this.settingsForm.get(
+      'panel_ui.' + this.currentAppType(),
+    );
+    if (!panelUiGroup) return false;
+    const values = Object.values(panelUiGroup.value);
+    const hasEnabled = values.some((v: any) => v === true);
+    return !hasEnabled && panelUiGroup.touched;
   }
 
   /**
@@ -779,8 +510,19 @@ export class SettingsModalComponent {
     }
 
     const diff: Record<string, boolean> = {};
+    const hiddenI = getModulesHiddenByIndustries(
+      this.authFacade.userIndustries(),
+    );
+    const storePanelMap: Record<string, boolean> | undefined =
+      this.authFacade.storeSettings()?.panel_ui?.STORE_ADMIN;
+    const isStorePanelHidden = (k: string) =>
+      storePanelMap?.[k] === false;
+    const isIndustryHidden = (k: string) => hiddenI.includes(k);
+    const isGated = (k: string) =>
+      isIndustryHidden(k) || isStorePanelHidden(k);
+
     for (const module of this.getAllModulesForAppType(appType)) {
-      if (this.isPanelToggleGated(module.key)) {
+      if (isGated(module.key)) {
         if (Object.prototype.hasOwnProperty.call(storedValues, module.key)) {
           diff[module.key] = storedValues[module.key];
         }
@@ -792,10 +534,41 @@ export class SettingsModalComponent {
     return diff;
   }
 
+  // ===== Load + save flow =====
+
+  loadSettings() {
+    this.loading.set(true);
+    this.authService
+      .getSettings()
+      .pipe(finalize(() => this.loading.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: (response) => {
+          const settings = response.data || response;
+          this.currentSettings = settings;
+          this.currentAppType.set(settings.app_type || 'ORG_ADMIN');
+
+          // Extract and dispatch default_panel_ui for new module detection
+          if (settings.default_panel_ui) {
+            this.defaultPanelUi = settings.default_panel_ui;
+            this.authFacade.setDefaultPanelUi(settings.default_panel_ui);
+            this.computeNewModuleKeys(settings.config || {});
+          }
+
+          this.initializeForm(settings.config || {});
+        },
+        error: (err) => {
+          console.error('Error loading settings', err);
+          // Initialize with defaults even on error
+          this.currentAppType.set('ORG_ADMIN');
+          this.initializeForm({});
+        },
+      });
+  }
+
   initializeForm(config: any) {
     // Build patch object efficiently
     const patchObj: any = {
-      app: this.currentAppType,
+      app: this.currentAppType(),
       panel_ui: {
         ORG_ADMIN: {},
         STORE_ADMIN: {},
@@ -806,8 +579,10 @@ export class SettingsModalComponent {
       },
     };
 
-    patchObj.panel_ui.ORG_ADMIN = this.buildPanelUiPatch('ORG_ADMIN', config);
-    patchObj.panel_ui.STORE_ADMIN = this.buildPanelUiPatch('STORE_ADMIN', config);
+    const orgAdminPatch = this.buildPanelUiPatch('ORG_ADMIN', config);
+    const storeAdminPatch = this.buildPanelUiPatch('STORE_ADMIN', config);
+    patchObj.panel_ui.ORG_ADMIN = orgAdminPatch;
+    patchObj.panel_ui.STORE_ADMIN = storeAdminPatch;
 
     // Update preferences
     const prefs = config.preferences || { language: 'es', theme: 'default' };
@@ -817,53 +592,11 @@ export class SettingsModalComponent {
     // Apply all patches at once
     this.settingsForm.patchValue(patchObj);
 
-    // Sync disabled state of child controls based on each parent's value
-    this.syncChildControlStates('ORG_ADMIN', patchObj.panel_ui.ORG_ADMIN);
-    this.syncChildControlStates('STORE_ADMIN', patchObj.panel_ui.STORE_ADMIN);
-
-    // Apply the industry ∩ store_panel ceiling on the STORE_ADMIN map.
-    // Gated controls are disabled and will be excluded from the save diff.
-    this.syncGatedDisabledState('STORE_ADMIN');
-  }
-
-  getModulesForAppType(appType: string): any[] {
-    return APP_MODULES[appType as keyof typeof APP_MODULES] || [];
-  }
-
-  getAppTypeLabel(appType: string): string {
-    const labels: Record<string, string> = {
-      ORG_ADMIN: 'Organización',
-      STORE_ADMIN: 'Tienda',
-    };
-    return labels[appType] || appType;
-  }
-
-  selectAppType(appType: string) {
-    if (!this.canChangeAppType) return;
-
-    this.moduleSearchTerm = '';
-    this.currentAppType = appType;
-    this.settingsForm.patchValue({ app: appType });
-    this.recomputeFilteredModules();
-  }
-
-  selectTheme(theme: string) {
-    this.settingsForm.patchValue({
-      preferences: { theme },
+    // Mirror the resolved state so the editor sees the same values.
+    this.panelUiValues.set({
+      ORG_ADMIN: { ...orgAdminPatch },
+      STORE_ADMIN: { ...storeAdminPatch },
     });
-    // Apply immediate preview
-    this.themeService.applyUserTheme(theme);
-  }
-
-  hasModuleError(): boolean {
-    const panelUiGroup = this.settingsForm.get(
-      'panel_ui.' + this.currentAppType,
-    );
-    if (!panelUiGroup) return false;
-
-    const values = Object.values(panelUiGroup.value);
-    const hasEnabled = values.some((v: any) => v === true);
-    return !hasEnabled && panelUiGroup.touched;
   }
 
   onSubmit() {
@@ -872,27 +605,22 @@ export class SettingsModalComponent {
     this.saving.set(true);
     const formValue = this.settingsForm.getRawValue();
 
-    // 🔥 CRÍTICO: Preservar datos existentes con deep merge
+    // Preservar datos existentes con deep merge
     this.authService.getSettings().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const currentConfig = response.data?.config || response.config || {};
 
-        // 🔧 FIX: NO modificar el campo 'app' - solo actualizar panel_ui del app type actual
-        // El usuario puede estar viendo/editando un app type diferente al que tiene seleccionado
+        // NO modificar el campo 'app' - solo actualizar panel_ui del app type actual.
         const configObj = {
-          // Preservar TODOS los campos existentes, incluyendo 'app'
           ...currentConfig,
-
-          // 🔥 NO actualizar 'app' - mantener el valor actual del usuario
-          // app: formValue.app,  // ❌ ESTO CAUSA EL BUG - elimina esta línea
 
           // Merge panel_ui: preservar app types no editados y actualizar solo el actual.
           // For STORE_ADMIN, the diff excludes modules gated by industry or the
           // store panel UI (their stored user value is preserved untouched).
           panel_ui: {
             ...currentConfig.panel_ui, // Preservar todos los app types existentes
-            [this.currentAppType]: this.buildPanelUiDiff(
-              this.currentAppType,
+            [this.currentAppType()]: this.buildPanelUiDiff(
+              this.currentAppType(),
               formValue,
               currentConfig,
             ),
@@ -900,7 +628,7 @@ export class SettingsModalComponent {
 
           // Merge preferences: preservar preferencias existentes
           preferences: {
-            ...currentConfig.preferences, // Preservar otras preferencias
+            ...currentConfig.preferences,
             language: formValue.preferences.language,
             theme: formValue.preferences.theme,
           },
@@ -909,7 +637,6 @@ export class SettingsModalComponent {
         const dto = { config: configObj };
 
         // Use AuthFacade to update settings through NgRx
-        // This ensures the store is updated and sidebar reacts immediately
         this.authFacade.updateUserSettings(dto);
         this.saving.set(false);
 
@@ -938,7 +665,7 @@ export class SettingsModalComponent {
             <ul style="list-style-type: disc; list-style-position: inside; font-size: var(--fs-sm); color: var(--color-text-secondary); display: flex; flex-direction: column; gap: 0.5rem;">
               <li>Administrar múltiples tiendas desde un solo lugar</li>
               <li>Gestionar usuarios y permisos centralizados</li>
-              <li>Ver reportes consolidados de todas tus tiendas</li>
+              <li>Ver reportes consolidados de todas tus sucursales</li>
             </ul>
           </div>
 

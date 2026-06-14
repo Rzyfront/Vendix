@@ -29,7 +29,9 @@ export interface UpdateStockParams {
     | 'return'
     | 'damage'
     | 'expiration'
-    | 'initial';
+    | 'initial'
+    | 'production'
+    | 'consumption';
   reason?: string;
   user_id?: number;
   order_item_id?: number;
@@ -1024,6 +1026,13 @@ export class StockLevelManager {
       damage: 'adjustment_damage',
       expiration: 'adjustment_damage',
       initial: 'initial',
+      // Restaurant suite Fase C: the new movement types reuse the
+      // existing transaction types — 'consumption' is a stock-out
+      // (audit side) while 'production' is a stock-in. The actual
+      // inventory side-effect is decided by the SIGN of quantity_change
+      // inside `calculateAndConsumeMovementCost`.
+      production: 'stock_in',
+      consumption: 'stock_in',
     };
     return map[movementType] || 'stock_in';
   }
