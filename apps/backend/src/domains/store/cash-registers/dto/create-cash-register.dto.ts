@@ -29,4 +29,14 @@ export class CreateCashRegisterDto {
   @IsNumber()
   @Type(() => Number)
   default_opening_amount?: number;
+
+  /**
+   * Optional warehouse override. When set, this register will discount
+   * stock from this location instead of the store's default_location_id.
+   * When null, the POS flow falls back to stores.default_location_id.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  location_id?: number | null;
 }

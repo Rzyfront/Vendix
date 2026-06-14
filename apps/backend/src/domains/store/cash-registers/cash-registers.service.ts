@@ -4,6 +4,8 @@ import {
   ConflictException,
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreateCashRegisterDto } from './dto/create-cash-register.dto';
 import { UpdateCashRegisterDto } from './dto/update-cash-register.dto';
 
@@ -11,10 +13,40 @@ import { UpdateCashRegisterDto } from './dto/update-cash-register.dto';
 export class CashRegistersService {
   constructor(private readonly prisma: StorePrismaService) {}
 
+  private get storeId(): number {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    return store_id;
+  }
+
+  /**
+   * Defense-in-depth: ensure the warehouse override belongs to the current
+   * store. The FK to inventory_locations does not guarantee store isolation
+   * (a malicious or buggy payload could reference another store's warehouse).
+   */
+  private async assertLocationBelongsToStore(
+    location_id: number,
+  ): Promise<void> {
+    const location = await this.prisma.inventory_locations.findFirst({
+      where: { id: location_id, store_id: this.storeId },
+      select: { id: true },
+    });
+    if (!location) {
+      throw new VendixHttpException(
+        ErrorCodes.INV_LOC_001,
+        'Bodega no encontrada para esta tienda',
+      );
+    }
+  }
+
   async findAll() {
     return this.prisma.cash_registers.findMany({
       where: { is_active: true },
       include: {
+        location: { select: { id: true, name: true, is_default: true } },
         sessions: {
           where: { status: 'open' },
           include: {
@@ -33,6 +65,7 @@ export class CashRegistersService {
     const register = await this.prisma.cash_registers.findFirst({
       where: { id },
       include: {
+        location: { select: { id: true, name: true, is_default: true } },
         sessions: {
           where: { status: 'open' },
           include: {
@@ -63,6 +96,11 @@ export class CashRegistersService {
       );
     }
 
+    // Validate warehouse override belongs to this store (multi-tenant guard)
+    if (dto.location_id != null) {
+      await this.assertLocationBelongsToStore(dto.location_id);
+    }
+
     return this.prisma.cash_registers.create({
       data: {
         name: dto.name,
@@ -70,6 +108,7 @@ export class CashRegistersService {
         description: dto.description,
         is_active: dto.is_active ?? true,
         default_opening_amount: dto.default_opening_amount,
+        location_id: dto.location_id ?? null,
       },
     });
   }
@@ -86,6 +125,11 @@ export class CashRegistersService {
           `Ya existe una caja registradora con el código "${dto.code}"`,
         );
       }
+    }
+
+    // Validate warehouse override belongs to this store (multi-tenant guard)
+    if (dto.location_id != null) {
+      await this.assertLocationBelongsToStore(dto.location_id);
     }
 
     const updated = await this.prisma.cash_registers.updateMany({
