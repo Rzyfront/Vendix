@@ -453,7 +453,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     <View style={styles.variantHeader}>
                       <Text style={styles.variantTitle}>Variante {index + 1}</Text>
                       <Pressable onPress={() => removeVariant(variant.localId)} hitSlop={8}>
-                        <Icon name="trash" size={16} color={colors.error} />
+                        <Icon name="trash-2" size={16} color={colors.error} />
                       </Pressable>
                     </View>
                     {errors[`variant-${index}`] && <Text style={styles.errorText}>{errors[`variant-${index}`]}</Text>}
