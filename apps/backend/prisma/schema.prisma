@@ -10,7 +10,7 @@ datasource db {
 model users {
   id                         Int                          @id @default(autoincrement())
   username                   String                       @unique @db.VarChar(50)
-  email                      String                       @db.VarChar(255)
+  email                      String?                      @db.VarChar(255)
   password                   String
   state                      user_state_enum              @default(pending_verification)
   last_login                 DateTime?                    @db.Timestamp(6)

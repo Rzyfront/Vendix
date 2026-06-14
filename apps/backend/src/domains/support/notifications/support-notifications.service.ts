@@ -46,6 +46,9 @@ export class SupportNotificationsService {
       }
 
       const creatorEmail = ticket.created_by.email;
+      if (!creatorEmail) {
+        return;
+      }
       const creatorName =
         `${ticket.created_by.first_name} ${ticket.created_by.last_name}`.trim();
 
@@ -132,6 +135,9 @@ export class SupportNotificationsService {
       }
 
       const assigneeEmail = ticket.assigned_to.email;
+      if (!assigneeEmail) {
+        return;
+      }
       const assigneeName =
         `${ticket.assigned_to.first_name} ${ticket.assigned_to.last_name}`.trim();
 
@@ -199,7 +205,7 @@ export class SupportNotificationsService {
         select: { email: true, first_name: true, last_name: true },
       });
 
-      if (creator) {
+      if (creator && creator.email) {
         const creatorName = `${creator.first_name} ${creator.last_name}`.trim();
         const emailHtml = this.generateStatusChangedEmail({
           ticketNumber: data.ticket_number,
@@ -263,6 +269,9 @@ export class SupportNotificationsService {
       }
 
       const creatorEmail = ticket.created_by.email;
+      if (!creatorEmail) {
+        return;
+      }
       const creatorName =
         `${ticket.created_by.first_name} ${ticket.created_by.last_name}`.trim();
 
@@ -329,6 +338,9 @@ export class SupportNotificationsService {
       });
 
       for (const admin of admins) {
+        if (!admin.email) {
+          continue;
+        }
         const emailHtml = this.generateUrgentTicketEmail({
           ticketNumber: data.ticket_number,
           title: data.title,

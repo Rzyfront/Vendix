@@ -46,26 +46,33 @@ export class CustomersService {
 
   /**
    * Resuelve el email que se persistirá en `users.email` al crear/actualizar
-   * un cliente. Si el cliente no proporcionó un correo, devuelve un
-   * placeholder interno único (formato `noemail+store-{id}-{nanoid}@vendix.internal`)
-   * que no representa un canal de comunicación real.
+   * un cliente. El correo es OPCIONAL: si el cliente no proporcionó uno,
+   * devuelve `null` (no se generan placeholders ni correos falsos). El comercio
+   * puede crear clientes sin email; la identificación se hace por documento,
+   * teléfono o nombre.
    */
   private resolveCustomerEmail(
     email: string | null | undefined,
-    storeId: number,
-  ): string {
+  ): string | null {
     const trimmed = (email ?? '').trim().toLowerCase();
-    if (trimmed) return trimmed;
-
-    // randomUUID está disponible en Node 16+ vía crypto; evitamos una dep extra.
-    const { randomUUID } = require('crypto') as typeof import('crypto');
-    return `noemail+store-${storeId}-${randomUUID()}@vendix.internal`;
+    return trimmed ? trimmed : null;
   }
 
-  private async generateUniqueUsername(email: string): Promise<string> {
-    let baseUsername = email.split('@')[0];
+  /**
+   * Genera un username único. Cuando hay email, deriva el base del local-part;
+   * si no hay email, usa un seed alternativo (documento o nombre) y, en última
+   * instancia, `cliente`. El contador del while garantiza unicidad real contra
+   * la tabla `users`.
+   */
+  private async generateUniqueUsername(
+    seed: string | null,
+  ): Promise<string> {
+    const rawBase = seed ? seed.split('@')[0] : '';
     // Eliminar caracteres especiales
-    baseUsername = baseUsername.replace(/[^a-zA-Z0-9]/g, '');
+    let baseUsername = rawBase.replace(/[^a-zA-Z0-9]/g, '');
+    if (!baseUsername) {
+      baseUsername = 'cliente';
+    }
 
     let username = baseUsername;
     let counter = 1;
@@ -215,7 +222,12 @@ export class CustomersService {
         },
       });
 
-      let user: { id: number; first_name: string; last_name: string | null; email: string };
+      let user: {
+        id: number;
+        first_name: string;
+        last_name: string | null;
+        email: string | null;
+      };
       try {
         const username = await this.generateUniqueUsername(normalizedEmail);
         user = await this.prisma.users.create({
@@ -310,22 +322,24 @@ export class CustomersService {
       throw new VendixHttpException(ErrorCodes.STORE_FIND_001);
     }
 
-    // Email efectivo para plataforma. Si el cliente no proporcionó uno,
-    // generamos un placeholder interno único (no es un canal de comunicación
-    // real, solo satisface la unicidad de users.email y permite crear el
-    // usuario de plataforma sin obligar al comercio a capturar un correo).
-    const effectiveEmail = this.resolveCustomerEmail(dto.email, storeId);
+    // Email efectivo para plataforma. El correo es OPCIONAL: si el cliente no
+    // proporcionó uno, queda `null` (no se generan placeholders ni correos
+    // falsos). La identificación se hace por documento, teléfono o nombre.
+    const effectiveEmail = this.resolveCustomerEmail(dto.email);
 
-    // Check if user exists in the organization
-    const existingUser = await this.prisma.users.findFirst({
-      where: {
-        email: effectiveEmail,
-        organization_id: store.organization_id,
-      },
-    });
+    // Solo verificamos duplicidad por email cuando realmente hay un email.
+    // Sin email no aplica el chequeo de unicidad de correo.
+    if (effectiveEmail) {
+      const existingUser = await this.prisma.users.findFirst({
+        where: {
+          email: effectiveEmail,
+          organization_id: store.organization_id,
+        },
+      });
 
-    if (existingUser) {
-      throw new VendixHttpException(ErrorCodes.SYS_CONFLICT_001);
+      if (existingUser) {
+        throw new VendixHttpException(ErrorCodes.SYS_CONFLICT_001);
+      }
     }
 
     // Normalize document pair before any DB lookup so uniqueness, storage
@@ -361,7 +375,11 @@ export class CustomersService {
 
     const password = this.generateTemporaryPassword();
     const hashedPassword = await bcrypt.hash(password, 12);
-    const username = await this.generateUniqueUsername(effectiveEmail);
+    // Semilla para el username: email si existe, si no documento, si no nombre.
+    // El contador del while garantiza unicidad real contra la tabla `users`.
+    const usernameSeed =
+      effectiveEmail ?? normalizedDoc.number ?? dto.first_name ?? null;
+    const username = await this.generateUniqueUsername(usernameSeed);
 
     // Convertir nombres a Title Case
     const formatted_first_name = toTitleCase(dto.first_name || '');
@@ -581,7 +599,12 @@ export class CustomersService {
           dto.is_withholding_agent !== undefined
             ? dto.is_withholding_agent
             : undefined,
-        email: dto.email, // Can we update email? Usually requires verification, but for CRUD basic...
+        // Email opcional: si viene en el payload lo normalizamos (null cuando
+        // queda vacío, sin placeholders). Si no viene (undefined) no se toca.
+        email:
+          dto.email !== undefined
+            ? dto.email?.trim().toLowerCase() || null
+            : undefined,
       },
     });
   }
