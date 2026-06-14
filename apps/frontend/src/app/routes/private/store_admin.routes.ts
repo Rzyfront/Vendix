@@ -3,6 +3,7 @@ import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
 import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard';
+import { panelUiRouteGuard } from '../../core/guards/panel-ui-route.guard';
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
 import { couponReducer } from '../../private/modules/store/marketing/coupons/state/reducers/coupon.reducer';
@@ -28,6 +29,8 @@ export const storeAdminRoutes: Routes = [
       },
       {
         path: 'dashboard',
+        canActivate: [panelUiRouteGuard],
+        data: { panelUiKey: 'dashboard' },
         loadComponent: () =>
           import('../../private/modules/store/dashboard/dashboard.component').then(
             (c) => c.DashboardComponent,

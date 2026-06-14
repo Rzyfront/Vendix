@@ -595,6 +595,14 @@ export class UsersService {
       }
 
       return this.findConfiguration(id);
+    }).then((result) => {
+      // The 5-min `templateCache` in `DefaultPanelUIService` caches the
+      // merged fallback template, not per-user `panel_ui`. However,
+      // invalidating after an admin writes a user config is cheap and
+      // protects against future changes that start reading from the
+      // cached template (e.g. environment-switch service, getSettings).
+      this.defaultPanelUIService.invalidateCache();
+      return result;
     });
   }
 
