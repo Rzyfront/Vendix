@@ -1,10 +1,12 @@
 import { Injectable, Inject, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { PayrollCalculationService } from '../calculation/payroll-calculation.service';
 import { PayrollRulesService } from '../calculation/payroll-rules.service';
+import { NoveltiesService } from '../novelties/novelties.service';
 import {
   PAYROLL_PROVIDER,
   PayrollProviderAdapter,
@@ -31,6 +33,9 @@ const VALID_TRANSITIONS: Record<PayrollStatus, PayrollStatus[]> = {
   paid: [],
   cancelled: [],
 };
+
+/** Concepto de retefuente laboral sembrado por withholding-tax.seed.ts */
+const LABOR_WITHHOLDING_CONCEPT_CODE = 'RTE_SALARIOS';
 
 const PAYROLL_RUN_INCLUDE = {
   store: {
@@ -77,6 +82,7 @@ export class PayrollFlowService {
     @Inject(PAYROLL_PROVIDER)
     private readonly payroll_provider: PayrollProviderAdapter,
     private readonly dian_payroll_provider: DianPayrollProvider,
+    private readonly novelties_service?: NoveltiesService,
   ) {}
 
   private getContext() {
@@ -192,6 +198,138 @@ export class PayrollFlowService {
       approved_by: user_id ?? run.approved_by_user_id,
       cost_center_breakdown: this.buildCostCenterBreakdown(run),
     });
+  }
+
+  /**
+   * Persists one withholding_calculations row (role='practiced',
+   * withholding_type='retefuente') per payroll item with retention > 0, so the
+   * labor retefuente reaches the withholding declaration (form 350) and the
+   * exogenous formats.
+   *
+   * IDEMPOTENCY GUARANTEE: this method only runs when the run's dian_status
+   * flips to 'accepted' for the first time (previous_dian_status !==
+   * 'accepted'). Every emit point (send / sendToDian / getDianStatus) sets
+   * dian_status='accepted' on success, so any later re-emission for the same
+   * run (e.g. a getDianStatus poll after a successful send, or a repeated
+   * sendToDian from 'paid') sees previous_dian_status === 'accepted' and
+   * skips — no duplicate calculations are ever created.
+   *
+   * Failures are logged and swallowed: the DIAN acceptance already happened
+   * and must never be rolled back because of a fiscal bookkeeping error.
+   */
+  private async persistAcceptedRunWithholdings(
+    run: any,
+    previous_dian_status: string | null | undefined,
+  ): Promise<void> {
+    if (previous_dian_status === 'accepted') return;
+
+    try {
+      const items = (run.payroll_items || []).filter(
+        (item: any) => Number(item.deductions?.retention || 0) > 0,
+      );
+      if (items.length === 0) return;
+
+      const year = new Date(run.period_start).getFullYear();
+
+      // Labor concept: prefer the entity-specific concept, fall back to the
+      // organization-level default (accounting_entity_id=null, seeded).
+      const concept =
+        (await this.prisma.withholding_concepts.findFirst({
+          where: {
+            organization_id: run.organization_id,
+            accounting_entity_id: run.accounting_entity_id,
+            code: LABOR_WITHHOLDING_CONCEPT_CODE,
+            is_active: true,
+          },
+        })) ??
+        (await this.prisma.withholding_concepts.findFirst({
+          where: {
+            organization_id: run.organization_id,
+            accounting_entity_id: null,
+            code: LABOR_WITHHOLDING_CONCEPT_CODE,
+            is_active: true,
+          },
+        }));
+
+      if (!concept) {
+        throw new VendixHttpException(
+          ErrorCodes.WHT_CONCEPT_NOT_FOUND,
+          `Labor withholding concept '${LABOR_WITHHOLDING_CONCEPT_CODE}' not found for organization #${run.organization_id}. ` +
+            'Run the withholding-tax seed to create it.',
+        );
+      }
+
+      // UVT for the period year: PayrollRules carry no UVT, so resolve from
+      // uvt_values (entity-specific first, org-level default fallback).
+      const uvt =
+        (await this.prisma.uvt_values.findFirst({
+          where: {
+            organization_id: run.organization_id,
+            accounting_entity_id: run.accounting_entity_id,
+            year,
+          },
+        })) ??
+        (await this.prisma.uvt_values.findFirst({
+          where: {
+            organization_id: run.organization_id,
+            accounting_entity_id: null,
+            year,
+          },
+        }));
+
+      for (const item of items) {
+        const retention = Number(item.deductions.retention);
+        // Preferred source: the art. 383 ET detail persisted with the item
+        // (progressive procedure 1) — base is the depurated taxable base and
+        // the rate is the marginal rate of the applied bracket.
+        const retention_details = item.deductions?.retention_details;
+        let base: number;
+        let rate: number;
+        if (retention_details && Number(retention_details.base_depurada) > 0) {
+          base = Number(retention_details.base_depurada);
+          rate = Number(retention_details.marginal_rate);
+        } else {
+          // Legacy/historical runs (flat 1%): same base the retention was
+          // computed on — the proportional salary (earnings.base_salary).
+          base = Number(item.earnings?.base_salary || 0);
+          rate =
+            base > 0
+              ? Math.round((retention / base) * 10000) / 10000
+              : Number(concept.rate);
+        }
+
+        await this.prisma.withholding_calculations.create({
+          data: {
+            organization_id: run.organization_id,
+            store_id: run.store_id ?? null,
+            accounting_entity_id: run.accounting_entity_id ?? null,
+            invoice_id: null,
+            supplier_id: null,
+            customer_id: null,
+            concept_id: concept.id,
+            role: 'practiced',
+            counterparty_type: 'employee',
+            withholding_type: 'retefuente',
+            base_amount: new Prisma.Decimal(base),
+            withholding_rate: new Prisma.Decimal(rate),
+            withholding_amount: new Prisma.Decimal(retention),
+            uvt_value_used: uvt ? uvt.value_cop : new Prisma.Decimal(0),
+            year,
+          },
+        });
+      }
+
+      this.logger.log(
+        `Payroll run #${run.id}: persisted ${items.length} labor withholding calculation(s) for year ${year}`,
+      );
+    } catch (error) {
+      // Never revert the DIAN acceptance because of this side effect.
+      this.logger.error(
+        `Payroll run #${run.id}: failed to persist labor withholding calculations — ` +
+          `they will be missing from the withholding declaration until backfilled. ${(error as Error).message}`,
+        (error as Error).stack,
+      );
+    }
   }
 
   /**
@@ -333,6 +471,7 @@ export class PayrollFlowService {
     );
 
     if (provider_response.success) {
+      await this.persistAcceptedRunWithholdings(updated, run.dian_status);
       this.emitPayrollDianAcceptedAccounting(
         updated,
         RequestContextService.getContext()?.user_id,
@@ -398,6 +537,10 @@ export class PayrollFlowService {
       },
       include: PAYROLL_RUN_DETAIL_INCLUDE,
     });
+
+    // Release any novelties attached to this run back to pending so they
+    // can be picked up by a future payroll run.
+    await this.novelties_service?.releaseFromRun(id);
 
     this.logger.log(`Payroll run #${id} cancelled`);
 
@@ -499,6 +642,7 @@ export class PayrollFlowService {
     );
 
     if (provider_response.success) {
+      await this.persistAcceptedRunWithholdings(updated, run.dian_status);
       this.emitPayrollDianAcceptedAccounting(
         updated,
         RequestContextService.getContext()?.user_id,
@@ -625,6 +769,7 @@ export class PayrollFlowService {
         },
         include: PAYROLL_RUN_DETAIL_INCLUDE,
       });
+      await this.persistAcceptedRunWithholdings(updated, run.dian_status);
       this.emitPayrollDianAcceptedAccounting(
         updated,
         RequestContextService.getContext()?.user_id,

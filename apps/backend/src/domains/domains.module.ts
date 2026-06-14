@@ -4,7 +4,6 @@ import { SuperadminDomainModule } from './superadmin/superadmin.module';
 import { OrganizationDomainModule } from './organization/organization.module';
 import { StoreDomainModule } from './store/store.module';
 import { PublicDomainModule } from './public/public.module';
-import { UploadModule } from './upload/upload.module';
 import { EcommerceDomainModule } from './ecommerce/ecommerce.module';
 import { SupportModule } from './support/support.module';
 import { HelpCenterModule } from './help-center/help-center.module';
@@ -17,7 +16,6 @@ import { FiscalOperationsModule } from './fiscal-operations/fiscal-operations.mo
     OrganizationDomainModule,
     StoreDomainModule,
     PublicDomainModule,
-    UploadModule,
     EcommerceDomainModule,
     SupportModule,
     HelpCenterModule,

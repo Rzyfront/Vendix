@@ -16,6 +16,8 @@ metadata:
       "analizar PR",
       "code review",
       "revisar pull request",
+      "Running the 80% pass gate before merging a PR (git-workflow RULE 8)",
+      "Re-developing solutions identified by a code review below 80%",
     ]
 ---
 
@@ -126,14 +128,17 @@ STEP 7 → Repeat with the next PR
 Calculation: The Regression category weighs x3. All others weigh x1.
 A PR with no regression issues starts with a high base score.
 
-90-100%  → APPROVE — Clean, no issues. Low regression, additive changes.
-70-89%   → APPROVE with comments — Low regression + minor issues in other categories.
-                                    Inform comments to user so they can decide.
+80-100%  → APPROVE — Clean, no issues. Low regression, additive changes.
+                                  PASSES the 80% gate (git-workflow RULE 8).
+70-79%   → REQUEST CHANGES — Just below the 80% gate. Re-develop the failing
+                                  items and re-review. Do not merge below 80%.
 50-69%   → REQUEST CHANGES — Medium regression risk OR logic/security bugs.
 30-49%   → REQUEST CHANGES — High regression risk OR critical security issues.
  0-29%   → REQUEST CHANGES — Critical regression: modifies existing flows without protection,
                               multiple critical issues. PR needs a rewrite.
 ```
+
+**The 80% threshold is the merge gate.** This is a hard requirement from `git-workflow` RULE 8 — no PR can be merged below 80%, regardless of how nice the comments are. A score in the 70-79% range is treated as **REQUEST CHANGES**, not as "approve with comments", because the dev must re-develop the failing items.
 
 ### Pattern 4: Presentation Format for the User
 
@@ -419,6 +424,32 @@ gh api repos/OWNER/REPO/pulls/N/comments \
 **Problem**: The PR has merge conflicts (`mergeable: false`), making it impossible to merge regardless of code quality.
 **Fix**: Resolve conflicts favoring the most stable changes or those the author considers most relevant. Then request re-review.
 **Review action**: Automatic 0/100, REQUEST CHANGES with brief decontextualized recommendation. No deep code analysis until conflicts are resolved.
+
+---
+
+## Re-development Workflow (When the Review Fails)
+
+When the review posts a score **below 80%** or REQUEST CHANGES for any reason, the dev is responsible for **re-developing the solutions that the review identifies** in the same branch — not for ignoring the feedback or for arguing the review wrong.
+
+**Cycle:**
+
+1. **Read every finding** in the posted review. Each one is `file.ext ~LNNN` + suggested fix.
+2. **Address them in the same branch** (no new branch, no "I'll fix it later" PR).
+3. **Push the fixes** to the same PR.
+4. **Re-run this skill** on the same PR. The diff is now smaller, the score should rise.
+5. **Repeat** until the score is >= 80% clean.
+6. **APPROVE → merge.**
+
+**Escalation rules:**
+
+- If two re-review cycles do not move the score to >= 80%, stop and ask the human for guidance — the design or scope may be wrong, not just the implementation.
+- If a finding is genuinely wrong or the dev disagrees, the dev explains in a PR comment with evidence, and the human decides. The review is not a vote.
+- If the failing items are all in the same module, the dev may pull the offending changes into a new commit (`refactor: address pr-review feedback`) for clarity.
+
+**What "re-develop" means:**
+
+- "Re-develop" is not "acknowledge and merge anyway." It is: change the code so the finding no longer applies.
+- A PR cannot be merged at 75% "with comments" — that is below the 80% gate.
 
 ---
 

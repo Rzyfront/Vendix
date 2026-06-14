@@ -22,6 +22,9 @@ import {
   MarkFiscalSubmittedDto,
 } from '../dto/fiscal-operations.dto';
 import { FiscalAuditService } from './fiscal-audit.service';
+import { FiscalRulesService } from './fiscal-rules.service';
+import { ExogenousGeneratorService } from '../../store/exogenous/exogenous-generator.service';
+import { ExogenousLineData } from '../../store/exogenous/interfaces/exogenous.interface';
 
 interface DeclarationCalculation {
   totals: Record<string, number>;
@@ -65,6 +68,8 @@ export class TaxDeclarationDraftService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly audit: FiscalAuditService,
+    private readonly exogenousGenerator: ExogenousGeneratorService,
+    private readonly fiscalRules: FiscalRulesService,
   ) {}
 
   async list(contexts: FiscalOperationsContext[], query: FiscalListQueryDto) {
@@ -703,24 +708,33 @@ export class TaxDeclarationDraftService {
         balance_due: withholding,
         total_payable: withholding,
       },
-      lines: filtered.map((item) => ({
-        declaration_id: 0,
-        line_type: 'withholding_practiced',
-        source_type: 'withholding_calculation',
-        source_id: item.id,
-        third_party_id: item.supplier_id ?? undefined,
-        third_party_name: item.supplier?.name,
-        third_party_tax_id: item.supplier?.tax_id,
-        concept_code: item.concept.code,
-        description: `${item.concept.code} - ${item.concept.name}`,
-        base_amount: Number(item.base_amount || 0),
-        withholding_amount: Number(item.withholding_amount || 0),
-        metadata: {
-          invoice_id: item.invoice_id,
-          withholding_rate: item.withholding_rate,
-          uvt_value_used: item.uvt_value_used,
-        },
-      })),
+      lines: filtered.map((item) => {
+        // Retención laboral (nómina): invoice_id=null y counterparty_type=
+        // 'employee'. Debe ser distinguible de las retenciones de compras en
+        // la declaración (descripción y metadata propias).
+        const isLabor = item.counterparty_type === 'employee';
+        return {
+          declaration_id: 0,
+          line_type: 'withholding_practiced',
+          source_type: 'withholding_calculation',
+          source_id: item.id,
+          third_party_id: item.supplier_id ?? undefined,
+          third_party_name: item.supplier?.name,
+          third_party_tax_id: item.supplier?.tax_id,
+          concept_code: item.concept.code,
+          description: isLabor
+            ? `Retefuente laboral - ${item.concept.name}`
+            : `${item.concept.code} - ${item.concept.name}`,
+          base_amount: Number(item.base_amount || 0),
+          withholding_amount: Number(item.withholding_amount || 0),
+          metadata: {
+            invoice_id: item.invoice_id,
+            counterparty_type: item.counterparty_type,
+            withholding_rate: item.withholding_rate,
+            uvt_value_used: item.uvt_value_used,
+          },
+        };
+      }),
       rules_snapshot: await this.resolveRulesSnapshot(
         context,
         type,
@@ -732,7 +746,12 @@ export class TaxDeclarationDraftService {
       },
       validation_summary: {
         warnings: filtered
-          .filter((item) => !item.supplier?.tax_id)
+          // Las filas laborales (nómina) no tienen proveedor por diseño:
+          // no deben generar la advertencia SUPPLIER_WITHOUT_TAX_ID.
+          .filter(
+            (item) =>
+              item.counterparty_type !== 'employee' && !item.supplier?.tax_id,
+          )
           .map((item) => ({
             code: 'SUPPLIER_WITHOUT_TAX_ID',
             supplier_id: item.supplier_id,
@@ -806,54 +825,131 @@ export class TaxDeclarationDraftService {
     };
   }
 
+  /**
+   * Exógena: una sola fuente de cálculo. Delega en ExogenousGeneratorService
+   * (formatos 1001/1003/1005/1007 — pagos y retenciones practicadas,
+   * retenciones sufridas, IVA generado e ingresos de terceros) y materializa
+   * sus agregados como tax_declaration_lines trazables por formato.
+   *
+   * La información exógena es ANUAL: el generator solo recibe el año, así que
+   * el draft usa siempre period_year de la obligación (con period_month null
+   * el rango ya cubre el año completo).
+   */
   private async calculateExogenous(
     context: FiscalOperationsContext,
     period: ReturnType<typeof resolveFiscalPeriodRange>,
   ): Promise<DeclarationCalculation> {
-    const reports = await this.prisma.exogenous_reports.findMany({
-      where: {
-        organization_id: context.organization_id,
-        fiscal_year: period.period_year,
-        ...(context.store_id ? { store_id: context.store_id } : {}),
+    const formats: Array<{
+      code: string;
+      generate: () => Promise<ExogenousLineData[]>;
+    }> = [
+      {
+        code: '1001',
+        generate: () =>
+          this.exogenousGenerator.generateFormat1001(
+            context.organization_id,
+            context.store_id,
+            period.period_year,
+          ),
       },
-      include: { exogenous_report_lines: true },
-    });
-    const lines = reports.flatMap((report) =>
-      report.exogenous_report_lines.map((line) => ({
-        declaration_id: 0,
-        line_type: 'exogenous_third_party',
-        source_type: 'exogenous_report_line',
-        source_id: line.id,
-        third_party_name: line.third_party_name,
-        third_party_tax_id: line.third_party_nit,
-        concept_code: line.concept_code,
-        description: `Formato ${report.format_code} - ${line.concept_code}`,
-        base_amount: Number(line.payment_amount || 0),
-        tax_amount: Number(line.tax_amount || 0),
-        withholding_amount: Number(line.withholding_amount || 0),
-        metadata: { report_id: report.id, format_code: report.format_code },
-      })),
-    );
+      {
+        code: '1003',
+        generate: () =>
+          this.exogenousGenerator.generateFormat1003(
+            context.organization_id,
+            context.store_id,
+            period.period_year,
+          ),
+      },
+      {
+        code: '1005',
+        generate: () =>
+          this.exogenousGenerator.generateFormat1005(
+            context.organization_id,
+            context.store_id,
+            period.period_year,
+          ),
+      },
+      {
+        code: '1007',
+        generate: () =>
+          this.exogenousGenerator.generateFormat1007(
+            context.organization_id,
+            context.store_id,
+            period.period_year,
+          ),
+      },
+    ];
+
+    const lines: Prisma.tax_declaration_linesCreateManyInput[] = [];
+    const lineCountByFormat: Record<string, number> = {};
+
+    for (const format of formats) {
+      const generated = await format.generate();
+      lineCountByFormat[format.code] = generated.length;
+
+      for (const line of generated) {
+        lines.push({
+          declaration_id: 0,
+          line_type: 'exogenous_third_party',
+          source_type: 'exogenous_generator',
+          third_party_name: line.third_party_name,
+          third_party_tax_id:
+            line.third_party_nit === 'SIN_NIT'
+              ? undefined
+              : line.third_party_nit,
+          concept_code: line.concept_code,
+          description: `Formato ${format.code} - ${line.concept_code}`,
+          base_amount: Number(line.payment_amount || 0),
+          tax_amount: Number(line.tax_amount || 0),
+          withholding_amount: Number(line.withholding_amount || 0),
+          metadata: {
+            format_code: format.code,
+            ...(line.role ? { role: line.role } : {}),
+            ...(line.third_party_dv
+              ? { third_party_dv: line.third_party_dv }
+              : {}),
+            ...(line.line_data ? { line_data: line.line_data } : {}),
+          },
+        });
+      }
+    }
+
     const total = lines.reduce(
       (sum, line) => sum + Number(line.base_amount || 0),
       0,
     );
+    const totalWithholding = lines.reduce(
+      (sum, line) => sum + Number(line.withholding_amount || 0),
+      0,
+    );
 
     return {
-      totals: { gross_base_amount: total, taxable_base_amount: total },
+      // La exógena es informativa: no genera saldo a pagar.
+      totals: {
+        gross_base_amount: total,
+        taxable_base_amount: total,
+        withholding_amount: totalWithholding,
+      },
       lines,
       rules_snapshot: await this.resolveRulesSnapshot(
         context,
         'exogenous',
         period.period_year,
       ),
-      source_snapshot: { report_ids: reports.map((report) => report.id) },
+      source_snapshot: {
+        generator: 'ExogenousGeneratorService',
+        fiscal_year: period.period_year,
+        formats: formats.map((format) => format.code),
+        line_count_by_format: lineCountByFormat,
+      },
       validation_summary: {
         warnings: lines
           .filter((line) => !line.third_party_tax_id)
           .map((line) => ({
             code: 'THIRD_PARTY_WITHOUT_TAX_ID',
-            source_id: line.source_id,
+            concept_code: line.concept_code,
+            format_code: (line.metadata as any)?.format_code,
           })),
       },
     };
@@ -913,23 +1009,113 @@ export class TaxDeclarationDraftService {
       }
     }
 
-    const taxable = revenue - costsAndExpenses;
+    // Tarifa de renta desde reglas efectivas (entidad → org → global →
+    // default Vendix 35%, Art. 240 ET).
+    const rulesSnapshot = await this.fiscalRules.resolveEffectiveRules(
+      {
+        organization_id: context.organization_id,
+        accounting_entity_id: context.accounting_entity_id,
+      },
+      'income_tax',
+      period.period_year,
+    );
+    const rawRate = rulesSnapshot['general_rate_percent'];
+    const ratePercent =
+      typeof rawRate === 'number' && Number.isFinite(rawRate) ? rawRate : 35;
+    const legalBasis = rulesSnapshot['legal_basis'];
+
+    // Retenciones que ME practicaron (role='suffered') = crédito a favor en
+    // renta. Se filtran por el campo semántico `year` (año fiscal de la
+    // retención), NO por created_at: una retención del año fiscal puede
+    // registrarse en fechas posteriores al cierre del periodo.
+    const suffered = await this.prisma.withholding_calculations.findMany({
+      where: {
+        accounting_entity_id: context.accounting_entity_id,
+        role: 'suffered',
+        year: period.period_year,
+      },
+    });
+
+    const netTaxable = revenue - costsAndExpenses;
+    // Base gravable estimada: una pérdida contable no genera impuesto.
+    const taxableBase = Math.max(netTaxable, 0);
+    const estimatedTax = this.round2((taxableBase * ratePercent) / 100);
+    const sufferedCredit = this.round2(
+      suffered.reduce(
+        (sum, item) => sum + Number(item.withholding_amount || 0),
+        0,
+      ),
+    );
+
+    declarationLines.push({
+      declaration_id: 0,
+      line_type: 'income_tax_estimate',
+      source_type: 'fiscal_rule',
+      description: `Renta estimada ${period.period_year} (${ratePercent}%)`,
+      base_amount: taxableBase,
+      tax_amount: estimatedTax,
+      metadata: {
+        rate_percent: ratePercent,
+        revenue,
+        costs_and_expenses: costsAndExpenses,
+        ...(typeof legalBasis === 'string' ? { legal_basis: legalBasis } : {}),
+      },
+    });
+
+    // Líneas de crédito por retenciones sufridas, agregadas por
+    // withholding_type (las filas legacy sin tipo se agrupan aparte).
+    const sufferedByType = new Map<string, { total: number; count: number }>();
+    for (const item of suffered) {
+      const key = item.withholding_type ?? 'untyped_legacy';
+      const bucket = sufferedByType.get(key) ?? { total: 0, count: 0 };
+      bucket.total += Number(item.withholding_amount || 0);
+      bucket.count += 1;
+      sufferedByType.set(key, bucket);
+    }
+    for (const [withholdingType, bucket] of sufferedByType) {
+      declarationLines.push({
+        declaration_id: 0,
+        line_type: 'withholding_suffered_credit',
+        source_type: 'withholding_calculation',
+        description: `Retenciones sufridas (${withholdingType})`,
+        withholding_amount: this.round2(bucket.total),
+        metadata: {
+          withholding_type: withholdingType,
+          calculation_count: bucket.count,
+        },
+      });
+    }
+
+    const warnings: Array<{ code: string }> = [
+      // El precierre SIEMPRE es una estimación interna, nunca el formulario 110.
+      { code: 'INCOME_TAX_PRECLOSE_ESTIMATE' },
+    ];
+    if (netTaxable < 0) warnings.push({ code: 'NEGATIVE_TAXABLE_BASE' });
+
     return {
       totals: {
         gross_base_amount: revenue,
-        taxable_base_amount: taxable,
-        generated_tax_amount: 0,
+        // Informativo: puede ser negativo si hay pérdida contable.
+        taxable_base_amount: netTaxable,
+        generated_tax_amount: estimatedTax,
+        withholding_amount: sufferedCredit,
+        balance_due: Math.max(estimatedTax - sufferedCredit, 0),
+        balance_favor: Math.max(sufferedCredit - estimatedTax, 0),
+        // El precierre es estimación, no obligación de pago: total_payable=0.
         total_payable: 0,
       },
       lines: declarationLines,
-      rules_snapshot: await this.resolveRulesSnapshot(
-        context,
-        'income_tax',
-        period.period_year,
-      ),
-      source_snapshot: { accounting_line_count: lines.length },
-      validation_summary: { warnings: [] },
+      rules_snapshot: rulesSnapshot as Prisma.InputJsonObject,
+      source_snapshot: {
+        accounting_line_count: lines.length,
+        suffered_calculation_ids: suffered.map((item) => item.id),
+      },
+      validation_summary: { warnings },
     };
+  }
+
+  private round2(value: number): number {
+    return Math.round(value * 100) / 100;
   }
 
   private async resolveRulesSnapshot(

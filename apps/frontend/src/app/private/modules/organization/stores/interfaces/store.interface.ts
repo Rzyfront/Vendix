@@ -15,6 +15,8 @@ export enum StoreState {
   ARCHIVED = 'archived',
 }
 
+export type StoreIndustry = 'retail' | 'restaurant' | 'manufacturing' | 'service';
+
 export interface Store {
   // Core properties from API
   id: number;
@@ -218,6 +220,7 @@ export interface CreateStoreDto {
   currency_code?: string;
   operating_hours?: OperatingHours;
   store_type: StoreType;
+  industries?: StoreIndustry[];
   is_active?: boolean;
   manager_user_id?: number;
   description?: string;

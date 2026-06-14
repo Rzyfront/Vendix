@@ -3,8 +3,11 @@ import {
   forwardRef,
   inject,
   signal,
+  computed,
   input,
   output,
+  ElementRef,
+  HostListener,
 } from '@angular/core';
 
 import {
@@ -63,38 +66,113 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
             }
           </label>
         }
-    
-        <div [class]="wrapperClasses">
-          <select
-            [id]="id()"
-            [class]="selectClasses"
-            [disabled]="isDisabled()"
-            [required]="required()"
-            [ngModel]="selectedValue()"
-            (ngModelChange)="onModelChange($event)"
-            (blur)="onBlur()"
-            (focus)="onFocus()"
-            >
-            @if (placeholder()) {
-              <option [ngValue]="null" disabled selected class="text-text-muted">
-                {{ placeholder() }}
-              </option>
-            }
-            @for (option of options(); track trackByOption($index, option)) {
-              <option
-                [ngValue]="option.value"
-                [disabled]="option.disabled"
+
+        @if (searchable()) {
+          <!-- Searchable mode: custom dropdown with filter input.
+               Opt-in via [searchable]="true"; default keeps the native <select>. -->
+          <div [class]="wrapperClasses">
+            <button
+              type="button"
+              [id]="id()"
+              [class]="selectClasses + ' text-left flex items-center'"
+              [disabled]="isDisabled()"
+              (click)="toggleDropdown()"
+              (blur)="onBlur()"
+              >
+              <span
+                class="flex-1 truncate"
+                [style.color]="selectedValue() == null ? 'var(--color-text-secondary)' : 'var(--color-text-primary)'"
                 >
-                {{ option.label }}
-              </option>
+                {{ selectedLabel() || placeholder() }}
+              </span>
+            </button>
+
+            <div [class]="iconClasses">
+              <app-icon [name]="isOpen() ? 'chevron-up' : 'chevron-down'" [size]="iconSize"></app-icon>
+            </div>
+
+            @if (isOpen()) {
+              <div
+                class="absolute z-[10000] w-full mt-1 bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto rounded-xl"
+                >
+                <div class="p-2 border-b border-border sticky top-0 bg-[var(--color-surface)]">
+                  <input
+                    type="text"
+                    [ngModel]="searchTerm()"
+                    (ngModelChange)="onSearch($event)"
+                    class="w-full px-3 py-1.5 text-sm border border-border rounded-lg
+                           hover:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-primary)]
+                           bg-[var(--color-surface)] text-[var(--color-text-primary)]"
+                    placeholder="Buscar..."
+                    />
+                </div>
+                <div class="py-1">
+                  @for (option of filteredOptions(); track trackByOption($index, option)) {
+                    <button
+                      type="button"
+                      [disabled]="option.disabled"
+                      (click)="selectOption(option)"
+                      class="w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors
+                             hover:bg-primary-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      [class.bg-primary-50]="option.value == selectedValue()"
+                      [class.font-semibold]="option.value == selectedValue()"
+                      >
+                      <span
+                        class="flex-1 min-w-0 text-[var(--color-text-primary)] truncate"
+                        [class.text-primary-700]="option.value == selectedValue()"
+                        >{{ option.label }}</span>
+                      @if (option.description) {
+                        <span
+                          class="text-xs text-[var(--color-text-secondary)] truncate whitespace-nowrap overflow-hidden max-w-[40%] shrink-0"
+                          [title]="option.description"
+                          >
+                          {{ option.description }}
+                        </span>
+                      }
+                    </button>
+                  }
+                  @if (filteredOptions().length === 0) {
+                    <div class="px-3 py-4 text-center text-sm text-[var(--color-text-secondary)]">
+                      No se encontraron opciones
+                    </div>
+                  }
+                </div>
+              </div>
             }
-          </select>
-    
-          <div [class]="iconClasses">
-            <app-icon name="chevron-down" [size]="iconSize"></app-icon>
           </div>
-        </div>
-    
+        } @else {
+          <div [class]="wrapperClasses">
+            <select
+              [id]="id()"
+              [class]="selectClasses"
+              [disabled]="isDisabled()"
+              [required]="required()"
+              [ngModel]="selectedValue()"
+              (ngModelChange)="onModelChange($event)"
+              (blur)="onBlur()"
+              (focus)="onFocus()"
+              >
+              @if (placeholder()) {
+                <option [ngValue]="null" disabled selected class="text-text-muted">
+                  {{ placeholder() }}
+                </option>
+              }
+              @for (option of options(); track trackByOption($index, option)) {
+                <option
+                  [ngValue]="option.value"
+                  [disabled]="option.disabled"
+                  >
+                  {{ option.label }}
+                </option>
+              }
+            </select>
+
+            <div [class]="iconClasses">
+              <app-icon name="chevron-down" [size]="iconSize"></app-icon>
+            </div>
+          </div>
+        }
+
         @if (helpText() || errorText()) {
           <div class="mt-1 text-sm">
             @if (helpText() && !errorText()) {
@@ -115,6 +193,8 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
   styleUrls: ['./selector.component.scss'],
 })
 export class SelectorComponent implements ControlValueAccessor {
+  private readonly elementRef = inject(ElementRef);
+
   readonly id = input<string>(`selector-${Math.random().toString(36).substr(2, 9)}`);
   readonly label = input<string>('');
   readonly placeholder = input<string>('');
@@ -128,12 +208,37 @@ export class SelectorComponent implements ControlValueAccessor {
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly options = input<SelectorOption[]>([]);
   readonly tooltipText = input<string | undefined>(undefined);
+  /** When true, renders a custom dropdown with a search filter instead of the
+   *  native <select>. Default false keeps the existing native behaviour, so no
+   *  existing usage changes unless it opts in. */
+  readonly searchable = input<boolean>(false);
 
   readonly valueChange = output<string | number | null>();
   readonly blur = output<void>();
   readonly focus = output<void>();
 
   readonly selectedValue = signal<string | number | null>(null);
+
+  // --- Searchable mode state ---
+  readonly isOpen = signal<boolean>(false);
+  readonly searchTerm = signal<string>('');
+
+  readonly filteredOptions = computed<SelectorOption[]>(() => {
+    const term = this.searchTerm().toLowerCase().trim();
+    if (!term) return this.options();
+    return this.options().filter(
+      (o) =>
+        o.label.toLowerCase().includes(term) ||
+        (o.description?.toLowerCase().includes(term) ?? false),
+    );
+  });
+
+  readonly selectedLabel = computed<string>(() => {
+    const value = this.selectedValue();
+    if (value == null) return '';
+    const found = this.options().find((o) => o.value == value);
+    return found?.label ?? '';
+  });
 
   // ControlValueAccessor callbacks
   private onChange: (value: string | number | null) => void = () => { };
@@ -160,10 +265,41 @@ export class SelectorComponent implements ControlValueAccessor {
     return this.disabled() || this.disabledState();
   }
 
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: MouseEvent): void {
+    if (!this.isOpen()) return;
+    const path = event.composedPath();
+    const isInside = path.some((node) => node === this.elementRef.nativeElement);
+    if (!isInside) {
+      this.isOpen.set(false);
+    }
+  }
+
   onModelChange(value: string | number | null): void {
     this.selectedValue.set(value);
     this.onChange(value);
     this.valueChange.emit(value);
+  }
+
+  toggleDropdown(): void {
+    if (this.isDisabled()) return;
+    if (!this.isOpen()) {
+      this.searchTerm.set('');
+    }
+    this.isOpen.update((v) => !v);
+  }
+
+  selectOption(option: SelectorOption): void {
+    if (option.disabled) return;
+    this.selectedValue.set(option.value);
+    this.onChange(option.value);
+    this.valueChange.emit(option.value);
+    this.onTouched();
+    this.isOpen.set(false);
+  }
+
+  onSearch(term: string): void {
+    this.searchTerm.set(term);
   }
 
   onFocus(): void {

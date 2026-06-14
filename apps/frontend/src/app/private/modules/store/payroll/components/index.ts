@@ -12,3 +12,6 @@ export * from './settlements/settlement-create/settlement-create.component';
 export * from './settlements/settlement-detail/settlement-detail.component';
 export * from './advances/advance-create/advance-create.component';
 export * from './advances/advance-detail/advance-detail.component';
+export * from './novelties/novelties-list.component';
+export * from './novelties/novelty-form-modal.component';
+export * from './novelties/novelty-labels';

@@ -1,6 +1,7 @@
 import {
   Component,
   OnInit,
+  computed,
   effect,
   inject,
   input,
@@ -8,12 +9,29 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
+import {
+  ReactiveFormsModule,
+  FormGroup,
+  FormControl,
+  ValidatorFn,
+} from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  MultiSelectorComponent,
+  MultiSelectorOption,
+} from '../../../../../../../shared/components/multi-selector/multi-selector.component';
+import { PanelUiModulesEditorComponent } from '../../../../../../../shared/components/panel-ui-modules-editor/panel-ui-modules-editor.component';
+import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
+import {
+  STORE_INDUSTRIES,
+  StoreIndustry,
+  getModulesHiddenByIndustries,
+} from '../../../../../../../shared/constants/industry-modules.constant';
+import type { PanelUISettings } from '../../../../../../../core/models/store-settings.interface';
 import { CurrencyService } from '../../../../../../../services/currency.service';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
@@ -28,7 +46,13 @@ export interface GeneralSettings {
   name?: string;
   logo_url?: string | null;
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
+  industries?: StoreIndustry[];
 }
+
+const nonEmptyArray: ValidatorFn = (control) => {
+  const v = control.value;
+  return Array.isArray(v) && v.length > 0 ? null : { required: true };
+};
 
 @Component({
   selector: 'app-general-settings-form',
@@ -38,6 +62,9 @@ export interface GeneralSettings {
     ReactiveFormsModule,
     InputComponent,
     SelectorComponent,
+    MultiSelectorComponent,
+    PanelUiModulesEditorComponent,
+    ModalComponent,
   ],
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],
@@ -46,14 +73,56 @@ export class GeneralSettingsForm implements OnInit {
   readonly settings = input.required<GeneralSettings>();
   readonly settingsChange = output<GeneralSettings>();
 
+  readonly panelUi = input<PanelUISettings | undefined>(undefined);
+  readonly panelUiChange = output<PanelUISettings | undefined>();
+
   private currencyService = inject(CurrencyService);
   private currencyFormatService = inject(CurrencyFormatService);
 
+  readonly modulesHiddenByIndustries = signal<string[]>([]);
+
+  readonly modulesModalOpen = signal(false);
+
+  /** `value` for the shared editor — derived from the store-level
+   *  `panel_ui.STORE_ADMIN` map. Absent = true (allowed). */
+  readonly editorValue = signal<Record<string, boolean>>({});
+
+  /** `hiddenByIndustry` for the shared editor — only industry gating
+   *  applies at the store level; no `hiddenByStore` ceiling. */
+  readonly hiddenByIndustry = computed(() => this.modulesHiddenByIndustries());
+  readonly hiddenByStore = signal<string[]>([]);
+
+  /** `offModulesCount` for the "N ocultos" badge in the trigger card.
+   *  Counts modules explicitly disabled by the store owner (≠ gated
+   *  by industry, which is not the store's choice). */
+  readonly offModulesCount = computed(() => {
+    let count = 0;
+    for (const v of Object.values(this.editorValue())) {
+      if (v === false) count++;
+    }
+    return count;
+  });
+
   constructor() {
+    // Sync `panelUi()` input → `editorValue()` so the editor sees the
+    // resolved store-level state (absent keys are NOT materialized here
+    // — the editor treats them as `true` for its own rendering).
+    effect(() => {
+      const incoming = this.panelUi();
+      this.editorValue.set({ ...(incoming?.STORE_ADMIN ?? {}) });
+    });
+
     effect(() => {
       const current = this.settings();
       if (current) {
-        this.form.patchValue(current, { emitEvent: false });
+        const sanitized = { ...current };
+        if (!Array.isArray(sanitized.industries) || sanitized.industries.length === 0) {
+          sanitized.industries = ['retail'];
+        }
+        this.form.patchValue(sanitized, { emitEvent: false });
+        this.modulesHiddenByIndustries.set(
+          getModulesHiddenByIndustries(sanitized.industries),
+        );
       }
     });
   }
@@ -62,6 +131,7 @@ export class GeneralSettingsForm implements OnInit {
     // Campos de stores
     name: new FormControl(''),
     store_type: new FormControl('physical'),
+    industries: new FormControl<string[]>(['retail'], { nonNullable: true, validators: [nonEmptyArray] }),
     // Campos de store_settings
     timezone: new FormControl('America/Bogota'),
     currency: new FormControl(
@@ -78,6 +148,11 @@ export class GeneralSettingsForm implements OnInit {
     { value: 'popup', label: 'Tienda Pop-up' },
     { value: 'kiosko', label: 'Kiosco' },
   ];
+
+  industryOptions: MultiSelectorOption[] = STORE_INDUSTRIES.map((id) => ({
+    value: id,
+    label: this.getIndustryLabel(id),
+  }));
 
   // Cargado dinámicamente desde CurrencyService
   readonly currencies = signal<SelectorOption[]>([]);
@@ -108,6 +183,10 @@ export class GeneralSettingsForm implements OnInit {
 
   get storeTypeControl(): FormControl<string> {
     return this.form.get('store_type') as FormControl<string>;
+  }
+
+  get industriesControl(): FormControl<string[]> {
+    return this.form.get('industries') as FormControl<string[]>;
   }
 
   get timezoneControl(): FormControl<string> {
@@ -162,8 +241,44 @@ export class GeneralSettingsForm implements OnInit {
   }
 
   onFieldChange() {
+    this.modulesHiddenByIndustries.set(
+      getModulesHiddenByIndustries(this.industriesControl.value),
+    );
     if (this.form.valid) {
       this.settingsChange.emit(this.form.value);
+    }
+  }
+
+  /**
+   * Map the editor's `valueChange` (Record<key, boolean>, gated keys
+   * already omitted) to the store-level payload. Semantics:
+   *   - `false` = store-owner disabled (publish as `{key: false}`)
+   *   - `true` = allowed (omit from the map; absent=allowed per the
+   *     panel-ui contract, so re-enabling a previously disabled module
+   *     also clears it via deep-merge on the backend)
+   *   - The store-emit shape is always `{ STORE_ADMIN: { ... } }`.
+   *   - The local `editorValue` mirror is kept in sync so the trigger
+   *     card's "N ocultos" badge updates without waiting for the round-trip.
+   */
+  onModulesChange(next: Record<string, boolean>): void {
+    this.editorValue.set({ ...next });
+    const disabled: Record<string, boolean> = {};
+    for (const key of Object.keys(next)) {
+      if (next[key] === false) disabled[key] = false;
+    }
+    this.panelUiChange.emit({ STORE_ADMIN: disabled });
+  }
+
+  private getIndustryLabel(id: StoreIndustry): string {
+    switch (id) {
+      case 'retail':
+        return 'Retail';
+      case 'restaurant':
+        return 'Restaurante';
+      case 'manufacturing':
+        return 'Manufactura';
+      case 'service':
+        return 'Servicios';
     }
   }
 }

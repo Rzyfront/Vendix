@@ -15,8 +15,13 @@ import { purchase_order_status_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { toTitleCase } from '@common/utils/format.util';
+import { generateSlug } from '@common/utils/slug.util';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
-import { CostingService } from '../../inventory/shared/services/costing.service';
+import {
+  CostingService,
+  CostCalculationResult,
+} from '../../inventory/shared/services/costing.service';
+import { CostingMethodResolverService } from '../../inventory/shared/services/costing-method-resolver.service';
 import { AuditService } from '@common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
@@ -30,6 +35,7 @@ export class PurchaseOrdersService {
     private prisma: StorePrismaService,
     private stockLevelManager: StockLevelManager,
     private costingService: CostingService,
+    private costingMethodResolver: CostingMethodResolverService,
     private auditService: AuditService,
     private s3Service: S3Service,
     private settingsService: SettingsService,
@@ -188,23 +194,27 @@ export class PurchaseOrdersService {
             basePrice = cost * (1 + margin / 100);
           }
 
-          // Resolve Brand: trim + lowercase for search, Title Case for creation
+          // Resolve Brand: derive a deterministic slug (mirrors the categories
+          // block below) and search/create scoped by store_id. `brands` requires
+          // a non-null `slug` and enforces @@unique([store_id, slug]) +
+          // @@unique([store_id, name]); searching and creating by slug+store_id
+          // keeps a PO-created brand indistinguishable from a UI-created one.
           let brandId: number | undefined;
-          if (item.brand_name) {
-            const normalizedBrandName = item.brand_name.trim().toLowerCase();
-            if (normalizedBrandName) {
+          if (item.brand_name?.trim()) {
+            const brandName = item.brand_name.trim();
+            const brandSlug = generateSlug(brandName);
+            if (brandSlug) {
               const brand = await tx.brands.findFirst({
-                where: {
-                  name: { equals: normalizedBrandName, mode: 'insensitive' },
-                },
+                where: { slug: brandSlug, store_id: storeId },
               });
               if (brand) {
                 brandId = brand.id;
               } else {
-                const titleCaseBrandName = toTitleCase(item.brand_name.trim());
                 const newBrand = await tx.brands.create({
                   data: {
-                    name: titleCaseBrandName,
+                    name: toTitleCase(brandName),
+                    slug: brandSlug,
+                    store_id: storeId,
                     description: 'Creada automáticamente por carga masiva PO',
                     state: 'active',
                   },
@@ -798,12 +808,14 @@ export class PurchaseOrdersService {
         throw new NotFoundException('Purchase order not found');
       }
 
-      // Read costing method from store settings
-      const settings = await this.settingsService.getSettings();
-      const costingMethod: 'weighted_average' | 'fifo' | 'lifo' =
-        settings.inventory?.costing_method === 'fifo'
-          ? 'fifo'
-          : 'weighted_average';
+      // Resolve costing method via the org/store precedence resolver.
+      const organizationId = RequestContextService.getOrganizationId();
+      const storeId =
+        purchaseOrder.location?.store_id ?? RequestContextService.getStoreId();
+      const costingMethod = await this.costingMethodResolver.resolveCostingMethod(
+        organizationId!,
+        storeId ?? undefined,
+      );
 
       // Create inventory movements, update stock, and calculate cost for received items
       for (const item of dto.items) {
@@ -816,7 +828,35 @@ export class PurchaseOrdersService {
         const productVariantId = orderItem?.product_variant_id;
 
         if (productId) {
-          // Update stock levels using StockLevelManager
+          const receiptUnitCost = Number(orderItem?.unit_cost || 0);
+
+          // Cost FIRST: weighted-average needs pre-receipt stock reads.
+          let costResult: CostCalculationResult | null = null;
+          try {
+            costResult = await this.costingService.calculateCostOnReceipt(
+              {
+                product_id: productId,
+                variant_id: productVariantId || undefined,
+                location_id: purchaseOrder.location_id!,
+                quantity_received: item.quantity_received,
+                unit_cost: receiptUnitCost,
+                costing_method: costingMethod,
+                purchase_order_id: id,
+                batch_number: orderItem?.batch_number || undefined,
+                manufacturing_date: orderItem?.manufacturing_date || undefined,
+                expiration_date: orderItem?.expiration_date || undefined,
+              },
+              tx,
+            );
+          } catch (error) {
+            this.logger.error(
+              `Failed to calculate cost for PO item #${item.id}: ${error.message}`,
+              error.stack,
+            );
+            // Do not block receipt — fall back to the receipt unit cost below.
+          }
+
+          // Then update stock levels using StockLevelManager.
           await this.stockLevelManager.updateStock(
             {
               product_id: productId,
@@ -827,32 +867,11 @@ export class PurchaseOrdersService {
               reason: 'Purchase order receipt',
               create_movement: true,
               source_module: 'pop_purchase',
+              unit_cost: costResult?.new_cost_per_unit ?? receiptUnitCost,
+              movement_unit_cost: receiptUnitCost,
             },
             tx,
           );
-
-          // Calculate cost on receipt using CostingService
-          try {
-            await this.costingService.calculateCostOnReceipt(
-              {
-                product_id: productId,
-                variant_id: productVariantId || undefined,
-                location_id: purchaseOrder.location_id!,
-                quantity_received: item.quantity_received,
-                unit_cost: Number(orderItem.unit_cost || 0),
-                costing_method: costingMethod,
-                purchase_order_id: id,
-                batch_number: orderItem.batch_number || undefined,
-                manufacturing_date: orderItem.manufacturing_date || undefined,
-                expiration_date: orderItem.expiration_date || undefined,
-              },
-              tx,
-            );
-          } catch (error) {
-            this.logger.error(
-              `Failed to calculate cost for PO item #${item.id}: ${error.message}`,
-            );
-          }
         }
       }
 
@@ -1288,8 +1307,27 @@ export class PurchaseOrdersService {
   }
 
   async getCostPreview(dto: CostPreviewDto) {
-    const settings = await this.settingsService.getSettings();
-    const costingMethod = settings.inventory?.costing_method || 'cpp';
+    const organizationId = RequestContextService.getOrganizationId();
+    if (!organizationId) {
+      throw new BadRequestException('Organization ID not found in context');
+    }
+
+    // Resolve costing method via org/store precedence (mirrors receive()).
+    const location = await this.prisma.inventory_locations.findUnique({
+      where: { id: dto.location_id },
+      select: { store_id: true },
+    });
+    const storeId = location?.store_id ?? RequestContextService.getStoreId();
+    const costingMethod = await this.costingMethodResolver.resolveCostingMethod(
+      organizationId,
+      storeId ?? undefined,
+    );
+
+    // Scope cost aggregates to the operating scope (STORE vs ORGANIZATION).
+    const locationFilter = await this.costingService.buildScopedLocationFilter(
+      organizationId,
+      dto.location_id,
+    );
 
     const items: Array<{
       product_id: number;
@@ -1319,12 +1357,13 @@ export class PurchaseOrdersService {
       const currentStock = Number(stockLevel?.quantity_on_hand ?? 0);
       const currentCost = Number(stockLevel?.cost_per_unit ?? 0);
 
-      // Global stock across all locations
+      // Aggregate stock across the scoped location set (org or store).
       const allStockLevels = await this.prisma.stock_levels.findMany({
         where: {
           product_id: item.product_id,
           product_variant_id: item.product_variant_id || null,
           quantity_on_hand: { gt: 0 },
+          inventory_locations: { is: locationFilter },
         },
       });
       const globalStock = allStockLevels.reduce(

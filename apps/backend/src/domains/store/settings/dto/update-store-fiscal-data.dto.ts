@@ -124,6 +124,17 @@ export class UpdateStoreFiscalDataDto {
   tax_responsibilities?: string[];
 
   @ApiPropertyOptional({
+    enum: ['monthly', 'bimonthly', 'four_monthly'],
+    example: 'bimonthly',
+    description:
+      'Periodicidad de la declaración de IVA (art. 600 ET). Solo aplica si el tenant es responsable de IVA (O-48). Ausente ⇒ bimonthly.',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['monthly', 'bimonthly', 'four_monthly'])
+  vat_periodicity?: 'monthly' | 'bimonthly' | 'four_monthly';
+
+  @ApiPropertyOptional({
     example: 'O-15',
     maxLength: 32,
     description:

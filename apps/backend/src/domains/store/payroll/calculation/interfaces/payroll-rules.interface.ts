@@ -1,4 +1,19 @@
 /**
+ * Hourly rates for overtime and surcharge novelties.
+ * Expressed as the EXTRA fraction over the ordinary hour value
+ * (0.25 = +25%). Surcharges pay only the rate (the ordinary hour
+ * is already included in the base salary).
+ */
+export interface OvertimeRates {
+  overtime_diurna: number;
+  overtime_nocturna: number;
+  overtime_dominical_diurna: number;
+  overtime_dominical_nocturna: number;
+  surcharge_nocturno: number;
+  surcharge_dominical: number;
+}
+
+/**
  * Typed interface for configurable payroll rules.
  * Stored per-year in organization_settings.settings.payroll.rules["YYYY"].
  */
@@ -32,6 +47,25 @@ export interface PayrollRules {
   // Calendar (non-editable)
   days_per_month: number;
   days_per_year: number;
+
+  // ── Novelty valuation (optional — defaults applied when absent so
+  // rules snapshots persisted before this feature keep working) ──
+
+  /**
+   * Legal monthly hours used to derive the ordinary hour value.
+   * 230h in 2026; Ley 2101/2021 lowers it to 220h from July 2026
+   * (configurable per organization — not automated).
+   */
+  monthly_hours?: number;
+
+  /** Extra rates for overtime/surcharge novelties (0.25 = +25%). */
+  overtime_rates?: OvertimeRates;
+
+  /**
+   * Employer-paid share of a general-illness incapacity day
+   * (2/3 of the daily salary).
+   */
+  incapacity_general_employer_rate?: number;
 }
 
 /**

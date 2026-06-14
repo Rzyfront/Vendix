@@ -13,6 +13,7 @@ import {
   IsDecimal,
   IsArray,
   IsJSON,
+  ArrayMinSize,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
@@ -29,6 +30,13 @@ export enum StoreState {
   INACTIVE = 'inactive',
   SUSPENDED = 'suspended',
   ARCHIVED = 'archived',
+}
+
+export enum StoreIndustry {
+  RETAIL = 'retail',
+  RESTAURANT = 'restaurant',
+  MANUFACTURING = 'manufacturing',
+  SERVICE = 'service',
 }
 
 export class CreateStoreDto {
@@ -73,6 +81,12 @@ export class CreateStoreDto {
   @IsOptional()
   @IsEnum(StoreType)
   store_type?: StoreType = StoreType.PHYSICAL;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
 
   @IsOptional()
   @IsBoolean()
@@ -133,6 +147,12 @@ export class UpdateStoreDto {
   store_type?: StoreType;
 
   @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
+
+  @IsOptional()
   @IsBoolean()
   is_active?: boolean;
 
@@ -168,6 +188,13 @@ export class StoreQueryDto {
   @IsOptional()
   @IsEnum(StoreType)
   store_type?: StoreType;
+
+  @IsOptional()
+  @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
 
   @IsOptional()
   @IsBoolean()
@@ -228,6 +255,13 @@ export class AdminStoreQueryDto {
   @IsOptional()
   @IsEnum(StoreType)
   store_type?: StoreType;
+
+  @IsOptional()
+  @Transform(({ value }) => (Array.isArray(value) ? value : [value]))
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsEnum(StoreIndustry, { each: true })
+  industries?: StoreIndustry[];
 
   @IsOptional()
   @IsBoolean()

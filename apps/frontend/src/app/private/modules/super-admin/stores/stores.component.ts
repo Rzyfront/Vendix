@@ -727,7 +727,10 @@ private initializeCreateForm(): void {
       city: storeData.city,
       country: storeData.country,
       is_active: storeData.state === 'active' ? true : false,
-      store_type: storeData.store_type || StoreType.PHYSICAL};
+      store_type: storeData.store_type || StoreType.PHYSICAL,
+      industries: Array.isArray(storeData.industries) && storeData.industries.length > 0
+        ? storeData.industries
+        : ['retail']};
 
     this.storesService
       .updateStore(current.id, updateData)

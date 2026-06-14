@@ -45,12 +45,12 @@ import {
           <!-- Header -->
           <div class="text-center">
             <div
-              class="inline-flex items-center justify-center w-12 h-12 bg-primary/10 rounded-full mb-2"
+              class="inline-flex items-center justify-center w-12 h-12 bg-primary-600/10 rounded-full mb-2"
             >
               <app-icon
                 name="users"
                 [size]="24"
-                class="text-primary"
+                class="text-primary-600"
               ></app-icon>
             </div>
             <h3 class="text-base font-semibold text-gray-900">
@@ -184,14 +184,14 @@ import {
                 type="checkbox"
                 [checked]="dontShowIntroAgain()"
                 (change)="toggleDontShowAgain()"
-                class="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+                class="w-3.5 h-3.5 rounded border-gray-300 text-primary-600 focus:ring-primary-600"
               />
               <span class="text-[11px] text-gray-500">No volver a mostrar</span>
             </label>
             <div class="flex items-center gap-1.5">
               <div class="w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
                 <div
-                  class="h-full bg-primary rounded-full transition-all duration-100"
+                  class="h-full bg-primary-600 rounded-full transition-all duration-100"
                   [style.width.%]="introProgress()"
                 ></div>
               </div>
@@ -360,7 +360,7 @@ import {
                 <app-icon
                   name="loader"
                   [size]="36"
-                  class="text-primary animate-spin"
+                  class="text-primary-600 animate-spin"
                 ></app-icon>
                 <p class="text-sm text-gray-900 font-medium">
                   Analizando archivo...
@@ -662,7 +662,7 @@ import {
                 <app-icon
                   name="loader"
                   [size]="36"
-                  class="text-primary animate-spin"
+                  class="text-primary-600 animate-spin"
                 ></app-icon>
                 <p class="text-sm text-gray-900 font-medium">
                   Cargando empleados...

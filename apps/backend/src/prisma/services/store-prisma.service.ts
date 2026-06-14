@@ -72,6 +72,21 @@ export class StorePrismaService extends BasePrismaService {
     'subscription_payments',
     'subscription_events',
     'price_tiers',
+    // ===== Restaurant Suite Foundation (Fase A) =====
+    // Only the 8 models that carry a direct store_id column use direct-store
+    // scoping. The 3 child tables (recipe_items, kitchen_ticket_items,
+    // menu_section_items) have NO store_id column — they are scoped
+    // relationally via their parent (see `relational_scopes` below). Listing
+    // them here would inject `store_id` into their where/data and Prisma would
+    // reject it with "Unknown argument store_id".
+    'recipes',
+    'production_orders',
+    'tables',
+    'table_sessions',
+    'kitchen_tickets',
+    'menus',
+    'menu_sections',
+    'menu_availability_windows',
   ];
 
   private readonly fiscal_entity_scoped_models = [
@@ -246,6 +261,7 @@ export class StorePrismaService extends BasePrismaService {
       'employees', // Org scoped (multi-store via employee_stores junction)
       'employee_stores', // Store scoped (junction table)
       'payroll_runs', // Org scoped
+      'payroll_novelties', // Org scoped (organization_id + optional store_id)
       'payroll_settlements', // Fiscal entity scoped
       'layaway_items', // Relational
       'layaway_installments', // Relational
@@ -292,6 +308,10 @@ export class StorePrismaService extends BasePrismaService {
       'subscription_events', // Relational
       'product_price_tier_overrides', // Relational (via product.store_id)
       'product_price_tier_assignments', // Relational (via product.store_id)
+      // ===== Restaurant Suite child tables (no store_id, relational scope) =====
+      'recipe_items', // Relational (via recipe.store_id)
+      'kitchen_ticket_items', // Relational (via kitchen_ticket.store_id)
+      'menu_section_items', // Relational (via menu_section.store_id)
     ];
 
     for (const model of all_scoped_models) {
@@ -504,6 +524,12 @@ export class StorePrismaService extends BasePrismaService {
       product_price_tier_assignments: {
         product: { store_id: context.store_id },
       },
+      // ===== Restaurant Suite child tables (scoped via parent store_id) =====
+      recipe_items: { recipe: { store_id: context.store_id } },
+      kitchen_ticket_items: {
+        kitchen_ticket: { store_id: context.store_id },
+      },
+      menu_section_items: { menu_section: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -520,6 +546,7 @@ export class StorePrismaService extends BasePrismaService {
       'accounting_entries',
       'employees',
       'payroll_runs',
+      'payroll_novelties',
       'employee_advances',
       'bank_accounts',
       'fixed_asset_categories',
@@ -1185,6 +1212,10 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.payroll_settlements;
   }
 
+  get payroll_novelties() {
+    return this.scoped_client.payroll_novelties;
+  }
+
   get employee_advances() {
     return this.scoped_client.employee_advances;
   }
@@ -1517,6 +1548,51 @@ export class StorePrismaService extends BasePrismaService {
 
   get product_price_tier_assignments() {
     return this.scoped_client.product_price_tier_assignments;
+  }
+
+  // ===== Restaurant Suite Foundation (Fase A) =====
+  get recipes() {
+    return this.scoped_client.recipes;
+  }
+
+  get recipe_items() {
+    return this.scoped_client.recipe_items;
+  }
+
+  get production_orders() {
+    return this.scoped_client.production_orders;
+  }
+
+  get tables() {
+    return this.scoped_client.tables;
+  }
+
+  get table_sessions() {
+    return this.scoped_client.table_sessions;
+  }
+
+  get kitchen_tickets() {
+    return this.scoped_client.kitchen_tickets;
+  }
+
+  get kitchen_ticket_items() {
+    return this.scoped_client.kitchen_ticket_items;
+  }
+
+  get menus() {
+    return this.scoped_client.menus;
+  }
+
+  get menu_sections() {
+    return this.scoped_client.menu_sections;
+  }
+
+  get menu_section_items() {
+    return this.scoped_client.menu_section_items;
+  }
+
+  get menu_availability_windows() {
+    return this.scoped_client.menu_availability_windows;
   }
 
   // Global tables (no store scoping)

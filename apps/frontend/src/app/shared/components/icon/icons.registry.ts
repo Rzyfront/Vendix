@@ -249,6 +249,8 @@ import {
   FileSignature,
   ListChecks,
   LifeBuoy,
+  // Accounting shell icons
+  ListTree,
   // Subscription module icons
   AlertOctagon,
   PauseCircle,
@@ -261,6 +263,57 @@ import {
   FlipVertical,
   SwitchCamera,
   ZapOff,
+  // Restaurant-ops module icons
+  ChefHat,
+  LayoutList,
+  Split,
+  Square,
+  Table,
+  Utensils,
+  OctagonX,
+  // Lucide icons used as Lucide names (added by full audit):
+  ArrowDown,
+  ArrowUp,
+  Award,
+  CalendarPlus,
+  ChartLine,
+  CircleMinus,
+  CircleArrowRight,
+  Feather,
+  FileInput,
+  FileMinus,
+  FileOutput,
+  Flag,
+  Gauge,
+  GitMerge,
+  Hourglass,
+  PenLine,
+  Power,
+  Puzzle,
+  ShieldAlert,
+  SquareStack,
+  SquareMenu,
+  ThumbsDown,
+  ThumbsUp,
+  Timer,
+  UserMinus,
+  UserRound,
+  UtensilsCrossed,
+  Wifi,
+  // Alias-only imports (no canonical Lucide name for the legacy key):
+  // 'close'      -> X        (already imported)
+  // 'bank'       -> Building (already imported)
+  // 'dns'        -> Server   (already imported)
+  // 'sitemap'    -> Network  (new import below)
+  Network,
+  // 'toggle'     -> ToggleLeft (already imported)
+  // Additional imports for full-audit registrations:
+  ArrowRightLeft,
+  CircleDollarSign,
+  HandCoins,
+  Handshake,
+  Music2,
+  Navigation,
 } from 'lucide-angular';
 
 /**
@@ -587,6 +640,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'list-checks': ListChecks,
   'life-buoy': LifeBuoy,
 
+  // Accounting shell icons
+  'list-tree': ListTree,
+
   'alert-octagon': AlertOctagon,
   'pause-circle': PauseCircle,
 
@@ -600,6 +656,68 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'flip-vertical': FlipVertical,
   'switch-camera': SwitchCamera,
   'zap-off': ZapOff,
+
+  // Restaurant-ops module icons
+  'chef-hat': ChefHat,
+  'layout-list': LayoutList,
+  'split': Split,
+  'square': Square,
+  'table': Table,
+  'utensils': Utensils,
+  'x-octagon': OctagonX,
+
+  // Lucide icons used by app code (full-audit registration):
+  'arrow-down': ArrowDown,
+  'arrow-up': ArrowUp,
+  'award': Award,
+  'calendar-plus': CalendarPlus,
+  'circle-minus': CircleMinus,
+  'circle-arrow-right': CircleArrowRight,
+  'feather': Feather,
+  'file-input': FileInput,
+  'file-minus': FileMinus,
+  'file-output': FileOutput,
+  'flag': Flag,
+  'gauge': Gauge,
+  'git-merge': GitMerge,
+  'headphones': Headphones,
+  'hourglass': Hourglass,
+  'pen-line': PenLine,
+  'power': Power,
+  'puzzle': Puzzle,
+  'shield-alert': ShieldAlert,
+  'square-stack': SquareStack,
+  'square-menu': SquareMenu,
+  'thumbs-down': ThumbsDown,
+  'thumbs-up': ThumbsUp,
+  'timer': Timer,
+  'triangle-alert': TriangleAlert,
+  'user-minus': UserMinus,
+  'user-round': UserRound,
+  'utensils-crossed': UtensilsCrossed,
+  'wifi': Wifi,
+
+  // Aliases for renamed Lucide icons (legacy keys used by app code):
+  'line-chart': ChartLine,
+  'arrow-right-circle': CircleArrowRight,
+  'menu-square': SquareMenu,
+  'minus-circle': CircleMinus,
+
+  // Aliases for non-canonical legacy keys (mapped to semantically similar Lucide icons):
+  // ('close' is already aliased earlier in this object as `close: X`.)
+  'bank': Building,     // Lucide has no "bank"; use Building for generic institution
+  'dns': Server,        // Lucide has no "dns"; use Server for network/infra
+  'sitemap': Network,   // Lucide has no "sitemap"; use Network
+  'toggle': ToggleLeft, // Lucide has no plain "toggle"; use ToggleLeft
+
+  // Additional Lucide icons used by app code (full-audit registration):
+  'arrow-right-left': ArrowRightLeft,
+  'circle-alert': CircleAlert,
+  'circle-dollar-sign': CircleDollarSign,
+  'hand-coins': HandCoins,
+  'handshake': Handshake,
+  'music-2': Music2,
+  'navigation': Navigation,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

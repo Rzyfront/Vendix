@@ -392,6 +392,7 @@ export class AutoEntryService {
     // Map entry type from source_type
     const entry_type_map: Record<string, string> = {
       'invoice.validated': 'auto_invoice',
+      'credit_note.accepted': 'auto_return',
       'support_document.accepted': 'auto_purchase',
       'payment.received': 'auto_payment',
       'expense.approved': 'auto_expense',
@@ -399,6 +400,7 @@ export class AutoEntryService {
       'payroll.approved': 'auto_payroll',
       'payroll.paid': 'auto_payroll',
       'order.completed': 'auto_inventory',
+      'production.completed': 'auto_inventory',
       'refund.completed': 'auto_return',
       'purchase_order.received': 'auto_purchase',
       'purchase_order.payment': 'auto_purchase',
@@ -502,6 +504,7 @@ export class AutoEntryService {
 
       if (
         source_type === 'invoice.validated' ||
+        source_type === 'credit_note.accepted' ||
         source_type === 'support_document.accepted'
       ) {
         await tx.invoices.updateMany({
@@ -636,6 +639,76 @@ export class AutoEntryService {
       accounting_entity_id: data.accounting_entity_id,
       entry_date: new Date(),
       description: `Invoice validated #${data.invoice_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * Credit note acceptance (nota crédito DIAN): mirror reversal of the sale
+   * entry posted by `onInvoiceValidated`.
+   *
+   *   DR 4175 Devoluciones en Ventas (subtotal)
+   *   DR 2408/2436/2412 tax liability per typed `tax_breakdown`
+   *   CR 1305 Cuentas por Cobrar (total)
+   *
+   * Tax routing reuses `resolveTaxLines` with `side='debit'` so each fiscal
+   * type reverses its own liability account (`credit_note.accepted.<type>_payable`).
+   * Rows without a typed mapping (or breakdown-less events) fall back to the
+   * IVA key, matching the `tax_type null → iva` contract of buildTaxBreakdown.
+   */
+  async onCreditNoteAccepted(data: {
+    invoice_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    subtotal: number;
+    tax_amount: number;
+    tax_breakdown?: TaxBreakdownItem[];
+    total: number;
+    user_id?: number;
+  }) {
+    const lines: (AutoEntryLine | null)[] = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'credit_note.accepted.sales_returns',
+        'Devoluciones en Ventas (nota crédito)',
+        data.subtotal,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'credit_note.accepted.accounts_receivable',
+        'Cuentas por Cobrar (reversa nota crédito)',
+        0,
+        data.total,
+        data.store_id,
+      ),
+    ]);
+
+    lines.push(
+      ...(await this.resolveTaxLines({
+        organization_id: data.organization_id,
+        store_id: data.store_id,
+        prefix: 'credit_note.accepted',
+        suffix: 'payable',
+        side: 'debit',
+        total: data.tax_amount,
+        breakdown: data.tax_breakdown,
+        legacyKey: 'credit_note.accepted.iva_payable',
+        label: 'Impuesto por Pagar (reversa nota crédito)',
+      })),
+    );
+
+    return this.createAutoEntry({
+      source_type: 'credit_note.accepted',
+      source_id: data.invoice_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      entry_date: new Date(),
+      description: `Credit note accepted #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -1699,6 +1772,137 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Order completed #${data.order_id} - COGS`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * production.completed (Restaurant Suite Fase C)
+   *
+   * Sub-recipe batch production is a value transfer between inventory
+   * buckets: raw ingredients leave the warehouse, the finished batch
+   * enters it. The entry is balanced (DR 1435 finished goods =
+   * CR 1435 ingredients) using the FIFO-weighted unit_cost returned by
+   * the production service.
+   *
+   * Source uniqueness uses `(source_type='production.completed',
+   * source_id=production_order_id)` so re-deliveries of the same event
+   * never produce a second journal entry.
+   */
+  async onProductionCompleted(data: {
+    production_order_id: number;
+    organization_id: number;
+    store_id?: number;
+    product_name: string;
+    produced_qty: number;
+    produced_unit_cost: number;
+    total_cost: number;
+    user_id?: number;
+  }) {
+    const totalValue = Number(data.total_cost || 0);
+    if (totalValue <= 0) {
+      this.logger.log(
+        `Skipping production.completed auto-entry for order #${data.production_order_id}: total_cost is 0`,
+      );
+      return null;
+    }
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'production.completed.finished_goods',
+        `Productos terminados – ${data.product_name} (${data.produced_qty})`,
+        totalValue,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'production.completed.ingredient_consumed',
+        `Insumos consumidos – ${data.product_name} (${data.produced_qty})`,
+        0,
+        totalValue,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'production.completed',
+      source_id: data.production_order_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Producción completada #${data.production_order_id} – ${data.product_name}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * kitchen.fired (Restaurant Suite Fase D)
+   *
+   * Fire-to-kitchen event. Restaurant flow moves the COGS recognition
+   * from "at sale/payment" to "at fire" — the moment the kitchen
+   * receives the order. The journal entry mirrors `onOrderCompleted`
+   * (DR 6135 / CR 1435) but is fired by `KitchenFireService` with the
+   * REAL FIFO cost snapshot returned by the recipe explosion (i.e.
+   * after merma + yield + sub-recipe resolution).
+   *
+   * The amount and currency belong to the per-kitchen-fire batch, not
+   * the order, so we use the kitchen_ticket_id as `source_id`. Re-firing
+   * the same item is impossible: `KitchenFireService` flips
+   * `order_items.inventory_consumed_at_fire=true` and skips the item on
+   * subsequent calls, so this listener will only ever be invoked once
+   * per order_item.
+   *
+   * If `total_cost <= 0` (e.g. the product is a combo with no recipe),
+   * the auto-entry is skipped and a debug line is logged — the fire
+   * itself still succeeds.
+   */
+  async onKitchenFired(data: {
+    kitchen_ticket_id: number;
+    order_id: number;
+    organization_id: number;
+    store_id?: number;
+    total_cost: number;
+    consumed_line_count: number;
+    user_id?: number;
+  }) {
+    const totalValue = Number(data.total_cost || 0);
+    if (totalValue <= 0) {
+      this.logger.log(
+        `Skipping kitchen.fired auto-entry for ticket #${data.kitchen_ticket_id}: total_cost is 0 (no recipe or empty BOM)`,
+      );
+      return null;
+    }
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'kitchen.fired.cogs',
+        `COGS fire-to-kitchen (orden #${data.order_id}, ${data.consumed_line_count} líneas)`,
+        totalValue,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'kitchen.fired.inventory',
+        `Inventario consumido en cocina (orden #${data.order_id})`,
+        0,
+        totalValue,
+        data.store_id,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'kitchen.fired',
+      source_id: data.kitchen_ticket_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Fire-to-kitchen ticket #${data.kitchen_ticket_id} – orden #${data.order_id} (${data.consumed_line_count} líneas)`,
       lines,
       user_id: data.user_id,
     });
@@ -3214,6 +3418,134 @@ export class AutoEntryService {
       store_id: data.store_id,
       entry_date: new Date(),
       description: `Cancelación gasto #${data.expense_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  // ===== SAAS PLATFORM AUTO-ENTRIES (RNC-MF-3) =====
+  // These three handlers are dispatched by AccountingEventsListener for events
+  // emitted against the Vendix platform organization (VENDIX_ADMIN). They are
+  // intentionally decoupled from `PlatformOrgService` — the listener resolves
+  // the platform context and passes the resolved `organization_id` as
+  // `data.organization_id`. `entry_date` is sourced from the event payload so
+  // back-fills post the entry in the original fiscal period.
+
+  /**
+   * saas_refund: Vendix refunds a tenant — reverses SaaS revenue.
+   *   DR 4175 Devoluciones en Ventas (SaaS)
+   *   CR 1110 Bancos (reembolso)
+   */
+  async onSaasRefund(data: {
+    refund_event_id: number;
+    organization_id: number;
+    amount: number;
+    entry_date: Date;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_refund.revenue',
+        'Devoluciones en Ventas (SaaS refund)',
+        data.amount,
+        0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_refund.cash_bank',
+        'Bancos (reembolso SaaS)',
+        0,
+        data.amount,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'saas_refund',
+      source_id: data.refund_event_id,
+      organization_id: data.organization_id,
+      entry_date: data.entry_date,
+      description: `Reembolso SaaS #${data.refund_event_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * saas_bad_debt: Wompi declines a SaaS charge — provisions bad debt.
+   *   DR 5295 Gasto Incobrable SaaS
+   *   CR 1305 CxC SaaS (provisión)
+   */
+  async onSaasPaymentFailed(data: {
+    payment_id: number;
+    organization_id: number;
+    amount: number;
+    entry_date: Date;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_bad_debt.expense',
+        'Gasto Incobrable SaaS',
+        data.amount,
+        0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_bad_debt.receivable',
+        'CxC SaaS (provisión incobrable)',
+        0,
+        data.amount,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'saas_bad_debt',
+      source_id: data.payment_id,
+      organization_id: data.organization_id,
+      entry_date: data.entry_date,
+      description: `Provisión incobrable SaaS — Pago #${data.payment_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * saas_partner_payout: Vendix pays a partner commission batch — settles payable.
+   *   DR 2335 CxP Comisiones Partners
+   *   CR 1110 Bancos (pago)
+   */
+  async onPartnerPayoutPaid(data: {
+    batch_id: number;
+    organization_id: number;
+    amount: number;
+    entry_date: Date;
+    user_id?: number;
+  }) {
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_partner_payout.commissions_payable',
+        `CxP Comisiones Partners — Batch #${data.batch_id}`,
+        data.amount,
+        0,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'saas_partner_payout.cash_bank',
+        `Bancos (pago comisiones batch #${data.batch_id})`,
+        0,
+        data.amount,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'saas_partner_payout',
+      source_id: data.batch_id,
+      organization_id: data.organization_id,
+      entry_date: data.entry_date,
+      description: `Pago comisiones partner — Batch #${data.batch_id}`,
       lines,
       user_id: data.user_id,
     });

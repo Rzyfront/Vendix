@@ -1,18 +1,29 @@
 import { Component, inject, input, output } from '@angular/core';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { FormBuilder, FormGroup, Validators } from '@angular/forms';
+import { FormBuilder, FormGroup, Validators, ValidatorFn } from '@angular/forms';
 
 import {
   ModalComponent,
   InputComponent,
   ButtonComponent,
+  MultiSelectorComponent,
+  MultiSelectorOption,
 } from '../../../../../shared/components/index';
+import {
+  STORE_INDUSTRIES,
+  StoreIndustry,
+} from '../../../../../shared/constants/industry-modules.constant';
 import {
   CreateStoreDto,
   StoreState,
   StoreType,
 } from '../interfaces/store.interface';
+
+const nonEmptyArray: ValidatorFn = (control) => {
+  const v = control.value;
+  return Array.isArray(v) && v.length > 0 ? null : { required: true };
+};
 
 @Component({
   selector: 'app-store-create-modal',
@@ -22,7 +33,8 @@ import {
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent
+    ButtonComponent,
+    MultiSelectorComponent,
 ],
   template: `
     <app-modal
@@ -125,6 +137,14 @@ import {
               </select>
             </div>
           </div>
+
+          <app-multi-selector
+            formControlName="industries"
+            label="Tipos de Negocio"
+            [options]="industryOptions"
+            [required]="true"
+            helpText="Si tu negocio combina varias industrias, marca todas las que apliquen."
+          ></app-multi-selector>
 
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
@@ -306,6 +326,7 @@ export class StoreCreateModalComponent {
       country: [''],
       organization_id: [null, [Validators.required, Validators.min(1)]],
       store_type: [StoreType.PHYSICAL, [Validators.required]],
+      industries: [['retail'], { validators: [nonEmptyArray] }],
       is_active: [true, [Validators.required]],
       domain: [''],
       timezone: [''],
@@ -314,6 +335,24 @@ export class StoreCreateModalComponent {
       color_primary: [''],
       color_secondary: [''],
     });
+  }
+
+  readonly industryOptions: MultiSelectorOption[] = STORE_INDUSTRIES.map((id) => ({
+    value: id,
+    label: this.getIndustryLabel(id),
+  }));
+
+  private getIndustryLabel(id: StoreIndustry): string {
+    switch (id) {
+      case 'retail':
+        return 'Retail';
+      case 'restaurant':
+        return 'Restaurante';
+      case 'manufacturing':
+        return 'Manufactura';
+      case 'service':
+        return 'Servicios';
+    }
   }
 
   onSubmit(): void {
@@ -338,6 +377,9 @@ export class StoreCreateModalComponent {
       country: formData.country || undefined,
       organization_id: formData.organization_id,
       store_type: formData.store_type as StoreType,
+      industries: Array.isArray(formData.industries) && formData.industries.length > 0
+        ? (formData.industries as StoreIndustry[])
+        : (['retail'] as StoreIndustry[]),
       is_active: formData.is_active as boolean,
       domain: formData.domain || undefined,
       timezone: formData.timezone || undefined,
@@ -369,6 +411,7 @@ export class StoreCreateModalComponent {
       country: '',
       organization_id: null,
       store_type: StoreType.PHYSICAL,
+      industries: ['retail'],
       is_active: true,
       domain: '',
       timezone: '',

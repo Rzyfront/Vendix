@@ -71,6 +71,12 @@ export interface Product {
   has_variants: boolean;
   product_variants: PosProductVariant[];
   pricing_type?: 'unit' | 'weight';
+  /**
+   * Product type snapshot. `prepared` flags a dish/recipe-backed product whose
+   * inventory is consumed at fire-to-kitchen (restaurant suite). The POS uses
+   * this to decide whether the "Enviar a cocina" action applies to a cart line.
+   */
+  product_type?: string;
   // Multi-tarifa flags (Phase 5). Packaging (units-per-package) is no longer a
   // product field — it lives on the price tier / per-product tier override and
   // is resolved per cart line via PriceResolverService.resolveWithTier.
@@ -152,6 +158,13 @@ export interface SearchFilters {
   pos_optimized?: boolean;
   barcode?: string;
   include_stock?: boolean;
+  /**
+   * Restaurant Suite (Fase H) — when true, the listing is restricted
+   * to products with `is_sellable=true`, hiding pure ingredients
+   * from the POS product picker. The backend enforces this in the
+   * scoped products query; the POS sends it explicitly for clarity.
+   */
+  is_sellable?: boolean;
 }
 
 export interface SearchResult {
@@ -308,6 +321,10 @@ export class PosProductService {
 
     if (filters.include_stock) {
       query.include_stock = 'true';
+    }
+
+    if (filters.is_sellable !== undefined) {
+      query.is_sellable = filters.is_sellable ? 'true' : 'false';
     }
 
     const params = this.buildParams(query);

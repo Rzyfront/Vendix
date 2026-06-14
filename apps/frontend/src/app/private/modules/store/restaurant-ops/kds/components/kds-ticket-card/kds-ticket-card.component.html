@@ -1,0 +1,143 @@
+<div
+  class="kds-card"
+  [class.kds-card--urgent]="isUrgent() && !isTerminal(ticket().status)"
+  [class.kds-card--delivered]="ticket().status === 'delivered'"
+  [class.kds-card--cancelled]="ticket().status === 'cancelled'"
+  [class.kds-card--mutating]="isMutating()"
+>
+  <!-- Header -->
+  <header class="kds-card__header">
+    <div class="kds-card__id">
+      <span class="kds-card__hash">#</span>
+      <span class="kds-card__number">{{ ticket().id }}</span>
+    </div>
+    <div class="kds-card__meta">
+      @if (ticket().table_id) {
+        <span class="kds-card__table" title="Mesa">
+          <app-icon name="square" [size]="12" /> Mesa {{ ticket().table_id }}
+        </span>
+      }
+      <span class="kds-card__order" title="Orden">
+        <app-icon name="file-text" [size]="12" /> Orden #{{ ticket().order_id }}
+      </span>
+    </div>
+  </header>
+
+  <!-- Status + elapsed -->
+  <div class="kds-card__row">
+    <app-badge
+      [variant]="statusBadgeVariant()"
+      size="xs"
+      [class.kds-card__status--cooking]="isInPreparation()"
+    >
+      @if (isInPreparation()) {
+        <app-icon name="flame" [size]="11" />
+      }
+      {{ statusLabel() }}
+    </app-badge>
+    <span
+      class="kds-card__elapsed"
+      [class.kds-card__elapsed--urgent]="isUrgent()"
+    >
+      <app-icon name="clock" [size]="12" /> {{ elapsedLabel() }}
+    </span>
+  </div>
+
+  <!-- In-flight indicator while the parent processes a state change. -->
+  @if (isMutating()) {
+    <div class="kds-card__updating" role="status" aria-live="polite">
+      <app-icon name="loader" [size]="12" class="animate-spin" />
+      <span>Actualizando…</span>
+    </div>
+  }
+
+  <!-- Items -->
+  <ul class="kds-card__items">
+    @for (item of ticket().items; track trackByItemId($index, item)) {
+      <li class="kds-card__item">
+        <div class="kds-card__item-line">
+          <span class="kds-card__qty">×{{ item.quantity }}</span>
+          <span class="kds-card__name">
+            {{ item.product?.name || ('Producto #' + item.product_id) }}
+          </span>
+        </div>
+        @if (item.notes) {
+          <p class="kds-card__notes">{{ item.notes }}</p>
+        }
+      </li>
+    }
+  </ul>
+
+  <!-- Actions -->
+  <footer class="kds-card__actions">
+    @if (ticket().status === 'pending') {
+      <app-button
+        variant="primary"
+        size="sm"
+        (clicked)="onStart()"
+        [disabled]="isMutating()"
+        [loading]="isMutating()"
+      >
+        <app-icon slot="icon" name="play" [size]="14" />
+        Iniciar
+      </app-button>
+      <app-button
+        variant="outline"
+        size="sm"
+        (clicked)="onCancel()"
+        [disabled]="isMutating()"
+      >
+        <app-icon slot="icon" name="x" [size]="14" />
+        Cancelar
+      </app-button>
+    } @else if (ticket().status === 'in_preparation') {
+      <app-button
+        variant="success"
+        size="sm"
+        (clicked)="onReady()"
+        [disabled]="isMutating()"
+        [loading]="isMutating()"
+      >
+        <app-icon slot="icon" name="check" [size]="14" />
+        Listo
+      </app-button>
+      <app-button
+        variant="outline"
+        size="sm"
+        (clicked)="onCancel()"
+        [disabled]="isMutating()"
+      >
+        <app-icon slot="icon" name="x" [size]="14" />
+        Cancelar
+      </app-button>
+    } @else if (ticket().status === 'ready') {
+      <app-button
+        variant="primary"
+        size="sm"
+        (clicked)="onDeliver()"
+        [disabled]="isMutating()"
+        [loading]="isMutating()"
+      >
+        <app-icon slot="icon" name="check-circle" [size]="14" />
+        Entregar
+      </app-button>
+      <app-button
+        variant="outline"
+        size="sm"
+        (clicked)="onCancel()"
+        [disabled]="isMutating()"
+      >
+        <app-icon slot="icon" name="x" [size]="14" />
+        Cancelar
+      </app-button>
+    } @else if (showDelivered() && (ticket().status === 'delivered' || ticket().status === 'cancelled')) {
+      <span class="kds-card__closed">
+        <app-icon
+          [name]="ticket().status === 'delivered' ? 'check-circle' : 'x-circle'"
+          [size]="16"
+        />
+        {{ statusLabel() }}
+      </span>
+    }
+  </footer>
+</div>

@@ -76,13 +76,13 @@ import {
             <div class="flex items-center gap-4 pt-6">
               <label class="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" formControlName="is_active"
-                       class="rounded border-gray-300 text-primary focus:ring-primary" />
+                       class="rounded border-gray-300 text-primary-600 focus:ring-primary-600" />
                 <span class="text-sm text-text-primary">Activo</span>
               </label>
 
               <label class="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" formControlName="accepts_entries"
-                       class="rounded border-gray-300 text-primary focus:ring-primary" />
+                       class="rounded border-gray-300 text-primary-600 focus:ring-primary-600" />
                 <span class="text-sm text-text-primary">Acepta Asientos</span>
               </label>
             </div>

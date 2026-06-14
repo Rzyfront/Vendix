@@ -81,3 +81,79 @@ export interface WithholdingPreviewResult {
   lines: WithholdingLine[];
   total_withholding: number;
 }
+
+// ── Calculations audit (`GET /store/withholding-tax/calculations`) ──
+
+/** One persisted withholding calculation row from the audit endpoint. */
+export interface WithholdingCalculation {
+  id: number;
+  invoice_id?: number | null;
+  supplier_id?: number | null;
+  customer_id?: number | null;
+  concept_id: number;
+  role: WithholdingRole;
+  withholding_type?: WithholdingType | null;
+  /** Prisma Decimal serialized as string — convert with Number() for math. */
+  base_amount: string | number;
+  withholding_rate: string | number;
+  withholding_amount: string | number;
+  uvt_value_used?: string | number;
+  year: number;
+  created_at?: string | null;
+  concept?: { name: string; code: string } | null;
+  supplier?: { id: number; name: string; tax_id?: string | null } | null;
+  customer?: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    email?: string;
+  } | null;
+  invoice?: { id: number; invoice_number: string } | null;
+}
+
+/** Query params for the calculations audit list. */
+export interface WithholdingCalculationsQuery {
+  page?: number;
+  limit?: number;
+  year?: number;
+  month?: number;
+  supplier_id?: number;
+  concept_id?: number;
+  role?: WithholdingRole;
+}
+
+export interface PaginationMeta {
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPreviousPage: boolean;
+}
+
+export interface PaginatedApiResponse<T> {
+  success: boolean;
+  message: string;
+  data: T[];
+  meta: PaginationMeta;
+}
+
+// ── Certificates (`GET /store/withholding-tax/certificates/:id`) ──
+
+export interface WithholdingCertificateRow {
+  month: number;
+  concept: string;
+  base: number;
+  rate: number;
+  amount: number;
+}
+
+/** Shape returned by the backend certificate generator. */
+export interface WithholdingCertificateData {
+  supplier_name: string;
+  supplier_nit: string;
+  year: number;
+  total_base: number;
+  total_withheld: number;
+  monthly_breakdown: WithholdingCertificateRow[];
+}

@@ -16,9 +16,11 @@ export async function seedWithholdingTax(
   console.log('🌱 Seeding withholding tax data...');
 
   // ===== UVT Values =====
+  // UVT oficial DIAN: 2025 = $49.799 (Resolución DIAN 000193 de dic-2024),
+  // 2026 = $52.374 (Resolución DIAN de dic-2025).
   const uvt_values = [
-    { year: 2025, value_cop: 47065 },
-    { year: 2026, value_cop: 49799 },
+    { year: 2025, value_cop: 49799 },
+    { year: 2026, value_cop: 52374 },
   ];
 
   for (const uvt of uvt_values) {
@@ -50,7 +52,16 @@ export async function seedWithholdingTax(
   }
 
   // ===== Withholding Concepts =====
-  const concepts = [
+  const concepts: Array<{
+    code: string;
+    name: string;
+    rate: number;
+    min_uvt_threshold: number;
+    applies_to: 'purchase' | 'service' | 'rent' | 'fees' | 'other';
+    supplier_type_filter: 'gran_contribuyente' | 'regimen_simple' | 'persona_natural' | 'any';
+    withholding_type?: 'retefuente' | 'reteiva' | 'reteica';
+    account_code?: string;
+  }> = [
     {
       code: 'RTE_COMPRAS',
       name: 'Retención en Compras',
@@ -107,6 +118,21 @@ export async function seedWithholdingTax(
       applies_to: 'other' as const,
       supplier_type_filter: 'any' as const,
     },
+    {
+      // Concepto laboral: retefuente sobre salarios (art. 383 ET).
+      // Base mínima 95 UVT mensuales; la tarifa es progresiva por tabla UVT,
+      // pero el motor de nómina actual usa un 1% simplificado para altos
+      // ingresos (payroll-calculation.service.ts), así que el concepto refleja
+      // esa misma tarifa para mantener coherencia rate*base = retención.
+      code: 'RTE_SALARIOS',
+      name: 'Salarios y pagos laborales',
+      rate: 0.01,
+      min_uvt_threshold: 95,
+      applies_to: 'other' as const,
+      supplier_type_filter: 'any' as const,
+      withholding_type: 'retefuente' as const,
+      account_code: '236505',
+    },
   ];
 
   for (const concept of concepts) {
@@ -125,6 +151,10 @@ export async function seedWithholdingTax(
       min_uvt_threshold: concept.min_uvt_threshold,
       applies_to: concept.applies_to,
       supplier_type_filter: concept.supplier_type_filter,
+      ...(concept.withholding_type
+        ? { withholding_type: concept.withholding_type }
+        : {}),
+      ...(concept.account_code ? { account_code: concept.account_code } : {}),
       is_active: true,
     };
 

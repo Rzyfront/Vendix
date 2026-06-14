@@ -16,6 +16,7 @@ import {
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { AllowCrossDomain } from '@common/decorators/allow-cross-domain.decorator';
 import { ResponseService } from '@common/responses/response.service';
 
 @Controller('organization/organizations')
@@ -59,6 +60,10 @@ export class OrganizationsController {
   }
 
   @Patch('upgrade-account-type')
+  // Bootstrap cross-domain: el owner aún es STORE_ADMIN al invocarlo (sube a
+  // ORG_ADMIN como resultado). Salta DomainScopeGuard; PermissionsGuard + la
+  // validación de owner en el servicio siguen protegiendo el endpoint.
+  @AllowCrossDomain()
   @Permissions('organization:organizations:update')
   async upgradeAccountType(@Body() dto: UpgradeAccountTypeDto) {
     const result = await this.organizationsService.upgradeAccountType(dto);

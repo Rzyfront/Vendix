@@ -21,6 +21,10 @@ import { S3Module } from '../../../common/services/s3.module';
     NotificationsEventsListener,
     NotificationSoundsCatalogService,
   ],
-  exports: [NotificationsService, NotificationsPushService],
+  exports: [
+    NotificationsService,
+    NotificationsSseService,
+    NotificationsPushService,
+  ],
 })
 export class NotificationsModule {}

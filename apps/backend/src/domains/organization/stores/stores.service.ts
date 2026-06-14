@@ -23,7 +23,7 @@ import { BrandingGeneratorHelper } from '../../../common/helpers/branding-genera
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StoreSettings } from '../../store/settings/interfaces/store-settings.interface';
-import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
+import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 
 @Injectable()

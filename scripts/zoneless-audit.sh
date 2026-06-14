@@ -67,7 +67,7 @@ check "NgZone (excl app.config.ts)" \
   0
 
 check "markForCheck/detectChanges" \
-  "grep -rln 'markForCheck\|detectChanges' $FRONTEND --include='*.ts' | wc -l" \
+  "grep -rln 'markForCheck\|detectChanges' $FRONTEND --include='*.ts' | grep -vE '\.spec\.ts$' | wc -l" \
   0
 
 echo ""

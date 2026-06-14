@@ -155,8 +155,11 @@ export class NotificationsDropdownComponent {
           ? `/admin/customers/${d.customer_id}`
           : '/admin/customers/all';
       case 'low_stock':
+        // Navigate to the consolidated stock-by-product view. The user
+        // sees the product's stock across all warehouses — useful to
+        // know that 'Camisa Polo está baja en Bodega X pero tiene 25 en Sur'.
         return d?.product_id
-          ? `/admin/products/edit/${d.product_id}`
+          ? `/admin/inventory/stock/${d.product_id}`
           : '/admin/products';
       case 'new_review':
         return d?.review_id

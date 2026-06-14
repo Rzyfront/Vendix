@@ -9,6 +9,7 @@ import {
   signal,
   DestroyRef,
   computed,
+  effect,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -16,6 +17,7 @@ import { FormsModule } from '@angular/forms';
 import {
   ReactiveFormsModule,
   FormBuilder,
+  FormControl,
   FormGroup,
   Validators,
 } from '@angular/forms';
@@ -25,6 +27,7 @@ import {
   TextareaComponent,
   MultiSelectorComponent,
   MultiSelectorOption,
+  PanelUiModulesEditorComponent,
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User } from '../interfaces/user.interface';
@@ -36,6 +39,25 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
 import { Role } from '../../roles/interfaces/role.interface';
 import { StoreListItem } from '../../stores/interfaces/store.interface';
 
+type PanelUiAppType = 'STORE_ADMIN' | 'ORG_ADMIN' | 'STORE_ECOMMERCE' | 'VENDIX_LANDING';
+
+/** Default `panel_ui` for `STORE_ECOMMERCE` — there is no APP_MODULES
+ *  catalog for it yet, so the consumer holds the schema. `VENDIX_LANDING`
+ *  intentionally has no defaults (it is empty `{}` when no keys are set). */
+const DEFAULT_STORE_ECOMMERCE_PANEL_UI: Record<string, boolean> = {
+  profile: true,
+  history: true,
+  dashboard: true,
+  favorites: true,
+  orders: true,
+  settings: true,
+};
+
+/** App types the shared editor can render. Non-catalog types
+ *  (`STORE_ECOMMERCE`, `VENDIX_LANDING`) fall through to the JSON
+ *  textarea in the "Avanzado (JSON)" block. */
+const CATALOG_APP_TYPES: PanelUiAppType[] = ['STORE_ADMIN', 'ORG_ADMIN'];
+
 @Component({
   selector: 'app-user-config-modal',
   standalone: true,
@@ -46,6 +68,7 @@ import { StoreListItem } from '../../stores/interfaces/store.interface';
     ModalComponent,
     TextareaComponent,
     MultiSelectorComponent,
+    PanelUiModulesEditorComponent,
   ],
   template: `
     <app-modal
@@ -167,19 +190,80 @@ import { StoreListItem } from '../../stores/interfaces/store.interface';
               }
               @case ('panel_ui') {
                 <div class="space-y-4">
-                  <div class="space-y-2">
-                    <app-textarea
-                      styleVariant="modern"
-                      formControlName="panelUiInput"
-                      [label]="'Configuración JSON'"
-                      [rows]="10"
-                      placeholder='{"dashboard": true, "settings": false}'
-                      customClass="font-mono"
-                    ></app-textarea>
-                    @if (jsonError()) {
-                      <p class="text-xs text-red-500">{{ jsonError() }}</p>
+                  <p class="text-xs text-[var(--color-text-secondary)]">
+                    Configura la visibilidad de módulos para cada aplicación.
+                    Para apps con catálogo, usa el árbol; para apps sin
+                    catálogo edita el JSON.
+                  </p>
+
+                  <!-- Sub-tabs por app_type -->
+                  <div
+                    class="flex gap-1 p-1 bg-surface rounded-lg border border-border"
+                  >
+                    @for (tab of panelUiTabs; track tab.id) {
+                      <button
+                        type="button"
+                        class="flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors"
+                        [class]="
+                          activePanelUiTab() === tab.id
+                            ? 'bg-primary text-white shadow-sm'
+                            : 'text-text-secondary hover:text-text-primary hover:bg-surface'
+                        "
+                        (click)="activePanelUiTab.set(tab.id)"
+                      >
+                        {{ tab.label }}
+                      </button>
                     }
                   </div>
+
+                  <!-- Catalog app_types: shared editor -->
+                  @if (isCatalogAppType(activePanelUiTab())) {
+                    <app-panel-ui-modules-editor
+                      [appType]="activePanelUiTab()"
+                      [value]="editorValue()"
+                      [hiddenByIndustry]="[]"
+                      [hiddenByStore]="[]"
+                      [searchable]="true"
+                      [parentSync]="true"
+                      (valueChange)="onEditorValueChange($event)"
+                    ></app-panel-ui-modules-editor>
+                  }
+
+                  <!-- Non-catalog app_types: JSON textarea (Avanzado) -->
+                  @if (!isCatalogAppType(activePanelUiTab())) {
+                    <div class="space-y-2">
+                      @if (activePanelUiTab() === 'STORE_ECOMMERCE') {
+                        <app-textarea
+                          styleVariant="modern"
+                          [formControl]="ecommerceJsonInput"
+                          [label]="'Configuración JSON — STORE_ECOMMERCE'"
+                          [rows]="10"
+                          [placeholder]="'{}'"
+                          customClass="font-mono"
+                        ></app-textarea>
+                        @if (jsonErrors()['STORE_ECOMMERCE']) {
+                          <p class="text-xs text-red-500">
+                            {{ jsonErrors()['STORE_ECOMMERCE'] }}
+                          </p>
+                        }
+                      }
+                      @if (activePanelUiTab() === 'VENDIX_LANDING') {
+                        <app-textarea
+                          styleVariant="modern"
+                          [formControl]="landingJsonInput"
+                          [label]="'Configuración JSON — VENDIX_LANDING'"
+                          [rows]="10"
+                          [placeholder]="'{}'"
+                          customClass="font-mono"
+                        ></app-textarea>
+                        @if (jsonErrors()['VENDIX_LANDING']) {
+                          <p class="text-xs text-red-500">
+                            {{ jsonErrors()['VENDIX_LANDING'] }}
+                          </p>
+                        }
+                      }
+                    </div>
+                  }
                 </div>
               }
             }
@@ -202,7 +286,7 @@ import { StoreListItem } from '../../stores/interfaces/store.interface';
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="configForm.invalid || isSaving() || !!jsonError()"
+          [disabled]="configForm.invalid || isSaving() || hasJsonError()"
           [loading]="isSaving()"
           size="sm"
         >
@@ -238,7 +322,6 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
   readonly isLoadingRoles = signal(false);
   readonly isLoadingStores = signal(false);
   activeTab: 'general' | 'roles' | 'stores' | 'panel_ui' = 'general';
-  readonly jsonError = signal<string | null>(null);
 
   readonly roles = signal<Role[]>([]);
   readonly stores = signal<StoreListItem[]>([]);
@@ -259,25 +342,91 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
     })),
   );
 
+  /** Form controls for the two non-catalog app_types' JSON textareas. */
+  readonly ecommerceJsonInput = new FormControl<string>(
+    { value: '{}', disabled: false },
+    { nonNullable: true },
+  );
+  readonly landingJsonInput = new FormControl<string>(
+    { value: '{}', disabled: false },
+    { nonNullable: true },
+  );
+
+  /** Full nested `panel_ui` map: per-app_type Record. Populated on
+   *  load with the resolved server config (deep-merged with defaults
+   *  for non-catalog app_types); updated on every editor toggle and
+   *  JSON edit. Written as-is on save. */
+  readonly localPanelUi = signal<Record<string, Record<string, boolean>>>({});
+
+  /** Sub-tab inside the `panel_ui` section. */
+  readonly activePanelUiTab = signal<PanelUiAppType>('STORE_ADMIN');
+
+  readonly panelUiTabs: { id: PanelUiAppType; label: string }[] = [
+    { id: 'STORE_ADMIN', label: 'Tienda' },
+    { id: 'ORG_ADMIN', label: 'Organización' },
+    { id: 'STORE_ECOMMERCE', label: 'E-commerce' },
+    { id: 'VENDIX_LANDING', label: 'Landing' },
+  ];
+
+  /** Per-app-type JSON strings + parse errors. */
+  readonly jsonStrings = signal<Record<PanelUiAppType, string>>({
+    STORE_ADMIN: '{}',
+    ORG_ADMIN: '{}',
+    STORE_ECOMMERCE: '{}',
+    VENDIX_LANDING: '{}',
+  });
+  readonly jsonErrors = signal<Record<PanelUiAppType, string | null>>({
+    STORE_ADMIN: null,
+    ORG_ADMIN: null,
+    STORE_ECOMMERCE: null,
+    VENDIX_LANDING: null,
+  });
+
+  /** Resolved boolean map for the active catalog tab, fed to the shared
+   *  editor. Mirrors the store/user consumers (absent / `true` = allowed). */
+  readonly editorValue = computed<Record<string, boolean>>(
+    () => this.localPanelUi()[this.activePanelUiTab()] ?? {},
+  );
+
+  readonly hasJsonError = computed<boolean>(() => {
+    const errs = this.jsonErrors();
+    return Object.values(errs).some((e) => !!e);
+  });
+
   constructor() {
     this.configForm = this.fb.group({
       app: ['VENDIX_LANDING'],
       roles: [[] as number[]],
       store_ids: [[] as number[]],
-      panelUiInput: ['{}'],
     });
 
-    this.configForm
-      .get('panelUiInput')
-      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((value) => {
-        try {
-          JSON.parse(value);
-          this.jsonError.set(null);
-        } catch {
-          this.jsonError.set('Formato JSON inválido');
-        }
-      });
+    // Wire the JSON textareas: when the user edits, parse and write
+    // the result back into `localPanelUi[STORE_ECOMMERCE]` /
+    // `localPanelUi[VENDIX_LANDING]`. Save is blocked while either
+    // textarea is in error (`hasJsonError`).
+    this.ecommerceJsonInput.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value: string | null) =>
+        this.onAdvancedJsonChange(value ?? '{}', 'STORE_ECOMMERCE'),
+      );
+    this.landingJsonInput.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value: string | null) =>
+        this.onAdvancedJsonChange(value ?? '{}', 'VENDIX_LANDING'),
+      );
+
+    // When the active sub-tab changes, refresh the form control's
+    // value from the persisted JSON string so the textarea reflects
+    // any external state (e.g. loadConfiguration).
+    effect(() => {
+      const tab = this.activePanelUiTab();
+      const next = this.jsonStrings()[tab] || '{}';
+      if (tab === 'STORE_ECOMMERCE' && this.ecommerceJsonInput.value !== next) {
+        this.ecommerceJsonInput.setValue(next, { emitEvent: false });
+      } else if (tab === 'VENDIX_LANDING' && this.landingJsonInput.value !== next) {
+        this.landingJsonInput.setValue(next, { emitEvent: false });
+      }
+    });
   }
 
   ngOnInit(): void {
@@ -288,6 +437,47 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
   ngOnChanges(): void {
     if (this.isOpen() && this.user()) {
       this.loadConfiguration();
+    }
+  }
+
+  isCatalogAppType(appType: string): boolean {
+    return CATALOG_APP_TYPES.includes(appType as PanelUiAppType);
+  }
+
+  /** Patch the active catalog app_type's map with the editor's emission. */
+  onEditorValueChange(next: Record<string, boolean>): void {
+    const appType = this.activePanelUiTab();
+    this.localPanelUi.update((prev) => ({
+      ...prev,
+      [appType]: { ...next },
+    }));
+  }
+
+  /** Parse + validate the JSON for the given non-catalog app_type and
+   *  write the result back into `localPanelUi`. */
+  onAdvancedJsonChange(value: string, appType: PanelUiAppType): void {
+    this.jsonStrings.update((prev) => ({ ...prev, [appType]: value }));
+    try {
+      const parsed = value.trim() === '' ? {} : JSON.parse(value);
+      if (
+        parsed === null ||
+        typeof parsed !== 'object' ||
+        Array.isArray(parsed)
+      ) {
+        throw new Error('El JSON debe ser un objeto plano');
+      }
+      // Coerce to `Record<string, boolean>` (drop non-boolean entries).
+      const cleaned: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'boolean') cleaned[k] = v;
+      }
+      this.jsonErrors.update((prev) => ({ ...prev, [appType]: null }));
+      this.localPanelUi.update((prev) => ({ ...prev, [appType]: cleaned }));
+    } catch (err) {
+      this.jsonErrors.update((prev) => ({
+        ...prev,
+        [appType]: err instanceof Error ? err.message : 'Formato JSON inválido',
+      }));
     }
   }
 
@@ -329,110 +519,21 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
     const user = this.user();
     if (!user) return;
 
-    const defaultPanelUi = {
-      ORG_ADMIN: {
-        dashboard: true,
-        stores: true,
-        users: true,
-        domains: true,
-        audit: true,
-        settings: true,
-        accounting: true,
-        payroll: true,
-      },
-      STORE_ADMIN: {
-        dashboard: true,
-        pos: true,
-        products: true,
-        ecommerce: true,
-        orders: true,
-        orders_sales: true,
-        orders_purchase_orders: false,
-        orders_quotations: true,
-        orders_layaway: true,
-        orders_reservations: true,
-        orders_dispatch_notes: true,
-        inventory: true,
-        inventory_pop: true,
-        inventory_adjustments: false,
-        inventory_locations: false,
-        inventory_suppliers: false,
-        inventory_movements: false,
-        inventory_transfers: false,
-        customers: true,
-        customers_all: true,
-        customers_reviews: false,
-        customers_data_collection: true,
-        marketing: true,
-        marketing_promotions: false,
-        marketing_coupons: false,
-        marketing_anuncios: false,
-        marketing_social_sales: false,
-        analytics: true,
-        analytics_overview: true,
-        analytics_sales: true,
-        analytics_purchases: false,
-        analytics_reviews: false,
-        analytics_inventory: true,
-        analytics_products: true,
-        analytics_customers: true,
-        analytics_financial: true,
-        reports: true,
-        expenses: true,
-        expenses_overview: true,
-        expenses_all: true,
-        expenses_create: true,
-        expenses_categories: true,
-        expenses_reports: true,
-        invoicing: true,
-        accounting: true,
-        accounting_journal_entries: true,
-        accounting_fiscal_periods: true,
-        accounting_chart_of_accounts: true,
-        accounting_account_mappings: true,
-        accounting_flows_dashboard: true,
-        cartera_dashboard: true,
-        cartera_receivables: true,
-        cartera_payables: true,
-        cartera_aging: true,
-        accounting_withholding_tax: true,
-        accounting_exogenous: true,
-        taxes_ica: true,
-        payroll: true,
-        payroll_employees: true,
-        payroll_runs: true,
-        payroll_settlements: true,
-        payroll_advances: true,
-        payroll_settings: true,
-        help: true,
-        help_support: true,
-        help_center: true,
-        settings: true,
-        settings_general: true,
-        settings_payments: true,
-        settings_appearance: false,
-        settings_security: true,
-        settings_domains: false,
-        settings_users: true,
-        settings_roles: true,
-        settings_cash_registers: false,
-        settings_habeas_data: true,
-      },
-      STORE_ECOMMERCE: {
-        profile: true,
-        history: true,
-        dashboard: true,
-        favorites: true,
-        orders: true,
-        settings: true,
-      },
+    // Defaults for the catalog app_types come from the editor (absent
+    // = true, the editor treats empty `value` as fully-enabled). For
+    // non-catalog app_types the defaults are explicit because there is
+    // no APP_MODULES entry to fall back on.
+    const defaults: Record<string, Record<string, boolean>> = {
+      STORE_ADMIN: {},
+      ORG_ADMIN: {},
+      STORE_ECOMMERCE: { ...DEFAULT_STORE_ECOMMERCE_PANEL_UI },
+      VENDIX_LANDING: {},
     };
 
     this.configForm.reset({
       app: 'VENDIX_LANDING',
       roles: [],
       store_ids: [],
-      panelUiInput: JSON.stringify(defaultPanelUi, null, 2),
     });
 
     this.usersService
@@ -440,8 +541,8 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (config: any) => {
-          const mergedPanelUi = {
-            ...defaultPanelUi,
+          const mergedPanelUi: Record<string, Record<string, boolean>> = {
+            ...defaults,
             ...(config.panel_ui || {}),
           };
 
@@ -449,7 +550,28 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
             app: config.app || 'VENDIX_LANDING',
             roles: config.roles || [],
             store_ids: config.store_ids || [],
-            panelUiInput: JSON.stringify(mergedPanelUi, null, 2),
+          });
+
+          this.localPanelUi.set(mergedPanelUi);
+          this.jsonStrings.set({
+            STORE_ADMIN: JSON.stringify(mergedPanelUi['STORE_ADMIN'] || {}, null, 2),
+            ORG_ADMIN: JSON.stringify(mergedPanelUi['ORG_ADMIN'] || {}, null, 2),
+            STORE_ECOMMERCE: JSON.stringify(
+              mergedPanelUi['STORE_ECOMMERCE'] || {},
+              null,
+              2,
+            ),
+            VENDIX_LANDING: JSON.stringify(
+              mergedPanelUi['VENDIX_LANDING'] || {},
+              null,
+              2,
+            ),
+          });
+          this.jsonErrors.set({
+            STORE_ADMIN: null,
+            ORG_ADMIN: null,
+            STORE_ECOMMERCE: null,
+            VENDIX_LANDING: null,
           });
         },
         error: (err: unknown) => {
@@ -467,7 +589,7 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
 
   onSubmit(): void {
     const user = this.user();
-    if (this.configForm.invalid || this.jsonError() || !user) return;
+    if (this.configForm.invalid || this.hasJsonError() || !user) return;
 
     this.isSaving.set(true);
     const formVal = this.configForm.value;
@@ -476,7 +598,7 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
       app: formVal.app,
       roles: formVal.roles as number[],
       store_ids: formVal.store_ids as number[],
-      panel_ui: JSON.parse(formVal.panelUiInput),
+      panel_ui: this.localPanelUi(),
     };
 
     this.usersService

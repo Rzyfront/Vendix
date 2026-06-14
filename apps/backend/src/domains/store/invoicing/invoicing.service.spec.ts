@@ -88,6 +88,10 @@ describe('InvoicingService support adjustment notes', () => {
     const fiscalScope = {
       resolveAccountingEntityForFiscal: jest.fn().mockResolvedValue({ id: 77 }),
     };
+    const retryQueue = {
+      getRetryStatusByInvoiceIds: jest.fn().mockResolvedValue(new Map()),
+      ...overrides.retryQueue,
+    };
 
     return {
       service: new InvoicingService(
@@ -95,10 +99,12 @@ describe('InvoicingService support adjustment notes', () => {
         generator as any,
         eventEmitter,
         fiscalScope as any,
+        retryQueue as any,
       ),
       prisma,
       generator,
       eventEmitter,
+      retryQueue,
     };
   };
 
@@ -168,5 +174,65 @@ describe('InvoicingService support adjustment notes', () => {
       }),
     );
     expect(result.related_invoice_id).toBe(100);
+  });
+
+  describe('findAll retry_status', () => {
+    const invoices = [
+      {
+        id: 1,
+        send_status: 'sent_error',
+        transmission_status: 'error',
+      },
+      {
+        id: 2,
+        send_status: 'sent_ok',
+        transmission_status: 'accepted',
+      },
+      {
+        id: 3,
+        send_status: 'sent_error',
+        transmission_status: 'error',
+      },
+    ];
+
+    const createListService = (retryMap: Map<number, any>) =>
+      createService({
+        prisma: {
+          invoices: {
+            findMany: jest.fn().mockResolvedValue(invoices),
+            count: jest.fn().mockResolvedValue(invoices.length),
+          },
+        },
+        retryQueue: {
+          getRetryStatusByInvoiceIds: jest.fn().mockResolvedValue(retryMap),
+        },
+      });
+
+    it('resolves retry_status in batch only for error/pending invoices, null otherwise', async () => {
+      const retry_status = {
+        status: 'pending',
+        attempts: 1,
+        max_attempts: 3,
+        last_error: 'ETIMEDOUT',
+        next_retry_at: new Date('2026-06-09T12:00:00.000Z'),
+      };
+      const { service, retryQueue } = createListService(
+        new Map([[1, retry_status]]),
+      );
+
+      const result = await service.findAll({ page: 1, limit: 10 } as any);
+
+      // One batch call with only the error/pending IDs of the page (no N+1).
+      expect(retryQueue.getRetryStatusByInvoiceIds).toHaveBeenCalledTimes(1);
+      expect(retryQueue.getRetryStatusByInvoiceIds).toHaveBeenCalledWith([
+        1, 3,
+      ]);
+
+      expect(result.data[0].retry_status).toEqual(retry_status);
+      // Accepted invoice: never queried, retry_status null.
+      expect(result.data[1].retry_status).toBeNull();
+      // Error invoice not present in the queue: retry_status null.
+      expect(result.data[2].retry_status).toBeNull();
+    });
   });
 });

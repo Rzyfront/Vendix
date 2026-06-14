@@ -35,10 +35,22 @@ export const payrollRoutes: Routes = [
                     route: '/admin/payroll/settlements',
                 },
                 {
+                    id: 'novelties',
+                    label: 'Novedades',
+                    icon: 'calendar-days',
+                    route: '/admin/payroll/novelties',
+                },
+                {
                     id: 'advances',
                     label: 'Adelantos',
                     icon: 'hand-coins',
                     route: '/admin/payroll/advances',
+                },
+                {
+                    id: 'pila',
+                    label: 'PILA',
+                    icon: 'shield-check',
+                    route: '/admin/payroll/pila',
                 },
                 {
                     id: 'settings',
@@ -81,10 +93,24 @@ export const payrollRoutes: Routes = [
                     ),
             },
             {
+                path: 'novelties',
+                loadComponent: () =>
+                    import('./pages/payroll-novelties-page.component').then(
+                        (c) => c.PayrollNoveltiesPageComponent,
+                    ),
+            },
+            {
                 path: 'advances',
                 loadComponent: () =>
                     import('./pages/payroll-advances-page.component').then(
                         (c) => c.PayrollAdvancesPageComponent,
+                    ),
+            },
+            {
+                path: 'pila',
+                loadComponent: () =>
+                    import('./pages/payroll-pila-page.component').then(
+                        (c) => c.PayrollPilaPageComponent,
                     ),
             },
             {

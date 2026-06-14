@@ -40,7 +40,7 @@
         <h2 class="text-base font-bold text-gray-900">Tipo de Producto</h2>
       </div>
       <app-input-buttons
-        [options]="productTypeOptions"
+        [options]="productTypeOptions()"
         formControlName="product_type"
         (valueChange)="onProductTypeChange($event)"
         customWrapperClass="!mt-0"
@@ -415,20 +415,6 @@
                 tooltipText="Selecciona las tarifas que aplican a este producto. Solo las seleccionadas mostrarán precio, margen y cantidad por empaque configurables."
               ></app-multi-selector>
 
-              <!-- Available tiers preview -->
-              <div class="flex flex-wrap items-center gap-1.5">
-                <span class="text-xs text-gray-400"
-                  >Tarifas disponibles:</span
-                >
-                @for (row of priceTierRows(); track row.tier.id) {
-                  <app-badge
-                    [variant]="row.enabled ? 'primary' : 'neutral'"
-                    size="sm"
-                    >{{ row.tier.name }}</app-badge
-                  >
-                }
-              </div>
-
               <!-- Step 2: configurable rows for SELECTED tiers only -->
               @if (selectedPriceTierRows().length === 0) {
                 <div
@@ -440,7 +426,12 @@
                     class="text-gray-500 shrink-0 mt-0.5"
                   ></app-icon>
                   <span>
-                    Selecciona al menos una tarifa arriba para configurar su
+                    Hay {{ priceTierRows().length }}
+                    {{
+                      priceTierRows().length === 1
+                        ? 'tarifa disponible'
+                        : 'tarifas disponibles'
+                    }}. Selecciona al menos una arriba para configurar su
                     precio, margen y cantidad por empaque.
                   </span>
                 </div>
@@ -824,6 +815,37 @@
               description="Permite que usuarios autorizados vendan este producto con precio negociado"
             >
             </app-setting-toggle>
+
+            <!-- Restaurant Suite toggles (Fase B) — solo industria restaurant -->
+            @if (isRestaurant()) {
+              <app-setting-toggle
+                formControlName="is_sellable"
+                label="Vendible"
+                description="Visible y vendible en carta, POS y ecommerce"
+              >
+              </app-setting-toggle>
+
+              <app-setting-toggle
+                formControlName="is_ingredient"
+                label="Es insumo"
+                description="Apto para usarse como componente de recetas (BOM)"
+              >
+              </app-setting-toggle>
+
+              <app-setting-toggle
+                formControlName="is_combo"
+                label="Es combo / menú fijo"
+                description="Plato que agrupa varios productos a precio fijo"
+              >
+              </app-setting-toggle>
+
+              <app-setting-toggle
+                formControlName="is_batch_produced"
+                label="Producido en lote"
+                description="Sub-receta que se produce y mantiene stock propio"
+              >
+              </app-setting-toggle>
+            }
 
             <!-- Row 2: Variantes + Inventario -->
             <div>
@@ -1819,8 +1841,8 @@
               </p>
               <app-multi-selector
                 label="Promociones"
-                [options]="promotionOptions"
-                [ngModel]="productPromotionIds"
+                [options]="promotionOptions()"
+                [ngModel]="productPromotionIds()"
                 [ngModelOptions]="{ standalone: true }"
                 (valueChange)="onPromotionsChange($event)"
                 placeholder="Seleccionar promociones..."
@@ -2106,8 +2128,8 @@
           </p>
           <app-multi-selector
             label="Promociones"
-            [options]="promotionOptions"
-            [ngModel]="productPromotionIds"
+            [options]="promotionOptions()"
+            [ngModel]="productPromotionIds()"
             [ngModelOptions]="{ standalone: true }"
             (valueChange)="onPromotionsChange($event)"
             placeholder="Seleccionar promociones..."

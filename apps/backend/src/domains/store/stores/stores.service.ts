@@ -147,7 +147,14 @@ export class StoresService {
   }
 
   async findAll(query: StoreQueryDto) {
-    const { page = 1, limit = 10, search, store_type, is_active } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      store_type,
+      industries,
+      is_active,
+    } = query;
     const skip = (page - 1) * limit;
 
     const context = RequestContextService.getContext();
@@ -162,6 +169,10 @@ export class StoresService {
         ],
       }),
       ...(store_type && { store_type }),
+      // OR semantics: a store matches if it has at least one of the
+      // requested industries. `ArrayMinSize(1)` is enforced at the DTO
+      // layer, so we only need a defensive length check here.
+      ...(industries?.length && { industries: { hasSome: industries } }),
       ...(is_active !== undefined && { is_active }),
     };
 

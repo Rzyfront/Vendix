@@ -13,18 +13,21 @@ import { Permissions } from '../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { ResponseService } from '@common/responses/response.service';
 import { FiscalContextResolverService } from './services/fiscal-context-resolver.service';
+import { FiscalFlowStateService } from './services/fiscal-flow-state.service';
 import { FiscalObligationService } from './services/fiscal-obligation.service';
 import { TaxDeclarationDraftService } from './services/tax-declaration-draft.service';
 import { FiscalCloseService } from './services/fiscal-close.service';
 import { FiscalEvidenceService } from './services/fiscal-evidence.service';
 import { FiscalRulesService } from './services/fiscal-rules.service';
 import { FiscalAuditService } from './services/fiscal-audit.service';
+import { FiscalConfigChecklistService } from './services/fiscal-config-checklist.service';
 import {
   AttachFiscalEvidenceDto,
   ChangeFiscalObligationStatusDto,
   CreateFiscalCloseSessionDto,
   CreateTaxDeclarationDraftDto,
   FiscalCloseQueryDto,
+  FiscalFlowStateQueryDto,
   FiscalHistoryQueryDto,
   FiscalListQueryDto,
   FiscalRulesQueryDto,
@@ -33,18 +36,24 @@ import {
   OverrideFiscalCloseCheckDto,
   ReopenFiscalCloseDto,
 } from './dto/fiscal-operations.dto';
+import {
+  FISCAL_RESPONSIBILITIES_CATALOG,
+  FISCAL_RESPONSIBILITIES_CATALOG_VERSION,
+} from './constants/fiscal-responsibilities.catalog';
 
 @Controller('store/fiscal')
 @UseGuards(PermissionsGuard)
 export class StoreFiscalController {
   constructor(
     private readonly contextResolver: FiscalContextResolverService,
+    private readonly flowState: FiscalFlowStateService,
     private readonly obligations: FiscalObligationService,
     private readonly declarations: TaxDeclarationDraftService,
     private readonly closeService: FiscalCloseService,
     private readonly evidence: FiscalEvidenceService,
     private readonly rules: FiscalRulesService,
     private readonly audit: FiscalAuditService,
+    private readonly checklist: FiscalConfigChecklistService,
     private readonly response: ResponseService,
   ) {}
 
@@ -53,6 +62,15 @@ export class StoreFiscalController {
   async overview() {
     const context = await this.contextResolver.resolveForStore();
     return this.response.success(await this.obligations.getOverview([context]));
+  }
+
+  @Get('flow-state')
+  @Permissions('store:fiscal:dashboard:read')
+  async getFlowState(@Query() query: FiscalFlowStateQueryDto) {
+    const context = await this.contextResolver.resolveForStore();
+    return this.response.success(
+      await this.flowState.getFlowState([context], query),
+    );
   }
 
   @Get('history')
@@ -313,5 +331,27 @@ export class StoreFiscalController {
   async listRules(@Query() query: FiscalRulesQueryDto) {
     const context = await this.contextResolver.resolveForStore();
     return this.response.success(await this.rules.list([context], query));
+  }
+
+  /**
+   * Catálogo estático y versionado de responsabilidades DIAN (RUT casilla 53).
+   * No depende del contexto fiscal: la UI lo usa para labels/tooltips y para
+   * explicar qué obligaciones habilita cada responsabilidad.
+   */
+  @Get('responsibilities/catalog')
+  @Permissions('store:fiscal:dashboard:read')
+  getResponsibilitiesCatalog() {
+    return this.response.success({
+      version: FISCAL_RESPONSIBILITIES_CATALOG_VERSION,
+      responsibilities: FISCAL_RESPONSIBILITIES_CATALOG,
+    });
+  }
+
+  /** Checklist de configuración fiscal (read-only) para la tienda actual. */
+  @Get('config-checklist')
+  @Permissions('store:fiscal:dashboard:read')
+  async getConfigChecklist() {
+    const context = await this.contextResolver.resolveForStore();
+    return this.response.success(await this.checklist.build(context));
   }
 }

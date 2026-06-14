@@ -104,15 +104,10 @@ export const APP_MODULES: {
           description: 'Checklist y control de cierre mensual',
         },
         {
-          key: 'fiscal_evidence',
-          label: 'Evidencias fiscales',
-          description: 'Soportes, hashes y trazabilidad documental',
-        },
-        {
-          key: 'fiscal_history',
-          label: 'Historial fiscal',
+          key: 'fiscal_audit',
+          label: 'Auditoría fiscal',
           description:
-            'Eventos auditables por obligación, declaración y cierre',
+            'Evidencias, soportes y eventos auditables de la operación fiscal',
         },
         {
           key: 'fiscal_rules',
@@ -355,6 +350,44 @@ export const APP_MODULES: {
       description: 'Secci\u00f3n de gastos',
     },
 
+    // Restaurant Operations (Restaurant Suite — Fase I). Parent module
+    // hidden by `INDUSTRY_HIDDEN_MODULES` for retail/manufacturing/service;
+    // visible only when the store's industry includes `restaurant`.
+    {
+      key: 'restaurant_ops',
+      label: 'Operaciones de Restaurante',
+      description:
+        'Recetas, producci\u00f3n, comandas (KDS), mesas y cartas',
+      isParent: true,
+      children: [
+        {
+          key: 'restaurant_ops_recipes',
+          label: 'Recetas',
+          description: 'Recetas (BOM) y sub-recetas de la tienda',
+        },
+        {
+          key: 'restaurant_ops_production',
+          label: 'Producci\u00f3n',
+          description: '\u00d3rdenes de producci\u00f3n y stock en lote',
+        },
+        {
+          key: 'restaurant_ops_kds',
+          label: 'Comandas',
+          description: 'Pantalla de cocina (KDS) y tickets en vivo',
+        },
+        {
+          key: 'restaurant_ops_tables',
+          label: 'Mesas',
+          description: 'Mapa de mesas, sesiones y consumo en mesa',
+        },
+        {
+          key: 'restaurant_ops_menus',
+          label: 'Cartas',
+          description: 'Cartas p\u00fablicas, secciones y ventanas',
+        },
+      ],
+    },
+
     // Facturaci\u00f3n (padre con hijos)
     {
       key: 'invoicing',
@@ -521,15 +554,10 @@ export const APP_MODULES: {
           description: 'Checklist y control de cierre mensual',
         },
         {
-          key: 'fiscal_evidence',
-          label: 'Evidencias fiscales',
-          description: 'Soportes, hashes y trazabilidad documental',
-        },
-        {
-          key: 'fiscal_history',
-          label: 'Historial fiscal',
+          key: 'fiscal_audit',
+          label: 'Auditoría fiscal',
           description:
-            'Eventos auditables por obligación, declaración y cierre',
+            'Evidencias, soportes y eventos auditables de la operación fiscal',
         },
         {
           key: 'fiscal_rules',

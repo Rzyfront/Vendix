@@ -59,7 +59,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       <div class="flex justify-end px-2 md:px-6 py-2">
         <button
           (click)="goToReports()"
-          class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-primary border border-border rounded-lg hover:bg-surface transition-colors"
+          class="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-primary-600 border border-border rounded-lg hover:bg-surface transition-colors"
         >
           <app-icon name="file-text" [size]="16" />
           Ver Reportes

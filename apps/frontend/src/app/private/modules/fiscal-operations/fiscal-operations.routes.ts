@@ -11,7 +11,7 @@ import { fiscalManagementGuard } from '../../../core/guards/fiscal-management.gu
  * rendered for `/admin/fiscal/**`. It decides, based on the
  * `fiscalStatus` signal, whether to show the *activation layer*
  * (panel + wizard CTA) or the *operation layer* (sticky-header +
- * <router-outlet>) that hosts the 7 fiscal tabs.
+ * <router-outlet>) that hosts the 6 fiscal tabs.
  *
  * Direct children:
  * - `''`           — pathMatch full redirect to `dashboard` (defensive
@@ -24,7 +24,9 @@ import { fiscalManagementGuard } from '../../../core/guards/fiscal-management.gu
  * - `activation`   — dedicated view for the activation panel only
  *                    (reuses the same panel that the shell renders
  *                    inline when the org has no active fiscal areas).
- * - `dashboard`/`obligations`/... — the 7 operation tabs.
+ * - `dashboard`/`obligations`/... — the 6 operation tabs. `audit`
+ *   unifies the former `evidence` + `history` tabs (those paths now
+ *   redirect to `audit`).
  */
 export const fiscalOperationsRoutes: Routes = [
   {
@@ -57,6 +59,15 @@ export const fiscalOperationsRoutes: Routes = [
         data: { tab: 'dashboard' },
       },
       {
+        // Editor post-wizard de identidad fiscal (datos legales +
+        // responsabilidades DIAN como toggles + periodicidad de IVA).
+        path: 'identity',
+        loadComponent: () =>
+          import('./components/fiscal-identity-panel.component').then(
+            (c) => c.FiscalIdentityPanelComponent,
+          ),
+      },
+      {
         path: 'obligations',
         loadComponent: () => Promise.resolve(FiscalOperationsComponent),
         data: { tab: 'obligations' },
@@ -72,14 +83,21 @@ export const fiscalOperationsRoutes: Routes = [
         data: { tab: 'close' },
       },
       {
-        path: 'evidence',
+        path: 'audit',
         loadComponent: () => Promise.resolve(FiscalOperationsComponent),
-        data: { tab: 'evidence' },
+        data: { tab: 'audit' },
+      },
+      // Legacy aliases — Evidencias + Historial were merged into the
+      // unified "Auditoría" tab (audit). Old deep-links keep working.
+      {
+        path: 'evidence',
+        pathMatch: 'full',
+        redirectTo: 'audit',
       },
       {
         path: 'history',
-        loadComponent: () => Promise.resolve(FiscalOperationsComponent),
-        data: { tab: 'history' },
+        pathMatch: 'full',
+        redirectTo: 'audit',
       },
       {
         path: 'rules',

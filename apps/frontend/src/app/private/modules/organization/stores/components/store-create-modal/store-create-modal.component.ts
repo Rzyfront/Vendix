@@ -18,10 +18,11 @@ import {
   FormControl,
   Validators,
   AbstractControl,
+  ValidatorFn,
 } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, catchError } from 'rxjs';
-import { StoreType } from '../../interfaces/store.interface';
+import { StoreIndustry, StoreType } from '../../interfaces/store.interface';
 import { OrganizationStoresService } from '../../services/organization-stores.service';
 import { environment } from '../../../../../../../environments/environment';
 
@@ -33,16 +34,27 @@ import {
   SelectorComponent,
   ToggleComponent,
   SelectorOption,
+  MultiSelectorComponent,
+  MultiSelectorOption,
 } from '../../../../../../shared/components/index';
+import {
+  STORE_INDUSTRIES,
+} from '../../../../../../shared/constants/industry-modules.constant';
 import { OperatingHoursPickerComponent, OperatingHoursValue } from '../operating-hours-picker/operating-hours-picker.component';
 import { UserSelectComponent } from '../user-select/user-select.component';
 import { ColorPickerComponent } from '../color-picker/color-picker.component';
+
+const nonEmptyArray: ValidatorFn = (control) => {
+  const v = control.value;
+  return Array.isArray(v) && v.length > 0 ? null : { required: true };
+};
 
 export interface StoreCreateModalData {
   name: string;
   slug?: string;
   store_code?: string;
   store_type?: StoreType;
+  industries?: StoreIndustry[];
   website?: string;
   domain?: string;
   timezone?: string;
@@ -85,6 +97,7 @@ interface Tab {
     IconComponent,
     SelectorComponent,
     ToggleComponent,
+    MultiSelectorComponent,
     OperatingHoursPickerComponent,
     UserSelectComponent,
     ColorPickerComponent,
@@ -196,6 +209,15 @@ interface Tab {
                   size="md"
                 />
               </div>
+
+              <app-multi-selector
+                formControlName="industries"
+                label="Tipos de Negocio"
+                [options]="industryOptions"
+                [required]="true"
+                helpText="Si tu negocio combina varias industrias, marca todas las que apliquen."
+                size="md"
+              ></app-multi-selector>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <app-input
@@ -556,6 +578,11 @@ export class StoreCreateModalComponent implements OnInit {
     { value: 'VE', label: 'Venezuela' },
   ];
 
+  industryOptions: MultiSelectorOption[] = STORE_INDUSTRIES.map((id) => ({
+    value: id,
+    label: this.getIndustryLabel(id),
+  }));
+
   storeForm!: FormGroup;
 
   private codeSubject = new Subject<string>();
@@ -582,6 +609,7 @@ export class StoreCreateModalComponent implements OnInit {
   get operatingHoursControl(): FormControl<OperatingHoursValue | null> { return this.storeForm.get('operating_hours') as FormControl<OperatingHoursValue | null>; }
   get currencyCodeControl(): FormControl<string> { return this.storeForm.get('currency_code') as FormControl<string>; }
   get taxIncludedControl(): FormControl<boolean> { return this.storeForm.get('tax_included') as FormControl<boolean>; }
+  get industriesControl(): FormControl<string[]> { return this.storeForm.get('industries') as FormControl<string[]>; }
 
   ngOnInit(): void {
     this.initializeForm();
@@ -597,6 +625,7 @@ export class StoreCreateModalComponent implements OnInit {
       slug: [''],
       store_code: ['', [Validators.maxLength(20)]],
       store_type: [StoreType.PHYSICAL, [Validators.required]],
+      industries: [['retail'], { validators: [nonEmptyArray] }],
       website: [''],
       timezone: ['America/Bogota'],
       is_active: [true],
@@ -620,6 +649,19 @@ export class StoreCreateModalComponent implements OnInit {
       currency_code: ['COP'],
       tax_included: [false],
     });
+  }
+
+  private getIndustryLabel(id: StoreIndustry): string {
+    switch (id) {
+      case 'retail':
+        return 'Retail';
+      case 'restaurant':
+        return 'Restaurante';
+      case 'manufacturing':
+        return 'Manufactura';
+      case 'service':
+        return 'Servicios';
+    }
   }
 
   private async loadOptions(): Promise<void> {
@@ -736,6 +778,9 @@ export class StoreCreateModalComponent implements OnInit {
       slug: v.slug || undefined,
       store_code: v.store_code || undefined,
       store_type: v.store_type,
+      industries: Array.isArray(v.industries) && v.industries.length > 0
+        ? (v.industries as StoreIndustry[])
+        : (['retail'] as StoreIndustry[]),
       timezone: v.timezone || undefined,
       is_active: v.is_active,
       operating_hours: v.operating_hours || undefined,
@@ -757,6 +802,7 @@ export class StoreCreateModalComponent implements OnInit {
       slug: '',
       store_code: '',
       store_type: StoreType.PHYSICAL,
+      industries: ['retail'],
       website: '',
       timezone: 'America/Bogota',
       is_active: true,

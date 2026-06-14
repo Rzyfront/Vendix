@@ -41,6 +41,7 @@ import { RedisModule } from './common/redis/redis.module';
 import { QueueModule } from './common/queue/queue.module';
 import { VendixCacheModule } from './common/cache/cache.module';
 import { MessagingModule } from './messaging/messaging.module';
+import { UploadModule } from './upload/upload.module';
 import { DnsModule } from './common/services/dns/dns.module';
 import { CorsModule } from './common/cors/cors.module';
 import { BlocklistModule } from './common/services/blocklist/blocklist.module';
@@ -74,6 +75,7 @@ import { RateLimitModule } from './common/services/rate-limit/rate-limit.module'
     AwsModule,
     PerformanceModule,
     MessagingModule,
+    UploadModule,
     DnsModule,
     CorsModule,
     BlocklistModule,

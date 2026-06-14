@@ -470,7 +470,12 @@
                 (bookingStep !== null &&
                   step() === bookingStep &&
                   !allBookingSlotsSelected) ||
-                (step() === 1 && !cartHasOnlyServices && !canProceedFromAddress())
+                (step() === 1 &&
+                  !cartHasOnlyServices &&
+                  !canProceedFromAddress()) ||
+                (step() === paymentStep &&
+                  !cartHasOnlyServices &&
+                  shipping_options().length === 0)
               "
             >
               Continuar

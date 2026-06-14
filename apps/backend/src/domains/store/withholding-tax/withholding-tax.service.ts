@@ -5,12 +5,14 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { WithholdingCalculatorService } from './withholding-calculator.service';
 import { WithholdingFlowService } from './withholding-flow.service';
 import {
   CreateWithholdingConceptDto,
   UpdateWithholdingConceptDto,
   PreviewWithholdingDto,
+  CalculationsQueryDto,
 } from './dto';
 import { WithholdingCertificateData } from './interfaces/withholding.interface';
 import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
@@ -22,6 +24,7 @@ export class WithholdingTaxService {
     private readonly calculator: WithholdingCalculatorService,
     private readonly event_emitter: EventEmitter2,
     private readonly fiscalScope: FiscalScopeService,
+    private readonly fiscalGate: FiscalGateService,
     private readonly withholdingFlow: WithholdingFlowService,
   ) {}
 
@@ -194,6 +197,21 @@ export class WithholdingTaxService {
   }> {
     const context = RequestContextService.getContext()!;
 
+    // Fiscal gate (defense in depth): retefuente is an `accounting` subfeature.
+    // When the tenant's accounting area is not ACTIVE/LOCKED, skip the fiscal
+    // computation entirely and return an empty preview — never reach the UVT
+    // lookup (which would otherwise throw WHT_UVT_NOT_FOUND on a non-fiscal
+    // tenant). `isAreaEnabled` resolves store-vs-org by `fiscal_scope` and is
+    // fail-closed. No throw here: a preview must degrade gracefully.
+    const accountingActive = await this.fiscalGate.isAreaEnabled(
+      context.organization_id!,
+      context.store_id ?? null,
+      'accounting',
+    );
+    if (!accountingActive) {
+      return { lines: [], total_withholding: 0 };
+    }
+
     const resolution =
       dto.role === 'practiced'
         ? await this.withholdingFlow.resolvePracticed({
@@ -325,6 +343,62 @@ export class WithholdingTaxService {
       calculation_id: calculation.id,
       net_amount,
     };
+  }
+
+  // ===== Calculations Audit List =====
+
+  /**
+   * Paginated audit list of persisted withholding calculations. Read-only:
+   * supports the "Cálculos" tab in the Retenciones submodule so the user can
+   * audit every withholding practiced/suffered (date, concept, counterparty,
+   * invoice, base, rate and amount). Tenant scoping comes from the scoped
+   * Prisma service; the month filter is resolved as a created_at range over
+   * the requested (or current) year.
+   */
+  async findAllCalculations(query: CalculationsQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 20;
+
+    const where: Prisma.withholding_calculationsWhereInput = {};
+
+    if (query.role) where.role = query.role;
+    if (query.supplier_id) where.supplier_id = query.supplier_id;
+    if (query.concept_id) where.concept_id = query.concept_id;
+
+    if (query.month) {
+      const range_year = query.year ?? new Date().getFullYear();
+      where.created_at = {
+        gte: new Date(range_year, query.month - 1, 1),
+        lt: new Date(range_year, query.month, 1),
+      };
+    } else if (query.year) {
+      where.year = query.year;
+    }
+
+    const [data, total] = await Promise.all([
+      this.prisma.withholding_calculations.findMany({
+        where,
+        include: {
+          concept: { select: { name: true, code: true } },
+          supplier: { select: { id: true, name: true, tax_id: true } },
+          customer: {
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          },
+          invoice: { select: { id: true, invoice_number: true } },
+        },
+        orderBy: { created_at: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.withholding_calculations.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   // ===== Certificate Generation =====

@@ -46,6 +46,7 @@ export class CatalogService {
     const where: any = {
       state: 'active',
       available_for_ecommerce: true,
+      is_sellable: true,
       // store_id se aplica automáticamente por EcommercePrismaService
     };
     const andFilters: any[] = [];
@@ -376,13 +377,19 @@ export class CatalogService {
       ),
     );
 
+    // Restaurant Suite Fase G — filter out products whose menus are not
+    // currently within an availability window. MÍNIMO: uses the same
+    // Intl-based day/hours/minutes helper as schedule-validation.service
+    // (line 251: getDateInTimezone) without depending on that module.
+    const filtered = await this.filterByMenuAvailability(mappedData, store_id);
+
     return {
-      data: mappedData,
+      data: filtered,
       meta: {
-        total,
+        total: filtered.length,
         page: Number(page),
         limit: Number(limit),
-        total_pages: Math.ceil(total / Number(limit)),
+        total_pages: Math.max(1, Math.ceil(filtered.length / Number(limit))),
       },
     };
   }
@@ -446,6 +453,7 @@ export class CatalogService {
         ...(isNaN(Number(slug)) ? { slug } : { id: Number(slug) }),
         state: 'active',
         available_for_ecommerce: true,
+        is_sellable: true,
         // store_id se aplica automáticamente por EcommercePrismaService
       },
       include,
@@ -1035,5 +1043,155 @@ export class CatalogService {
     }
 
     return Array.from(directProductIds);
+  }
+
+  // --------------------------------------------------- Fase G menu windows
+
+  /**
+   * Post-filter for the public carta. Hides products that belong to a menu
+   * with availability windows when none of those windows are active right
+   * now. Products with NO menu memberships stay visible (e.g. retail
+   * products that never opted in to a menu).
+   *
+   * MÍNIMO implementation: a single Prisma query pulls every window that
+   * could affect a product, then a JS-side loop decides what to keep.
+   * Section-level windows are honored too (a section is "menu-locked" if
+   * either its parent menu OR itself has any window defined).
+   *
+   * Timezone: reuses the same Intl-based approach as
+   * `schedule-validation.service.ts` getDateInTimezone (line 251). The
+   * store's timezone is read from store_settings.settings.general.timezone,
+   * defaulting to America/Bogota (Vendix-CO default).
+   */
+  private async filterByMenuAvailability<T extends { id: number }>(
+    products: T[],
+    storeId: number | null | undefined,
+  ): Promise<T[]> {
+    if (!storeId || products.length === 0) return products;
+    const productIds = products.map((p) => p.id);
+
+    // 1. Resolve the store timezone.
+    const settings = await this.prisma.store_settings.findFirst({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+    const timezone =
+      ((settings?.settings as any)?.general?.timezone as string) ||
+      'America/Bogota';
+
+    // 2. Compute current day-of-week + minutes-since-midnight in TZ.
+    const { day: nowDay, minutes: nowMinutes } = this.getDateInTimezone(
+      timezone,
+    );
+
+    // 3. Pull every menu_section_items row for the product ids and the
+    //    availability windows attached to its menu or section.
+    const sectionItems = await this.storePrisma.menu_section_items.findMany({
+      where: { product_id: { in: productIds } },
+      select: {
+        product_id: true,
+        menu_section_id: true,
+        menu_section: {
+          select: {
+            menu_id: true,
+            menu: {
+              select: {
+                availability_windows: {
+                  select: {
+                    day_of_week: true,
+                    start_time: true,
+                    end_time: true,
+                  },
+                },
+              },
+            },
+            availability_windows: {
+              select: {
+                day_of_week: true,
+                start_time: true,
+                end_time: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // 4. For each product, collapse all windows that could gate it.
+    const productWindows = new Map<number, Array<{
+      day_of_week: number;
+      start_time: string;
+      end_time: string;
+    }>>();
+    for (const item of sectionItems) {
+      const list = productWindows.get(item.product_id) ?? [];
+      const menuWindows = item.menu_section?.menu?.availability_windows ?? [];
+      const sectionWindows =
+        item.menu_section?.availability_windows ?? [];
+      for (const w of menuWindows) list.push(w);
+      for (const w of sectionWindows) list.push(w);
+      if (list.length > 0) productWindows.set(item.product_id, list);
+    }
+
+    // 5. A product is visible if it has NO gating windows, or at least one
+    //    of them is currently active.
+    return products.filter((p) => {
+      const windows = productWindows.get(p.id);
+      if (!windows || windows.length === 0) return true;
+      return windows.some((w) =>
+        this.isWindowActive(w, nowDay, nowMinutes),
+      );
+    });
+  }
+
+  private isWindowActive(
+    w: { day_of_week: number; start_time: string; end_time: string },
+    nowDay: number,
+    nowMinutes: number,
+  ): boolean {
+    if (w.day_of_week !== nowDay) return false;
+    const toMinutes = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+    const start = toMinutes(w.start_time);
+    const end = toMinutes(w.end_time);
+    return nowMinutes >= start && nowMinutes <= end;
+  }
+
+  private getDateInTimezone(timezone: string): {
+    day: number;
+    hours: number;
+    minutes: number;
+  } {
+    const now = new Date();
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        weekday: 'short',
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: false,
+      }).formatToParts(now);
+      const weekdayStr = parts.find((p) => p.type === 'weekday')?.value || '';
+      const hoursVal = parseInt(
+        parts.find((p) => p.type === 'hour')?.value || '0',
+        10,
+      );
+      const minutesVal = parseInt(
+        parts.find((p) => p.type === 'minute')?.value || '0',
+        10,
+      );
+      const weekdayMap: Record<string, number> = {
+        Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+      };
+      return {
+        day: weekdayMap[weekdayStr] ?? now.getDay(),
+        hours: hoursVal,
+        minutes: minutesVal,
+      };
+    } catch {
+      return { day: now.getDay(), hours: now.getHours(), minutes: now.getMinutes() };
+    }
   }
 }

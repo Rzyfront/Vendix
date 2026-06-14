@@ -17,6 +17,6 @@ import { ExogenousFileBuilderService } from './exogenous-file-builder.service';
     ExogenousValidatorService,
     ExogenousFileBuilderService,
   ],
-  exports: [ExogenousService],
+  exports: [ExogenousService, ExogenousGeneratorService],
 })
 export class ExogenousModule {}

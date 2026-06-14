@@ -70,9 +70,9 @@ export class ReportsShellComponent {
     'chart-of-accounts': '/admin/accounting/chart-of-accounts',
     'journal-entries': '/admin/accounting/journal-entries',
     'fixed-assets': '/admin/accounting/fixed-assets',
-    'receivables': '/admin/accounting/receivables',
-    'payables': '/admin/accounting/payables',
-    'aging-report': '/admin/accounting/aging',
+    'receivables': '/admin/accounting/cartera/receivables',
+    'payables': '/admin/accounting/cartera/payables',
+    'aging-report': '/admin/accounting/cartera/aging',
     // Payroll → /admin/payroll/*
     'payroll-employees': '/admin/payroll/employees',
     'payroll-runs': '/admin/payroll/runs',

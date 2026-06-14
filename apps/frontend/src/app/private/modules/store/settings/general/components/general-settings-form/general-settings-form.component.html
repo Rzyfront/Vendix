@@ -23,6 +23,19 @@
     </div>
   </div>
 
+  <!-- Tipos de Negocio (ancho completo: determina los módulos visibles de toda la tienda) -->
+  <div class="mt-6">
+    <app-multi-selector
+      [formControl]="industriesControl"
+      label="Tipos de Negocio"
+      [options]="industryOptions"
+      size="sm"
+      [required]="true"
+      helpText="Si tu negocio combina varias industrias, marca todas las que apliquen — los módulos visibles se calculan con la unión de reglas."
+      (valueChange)="onFieldChange()"
+    ></app-multi-selector>
+  </div>
+
   <!-- Store type consequence info (full width, below the grid) -->
   <div class="mt-4 rounded-lg border px-3 py-2.5 text-xs leading-relaxed"
     [ngClass]="{
@@ -48,4 +61,63 @@
       }
     }
   </div>
+
+  <!-- Panel UI - "Módulos de la Tienda" trigger + modal (full width, below type consequences) -->
+  <div class="mt-6 rounded-lg border border-gray-200 bg-white px-4 py-3 flex items-center justify-between gap-4">
+    <div class="min-w-0">
+      <div class="flex items-center gap-2">
+        <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider">Módulos de la Tienda</h4>
+        @if (offModulesCount() > 0) {
+          <span class="text-[10px] font-semibold text-amber-700 bg-amber-100 rounded-full px-2 py-0.5">
+            {{ offModulesCount() }} {{ offModulesCount() === 1 ? 'oculto' : 'ocultos' }}
+          </span>
+        }
+      </div>
+      <p class="text-[11px] text-gray-500 leading-relaxed mt-0.5">
+        Controla qué módulos ve el menú lateral de tu equipo.
+      </p>
+    </div>
+    <button
+      type="button"
+      class="shrink-0 inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+      (click)="modulesModalOpen.set(true)"
+    >
+      Gestionar
+    </button>
+  </div>
+
+  <!-- Modal: Módulos de la Tienda -->
+  <app-modal
+    [(isOpen)]="modulesModalOpen"
+    title="Módulos de la Tienda"
+    subtitle="STORE_ADMIN — visibilidad en el menú lateral"
+    size="lg"
+  >
+    <p class="text-[12px] text-gray-500 leading-relaxed mb-3">
+      Apaga un módulo para ocultarlo del menú lateral a <strong>todos los usuarios</strong> de la tienda.
+      <span class="block mt-1">
+        <strong>Apagado</strong> = oculto para todos. <strong>Ausente / encendido</strong> = permitido (segun la configuracion por usuario).
+      </span>
+    </p>
+
+    <app-panel-ui-modules-editor
+      appType="STORE_ADMIN"
+      [value]="editorValue()"
+      [hiddenByIndustry]="hiddenByIndustry()"
+      [hiddenByStore]="hiddenByStore()"
+      [searchable]="false"
+      [parentSync]="true"
+      (valueChange)="onModulesChange($event)"
+    ></app-panel-ui-modules-editor>
+
+    <div slot="footer" class="flex justify-end">
+      <button
+        type="button"
+        class="inline-flex items-center rounded-md bg-primary-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+        (click)="modulesModalOpen.set(false)"
+      >
+        Listo
+      </button>
+    </div>
+  </app-modal>
 </div>

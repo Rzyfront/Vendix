@@ -1,0 +1,130 @@
+.table-cell {
+  // Fallback only; the real color is injected via [style.--cell-color]
+  // from TablesService.statusColorVar (design-system tokens).
+  --cell-color: var(--color-text-muted, #6b7280);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  border-radius: var(--radius-lg, 12px);
+  border: 2px solid transparent;
+  background: var(--color-surface, #fff);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+  font: inherit;
+  min-height: 110px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  &:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    border-color: var(--cell-color);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-ring, #3b82f6);
+    outline-offset: 2px;
+  }
+
+  // Border color is driven by the injected --cell-color token across all
+  // states; the subtle tinted backgrounds use the semantic *-light tokens.
+  &.is-occupied {
+    border-color: var(--cell-color);
+    background: linear-gradient(
+      180deg,
+      var(--color-error-light, rgba(239, 68, 68, 0.1)) 0%,
+      var(--color-surface, #fff) 60%
+    );
+  }
+
+  &.is-available {
+    border-color: var(--cell-color);
+  }
+
+  &.is-reserved {
+    border-color: var(--cell-color);
+    background: linear-gradient(
+      180deg,
+      var(--color-warning-light, rgba(251, 146, 60, 0.1)) 0%,
+      var(--color-surface, #fff) 60%
+    );
+  }
+
+  &.is-cleaning {
+    border-color: var(--cell-color);
+    background: linear-gradient(
+      180deg,
+      var(--color-muted-light, rgba(148, 163, 184, 0.1)) 0%,
+      var(--color-surface, #fff) 60%
+    );
+  }
+}
+
+.cell-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+
+  .table-name {
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--color-text-primary, #111827);
+  }
+
+  .zone {
+    font-size: 0.7rem;
+    color: var(--color-text-secondary, #6b7280);
+    background: var(--color-background, #f3f4f6);
+    padding: 0.125rem 0.5rem;
+    border-radius: 999px;
+  }
+}
+
+.cell-body {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 0.85rem;
+
+  .capacity,
+  .guests {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+}
+
+.cell-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+
+  .status-pill {
+    color: #fff;
+    padding: 0.125rem 0.625rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.025em;
+  }
+
+  .session-id {
+    font-size: 0.75rem;
+    color: var(--color-text-muted, #9ca3af);
+  }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 3rem 1rem;
+  color: var(--color-text-secondary, #6b7280);
+  text-align: center;
+}

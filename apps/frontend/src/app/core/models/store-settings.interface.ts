@@ -1,4 +1,10 @@
 import type { FiscalStatusBlock } from './fiscal-status.model';
+import type { StoreIndustry } from '../../shared/constants/industry-modules.constant';
+
+export interface PanelUISettings {
+  STORE_ADMIN?: Record<string, boolean>;
+  STORE_ECOMMERCE?: Record<string, boolean>;
+}
 
 export interface StoreSettings {
   general: GeneralSettings;
@@ -11,6 +17,7 @@ export interface StoreSettings {
   app: AppSettings;
   operations?: OperationsSettings;
   fiscal_status?: FiscalStatusBlock;
+  panel_ui?: PanelUISettings;
 }
 
 export interface AppSettings {
@@ -32,6 +39,11 @@ export interface GeneralSettings {
   name?: string;
   logo_url?: string | null;
   store_type?: 'physical' | 'online' | 'hybrid' | 'popup' | 'kiosko';
+  /**
+   * Store industry classification (multi-select). Mirrors `stores.industries`
+   * on the backend. Default `['retail']` for existing tenants.
+   */
+  industries?: StoreIndustry[];
 }
 
 export type InventoryScope = 'main_location' | 'all_locations';

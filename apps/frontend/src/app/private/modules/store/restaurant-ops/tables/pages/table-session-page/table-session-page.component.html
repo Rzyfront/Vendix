@@ -1,0 +1,188 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    [title]="
+      session()?.table
+        ? 'Mesa ' + session()!.table!.name
+        : 'Sesión #' + (session()?.id ?? '')
+    "
+    [subtitle]="
+      'Sesión #' +
+      (session()?.id ?? '') +
+      ' — ' +
+      (isClosed() ? 'Cerrada' : 'Cuenta abierta')
+    "
+    icon="receipt"
+    variant="glass"
+    [actions]="[
+      { id: 'back', label: 'Volver', icon: 'arrow-left', variant: 'ghost' },
+      { id: 'add', label: 'Agregar items', icon: 'plus', variant: 'primary' },
+      {
+        id: 'fire',
+        label: 'Enviar a cocina',
+        icon: 'flame',
+        variant: 'secondary',
+        disabled: !hasUnfiredItems() || isClosed(),
+      },
+      {
+        id: 'split',
+        label: 'Dividir cuenta',
+        icon: 'split',
+        variant: 'ghost',
+        disabled: items().length < 2 || isClosed(),
+      },
+      {
+        id: 'close',
+        label: 'Cerrar mesa',
+        icon: 'lock',
+        variant: 'danger',
+        disabled: isClosed(),
+      },
+    ]"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <div class="session-body">
+    @if (isLoading()) {
+      <div class="loading">
+        <app-spinner size="md"></app-spinner>
+        <p>Cargando sesión…</p>
+      </div>
+    } @else if (session()) {
+      <div class="grid gap-4 md:grid-cols-3">
+        <!-- Order summary -->
+        <app-card title="Resumen" [responsive]="true">
+          <div class="summary">
+            <div class="row">
+              <span>Estado de la orden</span>
+              <app-badge [variant]="isClosed() ? 'neutral' : 'primary'">
+                {{ session()?.order?.state ?? '—' }}
+              </app-badge>
+            </div>
+            <div class="row">
+              <span>Comensales</span>
+              <span>{{ session()?.guest_count ?? '—' }}</span>
+            </div>
+            <div class="row">
+              <span>Items en la cuenta</span>
+              <span>{{ items().length }}</span>
+            </div>
+            <div class="row total">
+              <span>Total</span>
+              <strong>{{ orderTotal() | currency }}</strong>
+            </div>
+            <div class="row">
+              <span>Sesión</span>
+              <app-badge
+                [variant]="isClosed() ? 'success' : 'info'"
+              >
+                {{ isClosed() ? 'Cerrada' : 'Abierta' }}
+              </app-badge>
+            </div>
+          </div>
+
+          @if (hasUnfiredItems() && !isClosed()) {
+            <div class="unfired-hint">
+              <app-icon name="flame" [size]="14"></app-icon>
+              <span>
+                Hay items sin enviar a cocina. Los insumos se descuentan
+                al hacer fire.
+              </span>
+            </div>
+          }
+        </app-card>
+
+        <!-- Items -->
+        <app-card
+          [title]="'Items (' + items().length + ')'"
+          class="md:col-span-2"
+          [responsive]="true"
+        >
+          @if (items().length === 0) {
+            <div class="empty">
+              <app-icon name="inbox" [size]="32"></app-icon>
+              <p>No hay items en esta cuenta todavía.</p>
+              <app-button variant="primary" (clicked)="openAddItems()">
+                Agregar el primer item
+              </app-button>
+            </div>
+          } @else {
+            <div class="item-toolbar">
+              <app-button
+                variant="ghost"
+                size="sm"
+                (clicked)="selectAllUnfired()"
+              >
+                Seleccionar sin enviar
+              </app-button>
+              <app-button
+                variant="ghost"
+                size="sm"
+                (clicked)="clearSelection()"
+                [disabled]="selectedItemIds().size === 0"
+              >
+                Limpiar selección
+              </app-button>
+            </div>
+
+            <div class="item-list">
+              @for (
+                item of items();
+                track trackById($index, item)
+              ) {
+                <div
+                  class="item-row"
+                  [class.is-selected]="isSelected(item.id)"
+                  [class.is-fired]="item.inventory_consumed_at_fire"
+                  (click)="toggleItemSelection(item.id)"
+                >
+                  <div class="item-toggle" (click)="$event.stopPropagation()">
+                    <app-toggle
+                      [checked]="isSelected(item.id)"
+                      [disabled]="item.inventory_consumed_at_fire"
+                      [ariaLabel]="'Seleccionar ' + item.product_name"
+                      (changed)="toggleItemSelection(item.id)"
+                    ></app-toggle>
+                  </div>
+                  <div class="item-info">
+                    <span class="name">{{ item.product_name }}</span>
+                    <span class="qty">× {{ item.quantity }}</span>
+                  </div>
+                  <div class="item-status">
+                    @if (item.inventory_consumed_at_fire) {
+                      <app-badge variant="success">
+                        <app-icon name="flame" [size]="12"></app-icon>
+                        Enviado
+                      </app-badge>
+                    } @else {
+                      <app-badge variant="neutral">Pendiente</app-badge>
+                    }
+                  </div>
+                  <div class="item-price">
+                    {{ +item.total_price | currency }}
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </app-card>
+      </div>
+    }
+  </div>
+
+  <app-add-items-modal
+    [isOpen]="isAddItemsOpen()"
+    [loading]="isAddingItems()"
+    (isOpenChange)="isAddItemsOpen.set($event)"
+    (addItems)="onAddItems($event)"
+  />
+
+  <app-split-order-modal
+    [isOpen]="isSplitOpen()"
+    [loading]="isSplitting()"
+    [items]="items()"
+    [orderTotal]="orderTotal()"
+    (isOpenChange)="isSplitOpen.set($event)"
+    (splitByItems)="onSplitByItems($event)"
+    (splitByAmount)="onSplitByAmount($event)"
+  />
+</div>

@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '@common/decorators/public.decorator';
+import { ALLOW_CROSS_DOMAIN_KEY } from '@common/decorators/allow-cross-domain.decorator';
 
 /**
  * DomainScopeGuard
@@ -47,6 +48,17 @@ export class DomainScopeGuard implements CanActivate {
       context.getClass(),
     ]);
     if (isPublic) return true;
+
+    // 1b. Bootstrap cross-domain explícito (@AllowCrossDomain): handlers de
+    // transición de dominio (p. ej. upgrade SINGLE_STORE → MULTI_STORE_ORG) que
+    // un token del dominio origen debe poder llamar aunque vivan bajo el prefijo
+    // del dominio destino. Salta SOLO el aislamiento de dominio; PermissionsGuard
+    // y validaciones de servicio (owner) siguen activos.
+    const allowCrossDomain = this.reflector.getAllAndOverride<boolean>(
+      ALLOW_CROSS_DOMAIN_KEY,
+      [context.getHandler(), context.getClass()],
+    );
+    if (allowCrossDomain) return true;
 
     const req = context.switchToHttp().getRequest();
 

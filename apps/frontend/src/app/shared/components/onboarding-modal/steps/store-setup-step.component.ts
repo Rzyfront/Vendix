@@ -16,6 +16,7 @@ import {
   City,
 } from '../../../../services/country.service';
 import { CurrencyService } from '../../../../services/currency.service';
+import { StoreIndustry } from '../../../../shared/constants/industry-modules.constant';
 
 @Component({
   selector: 'app-store-setup-step',
@@ -322,6 +323,16 @@ import { CurrencyService } from '../../../../services/currency.service';
         color: var(--color-warning);
       }
 
+      /* Multi-toggle industries section — same visual contract as the
+         store-type cards; only an extra help line is added between the
+         section header and the card grid. */
+      .industry-help {
+        font-size: var(--fs-xs);
+        color: var(--color-text-secondary);
+        margin: 0 0 1rem;
+        line-height: 1.4;
+      }
+
       /* ========================================
          DESKTOP STYLES (≥ 640px)
          ======================================== */
@@ -579,6 +590,57 @@ import { CurrencyService } from '../../../../services/currency.service';
             </div>
           </div>
     
+          <!-- Industry Selection Section (multi-toggle, mirrors the store-type pattern) -->
+          <div class="form-section">
+            <div class="section-header">
+              <div class="section-icon">
+                <app-icon
+                  name="briefcase"
+                  size="20"
+                  class="section-icon-element"
+                ></app-icon>
+              </div>
+              <h3 class="section-title">Industria(s) del negocio</h3>
+            </div>
+            <p class="industry-help">
+              Selecciona una o varias industrias — puedes marcar varias.
+              Mínimo 1.
+            </p>
+    
+            <div class="store-type-selector">
+              @for (option of industryOptions; track option.value) {
+                <div
+                  class="store-type-option"
+                  [class.active]="isIndustrySelected(option.value)"
+                  (click)="toggleIndustry(option.value)"
+                  >
+                  <div class="store-type-icon">
+                    <app-icon
+                      [name]="option.icon"
+                      size="24"
+                      class="type-icon-element"
+                    ></app-icon>
+                  </div>
+                  <div class="store-type-content">
+                    <h4 class="store-type-title">{{ option.label }}</h4>
+                    <p class="store-type-description">
+                      {{ option.description }}
+                    </p>
+                  </div>
+                  <div class="store-type-check">
+                    @if (isIndustrySelected(option.value)) {
+                      <app-icon
+                        name="check-circle"
+                        size="22"
+                        class="check-icon"
+                      ></app-icon>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+    
           <!-- Location Section -->
           <div class="form-section">
             <div class="section-header">
@@ -718,6 +780,44 @@ export class StoreSetupStepComponent implements OnInit {
   currencies: { value: string; label: string }[] = [];
   locationOptions: { value: number; label: string }[] = [];
 
+  /**
+   * Industry options rendered as multi-toggle cards. Each entry maps the
+   * backend `StoreIndustry` value to a user-facing label and a Lucide
+   * icon already registered in the icon registry (no new icons are
+   * introduced — same pattern as the store-type cards).
+   */
+  readonly industryOptions: ReadonlyArray<{
+    value: StoreIndustry;
+    label: string;
+    description: string;
+    icon: string;
+  }> = [
+    {
+      value: 'retail',
+      label: 'Retail',
+      description: 'Venta de productos físicos',
+      icon: 'store',
+    },
+    {
+      value: 'restaurant',
+      label: 'Restaurante',
+      description: 'Menú, mesas y cocina',
+      icon: 'flame',
+    },
+    {
+      value: 'manufacturing',
+      label: 'Manufactura',
+      description: 'Producción y elaboración',
+      icon: 'boxes',
+    },
+    {
+      value: 'service',
+      label: 'Servicios',
+      description: 'Citas, reservas y atención',
+      icon: 'briefcase',
+    },
+  ];
+
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();
     this.timezones = this.countryService.getTimezones();
@@ -802,6 +902,38 @@ export class StoreSetupStepComponent implements OnInit {
         { value: 'EUR', label: 'Euro (EUR)' },
       ];
     }
+  }
+
+  /**
+   * Toggle a single industry in the multi-select form control. Mirrors
+   * the click-to-set pattern of the store-type cards: clicking a card
+   * adds the value if absent, removes it if present. Empty selections
+   * are blocked client-side — the DTO's `@ArrayMinSize(1)` is the
+   * server-side safety net.
+   */
+  toggleIndustry(value: StoreIndustry): void {
+    const control = this.formGroup()?.get('industries');
+    if (!control) return;
+    const current: StoreIndustry[] = Array.isArray(control.value)
+      ? [...control.value]
+      : [];
+    const index = current.indexOf(value);
+    if (index >= 0) {
+      current.splice(index, 1);
+    } else {
+      current.push(value);
+    }
+    // Reject emptying the selection client-side; the parent step already
+    // requires a non-empty array and we keep the contract consistent here.
+    if (current.length === 0) {
+      return;
+    }
+    control.setValue(current);
+  }
+
+  isIndustrySelected(value: StoreIndustry): boolean {
+    const current = this.formGroup()?.get('industries')?.value;
+    return Array.isArray(current) && current.includes(value);
   }
 
   get currencyOptions() {

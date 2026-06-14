@@ -425,6 +425,155 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
+    // Recetas / BOM (Restaurant Suite — Fase B)
+    {
+      name: 'store:recipes:read',
+      description: 'Listar recetas (BOM) de la tienda',
+      path: '/api/store/recipes',
+      method: 'GET',
+    },
+    {
+      name: 'store:recipes:create',
+      description: 'Crear receta (BOM)',
+      path: '/api/store/recipes',
+      method: 'POST',
+    },
+    {
+      name: 'store:recipes:update',
+      description: 'Actualizar receta (BOM) o sus componentes',
+      path: '/api/store/recipes/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:recipes:delete',
+      description: 'Desactivar receta (BOM)',
+      path: '/api/store/recipes/:id',
+      method: 'DELETE',
+    },
+
+    // Production Orders / Sub-recipe batch stock (Restaurant Suite — Fase C)
+    {
+      name: 'store:production_orders:read',
+      description: 'Listar órdenes de producción de la tienda',
+      path: '/api/store/production-orders',
+      method: 'GET',
+    },
+    {
+      name: 'store:production_orders:create',
+      description: 'Crear orden de producción (sub-receta en lote)',
+      path: '/api/store/production-orders',
+      method: 'POST',
+    },
+    {
+      name: 'store:production_orders:update',
+      description:
+        'Iniciar/completar/cancelar/editar orden de producción (consume stock + genera stock del producto preparado)',
+      path: '/api/store/production-orders/:id',
+      method: 'PATCH',
+    },
+
+    // Kitchen Fire (Restaurant Suite — Fase D)
+    // Fire-to-kitchen consume + COGS auto-entry seam.
+    {
+      name: 'store:kitchen_fire:create',
+      description:
+        'Enviar items de orden a cocina (consume inventario de insumos + crea ticket + emite COGS)',
+      path: '/api/store/kitchen-fire',
+      method: 'POST',
+    },
+    {
+      name: 'store:kitchen_fire:read',
+      description: 'Listar/consultar tickets de cocina (KDS)',
+      path: '/api/store/kitchen-fire/tickets',
+      method: 'GET',
+    },
+    {
+      name: 'store:kitchen_fire:update',
+      description:
+        'Actualizar estado de ticket de cocina (in_preparation / ready / delivered / cancelled)',
+      path: '/api/store/kitchen-fire/tickets/:id',
+      method: 'PATCH',
+    },
+
+    // Tables (mesas) + Table Sessions (cuenta abierta) — Restaurant Suite — Fase E
+    {
+      name: 'store:tables:read',
+      description: 'Listar/consultar mesas y mapa de mesas de la tienda',
+      path: '/api/store/tables',
+      method: 'GET',
+    },
+    {
+      name: 'store:tables:create',
+      description: 'Crear mesa en la tienda',
+      path: '/api/store/tables',
+      method: 'POST',
+    },
+    {
+      name: 'store:tables:update',
+      description: 'Actualizar mesa (nombre, zona, capacidad, layout)',
+      path: '/api/store/tables/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:tables:delete',
+      description: 'Eliminar mesa de la tienda',
+      path: '/api/store/tables/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:table_sessions:read',
+      description: 'Consultar sesiones de mesa (cuenta abierta)',
+      path: '/api/store/table-sessions/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:table_sessions:create',
+      description:
+        'Abrir sesión de mesa (crea orden draft y vincula table_session)',
+      path: '/api/store/table-sessions',
+      method: 'POST',
+    },
+    {
+      name: 'store:table_sessions:update',
+      description:
+        'Agregar/quitar items, dividir cuenta (split) y cerrar sesión de mesa',
+      path: '/api/store/table-sessions/:id',
+      method: 'PATCH',
+    },
+
+    // Menus / Carta pública (Restaurant Suite — Fase G)
+    {
+      name: 'store:menus:read',
+      description: 'Listar/consultar menús (carta) de la tienda',
+      path: '/api/store/menus',
+      method: 'GET',
+    },
+    {
+      name: 'store:menus:create',
+      description: 'Crear menú (carta) de la tienda',
+      path: '/api/store/menus',
+      method: 'POST',
+    },
+    {
+      name: 'store:menus:update',
+      description: 'Actualizar menú o sus secciones/items/ventanas',
+      path: '/api/store/menus/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:menus:delete',
+      description: 'Desactivar menú de la tienda',
+      path: '/api/store/menus/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:menu_engineering:read',
+      description:
+        'Ingeniería de menú (clasificación estrella/caballo/puzzle/perro)',
+      path: '/api/store/menus/engineering-report',
+      method: 'GET',
+    },
+
     // Órdenes
     {
       name: 'store:orders:create',
@@ -2384,6 +2533,31 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/payroll/advances/:id/cancel',
       method: 'PATCH',
     },
+    // Nómina - Novedades (horas extra, recargos, incapacidades, licencias, bonos)
+    {
+      name: 'store:payroll:novelties:read',
+      description: 'Leer novedades de nómina',
+      path: '/api/store/payroll/novelties',
+      method: 'GET',
+    },
+    {
+      name: 'store:payroll:novelties:create',
+      description: 'Crear novedades de nómina',
+      path: '/api/store/payroll/novelties',
+      method: 'POST',
+    },
+    {
+      name: 'store:payroll:novelties:update',
+      description: 'Actualizar novedades de nómina (solo pendientes)',
+      path: '/api/store/payroll/novelties/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:payroll:novelties:delete',
+      description: 'Eliminar novedades de nómina (solo pendientes)',
+      path: '/api/store/payroll/novelties/:id',
+      method: 'DELETE',
+    },
     // Nómina - Liquidaciones de empleado (prestaciones sociales)
     {
       name: 'store:payroll:settlements:read',
@@ -2889,6 +3063,97 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'superadmin:fiscal:accounting',
+      description:
+        'Gestionar la contabilidad interna de Vendix (PUC, journal entries, account mappings, fiscal periods)',
+      path: '/api/super-admin/fiscal/accounting/*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:reports',
+      description:
+        'Consultar reportes contables de Vendix (balance de prueba, balance general, estado de resultados, libro mayor)',
+      path: '/api/super-admin/fiscal/accounting/reports/*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:obligations',
+      description:
+        'Gestionar obligaciones fiscales de Vendix (IVA, retefuente, ICA, exogena) — listar, cambiar estado, marcar presentado',
+      path: '/api/super-admin/fiscal/obligations*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:declarations',
+      description:
+        'Gestionar borradores de declaraciones tributarias de Vendix (crear, regenerar, finalizar)',
+      path: '/api/super-admin/fiscal/declarations*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:closes',
+      description:
+        'Ejecutar y gestionar cierres fiscales mensuales de Vendix (iniciar, correr checks, completar, reabrir)',
+      path: '/api/super-admin/fiscal/closes*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:evidence',
+      description:
+        'Adjuntar y gestionar evidencia fiscal (soportes PDF) para obligaciones/declaraciones/cierres de Vendix',
+      path: '/api/super-admin/fiscal/evidence*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:rules',
+      description:
+        'Leer y actualizar conjuntos de reglas fiscales (fiscal_rule_sets) de la plataforma Vendix',
+      path: '/api/super-admin/fiscal/rules*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:rules:manage:create',
+      description:
+        'Crear, activar y archivar conjuntos de reglas fiscales (fiscal_rule_sets) de la plataforma Vendix',
+      path: '/api/super-admin/fiscal/rules*',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:fiscal:rules:manage:update',
+      description:
+        'Editar conjuntos de reglas fiscales (fiscal_rule_sets) de la plataforma Vendix',
+      path: '/api/super-admin/fiscal/rules*',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:fiscal:identity:read',
+      description:
+        'Leer la identidad legal/tributaria (fiscal_data) de la plataforma Vendix (NIT, responsabilidades DIAN, periodicidad IVA)',
+      path: '/api/super-admin/fiscal/identity/fiscal-data',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:identity:write',
+      description:
+        'Editar la identidad legal/tributaria (fiscal_data) de la plataforma Vendix (NIT, responsabilidades DIAN, periodicidad IVA)',
+      path: '/api/super-admin/fiscal/identity/fiscal-data',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:fiscal:audit',
+      description:
+        'Consultar el audit trail fiscal de la plataforma (fiscal_operation_events) — eventos de obligaciones, declaraciones, cierres',
+      path: '/api/super-admin/fiscal/audit*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:fiscal:invoicing',
+      description:
+        'Gestionar documentos soporte de proveedor (facturas recibidas): CRUD, aprobar, marcar pagado, anular, subir PDF',
+      path: '/api/super-admin/fiscal/invoicing/*',
+      method: 'GET',
+    },
+    {
       name: 'superadmin:social_sales:config:read',
       description: 'Leer configuración Meta para Social Sales',
       path: '/api/superadmin/social-sales/meta/config',
@@ -3297,6 +3562,13 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/fiscal/rules',
       method: 'POST',
     },
+    {
+      name: 'store:fiscal:rules:manage',
+      description:
+        'Administrar reglas fiscales de tienda (crear/editar/activar/archivar)',
+      path: '/api/store/fiscal/rules/*',
+      method: 'POST',
+    },
 
     // Fiscal Operations (Organization)
     {
@@ -3370,6 +3642,13 @@ export async function seedPermissionsAndRoles(
       name: 'organization:fiscal:rules:write',
       description: 'Gestionar reglas fiscales de organización',
       path: '/api/organization/fiscal/rules',
+      method: 'POST',
+    },
+    {
+      name: 'organization:fiscal:rules:manage',
+      description:
+        'Administrar reglas fiscales de organización (crear/editar/activar/archivar)',
+      path: '/api/organization/fiscal/rules/*',
       method: 'POST',
     },
   ];
@@ -3704,6 +3983,7 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:reviews:moderate') ||
       p.name === 'store:payroll:advances:read' ||
+      p.name === 'store:payroll:novelties:read' ||
       // Permisos de lectura para nuevos dominios
       p.name === 'exogenous:read' ||
       p.name === 'payroll:read' ||

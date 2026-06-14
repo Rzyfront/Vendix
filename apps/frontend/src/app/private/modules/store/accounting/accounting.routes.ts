@@ -3,6 +3,70 @@ import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { accountingReducer } from './state/reducers/accounting.reducer';
 import { AccountingEffects } from './state/effects/accounting.effects';
+import type { AccountingSubTab } from './components/sub-tabs-shell/sub-tabs-shell.component';
+
+const CONFIGURATION_SUB_TABS: AccountingSubTab[] = [
+  {
+    id: 'mappings',
+    label: 'Mapeos',
+    icon: 'arrow-left-right',
+    route: '/admin/accounting/configuration/mappings',
+  },
+  {
+    id: 'flows',
+    label: 'Flujos',
+    icon: 'activity',
+    route: '/admin/accounting/configuration/flows',
+  },
+];
+
+const CARTERA_SUB_TABS: AccountingSubTab[] = [
+  {
+    id: 'dashboard',
+    label: 'Dashboard',
+    icon: 'layout-dashboard',
+    route: '/admin/accounting/cartera/dashboard',
+  },
+  {
+    id: 'receivables',
+    label: 'CxC',
+    icon: 'arrow-down-circle',
+    route: '/admin/accounting/cartera/receivables',
+  },
+  {
+    id: 'payables',
+    label: 'CxP',
+    icon: 'arrow-up-circle',
+    route: '/admin/accounting/cartera/payables',
+  },
+  {
+    id: 'aging',
+    label: 'Vencimientos',
+    icon: 'clock',
+    route: '/admin/accounting/cartera/aging',
+  },
+];
+
+const TAXES_SUB_TABS: AccountingSubTab[] = [
+  {
+    id: 'withholding',
+    label: 'Retenciones',
+    icon: 'percent',
+    route: '/admin/accounting/taxes/withholding',
+  },
+  {
+    id: 'exogenous',
+    label: 'Exógena',
+    icon: 'file-spreadsheet',
+    route: '/admin/accounting/taxes/exogenous',
+  },
+  {
+    id: 'ica',
+    label: 'Tarifas ICA',
+    icon: 'landmark',
+    route: '/admin/accounting/taxes/ica',
+  },
+];
 
 export const accountingRoutes: Routes = [
   {
@@ -40,40 +104,122 @@ export const accountingRoutes: Routes = [
             (c) => c.FiscalPeriodsComponent,
           ),
       },
+      // Configuración — super-tab grouping account mappings + accounting flows.
       {
-        path: 'account-mappings',
+        path: 'configuration',
         loadComponent: () =>
-          import('./components/account-mappings/account-mappings.component').then(
-            (c) => c.AccountMappingsComponent,
+          import('./components/sub-tabs-shell/sub-tabs-shell.component').then(
+            (c) => c.AccountingSubTabsShellComponent,
           ),
-      },
-      {
-        path: 'fixed-assets',
-        loadComponent: () =>
-          import('./components/fixed-assets/fixed-assets.component').then(
-            (c) => c.FixedAssetsComponent,
-          ),
-      },
-      {
-        path: 'consolidation',
-        loadComponent: () =>
-          import('./components/consolidation/consolidation.component').then(
-            (c) => c.ConsolidationComponent,
-          ),
+        data: {
+          subTabs: CONFIGURATION_SUB_TABS,
+          subTabsAriaLabel: 'Configuración contable',
+        },
         children: [
           {
             path: '',
+            redirectTo: 'mappings',
+            pathMatch: 'full',
+          },
+          {
+            path: 'mappings',
             loadComponent: () =>
-              import('./components/consolidation/consolidation-sessions/consolidation-sessions.component').then(
-                (c) => c.ConsolidationSessionsComponent,
+              import('./components/account-mappings/account-mappings.component').then(
+                (c) => c.AccountMappingsComponent,
               ),
           },
           {
-            path: ':id',
+            path: 'flows',
             loadComponent: () =>
-              import('./components/consolidation/session-detail/session-detail.component').then(
-                (c) => c.SessionDetailComponent,
+              import('./components/accounting-flows/accounting-flows.component').then(
+                (c) => c.AccountingFlowsComponent,
               ),
+          },
+        ],
+      },
+      // Cartera — super-tab grouping dashboard + CxC + CxP + aging.
+      {
+        path: 'cartera',
+        loadComponent: () =>
+          import('./components/sub-tabs-shell/sub-tabs-shell.component').then(
+            (c) => c.AccountingSubTabsShellComponent,
+          ),
+        data: {
+          subTabs: CARTERA_SUB_TABS,
+          subTabsAriaLabel: 'Gestión de cartera',
+        },
+        children: [
+          {
+            path: '',
+            redirectTo: 'dashboard',
+            pathMatch: 'full',
+          },
+          {
+            path: 'dashboard',
+            loadComponent: () =>
+              import('./components/cartera-dashboard/cartera-dashboard.component').then(
+                (c) => c.CarteraDashboardComponent,
+              ),
+          },
+          {
+            path: 'receivables',
+            loadComponent: () =>
+              import('./components/receivables/receivables.component').then(
+                (c) => c.ReceivablesComponent,
+              ),
+          },
+          {
+            path: 'payables',
+            loadComponent: () =>
+              import('./components/payables/payables.component').then(
+                (c) => c.PayablesComponent,
+              ),
+          },
+          {
+            path: 'aging',
+            loadComponent: () =>
+              import('./components/aging-report/aging-report.component').then(
+                (c) => c.AgingReportComponent,
+              ),
+          },
+        ],
+      },
+      // Impuestos — super-tab mounting the lazy tax sub-modules
+      // (retenciones / exógena / tarifas ICA) without rewriting them.
+      {
+        path: 'taxes',
+        loadComponent: () =>
+          import('./components/sub-tabs-shell/sub-tabs-shell.component').then(
+            (c) => c.AccountingSubTabsShellComponent,
+          ),
+        data: {
+          subTabs: TAXES_SUB_TABS,
+          subTabsAriaLabel: 'Gestión de impuestos',
+        },
+        children: [
+          {
+            path: '',
+            redirectTo: 'withholding',
+            pathMatch: 'full',
+          },
+          {
+            path: 'withholding',
+            loadChildren: () =>
+              import('../withholding-tax/withholding-tax.routes').then(
+                (m) => m.withholdingTaxRoutes,
+              ),
+          },
+          {
+            path: 'exogenous',
+            loadChildren: () =>
+              import('../exogenous/exogenous.routes').then(
+                (m) => m.exogenousRoutes,
+              ),
+          },
+          {
+            path: 'ica',
+            loadChildren: () =>
+              import('../taxes/ica/ica.routes').then((m) => m.icaRoutes),
           },
         ],
       },
@@ -108,6 +254,13 @@ export const accountingRoutes: Routes = [
         ],
       },
       {
+        path: 'fixed-assets',
+        loadComponent: () =>
+          import('./components/fixed-assets/fixed-assets.component').then(
+            (c) => c.FixedAssetsComponent,
+          ),
+      },
+      {
         path: 'budgets',
         loadComponent: () =>
           import('./components/budgets/budgets.component').then(
@@ -138,39 +291,27 @@ export const accountingRoutes: Routes = [
         ],
       },
       {
-        path: 'receivables',
+        path: 'consolidation',
         loadComponent: () =>
-          import('./components/receivables/receivables.component').then(
-            (c) => c.ReceivablesComponent,
+          import('./components/consolidation/consolidation.component').then(
+            (c) => c.ConsolidationComponent,
           ),
-      },
-      {
-        path: 'payables',
-        loadComponent: () =>
-          import('./components/payables/payables.component').then(
-            (c) => c.PayablesComponent,
-          ),
-      },
-      {
-        path: 'flows',
-        loadComponent: () =>
-          import('./components/accounting-flows/accounting-flows.component').then(
-            (c) => c.AccountingFlowsComponent,
-          ),
-      },
-      {
-        path: 'cartera',
-        loadComponent: () =>
-          import('./components/cartera-dashboard/cartera-dashboard.component').then(
-            (c) => c.CarteraDashboardComponent,
-          ),
-      },
-      {
-        path: 'aging',
-        loadComponent: () =>
-          import('./components/aging-report/aging-report.component').then(
-            (c) => c.AgingReportComponent,
-          ),
+        children: [
+          {
+            path: '',
+            loadComponent: () =>
+              import('./components/consolidation/consolidation-sessions/consolidation-sessions.component').then(
+                (c) => c.ConsolidationSessionsComponent,
+              ),
+          },
+          {
+            path: ':id',
+            loadComponent: () =>
+              import('./components/consolidation/session-detail/session-detail.component').then(
+                (c) => c.SessionDetailComponent,
+              ),
+          },
+        ],
       },
       {
         path: 'reports',
@@ -214,28 +355,49 @@ export const accountingRoutes: Routes = [
           },
         ],
       },
-      // Tax sub-modules — nested under AccountingComponent so they share the
-      // module's persistent sticky-header (single router-outlet). Previously
-      // mounted as sibling top-level routes in store_admin.routes, which made
-      // their tabs navigate away from the accounting shell.
+      // ── Legacy redirects ─────────────────────────────────────────────
+      // Old flat tab routes were regrouped under the configuration /
+      // cartera / taxes super-tabs. Keep redirects so bookmarks, sidebar
+      // entries and deep links keep working.
+      {
+        path: 'account-mappings',
+        redirectTo: 'configuration/mappings',
+        pathMatch: 'full',
+      },
+      {
+        path: 'flows',
+        redirectTo: 'configuration/flows',
+        pathMatch: 'full',
+      },
+      {
+        path: 'receivables',
+        redirectTo: 'cartera/receivables',
+        pathMatch: 'full',
+      },
+      {
+        path: 'payables',
+        redirectTo: 'cartera/payables',
+        pathMatch: 'full',
+      },
+      {
+        path: 'aging',
+        redirectTo: 'cartera/aging',
+        pathMatch: 'full',
+      },
       {
         path: 'withholding-tax',
-        loadChildren: () =>
-          import('../withholding-tax/withholding-tax.routes').then(
-            (m) => m.withholdingTaxRoutes,
-          ),
+        redirectTo: 'taxes/withholding',
+        pathMatch: 'full',
       },
       {
         path: 'exogenous',
-        loadChildren: () =>
-          import('../exogenous/exogenous.routes').then(
-            (m) => m.exogenousRoutes,
-          ),
+        redirectTo: 'taxes/exogenous',
+        pathMatch: 'full',
       },
       {
         path: 'ica',
-        loadChildren: () =>
-          import('../taxes/ica/ica.routes').then((m) => m.icaRoutes),
+        redirectTo: 'taxes/ica',
+        pathMatch: 'full',
       },
     ],
   },

@@ -229,7 +229,7 @@ export class GeneralSettingsComponent implements OnInit {
       }
 
       const knownSections: (keyof StoreSettings)[] = [
-        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations',
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'panel_ui',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {

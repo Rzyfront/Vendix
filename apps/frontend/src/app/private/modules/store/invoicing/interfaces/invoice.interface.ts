@@ -38,6 +38,28 @@ export interface Invoice {
   pdf_url?: string;
   sent_at?: string;
   accepted_at?: string;
+
+  /**
+   * DIAN retry-queue state attached by the backend list endpoint.
+   * Only present for invoices whose send/transmission status is in an
+   * error or pending-send state; `null` for the rest.
+   */
+  retry_status?: InvoiceRetryStatus | null;
+}
+
+export type InvoiceRetryQueueStatus =
+  | 'pending'
+  | 'processing'
+  | 'failed'
+  | 'completed';
+
+export interface InvoiceRetryStatus {
+  status: InvoiceRetryQueueStatus;
+  attempts: number;
+  max_attempts: number;
+  last_error: string | null;
+  /** ISO timestamp of the next scheduled retry attempt. */
+  next_retry_at: string | null;
 }
 
 export type InvoiceType =

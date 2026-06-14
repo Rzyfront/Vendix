@@ -85,6 +85,7 @@ export class NotificationsSettingsForm implements OnInit {
       const current = this.settings();
       if (current) {
         this.form.patchValue(current, { emitEvent: false });
+        this.syncSoundIdDisabledState();
       }
     });
 
@@ -232,8 +233,23 @@ export class NotificationsSettingsForm implements OnInit {
   }
 
   onFieldChange() {
+    this.syncSoundIdDisabledState();
     if (this.form.valid) {
       this.settingsChange.emit(this.form.value);
+    }
+  }
+
+  /**
+   * Gobierna el disabled de sound_id desde el control reactivo (fuente de
+   * verdad), no vía [disabled] en el template — que la directiva reactiva
+   * intercepta y dispara la advertencia "disabled attribute with a reactive
+   * form directive". Al silenciar sonidos, el selector queda deshabilitado.
+   */
+  private syncSoundIdDisabledState(): void {
+    if (this.isSoundMuted) {
+      this.soundIdControl.disable({ emitEvent: false });
+    } else {
+      this.soundIdControl.enable({ emitEvent: false });
     }
   }
 
