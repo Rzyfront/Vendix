@@ -20,7 +20,7 @@
         id: 'fire',
         label: 'Enviar a cocina',
         icon: 'flame',
-        variant: 'warning',
+        variant: 'secondary',
         disabled: !hasUnfiredItems() || isClosed(),
       },
       {
@@ -135,13 +135,14 @@
                   [class.is-fired]="item.inventory_consumed_at_fire"
                   (click)="toggleItemSelection(item.id)"
                 >
-                  <input
-                    type="checkbox"
-                    [checked]="isSelected(item.id)"
-                    (click)="$event.stopPropagation()"
-                    (change)="toggleItemSelection(item.id)"
-                    [disabled]="item.inventory_consumed_at_fire"
-                  />
+                  <div class="item-toggle" (click)="$event.stopPropagation()">
+                    <app-toggle
+                      [checked]="isSelected(item.id)"
+                      [disabled]="item.inventory_consumed_at_fire"
+                      [ariaLabel]="'Seleccionar ' + item.product_name"
+                      (changed)="toggleItemSelection(item.id)"
+                    ></app-toggle>
+                  </div>
                   <div class="item-info">
                     <span class="name">{{ item.product_name }}</span>
                     <span class="qty">× {{ item.quantity }}</span>
@@ -157,7 +158,7 @@
                     }
                   </div>
                   <div class="item-price">
-                    {{ item.total_price | currency }}
+                    {{ +item.total_price | currency }}
                   </div>
                 </div>
               }

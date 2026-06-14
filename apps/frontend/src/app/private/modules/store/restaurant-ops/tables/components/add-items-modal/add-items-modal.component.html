@@ -9,7 +9,7 @@
   <!-- Search -->
   <div class="search-bar">
     <app-input
-      [formControl]="form.controls['search']"
+      [formControl]="searchControl"
       label="Buscar producto"
       placeholder="Escribe el nombre del producto..."
       [required]="false"
@@ -24,6 +24,24 @@
       <app-spinner size="md"></app-spinner>
       <p>Cargando productos…</p>
     </div>
+  } @else if (filteredRows().length === 0) {
+    @if (searchTerm().trim()) {
+      <app-empty-state
+        icon="search-x"
+        title="Sin productos"
+        [description]="
+          'No hay productos que coincidan con «' + searchTerm().trim() + '».'
+        "
+        [showActionButton]="false"
+      ></app-empty-state>
+    } @else {
+      <app-empty-state
+        icon="package"
+        title="Sin productos"
+        description="No hay productos vendibles disponibles para agregar a la cuenta."
+        [showActionButton]="false"
+      ></app-empty-state>
+    }
   } @else {
     <div class="product-list">
       @for (row of filteredRows(); track trackById($index, row)) {
@@ -35,29 +53,29 @@
                 <span class="type">{{ row.product_type }}</span>
               }
               <span class="price">
-                {{ row.base_price | currency }}
+                {{ +(row.base_price ?? 0) | currency }}
               </span>
             </div>
           </div>
           <div class="qty-controls">
-            <button
-              type="button"
-              class="qty-btn"
+            <app-button
+              variant="outline"
+              size="sm"
               [disabled]="row.quantity <= 0"
-              (click)="decrement(row)"
-              aria-label="Disminuir"
+              [attr.aria-label]="'Disminuir'"
+              (clicked)="decrement(row)"
             >
-              <app-icon name="minus" [size]="14"></app-icon>
-            </button>
+              <app-icon slot="icon" name="minus" [size]="14"></app-icon>
+            </app-button>
             <span class="qty">{{ row.quantity }}</span>
-            <button
-              type="button"
-              class="qty-btn"
-              (click)="increment(row)"
-              aria-label="Aumentar"
+            <app-button
+              variant="outline"
+              size="sm"
+              [attr.aria-label]="'Aumentar'"
+              (clicked)="increment(row)"
             >
-              <app-icon name="plus" [size]="14"></app-icon>
-            </button>
+              <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+            </app-button>
           </div>
         </div>
       }

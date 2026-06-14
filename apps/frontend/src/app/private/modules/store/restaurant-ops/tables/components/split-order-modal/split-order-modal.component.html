@@ -8,26 +8,26 @@
 >
   <!-- Tabs -->
   <div class="tabs" role="tablist">
-    <button
-      type="button"
-      class="tab"
-      [class.active]="activeTab() === 'items'"
-      role="tab"
-      (click)="setTab('items')"
+    <app-button
+      [variant]="activeTab() === 'items' ? 'primary' : 'ghost'"
+      size="sm"
+      [attr.role]="'tab'"
+      [attr.aria-selected]="activeTab() === 'items'"
+      (clicked)="setTab('items')"
     >
-      <app-icon name="list" [size]="16"></app-icon>
+      <app-icon slot="icon" name="list" [size]="16"></app-icon>
       Por items
-    </button>
-    <button
-      type="button"
-      class="tab"
-      [class.active]="activeTab() === 'amount'"
-      role="tab"
-      (click)="setTab('amount')"
+    </app-button>
+    <app-button
+      [variant]="activeTab() === 'amount' ? 'primary' : 'ghost'"
+      size="sm"
+      [attr.role]="'tab'"
+      [attr.aria-selected]="activeTab() === 'amount'"
+      (clicked)="setTab('amount')"
     >
-      <app-icon name="dollar-sign" [size]="16"></app-icon>
+      <app-icon slot="icon" name="dollar-sign" [size]="16"></app-icon>
       Por monto
-    </button>
+    </app-button>
   </div>
 
   <!-- By items -->
@@ -44,39 +44,39 @@
             <div class="group-header">
               <strong>Comensal {{ i + 1 }}</strong>
               @if (itemGroups().length > 2) {
-                <button
-                  type="button"
-                  class="remove-btn"
-                  (click)="removeGroup(i)"
-                  aria-label="Eliminar grupo"
+                <app-button
+                  variant="outline-danger"
+                  size="sm"
+                  [attr.aria-label]="'Eliminar grupo'"
+                  (clicked)="removeGroup(i)"
                 >
-                  <app-icon name="trash" [size]="14"></app-icon>
-                </button>
+                  <app-icon slot="icon" name="trash" [size]="14"></app-icon>
+                </app-button>
               }
             </div>
 
             <div class="item-picker">
               @for (item of items(); track trackById($index, item)) {
-                <label
+                <div
                   class="item-check"
                   [class.is-checked]="isItemInGroup(item.id, i)"
                   [class.is-locked]="
                     isItemAssigned(item.id) && !isItemInGroup(item.id, i)
                   "
                 >
-                  <input
-                    type="checkbox"
+                  <app-toggle
                     [checked]="isItemInGroup(item.id, i)"
-                    (change)="toggleItemInGroup(item.id, i)"
-                  />
+                    [ariaLabel]="'Asignar ' + item.product_name + ' a este comensal'"
+                    (changed)="toggleItemInGroup(item.id, i)"
+                  ></app-toggle>
                   <div class="item-info">
                     <span class="item-name">{{ item.product_name }}</span>
                     <span class="item-qty">× {{ item.quantity }}</span>
                   </div>
                   <span class="item-total">
-                    {{ item.total_price | currency }}
+                    {{ +item.total_price | currency }}
                   </span>
-                </label>
+                </div>
               }
             </div>
 
@@ -88,10 +88,12 @@
         }
       </div>
 
-      <button type="button" class="add-group" (click)="addGroup()">
-        <app-icon name="plus" [size]="14"></app-icon>
-        Agregar otro comensal
-      </button>
+      <div class="add-group-wrap">
+        <app-button variant="outline" size="sm" (clicked)="addGroup()">
+          <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+          Agregar otro comensal
+        </app-button>
+      </div>
 
       <div class="status-bar" [class.ok]="allItemsAssigned()">
         {{ itemsAssigned().size }} / {{ items().length }} items asignados
@@ -107,27 +109,27 @@
       </p>
 
       <div class="mode-toggle">
-        <button
-          type="button"
-          class="mode-btn"
-          [class.active]="splitMode() === 'equal'"
-          (click)="setMode('equal')"
+        <app-button
+          [variant]="splitMode() === 'equal' ? 'primary' : 'ghost'"
+          size="sm"
+          [attr.aria-pressed]="splitMode() === 'equal'"
+          (clicked)="setMode('equal')"
         >
           Partes iguales
-        </button>
-        <button
-          type="button"
-          class="mode-btn"
-          [class.active]="splitMode() === 'custom'"
-          (click)="setMode('custom')"
+        </app-button>
+        <app-button
+          [variant]="splitMode() === 'custom' ? 'primary' : 'ghost'"
+          size="sm"
+          [attr.aria-pressed]="splitMode() === 'custom'"
+          (clicked)="setMode('custom')"
         >
           Personalizado
-        </button>
+        </app-button>
       </div>
 
       <div class="nsplits">
         <app-input
-          [formControl]="$any(form.controls['n_splits'])"
+          [formControl]="nSplitsControl"
           label="Número de partes"
           type="number"
           [min]="2"
@@ -144,8 +146,8 @@
               [label]="'Parte ' + (i + 1)"
               type="number"
               [min]="0"
-              currency
-              currencyDecimals="2"
+              [currency]="true"
+              [currencyDecimals]="2"
             />
           }
         </div>
@@ -154,7 +156,18 @@
           [class.ok]="customSumMatches()"
           [class.bad]="!customSumMatches()"
         >
-          Suma: {{ customSum() | currency }} / {{ orderTotal() | currency }}
+          <span class="status-line">
+            Suma: {{ customSum() | currency }} / {{ orderTotal() | currency }}
+          </span>
+          @if (!customSumMatches()) {
+            <span class="status-diff">
+              @if (customSumIsShort()) {
+                Faltan {{ customSumDiffAbs() | currency }}
+              } @else {
+                Sobran {{ customSumDiffAbs() | currency }}
+              }
+            </span>
+          }
         </div>
       }
     </div>

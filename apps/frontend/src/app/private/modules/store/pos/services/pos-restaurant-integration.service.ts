@@ -22,10 +22,36 @@ import type {
 
 interface FireOrderItemsResponse {
   kitchen_ticket_id: number;
-  fired_count: number;
-  skipped_count: number;
+  order_id: number;
+  fired_item_ids: number[];
+  skipped_item_ids: number[];
   cogs_total: string | number;
-  order_item_ids: number[];
+  consumed_line_count: number;
+}
+
+/** A single line to seed a counter (table-less) draft order before firing. */
+export interface CounterOrderLine {
+  product_id: number;
+  product_variant_id?: number;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  tax_rate?: number;
+}
+
+/** Shape returned by POST /store/orders (subset used by the counter-fire flow). */
+export interface CounterOrderResult {
+  id: number;
+  order_number?: string;
+  state?: string;
+  order_items: Array<{
+    id: number;
+    product_id: number | null;
+    product_variant_id?: number | null;
+    product_name: string;
+    quantity: number;
+  }>;
 }
 
 export interface OpenTableSessionResult {
@@ -165,6 +191,50 @@ export class PosRestaurantIntegrationService {
         map((res) => res.data),
         catchError((err) =>
           throwError(() => this.toMessage(err, 'No se pudo enviar a cocina')),
+        ),
+      );
+  }
+
+  /**
+   * Create a draft counter (table-less) order so its `prepared` items can be
+   * fired to the kitchen without opening a table. Used for mostrador / para
+   * llevar flows where there is no `table_session`. The backend creates the
+   * `orders` row in `draft` state and returns the persisted `order_items`
+   * with their ids — those ids are what `fireOrderItems` consumes.
+   *
+   * Stock for tracked products is reserved (non-restrictive: availability is
+   * NOT validated, matching the existing POS create path); the prepared
+   * ingredient consumption happens later at fire, never here.
+   */
+  createCounterDraftOrder(
+    customerId: number,
+    lines: CounterOrderLine[],
+    notes?: string,
+  ): Observable<CounterOrderResult> {
+    const subtotal = lines.reduce((sum, l) => sum + (l.total_price || 0), 0);
+    const body = {
+      customer_id: customerId,
+      state: 'draft',
+      subtotal: Number(subtotal.toFixed(2)),
+      total_amount: Number(subtotal.toFixed(2)),
+      internal_notes: notes,
+      items: lines.map((l) => ({
+        product_id: l.product_id,
+        product_variant_id: l.product_variant_id,
+        item_type: 'product',
+        product_name: l.product_name,
+        quantity: l.quantity,
+        unit_price: Number((l.unit_price || 0).toFixed(2)),
+        total_price: Number((l.total_price || 0).toFixed(2)),
+        tax_rate: l.tax_rate,
+      })),
+    };
+    return this.http
+      .post<ApiResponse<CounterOrderResult>>(`${this.apiUrl}/store/orders`, body)
+      .pipe(
+        map((res) => res.data),
+        catchError((err) =>
+          throwError(() => this.toMessage(err, 'No se pudo crear la orden de mostrador')),
         ),
       );
   }

@@ -262,11 +262,16 @@ export class MenusListPageComponent implements OnInit {
     }
   }
 
-  createMenu(): void {
-    const name = window.prompt('Nombre de la nueva carta:');
-    if (!name) return;
+  async createMenu(): Promise<void> {
+    const name = await this.dialogService.prompt({
+      title: 'Nueva carta',
+      message: 'Nombre de la nueva carta',
+      placeholder: 'Ej: Carta principal',
+      confirmText: 'Crear',
+    });
+    if (!name || !name.trim()) return;
     this.menusService
-      .create({ name, is_active: true })
+      .create({ name: name.trim(), is_active: true })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (created) => {

@@ -53,9 +53,24 @@ Use this skill for inventory value, historical inventory value, COGS, cost layer
 - Surplus: DR `1435`, CR `5295` using real input cost.
 - Entries must resolve the correct accounting entity from operating scope.
 
+## Restaurant Suite — Minimum Integer Stock Unit Rule (MVP)
+
+- The inventory core stays `Int`: `stock_levels.quantity_*`, `inventory_cost_layers.quantity`, and movements were **NOT** migrated to `Decimal`.
+- Each ingredient is modeled in its **minimum integer stock unit** (g, ml, unit) via `products.stock_unit` / `products.purchase_unit` / `products.purchase_to_stock_factor`. The factor converts purchase units → stock units at receipt time, so cost layers and valuation accumulate in the integer minimal unit.
+- Recipes (`recipe_items`) reference quantities in the ingredient's **minimal integer unit**. `waste_percent` (merma) and `yield`/`rendimiento` factors are applied as decimals, and the resulting consumed/produced quantity is **rounded to integer** in the stock unit before hitting `StockLevelManager`.
+- Residual risk: rounding error accumulates in recipes with many tiny components. Mitigation: model in milli-units (mg, µl) — still integer.
+- Deferred alternative: a `Decimal(18,4)` migration of the inventory core. It is intentionally deferred and **must** follow the anti-destructive rules in `vendix-prisma-migrations` and global §6 of `CLAUDE.md`.
+
+### COGS recognition for prepared products
+
+- COGS for a `prepared` product is recognized at **fire-to-kitchen**, not at payment: DR `6135` / CR `1435` via `AutoEntryService.onKitchenFired` (mapping keys `kitchen.fired.cogs` / `kitchen.fired.inventory`).
+- The consumed cost is `Σ(FIFO costs consumed)` computed when the leaf ingredients exit through `StockLevelManager.updateStock` with `movement_type='consumption'` (negative sign → FIFO over `inventory_cost_layers`). Payment must not re-recognize this cost (see the `inventory_consumed_at_fire` guard in `vendix-restaurant-ops`).
+- Sub-recipe production (`production_orders`) is an intra-inventory value transfer DR `1435` / CR `1435`; the produced lot's `unit_cost = Σ(FIFO costs consumed) / produced_qty`.
+
 ## Related Skills
 
 - `vendix-inventory-stock`
+- `vendix-restaurant-ops`
 - `vendix-accounting-rules`
 - `vendix-auto-entries`
 - `vendix-operating-scope`

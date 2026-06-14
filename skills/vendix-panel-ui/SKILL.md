@@ -125,16 +125,16 @@ do not gate `ORG_ADMIN` modules).
 ```ts
 // apps/frontend/src/app/shared/constants/industry-modules.constant.ts
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
-  retail:        [],   // intentionally empty in the foundation plan
-  restaurant:    [],
-  manufacturing: [],
-  service:       [],
+  retail:        ['restaurant_ops'],
+  restaurant:    [],   // the ONLY industry that sees the restaurant suite
+  manufacturing: ['restaurant_ops'],
+  service:       ['restaurant_ops'],
 };
 
 export function getModulesHiddenByIndustries(industries: string[]): string[] {
   // OR semantics: a module is hidden only if hidden for EVERY industry of the store.
   // Implementation = set-intersection of the per-industry hidden lists.
-  // If `industries` is empty, falls back to ['retail'] so the call is always defined.
+  // If `industries` is empty/undefined, returns [] (no module hidden).
 }
 ```
 
@@ -144,7 +144,36 @@ export function getModulesHiddenByIndustries(industries: string[]): string[] {
 exactly one source. Adding a new per-industry rule means adding a module key string to
 the relevant industry's array; no other code changes are required.
 
-The map is **intentionally empty** in the foundation plan (per `planning/industry-field-foundation-plan.md`). Follow-up plans (restaurant Operations / recipes, KDS, manufacturing, services) populate the map and may propose a dedicated `vendix-store-industries` skill once real per-industry behavior lands.
+### Inverse gating rule (Restaurant Suite, Phase I)
+
+The first real per-industry rule is **inverse**: the `restaurant_ops` parent module is
+hidden for **every** industry EXCEPT `restaurant`. `retail`, `manufacturing`, and
+`service` list `restaurant_ops` in their arrays; `restaurant` keeps an **empty** array
+so it stays visible. Because `getModulesHiddenByIndustries` uses **OR / set-intersection**
+semantics (a module is hidden only if it is hidden for *all* of the store's industries),
+a multi-industry store such as a hotel (`service` + `restaurant`) still sees
+`restaurant_ops` — the `restaurant` half of the intersection does not hide it, so the
+intersection is empty.
+
+`restaurant_ops` is a **parent** module with 5 children — `restaurant_ops_recipes`,
+`restaurant_ops_production`, `restaurant_ops_kds`, `restaurant_ops_tables`,
+`restaurant_ops_menus` — all registered (value `true`) under `STORE_ADMIN` in
+`DefaultPanelUIService.PANEL_UI_FALLBACK` (`default-panel-ui.service.ts`), catalogued
+in `APP_MODULES.STORE_ADMIN` (`app-modules.constant.ts`, parent + `children[]`), and
+label-mapped in `MenuFilterService.moduleKeyMap` ("Operaciones de Restaurante",
+"Recetas", "Producción", "Comandas", "Mesas", "Cartas"). Hiding the parent via the
+industry layer hides the whole subtree.
+
+**Crossing semantics enforced by this rule:** effective visibility is
+industry ∩ store ∩ user (AND chain — see Triple-Crossing Order). Because the industry
+layer runs **first** and a later step can never widen a module an earlier step hid, an
+industry that hides `restaurant_ops` means **neither** the store panel UI **nor** the
+per-user config can re-enable it. The two per-user config surfaces render those toggles
+**disabled with an "Industria" badge** and exclude them from the save diff.
+
+Follow-up plans (manufacturing, services) may add more industry rules and may propose a
+dedicated `vendix-store-industries` skill once more per-industry behavior lands. See
+`vendix-restaurant-ops` for the suite behind `restaurant_ops`.
 
 ### Snapshot fallback
 
@@ -495,5 +524,6 @@ rejected a backend clamp of user `panel_ui` writes against the industry ceiling
 - `vendix-frontend-routing` - Lazy routes for modules
 - `vendix-operating-scope` - STORE vs ORGANIZATION visibility
 - `vendix-fiscal-scope` - Fiscal scope filtering
+- `vendix-restaurant-ops` - Suite behind the `restaurant_ops` module gated by the inverse industry rule
 - `how-to-plan` - Must record the two Critical Plan Decisions whenever a plan introduces a module or submodule
 - `planning/industry-field-foundation-plan.md` - Foundation plan that introduced the industry dimension + store panel UI ceiling (Step 11 = this skill update)

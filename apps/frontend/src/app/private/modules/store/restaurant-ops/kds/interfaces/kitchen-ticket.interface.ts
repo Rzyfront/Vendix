@@ -96,14 +96,21 @@ export interface KdsSnapshotResponse {
 
 /**
  * Column definition for the KDS board. Mirrors the `pending → ready`
- * workflow. `delivered` is a soft column that holds the most recent
- * delivered/cancelled tickets so the kitchen can see what just left.
+ * workflow. `delivered` and `cancelled` are soft columns that hold the
+ * most recent closed tickets so the kitchen can see what just left —
+ * kept visually distinct (green vs red) instead of mixed together.
  */
-export type KdsColumn = 'pending' | 'in_preparation' | 'ready' | 'delivered';
+export type KdsColumn =
+  | 'pending'
+  | 'in_preparation'
+  | 'ready'
+  | 'delivered'
+  | 'cancelled';
 
 export const KDS_COLUMNS: readonly KdsColumn[] = [
   'pending',
   'in_preparation',
   'ready',
   'delivered',
+  'cancelled',
 ] as const;

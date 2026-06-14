@@ -35,6 +35,7 @@ import {
   ProductionOrderStats,
 } from '../../interfaces';
 import { ProductionOrdersService } from '../../services';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
 type StatusFilter = 'all' | ProductionOrderStatus;
 
@@ -77,6 +78,8 @@ export class ProductionOrdersListPageComponent implements OnInit {
   readonly filters = signal({ page: 1, limit: 10 });
   readonly totalItems = signal(0);
   readonly isLoading = signal(false);
+  /** Id of the order whose transition (start/complete/cancel) is in flight. */
+  readonly processingId = signal<number | null>(null);
 
   readonly searchTerm = signal('');
   readonly statusFilter = signal<StatusFilter>('all');
@@ -154,7 +157,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
       sortable: true,
       priority: 3,
       transform: (value: string | Date | null | undefined) =>
-        value ? this.formatDate(value) : '—',
+        value ? formatDateOnlyUTC(value) : '—',
     },
     {
       key: 'produced_at',
@@ -162,35 +165,44 @@ export class ProductionOrdersListPageComponent implements OnInit {
       sortable: true,
       priority: 3,
       transform: (value: string | Date | null | undefined) =>
-        value ? this.formatDate(value) : '—',
+        value ? formatDateOnlyUTC(value) : '—',
     },
   ];
 
-  readonly tableActions = computed<TableAction[]>(() => [
-    {
-      label: 'Iniciar',
-      icon: 'play',
-      variant: 'primary',
-      condition: (item: ProductionOrder) => item.status === 'draft',
-      action: (item: ProductionOrder) => this.startOrder(item),
-    },
-    {
-      label: 'Completar',
-      icon: 'check',
-      variant: 'primary',
-      condition: (item: ProductionOrder) =>
-        item.status === 'draft' || item.status === 'in_progress',
-      action: (item: ProductionOrder) => this.completeOrder(item),
-    },
-    {
-      label: 'Cancelar',
-      icon: 'x',
-      variant: 'danger',
-      condition: (item: ProductionOrder) =>
-        item.status === 'draft' || item.status === 'in_progress',
-      action: (item: ProductionOrder) => this.cancelOrder(item),
-    },
-  ]);
+  readonly tableActions = computed<TableAction[]>(() => {
+    // Read the processing signal so actions recompute (and re-disable) while
+    // a transition is in flight, keeping the row inert until it resolves.
+    const busyId = this.processingId();
+    const isBusy = (item: ProductionOrder) => busyId === item.id;
+    return [
+      {
+        label: 'Iniciar',
+        icon: 'play',
+        variant: 'primary',
+        show: (item: ProductionOrder) => item.status === 'draft',
+        disabled: (item: ProductionOrder) => isBusy(item),
+        action: (item: ProductionOrder) => this.startOrder(item),
+      },
+      {
+        label: 'Completar',
+        icon: 'check',
+        variant: 'primary',
+        show: (item: ProductionOrder) =>
+          item.status === 'draft' || item.status === 'in_progress',
+        disabled: (item: ProductionOrder) => isBusy(item),
+        action: (item: ProductionOrder) => this.completeOrder(item),
+      },
+      {
+        label: 'Cancelar',
+        icon: 'x',
+        variant: 'danger',
+        show: (item: ProductionOrder) =>
+          item.status === 'draft' || item.status === 'in_progress',
+        disabled: (item: ProductionOrder) => isBusy(item),
+        action: (item: ProductionOrder) => this.cancelOrder(item),
+      },
+    ];
+  });
 
   readonly cardConfig: ItemListCardConfig = {
     titleKey: 'product',
@@ -221,7 +233,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
         label: 'Creada',
         icon: 'clock',
         transform: (v: string | Date | null | undefined) =>
-          v ? this.formatDate(v) : '—',
+          v ? formatDateOnlyUTC(v) : '—',
       },
     ],
   };
@@ -333,17 +345,30 @@ export class ProductionOrdersListPageComponent implements OnInit {
     this.router.navigate(['/admin/restaurant-ops/production/new']);
   }
 
-  private startOrder(order: ProductionOrder): void {
+  private async startOrder(order: ProductionOrder): Promise<void> {
+    if (this.processingId() != null) return;
+    // Coherence with complete()/cancel(): confirm before mutating.
+    const ok = await this.dialogService.confirm({
+      title: 'Iniciar producción',
+      message: '¿Iniciar esta orden de producción?',
+      confirmText: 'Iniciar',
+      cancelText: 'Cancelar',
+    });
+    if (!ok) return;
+
+    this.processingId.set(order.id);
     this.productionService
       .start(order.id)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Producción iniciada');
+          this.processingId.set(null);
           this.loadOrders();
           this.loadStats();
         },
         error: (error) => {
+          this.processingId.set(null);
           this.toastService.error(
             typeof error === 'string' ? error : 'Error al iniciar la producción',
           );
@@ -372,6 +397,7 @@ export class ProductionOrdersListPageComponent implements OnInit {
           this.toastService.error('La cantidad producida debe ser mayor a 0');
           return;
         }
+        this.processingId.set(order.id);
         this.productionService
           .complete(order.id, { produced_qty: produced })
           .pipe(takeUntilDestroyed(this.destroyRef))
@@ -380,10 +406,12 @@ export class ProductionOrdersListPageComponent implements OnInit {
               this.toastService.success(
                 'Producción completada: stock generado y consumos registrados',
               );
+              this.processingId.set(null);
               this.loadOrders();
               this.loadStats();
             },
             error: (error) => {
+              this.processingId.set(null);
               this.toastService.error(
                 typeof error === 'string'
                   ? error
@@ -405,16 +433,19 @@ export class ProductionOrdersListPageComponent implements OnInit {
       })
       .then((confirmed) => {
         if (!confirmed) return;
+        this.processingId.set(order.id);
         this.productionService
           .cancel(order.id)
           .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
               this.toastService.success('Producción cancelada');
+              this.processingId.set(null);
               this.loadOrders();
               this.loadStats();
             },
             error: (error) => {
+              this.processingId.set(null);
               this.toastService.error(
                 typeof error === 'string'
                   ? error
@@ -446,14 +477,5 @@ export class ProductionOrdersListPageComponent implements OnInit {
     const n = Number(value);
     if (!Number.isFinite(n)) return String(value);
     return Number.isInteger(n) ? n.toString() : n.toFixed(2);
-  }
-
-  private formatDate(value: string | Date): string {
-    const d = value instanceof Date ? value : new Date(value);
-    if (Number.isNaN(d.getTime())) return String(value);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
   }
 }
