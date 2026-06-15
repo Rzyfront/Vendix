@@ -1,0 +1,8 @@
+{
+  "/api": {
+    "target": "https://api.vendix.com",
+    "secure": false,
+    "changeOrigin": true,
+    "logLevel": "info"
+  }
+}
