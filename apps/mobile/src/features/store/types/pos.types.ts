@@ -65,7 +65,10 @@ export interface PaymentMethod {
 }
 
 export interface CreatePosPaymentItemDto {
-  product_id: number;
+  // product_id is optional in the payload: pre-bulk/draft lines (e.g.
+  // products the cashier is composing on the fly) don't have a backend
+  // id yet. The backend treats undefined as "create on the fly".
+  product_id?: number;
   product_variant_id?: number;
   product_name: string;
   product_sku?: string;

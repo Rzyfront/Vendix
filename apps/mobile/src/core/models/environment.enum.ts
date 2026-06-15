@@ -1,3 +1,6 @@
+// TODO(shared-types): migrate to `@vendix/shared-types` once libs/shared-types/index.d.ts
+// is regenerated to match index.ts (currently a placeholder that only exports UserDto).
+// Tracked as a Knowledge Gap in the org-admin parity plan.
 export enum DomainApp {
   VENDIX_LANDING = 'VENDIX_LANDING',
   VENDIX_ADMIN = 'VENDIX_ADMIN',
