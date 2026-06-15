@@ -96,6 +96,14 @@
       "sessions": 1,
       "memories": 4,
       "prompts": 1
+    },
+    {
+      "id": "cba1feaa",
+      "created_by": "yoner",
+      "created_at": "2026-06-15T04:07:04Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
