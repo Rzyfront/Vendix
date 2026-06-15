@@ -1100,7 +1100,7 @@ const CartItemRow = ({
         pressed ? { opacity: 0.5 } : undefined,
       ]}
     >
-      <Icon name="trash" size={16} color={colors.error} />
+      <Icon name="trash-2" size={16} color={colors.error} />
     </Pressable>
   </View>
 );

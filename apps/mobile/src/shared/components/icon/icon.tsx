@@ -34,7 +34,6 @@ import {
   Plus,
   Minus,
   PlusCircle,
-  Trash2,
   X,
   ChevronRight,
   ChevronDown,
