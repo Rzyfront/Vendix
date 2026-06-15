@@ -488,7 +488,6 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   globe: Globe,
   factory: Factory,
   boxes: Boxes,
-  hash: Hash,
   tags: Tags,
   'scroll-text': ScrollText,
   history: History,
