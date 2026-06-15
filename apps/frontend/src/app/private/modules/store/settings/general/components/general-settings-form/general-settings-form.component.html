@@ -8,15 +8,6 @@
         (inputChange)="onFieldChange()"></app-input>
         <app-selector [formControl]="storeTypeControl" label="Tipo de Tienda" [options]="storeTypes"
         (valueChange)="onFieldChange()" size="sm"></app-selector>
-        <app-multi-selector
-          [formControl]="industriesControl"
-          label="Tipos de Negocio"
-          [options]="industryOptions"
-          size="sm"
-          [required]="true"
-          helpText="Si tu negocio combina varias industrias, marca todas las que apliquen — los módulos visibles se calculan con la unión de reglas."
-          (valueChange)="onFieldChange()"
-        ></app-multi-selector>
       </div>
     </div>
 
@@ -30,6 +21,19 @@
         (valueChange)="onFieldChange()" size="sm"></app-selector>
       </div>
     </div>
+  </div>
+
+  <!-- Tipos de Negocio (ancho completo: determina los módulos visibles de toda la tienda) -->
+  <div class="mt-6">
+    <app-multi-selector
+      [formControl]="industriesControl"
+      label="Tipos de Negocio"
+      [options]="industryOptions"
+      size="sm"
+      [required]="true"
+      helpText="Si tu negocio combina varias industrias, marca todas las que apliquen — los módulos visibles se calculan con la unión de reglas."
+      (valueChange)="onFieldChange()"
+    ></app-multi-selector>
   </div>
 
   <!-- Store type consequence info (full width, below the grid) -->

@@ -112,8 +112,8 @@ import { RateLimitModule } from './common/services/rate-limit/rate-limit.module'
     // populated. Blocks writes under /api/store/** when the store has no
     // active subscription (or it's suspended/blocked/cancelled/expired).
     // Read methods, /api/store/subscriptions/**, and handlers decorated
-    // with @SkipSubscriptionGate() pass through. Enforce mode is gated by
-    // the STORE_GATE_ENFORCE env var (currently 'true' in dev/prod).
+    // with @SkipSubscriptionGate() pass through. Enforce is the code default;
+    // set STORE_GATE_ENFORCE=false to fall back to log-only observation.
     {
       provide: APP_GUARD,
       useClass: StoreOperationsGuard,

@@ -1,4 +1,4 @@
-import { Component, model, input, output } from '@angular/core';
+import { Component, OnInit, model, input, output } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../modal/modal.component';
@@ -12,7 +12,7 @@ import { InputComponent } from '../input/input.component';
   templateUrl: './prompt-modal.component.html',
   styleUrl: './prompt-modal.component.scss',
 })
-export class PromptModalComponent {
+export class PromptModalComponent implements OnInit {
   readonly title = input('Ingresar valor');
   readonly message = input('');
   readonly placeholder = input('');
@@ -30,8 +30,11 @@ export class PromptModalComponent {
 
   inputValue = '';
 
-  constructor() {
-    this.inputValue = '';
+  ngOnInit(): void {
+    // Prefill con defaultValue (lo setea DialogService.prompt vía setInput antes
+    // del primer change detection). El template usa [(ngModel)]="inputValue", que
+    // antes ignoraba defaultValue y dejaba el campo siempre vacío.
+    this.inputValue = this.defaultValue();
   }
 
   onConfirm(): void {

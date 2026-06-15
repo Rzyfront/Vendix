@@ -95,7 +95,6 @@ export function getDefaultStoreSettings(): StoreSettings {
       schedule_mode: 'continuous',
       enable_schedule_validation: false,
       offline_mode_enabled: false,
-      require_cash_drawer_open: false,
       auto_print_receipt: true,
       allow_price_edit: true,
       allow_discount: true,
@@ -120,6 +119,9 @@ export function getDefaultStoreSettings(): StoreSettings {
         auto_create_default_register: true,
         require_closing_count: true,
         track_non_cash_payments: true,
+      },
+      barcode_scanner: {
+        enabled: false,
       },
       customer_queue: {
         enabled: false,

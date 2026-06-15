@@ -80,4 +80,34 @@ describe('domain-root-hosting.util', () => {
       ]),
     );
   });
+
+  it('keeps ownership pending and re-exposes the TXT when ownership failed', () => {
+    const payload = buildDomainRootDnsInstructions({
+      root: {
+        id: 1,
+        hostname: 'gorrerolicor.online',
+        status: 'failed_ownership',
+        ssl_status: 'pending',
+        last_verified_at: null,
+        verification_token: 'vdx_test',
+      },
+      routingEndpoint: 'd123.cloudfront.net',
+      verificationToken: 'vdx_test',
+    });
+
+    expect(payload.ownership_status).toBe('pending');
+    expect(
+      payload.stages?.find((stage) => stage.key === 'ownership')?.status,
+    ).toBe('failed');
+    expect(payload.instructions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          group: 'ownership',
+          record_type: 'TXT',
+          provider_host: '_vendix-verify',
+          value: 'vdx_test',
+        }),
+      ]),
+    );
+  });
 });

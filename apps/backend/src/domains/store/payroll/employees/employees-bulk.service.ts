@@ -445,7 +445,7 @@ export class EmployeesBulkService {
         email: true,
       },
     });
-    const userDocMap = new Map<string, { id: number; email: string }>();
+    const userDocMap = new Map<string, { id: number; email: string | null }>();
     for (const u of existingUsers) {
       if (u.document_type && u.document_number) {
         const key = `${u.document_type}-${u.document_number}`;

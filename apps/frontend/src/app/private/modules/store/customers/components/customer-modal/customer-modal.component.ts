@@ -43,10 +43,9 @@ export { translateCustomerError } from '../../utils/customer-error.translator';
         <!-- Email -->
         <app-input
           formControlName="email"
-          label="Correo electrónico *"
+          label="Correo electrónico"
           placeholder="cliente@ejemplo.com"
           type="email"
-          [required]="true"
           [error]="getFieldError('email')"
           (blur)="onFieldBlur('email')"
           customWrapperClass="mt-0"
@@ -208,7 +207,7 @@ export class CustomerModalComponent {
 
   constructor() {
     this.form = this.fb.group({
-      email: ['', [Validators.required, Validators.email]],
+      email: ['', [Validators.email]],
       first_name: ['', [Validators.required, Validators.minLength(2)]],
       last_name: ['', [Validators.required, Validators.minLength(2)]],
       phone: ['', [Validators.required, Validators.minLength(7)]],
@@ -306,8 +305,6 @@ export class CustomerModalComponent {
 
     if (errors['required']) {
       switch (field) {
-        case 'email':
-          return 'El correo es obligatorio';
         case 'first_name':
           return 'El nombre es obligatorio';
         case 'last_name':

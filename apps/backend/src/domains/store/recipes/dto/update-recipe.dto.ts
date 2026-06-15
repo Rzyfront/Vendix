@@ -13,8 +13,9 @@ import { Transform, Type } from 'class-transformer';
 /**
  * DTO to partially update a recipe.
  *
- * All fields are optional. Changing `product_id` is allowed but the service
- * still enforces the unique-per-store constraint.
+ * All fields are optional. `product_id` is intentionally NOT updatable: a recipe
+ * is bound to its finished product at creation time, the service ignores it, and
+ * the whitelist (forbidNonWhitelisted) rejects it with 400 if sent.
  */
 export class UpdateRecipeDto {
   @IsOptional()

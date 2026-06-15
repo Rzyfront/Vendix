@@ -128,7 +128,7 @@ export class FiscalScopeEventsListener {
       where: {
         organization_id,
         state: { not: 'archived' },
-        email: { not: '' },
+        email: { not: null },
       },
       select: {
         id: true,
@@ -147,7 +147,10 @@ export class FiscalScopeEventsListener {
     const adminRoleNames = new Set(['owner', 'admin', 'ORG_ADMIN']);
     const seen = new Set<string>();
 
-    return users.filter((user) => {
+    type AdminRecipient = (typeof users)[number] & { email: string };
+
+    return users.filter((user): user is AdminRecipient => {
+      if (!user.email) return false;
       const isOrgAdminApp = user.user_settings?.app_type === 'ORG_ADMIN';
       const hasAdminRole = user.user_roles.some((userRole) =>
         userRole.roles?.name ? adminRoleNames.has(userRole.roles.name) : false,

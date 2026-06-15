@@ -483,6 +483,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'El producto ya existe',
   },
+  PROD_BARCODE_DUP_001: {
+    code: 'PROD_BARCODE_DUP_001',
+    httpStatus: 409,
+    devMessage: 'El código de barras ya está en uso en esta tienda',
+  },
   PROD_IMAGE_001: {
     code: 'PROD_IMAGE_001',
     httpStatus: 404,

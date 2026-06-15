@@ -382,11 +382,11 @@ export class ProductionOrdersListPageComponent implements OnInit {
     // significantly different than the recipe's planned value.
     this.dialogService
       .prompt({
-        title: 'Completar producción',
-        message: `¿Cuántas ${order.recipe?.yield_unit ?? 'unidades'} se produjeron realmente? (Planeado: ${this.formatNumber(order.planned_qty)})`,
-        placeholder: 'Cantidad producida',
+        title: `Completar producción de ${order.product?.name ?? `#${order.id}`}`,
+        message: `Indica cuántas ${order.recipe?.yield_unit ?? 'unidades'} se produjeron realmente (planeado: ${this.formatNumber(order.planned_qty)}). Al confirmar, se descuentan los insumos de la receta del inventario y se suma el stock del producto terminado.`,
+        placeholder: `Cantidad en ${order.recipe?.yield_unit ?? 'unidades'}`,
         defaultValue: String(order.planned_qty),
-        confirmText: 'Completar',
+        confirmText: 'Completar y registrar stock',
         cancelText: 'Cancelar',
         inputType: 'number',
       })

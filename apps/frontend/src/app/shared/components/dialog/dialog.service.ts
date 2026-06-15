@@ -1,5 +1,6 @@
 import {
   Injectable,
+  ComponentRef,
   createComponent,
   EnvironmentInjector,
   ApplicationRef,
@@ -47,15 +48,20 @@ export class DialogService {
     private appRef: ApplicationRef,
   ) {}
 
-  private setSignalValue(instance: any, key: string, value: any): void {
-    const prop = instance[key];
-    if (prop && typeof prop === 'function') {
-      const signal = prop as any;
-      if (typeof signal.set === 'function') {
-        signal.set(value);
-      } else if (typeof signal.update === 'function') {
-        signal.update(() => value);
-      }
+  /**
+   * Escribe un input del componente creado dinámicamente.
+   *
+   * IMPORTANTE: los modales declaran sus props con `input()` (read-only), que NO
+   * exponen `.set()`/`.update()`. La forma oficial de escribir un input de un
+   * componente creado por `createComponent` es `ComponentRef.setInput()` — que
+   * además funciona para `model()`. Antes esto usaba `signal.set()` sobre la
+   * instancia, lo que fallaba en silencio y dejaba todos los modales con sus
+   * valores por defecto (título genérico, mensaje vacío). Solo escribe cuando el
+   * valor está definido para no pisar los defaults del componente.
+   */
+  private setInput(ref: ComponentRef<unknown>, key: string, value: unknown): void {
+    if (value !== undefined) {
+      ref.setInput(key, value);
     }
   }
 
@@ -64,40 +70,15 @@ export class DialogService {
       const componentRef = createComponent(ConfirmationModalComponent, {
         environmentInjector: this.injector,
       });
-      this.setSignalValue(componentRef.instance, 'title', data.title);
-      this.setSignalValue(componentRef.instance, 'message', data.message);
-      if (data.confirmText)
-        this.setSignalValue(
-          componentRef.instance,
-          'confirmText',
-          data.confirmText,
-        );
-      if (data.cancelText)
-        this.setSignalValue(
-          componentRef.instance,
-          'cancelText',
-          data.cancelText,
-        );
-      if (data.confirmVariant)
-        this.setSignalValue(
-          componentRef.instance,
-          'confirmVariant',
-          data.confirmVariant,
-        );
-      if (config.size)
-        this.setSignalValue(componentRef.instance, 'size', config.size);
-      if (config.showCloseButton !== undefined)
-        this.setSignalValue(
-          componentRef.instance,
-          'showCloseButton',
-          config.showCloseButton,
-        );
-      if (config.customClasses)
-        this.setSignalValue(
-          componentRef.instance,
-          'customClasses',
-          config.customClasses,
-        );
+      this.setInput(componentRef, 'title', data.title);
+      this.setInput(componentRef, 'message', data.message);
+      this.setInput(componentRef, 'confirmText', data.confirmText);
+      this.setInput(componentRef, 'cancelText', data.cancelText);
+      this.setInput(componentRef, 'confirmVariant', data.confirmVariant);
+      this.setInput(componentRef, 'size', config.size);
+      this.setInput(componentRef, 'showCloseButton', config.showCloseButton);
+      this.setInput(componentRef, 'customClasses', config.customClasses);
+
       let sub: any;
       let subCancel: any;
 
@@ -133,46 +114,17 @@ export class DialogService {
       const componentRef = createComponent(PromptModalComponent, {
         environmentInjector: this.injector,
       });
-      this.setSignalValue(componentRef.instance, 'title', data.title);
-      this.setSignalValue(componentRef.instance, 'message', data.message);
-      this.setSignalValue(
-        componentRef.instance,
-        'placeholder',
-        data.placeholder || '',
-      );
-      this.setSignalValue(
-        componentRef.instance,
-        'defaultValue',
-        data.defaultValue || '',
-      );
-      if (data.confirmText)
-        this.setSignalValue(
-          componentRef.instance,
-          'confirmText',
-          data.confirmText,
-        );
-      if (data.cancelText)
-        this.setSignalValue(
-          componentRef.instance,
-          'cancelText',
-          data.cancelText,
-        );
-      if (data.inputType)
-        this.setSignalValue(componentRef.instance, 'inputType', data.inputType);
-      if (config.size)
-        this.setSignalValue(componentRef.instance, 'size', config.size);
-      if (config.showCloseButton !== undefined)
-        this.setSignalValue(
-          componentRef.instance,
-          'showCloseButton',
-          config.showCloseButton,
-        );
-      if (config.customClasses)
-        this.setSignalValue(
-          componentRef.instance,
-          'customClasses',
-          config.customClasses,
-        );
+      this.setInput(componentRef, 'title', data.title);
+      this.setInput(componentRef, 'message', data.message);
+      this.setInput(componentRef, 'placeholder', data.placeholder || '');
+      this.setInput(componentRef, 'defaultValue', data.defaultValue || '');
+      this.setInput(componentRef, 'confirmText', data.confirmText);
+      this.setInput(componentRef, 'cancelText', data.cancelText);
+      this.setInput(componentRef, 'inputType', data.inputType);
+      this.setInput(componentRef, 'size', config.size);
+      this.setInput(componentRef, 'showCloseButton', config.showCloseButton);
+      this.setInput(componentRef, 'customClasses', config.customClasses);
+
       let sub: any;
       let subCancel: any;
 

@@ -55,7 +55,6 @@ export class PosSettingsForm implements OnInit {
     schedule_mode: new FormControl<'continuous' | 'custom'>('continuous'),
     enable_schedule_validation: new FormControl<boolean | null>(null),
     show_onscreen_keypad: new FormControl<boolean | null>(null),
-    require_cash_drawer_open: new FormControl<boolean | null>(null),
     auto_print_receipt: new FormControl<boolean | null>(null),
     allow_price_edit: new FormControl<boolean | null>(null),
     allow_discount: new FormControl<boolean | null>(null),
@@ -80,6 +79,9 @@ export class PosSettingsForm implements OnInit {
       auto_create_default_register: new FormControl<boolean | null>(null),
       require_closing_count: new FormControl<boolean | null>(null),
       track_non_cash_payments: new FormControl<boolean | null>(null),
+    }),
+    barcode_scanner: new FormGroup({
+      enabled: new FormControl<boolean | null>(null),
     }),
     customer_queue: new FormGroup({
       enabled: new FormControl<boolean | null>(null),
@@ -119,8 +121,8 @@ export class PosSettingsForm implements OnInit {
     return this.form.get('show_onscreen_keypad') as FormControl<boolean>;
   }
 
-  get requireCashDrawerOpenControl(): FormControl<boolean> {
-    return this.form.get('require_cash_drawer_open') as FormControl<boolean>;
+  get barcodeScannerEnabledControl(): FormControl<boolean> {
+    return this.form.get('barcode_scanner.enabled') as FormControl<boolean>;
   }
 
   get autoPrintReceiptControl(): FormControl<boolean> {

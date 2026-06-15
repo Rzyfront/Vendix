@@ -1,26 +1,82 @@
 <div class="w-full overflow-x-hidden">
   <app-sticky-header
     title="Nueva Producción"
-    subtitle="Crear una orden de producción (sub-receta en lote)"
+    subtitle="Producir un lote de un producto preparado a partir de su receta"
     icon="flame"
     variant="glass"
   />
 
-  <div class="px-2 py-3 md:p-4">
-    <app-card title="Datos de la producción" subtitle="Define el producto preparado, la receta y la cantidad planeada">
+  <div class="px-2 py-3 md:p-4 space-y-5">
+    <!-- Panel explicativo: qué hace este módulo y cuál es el flujo. -->
+    <div
+      class="flex items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4"
+    >
+      <app-icon
+        name="info"
+        [size]="20"
+        class="mt-0.5 flex-shrink-0 text-[var(--color-primary)]"
+      />
+      <div class="space-y-1 text-sm text-[var(--color-text-secondary)]">
+        <p class="font-semibold text-[var(--color-text-primary)]">
+          ¿Qué es una orden de producción?
+        </p>
+        <p>
+          Fabrica un <strong>lote</strong> de un
+          <strong>producto preparado</strong> (un plato o una sub-receta)
+          siguiendo su <strong>receta</strong>. Al completarla, se
+          <strong>descuentan los insumos</strong> del inventario y se
+          <strong>suma el stock</strong> del producto terminado.
+        </p>
+        <p class="text-[var(--color-text-tertiary)]">
+          Flujo: <strong>Borrador</strong> (se crea aquí) →
+          <strong>Iniciar</strong> → <strong>Completar</strong> (registras la
+          cantidad realmente producida, se consumen los insumos y se suma el
+          stock).
+        </p>
+      </div>
+    </div>
+
+    <app-card
+      title="Datos de la producción"
+      subtitle="Elige el producto preparado, su receta y la cantidad que planeas producir"
+    >
       <form
         [formGroup]="form"
         (ngSubmit)="onSubmit()"
         class="grid grid-cols-1 md:grid-cols-2 gap-4"
       >
-        <app-selector
-          label="Producto preparado"
-          placeholder="Selecciona el producto a producir"
-          [options]="productOptions()"
-          [required]="true"
-          [disabled]="isLoadingProducts()"
-          [formControl]="productIdControl"
-        />
+        <div class="md:col-span-2">
+          <app-selector
+            label="Producto preparado"
+            [placeholder]="
+              isLoadingProducts()
+                ? 'Cargando productos...'
+                : 'Selecciona el producto a producir'
+            "
+            helpText="El plato o sub-receta que vas a producir en lote. Solo son producibles los productos «preparados» marcados como «producido por lote»."
+            [options]="productOptions()"
+            [required]="true"
+            [formControl]="productIdControl"
+          />
+
+          @if (noEligibleProducts()) {
+            <div
+              class="mt-2 flex items-start gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-warning-light)] p-3 text-sm text-[var(--color-text-secondary)]"
+            >
+              <app-icon
+                name="alert-triangle"
+                [size]="16"
+                class="mt-0.5 flex-shrink-0 text-[var(--color-warning)]"
+              />
+              <span>
+                No tienes productos configurados para producción en lote. Edita un
+                producto <strong>preparado</strong>, actívale
+                <strong>«producido por lote»</strong> y crea su
+                <strong>receta</strong> antes de generar una producción.
+              </span>
+            </div>
+          }
+        </div>
 
         <app-selector
           label="Receta"
@@ -33,45 +89,50 @@
                   ? 'Este producto no tiene recetas activas'
                   : 'Selecciona la receta a producir'
           "
+          helpText="Define qué insumos y en qué cantidad se consumen. Se carga automáticamente según el producto elegido."
           [options]="recipeOptions()"
           [required]="true"
-          [disabled]="!productIdControl.value || isLoadingRecipes()"
           [formControl]="recipeIdControl"
         />
 
         <app-input
           type="number"
-          [label]="'Cantidad planeada (' + (selectedProductUnit() ?? 'unidades') + ')'"
+          [label]="'Cantidad a producir (' + (selectedProductUnit() ?? 'unidades') + ')'"
           placeholder="Ej. 10"
           step="0.01"
           [min]="0"
-          helperText="En la unidad de rendimiento de la receta (yield_unit)"
+          helperText="Cuántas unidades planeas producir, en la unidad de rendimiento de la receta."
+          [required]="true"
           [formControl]="plannedQtyControl"
         />
 
         <app-textarea
           label="Notas (opcional)"
-          placeholder="Notas internas de la producción"
+          placeholder="Notas internas de la producción (ej. turno, responsable)"
           [formControl]="notesControl"
           [rows]="3"
         />
 
-        <div class="md:col-span-2 flex flex-col-reverse md:flex-row md:justify-end gap-2 pt-2">
+        <div
+          class="md:col-span-2 flex flex-col-reverse md:flex-row md:justify-end gap-2 pt-2"
+        >
           <app-button
             variant="outline"
-            label="Cancelar"
-            icon="x"
-            (click)="onCancel()"
+            (clicked)="onCancel()"
             [disabled]="isSubmitting()"
-          />
+          >
+            <app-icon name="x" [size]="16" slot="icon" />
+            Cancelar
+          </app-button>
           <app-button
             variant="primary"
             type="submit"
-            label="Crear producción"
-            icon="check"
-            [disabled]="isSubmitting() || form.invalid"
             [loading]="isSubmitting()"
-          />
+            [disabled]="isSubmitting()"
+          >
+            <app-icon name="check" [size]="16" slot="icon" />
+            Crear producción
+          </app-button>
         </div>
       </form>
     </app-card>

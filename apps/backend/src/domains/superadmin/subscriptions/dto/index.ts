@@ -1,4 +1,4 @@
-export { CreatePlanDto } from './plan.dto';
+export { CreatePlanDto, PlanPricingDto } from './plan.dto';
 export { UpdatePlanDto } from './update-plan.dto';
 export { PlanQueryDto } from './plan-query.dto';
 export {

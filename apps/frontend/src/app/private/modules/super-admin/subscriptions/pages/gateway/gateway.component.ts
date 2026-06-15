@@ -37,6 +37,7 @@ import {
   UpsertGatewayDto,
 } from '../../interfaces/platform-gateway.interface';
 import { GatewayAdminService } from '../../services/gateway-admin.service';
+import { environment } from '../../../../../../../environments/environment';
 
 /**
  * Reactive form shape for the Wompi platform-gateway configuration.
@@ -100,6 +101,14 @@ export class GatewayComponent {
   readonly selectedEnvironment = signal<GatewayEnvironment>('sandbox');
   readonly formInvalid = signal<boolean>(true);
   readonly secretsFilled = signal<boolean>(false);
+  readonly webhookUrlCopied = signal<boolean>(false);
+
+  /**
+   * Events URL the operator must register in the PLATFORM Wompi merchant
+   * (distinct from the per-store webhook). Derived from the API base so it
+   * stays correct across environments.
+   */
+  readonly platformWebhookUrl = `${environment.apiUrl}/platform/webhooks/wompi`;
 
   /**
    * `true` when the backend already has a valid (parseable) configuration.
@@ -303,6 +312,15 @@ export class GatewayComponent {
   onHeaderAction(id: string): void {
     if (id === 'test') this.onTest();
     if (id === 'save') this.onSave();
+  }
+
+  // ── Webhook URL ───────────────────────────────────────────────────
+
+  copyWebhookUrl(): void {
+    navigator.clipboard.writeText(this.platformWebhookUrl).then(() => {
+      this.webhookUrlCopied.set(true);
+      setTimeout(() => this.webhookUrlCopied.set(false), 2000);
+    });
   }
 
   // ── Test connection ───────────────────────────────────────────────

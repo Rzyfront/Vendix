@@ -36,6 +36,9 @@ export enum PricingType {
 export enum ProductType {
   PHYSICAL = 'physical',
   SERVICE = 'service',
+  // Plato/preparación producida in-house (suite restaurante). Ya existe en el
+  // enum Prisma product_type_enum; el DTO debe aceptarlo para crear/editar platos.
+  PREPARED = 'prepared',
 }
 
 export enum ServiceModality {
@@ -82,6 +85,11 @@ export class CreateVariantWithStockDto {
   @IsString()
   @MaxLength(100)
   sku: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 
   @IsOptional()
   @IsString()
@@ -206,6 +214,11 @@ export class CreateProductDto {
   @IsString()
   @MaxLength(100)
   sku?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 
   @IsOptional()
   @IsInt()
@@ -477,6 +490,11 @@ export class UpdateProductDto {
   @IsString()
   @MaxLength(100)
   sku?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 
   @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -786,6 +804,11 @@ export class CreateProductVariantDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(64)
+  barcode?: string;
+
+  @IsOptional()
+  @IsString()
   @MaxLength(255)
   name?: string;
 
@@ -876,6 +899,11 @@ export class UpdateProductVariantDto {
   @IsString()
   @MaxLength(100)
   sku?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 
   @IsOptional()
   @IsString()
@@ -1214,6 +1242,11 @@ export class UpdateVariantWithStockDto {
   @IsString()
   @MaxLength(100)
   sku?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  barcode?: string;
 
   @IsOptional()
   @IsString()

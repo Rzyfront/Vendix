@@ -18,6 +18,7 @@ import {
   WompiWidgetConfig,
 } from '../../../../../../core/services/wompi-checkout.service';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { markdownToHtml } from '../../../../../../shared/utils/markdown.util';
 
 // S2.1 — Map backend coupon validation `reason` codes to user-facing
 // Spanish copy. Kept inline (rather than i18n keys) to match the existing
@@ -242,6 +243,18 @@ const COUPON_REASON_COPY: Record<string, string> = {
                     }
                   </div>
                 </div>
+
+                <!-- Detalles enriquecidos del plan (Markdown del super-admin).
+                     Se renderiza el STRING HTML directamente con [innerHTML];
+                     Angular lo sanitiza automáticamente. No usar
+                     bypassSecurityTrustHtml. -->
+                @if (detailsHtml(); as html) {
+                  <div
+                    class="prose prose-sm max-w-none markdown-preview text-sm text-text-primary"
+                    [innerHTML]="html"
+                  ></div>
+                }
+
                 <div class="border-t border-border"></div>
               }
 
@@ -584,6 +597,15 @@ export class CheckoutComponent implements OnInit {
       if (code === null && !this.preview()) return;
       this.loadPreview(planId, code ?? undefined);
     }
+  });
+
+  // Rich plan details (Markdown → HTML string). We return a plain string and
+  // bind it with [innerHTML]; Angular's default sanitizer strips unsafe
+  // markup. Do NOT wrap this in DomSanitizer.bypassSecurityTrustHtml — that
+  // would disable sanitization and open an XSS vector on admin-authored copy.
+  readonly detailsHtml = computed<string>(() => {
+    const md = this.selectedPlan()?.details_md ?? '';
+    return md.trim() ? markdownToHtml(md) : '';
   });
 
   readonly freePlan = computed(() => this.preview()?.free_plan ?? null);

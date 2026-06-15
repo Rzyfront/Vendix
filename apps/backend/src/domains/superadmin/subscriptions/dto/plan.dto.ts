@@ -6,9 +6,29 @@ import {
   IsBoolean,
   IsObject,
   IsNotEmpty,
+  IsArray,
+  ValidateNested,
   MaxLength,
   Min,
 } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class PlanPricingDto {
+  @IsEnum(['monthly', 'quarterly', 'semiannual', 'annual'])
+  billing_cycle: string;
+
+  @IsNumber()
+  @Min(0)
+  price: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3)
+  currency?: string;
+
+  @IsBoolean()
+  is_default: boolean;
+}
 
 export class CreatePlanDto {
   @IsString()
@@ -124,4 +144,22 @@ export class CreatePlanDto {
   @IsOptional()
   @IsNumber()
   parent_plan_id?: number;
+
+  // --- Multi-cycle support (additive) ---
+  // When provided with >= 1 item, create() produces one subscription_plans row
+  // per pricing, all sharing the same plan_group_code.
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PlanPricingDto)
+  pricings?: PlanPricingDto[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  plan_group_code?: string;
+
+  @IsOptional()
+  @IsString()
+  details_md?: string;
 }

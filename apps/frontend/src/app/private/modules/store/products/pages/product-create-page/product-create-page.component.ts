@@ -5,6 +5,7 @@ import {
   effect,
   signal,
   inject,
+  DestroyRef,
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
@@ -42,6 +43,7 @@ import {
   CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../../shared/pipes/currency';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   CreateProductDto,
   CreateProductImageDto,
@@ -71,6 +73,7 @@ import {
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 import { ProductUtils } from '../../utils/product.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
+import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
 import { environment } from '../../../../../../../environments/environment';
 import { saleLessThanBaseValidator } from '../../utils/product-validators';
 import { PriceTiersService } from '../../../price-tiers/services/price-tiers.service';
@@ -91,6 +94,7 @@ interface VariantAttribute {
 interface GeneratedVariant {
   id?: number;
   sku: string;
+  barcode?: string;
   name: string;
   price: number;
   cost_price: number;
@@ -459,6 +463,43 @@ export class ProductCreatePageComponent {
   private priceTiersService = inject(PriceTiersService);
   private priceTierCache = inject(PriceTierCacheService);
   private http = inject(HttpClient);
+  private destroyRef = inject(DestroyRef);
+  private barcodeService = inject(PosBarcodeService);
+  private readonly authFacade = inject(AuthFacade);
+
+  /**
+   * Industrias EFECTIVAS de la tienda, con la MISMA cascada de fuentes que
+   * `MenuFilterService` (core/services/menu-filter.service.ts):
+   *   1. store_settings.general.industries — fuente de verdad, se actualiza al
+   *      guardar en Ajustes → General (live, no requiere re-login).
+   *   2. user.store.industries — snapshot de login (puede no traer el campo si
+   *      el whitelist de `cleanStore` aún no lo incluye).
+   *   3. ['retail'] — default canónico (columna DB + settings default).
+   * Antes leía solo (1)→userIndustries$ login y devolvía [] cuando el campo
+   * faltaba, ocultando "Plato preparado" en tiendas restaurante.
+   */
+  private readonly storeSettings = toSignal(this.authFacade.storeSettings$, {
+    initialValue: null as { general?: { industries?: string[] } } | null,
+  });
+  private readonly loginIndustries = toSignal(this.authFacade.userIndustries$, {
+    initialValue: [] as string[],
+  });
+  private readonly storeIndustries = computed<string[]>(() => {
+    const fromSettings = this.storeSettings()?.general?.industries;
+    const fromLogin = this.loginIndustries();
+    return (
+      fromSettings ||
+      (Array.isArray(fromLogin) ? fromLogin : null) ||
+      ['retail']
+    );
+  });
+  /**
+   * `true` solo si la tienda tiene la industria `restaurant`. Gatea el tipo
+   * "Plato preparado" y los toggles de la suite restaurante en el formulario.
+   */
+  readonly isRestaurant = computed(() =>
+    this.storeIndustries().includes('restaurant'),
+  );
 
   // Data Collection Templates (for consultation configuration)
   dataCollectionTemplates: {
@@ -557,10 +598,26 @@ export class ProductCreatePageComponent {
     { value: 'weight', label: 'Venta por peso (kg)' },
   ];
 
-  productTypeOptions: { value: string; label: string }[] = [
-    { value: 'physical', label: 'Producto Físico' },
-    { value: 'service', label: 'Servicio' },
-  ];
+  /**
+   * Opciones del selector "Tipo de Producto". "Plato preparado"
+   * (product_type='prepared') solo se ofrece a tiendas con industria
+   * `restaurant`, o si el producto en edición ya es 'prepared' (para no
+   * perder el valor al editarlo en una tienda mal configurada).
+   */
+  readonly productTypeOptions = computed<{ value: string; label: string }[]>(
+    () => {
+      this.formUpdateTrigger(); // reactividad ante cambios del formulario
+      const base = [
+        { value: 'physical', label: 'Producto Físico' },
+        { value: 'service', label: 'Servicio' },
+      ];
+      const current = this.productForm?.get('product_type')?.value;
+      if (this.isRestaurant() || current === 'prepared') {
+        base.push({ value: 'prepared', label: 'Plato preparado' });
+      }
+      return base;
+    },
+  );
 
   serviceModalityOptions: SelectorOption[] = [
     { value: 'in_person', label: 'Presencial' },
@@ -647,6 +704,12 @@ export class ProductCreatePageComponent {
   variantAttributes: VariantAttribute[] = [];
   generatedVariants: GeneratedVariant[] = [];
   removedVariantKeys = new Set<string>();
+
+  // Routes a barcode scan to the currently-focused barcode input.
+  // Default = product-level barcode (preserves simple-product scan behavior).
+  protected readonly scanTarget = signal<
+    { kind: 'product' } | { kind: 'variant'; index: number }
+  >({ kind: 'product' });
   expandedVariantIndex = signal<number | null>(null);
   stockTransferMode: 'first' | 'distribute' | 'reset' | null = null;
   readonly originalBaseStock = signal(0);
@@ -778,6 +841,26 @@ export class ProductCreatePageComponent {
         this.loadProductPromotions(this.productId);
       }
     });
+
+    // Scan-to-fill: a barcode scan (gated by barcode_scanner.enabled) is routed
+    // to whichever barcode input is currently focused (scanTarget). Default is the
+    // product-level barcode, preserving simple-product behavior.
+    this.barcodeService.scans$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((code) => {
+        const target = this.scanTarget();
+        if (target.kind === 'variant') {
+          const variant = this.generatedVariants[target.index];
+          if (variant) {
+            variant.barcode = code;
+            // Zoneless reactive refresh: reassign the array (same pattern used by
+            // the variant image-update handlers) so the focused input re-renders.
+            this.generatedVariants = [...this.generatedVariants];
+            return;
+          }
+        }
+        this.productForm.get('barcode')?.setValue(code);
+      });
   }
 
   private applyDraftData(draft: any): void {
@@ -789,6 +872,7 @@ export class ProductCreatePageComponent {
       track_inventory: draft.track_inventory ?? true,
       allow_pos_price_override: draft.allow_pos_price_override ?? false,
       sku: draft.sku || '',
+      barcode: draft.barcode || '',
       category_ids: draft.category_ids || [],
       brand_ids: draft.brand_id ? [draft.brand_id] : [],
       tax_category_ids: draft.tax_category_ids || [],
@@ -882,6 +966,18 @@ export class ProductCreatePageComponent {
     this.copyOnlinePurchaseLinkFallback(url);
   }
 
+  copyName(): void {
+    const name = this.productForm.get('name')?.value?.trim();
+    if (!name) return;
+
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      navigator.clipboard
+        .writeText(name)
+        .then(() => this.toastService.success('Nombre copiado'))
+        .catch(() => {});
+    }
+  }
+
   openOnlinePurchaseLink(): void {
     const url = this.onlinePurchaseUrl();
     if (!url || typeof window === 'undefined') return;
@@ -963,6 +1059,7 @@ export class ProductCreatePageComponent {
         is_featured: [false],
         allow_pos_price_override: [false],
         sku: ['', [Validators.maxLength(100)]],
+        barcode: ['', [Validators.maxLength(64)]],
         stock_quantity: [0, [Validators.min(0)]],
         track_inventory: [true],
         category_ids: [[] as number[]],
@@ -1130,6 +1227,7 @@ export class ProductCreatePageComponent {
       is_featured: !!product.is_featured,
       allow_pos_price_override: product.allow_pos_price_override === true,
       sku: product.sku,
+      barcode: product.barcode,
       stock_quantity: product.stock_quantity,
       track_inventory: product.track_inventory !== false,
       category_ids: categoryIds,
@@ -1202,6 +1300,7 @@ export class ProductCreatePageComponent {
       this.generatedVariants = product.product_variants.map((v: any) => ({
         id: v.id,
         sku: v.sku,
+        barcode: v.barcode ?? '',
         name: v.name || `${product.name} - ${v.sku}`,
         price:
           v.price_override !== undefined && v.price_override !== null
@@ -2451,6 +2550,7 @@ export class ProductCreatePageComponent {
       is_featured: !!formValue.is_featured,
       allow_pos_price_override: !!formValue.allow_pos_price_override,
       sku: formValue.sku || undefined,
+      barcode: formValue.barcode || undefined,
       track_inventory: isServiceType ? false : !!formValue.track_inventory,
       stock_quantity: isServiceType
         ? undefined
@@ -2547,6 +2647,7 @@ export class ProductCreatePageComponent {
         return {
           id: v.id,
           sku: v.sku,
+          barcode: v.barcode?.trim() ? v.barcode.trim() : undefined,
           name: v.name,
           // Only send price_override when intentionally non-zero; 0 is ambiguous (backend rejects)
           price_override: Number(v.price) > 0 ? Number(v.price) : null,
