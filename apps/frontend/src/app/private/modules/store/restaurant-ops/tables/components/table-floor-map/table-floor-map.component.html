@@ -15,6 +15,8 @@
       [style.--cell-color]="cell.statusColor"
       (click)="onTableClick(cell.table)"
       [draggable]="editable()"
+      [style.grid-column]="cellPos(cell.table).col"
+      [style.grid-row]="cellPos(cell.table).row"
       (dragstart)="onDragStart($event, cell)"
       (dragover)="onDragOver($event)"
       (drop)="onDrop($event, cell)"
@@ -54,6 +56,12 @@
         </span>
         @if (cell.isOccupied && cell.table.active_session) {
           <span class="session-id">#{{ cell.table.active_session.id }}</span>
+        }
+        @if (cell.displayStatus === 'reserved' && (cell.table.pending_bookings?.length ?? 0) > 0) {
+          <span class="reservation-tag" title="Reservas pendientes">
+            <app-icon name="calendar" [size]="12"></app-icon>
+            {{ cell.table.pending_bookings?.length }}
+          </span>
         }
       </div>
     </button>

@@ -68,4 +68,11 @@
     (isOpenChange)="onCloseModal()"
     (open)="onOpenSession($event)"
   />
+
+  <app-seat-booking-modal
+    [isOpen]="isSeatModalOpen()"
+    [table]="seatTable()"
+    (isOpenChange)="closeSeatModal()"
+    (seated)="onBookingSeated()"
+  />
 </div>

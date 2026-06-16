@@ -19,6 +19,8 @@ import { AvailabilityService } from './availability.service';
 import { OrdersService } from '../orders/orders.service';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../products/services/price-resolver.service';
+import { TablesService } from '../tables/tables.service';
+import { TableSessionsService } from '../tables/table-sessions.service';
 
 @Injectable()
 export class ReservationsService {
@@ -31,6 +33,8 @@ export class ReservationsService {
     private readonly s3Service: S3Service,
     private readonly eventEmitter: EventEmitter2,
     private readonly priceResolverService: PriceResolverService,
+    private readonly tablesService: TablesService,
+    private readonly tableSessionsService: TableSessionsService,
   ) {}
 
   // Estado maquina de transiciones validas
@@ -302,6 +306,7 @@ export class ReservationsService {
             channel: dto.channel || 'pos',
             notes: dto.notes,
             order_id: dto.order_id,
+            table_id: dto.table_id ?? null,
             provider_id: resolvedProviderId,
             product_variant_id: dto.product_variant_id ?? null,
             created_by_user_id: context?.user_id,
@@ -314,7 +319,19 @@ export class ReservationsService {
       { isolationLevel: 'Serializable' },
     );
 
-    // 7. Auto-crear orden de venta vinculada
+    // 7. Marcar la mesa como reservada si se asignó una tabla
+    if (dto.table_id) {
+      try {
+        await this.prisma.tables.updateMany({
+          where: { id: dto.table_id, store_id, status: 'available' },
+          data: { status: 'reserved', updated_at: new Date() },
+        });
+      } catch {
+        // No-op: la mesa puede no existir o estar en otro estado.
+      }
+    }
+
+    // 8. Auto-crear orden de venta vinculada
     if (!dto.order_id && !dto.skip_order_creation) {
       try {
         const priceResult = this.priceResolverService.resolvePrice({
@@ -502,6 +519,74 @@ export class ReservationsService {
     );
 
     return updated;
+  }
+
+  /**
+   * Asigna (o reasigna) una mesa a una reserva. Marca la mesa como
+   * 'reserved' si estaba 'available'. NO toca el estado de la reserva.
+   */
+  async assignTable(bookingId: number, tableId: number) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new BadRequestException('No se encontro contexto de tienda');
+    }
+    const booking = await this.findOne(bookingId);
+    if (booking.store_id !== store_id) {
+      throw new NotFoundException('Reserva no encontrada');
+    }
+    const table = await this.tablesService.getById(tableId);
+    if (table.store_id !== store_id) {
+      throw new NotFoundException('Mesa no encontrada');
+    }
+    const updated = await this.mapBooking(
+      await this.prisma.bookings.update({
+        where: { id: bookingId },
+        data: { table_id: tableId, updated_at: new Date() },
+        include: this.BOOKING_INCLUDE,
+      }),
+    );
+    if (table.status === 'available') {
+      await this.prisma.tables.update({
+        where: { id: tableId },
+        data: { status: 'reserved', updated_at: new Date() },
+      });
+    }
+    return updated;
+  }
+
+  /**
+   * Sienta una reserva: pending → confirmed → in_progress y abre
+   * una table_session con el customer de la reserva. La mesa pasa
+   * a 'occupied'.
+   */
+  async seatBooking(bookingId: number, tableId?: number) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    if (!store_id) {
+      throw new BadRequestException('No se encontro contexto de tienda');
+    }
+    const booking = await this.findOne(bookingId);
+    if (booking.store_id !== store_id) {
+      throw new NotFoundException('Reserva no encontrada');
+    }
+    const targetTableId = tableId ?? booking.table_id;
+    if (!targetTableId) {
+      throw new BadRequestException(
+        'La reserva no tiene mesa asignada. Asigna una antes de sentar.',
+      );
+    }
+    if (booking.status === 'pending') {
+      await this.transition(bookingId, 'confirmed');
+    }
+    if (booking.status !== 'in_progress') {
+      await this.start(bookingId);
+    }
+    const session = await this.tableSessionsService.openSession({
+      table_id: targetTableId,
+      customer_id: booking.customer_id,
+    });
+    return session;
   }
 
   /**

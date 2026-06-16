@@ -11,7 +11,6 @@ import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   CardComponent,
-  IconComponent,
   SpinnerComponent,
   StatsComponent,
   StickyHeaderActionButton,
@@ -22,6 +21,7 @@ import { Table } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import { TableFloorMapComponent } from '../../components/table-floor-map/table-floor-map.component';
 import { OpenTableModalComponent } from '../../components/open-table-modal/open-table-modal.component';
+import { SeatBookingModalComponent } from '../../components/seat-booking-modal/seat-booking-modal.component';
 
 interface TablesStats {
   total: number;
@@ -47,10 +47,10 @@ interface TablesStats {
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
-    IconComponent,
     SpinnerComponent,
     TableFloorMapComponent,
     OpenTableModalComponent,
+    SeatBookingModalComponent,
   ],
   templateUrl: './tables-floor-page.component.html',
   styleUrl: './tables-floor-page.component.scss',
@@ -66,6 +66,8 @@ export class TablesFloorPageComponent implements OnInit {
   readonly selectedTable = signal<Table | null>(null);
   readonly isOpenModalOpen = signal(false);
   readonly isOpeningSession = signal(false);
+  readonly isSeatModalOpen = signal(false);
+  readonly seatTable = signal<Table | null>(null);
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {
@@ -133,6 +135,11 @@ export class TablesFloorPageComponent implements OnInit {
       ]);
       return;
     }
+    if (status === 'reserved' && (t.pending_bookings?.length ?? 0) > 0) {
+      this.seatTable.set(t);
+      this.isSeatModalOpen.set(true);
+      return;
+    }
     if (status === 'available') {
       this.selectedTable.set(t);
       this.isOpenModalOpen.set(true);
@@ -141,6 +148,15 @@ export class TablesFloorPageComponent implements OnInit {
         `La mesa ${t.name} no está disponible (${TablesService.statusLabel(status)})`,
       );
     }
+  }
+
+  closeSeatModal(): void {
+    this.isSeatModalOpen.set(false);
+    this.seatTable.set(null);
+  }
+
+  onBookingSeated(): void {
+    this.loadFloor();
   }
 
   onOpenSession(dto: { table_id: number; guest_count?: number }): void {

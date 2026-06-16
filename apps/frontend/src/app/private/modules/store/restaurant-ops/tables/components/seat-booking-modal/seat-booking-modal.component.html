@@ -1,0 +1,56 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="close()"
+  [size]="'md'"
+  [title]="title()"
+  subtitle="Elige la reserva que quieres sentar en esta mesa"
+>
+  @if (bookings().length === 0) {
+    <div class="empty text-center text-text-secondary py-6">
+      <app-icon name="calendar" [size]="32"></app-icon>
+      <p class="mt-2 text-sm">
+        Esta mesa no tiene reservas pendientes o confirmadas.
+      </p>
+    </div>
+  } @else {
+    <ul class="space-y-2">
+      @for (b of bookings(); track trackById($index, b)) {
+        <li
+          class="flex items-center justify-between gap-2 bg-gray-50 px-3 py-2 rounded border border-border"
+        >
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium">
+              {{ b.booking_number }} ·
+              <span class="text-text-secondary">{{ b.start_time }} – {{ b.end_time }}</span>
+            </div>
+            <div class="text-xs text-text-secondary truncate">
+              @if (b.customer) {
+                {{ b.customer.first_name }} {{ b.customer.last_name }}
+                @if (b.customer.phone) {
+                  · {{ b.customer.phone }}
+                }
+              }
+              @if (b.product) {
+                · {{ b.product.name }}
+              }
+            </div>
+          </div>
+          <app-button
+            variant="primary"
+            size="sm"
+            [loading]="internalLoading()"
+            (clicked)="seat(b)"
+          >
+            <app-icon slot="icon" name="user-check" [size]="14"></app-icon>
+            Sentar
+          </app-button>
+        </li>
+      }
+    </ul>
+  }
+
+  <div slot="footer" class="flex justify-end">
+    <app-button variant="ghost" (clicked)="close()">Cerrar</app-button>
+  </div>
+</app-modal>

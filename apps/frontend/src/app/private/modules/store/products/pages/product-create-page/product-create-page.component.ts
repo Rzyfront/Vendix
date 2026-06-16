@@ -1100,9 +1100,12 @@ export class ProductCreatePageComponent {
 
   constructor() {
     // Deep-link desde otros módulos: si llegan queryParams (ej. ?is_combo=true&product_type=prepared)
-    // los aplicamos al form. Usamos un effect con el queryParamMap como signal.
+    // los aplicamos al form. Usamos toSignal(queryParamMap) para que sea reactivo.
+    const queryParamsSignal = toSignal(this.route.queryParamMap, {
+      initialValue: this.route.snapshot.queryParamMap,
+    });
     effect(() => {
-      const params = this.route.snapshot.queryParamMap;
+      const params = queryParamsSignal();
       const isCombo = params.get('is_combo') === 'true';
       const productType = params.get('product_type');
       if (isCombo || productType) {

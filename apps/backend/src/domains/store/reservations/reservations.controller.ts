@@ -219,6 +219,41 @@ export class ReservationsController {
     );
   }
 
+  @Patch(':id/assign-table')
+  @Permissions('store:reservations:update')
+  async assignTable(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { table_id: number },
+  ) {
+    if (!body?.table_id) {
+      throw new BadRequestException('table_id es obligatorio');
+    }
+    const result = await this.reservationsService.assignTable(
+      id,
+      body.table_id,
+    );
+    return this.responseService.success(
+      result,
+      'Mesa asignada a la reserva',
+    );
+  }
+
+  @Patch(':id/seat')
+  @Permissions('store:reservations:update')
+  async seat(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { table_id?: number } = {},
+  ) {
+    const result = await this.reservationsService.seatBooking(
+      id,
+      body.table_id,
+    );
+    return this.responseService.success(
+      result,
+      'Reserva sentada en la mesa',
+    );
+  }
+
   @Delete(':id')
   @Permissions('store:reservations:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {

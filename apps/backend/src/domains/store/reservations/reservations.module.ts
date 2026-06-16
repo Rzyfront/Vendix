@@ -11,9 +11,10 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { OrdersModule } from '../orders/orders.module';
 import { S3Module } from '@common/services/s3.module';
 import { ProductsModule } from '../products/products.module';
+import { TablesModule } from '../tables/tables.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, OrdersModule, S3Module, ProductsModule],
+  imports: [ResponseModule, PrismaModule, OrdersModule, S3Module, ProductsModule, TablesModule],
   controllers: [ProvidersController, ReservationsController],
   providers: [
     ReservationsService,

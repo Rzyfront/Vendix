@@ -11,6 +11,7 @@ import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
+  ButtonComponent,
   CardComponent,
   IconComponent,
   DialogService,
@@ -41,11 +42,13 @@ import { MenusService } from '../../services';
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
+    ButtonComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
+    IconComponent,
   ],
   templateUrl: './menus-list-page.component.html',
   styleUrl: './menus-list-page.component.scss',

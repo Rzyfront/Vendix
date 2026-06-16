@@ -6,11 +6,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import {
-  BadgeComponent,
-  CardComponent,
-  IconComponent,
-} from '../../../../../../../shared/components/index';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { Table, TableStatus } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 
@@ -39,12 +35,13 @@ export interface TableMovedEvent {
  *    al soltar se actualiza un signal `localPositions` y se emite
  *    `tableMoved`. Usado en la página de gestión.
  *
- * Coordenadas `pos_x` / `pos_y` se honran en ambos modos.
+ * Coordenadas `pos_x` / `pos_y` se honran en ambos modos via
+ * `cellPos()` que calcula `grid-column` / `grid-row`.
  */
 @Component({
   selector: 'app-table-floor-map',
   standalone: true,
-  imports: [CommonModule, CardComponent, IconComponent, BadgeComponent],
+  imports: [CommonModule, IconComponent],
   templateUrl: './table-floor-map.component.html',
   styleUrl: './table-floor-map.component.scss',
 })
@@ -79,13 +76,18 @@ export class TableFloorMapComponent {
     });
   });
 
-  /** Max X coordinate seen — used to size the absolute-positioned grid. */
-  readonly maxCols = computed(() => {
-    const xs = (this.tables() ?? [])
-      .map((t) => t.pos_x ?? 0)
-      .filter((x) => Number.isFinite(x));
-    return Math.max(1, ...xs) + 1;
-  });
+  /**
+   * Devuelve grid-column / grid-row para colocar la celda según su
+   * pos_x/pos_y. Si la mesa no tiene coordenadas, devuelve
+   * 'auto' para que el grid la coloque naturalmente.
+   */
+  cellPos(t: Table): { col: string; row: string } {
+    const local = this.localPositions().get(t.id);
+    const x = local?.x ?? t.pos_x;
+    const y = local?.y ?? t.pos_y;
+    if (x == null || y == null) return { col: 'auto', row: 'auto' };
+    return { col: String(x + 1), row: String(y + 1) };
+  }
 
   onTableClick(t: Table): void {
     if (this.editable() || this.draggingId != null) return;
@@ -120,15 +122,12 @@ export class TableFloorMapComponent {
     if (!this.editable() || this.draggingId == null) return;
     ev.preventDefault();
     if (this.dragOrigin) {
-      // Convierte el delta de píxeles a una unidad de grilla discreta.
-      // 1 unidad ≈ GRID_STEP px.
       const GRID_STEP = 80;
       const dx = Math.round((ev.clientX - this.dragOrigin.x) / GRID_STEP);
       const dy = Math.round((ev.clientY - this.dragOrigin.y) / GRID_STEP);
       const newX = Math.max(0, this.dragOrigin.cellX + dx);
       const newY = Math.max(0, this.dragOrigin.cellY + dy);
       const id = this.draggingId;
-      // Actualiza el signal local para feedback visual inmediato.
       this.localPositions.update((m) => {
         const next = new Map(m);
         next.set(id, { x: newX, y: newY });
@@ -143,13 +142,6 @@ export class TableFloorMapComponent {
   onDragEnd(): void {
     this.draggingId = null;
     this.dragOrigin = null;
-  }
-
-  effectivePos(t: Table): { x: number; y: number } | null {
-    if (t.pos_x == null || t.pos_y == null) return null;
-    const local = this.localPositions().get(t.id);
-    if (local) return local;
-    return { x: t.pos_x, y: t.pos_y };
   }
 
   trackByTableId(_i: number, cell: TableCell): number {

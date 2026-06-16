@@ -2,6 +2,7 @@ import {
   Component,
   computed,
   DestroyRef,
+  effect,
   inject,
   input,
   output,
@@ -110,6 +111,16 @@ export class TableFormModalComponent {
   });
 
   readonly statusOptions: SelectorOption[] = STATUS_OPTIONS;
+
+  constructor() {
+    // Sincroniza el form cada vez que la mesa a editar cambia (crear ↔ editar).
+    // Resuelve el caso donde el modal ya está abierto y la mesa a editar
+    // cambia de null (alta) a un valor (edición) o viceversa.
+    effect(() => {
+      this.table();
+      this.syncFromTable();
+    });
+  }
 
   /**
    * Llamado por el template cada vez que se abre el modal o cambia

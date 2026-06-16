@@ -13,6 +13,8 @@ export interface Booking {
   notes?: string;
   internal_notes?: string;
   order_id?: number;
+  table_id?: number | null;
+  table?: { id: number; name: string; zone?: string | null; status?: string } | null;
   created_by_user_id?: number;
   created_at: string;
   updated_at: string;

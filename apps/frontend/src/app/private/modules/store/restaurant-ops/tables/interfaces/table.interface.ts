@@ -27,6 +27,28 @@ export interface Table {
    * 'occupied'.
    */
   effective_status?: TableStatus;
+  /**
+   * Reservas pendientes/confirmadas asociadas a esta mesa (Phase 5
+   * alignment). Permite al operador ver y sentar al cliente desde
+   * el floor map.
+   */
+  pending_bookings?: PendingBookingSummary[];
+}
+
+export interface PendingBookingSummary {
+  id: number;
+  booking_number: string;
+  date: string | Date;
+  start_time: string;
+  end_time: string;
+  status: string;
+  customer: {
+    id: number;
+    first_name: string;
+    last_name: string;
+    phone?: string | null;
+  } | null;
+  product: { id: number; name: string } | null;
 }
 
 export interface TableSessionSummary {
