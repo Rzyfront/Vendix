@@ -20,6 +20,16 @@ export interface ExtractedLineItem {
   unit_price: number;
   total: number;
   sku_if_visible?: string;
+  /**
+   * Fase 4: pistas de unidad de medida emitidas por el perfil
+   * `invoice_ocr_ingredient`. El perfil retail (`invoice_ocr`) no las
+   * emite, por eso son opcionales. `uom_hint` es un código de unidad
+   * (p.ej. "L", "ml", "kg", "g", "unit") que el scanner usa para
+   * preseleccionar la unidad de compra cuando `orderType==='ingredient'`.
+   */
+  presentation?: string | null;
+  pack_size?: number | null;
+  uom_hint?: string | null;
 }
 
 export interface InvoiceScanResult {
@@ -58,6 +68,16 @@ export interface MatchedLineItem extends ExtractedLineItem {
   match_status: 'matched' | 'partial' | 'new';
   selected_product_id?: number;
   candidates: ProductCandidate[];
+  /**
+   * Fase 4: UoM FKs resueltas por el scanner a partir de `uom_hint`
+   * (solo en flujo `ingredient`). `purchase_uom_id` se resuelve por
+   * match case-insensitive de código contra el catálogo; `stock_uom_id`
+   * es la unidad BASE de la misma dimensión. Sugerencia editable: el
+   * usuario las confirma/ajusta en el modal de config del POP. Null
+   * cuando no hay hint o no hay match en el catálogo.
+   */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
 }
 
 export interface InvoiceMatchResult {

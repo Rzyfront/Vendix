@@ -455,6 +455,9 @@ export class PopCartService {
         notes: request.notes,
         is_prebulk: true,
         prebulk_data: request.prebulk_data,
+        // Fase 4: UoM preseleccionadas (scanner uom_hint) — sugerencia.
+        purchase_uom_id: request.purchase_uom_id ?? null,
+        stock_uom_id: request.stock_uom_id ?? null,
         addedAt: new Date(),
       };
       this.recalculateItemTotals(newItem);
@@ -506,6 +509,9 @@ export class PopCartService {
         lot_info: request.lot_info,
         notes: request.notes,
         is_prebulk: false,
+        // Fase 4: UoM preseleccionadas (scanner uom_hint) — sugerencia.
+        purchase_uom_id: request.purchase_uom_id ?? null,
+        stock_uom_id: request.stock_uom_id ?? null,
         addedAt: new Date(),
       };
       this.recalculateItemTotals(newItem);

@@ -573,6 +573,11 @@ export class PopComponent implements OnInit, OnDestroy {
         ? item.candidates.find((c) => c.id === item.selected_product_id)
         : null;
 
+      // Fase 4: UoM preseleccionadas por el scanner desde uom_hint (solo
+      // flujo ingredient). Sugerencia editable; null en retail / sin match.
+      const purchaseUomId = item.purchase_uom_id ?? null;
+      const stockUomId = item.stock_uom_id ?? null;
+
       if (candidate) {
         this.popCartService
           .addToCart({
@@ -587,6 +592,8 @@ export class PopComponent implements OnInit, OnDestroy {
             },
             quantity: item.quantity,
             unit_cost: item.unit_price,
+            purchase_uom_id: purchaseUomId,
+            stock_uom_id: stockUomId,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       } else {
@@ -604,10 +611,14 @@ export class PopComponent implements OnInit, OnDestroy {
             quantity: item.quantity,
             unit_cost: item.unit_price,
             is_prebulk: true,
+            purchase_uom_id: purchaseUomId,
+            stock_uom_id: stockUomId,
             prebulk_data: {
               name: item.description,
               code: item.sku_if_visible || '',
               description: item.description,
+              purchase_uom_id: purchaseUomId,
+              stock_uom_id: stockUomId,
             },
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();

@@ -57,6 +57,13 @@ export interface PurchaseOrderItemRequest {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * Insumos desde compra: clasificación del producto nuevo (prebulk). El
+   * backend crea el producto con `is_ingredient`/`is_sellable` y, junto con
+   * las UoM, lo deja listo para consumo en recetas.
+   */
+  is_ingredient?: boolean;
+  is_sellable?: boolean;
 
 }
 
@@ -144,6 +151,17 @@ export function cartToPurchaseOrderRequest(
         requestItem.sale_price = item.prebulk_data.sale_price;
         requestItem.brand_name = typeof item.prebulk_data.brand_id === 'string' ? item.prebulk_data.brand_id : undefined;
         requestItem.category_names = typeof item.prebulk_data.category_ids === 'string' ? item.prebulk_data.category_ids : undefined;
+        // Insumos desde compra: propaga la clasificación y, si es insumo, las
+        // UoM elegidas en el modal prebulk. El backend crea el producto con
+        // estos flags y deriva el factor de conversión al recibir.
+        requestItem.is_ingredient = item.prebulk_data.is_ingredient;
+        requestItem.is_sellable = item.prebulk_data.is_sellable;
+        if (item.prebulk_data.is_ingredient) {
+          requestItem.purchase_uom_id =
+            item.prebulk_data.purchase_uom_id ?? requestItem.purchase_uom_id ?? null;
+          requestItem.stock_uom_id =
+            item.prebulk_data.stock_uom_id ?? requestItem.stock_uom_id ?? null;
+        }
       }
 
       return requestItem;
@@ -154,6 +172,16 @@ export function cartToPurchaseOrderRequest(
   // of scope; if any item is a pure ingredient, the whole order is
   // `ingredient`. Otherwise `retail` (default).
   const isIngredientOrder = cartState.items.some((it: any) => {
+    // Caso prebulk (producto nuevo): la clasificación vive en prebulk_data,
+    // no en product (que es un dummy con id=0). Tiene prioridad.
+    if (it.is_prebulk && it.prebulk_data) {
+      const pb: any = it.prebulk_data;
+      const pbSellable =
+        pb.is_sellable === undefined || pb.is_sellable === null
+          ? true
+          : !!pb.is_sellable;
+      return !!pb.is_ingredient && !pbSellable;
+    }
     const p: any = it.product;
     if (!p) return false;
     const sellable =

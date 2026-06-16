@@ -26,6 +26,7 @@ import { AuditService } from '@common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
 import { CostPreviewDto } from './dto/cost-preview.dto';
+import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -125,6 +126,12 @@ export class PurchaseOrdersService {
         throw new BadRequestException('Organization ID not found in context');
       }
 
+      // Fase 2: read order_type up-front so the new-product creation block
+      // (below) can inherit ingredient flags. Defaults to `retail` for
+      // backward compat; new orders from the POP modal always carry a value.
+      const orderType =
+        (createPurchaseOrderDto as any).order_type ?? 'retail';
+
       const normalizeText = (value: unknown) =>
         String(value ?? '')
           .normalize('NFD')
@@ -202,6 +209,66 @@ export class PurchaseOrdersService {
             throw new BadRequestException(
               'Cannot create new product: No store found for this organization.',
             );
+          }
+
+          // Fase 2: ingredient inheritance for NEW products. The line is an
+          // ingredient if the parent order is `ingredient` OR the item opts in
+          // explicitly. We then gate that against the store's industries: a
+          // store whose `industries` do not support the ingredient capacity
+          // (helper: storeIndustriesSupportIngredients) NEVER persists an
+          // ingredient product — the flag is silently forced off.
+          const itemIsIngredient =
+            orderType === 'ingredient' || item.is_ingredient === true;
+          let effectiveIsIngredient = false;
+          if (itemIsIngredient) {
+            const storeForCaps = await tx.stores.findUnique({
+              where: { id: storeId },
+              select: { industries: true },
+            });
+            effectiveIsIngredient = storeIndustriesSupportIngredients(
+              storeForCaps?.industries,
+            );
+          }
+
+          // Fase 2: derive purchase_to_stock_factor from the global
+          // units_of_measure catalog when BOTH UoM FKs are present. This
+          // mirrors ProductsService.derivePurchaseToStockFactor (private in
+          // that service) inline so the whole creation stays inside this
+          // transaction. The factor is a CRITICAL costing value (purchase →
+          // stock at receipt), so the catalog is the source of truth.
+          let purchaseToStockFactor: number | undefined;
+          if (
+            effectiveIsIngredient &&
+            item.purchase_uom_id != null &&
+            item.stock_uom_id != null
+          ) {
+            const uoms = await tx.units_of_measure.findMany({
+              where: { id: { in: [item.stock_uom_id, item.purchase_uom_id] } },
+            });
+            const stockUom = uoms.find((u) => u.id === item.stock_uom_id);
+            const purchaseUom = uoms.find(
+              (u) => u.id === item.purchase_uom_id,
+            );
+            if (!stockUom || !purchaseUom) {
+              throw new BadRequestException(
+                'Unidad de medida no encontrada en el catálogo para el insumo.',
+              );
+            }
+            if (stockUom.dimension !== purchaseUom.dimension) {
+              throw new BadRequestException(
+                `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse.`,
+              );
+            }
+            const derived = Math.round(
+              Number(purchaseUom.factor_to_base) /
+                Number(stockUom.factor_to_base),
+            );
+            if (!Number.isFinite(derived) || derived < 1) {
+              throw new BadRequestException(
+                `Factor de conversión inválido entre ${purchaseUom.code} y ${stockUom.code}: debe ser >= 1.`,
+              );
+            }
+            purchaseToStockFactor = derived;
           }
 
           // Check if product with SKU exists to avoid duplicates
@@ -424,6 +491,35 @@ export class PurchaseOrdersService {
               data: productUpdateData,
             });
           } else {
+            // Fase 2: a pure ingredient neutralizes every retail-sale
+            // construct (mirrors ProductsService.sanitizeIngredientPayload)
+            // and carries the UoM FKs + derived factor. Retail lines
+            // (effectiveIsIngredient === false) keep the exact legacy values.
+            const ingredientOverrides = effectiveIsIngredient
+              ? {
+                  is_ingredient: true,
+                  is_sellable: false,
+                  purchase_uom_id: item.purchase_uom_id ?? null,
+                  stock_uom_id: item.stock_uom_id ?? null,
+                  purchase_to_stock_factor: purchaseToStockFactor ?? null,
+                  base_price: 0,
+                  sale_price: 0,
+                  is_on_sale: false,
+                  available_for_ecommerce: false,
+                  is_featured: false,
+                  allow_pos_price_override: false,
+                  has_multiple_price_tiers: false,
+                }
+              : {
+                  base_price: basePrice,
+                  sale_price: item.sale_price || 0,
+                  is_on_sale: isOnSale,
+                  available_for_ecommerce: availableForEcommerce,
+                  is_featured: isFeatured,
+                  allow_pos_price_override: allowPosPriceOverride,
+                  has_multiple_price_tiers: hasMultiplePriceTiers,
+                };
+
             const newProduct = await tx.products.create({
               data: {
                 name: item.product_name,
@@ -434,7 +530,6 @@ export class PurchaseOrdersService {
                     .replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
                 description: item.product_description || '',
                 sku: item.sku || `GEN-${Date.now()}`,
-                base_price: basePrice,
                 cost_price: cost,
                 profit_margin: margin,
                 stock_quantity: 0,
@@ -444,13 +539,8 @@ export class PurchaseOrdersService {
                 product_type: productType,
                 track_inventory: trackInventory,
                 pricing_type: pricingType,
-                available_for_ecommerce: availableForEcommerce,
-                is_featured: isFeatured,
-                allow_pos_price_override: allowPosPriceOverride,
-                has_multiple_price_tiers: hasMultiplePriceTiers,
-                is_on_sale: isOnSale,
-                sale_price: item.sale_price || 0,
                 brand_id: brandId,
+                ...ingredientOverrides,
                 product_categories: {
                   create: categoryIds.map((id) => ({ category_id: id })),
                 },
@@ -541,9 +631,8 @@ export class PurchaseOrdersService {
       };
       const { expected_date: rawExpectedDate, ...orderDataRest } = orderData;
 
-      // Fase 2: order_type defaults to `retail` for backward compat; new
-      // orders from the POP modal always carry a value.
-      const orderType = (orderData as any).order_type ?? 'retail';
+      // Fase 2: `orderType` was resolved at the top of the transaction so the
+      // new-product creation block could inherit ingredient flags.
       // Fase 2: when the order is `ingredient`, every line MUST carry the
       // UoM FKs. We do a soft guard here (log + default) instead of a hard
       // 400 to keep legacy clients working. The receive() flow is the

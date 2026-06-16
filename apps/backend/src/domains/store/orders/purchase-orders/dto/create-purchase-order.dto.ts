@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsDateString,
   IsArray,
+  IsBoolean,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -55,6 +56,30 @@ export class PurchaseOrderItemDto {
   @IsNumber()
   @IsOptional()
   stock_uom_id?: number;
+
+  /**
+   * Ingredient flags. Apply ONLY to NEW products created from this order line
+   * (when the item has no `product_id`). Existing products keep their own
+   * flags untouched. Effective only if the store's industries support the
+   * `is_ingredient` capacity; otherwise the backend forces them off.
+   */
+  @ApiProperty({
+    description:
+      'Mark NEW product as an ingredient (insumo). Applies only to products created from this order line.',
+    required: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  is_ingredient?: boolean;
+
+  @ApiProperty({
+    description:
+      'Mark NEW product as sellable. Applies only to products created from this order line. Forced to false for pure ingredients.',
+    required: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  is_sellable?: boolean;
 
   @ApiProperty({ description: 'Discount percentage (optional)' })
   @IsNumber()

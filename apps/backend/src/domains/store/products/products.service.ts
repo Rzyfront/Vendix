@@ -49,6 +49,7 @@ import { resolveProductLowStockThreshold } from '../inventory/shared/helpers/low
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../settings/interfaces/store-settings.interface';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import type {
   ActiveProductPromotion,
   ActivePromotionProductInput,
@@ -298,6 +299,39 @@ export class ProductsService {
       online_purchase_url: null,
     } as T;
   }
+
+  /**
+   * Store-capability gate for the `is_ingredient` flag (cross-cutting rule).
+   *
+   * A store can only persist ingredient products if its `industries` support
+   * the ingredient capacity (helper: storeIndustriesSupportIngredients,
+   * currently `restaurant`). If the payload opts into `is_ingredient=true`
+   * but the store does not qualify, the flag is SILENTLY forced off — the
+   * retail flow (is_ingredient false/undefined) is never touched.
+   *
+   * Returns a (possibly mutated) copy of the DTO. Only does DB work when the
+   * payload actually requests `is_ingredient=true`, so the retail path stays
+   * query-free.
+   */
+  private async enforceIngredientCapability<
+    T extends { is_ingredient?: boolean | null },
+  >(dto: T, storeId: number | null | undefined): Promise<T> {
+    if (dto.is_ingredient !== true) {
+      return dto;
+    }
+    if (!storeId) {
+      return { ...dto, is_ingredient: false };
+    }
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { industries: true },
+    });
+    if (!storeIndustriesSupportIngredients(store?.industries)) {
+      return { ...dto, is_ingredient: false };
+    }
+    return dto;
+  }
+
   async updateProductPromotions(productId: number, promotionIds: number[]) {
     return this.prisma.$transaction(async (tx) => {
       await tx.promotion_products.deleteMany({
@@ -395,7 +429,7 @@ export class ProductsService {
 
   async create(createProductDto: CreateProductDto) {
     // Fase 1: pure-ingredient sanitization. Idempotent.
-    const sanitizedDto = this.sanitizeIngredientPayload(createProductDto);
+    let sanitizedDto = this.sanitizeIngredientPayload(createProductDto);
     try {
       // Validate service-specific constraints
       this.validateByProductType(sanitizedDto);
@@ -408,6 +442,15 @@ export class ProductsService {
       if (!store_id) {
         throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
       }
+
+      // Cross-cutting gate: a store whose industries do not support ingredients
+      // can never persist is_ingredient=true. Force it off, then re-sanitize so
+      // the neutralized sale fields stay coherent if the flag just flipped.
+      sanitizedDto = await this.enforceIngredientCapability(
+        sanitizedDto,
+        store_id,
+      );
+      sanitizedDto = this.sanitizeIngredientPayload(sanitizedDto);
 
       // Verify user context for audit
       const user_id = context?.user_id;
@@ -1680,7 +1723,7 @@ export class ProductsService {
 
   async update(id: number, updateProductDto: UpdateProductDto) {
     // Fase 1: pure-ingredient sanitization. Idempotent.
-    const sanitizedDto = this.sanitizeIngredientPayload(updateProductDto);
+    let sanitizedDto = this.sanitizeIngredientPayload(updateProductDto);
     try {
       // Validate service-specific constraints
       this.validateByProductType(sanitizedDto);
@@ -1696,6 +1739,15 @@ export class ProductsService {
       if (!existingProduct) {
         throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
       }
+
+      // Cross-cutting gate: only stores whose industries support ingredients
+      // may set is_ingredient=true. Gate against the product's own store, then
+      // re-sanitize so neutralized sale fields stay coherent if it flipped off.
+      sanitizedDto = await this.enforceIngredientCapability(
+        sanitizedDto,
+        existingProduct.store_id,
+      );
+      sanitizedDto = this.sanitizeIngredientPayload(sanitizedDto);
 
       // BLOCK: Check for active stock reservations on the product itself
       const hasActiveReservations =

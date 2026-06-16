@@ -870,12 +870,13 @@
                 description="Sub-receta que se produce y mantiene stock propio"
               >
               </app-setting-toggle>
+            }
 
-              <!-- ===== UoM (Fase UoM) — solo si es insumo ===== -->
-              @if (isIngredient() && storeSupportsIngredients()) {
-                <div
-                  class="md:col-span-2 w-full rounded-xl border border-border bg-bg p-4 space-y-3 mt-1"
-                >
+            <!-- ===== UoM (Fase UoM) — solo si es insumo (fuente de verdad: storeSupportsIngredients) ===== -->
+            @if (isIngredient() && storeSupportsIngredients()) {
+              <div
+                class="md:col-span-2 w-full rounded-xl border border-border bg-bg p-4 space-y-3 mt-1"
+              >
                   <div class="flex items-center gap-2">
                     <app-icon
                       name="package"
@@ -955,7 +956,6 @@
                   }
                 </div>
               }
-            }
 
             <!-- Row 2: Variantes + Inventario -->
             <div>
@@ -1956,7 +1956,7 @@
             </h2>
           </div>
 
-          @if (isEditMode()) {
+          @if (isEditMode() && !isPureIngredient()) {
             <div class="space-y-2">
               <p class="text-xs text-gray-500">
                 Asocia promociones activas a este producto.
