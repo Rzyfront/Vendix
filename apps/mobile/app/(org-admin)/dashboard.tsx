@@ -22,9 +22,12 @@ export default function OrgDashboard() {
   const user = useAuthStore((s) => s.user);
   const [refreshing, setRefreshing] = useState(false);
 
+  const orgId = user?.organizations?.id || user?.organization_id;
+
   const statsQuery = useQuery({
-    queryKey: ['org-dashboard-stats'],
-    queryFn: () => OrgDashboardService.getStats(),
+    queryKey: ['org-dashboard-stats', orgId],
+    queryFn: () => OrgDashboardService.getStats(String(orgId)),
+    enabled: !!orgId,
   });
 
   const recentQuery = useQuery({
@@ -96,28 +99,32 @@ export default function OrgDashboard() {
           columns={2}
           stats={[
             {
-              label: 'Tiendas activas',
-              value: stats?.active_stores ?? 0,
+              label: 'Total de Tiendas',
+              value: stats?.stats?.total_stores?.value ?? 0,
+              subText: `${stats?.stats?.total_stores?.sub_value ?? 0} nuevas este mes`,
               icon: 'store',
               color: colors.primary,
             },
             {
-              label: 'Usuarios',
-              value: stats?.total_users ?? 0,
+              label: 'Usuarios Activos',
+              value: stats?.stats?.active_users?.value ?? 0,
+              subText: `${stats?.stats?.active_users?.sub_value ?? 0} en línea ahora`,
               icon: 'users',
               color: colorScales.blue[500],
             },
             {
-              label: 'Ingresos del mes',
-              value: formatCurrency(stats?.revenue_month ?? 0),
-              icon: 'dollar-sign',
-              color: colorScales.green[600],
-            },
-            {
-              label: 'Órdenes del mes',
-              value: stats?.total_orders_month ?? 0,
+              label: 'Pedidos Mensuales',
+              value: stats?.stats?.monthly_orders?.value ?? 0,
+              subText: `${stats?.stats?.monthly_orders?.sub_value ?? 0} pedidos hoy`,
               icon: 'shopping-cart',
               color: colorScales.amber[500],
+            },
+            {
+              label: 'Ganancia',
+              value: formatCurrency(stats?.stats?.revenue?.value ?? 0),
+              subText: `${(stats?.stats?.revenue?.sub_value ?? 0) >= 0 ? '+' : ''}${formatCurrency(stats?.stats?.revenue?.sub_value ?? 0)} vs mes anterior`,
+              icon: 'dollar-sign',
+              color: (stats?.stats?.revenue?.sub_value ?? 0) >= 0 ? colorScales.green[600] : colorScales.red[600],
             },
           ]}
         />
