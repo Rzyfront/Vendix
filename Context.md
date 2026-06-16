@@ -44,7 +44,7 @@ You are working with a Dockerized environment. Understand that:
 When you need reference material:
 
 - Check `doc/` folders in each project (backend, frontend) for specific documentation, including ADRs, architecture guides, and .http files for API testing
-- **API Testing with Bruno**: Use the local collection in `bruno/` for endpoint testing with centralized base URL configuration `api.vendix.com` and available health check
+- **API Testing with curl**: Verify endpoints with `curl` against dev (centralized base URL `api.vendix.com`, health check available). Authenticate using a seed owner account (`owner@techsolutions.co` / `owner@fashionretail.com`, password `1125634q`) or ask the user for an authorized dev test account (`slug`, `email`, `password`). Bruno collections under `bruno/` are an opt-in template only when a developer explicitly requests a `.bru` test — never the default verification path.
 
 ## Technology Stack You're Working With
 

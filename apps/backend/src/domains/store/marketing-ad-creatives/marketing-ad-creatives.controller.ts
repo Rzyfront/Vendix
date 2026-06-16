@@ -105,6 +105,51 @@ export class MarketingAdCreativesController {
     return new StreamableFile(result.buffer);
   }
 
+  @Get(':id/image')
+  @Permissions(
+    'store:marketing_anuncios:read',
+    'store:marketing_anuncios:create',
+    'store:marketing_anuncios:generate',
+    'store:promotions:read',
+    'store:social_sales:read',
+  )
+  async proxyCreativeImage(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('variant') variant: 'full' | 'thumb' | undefined,
+    @Query('disposition') disposition: 'attachment' | 'inline' | undefined,
+    @Req() request: Request,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.adCreativesService.getCreativeImageAsset(
+      id,
+      variant ?? 'full',
+    );
+    const origin = request.headers.origin;
+
+    if (typeof origin === 'string') {
+      response.setHeader('Access-Control-Allow-Origin', origin);
+      response.setHeader('Vary', 'Origin');
+    }
+
+    response.setHeader('Content-Type', result.contentType);
+    response.setHeader('Cache-Control', 'private, max-age=300');
+    response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+
+    if (disposition === 'attachment') {
+      response.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${result.fileName}"`,
+      );
+    } else {
+      response.setHeader(
+        'Content-Disposition',
+        `inline; filename="${result.fileName}"`,
+      );
+    }
+
+    return new StreamableFile(result.buffer);
+  }
+
   @Post()
   @Permissions(
     'store:marketing_anuncios:create',

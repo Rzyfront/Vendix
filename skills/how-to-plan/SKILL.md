@@ -17,7 +17,7 @@ metadata:
     - "Declaring MCP servers, CLI commands, or web research alongside skills in a plan"
     - "Running the Plan Validation Checklist before requesting approval"
     - "Selecting the correct skills for each plan step using the Skill Selection Matrix"
-    - "Picking concrete verification mechanisms (Bruno, curl, build, audit, log inspection) per step"
+    - "Picking concrete verification mechanisms (curl, build, audit, log inspection) per step"
 ---
 
 # How To Plan
@@ -169,7 +169,7 @@ Every plan file must use this **exact** structure. Sections are ordered, all are
    Verification: [exact check for THIS step — command, file diff, UI assertion]  <!-- [MANDATORY] -->
 
 ## End-to-End Verification            <!-- [MANDATORY] integration-level, with concrete tools. -->
-1. [Integration check covering multiple steps + tool used: Bruno collection, curl, UI flow, etc.]
+1. [Integration check covering multiple steps + tool used: curl, UI flow, build command, etc.]
 2. [User-facing or contract-level check + how it is observed]
 3. [Build / typecheck / test command — exact invocation]
 
@@ -197,7 +197,7 @@ Each row defines what counts as **acceptable** vs **rejected**. If a field falls
 | Step `Why` | "Goes first because frontend in step 4 depends on these endpoints existing." | (missing entirely) |
 | Step `Output` | "GET `/organization/invoicing/invoices?store_id=?&from=&to=` returning paginated invoices scoped by `accounting_entity_id`." | "Endpoints for invoicing." |
 | Step `Verification` | "`curl -H 'Authorization: Bearer $ORG_TOKEN' /organization/invoicing/invoices` returns 200 with `data[]` non-empty; same call without org token returns 403." | "It should work." |
-| `End-to-End Verification` | "Bruno collection `orgs/fiscal-supervision.bru` runs green; `npm run build:prod -w apps/frontend` exits 0." | "Test everything." |
+| `End-to-End Verification` | "`curl -H 'Authorization: Bearer $ORG_TOKEN' /organization/invoicing/invoices` returns 200; `npm run build:prod -w apps/frontend` exits 0." | "Test everything." |
 | `Knowledge Gaps` | "Cross-module fiscal supervision pattern not covered — propose new skill `vendix-fiscal-supervision` after impl stabilizes." | (absent — must say "None." if there are none) |
 
 ### Verification mechanisms catalog
@@ -206,15 +206,22 @@ When writing `Verification` and `End-to-End Verification`, pick from this catalo
 
 | Mechanism | When | Example |
 |-----------|------|---------|
-| Bruno (`.bru`) | API contract & auth boundaries | `bruno run apps/api-tests/orgs/fiscal-supervision.bru --env dev` |
-| `curl` | One-off endpoint sanity | `curl -H 'Authorization: Bearer $TOK' http://localhost:3000/organization/invoicing/invoices` |
+| `curl` (primary API check) | API contract, auth boundaries & endpoint sanity | `curl -H 'Authorization: Bearer $TOK' http://localhost:3000/organization/invoicing/invoices` |
 | Backend unit test | Service logic | `npm run test -w apps/backend -- --runInBand src/domains/organization/invoicing/invoicing.service.spec.ts` |
 | Frontend build | Type safety after refactor | `npm run build:prod -w apps/frontend` |
 | Zoneless audit | Signal-based components | `npm run zoneless:audit` |
 | Migration verification | DB schema change | `npx prisma migrate status` + targeted SQL `SELECT` |
-| Permission verification | RBAC change | Bruno test using a token whose role lacks the permission must return 403 |
+| Permission verification | RBAC change | `curl` with a token whose role lacks the permission must return 403 |
 | Manual UI check | Behavior not covered by build | Document the exact route + steps + expected state |
 | Log inspection | Async flow / queue | `docker logs --tail 200 vendix-backend | grep <correlation_id>` |
+
+> **`curl` is the primary mechanism for verifying API contracts and auth boundaries. Agents must
+> NOT run Bruno (`.bru`) tests as plan verification.** For authenticated endpoints in dev, get a
+> token by logging in with a **seed owner account** (`owner@techsolutions.co` or
+> `owner@fashionretail.com`, password `1125634q` — see `apps/backend/prisma/seeds/users.seed.ts`)
+> or by **asking the user** for the `slug`, `email`, and `password` of an authorized dev test
+> account. Bruno remains an opt-in template (`vendix-bruno-test`) only when a developer explicitly
+> requests writing a `.bru` test.
 
 ## Plan Validation Checklist
 
@@ -245,7 +252,7 @@ Before adding the `## Approval Request` block, the planner must mentally (or lit
 ### Verification
 
 - [ ] `End-to-End Verification` covers integration paths, not single-step checks (those live in each Step).
-- [ ] Every E2E item names a concrete tool / command (Bruno, curl, build command, log inspection).
+- [ ] Every E2E item names a concrete tool / command (curl, build command, log inspection).
 - [ ] `Knowledge Gaps` is present and explicit — `None.` is allowed; absence is not.
 
 ### Skill Selection Matrix (use to catch missed skills before approving)
@@ -286,7 +293,7 @@ The following are prohibited. Each row lists the wrong move and its correct alte
 | Listing `how-to-plan` as a step skill | `how-to-plan` governs the planner, not the executor. Use the domain skills the step actually invokes. |
 | Adding non-spec sections (`Assumptions`, `Notes`, `Risks`, `TODO`) | Fold into `Context`, the step's `Business decision`, or `Knowledge Gaps`. The plan format is closed. |
 | `Knowledge Gaps` section absent because there are none | Write `None.` explicitly. Section absence is a format break. |
-| E2E `Verification` items like "Test everything" | Each item names a concrete tool: Bruno collection, curl, build command, manual UI route + expected state. |
+| E2E `Verification` items like "Test everything" | Each item names a concrete tool: curl, build command, manual UI route + expected state. |
 | Including `vendix-subscription-gate` in read-only steps | Subscription gate applies to **write** operations or AI features. Pure read-only views do not gate. |
 | Missing `vendix-multi-tenant-context` on any step that resolves org/store from JWT | Always include it where AsyncLocalStorage tenant resolution matters. |
 | Asking "¿está bien el plan?" / "¿procedo?" mid-text | Use the formal `## Approval Request` block at the end of the plan |
@@ -379,6 +386,7 @@ If any of these gates is not met, the work is **not done** — return to the gat
 
 ## Changelog
 
+- **v2.2** — Removed Bruno from the Verification Mechanisms Catalog and all examples. `curl` is now the primary mechanism for API-contract and auth-boundary checks; agents must not run `.bru` tests as plan verification. Documented dev credential sources (seed owner accounts + ask-the-user). Bruno survives only as the opt-in `vendix-bruno-test` template.
 - **v2.1** — Hardening pass for 100% format compliance. Added: explicit "six mandatory fields per step" rule, `Plan Validation Checklist` (structural / per-step / files / verification + Skill Selection Matrix), `Field-by-Field Rigor` table with acceptable-vs-rejected examples, `Verification Mechanisms Catalog` (Bruno, curl, build, audit, log inspection). Annotated `Required Plan Format` template with `[MANDATORY]` inline markers. Anti-Patterns extended with: missing `Why`/`Verification`, wildcards in `Critical Files`, vague `Resources`, `how-to-plan` listed as step skill, non-spec sections (`Assumptions`/`Notes`/`Risks`), absent `Knowledge Gaps`, subscription-gate misapplied to read-only steps, missing `vendix-multi-tenant-context` on tenant-scoped steps.
 - **v2.0** — Major rewrite. Added 5-phase workflow (Understanding / Design / Review / Final Plan / Approval), Agent Strategy with parallel cap of 3, Reuse Discovery checklist, Anti-Patterns table, User Interaction Boundary, Resources Beyond Skills section. Format extended with `Context`, `General Objective` + `Specific Objectives` (replaces singular `Objective`), `Critical Files`, `Reusable Assets`, `End-to-End Verification`, `Approval Request`, and `Resources:` field per step (MCPs, CLI commands, web research, external APIs). **Preserved:** `Business decision` per step, `Skills` per step, `Knowledge Gaps`, multi-agent perspective matrix.
 - **v1.0** — Initial release. Defined skills-per-step + business-decision-per-step format with single `Objective`.

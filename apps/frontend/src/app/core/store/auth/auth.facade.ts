@@ -14,6 +14,8 @@ import type {
 } from '../../models/organization.model';
 import type { FiscalArea } from '../../models/fiscal-status.model';
 
+import { industriesSupportIngredients } from '../../../shared/constants/industry-modules.constant';
+
 @Injectable({
   providedIn: 'root',
 })
@@ -202,6 +204,24 @@ export class AuthFacade {
    * for `toSignal` in facades.
    */
   readonly userIndustries = toSignal(this.userIndustries$, { initialValue: [] as string[] });
+  /**
+   * Capability resolver (Fase 0 consolidation): true if the active store
+   * supports the `is_ingredient` product capacity. Source of truth is the
+   * store settings cascade (settings → login → ['retail']); same priority
+   * chain used by `isRestaurant` in product-create-page. Defaults to `false`
+   * when the store has no industries loaded yet.
+   */
+  readonly storeSupportsIngredients = computed<boolean>(() => {
+    const fromSettings = (this.storeSettings() as any)?.general?.industries as
+      | string[]
+      | undefined;
+    const fromLogin = this.userIndustries();
+    const industries =
+      fromSettings ||
+      (Array.isArray(fromLogin) ? fromLogin : null) ||
+      [];
+    return industriesSupportIngredients(industries);
+  });
   readonly storeSettings = toSignal(this.storeSettings$, { initialValue: null as any });
   readonly fiscalStatus = toSignal(this.fiscalStatus$, { initialValue: null as any });
   readonly activeFiscalAreas = toSignal(this.activeFiscalAreas$, { initialValue: [] as FiscalArea[] });

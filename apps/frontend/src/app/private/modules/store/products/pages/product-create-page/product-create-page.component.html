@@ -170,6 +170,7 @@
 
         <!-- Precios y Rentabilidad Section -->
         <section
+          [hidden]="isPureIngredient()"
           class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
         >
           <div class="flex items-center gap-2">
@@ -365,6 +366,7 @@
 
         <!-- ─── Multi-Tarifa (Phase 4) ───────────────────────────────── -->
         <section
+          [hidden]="isPureIngredient()"
           class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
         >
           <div class="flex items-center gap-2">
@@ -804,7 +806,7 @@
           </div>
 
           <!-- Grid 2x2: Estado, Stock, Variantes, Inventario -->
-          <div class="grid grid-cols-1 md:grid-cols-2 md:auto-rows-fr gap-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
             <!-- Row 1, Col 1: Estado -->
             <app-input-buttons
               [options]="productStateButtonOptions"
@@ -816,6 +818,7 @@
             </app-input-buttons>
 
             <!-- Row 1, Col 2: Disponibilidad E-commerce -->
+            <div [hidden]="isPureIngredient()" class="contents">
             <app-setting-toggle
               formControlName="available_for_ecommerce"
               label="Disponible en E-commerce"
@@ -836,6 +839,7 @@
               description="Permite que usuarios autorizados vendan este producto con precio negociado"
             >
             </app-setting-toggle>
+            </div>
 
             <!-- Restaurant Suite toggles (Fase B) — solo industria restaurant -->
             @if (isRestaurant()) {
@@ -867,6 +871,91 @@
               >
               </app-setting-toggle>
             }
+
+            <!-- ===== UoM (Fase UoM) — solo si es insumo (fuente de verdad: storeSupportsIngredients) ===== -->
+            @if (isIngredient() && storeSupportsIngredients()) {
+              <div
+                class="md:col-span-2 w-full rounded-xl border border-border bg-bg p-4 space-y-3 mt-1"
+              >
+                  <div class="flex items-center gap-2">
+                    <app-icon
+                      name="package"
+                      size="14"
+                      class="text-primary-600"
+                    ></app-icon>
+                    <p
+                      class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
+                    >
+                      Unidad de medida del insumo
+                    </p>
+                  </div>
+
+                  <!-- compra → conversión → stock -->
+                  <div
+                    class="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-3 md:gap-4 items-center"
+                  >
+                    <app-selector
+                      formControlName="purchase_uom_id"
+                      label="Compra (presentación)"
+                      description="Como la recibes del proveedor."
+                      [options]="purchaseUomOptions()"
+                      placeholder="Ej. Litro, Kilogramo..."
+                      (valueChange)="onPurchaseUomChange()"
+                    ></app-selector>
+
+                    <!-- bloque de conversión central -->
+                    <div
+                      class="flex flex-col items-center justify-center gap-1.5 py-1"
+                    >
+                      <app-icon
+                        name="arrow-right"
+                        size="18"
+                        class="rotate-90 md:rotate-0 text-primary-500"
+                      ></app-icon>
+                      @if (unitCapacity(); as cap) {
+                        <div
+                          class="rounded-lg bg-primary-50 border border-primary-100 px-3 py-1.5 text-center whitespace-nowrap"
+                        >
+                          <p
+                            class="text-[9px] text-primary-600 uppercase font-bold tracking-wider"
+                          >
+                            Equivale a
+                          </p>
+                          <p class="text-sm font-bold text-primary-700">
+                            1 {{ cap.purchaseUnit }} = {{ cap.value }}
+                            {{ cap.unit }}
+                          </p>
+                        </div>
+                      } @else {
+                        <span
+                          class="text-[11px] text-text-muted text-center leading-tight"
+                        >
+                          Elige ambas unidades
+                        </span>
+                      }
+                    </div>
+
+                    <app-selector
+                      formControlName="stock_uom_id"
+                      label="Stock (unidad mínima)"
+                      description="En la que se descuenta el inventario."
+                      [options]="stockUomOptions()"
+                      placeholder="Elige primero la compra"
+                      (valueChange)="onStockUomChange()"
+                    ></app-selector>
+                  </div>
+
+                  @if (productForm.errors?.['uomDimensionMismatch']) {
+                    <p
+                      class="text-xs text-red-600 flex items-center gap-1 px-1"
+                    >
+                      <app-icon name="alert-triangle" size="12"></app-icon>
+                      La unidad de stock y la de compra deben ser de la misma
+                      dimensión (masa, volumen o unidad).
+                    </p>
+                  }
+                </div>
+              }
 
             <!-- Row 2: Variantes + Inventario -->
             <div>
@@ -1724,11 +1813,17 @@
                       >En inventario</span
                     >
                     <span class="text-xl font-bold text-text-primary">{{
-                      totalStockOnHand
+                      displayStockOnHand
                     }}</span>
-                    <span class="block text-[9px] text-text-muted mt-0.5"
-                      >Disponible + reservado</span
-                    >
+                    @if (isIngredientStock) {
+                      <span class="block text-[9px] text-text-muted mt-0.5"
+                        >{{ totalStockOnHand }} {{ stockUnitLabel }} en total</span
+                      >
+                    } @else {
+                      <span class="block text-[9px] text-text-muted mt-0.5"
+                        >Disponible + reservado</span
+                      >
+                    }
                   </div>
                   <div class="p-3 bg-surface rounded-lg border border-border">
                     <span
@@ -1736,11 +1831,17 @@
                       >Disponible</span
                     >
                     <span class="text-xl font-bold text-primary-600">{{
-                      totalStockAvailable
+                      displayStockAvailable
                     }}</span>
-                    <span class="block text-[9px] text-text-muted mt-0.5"
-                      >Listo para vender</span
-                    >
+                    @if (isIngredientStock) {
+                      <span class="block text-[9px] text-text-muted mt-0.5"
+                        >Unidades selladas</span
+                      >
+                    } @else {
+                      <span class="block text-[9px] text-text-muted mt-0.5"
+                        >Listo para vender</span
+                      >
+                    }
                   </div>
                   <div class="p-3 bg-surface rounded-lg border border-border">
                     <span
@@ -1855,7 +1956,7 @@
             </h2>
           </div>
 
-          @if (isEditMode()) {
+          @if (isEditMode() && !isPureIngredient()) {
             <div class="space-y-2">
               <p class="text-xs text-gray-500">
                 Asocia promociones activas a este producto.

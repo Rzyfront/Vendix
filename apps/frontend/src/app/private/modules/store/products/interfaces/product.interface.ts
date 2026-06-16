@@ -103,6 +103,14 @@ export interface Product {
   stock_unit?: string | null;
   purchase_unit?: string | null;
   purchase_to_stock_factor?: number | null;
+  // ===== UoM FKs (Fase UoM) =====
+  // The legacy string fields above remain for display/backfill. The FKs
+  // below link the product to the global units_of_measure catalog so the
+  // UI can validate dimension compatibility and show proper labels.
+  stock_uom_id?: number | null;
+  purchase_uom_id?: number | null;
+  stock_uom?: { id: number; code: string; name: string; dimension: string } | null;
+  purchase_uom?: { id: number; code: string; name: string; dimension: string } | null;
   created_at: Date;
   updated_at: Date;
 
@@ -339,6 +347,9 @@ export interface CreateProductDto {
   stock_unit?: string | null;
   purchase_unit?: string | null;
   purchase_to_stock_factor?: number | null;
+  // ===== UoM FKs (Fase UoM) =====
+  stock_uom_id?: number | null;
+  purchase_uom_id?: number | null;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];

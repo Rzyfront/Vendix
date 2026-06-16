@@ -1,0 +1,37 @@
+meta {
+  name: 14 Get Stock (sealed_units)
+  type: http
+  seq: 15
+}
+
+get {
+  url: {{baseUrl}}/store/inventory/stock-levels/product/{{uom_insumo_id}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+docs {
+  ## PRECONDICIÓN
+  Este assert (9680 / 9 / 680) solo se cumple si el insumo de la request 03
+  tiene los FK UoM seteados (ver nota SQL en `03 Create Insumo (UoM)`). En una
+  corrida limpia SIN ese UPDATE, la conversión no aplica y el consumo falla por
+  falta de stock → quantity_on_hand=0. Ejecutar el UPDATE acotado antes de
+  correr las requests 04-14.
+}
+
+tests {
+  test("Paso 6: vista derivada sealed_units / open_remaining", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    const rows = Array.isArray(res.body.data) ? res.body.data : [res.body.data];
+    const sl = rows.find(r => r && r.location_id === 50) || rows[0];
+    expect(sl.quantity_on_hand).to.equal(9680);
+    // sealed_units = floor(9680 / 1000) = 9 ; open_remaining = 9680 % 1000 = 680
+    expect(sl.sealed_units).to.equal(9);
+    expect(sl.open_remaining).to.equal(680);
+  });
+}

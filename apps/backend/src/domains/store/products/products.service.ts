@@ -49,6 +49,7 @@ import { resolveProductLowStockThreshold } from '../inventory/shared/helpers/low
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../settings/interfaces/store-settings.interface';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
+import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 import type {
   ActiveProductPromotion,
   ActivePromotionProductInput,
@@ -90,6 +91,60 @@ export class ProductsService {
     private readonly ai_engine: AIEngineService,
     private readonly promotionEngine: PromotionEngineService,
   ) {}
+
+  /**
+   * Deriva products.purchase_to_stock_factor a partir del catálogo global
+   * units_of_measure cuando el payload trae AMBOS stock_uom_id y purchase_uom_id.
+   *
+   * El factor de conversión es un valor CRÍTICO de costeo (purchase→stock al
+   * recibir compras): la fuente de verdad es factor_to_base del catálogo, NO el
+   * cliente. Por eso se sobrescribe cualquier purchase_to_stock_factor enviado.
+   *
+   * Reglas:
+   * - Requiere que ambas unidades compartan la MISMA dimension (no se puede
+   *   convertir, p.ej., volumen a peso) → BadRequest si difieren.
+   * - factor = round(purchase.factor_to_base / stock.factor_to_base).
+   * - Si solo viene uno de los dos FKs (o ninguno), NO se toca el factor:
+   *   devuelve undefined y el caller deja el valor existente intacto.
+   */
+  private async derivePurchaseToStockFactor(
+    stock_uom_id: number | null | undefined,
+    purchase_uom_id: number | null | undefined,
+  ): Promise<number | undefined> {
+    if (
+      stock_uom_id === undefined ||
+      stock_uom_id === null ||
+      purchase_uom_id === undefined ||
+      purchase_uom_id === null
+    ) {
+      return undefined;
+    }
+
+    const uoms = await this.prisma.units_of_measure.findMany({
+      where: { id: { in: [stock_uom_id, purchase_uom_id] } },
+    });
+
+    const stockUom = uoms.find((u) => u.id === stock_uom_id);
+    const purchaseUom = uoms.find((u) => u.id === purchase_uom_id);
+
+    if (!stockUom || !purchaseUom) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VALIDATE_001,
+        'Unidad de medida no encontrada en el catálogo',
+        { stock_uom_id, purchase_uom_id },
+      );
+    }
+
+    if (stockUom.dimension !== purchaseUom.dimension) {
+      throw new BadRequestException(
+        `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse`,
+      );
+    }
+
+    return Math.round(
+      Number(purchaseUom.factor_to_base) / Number(stockUom.factor_to_base),
+    );
+  }
 
   async generateDescription(dto: GenerateProductDescriptionDto) {
     const productData: Record<string, any> = { nombre: dto.name };
@@ -200,6 +255,83 @@ export class ProductsService {
     return records.map((r) => r.promotions);
   }
 
+  /**
+   * Fase 1: pure-ingredient payload sanitizer. If the incoming payload
+   * declares `is_ingredient=true` and `is_sellable=false` (a pure
+   * ingredient), we force every retail-sale construct to a neutral value
+   * so the persisted row is coherent regardless of what the client sent.
+   *
+   * Idempotent: safe to call on every create/update. Backend is the
+   * second line of defense (the form does it in the UI; we do not trust
+   * the client). Per the consolidation plan, the DB does NOT carry a
+   * hard constraint on the (is_ingredient, is_sellable) pair.
+   *
+   * Returns a *new* DTO with neutralized fields. The caller should use
+   * the returned object in place of the original payload.
+   */
+  private sanitizeIngredientPayload<
+    T extends {
+      is_ingredient?: boolean | null;
+      is_sellable?: boolean | null;
+      base_price?: number | null;
+      sale_price?: number | null;
+      is_on_sale?: boolean | null;
+      allow_pos_price_override?: boolean | null;
+      has_multiple_price_tiers?: boolean | null;
+      enabled_price_tier_ids?: number[] | null;
+      available_for_ecommerce?: boolean | null;
+      is_featured?: boolean | null;
+      online_purchase_url?: string | null;
+    },
+  >(dto: T): T {
+    const isPure = !!dto.is_ingredient && dto.is_sellable === false;
+    if (!isPure) return dto;
+    return {
+      ...dto,
+      base_price: 0,
+      sale_price: 0,
+      is_on_sale: false,
+      allow_pos_price_override: false,
+      has_multiple_price_tiers: false,
+      enabled_price_tier_ids: [],
+      available_for_ecommerce: false,
+      is_featured: false,
+      online_purchase_url: null,
+    } as T;
+  }
+
+  /**
+   * Store-capability gate for the `is_ingredient` flag (cross-cutting rule).
+   *
+   * A store can only persist ingredient products if its `industries` support
+   * the ingredient capacity (helper: storeIndustriesSupportIngredients,
+   * currently `restaurant`). If the payload opts into `is_ingredient=true`
+   * but the store does not qualify, the flag is SILENTLY forced off — the
+   * retail flow (is_ingredient false/undefined) is never touched.
+   *
+   * Returns a (possibly mutated) copy of the DTO. Only does DB work when the
+   * payload actually requests `is_ingredient=true`, so the retail path stays
+   * query-free.
+   */
+  private async enforceIngredientCapability<
+    T extends { is_ingredient?: boolean | null },
+  >(dto: T, storeId: number | null | undefined): Promise<T> {
+    if (dto.is_ingredient !== true) {
+      return dto;
+    }
+    if (!storeId) {
+      return { ...dto, is_ingredient: false };
+    }
+    const store = await this.prisma.stores.findUnique({
+      where: { id: storeId },
+      select: { industries: true },
+    });
+    if (!storeIndustriesSupportIngredients(store?.industries)) {
+      return { ...dto, is_ingredient: false };
+    }
+    return dto;
+  }
+
   async updateProductPromotions(productId: number, promotionIds: number[]) {
     return this.prisma.$transaction(async (tx) => {
       await tx.promotion_products.deleteMany({
@@ -296,9 +428,11 @@ export class ProductsService {
   }
 
   async create(createProductDto: CreateProductDto) {
+    // Fase 1: pure-ingredient sanitization. Idempotent.
+    let sanitizedDto = this.sanitizeIngredientPayload(createProductDto);
     try {
       // Validate service-specific constraints
-      this.validateByProductType(createProductDto);
+      this.validateByProductType(sanitizedDto);
 
       // Obtener store_id del DTO o del contexto del token
       // Obtener store_id del contexto
@@ -309,6 +443,15 @@ export class ProductsService {
         throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
       }
 
+      // Cross-cutting gate: a store whose industries do not support ingredients
+      // can never persist is_ingredient=true. Force it off, then re-sanitize so
+      // the neutralized sale fields stay coherent if the flag just flipped.
+      sanitizedDto = await this.enforceIngredientCapability(
+        sanitizedDto,
+        store_id,
+      );
+      sanitizedDto = this.sanitizeIngredientPayload(sanitizedDto);
+
       // Verify user context for audit
       const user_id = context?.user_id;
       if (!user_id) {
@@ -316,7 +459,7 @@ export class ProductsService {
       }
 
       // Generar slug si no se proporciona
-      const slug = createProductDto.slug || generateSlug(createProductDto.name);
+      const slug = sanitizedDto.slug || generateSlug(sanitizedDto.name);
 
       // Verificar que el slug sea único dentro de la tienda
       const existingProduct = await this.prisma.products.findFirst({
@@ -330,10 +473,10 @@ export class ProductsService {
       }
 
       // Verificar que el SKU sea único si se proporciona
-      if (createProductDto.sku) {
+      if (sanitizedDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
-            sku: createProductDto.sku,
+            sku: sanitizedDto.sku,
           },
         });
 
@@ -344,10 +487,10 @@ export class ProductsService {
 
       // Verificar unicidad del código de barras (producto y variantes) a
       // nivel de tienda antes de crear.
-      await this.assertBarcodeUnique(createProductDto.barcode);
-      if (createProductDto.variants && createProductDto.variants.length > 0) {
+      await this.assertBarcodeUnique(sanitizedDto.barcode);
+      if (sanitizedDto.variants && sanitizedDto.variants.length > 0) {
         const seenBarcodes = new Set<string>();
-        for (const variant of createProductDto.variants) {
+        for (const variant of sanitizedDto.variants) {
           const code = variant.barcode?.trim();
           if (!code) continue;
           if (seenBarcodes.has(code)) {
@@ -363,10 +506,10 @@ export class ProductsService {
       }
 
       // Verificar que el brand_id exista y esté activo
-      if (createProductDto.brand_id) {
+      if (sanitizedDto.brand_id) {
         const brand = await this.prisma.brands.findFirst({
           where: {
-            id: createProductDto.brand_id,
+            id: sanitizedDto.brand_id,
             state: { not: 'archived' }, // Excluir marcas archivadas
           },
         });
@@ -379,35 +522,35 @@ export class ProductsService {
       }
 
       // Consultation validation
-      if (createProductDto.is_consultation) {
-        if (createProductDto.product_type !== ProductType.SERVICE) {
+      if (sanitizedDto.is_consultation) {
+        if (sanitizedDto.product_type !== ProductType.SERVICE) {
           throw new BadRequestException(
             'Solo los servicios pueden ser consultas',
           );
         }
-        if (!createProductDto.requires_booking) {
+        if (!sanitizedDto.requires_booking) {
           throw new BadRequestException(
             'Las consultas requieren reserva previa',
           );
         }
-        if (!createProductDto.consultation_template_id) {
+        if (!sanitizedDto.consultation_template_id) {
           throw new BadRequestException(
             'Las consultas requieren una plantilla de consulta',
           );
         }
         if (
-          createProductDto.send_preconsultation &&
-          !createProductDto.preconsultation_template_id
+          sanitizedDto.send_preconsultation &&
+          !sanitizedDto.preconsultation_template_id
         ) {
           throw new BadRequestException(
             'Si se envía preconsulta, se requiere una plantilla de preconsulta',
           );
         }
       }
-      if (createProductDto.is_consultation === false) {
-        createProductDto.send_preconsultation = false;
-        createProductDto.consultation_template_id = undefined;
-        createProductDto.preconsultation_template_id = undefined;
+      if (sanitizedDto.is_consultation === false) {
+        sanitizedDto.send_preconsultation = false;
+        sanitizedDto.consultation_template_id = undefined;
+        sanitizedDto.preconsultation_template_id = undefined;
       }
 
       const {
@@ -427,6 +570,14 @@ export class ProductsService {
         slug,
       );
 
+      // Derivar purchase_to_stock_factor desde el catálogo de UoM (fuente de
+      // verdad de costeo). Sobrescribe lo que mande el cliente cuando vienen
+      // ambos FKs; si no, se respeta el valor del payload.
+      const derivedFactor = await this.derivePurchaseToStockFactor(
+        sanitizedDto.stock_uom_id,
+        sanitizedDto.purchase_uom_id,
+      );
+
       const result = await this.prisma.$transaction(
         async (prisma) => {
           // Crear producto usando scoped client para asegurar isolation
@@ -436,10 +587,13 @@ export class ProductsService {
               // Normalizar barcode: '' / whitespace-only → null. Postgres
               // permite múltiples NULL bajo UNIQUE(store_id, barcode) pero NO
               // múltiples '', así que un '' debe persistirse como null.
-              barcode: createProductDto.barcode?.trim() || null,
+              barcode: sanitizedDto.barcode?.trim() || null,
               store_id: store_id, // Agregar el store_id del contexto
               slug: slug,
               stock_quantity: 0, // Se inicializará via stock_levels
+              ...(derivedFactor !== undefined
+                ? { purchase_to_stock_factor: derivedFactor }
+                : {}),
               ...(onlinePurchaseData ?? {}),
               updated_at: new Date(),
             } as any,
@@ -1464,6 +1618,15 @@ export class ProductsService {
       is_ingredient: product.is_ingredient,
       is_combo: product.is_combo,
       is_batch_produced: product.is_batch_produced,
+      // UoM (Modelo B): el form de edición y el panel de inventario los leen
+      // de ESTE mapeo. Sin exponerlos aquí, el detalle del producto pierde la
+      // capacidad por unidad y el panel muestra el total crudo en vez de
+      // unidades selladas.
+      stock_unit: product.stock_unit,
+      purchase_unit: product.purchase_unit,
+      purchase_to_stock_factor: product.purchase_to_stock_factor,
+      stock_uom_id: product.stock_uom_id,
+      purchase_uom_id: product.purchase_uom_id,
       track_inventory: product.track_inventory,
       available_for_ecommerce: product.available_for_ecommerce,
       is_featured: product.is_featured,
@@ -1559,9 +1722,11 @@ export class ProductsService {
   }
 
   async update(id: number, updateProductDto: UpdateProductDto) {
+    // Fase 1: pure-ingredient sanitization. Idempotent.
+    let sanitizedDto = this.sanitizeIngredientPayload(updateProductDto);
     try {
       // Validate service-specific constraints
-      this.validateByProductType(updateProductDto);
+      this.validateByProductType(sanitizedDto);
 
       // Verificar que el producto existe y no está archivado
       const existingProduct = await this.prisma.products.findFirst({
@@ -1574,6 +1739,15 @@ export class ProductsService {
       if (!existingProduct) {
         throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
       }
+
+      // Cross-cutting gate: only stores whose industries support ingredients
+      // may set is_ingredient=true. Gate against the product's own store, then
+      // re-sanitize so neutralized sale fields stay coherent if it flipped off.
+      sanitizedDto = await this.enforceIngredientCapability(
+        sanitizedDto,
+        existingProduct.store_id,
+      );
+      sanitizedDto = this.sanitizeIngredientPayload(sanitizedDto);
 
       // BLOCK: Check for active stock reservations on the product itself
       const hasActiveReservations =
@@ -1592,10 +1766,10 @@ export class ProductsService {
       }
 
       // Si se actualiza el slug, verificar que sea único dentro de la tienda
-      if (updateProductDto.slug) {
+      if (sanitizedDto.slug) {
         const existingSlug = await this.prisma.products.findFirst({
           where: {
-            slug: updateProductDto.slug,
+            slug: sanitizedDto.slug,
             NOT: { id },
           },
         });
@@ -1606,11 +1780,11 @@ export class ProductsService {
       }
 
       // Si se actualiza el SKU, verificar que sea único dentro de la tienda
-      if (updateProductDto.sku) {
+      if (sanitizedDto.sku) {
         const existingSku = await this.prisma.products.findFirst({
           where: {
             store_id: existingProduct.store_id,
-            sku: updateProductDto.sku,
+            sku: sanitizedDto.sku,
             NOT: { id },
           },
         });
@@ -1622,14 +1796,14 @@ export class ProductsService {
 
       // Verificar unicidad del código de barras (producto y variantes) a
       // nivel de tienda antes de actualizar, excluyendo la fila actual.
-      if (updateProductDto.barcode !== undefined) {
-        await this.assertBarcodeUnique(updateProductDto.barcode, {
+      if (sanitizedDto.barcode !== undefined) {
+        await this.assertBarcodeUnique(sanitizedDto.barcode, {
           excludeProductId: id,
         });
       }
-      if (updateProductDto.variants && updateProductDto.variants.length > 0) {
+      if (sanitizedDto.variants && sanitizedDto.variants.length > 0) {
         const seenBarcodes = new Set<string>();
-        for (const variant of updateProductDto.variants) {
+        for (const variant of sanitizedDto.variants) {
           const code = variant.barcode?.trim();
           if (!code) continue;
           if (seenBarcodes.has(code)) {
@@ -1647,8 +1821,8 @@ export class ProductsService {
       }
 
       // Validate: variants require product to have SKU
-      if (updateProductDto.variants && updateProductDto.variants.length > 0) {
-        const productSku = updateProductDto.sku || existingProduct.sku;
+      if (sanitizedDto.variants && sanitizedDto.variants.length > 0) {
+        const productSku = sanitizedDto.sku || existingProduct.sku;
         if (!productSku || productSku.trim() === '') {
           throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_002);
         }
@@ -1656,7 +1830,7 @@ export class ProductsService {
 
       // BLOCK: cannot change to SERVICE if existing variants present
       if (
-        updateProductDto.product_type === ProductType.SERVICE &&
+        sanitizedDto.product_type === ProductType.SERVICE &&
         existingProduct.product_type !== ProductType.SERVICE
       ) {
         const existingVariantCount = await this.prisma.product_variants.count({
@@ -1676,31 +1850,31 @@ export class ProductsService {
 
       if (
         !user_id &&
-        (updateProductDto.stock_quantity !== undefined ||
-          (updateProductDto.stock_by_location &&
-            updateProductDto.stock_by_location.length > 0))
+        (sanitizedDto.stock_quantity !== undefined ||
+          (sanitizedDto.stock_by_location &&
+            sanitizedDto.stock_by_location.length > 0))
       ) {
         throw new VendixHttpException(ErrorCodes.PROD_PERM_001);
       }
 
       // Consultation validation (only when explicitly setting is_consultation)
-      if (updateProductDto.is_consultation === true) {
+      if (sanitizedDto.is_consultation === true) {
         const effectiveProductType =
-          updateProductDto.product_type ?? existingProduct.product_type;
+          sanitizedDto.product_type ?? existingProduct.product_type;
         if (effectiveProductType !== ProductType.SERVICE) {
           throw new BadRequestException(
             'Solo los servicios pueden ser consultas',
           );
         }
         const effectiveRequiresBooking =
-          updateProductDto.requires_booking ?? existingProduct.requires_booking;
+          sanitizedDto.requires_booking ?? existingProduct.requires_booking;
         if (!effectiveRequiresBooking) {
           throw new BadRequestException(
             'Las consultas requieren reserva previa',
           );
         }
         const effectiveTemplateId =
-          updateProductDto.consultation_template_id ??
+          sanitizedDto.consultation_template_id ??
           existingProduct.consultation_template_id;
         if (!effectiveTemplateId) {
           throw new BadRequestException(
@@ -1708,10 +1882,10 @@ export class ProductsService {
           );
         }
         const effectiveSendPreconsultation =
-          updateProductDto.send_preconsultation ??
+          sanitizedDto.send_preconsultation ??
           existingProduct.send_preconsultation;
         const effectivePreconsultationTemplateId =
-          updateProductDto.preconsultation_template_id ??
+          sanitizedDto.preconsultation_template_id ??
           existingProduct.preconsultation_template_id;
         if (
           effectiveSendPreconsultation &&
@@ -1722,10 +1896,10 @@ export class ProductsService {
           );
         }
       }
-      if (updateProductDto.is_consultation === false) {
-        updateProductDto.send_preconsultation = false;
-        updateProductDto.consultation_template_id = undefined;
-        updateProductDto.preconsultation_template_id = undefined;
+      if (sanitizedDto.is_consultation === false) {
+        sanitizedDto.send_preconsultation = false;
+        sanitizedDto.consultation_template_id = undefined;
+        sanitizedDto.preconsultation_template_id = undefined;
       }
 
       const {
@@ -1744,11 +1918,30 @@ export class ProductsService {
       } = updateProductDto as UpdateProductDto & { price?: number };
       const onlinePurchaseData = await this.buildOnlinePurchaseData(
         existingProduct.store_id,
-        updateProductDto.slug || existingProduct.slug,
+        sanitizedDto.slug || existingProduct.slug,
       );
       const shouldRefreshOnlinePurchase =
         !!onlinePurchaseData &&
         this.shouldRefreshOnlinePurchase(existingProduct, onlinePurchaseData);
+
+      // Derivar purchase_to_stock_factor desde el catálogo de UoM (fuente de
+      // verdad de costeo). PATCH semantics: se usan los FKs efectivos (DTO con
+      // fallback al producto existente) para que cambiar una sola unidad
+      // recalcule el factor contra la contraparte ya persistida. Solo se toca
+      // el factor cuando ambos FKs efectivos están presentes.
+      const effectiveStockUomId =
+        sanitizedDto.stock_uom_id ?? existingProduct.stock_uom_id;
+      const effectivePurchaseUomId =
+        sanitizedDto.purchase_uom_id ?? existingProduct.purchase_uom_id;
+      const uomFkTouched =
+        sanitizedDto.stock_uom_id !== undefined ||
+        sanitizedDto.purchase_uom_id !== undefined;
+      const derivedFactor = uomFkTouched
+        ? await this.derivePurchaseToStockFactor(
+            effectiveStockUomId,
+            effectivePurchaseUomId,
+          )
+        : undefined;
 
       const result = await this.prisma.$transaction(
         async (prisma) => {
@@ -1761,8 +1954,11 @@ export class ProductsService {
               // viene, normalizar '' / whitespace-only → null para no violar
               // UNIQUE(store_id, barcode). Si NO viene, no se sobreescribe el
               // valor existente.
-              ...(updateProductDto.barcode !== undefined
-                ? { barcode: updateProductDto.barcode?.trim() || null }
+              ...(sanitizedDto.barcode !== undefined
+                ? { barcode: sanitizedDto.barcode?.trim() || null }
+                : {}),
+              ...(derivedFactor !== undefined
+                ? { purchase_to_stock_factor: derivedFactor }
                 : {}),
               ...(shouldRefreshOnlinePurchase ? onlinePurchaseData : {}),
               updated_at: new Date(),
@@ -1948,12 +2144,12 @@ export class ProductsService {
             // existingProduct avoids false positives when the frontend always sends the
             // current value in the payload.
             if (
-              updateProductDto.track_inventory !== undefined &&
-              updateProductDto.track_inventory !==
+              sanitizedDto.track_inventory !== undefined &&
+              sanitizedDto.track_inventory !==
                 existingProduct.track_inventory &&
               allExistingVariants.length > 0
             ) {
-              if (!updateProductDto.stock_transfer_mode) {
+              if (!sanitizedDto.stock_transfer_mode) {
                 throw new VendixHttpException(
                   ErrorCodes.PROD_VALIDATE_001,
                   'Changing track_inventory with existing variants requires explicit stock_transfer_mode',
@@ -1998,13 +2194,13 @@ export class ProductsService {
               });
               const baseStockTotal = baseStockSum._sum.quantity_on_hand ?? 0;
               if (baseStockTotal > 0) {
-                if (!updateProductDto.stock_transfer_mode) {
+                if (!sanitizedDto.stock_transfer_mode) {
                   throw new VendixHttpException(
                     ErrorCodes.PROD_VALIDATE_001,
                     'El producto tiene stock base. Elige cómo distribuirlo entre las variantes (first | distribute).',
                   );
                 }
-                if (updateProductDto.stock_transfer_mode === 'reset') {
+                if (sanitizedDto.stock_transfer_mode === 'reset') {
                   throw new VendixHttpException(
                     ErrorCodes.PROD_VALIDATE_001,
                     "No puedes descartar stock al activar variantes. Usa 'first' o 'distribute' para transferirlo.",
@@ -2013,7 +2209,7 @@ export class ProductsService {
               }
 
               const transferMode =
-                updateProductDto.stock_transfer_mode || 'reset';
+                sanitizedDto.stock_transfer_mode || 'reset';
               inheritedLocationIds =
                 await this.stockLevelManager.transferBaseStockToVariants(
                   id,
@@ -2179,7 +2375,7 @@ export class ProductsService {
 
                 if (
                   (hasStock || hasActiveReservations) &&
-                  !updateProductDto.variant_removal_stock_mode
+                  !sanitizedDto.variant_removal_stock_mode
                 ) {
                   throw new VendixHttpException(
                     ErrorCodes.PROD_VALIDATE_001,

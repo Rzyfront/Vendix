@@ -264,7 +264,14 @@ export class ProductionOrdersService {
       );
     }
 
-    const producedQty = Number(dto.produced_qty);
+    // Stock columns (stock_levels.quantity_on_hand,
+    // inventory_cost_layers.quantity_remaining) are Int. The produced quantity
+    // can arrive fractional from the DTO (e.g. yield/waste-derived), so we
+    // round to the integer minimum stock unit here — before it reaches
+    // updateStock(movement_type='production') and before deriving
+    // producedUnitCost = totalConsumedCost / producedQty — so the unit cost
+    // uses the same integer quantity that is written to stock.
+    const producedQty = Math.round(Number(dto.produced_qty));
     if (!Number.isFinite(producedQty) || producedQty <= 0) {
       throw new VendixHttpException(
         ErrorCodes.PRODUCTION_INVALID_QTY,
@@ -301,10 +308,24 @@ export class ProductionOrdersService {
 
         const lineWastePct = Number(item.waste_percent || 0);
         const recipeWastePct = Number(recipe.waste_percent || 0);
-        // Multiplicative waste: 10% line + 5% recipe → 1.10 * 1.05 = 1.155
-        const multiplier =
-          (1 + lineWastePct / 100) * (1 + recipeWastePct / 100);
-        const consumedQty = Number((baseQty * multiplier).toFixed(4));
+        // ===== Waste mode (Fase UoM) =====
+        // percent (default): multiplicative waste 10% line + 5% recipe →
+        // 1.10 * 1.05 = 1.155. absolute: line waste_absolute is added in the
+        // component's minimum stock unit, recipe waste still multiplies
+        // (recipes are dimensionless yields, so percent is the only sane
+        // axis for them).
+        const wasteMode = (item as any).waste_mode ?? 'percent';
+        let consumedQty: number;
+        if (wasteMode === 'absolute') {
+          const wasteAbs = Number((item as any).waste_absolute ?? 0);
+          const safeWasteAbs = Number.isFinite(wasteAbs) ? wasteAbs : 0;
+          const withLine = baseQty + safeWasteAbs;
+          consumedQty = Math.round(withLine * (1 + recipeWastePct / 100));
+        } else {
+          const multiplier =
+            (1 + lineWastePct / 100) * (1 + recipeWastePct / 100);
+          consumedQty = Math.round(baseQty * multiplier);
+        }
 
         const result = await this.stockLevelManager.updateStock(
           {

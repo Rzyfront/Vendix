@@ -10,6 +10,16 @@ export interface StockLevel {
   max_stock?: number;
   cost_per_unit?: number;
   last_updated: Date;
+
+  /**
+   * UoM derived display (Fase UoM). Populated only for ingredients
+   * configured with a purchase→stock factor > 0.
+   *   - sealed_units:     floor(quantity_on_hand / factor)
+   *   - open_remaining:   quantity_on_hand % factor  (the open bottle/bag)
+   * Null for retail/legacy products or when factor is missing.
+   */
+  sealed_units?: number | null;
+  open_remaining?: number | null;
 }
 
 export interface StockAlert {

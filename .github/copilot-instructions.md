@@ -51,6 +51,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-permissions` |
 | -- | `vendix-prisma-scopes` |
 | -- | `vendix-redis-quota` |
+| -- | `vendix-restaurant-ops` |
 | -- | `vendix-saas-billing` |
 | -- | `vendix-settings-system` |
 | -- | `vendix-subscription-gate` |
@@ -112,7 +113,6 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating AI queue processors | `vendix-ai-queue` |
 | Creating AI-powered features | `vendix-ai-engine` |
 | Creating API endpoints | `vendix-backend-api` |
-| Creating API tests (Bruno) | `vendix-bruno-test` |
 | Creating Angular Forms | `vendix-angular-forms` |
 | Creating Angular components | `vendix-frontend-component` |
 | Creating Dockerfiles | `vendix-monorepo-workspaces` |
@@ -159,10 +159,15 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing @Permissions decorators | `vendix-permissions` |
 | Editing Schema | `vendix-prisma-schema` |
 | Editing files in apps/backend/, creating modules, or working with Prisma | `vendix-backend` |
+| Editing industry gating so that only `restaurant` stores see restaurant_ops | `vendix-restaurant-ops` |
 | Editing industry rules in INDUSTRY_HIDDEN_MODULES | `vendix-panel-ui` |
+| Editing kitchen-fire, fire-to-kitchen, or kitchen tickets / KDS | `vendix-restaurant-ops` |
+| Editing menus, menu sections, menu availability windows, or menu engineering | `vendix-restaurant-ops` |
 | Editing or creating any Angular component under apps/frontend (Zoneless patterns apply) | `vendix-zoneless-signals` |
 | Editing or creating any file under apps/mobile | `mobile-dev` |
 | Editing or creating frontend web code | `vendix-frontend` |
+| Editing recipes, BOM explosion, or sub-recipe production orders | `vendix-restaurant-ops` |
+| Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
 | Fixing bugs where variants are hidden or blocked because stock_quantity is zero | `vendix-product-variants` |
@@ -197,10 +202,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying package.json | `vendix-monorepo-workspaces` |
 | Modifying store_settings or organization_settings | `vendix-settings-system` |
 | Modifying the AI chat widget | `vendix-ai-chat` |
+| Modifying the POS for restaurant flow (fire, open table, split bill) | `vendix-restaurant-ops` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
-| Picking concrete verification mechanisms (Bruno, curl, build, audit, log inspection) per step | `how-to-plan` |
+| Picking concrete verification mechanisms (curl, build, audit, log inspection) per step | `how-to-plan` |
 | Planning structural changes, multi-file changes, broad refactors, or new features | `how-to-plan` |
 | Printing documents with date fields | `vendix-date-timezone` |
 | Protecting backend endpoints with auth, roles, or permissions | `vendix-backend-auth` |
@@ -296,9 +302,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with inventory valuation | `vendix-inventory-valuation` |
 | Working with journal entries, mapping keys, PUC accounts, payroll provisions, parafiscales, or debit/credit logic | `vendix-accounting-rules` |
 | Working with notifications SSE or Web Push | `vendix-notifications-system` |
+| Working with order_items.inventory_consumed_at_fire flag | `vendix-restaurant-ops` |
 | Working with organization operating scope STORE vs ORGANIZATION | `vendix-operating-scope` |
 | Working with organizations.fiscal_scope | `vendix-fiscal-scope` |
 | Working with permissions-roles seed | `vendix-permissions` |
+| Working with product_type_enum='prepared' or the is_sellable/is_ingredient/is_combo/is_batch_produced flags | `vendix-restaurant-ops` |
 | Working with products that have variants but do not track stock | `vendix-product-variants` |
 | Working with service variants, booking duration, buffer, preparation time, or product_variant_id on bookings | `vendix-product-variants` |
 | Working with stock levels, inventory adjustments, or stock transfers | `vendix-inventory-stock` |

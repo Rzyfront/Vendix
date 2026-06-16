@@ -15,6 +15,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
+import { UomService, UnitOfMeasure } from '../../../services/uom.service';
 import {
   InvoiceScanResult,
   InvoiceMatchResult,
@@ -468,6 +469,12 @@ import {
 export class InvoiceScannerModalComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
+  /**
+   * Fase 4: scan profile selector. Defaults to `retail`. The parent
+   * (`pop.component.ts`) passes `'ingredient'` when the cart already
+   * contains a pure-ingredient line (so the AI extracts UoM hints too).
+   */
+  readonly orderType = input<'retail' | 'ingredient'>('retail');
   readonly isOpenChange = output<boolean>();
   readonly confirmed = output<{
     scanResult: InvoiceScanResult;
@@ -516,10 +523,81 @@ export class InvoiceScannerModalComponent {
 
   private readonly MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
+  /**
+   * Fase 4: catálogo UoM global (cacheado por `UomService` vía
+   * shareReplay). Se carga cuando el modal arranca un escaneo en modo
+   * `ingredient`. Lo usamos para resolver `uom_hint` → `purchase_uom_id`
+   * y derivar el `stock_uom_id` base. Vacío hasta que llega la respuesta;
+   * la resolución es no-fatal (si falla, los items quedan sin preselección).
+   */
+  private readonly uomCatalog = signal<UnitOfMeasure[]>([]);
+
   constructor(
     private invoiceScannerService: InvoiceScannerService,
+    private uomService: UomService,
     private toastService: ToastService,
   ) {}
+
+  // ============================================================
+  // Fase 4: UoM hint resolution (ingredient flow only)
+  // ============================================================
+
+  /**
+   * Carga el catálogo UoM solo en flujo `ingredient`. El servicio cachea
+   * internamente (shareReplay), así que llamarlo varias veces no re-pega
+   * al backend. Errores son no-fatales: el scanner sigue sin preselección.
+   */
+  private loadUomCatalog(): void {
+    if (this.orderType() !== 'ingredient') return;
+    this.uomService
+      .getCatalog()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.uomCatalog.set(Array.isArray(res?.data) ? res.data : []);
+        },
+        error: () => {
+          this.uomCatalog.set([]);
+        },
+      });
+  }
+
+  /**
+   * Resuelve las UoM sugeridas para un item insumo a partir de su
+   * `uom_hint`. Solo aplica en flujo `ingredient`. Devuelve un par
+   * `{ purchase_uom_id, stock_uom_id }`:
+   *  - `purchase_uom_id`: la UoM cuyo `code` hace match case-insensitive
+   *    con el `uom_hint` (ej "L" → la UoM con code "L"). Sin match → null.
+   *  - `stock_uom_id`: la unidad BASE (`is_base === true`) de la MISMA
+   *    dimensión que la unidad de compra (ej compra "L" → stock "ml").
+   *    Sin unidad de compra resuelta → null.
+   * Es una SUGERENCIA: el usuario la confirma/ajusta luego en el modal
+   * de config del POP. Nunca inventa.
+   */
+  private resolveUomForHint(hint?: string | null): {
+    purchase_uom_id: number | null;
+    stock_uom_id: number | null;
+  } {
+    const empty = { purchase_uom_id: null, stock_uom_id: null };
+    if (this.orderType() !== 'ingredient') return empty;
+    const normalized = (hint ?? '').trim().toLowerCase();
+    if (!normalized) return empty;
+
+    const catalog = this.uomCatalog();
+    const purchase = catalog.find(
+      (u) => (u.code ?? '').trim().toLowerCase() === normalized,
+    );
+    if (!purchase) return empty;
+
+    const base = catalog.find(
+      (u) => u.dimension === purchase.dimension && u.is_base === true,
+    );
+
+    return {
+      purchase_uom_id: purchase.id,
+      stock_uom_id: base?.id ?? null,
+    };
+  }
 
   // ============================================================
   // File handling
@@ -640,8 +718,12 @@ export class InvoiceScannerModalComponent {
     this.currentStep.set(2);
     this.isScanning.set(true);
 
+    // Fase 4: precargar catálogo UoM en paralelo (solo flujo ingredient).
+    // El servicio cachea, así que estará listo al construir editableItems.
+    this.loadUomCatalog();
+
     this.invoiceScannerService
-      .scanInvoice(file)
+      .scanInvoice(file, this.orderType())
       .pipe(
         switchMap((scanResponse) => {
           if (!scanResponse.success || !scanResponse.data) {
@@ -667,9 +749,15 @@ export class InvoiceScannerModalComponent {
 
         if (matchResponse.success && matchResponse.data) {
           this.matchResult.set(matchResponse.data);
-          // Create editable copy of items
+          // Create editable copy of items. Fase 4: en flujo ingredient,
+          // resolvemos uom_hint → purchase/stock UoM como preselección.
           this.editableItems.set(
-            matchResponse.data.items.map((item) => ({ ...item })),
+            matchResponse.data.items.map((item) => {
+              const { purchase_uom_id, stock_uom_id } = this.resolveUomForHint(
+                item.uom_hint,
+              );
+              return { ...item, purchase_uom_id, stock_uom_id };
+            }),
           );
           // Pre-fill invoice header
           const scan = this.scanResult();

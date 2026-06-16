@@ -1,0 +1,48 @@
+meta {
+  name: 04 Create PO Insumo
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/store/orders/purchase-orders
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "supplier_id": 102,
+    "location_id": 50,
+    "notes": "UoM E2E test PO",
+    "items": [
+      { "product_id": {{uom_insumo_id}}, "quantity": 10, "unit_price": 5000 }
+    ]
+  }
+}
+
+script:post-response {
+  const d = res.body && res.body.data;
+  if (d) {
+    bru.setVar("uom_po_id", d.id);
+    const items = d.purchase_order_items || d.items || [];
+    if (items.length) bru.setVar("uom_po_item_id", items[0].id);
+  }
+}
+
+tests {
+  test("Paso 3: PO creada (10 L, total 50000)", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+    expect(Number(res.body.data.total_amount)).to.equal(50000);
+  });
+}
+
+docs {
+  La PO se crea en unidad de compra (L). quantity=10 L, unit_price=5000 COP/L.
+  La conversión a unidad mínima (ml) ocurre en la RECEPCIÓN (request 06).
+}

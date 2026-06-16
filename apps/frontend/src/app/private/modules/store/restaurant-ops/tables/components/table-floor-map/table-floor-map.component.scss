@@ -128,3 +128,24 @@
   color: var(--color-text-secondary, #6b7280);
   text-align: center;
 }
+
+.table-cell.is-editable {
+  cursor: move;
+
+  &:hover {
+    transform: none;
+    border-style: dashed;
+  }
+}
+
+.reservation-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--color-warning, #ea580c);
+  padding: 0.125rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}

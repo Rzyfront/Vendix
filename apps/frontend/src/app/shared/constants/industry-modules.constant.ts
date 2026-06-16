@@ -67,3 +67,35 @@ export function getModulesHiddenByIndustries(
     }),
   );
 }
+
+
+/**
+ * Capability resolver: returns true when at least one of the given store
+ * industries supports the "ingredient / insumo" capacity.
+ *
+ * Used as the single source of truth for the orthogonal `is_ingredient` flag
+ * across the product form, the POP modal and the AI scan profile. Replaces
+ * scattered `industries().includes('restaurant')` checks.
+ *
+ * Semantics: a multi-industry store (e.g. hotel = service + restaurant) is
+ * considered to support ingredients if ANY of its industries does (OR).
+ * An empty/undefined list defaults to `false` (no industry, no capacity).
+ *
+ * Adding a new industry that supports the capacity is a one-line change here.
+ */
+export function industriesSupportIngredients(
+  industries: string[] | null | undefined,
+): boolean {
+  if (!industries || industries.length === 0) {
+    return false;
+  }
+  return industries.some((industry) =>
+    (INDUSTRIES_SUPPORTING_INGREDIENTS as readonly string[]).includes(industry),
+  );
+}
+
+/**
+ * List of store industries that support the `is_ingredient` product capacity.
+ * Today only `restaurant`; designed to grow as the suite expands.
+ */
+export const INDUSTRIES_SUPPORTING_INGREDIENTS = ['restaurant'] as const;

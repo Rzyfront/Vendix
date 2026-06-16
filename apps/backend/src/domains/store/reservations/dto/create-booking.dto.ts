@@ -52,6 +52,15 @@ export class CreateBookingDto {
   @Type(() => Number)
   order_id?: number;
 
+  /**
+   * Optional table assignment. When set, the table is marked as
+   * 'reserved' on creation and is surfaced on the floor map.
+   */
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  table_id?: number;
+
   @IsOptional()
   @IsInt()
   @Type(() => Number)

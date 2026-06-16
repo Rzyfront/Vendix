@@ -23,13 +23,24 @@ export class InvoiceScannerService {
   constructor(private http: HttpClient) {}
 
   /**
-   * Upload an invoice image/PDF for OCR scanning
+   * Upload an invoice image/PDF for OCR scanning.
+   *
+   * Fase 4: `orderType` selects the backend AI app profile.
+   *   - `retail` (default) → `invoice_ocr`
+   *   - `ingredient` → `invoice_ocr_ingredient` (also extracts
+   *     presentation / pack_size / uom_hint)
+   *
+   * Mixed-line orders are out of scope; the caller picks one profile
+   * per scan.
    */
-  scanInvoice(file: File): Observable<ApiResponse<InvoiceScanResult>> {
+  scanInvoice(
+    file: File,
+    orderType: 'retail' | 'ingredient' = 'retail',
+  ): Observable<ApiResponse<InvoiceScanResult>> {
     const formData = new FormData();
     formData.append('file', file);
     return this.http.post<ApiResponse<InvoiceScanResult>>(
-      `${this.apiUrl}/scan`,
+      `${this.apiUrl}/scan?orderType=${orderType}`,
       formData,
     );
   }

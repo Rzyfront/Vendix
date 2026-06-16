@@ -26,6 +26,7 @@ import { AuditService } from '@common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
 import { CostPreviewDto } from './dto/cost-preview.dto';
+import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 
 @Injectable()
 export class PurchaseOrdersService {
@@ -42,6 +43,79 @@ export class PurchaseOrdersService {
     private eventEmitter: EventEmitter2,
   ) {}
 
+  /**
+   * Resolves the UoM conversion for a product at receipt time.
+   *
+   * The frontend sends `quantity_received` and `unit_cost` in the PURCHASE
+   * unit (the unit the operator sees on the PO line, e.g. "10 bottles").
+   * The stock_levels / inventory_cost_layers / inventory_movements tables
+   * all store quantities in the MINIMUM stock unit (e.g. ml, g, unit).
+   *
+   * This helper is the ONLY place in the PO receive flow that converts
+   * purchase → stock. It guarantees `calculateCostOnReceipt` and
+   * `updateStock` see the same `stockQuantity` and `stockUnitCost`, so
+   * stock-on-hand and FIFO cost layers stay in lockstep (the most
+   * dangerous class of bugs in the receive flow is "stock and FIFO drift
+   * by exactly the conversion factor").
+   *
+   * Returns:
+   *   stockQuantity    — quantity in minimum stock unit (integer, Int)
+   *   stockUnitCost    — unit cost in minimum stock unit (decimal)
+   *   purchaseFactor   — the factor applied (1 for retail/legacy)
+   *
+   * Retail products (is_ingredient=false or no factor configured) return
+   * the inputs unchanged — preserves the existing behaviour exactly.
+   */
+  private async resolveUoMConversion(
+    productId: number,
+    purchaseQuantity: number,
+    purchaseUnitCost: number,
+    tx: any,
+  ): Promise<{
+    stockQuantity: number;
+    stockUnitCost: number;
+    purchaseFactor: number;
+  }> {
+    // Read the product's UoM configuration. We use `findFirst` with the
+    // store guard through StorePrismaService so a multi-tenant call does
+    // not leak across stores.
+    const product = await tx.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        is_ingredient: true,
+        purchase_to_stock_factor: true,
+        stock_uom_id: true,
+        purchase_uom_id: true,
+      },
+    });
+
+    const factor = Number(product?.purchase_to_stock_factor ?? 1);
+    const isIngredient = !!product?.is_ingredient;
+    const hasUoM = isIngredient && factor > 0 && Number.isFinite(factor);
+
+    if (!hasUoM) {
+      return {
+        stockQuantity: purchaseQuantity,
+        stockUnitCost: purchaseUnitCost,
+        purchaseFactor: 1,
+      };
+    }
+
+    // 10 L × 1000 ml/L = 10000 ml in stock.
+    // unit_cost was 5000 COP per L → 5 COP per ml.
+    const stockQuantity = Math.round(purchaseQuantity * factor);
+    const stockUnitCost = Number(
+      (purchaseUnitCost / factor).toFixed(6),
+    );
+
+    return {
+      stockQuantity,
+      stockUnitCost,
+      purchaseFactor: factor,
+    };
+  }
+
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Process items to handle new product creation
@@ -51,6 +125,12 @@ export class PurchaseOrdersService {
       if (!organization_id) {
         throw new BadRequestException('Organization ID not found in context');
       }
+
+      // Fase 2: read order_type up-front so the new-product creation block
+      // (below) can inherit ingredient flags. Defaults to `retail` for
+      // backward compat; new orders from the POP modal always carry a value.
+      const orderType =
+        (createPurchaseOrderDto as any).order_type ?? 'retail';
 
       const normalizeText = (value: unknown) =>
         String(value ?? '')
@@ -129,6 +209,66 @@ export class PurchaseOrdersService {
             throw new BadRequestException(
               'Cannot create new product: No store found for this organization.',
             );
+          }
+
+          // Fase 2: ingredient inheritance for NEW products. The line is an
+          // ingredient if the parent order is `ingredient` OR the item opts in
+          // explicitly. We then gate that against the store's industries: a
+          // store whose `industries` do not support the ingredient capacity
+          // (helper: storeIndustriesSupportIngredients) NEVER persists an
+          // ingredient product — the flag is silently forced off.
+          const itemIsIngredient =
+            orderType === 'ingredient' || item.is_ingredient === true;
+          let effectiveIsIngredient = false;
+          if (itemIsIngredient) {
+            const storeForCaps = await tx.stores.findUnique({
+              where: { id: storeId },
+              select: { industries: true },
+            });
+            effectiveIsIngredient = storeIndustriesSupportIngredients(
+              storeForCaps?.industries,
+            );
+          }
+
+          // Fase 2: derive purchase_to_stock_factor from the global
+          // units_of_measure catalog when BOTH UoM FKs are present. This
+          // mirrors ProductsService.derivePurchaseToStockFactor (private in
+          // that service) inline so the whole creation stays inside this
+          // transaction. The factor is a CRITICAL costing value (purchase →
+          // stock at receipt), so the catalog is the source of truth.
+          let purchaseToStockFactor: number | undefined;
+          if (
+            effectiveIsIngredient &&
+            item.purchase_uom_id != null &&
+            item.stock_uom_id != null
+          ) {
+            const uoms = await tx.units_of_measure.findMany({
+              where: { id: { in: [item.stock_uom_id, item.purchase_uom_id] } },
+            });
+            const stockUom = uoms.find((u) => u.id === item.stock_uom_id);
+            const purchaseUom = uoms.find(
+              (u) => u.id === item.purchase_uom_id,
+            );
+            if (!stockUom || !purchaseUom) {
+              throw new BadRequestException(
+                'Unidad de medida no encontrada en el catálogo para el insumo.',
+              );
+            }
+            if (stockUom.dimension !== purchaseUom.dimension) {
+              throw new BadRequestException(
+                `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse.`,
+              );
+            }
+            const derived = Math.round(
+              Number(purchaseUom.factor_to_base) /
+                Number(stockUom.factor_to_base),
+            );
+            if (!Number.isFinite(derived) || derived < 1) {
+              throw new BadRequestException(
+                `Factor de conversión inválido entre ${purchaseUom.code} y ${stockUom.code}: debe ser >= 1.`,
+              );
+            }
+            purchaseToStockFactor = derived;
           }
 
           // Check if product with SKU exists to avoid duplicates
@@ -351,6 +491,35 @@ export class PurchaseOrdersService {
               data: productUpdateData,
             });
           } else {
+            // Fase 2: a pure ingredient neutralizes every retail-sale
+            // construct (mirrors ProductsService.sanitizeIngredientPayload)
+            // and carries the UoM FKs + derived factor. Retail lines
+            // (effectiveIsIngredient === false) keep the exact legacy values.
+            const ingredientOverrides = effectiveIsIngredient
+              ? {
+                  is_ingredient: true,
+                  is_sellable: false,
+                  purchase_uom_id: item.purchase_uom_id ?? null,
+                  stock_uom_id: item.stock_uom_id ?? null,
+                  purchase_to_stock_factor: purchaseToStockFactor ?? null,
+                  base_price: 0,
+                  sale_price: 0,
+                  is_on_sale: false,
+                  available_for_ecommerce: false,
+                  is_featured: false,
+                  allow_pos_price_override: false,
+                  has_multiple_price_tiers: false,
+                }
+              : {
+                  base_price: basePrice,
+                  sale_price: item.sale_price || 0,
+                  is_on_sale: isOnSale,
+                  available_for_ecommerce: availableForEcommerce,
+                  is_featured: isFeatured,
+                  allow_pos_price_override: allowPosPriceOverride,
+                  has_multiple_price_tiers: hasMultiplePriceTiers,
+                };
+
             const newProduct = await tx.products.create({
               data: {
                 name: item.product_name,
@@ -361,7 +530,6 @@ export class PurchaseOrdersService {
                     .replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
                 description: item.product_description || '',
                 sku: item.sku || `GEN-${Date.now()}`,
-                base_price: basePrice,
                 cost_price: cost,
                 profit_margin: margin,
                 stock_quantity: 0,
@@ -371,13 +539,8 @@ export class PurchaseOrdersService {
                 product_type: productType,
                 track_inventory: trackInventory,
                 pricing_type: pricingType,
-                available_for_ecommerce: availableForEcommerce,
-                is_featured: isFeatured,
-                allow_pos_price_override: allowPosPriceOverride,
-                has_multiple_price_tiers: hasMultiplePriceTiers,
-                is_on_sale: isOnSale,
-                sale_price: item.sale_price || 0,
                 brand_id: brandId,
+                ...ingredientOverrides,
                 product_categories: {
                   create: categoryIds.map((id) => ({ category_id: id })),
                 },
@@ -468,9 +631,17 @@ export class PurchaseOrdersService {
       };
       const { expected_date: rawExpectedDate, ...orderDataRest } = orderData;
 
+      // Fase 2: `orderType` was resolved at the top of the transaction so the
+      // new-product creation block could inherit ingredient flags.
+      // Fase 2: when the order is `ingredient`, every line MUST carry the
+      // UoM FKs. We do a soft guard here (log + default) instead of a hard
+      // 400 to keep legacy clients working. The receive() flow is the
+      // authoritative validator when the order is actually received.
+      const isIngredient = orderType === 'ingredient';
       const purchaseOrder = await tx.purchase_orders.create({
         data: {
           ...orderDataRest,
+          order_type: orderType,
           expected_date: toDate(rawExpectedDate),
           created_by_user_id: user_id,
           organization_id,
@@ -488,6 +659,12 @@ export class PurchaseOrdersService {
               batch_number: item.batch_number,
               manufacturing_date: toDate(item.manufacturing_date),
               expiration_date: toDate(item.expiration_date),
+              // Fase 2: UoM FKs. Required when the parent is `ingredient`;
+              // we pass `null` otherwise to keep the column clean.
+              purchase_uom_id: isIngredient
+                ? (item.purchase_uom_id ?? null)
+                : null,
+              stock_uom_id: isIngredient ? (item.stock_uom_id ?? null) : null,
             })),
           },
         },
@@ -828,7 +1005,32 @@ export class PurchaseOrdersService {
         const productVariantId = orderItem?.product_variant_id;
 
         if (productId) {
-          const receiptUnitCost = Number(orderItem?.unit_cost || 0);
+          const purchaseUnitCost = Number(orderItem?.unit_cost || 0);
+
+          // ===== UoM conversion (purchase unit → minimum stock unit) =====
+          // The frontend sends `item.quantity_received` in the purchase unit
+          // (e.g. 10 bottles). The stock tables store everything in the
+          // minimum stock unit (e.g. ml). resolveUoMConversion is the ONLY
+          // place that multiplies by `purchase_to_stock_factor`, so the cost
+          // engine and the stock increment see the same numbers and the
+          // `stock_unit_cost` we record per movement is internally
+          // consistent with `quantity_on_hand`.
+          const {
+            stockQuantity: stockQtyReceived,
+            stockUnitCost: receiptUnitCost,
+            purchaseFactor,
+          } = await this.resolveUoMConversion(
+            productId,
+            item.quantity_received,
+            purchaseUnitCost,
+            tx,
+          );
+
+          if (purchaseFactor > 1) {
+            this.logger.log(
+              `[UoM] PO #${id} item #${item.id}: ${item.quantity_received} × ${purchaseFactor} = ${stockQtyReceived} stock units @ ${receiptUnitCost}/unit`,
+            );
+          }
 
           // Cost FIRST: weighted-average needs pre-receipt stock reads.
           let costResult: CostCalculationResult | null = null;
@@ -838,7 +1040,7 @@ export class PurchaseOrdersService {
                 product_id: productId,
                 variant_id: productVariantId || undefined,
                 location_id: purchaseOrder.location_id!,
-                quantity_received: item.quantity_received,
+                quantity_received: stockQtyReceived,
                 unit_cost: receiptUnitCost,
                 costing_method: costingMethod,
                 purchase_order_id: id,
@@ -862,7 +1064,7 @@ export class PurchaseOrdersService {
               product_id: productId,
               variant_id: productVariantId || undefined,
               location_id: purchaseOrder.location_id!,
-              quantity_change: item.quantity_received,
+              quantity_change: stockQtyReceived,
               movement_type: 'stock_in',
               reason: 'Purchase order receipt',
               create_movement: true,

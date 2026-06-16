@@ -23,6 +23,16 @@ export interface ExtractedLineItem {
   unit_price: number;
   total: number;
   sku_if_visible?: string;
+  /**
+   * Fase 4: presentation / pack_size / uom_hint come from the
+   * `invoice_ocr_ingredient` profile. Optional because the retail
+   * profile (`invoice_ocr`) does not emit them. The POP modal
+   * (Phase 3) pre-fills the UoM selectors with these hints but the
+   * user always confirms manually.
+   */
+  presentation?: string | null;
+  pack_size?: number | null;
+  uom_hint?: string | null;
 }
 
 export interface InvoiceScanResult {

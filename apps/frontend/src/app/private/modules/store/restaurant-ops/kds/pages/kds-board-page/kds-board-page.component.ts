@@ -76,6 +76,8 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   readonly connectionState = this.kdsSse.connectionState;
   readonly lastReconnect = this.kdsSse.lastReconnect;
   readonly lastError = this.kdsSse.lastError;
+  readonly mode = this.kdsSse.mode;
+  readonly consecutiveFailures = this.kdsSse.consecutiveFailures;
 
   readonly pendingTickets = computed(() =>
     this.tickets().filter((t) => t.status === 'pending'),
@@ -157,6 +159,12 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    * tickets yet — used to show a "Conectando a cocina…" loader instead of
    * a blank board with empty columns.
    */
+  readonly isManualMode = computed(() => this.mode() === 'manual');
+
+  readonly modeLabel = computed(() => this.isManualMode() ? 'Manual' : 'En vivo');
+
+  readonly modeIcon = computed(() => this.isManualMode() ? 'wifi-off' : 'radio');
+
   readonly showInitialLoading = computed(() => {
     const s = this.connectionState();
     return (s === 'idle' || s === 'connecting') && this.tickets().length === 0;
@@ -195,9 +203,37 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  /**
+   * Refresca manualmente vía REST /snapshot sin tocar la conexión
+   * SSE. Útil cuando mode==='manual' (no llega nada por SSE) o
+   * cuando el operador quiere forzar sync.
+   */
+  forceRefresh(): void {
+    this.kdsSse
+      .refreshSnapshot(120)
+      .then(() => {
+        this.toastService.success('KDS sincronizado');
+      })
+      .catch((err: unknown) => {
+        this.toastService.error(
+          typeof err === 'string' ? err : 'Error al sincronizar el KDS',
+        );
+      });
+  }
+
   refresh(): void {
     this.kdsSse.reset();
     this.kdsSse.connect(120);
+  }
+
+  onHeaderAction(id: string): void {
+    if (id === 'refresh') {
+      this.forceRefresh();
+    } else if (id === 'reconnect') {
+      // Reset duro: limpia el modo manual, resetea contadores y reconecta SSE.
+      this.kdsSse.reset();
+      this.kdsSse.connect(120);
+    }
   }
 
   // ─── helpers for the template ──────────────────────────────────────

@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsNumber,
   IsOptional,
   Max,
@@ -26,6 +27,16 @@ export class UpdateRecipeItemDto {
   @Min(0)
   @Max(100)
   waste_percent?: number;
+
+  @IsOptional()
+  @IsIn(['percent', 'absolute'])
+  waste_mode?: 'percent' | 'absolute';
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Type(() => Number)
+  @Min(0)
+  waste_absolute?: number;
 
   @IsOptional()
   @IsBoolean()

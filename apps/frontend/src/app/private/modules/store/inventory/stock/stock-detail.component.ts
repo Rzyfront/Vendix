@@ -36,6 +36,14 @@ interface LocationStock {
   onHand: number;
   type: string;
   lastUpdated: string;
+  // ===== UoM derived display (Fase UoM) =====
+  // Populated by the backend for ingredients with a purchase→stock factor.
+  // `null` for retail/legacy products — render the total as-is.
+  sealed_units?: number | null;
+  open_remaining?: number | null;
+  stock_unit?: string | null;
+  purchase_unit?: string | null;
+  purchase_to_stock_factor?: number | null;
 }
 
 interface ConsolidatedStock {
@@ -122,13 +130,55 @@ interface ConsolidatedStock {
 
           <app-stats
             title="Total en Mano"
-            [value]="totalOnHand()"
-            smallText="Stock fisico total"
+            [value]="uomHeadline() ? uomHeadline()!.sealed : totalOnHand()"
+            [smallText]="uomHeadline() ? 'Unidades selladas' : 'Stock fisico total'"
             iconName="warehouse"
             iconBgColor="bg-blue-100"
             iconColor="text-blue-600"
           ></app-stats>
         </div>
+
+        <!-- ===== UoM headline (Modelo B) =====
+             Only rendered for ingredients with a purchase→stock factor.
+             Sellados = número principal; capacidad y volumen total al detalle. -->
+        @if (uomHeadline(); as uom) {
+          <div
+            class="rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-xs md:text-sm text-blue-900 flex flex-col gap-2"
+            data-testid="uom-headline"
+          >
+            <div
+              class="flex flex-col md:flex-row md:items-center md:justify-between gap-2"
+            >
+              <span class="flex items-center gap-2">
+                <app-icon name="package" [size]="14" class="text-blue-600"></app-icon>
+                <span>
+                  <strong>{{ uom.sealed }}</strong> sellado{{ uom.sealed === 1 ? '' : 's' }}
+                  @if (uom.open > 0) {
+                    + <strong>1</strong> abierto
+                    (<strong>{{ uom.open }}</strong> {{ uom.unit }})
+                  }
+                </span>
+              </span>
+
+              <!-- mismo pill de conversión que el detalle de producto -->
+              <div
+                class="self-start md:self-auto rounded-lg bg-primary-50 border border-primary-100 px-3 py-1 text-center whitespace-nowrap"
+              >
+                <span
+                  class="text-[9px] text-primary-600 uppercase font-bold tracking-wider mr-1.5"
+                >
+                  Equivale a
+                </span>
+                <span class="text-xs md:text-sm font-bold text-primary-700">
+                  1 unidad = {{ uom.capacity }} {{ uom.unit }}
+                </span>
+              </div>
+            </div>
+            <span class="text-blue-700/80 pl-6">
+              Volumen total: <strong>{{ uom.totalVolume }} {{ uom.unit }}</strong>
+            </span>
+          </div>
+        }
 
         <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
           <div class="px-2 py-1.5 md:px-6 md:py-4 md:border-b md:border-border">
@@ -303,6 +353,39 @@ export class StockDetailComponent implements OnInit {
       });
   }
 
+  /**
+   * Modelo B headline summary for ingredients. The sealed/open split is
+   * derived from the AGGREGATE total volume across locations (treated as a
+   * single pool) and the per-unit capacity, so the user sees "9 sellados"
+   * instead of the raw 9680 ml. Also carries the capacity (volume per unit)
+   * and the total volume for the detail rows. Returns `null` for
+   * retail/legacy products that have no factor.
+   */
+  readonly uomHeadline = computed<{
+    sealed: number;
+    open: number;
+    unit: string;
+    capacity: number;
+    totalVolume: number;
+  } | null>(() => {
+    const first = this.locations()[0];
+    if (!first) return null;
+    const capacity = Number(first.purchase_to_stock_factor ?? 0);
+    // sealed_units present signals "ingredient with factor"; without a valid
+    // capacity there is nothing to split.
+    if (first.sealed_units == null || !Number.isFinite(capacity) || capacity <= 0) {
+      return null;
+    }
+    const totalVolume = this.totalOnHand();
+    return {
+      sealed: Math.floor(totalVolume / capacity),
+      open: totalVolume % capacity,
+      unit: first.stock_unit || '',
+      capacity,
+      totalVolume,
+    };
+  });
+
   private processStockData(data: StockLevel | StockLevel[]): void {
     if (Array.isArray(data)) {
       if (data.length > 0) {
@@ -318,6 +401,15 @@ export class StockDetailComponent implements OnInit {
         onHand: level.quantity_on_hand,
         type: (level.location as any)?.type || 'warehouse',
         lastUpdated: level.updated_at || '',
+        // UoM split (Fase UoM) — see stock-levels.service.ts:
+        // sealed_units = floor(quantity_on_hand / factor), open_remaining
+        // = quantity_on_hand % factor. Null for non-ingredients.
+        sealed_units: (level as any).sealed_units ?? null,
+        open_remaining: (level as any).open_remaining ?? null,
+        stock_unit: (level.product as any)?.stock_unit ?? null,
+        purchase_unit: (level.product as any)?.purchase_unit ?? null,
+        purchase_to_stock_factor:
+          (level.product as any)?.purchase_to_stock_factor ?? null,
       }));
       this.locations.set(mapped);
       this.totalAvailable.set(mapped.reduce((sum, l) => sum + l.available, 0));

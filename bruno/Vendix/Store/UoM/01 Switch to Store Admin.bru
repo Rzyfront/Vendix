@@ -1,0 +1,38 @@
+meta {
+  name: 01 Switch to Store Admin
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/auth/switch-environment
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomBaseToken}}
+}
+
+body:json {
+  {
+    "target_environment": "STORE_ADMIN",
+    "store_slug": "roku"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.data && res.body.data.access_token) {
+    // STORE_ADMIN token con store_id=10 — requerido por todas las requests /store/*
+    bru.setVar("uomToken", res.body.data.access_token);
+  }
+}
+
+tests {
+  test("Switch to STORE_ADMIN successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.equal(true);
+    expect(res.body.data.updatedEnvironment).to.equal('STORE_ADMIN');
+    expect(res.body.data).to.have.property('access_token');
+  });
+}

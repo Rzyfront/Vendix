@@ -1,0 +1,38 @@
+meta {
+  name: 10 Add Recipe Item (absolute waste)
+  type: http
+  seq: 11
+}
+
+post {
+  url: {{baseUrl}}/store/recipes/{{uom_recipe_id}}/items
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "component_product_id": {{uom_insumo_id}},
+    "quantity": 300,
+    "waste_mode": "absolute",
+    "waste_absolute": 20
+  }
+}
+
+tests {
+  test("Paso 4: recipe_item con merma absoluta", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data.waste_mode).to.equal('absolute');
+    expect(Number(res.body.data.waste_absolute)).to.equal(20);
+    expect(Number(res.body.data.quantity)).to.equal(300);
+  });
+}
+
+docs {
+  Consumo esperado al fire = round(quantity + waste_absolute) = round(300+20) = 320 ml.
+}

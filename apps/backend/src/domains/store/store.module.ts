@@ -59,6 +59,7 @@ import { ProductionOrdersModule } from './production/production.module';
 import { KitchenFireModule } from './kitchen-fire/kitchen-fire.module';
 import { TablesModule } from './tables/tables.module';
 import { MenusModule } from './menus/menus.module';
+import { UomModule } from './uom/uom.module';
 
 @Module({
   imports: [
@@ -120,6 +121,7 @@ import { MenusModule } from './menus/menus.module';
     KitchenFireModule,
     TablesModule,
     MenusModule,
+    UomModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

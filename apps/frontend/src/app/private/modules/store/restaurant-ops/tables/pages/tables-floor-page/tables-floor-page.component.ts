@@ -11,9 +11,9 @@ import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   CardComponent,
-  IconComponent,
   SpinnerComponent,
   StatsComponent,
+  StickyHeaderActionButton,
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
@@ -21,6 +21,7 @@ import { Table } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import { TableFloorMapComponent } from '../../components/table-floor-map/table-floor-map.component';
 import { OpenTableModalComponent } from '../../components/open-table-modal/open-table-modal.component';
+import { SeatBookingModalComponent } from '../../components/seat-booking-modal/seat-booking-modal.component';
 
 interface TablesStats {
   total: number;
@@ -46,10 +47,10 @@ interface TablesStats {
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
-    IconComponent,
     SpinnerComponent,
     TableFloorMapComponent,
     OpenTableModalComponent,
+    SeatBookingModalComponent,
   ],
   templateUrl: './tables-floor-page.component.html',
   styleUrl: './tables-floor-page.component.scss',
@@ -65,6 +66,23 @@ export class TablesFloorPageComponent implements OnInit {
   readonly selectedTable = signal<Table | null>(null);
   readonly isOpenModalOpen = signal(false);
   readonly isOpeningSession = signal(false);
+  readonly isSeatModalOpen = signal(false);
+  readonly seatTable = signal<Table | null>(null);
+
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
+    {
+      id: 'manage',
+      label: 'Gestionar mesas',
+      variant: 'outline',
+      icon: 'settings',
+    },
+    {
+      id: 'refresh',
+      label: 'Refrescar',
+      variant: 'ghost',
+      icon: 'refresh-cw',
+    },
+  ]);
 
   readonly stats = computed<TablesStats>(() => {
     const list = this.tables();
@@ -100,6 +118,14 @@ export class TablesFloorPageComponent implements OnInit {
       });
   }
 
+  onHeaderAction(id: string): void {
+    if (id === 'manage') {
+      this.router.navigate(['/admin/restaurant-ops/tables/manage']);
+    } else if (id === 'refresh') {
+      this.loadFloor();
+    }
+  }
+
   onTableClick(t: Table): void {
     const status = t.effective_status ?? t.status;
     if (status === 'occupied' && t.active_session) {
@@ -107,6 +133,11 @@ export class TablesFloorPageComponent implements OnInit {
         '/admin/restaurant-ops/tables/session',
         t.active_session.id,
       ]);
+      return;
+    }
+    if (status === 'reserved' && (t.pending_bookings?.length ?? 0) > 0) {
+      this.seatTable.set(t);
+      this.isSeatModalOpen.set(true);
       return;
     }
     if (status === 'available') {
@@ -117,6 +148,15 @@ export class TablesFloorPageComponent implements OnInit {
         `La mesa ${t.name} no está disponible (${TablesService.statusLabel(status)})`,
       );
     }
+  }
+
+  closeSeatModal(): void {
+    this.isSeatModalOpen.set(false);
+    this.seatTable.set(null);
+  }
+
+  onBookingSeated(): void {
+    this.loadFloor();
   }
 
   onOpenSession(dto: { table_id: number; guest_count?: number }): void {

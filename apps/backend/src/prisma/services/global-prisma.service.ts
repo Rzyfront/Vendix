@@ -233,6 +233,13 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.subscription_plans;
   }
 
+  // Units of Measure catalog (Fase UoM). Global read-only data — same
+  // rationale as `countries` / `currencies` / `brands`. See
+  // uom-display.helper.ts and the units_of_measure migration.
+  get units_of_measure() {
+    return this.baseClient.units_of_measure;
+  }
+
   get currencies() {
     return this.baseClient.currencies;
   }
