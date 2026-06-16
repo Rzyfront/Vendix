@@ -1,0 +1,42 @@
+meta {
+  name: UoM
+}
+
+docs {
+  # Control exacto de UoM en insumos — Verificación E2E (Plan sección G)
+
+  Suite end-to-end que valida el control exacto de unidad de medida (UoM)
+  para insumos de la suite restaurante:
+
+  1. Conversión compra→unidad mínima en recepción de PO (10 L × 1000 = 10000 ml).
+  2. Merma absoluta en receta (waste_mode=absolute, waste_absolute=20).
+  3. Redondeo entero exacto al fire (Math.round(300+20)=320).
+  4. COGS FIFO en unidad mínima (320 × 5 = 1600, DR 6135 / CR 1435).
+  5. Vista derivada sealed_units / open_remaining.
+  6. Regresión retail (is_ingredient=false → factor no aplica).
+
+  ## Tienda de pruebas (dev seed Roku)
+  - Org: Roku (id 6, slug `roku`, operating_scope=ORGANIZATION, industries incl. restaurant)
+  - Store: Roku (id 10, slug `roku`)
+  - Location: Showroom Norte (id 50)
+  - Supplier: Samsung Electronics Colombia (id 102)
+  - Customer (user): sofia.hernandez (id 167)
+  - Owner login: owner@roku-demo.vendix.local / RokuDemo2026!
+    (definido en apps/backend/scripts/roku-demo/stages/01-foundation.ts:30)
+
+  ## Orden de ejecución
+  Correr en orden de `seq`. La request `00 Login` + `01 Switch to Store Admin`
+  setean `uomToken` (token STORE_ADMIN con store_id=10), requerido por el guard
+  domain-scope (un token VENDIX_ADMIN da 403 en /store/*).
+
+  ## BLOQUEANTE conocido (BUG P0 — gap de DTO)
+  `POST /store/products` rechaza con 400 los campos `stock_uom_id`,
+  `purchase_uom_id` y `purchase_to_stock_factor` ("property X should not exist")
+  porque CreateProductDto/UpdateProductDto NO los declaran y el ValidationPipe
+  global usa `forbidNonWhitelisted: true` (apps/backend/src/main.ts:55-58).
+  Las columnas existen en la tabla `products` y la lógica de conversión las lee
+  (purchase-orders.service.ts:resolveUoMConversion), pero NO hay ruta API para
+  setearlas. Hasta que se expongan en el DTO, el paso 02 debe completarse con
+  un UPDATE acotado (WHERE id=<insumo> AND store_id=10) — ver la nota en la
+  request `02 Create Insumo (UoM)`.
+}

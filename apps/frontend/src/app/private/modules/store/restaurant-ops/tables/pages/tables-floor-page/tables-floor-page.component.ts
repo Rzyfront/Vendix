@@ -14,6 +14,7 @@ import {
   IconComponent,
   SpinnerComponent,
   StatsComponent,
+  StickyHeaderActionButton,
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
@@ -66,6 +67,21 @@ export class TablesFloorPageComponent implements OnInit {
   readonly isOpenModalOpen = signal(false);
   readonly isOpeningSession = signal(false);
 
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
+    {
+      id: 'manage',
+      label: 'Gestionar mesas',
+      variant: 'outline',
+      icon: 'settings',
+    },
+    {
+      id: 'refresh',
+      label: 'Refrescar',
+      variant: 'ghost',
+      icon: 'refresh-cw',
+    },
+  ]);
+
   readonly stats = computed<TablesStats>(() => {
     const list = this.tables();
     return {
@@ -98,6 +114,14 @@ export class TablesFloorPageComponent implements OnInit {
           );
         },
       });
+  }
+
+  onHeaderAction(id: string): void {
+    if (id === 'manage') {
+      this.router.navigate(['/admin/restaurant-ops/tables/manage']);
+    } else if (id === 'refresh') {
+      this.loadFloor();
+    }
   }
 
   onTableClick(t: Table): void {

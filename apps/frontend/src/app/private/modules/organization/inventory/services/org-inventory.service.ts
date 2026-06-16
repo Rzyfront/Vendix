@@ -35,6 +35,14 @@ export interface OrgStockLevelRow {
   reserved_quantity?: number | string;
   available_quantity?: number | string;
   min_stock_threshold?: number | string | null;
+  // Modelo B (UoM) — presentation split for ingredients. Null for retail.
+  // `quantity` stays the canonical total in the minimum unit (e.g. ml);
+  // these surface the sealed/open view so the list can show "9" instead of 9680.
+  sealed_units?: number | null;
+  open_remaining?: number | null;
+  total_volume?: number | null;
+  capacity?: number | null;
+  stock_uom_code?: string | null;
 }
 
 export type OrgLocationType = 'warehouse' | 'store' | 'virtual' | 'transit';

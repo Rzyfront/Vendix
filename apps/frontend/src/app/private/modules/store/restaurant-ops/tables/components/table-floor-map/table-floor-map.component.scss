@@ -128,3 +128,12 @@
   color: var(--color-text-secondary, #6b7280);
   text-align: center;
 }
+
+.table-cell.is-editable {
+  cursor: move;
+
+  &:hover {
+    transform: none;
+    border-style: dashed;
+  }
+}

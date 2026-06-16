@@ -27,25 +27,7 @@ import {
   MarketingAdCreativeSummary,
 } from './anuncios.interface';
 import { AnunciosService } from './anuncios.service';
-
-interface FileSaveWritable {
-  write(data: Blob): Promise<void>;
-  close(): Promise<void>;
-}
-
-interface FileSaveHandle {
-  createWritable(): Promise<FileSaveWritable>;
-}
-
-type FileSaveWindow = Window & {
-  showSaveFilePicker?: (options?: {
-    suggestedName?: string;
-    types?: Array<{
-      description: string;
-      accept: Record<string, string[]>;
-    }>;
-  }) => Promise<FileSaveHandle>;
-};
+import { AdCreativeAssetService } from './services/ad-creative-asset.service';
 
 @Component({
   selector: 'app-anuncios',
@@ -461,6 +443,7 @@ type FileSaveWindow = Window & {
 })
 export class AnunciosComponent {
   private readonly anunciosService = inject(AnunciosService);
+  private readonly assetService = inject(AdCreativeAssetService);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
@@ -572,7 +555,8 @@ export class AnunciosComponent {
     {
       label: 'Descargar',
       icon: 'download',
-      action: (creative: MarketingAdCreative) => this.downloadImage(creative),
+      action: (creative: MarketingAdCreative) =>
+        void this.downloadImage(creative),
       variant: 'ghost',
       show: (creative: MarketingAdCreative) => !!creative.image_url,
     },
@@ -886,25 +870,8 @@ export class AnunciosComponent {
     }).format(new Date(value));
   }
 
-  protected async copyImage(creative: MarketingAdCreative): Promise<void> {
-    if (!creative.image_url) return;
-    try {
-      const clipboardItem = (window as any).ClipboardItem;
-      if (clipboardItem && navigator.clipboard?.write) {
-        const response = await fetch(creative.image_url);
-        const blob = await response.blob();
-        await navigator.clipboard.write([
-          new clipboardItem({ [blob.type || 'image/png']: blob }),
-        ]);
-        this.toastService.success('Imagen copiada.');
-        return;
-      }
-      await navigator.clipboard.writeText(creative.image_url);
-      this.toastService.success('Enlace copiado.');
-    } catch {
-      await navigator.clipboard.writeText(creative.image_url);
-      this.toastService.success('Enlace copiado.');
-    }
+  protected copyImage(creative: MarketingAdCreative): Promise<void> {
+    return this.assetService.copy(creative);
   }
 
   protected async copyPostCopy(): Promise<void> {
@@ -914,73 +881,12 @@ export class AnunciosComponent {
     this.toastService.success('Post copiado.');
   }
 
-  protected async downloadImage(creative: MarketingAdCreative): Promise<void> {
-    if (!creative.image_url) return;
-
-    const fileName = this.imageFileName(creative);
-    const savePicker = (window as FileSaveWindow).showSaveFilePicker;
-
-    if (savePicker) {
-      try {
-        const handle = await savePicker.call(window, {
-          suggestedName: fileName,
-          types: [
-            {
-              description: 'Imagen',
-              accept: {
-                'image/png': ['.png'],
-                'image/jpeg': ['.jpg', '.jpeg'],
-                'image/webp': ['.webp'],
-              },
-            },
-          ],
-        });
-        const blob = await this.fetchImageBlob(creative.image_url);
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
-        this.toastService.success('Imagen guardada.');
-        return;
-      } catch (error) {
-        if (this.isSaveCancelled(error)) return;
-      }
-    }
-
-    this.downloadViaAnchor(creative.image_url, fileName);
-    this.toastService.info('Descarga iniciada.');
+  protected downloadImage(creative: MarketingAdCreative): Promise<void> {
+    return this.assetService.download(creative);
   }
 
-  private downloadViaAnchor(imageUrl: string, fileName: string): void {
-    const link = document.createElement('a');
-    link.href = imageUrl;
-    link.download = fileName;
-    link.target = '_blank';
-    link.click();
-  }
-
-  private async fetchImageBlob(imageUrl: string): Promise<Blob> {
-    const response = await fetch(imageUrl);
-    if (!response.ok) {
-      throw new Error('No se pudo descargar la imagen.');
-    }
-    return response.blob();
-  }
-
-  private isSaveCancelled(error: unknown): boolean {
-    return error instanceof DOMException && error.name === 'AbortError';
-  }
-
-  protected async shareImage(creative: MarketingAdCreative): Promise<void> {
-    if (!creative.image_url) return;
-    if (navigator.share) {
-      await navigator.share({
-        title: creative.title,
-        url: creative.image_url,
-      });
-      return;
-    }
-    await navigator.clipboard.writeText(creative.image_url);
-    this.toastService.success('Enlace copiado para compartir.');
+  protected shareImage(creative: MarketingAdCreative): Promise<void> {
+    return this.assetService.share(creative);
   }
 
   private async ensureEcommerceUrl(): Promise<void> {
@@ -1017,38 +923,6 @@ export class AnunciosComponent {
     const updated = [...current];
     updated[index] = creative;
     this.anuncios.set(updated);
-  }
-
-  private fileSlug(value: string): string {
-    return value
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '')
-      .slice(0, 48);
-  }
-
-  private imageFileName(creative: MarketingAdCreative): string {
-    const extension = this.imageExtensionFromUrl(creative.image_url) || 'webp';
-    return `${this.fileSlug(creative.title) || 'anuncio'}.${extension}`;
-  }
-
-  private imageExtensionFromUrl(imageUrl?: string | null): string | null {
-    if (!imageUrl) return null;
-
-    try {
-      const pathname = new URL(imageUrl).pathname;
-      const extension = pathname.split('.').pop()?.toLowerCase();
-      if (extension && ['png', 'jpg', 'jpeg', 'webp'].includes(extension)) {
-        return extension;
-      }
-    } catch {
-      const extension = imageUrl.split('?')[0]?.split('.').pop()?.toLowerCase();
-      if (extension && ['png', 'jpg', 'jpeg', 'webp'].includes(extension)) {
-        return extension;
-      }
-    }
-
-    return null;
   }
 
   private toHttpsUrl(hostname: string): string {

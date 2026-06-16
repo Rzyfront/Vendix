@@ -4,10 +4,8 @@
     subtitle="Vista del piso del restaurante. Haz clic en una mesa disponible para abrir cuenta."
     icon="table"
     variant="glass"
-    [actions]="[
-      { id: 'refresh', label: 'Refrescar', icon: 'refresh-cw', variant: 'ghost' },
-    ]"
-    (actionClicked)="loadFloor()"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
   />
 
   <div

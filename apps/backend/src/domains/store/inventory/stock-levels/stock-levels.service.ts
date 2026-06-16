@@ -10,6 +10,7 @@ import {
   ResolvedInventoryScope,
 } from '../shared/helpers/pos-stock-scope.helper';
 import { resolveStockLevelLowStockThreshold } from '../shared/helpers/low-stock-threshold.helper';
+import { deriveUoMSplit, UoMSplit } from '../shared/helpers/uom-display.helper';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../settings/interfaces/store-settings.interface';
 
@@ -38,7 +39,7 @@ export class StockLevelsService {
       query.location_id,
       'pos',
     );
-    return this.prisma.stock_levels.findMany({
+    const rows = await this.prisma.stock_levels.findMany({
       where: {
         product_id: query.product_id,
         ...locationFilter,
@@ -49,6 +50,7 @@ export class StockLevelsService {
         inventory_locations: true,
       },
     });
+    return rows.map((row) => this.decorateUoM(row));
   }
 
   async findByProduct(productId: number, query: StockLevelQueryDto) {
@@ -56,7 +58,7 @@ export class StockLevelsService {
       query.location_id,
       'pos',
     );
-    return this.prisma.stock_levels.findMany({
+    const rows = await this.prisma.stock_levels.findMany({
       where: {
         product_id: productId,
         ...locationFilter,
@@ -67,12 +69,26 @@ export class StockLevelsService {
         inventory_locations: true,
       },
     });
+    return rows.map((row) => this.decorateUoM(row));
   }
 
-  findByLocation(locationId: number, query: StockLevelQueryDto) {
+  /**
+   * Decorates a stock_levels row with the UoM "sealed/open" split when the
+   * related product is an ingredient with a purchase→stock factor. The
+   * total in minimum stock units is left untouched — see
+   * uom-display.helper.ts for the rationale.
+   */
+  private decorateUoM<T extends { quantity_on_hand?: number | null; products?: any }>(
+    row: T,
+  ): T & UoMSplit {
+    const split = deriveUoMSplit(row);
+    return { ...row, ...split };
+  }
+
+  async findByLocation(locationId: number, query: StockLevelQueryDto) {
     // Validate location access implicitly by the query scope?
     // If locationId is not in store, findMany returns empty. Correct.
-    return this.prisma.stock_levels.findMany({
+    const rows = await this.prisma.stock_levels.findMany({
       where: {
         location_id: locationId,
         product_id: query.product_id,
@@ -83,6 +99,7 @@ export class StockLevelsService {
         inventory_locations: true,
       },
     });
+    return rows.map((row) => this.decorateUoM(row));
   }
 
   async getStockAlerts(query: StockLevelQueryDto) {

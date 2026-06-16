@@ -1,0 +1,87 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpenChange.emit($event)"
+  (cancel)="onCancel()"
+  (opened)="syncFromTable()"
+  [size]="'md'"
+  [title]="title()"
+  subtitle="Configura los datos y la posición en el plano"
+>
+  <form [formGroup]="form" class="space-y-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <app-input
+        class="md:col-span-2"
+        formControlName="name"
+        label="Nombre"
+        type="text"
+        placeholder="Ej. Mesa 1, Barra 3, VIP A"
+        [required]="true"
+        customWrapperClass="mt-0"
+      />
+
+      <app-input
+        formControlName="zone"
+        label="Zona"
+        type="text"
+        placeholder="Salón, Terraza, Barra…"
+        [required]="false"
+        customWrapperClass="mt-0"
+      />
+
+      <app-input
+        formControlName="capacity"
+        label="Capacidad"
+        type="number"
+        placeholder="Comensales"
+        [min]="1"
+        [required]="false"
+        customWrapperClass="mt-0"
+      />
+
+      <app-selector
+        class="md:col-span-2"
+        formControlName="status"
+        label="Estado inicial"
+        [options]="statusOptions"
+        [required]="true"
+        tooltipText="Se actualizará automáticamente al abrir/cerrar sesiones."
+      />
+
+      <app-input
+        formControlName="pos_x"
+        label="Posición X (plano)"
+        type="number"
+        placeholder="Columna"
+        [required]="false"
+        customWrapperClass="mt-0"
+        helperText="Opcional. Se usa al dibujar el plano."
+      />
+
+      <app-input
+        formControlName="pos_y"
+        label="Posición Y (plano)"
+        type="number"
+        placeholder="Fila"
+        [required]="false"
+        customWrapperClass="mt-0"
+        helperText="Opcional. Se usa al dibujar el plano."
+      />
+    </div>
+  </form>
+
+  <div slot="footer" class="flex justify-end gap-2">
+    <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
+    <app-button
+      variant="primary"
+      [loading]="loading()"
+      (clicked)="onSubmit()"
+    >
+      <app-icon
+        slot="icon"
+        [name]="isEditMode() ? 'save' : 'plus'"
+        [size]="16"
+      ></app-icon>
+      {{ isEditMode() ? 'Guardar cambios' : 'Crear mesa' }}
+    </app-button>
+  </div>
+</app-modal>

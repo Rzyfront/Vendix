@@ -46,6 +46,7 @@ import {
   MarketingAdCreative,
 } from '../anuncios.interface';
 import { AnunciosService } from '../anuncios.service';
+import { AdCreativeAssetService } from '../services/ad-creative-asset.service';
 
 type CreationMode = 'ai' | 'manual';
 type DetailsTarget = 'ai' | 'manual';
@@ -219,6 +220,20 @@ interface GalleryImage {
                           [size]="16"
                         ></app-icon>
                         Descargar
+                      </app-button>
+
+                      <app-button
+                        variant="outline"
+                        size="md"
+                        type="button"
+                        (clicked)="shareImage(activeResult()!)"
+                      >
+                        <app-icon
+                          slot="icon"
+                          name="share-2"
+                          [size]="16"
+                        ></app-icon>
+                        Compartir
                       </app-button>
                     </div>
                   }
@@ -819,6 +834,7 @@ interface GalleryImage {
 })
 export class AnuncioCreatePageComponent {
   private readonly anunciosService = inject(AnunciosService);
+  private readonly assetService = inject(AdCreativeAssetService);
   private readonly productsService = inject(ProductsService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
@@ -1313,35 +1329,16 @@ export class AnuncioCreatePageComponent {
     return classes[format];
   }
 
-  protected async copyImage(creative: MarketingAdCreative): Promise<void> {
-    if (!creative.image_url) return;
-
-    try {
-      const clipboardItem = (window as any).ClipboardItem;
-      if (clipboardItem && navigator.clipboard?.write) {
-        const response = await fetch(creative.image_url);
-        const blob = await response.blob();
-        await navigator.clipboard.write([
-          new clipboardItem({ [blob.type || 'image/png']: blob }),
-        ]);
-        this.toastService.success('Imagen copiada.');
-        return;
-      }
-      await navigator.clipboard.writeText(creative.image_url);
-      this.toastService.success('Enlace copiado.');
-    } catch {
-      await navigator.clipboard.writeText(creative.image_url);
-      this.toastService.success('Enlace copiado.');
-    }
+  protected copyImage(creative: MarketingAdCreative): Promise<void> {
+    return this.assetService.copy(creative);
   }
 
-  protected downloadImage(creative: MarketingAdCreative): void {
-    if (!creative.image_url) return;
-    const link = document.createElement('a');
-    link.href = creative.image_url;
-    link.download = `${this.fileSlug(creative.title)}.webp`;
-    link.target = '_blank';
-    link.click();
+  protected downloadImage(creative: MarketingAdCreative): Promise<void> {
+    return this.assetService.download(creative);
+  }
+
+  protected shareImage(creative: MarketingAdCreative): Promise<void> {
+    return this.assetService.share(creative);
   }
 
   private startGeneration(id: number): void {

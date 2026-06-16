@@ -1,4 +1,4 @@
-import {Component, OnInit, OnDestroy, ViewChild, signal, HostListener, DestroyRef, inject} from '@angular/core';
+import {Component, OnInit, OnDestroy, ViewChild, signal, computed, HostListener, DestroyRef, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -203,6 +203,7 @@ import { CostPreviewResponse } from '../interfaces';
 
     <app-invoice-scanner-modal
       [isOpen]="showInvoiceScanner()"
+      [orderType]="scannerOrderType()"
       (isOpenChange)="showInvoiceScanner.set($event)"
       (confirmed)="onInvoiceScanConfirmed($event)"
     ></app-invoice-scanner-modal>
@@ -219,6 +220,25 @@ import { CostPreviewResponse } from '../interfaces';
 export class PopComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   showInvoiceScanner = signal(false);
+  /**
+   * Fase 4: derive the AI scan profile from the current cart. If any
+   * line is a pure ingredient (is_ingredient && !is_sellable), route to
+   * the `invoice_ocr_ingredient` profile so the model also extracts
+   * presentation / pack_size / uom_hint. Otherwise `retail`.
+   */
+  readonly scannerOrderType = computed<'retail' | 'ingredient'>(() => {
+    const state = this.popCartService.currentState;
+    const isIngredient = state.items.some((it: any) => {
+      const p: any = it.product;
+      if (!p) return false;
+      const sellable =
+        p.is_sellable === undefined || p.is_sellable === null
+          ? true
+          : !!p.is_sellable;
+      return !!p.is_ingredient && !sellable;
+    });
+    return isIngredient ? 'ingredient' : 'retail';
+  });
 
   supplierModalOpen = signal(false);
   warehouseModalOpen = signal(false);

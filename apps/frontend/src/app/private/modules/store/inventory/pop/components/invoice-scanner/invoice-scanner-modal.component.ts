@@ -468,6 +468,12 @@ import {
 export class InvoiceScannerModalComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
+  /**
+   * Fase 4: scan profile selector. Defaults to `retail`. The parent
+   * (`pop.component.ts`) passes `'ingredient'` when the cart already
+   * contains a pure-ingredient line (so the AI extracts UoM hints too).
+   */
+  readonly orderType = input<'retail' | 'ingredient'>('retail');
   readonly isOpenChange = output<boolean>();
   readonly confirmed = output<{
     scanResult: InvoiceScanResult;
@@ -641,7 +647,7 @@ export class InvoiceScannerModalComponent {
     this.isScanning.set(true);
 
     this.invoiceScannerService
-      .scanInvoice(file)
+      .scanInvoice(file, this.orderType())
       .pipe(
         switchMap((scanResponse) => {
           if (!scanResponse.success || !scanResponse.data) {

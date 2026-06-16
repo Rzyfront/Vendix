@@ -31,7 +31,20 @@ export class InvoiceScannerService {
     private readonly responseService: ResponseService,
   ) {}
 
-  async scanInvoice(file: Express.Multer.File): Promise<InvoiceScanResult> {
+  /**
+   * Fase 4: `orderType` selects the AI application key. Defaults to
+   * `retail` (the original `invoice_ocr`). When the user is scanning an
+   * ingredient order, callers should pass `orderType: 'ingredient'`
+   * and we route to `invoice_ocr_ingredient` so the model also extracts
+   * `presentation` / `pack_size` / `uom_hint`.
+   *
+   * Mixed-line orders are out of scope (V1): the caller picks one profile
+   * per scan.
+   */
+  async scanInvoice(
+    file: Express.Multer.File,
+    orderType: 'retail' | 'ingredient' = 'retail',
+  ): Promise<InvoiceScanResult> {
     this.logger.debug(
       `[InvoiceScan] File: mimetype=${file.mimetype}, size=${file.size}, buffer=${file.buffer?.length ?? 'NO BUFFER'}`,
     );
@@ -55,8 +68,12 @@ export class InvoiceScannerService {
       ],
     };
 
-    this.logger.debug(`[InvoiceScan] Sending to AI engine...`);
-    const response = await this.aiEngine.run('invoice_ocr', {}, [imageMessage]);
+    const appKey =
+      orderType === 'ingredient' ? 'invoice_ocr_ingredient' : 'invoice_ocr';
+    this.logger.debug(
+      `[InvoiceScan] Sending to AI engine (profile=${orderType}, appKey=${appKey})...`,
+    );
+    const response = await this.aiEngine.run(appKey, {}, [imageMessage]);
 
     this.logger.debug(
       `[InvoiceScan] AI response: success=${response.success}, contentLength=${response.content?.length ?? 0}, model=${response.model}, error=${response.error}`,

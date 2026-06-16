@@ -226,9 +226,7 @@ export class KitchenFireService {
 
         // Per-leaf consumption: stock × orderQty × bomMultiplier.
         for (const line of bomLines) {
-          const consumedQty = Number(
-            (line.quantity * orderQty).toFixed(4),
-          );
+          const consumedQty = Math.round(line.quantity * orderQty);
           if (!Number.isFinite(consumedQty) || consumedQty <= 0) continue;
 
           const locationId = locationByProduct.get(

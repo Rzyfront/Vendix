@@ -12,6 +12,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   CardComponent,
+  IconComponent,
   DialogService,
   DropdownAction,
   EmptyStateComponent,
@@ -249,6 +250,18 @@ export class MenusListPageComponent implements OnInit {
   onPageChange(page: number): void {
     this.filters.update((f) => ({ ...f, page }));
     this.loadMenus();
+  }
+
+  onCreateCombo(): void {
+    this.router.navigate(
+      ['/admin/products/create'],
+      {
+        queryParams: {
+          is_combo: 'true',
+          product_type: 'prepared',
+        },
+      },
+    );
   }
 
   onActionClick(action: string): void {

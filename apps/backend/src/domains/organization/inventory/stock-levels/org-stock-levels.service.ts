@@ -6,6 +6,7 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { RequestContextService } from '@common/context/request-context.service';
 
 import { OrgStockLevelQueryDto } from './dto/org-stock-level-query.dto';
+import { deriveUoMSplit } from '../../../store/inventory/shared/helpers/uom-display.helper';
 
 /**
  * Org-native stock-levels read service.
@@ -89,7 +90,16 @@ export class OrgStockLevelsService {
       this.prisma.stock_levels.findMany({
         where,
         include: {
-          products: { select: { id: true, name: true, sku: true } },
+          products: {
+            select: {
+              id: true,
+              name: true,
+              sku: true,
+              is_ingredient: true,
+              purchase_to_stock_factor: true,
+              stock_unit: true,
+            },
+          },
           product_variants: {
             select: { id: true, name: true, sku: true },
           },
@@ -135,7 +145,14 @@ export class OrgStockLevelsService {
     quantity_reserved: number;
     quantity_available: number;
     reorder_point: number | null;
-    products: { id: number; name: string | null; sku: string | null } | null;
+    products: {
+      id: number;
+      name: string | null;
+      sku: string | null;
+      is_ingredient?: boolean | null;
+      purchase_to_stock_factor?: number | null;
+      stock_unit?: string | null;
+    } | null;
     product_variants: {
       id: number;
       name: string | null;
@@ -149,6 +166,21 @@ export class OrgStockLevelsService {
       stores: { id: number; name: string | null } | null;
     } | null;
   }) {
+    // Modelo B: surface the sealed/open split so the org list can show the
+    // sealed unit count (e.g. "9") as the headline instead of the raw total
+    // in minimum stock units (e.g. 9680 ml). `quantity` stays as the canonical
+    // total so existing consumers and valuation remain unchanged.
+    const uom = deriveUoMSplit({
+      quantity_on_hand: row.quantity_on_hand,
+      products: row.products
+        ? {
+            is_ingredient: row.products.is_ingredient ?? false,
+            purchase_to_stock_factor: row.products.purchase_to_stock_factor,
+            stock_unit: row.products.stock_unit,
+          }
+        : null,
+    });
+
     return {
       id: row.id,
       product_id: row.product_id,
@@ -166,6 +198,12 @@ export class OrgStockLevelsService {
       reserved_quantity: row.quantity_reserved,
       available_quantity: row.quantity_available,
       min_stock_threshold: row.reorder_point,
+      // UoM split (null for non-ingredients / retail).
+      sealed_units: uom.sealed_units,
+      open_remaining: uom.open_remaining,
+      total_volume: uom.total_volume,
+      capacity: uom.capacity,
+      stock_uom_code: uom.stock_uom_code,
     };
   }
 

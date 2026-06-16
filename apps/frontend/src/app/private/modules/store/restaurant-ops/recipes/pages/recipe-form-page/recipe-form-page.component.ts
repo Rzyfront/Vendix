@@ -227,6 +227,14 @@ export class RecipeFormPageComponent implements OnInit {
                   Number(item.waste_percent ?? 0),
                   { validators: [Validators.min(0), Validators.max(100)] },
                 ),
+                // ===== Waste mode (Fase UoM) =====
+                waste_mode: this.fb.nonNullable.control<'percent' | 'absolute'>(
+                  (item.waste_mode as 'percent' | 'absolute') ?? 'percent',
+                ),
+                waste_absolute: this.fb.nonNullable.control<number | null>(
+                  Number((item as any).waste_absolute ?? 0),
+                  { validators: [Validators.min(0)] },
+                ),
                 is_optional: this.fb.nonNullable.control<boolean>(
                   !!item.is_optional,
                 ),
@@ -357,6 +365,8 @@ export class RecipeFormPageComponent implements OnInit {
           component_product_id: raw.component_product_id as number,
           quantity: Number(raw.quantity ?? 0),
           waste_percent: Number(raw.waste_percent ?? 0),
+          waste_mode: (raw.waste_mode as 'percent' | 'absolute') ?? 'percent',
+          waste_absolute: Number(raw.waste_absolute ?? 0),
           is_optional: raw.is_optional,
         };
         await new Promise<void>((resolve) => {
@@ -382,6 +392,8 @@ export class RecipeFormPageComponent implements OnInit {
         const updateDto: UpdateRecipeItemDto = {
           quantity: Number(raw.quantity ?? 0),
           waste_percent: Number(raw.waste_percent ?? 0),
+          waste_mode: (raw.waste_mode as 'percent' | 'absolute') ?? 'percent',
+          waste_absolute: Number(raw.waste_absolute ?? 0),
           is_optional: raw.is_optional,
         };
         await new Promise<void>((resolve) => {

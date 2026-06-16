@@ -42,6 +42,79 @@ export class PurchaseOrdersService {
     private eventEmitter: EventEmitter2,
   ) {}
 
+  /**
+   * Resolves the UoM conversion for a product at receipt time.
+   *
+   * The frontend sends `quantity_received` and `unit_cost` in the PURCHASE
+   * unit (the unit the operator sees on the PO line, e.g. "10 bottles").
+   * The stock_levels / inventory_cost_layers / inventory_movements tables
+   * all store quantities in the MINIMUM stock unit (e.g. ml, g, unit).
+   *
+   * This helper is the ONLY place in the PO receive flow that converts
+   * purchase → stock. It guarantees `calculateCostOnReceipt` and
+   * `updateStock` see the same `stockQuantity` and `stockUnitCost`, so
+   * stock-on-hand and FIFO cost layers stay in lockstep (the most
+   * dangerous class of bugs in the receive flow is "stock and FIFO drift
+   * by exactly the conversion factor").
+   *
+   * Returns:
+   *   stockQuantity    — quantity in minimum stock unit (integer, Int)
+   *   stockUnitCost    — unit cost in minimum stock unit (decimal)
+   *   purchaseFactor   — the factor applied (1 for retail/legacy)
+   *
+   * Retail products (is_ingredient=false or no factor configured) return
+   * the inputs unchanged — preserves the existing behaviour exactly.
+   */
+  private async resolveUoMConversion(
+    productId: number,
+    purchaseQuantity: number,
+    purchaseUnitCost: number,
+    tx: any,
+  ): Promise<{
+    stockQuantity: number;
+    stockUnitCost: number;
+    purchaseFactor: number;
+  }> {
+    // Read the product's UoM configuration. We use `findFirst` with the
+    // store guard through StorePrismaService so a multi-tenant call does
+    // not leak across stores.
+    const product = await tx.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        is_ingredient: true,
+        purchase_to_stock_factor: true,
+        stock_uom_id: true,
+        purchase_uom_id: true,
+      },
+    });
+
+    const factor = Number(product?.purchase_to_stock_factor ?? 1);
+    const isIngredient = !!product?.is_ingredient;
+    const hasUoM = isIngredient && factor > 0 && Number.isFinite(factor);
+
+    if (!hasUoM) {
+      return {
+        stockQuantity: purchaseQuantity,
+        stockUnitCost: purchaseUnitCost,
+        purchaseFactor: 1,
+      };
+    }
+
+    // 10 L × 1000 ml/L = 10000 ml in stock.
+    // unit_cost was 5000 COP per L → 5 COP per ml.
+    const stockQuantity = Math.round(purchaseQuantity * factor);
+    const stockUnitCost = Number(
+      (purchaseUnitCost / factor).toFixed(6),
+    );
+
+    return {
+      stockQuantity,
+      stockUnitCost,
+      purchaseFactor: factor,
+    };
+  }
+
   async create(createPurchaseOrderDto: CreatePurchaseOrderDto) {
     const result = await this.prisma.$transaction(async (tx) => {
       // 1. Process items to handle new product creation
@@ -468,9 +541,18 @@ export class PurchaseOrdersService {
       };
       const { expected_date: rawExpectedDate, ...orderDataRest } = orderData;
 
+      // Fase 2: order_type defaults to `retail` for backward compat; new
+      // orders from the POP modal always carry a value.
+      const orderType = (orderData as any).order_type ?? 'retail';
+      // Fase 2: when the order is `ingredient`, every line MUST carry the
+      // UoM FKs. We do a soft guard here (log + default) instead of a hard
+      // 400 to keep legacy clients working. The receive() flow is the
+      // authoritative validator when the order is actually received.
+      const isIngredient = orderType === 'ingredient';
       const purchaseOrder = await tx.purchase_orders.create({
         data: {
           ...orderDataRest,
+          order_type: orderType,
           expected_date: toDate(rawExpectedDate),
           created_by_user_id: user_id,
           organization_id,
@@ -488,6 +570,12 @@ export class PurchaseOrdersService {
               batch_number: item.batch_number,
               manufacturing_date: toDate(item.manufacturing_date),
               expiration_date: toDate(item.expiration_date),
+              // Fase 2: UoM FKs. Required when the parent is `ingredient`;
+              // we pass `null` otherwise to keep the column clean.
+              purchase_uom_id: isIngredient
+                ? (item.purchase_uom_id ?? null)
+                : null,
+              stock_uom_id: isIngredient ? (item.stock_uom_id ?? null) : null,
             })),
           },
         },
@@ -828,7 +916,32 @@ export class PurchaseOrdersService {
         const productVariantId = orderItem?.product_variant_id;
 
         if (productId) {
-          const receiptUnitCost = Number(orderItem?.unit_cost || 0);
+          const purchaseUnitCost = Number(orderItem?.unit_cost || 0);
+
+          // ===== UoM conversion (purchase unit → minimum stock unit) =====
+          // The frontend sends `item.quantity_received` in the purchase unit
+          // (e.g. 10 bottles). The stock tables store everything in the
+          // minimum stock unit (e.g. ml). resolveUoMConversion is the ONLY
+          // place that multiplies by `purchase_to_stock_factor`, so the cost
+          // engine and the stock increment see the same numbers and the
+          // `stock_unit_cost` we record per movement is internally
+          // consistent with `quantity_on_hand`.
+          const {
+            stockQuantity: stockQtyReceived,
+            stockUnitCost: receiptUnitCost,
+            purchaseFactor,
+          } = await this.resolveUoMConversion(
+            productId,
+            item.quantity_received,
+            purchaseUnitCost,
+            tx,
+          );
+
+          if (purchaseFactor > 1) {
+            this.logger.log(
+              `[UoM] PO #${id} item #${item.id}: ${item.quantity_received} × ${purchaseFactor} = ${stockQtyReceived} stock units @ ${receiptUnitCost}/unit`,
+            );
+          }
 
           // Cost FIRST: weighted-average needs pre-receipt stock reads.
           let costResult: CostCalculationResult | null = null;
@@ -838,7 +951,7 @@ export class PurchaseOrdersService {
                 product_id: productId,
                 variant_id: productVariantId || undefined,
                 location_id: purchaseOrder.location_id!,
-                quantity_received: item.quantity_received,
+                quantity_received: stockQtyReceived,
                 unit_cost: receiptUnitCost,
                 costing_method: costingMethod,
                 purchase_order_id: id,
@@ -862,7 +975,7 @@ export class PurchaseOrdersService {
               product_id: productId,
               variant_id: productVariantId || undefined,
               location_id: purchaseOrder.location_id!,
-              quantity_change: item.quantity_received,
+              quantity_change: stockQtyReceived,
               movement_type: 'stock_in',
               reason: 'Purchase order receipt',
               create_movement: true,

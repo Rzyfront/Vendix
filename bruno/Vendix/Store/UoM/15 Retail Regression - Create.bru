@@ -1,0 +1,40 @@
+meta {
+  name: 15 Retail Regression - Create
+  type: http
+  seq: 16
+}
+
+post {
+  url: {{baseUrl}}/store/products
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "name": "Retail Regresion {{$timestamp}}",
+    "base_price": 20000,
+    "is_ingredient": false,
+    "is_sellable": true,
+    "product_type": "physical",
+    "track_inventory": true,
+    "sku": "UOM-RETAIL-{{$timestamp}}"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.data && res.body.data.id) {
+    bru.setVar("uom_retail_id", res.body.data.id);
+  }
+}
+
+tests {
+  test("Paso 7: producto retail (is_ingredient=false)", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.data.is_ingredient).to.equal(false);
+  });
+}

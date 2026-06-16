@@ -1,5 +1,6 @@
 import {
   IsBoolean,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -32,6 +33,26 @@ export class CreateRecipeItemDto {
   @Min(0)
   @Max(100)
   waste_percent?: number;
+
+  /**
+   * Waste mode for the line. `percent` (default) uses `waste_percent` as a
+   * multiplier; `absolute` uses `waste_absolute` in the component's minimum
+   * stock unit. The legacy default of `percent` keeps existing flows
+   * behaving exactly as before.
+   */
+  @IsOptional()
+  @IsIn(['percent', 'absolute'])
+  waste_mode?: 'percent' | 'absolute';
+
+  /**
+   * Absolute waste expressed in the component's minimum stock unit
+   * (e.g. ml, g, unit). Only honoured when `waste_mode='absolute'`.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 4 })
+  @Type(() => Number)
+  @Min(0)
+  waste_absolute?: number;
 
   @IsOptional()
   @IsBoolean()

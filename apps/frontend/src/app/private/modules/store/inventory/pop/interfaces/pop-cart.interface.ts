@@ -156,6 +156,14 @@ export interface PopCartItem {
   // Pre-bulk flag (temporary product not in catalog)
   is_prebulk?: boolean;
   prebulk_data?: PreBulkData;
+  /**
+   * Fase 3: UoM FKs the backend uses during reception to derive
+   * `purchase_to_stock_factor` (Modelo B). Required when the parent PO
+   * has `order_type='ingredient'`; the cart shows a live capacity preview
+   * (e.g. "1 L = 1000 ml") to make the user's intent explicit.
+   */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
   addedAt: Date;
 }
 

@@ -152,3 +152,33 @@ export function variantSkuUniquenessValidator(): ValidatorFn {
     return null;
   };
 }
+
+/**
+ * Validator (Fase UoM): stock_uom_id and purchase_uom_id must have the
+ * SAME dimension (mass / volume / count). Prevents accidentally pairing
+ * e.g. kg (mass) with L (volume) on a single ingredient.
+ *
+ * The dimension lookup is supplied as a callback because the UoM catalog
+ * lives in a separate UomService that is not injected into the validator
+ * (Angular validators are pure functions). The component provides a
+ * closure over its loaded catalog.
+ */
+export function uomDimensionMatchValidator(
+  getDimensionByUomId: (uomId: number | null) => string | null,
+): ValidatorFn {
+  return (control: AbstractControl): ValidationErrors | null => {
+    const group = control as FormGroup;
+    const stockUomId = group.get('stock_uom_id')?.value ?? null;
+    const purchaseUomId = group.get('purchase_uom_id')?.value ?? null;
+    if (!stockUomId || !purchaseUomId) return null;
+    const stockDim = getDimensionByUomId(Number(stockUomId));
+    const purchaseDim = getDimensionByUomId(Number(purchaseUomId));
+    if (!stockDim || !purchaseDim) return null;
+    if (stockDim !== purchaseDim) {
+      return {
+        uomDimensionMismatch: { stock: stockDim, purchase: purchaseDim },
+      };
+    }
+    return null;
+  };
+}

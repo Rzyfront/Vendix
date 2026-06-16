@@ -327,6 +327,11 @@ export class RecipesService {
             dto.waste_percent != null
               ? new Prisma.Decimal(dto.waste_percent)
               : new Prisma.Decimal(0),
+          waste_mode: dto.waste_mode ?? 'percent',
+          waste_absolute:
+            dto.waste_absolute != null
+              ? new Prisma.Decimal(dto.waste_absolute)
+              : new Prisma.Decimal(0),
           is_optional: dto.is_optional ?? false,
           updated_at: new Date(),
         },
@@ -367,6 +372,10 @@ export class RecipesService {
       }),
       ...(dto.waste_percent !== undefined && {
         waste_percent: new Prisma.Decimal(dto.waste_percent),
+      }),
+      ...(dto.waste_mode !== undefined && { waste_mode: dto.waste_mode }),
+      ...(dto.waste_absolute !== undefined && {
+        waste_absolute: new Prisma.Decimal(dto.waste_absolute),
       }),
       ...(dto.is_optional !== undefined && { is_optional: dto.is_optional }),
       updated_at: new Date(),
@@ -521,9 +530,25 @@ export class RecipesService {
 
     const lines: BomExplosionLine[] = [];
     for (const item of recipe.items) {
-      const lineWaste = Number(item.waste_percent ?? 0);
-      // Component qty per (one) yield of the parent recipe, after line waste.
-      const perYield = Number(item.quantity) * (1 + lineWaste / 100);
+      // ===== Waste mode (Fase UoM) =====
+      // Two ways to express waste on a recipe line:
+      //   - `percent` (default, legacy): waste_percent added as a multiplier
+      //     (300 × 1.10 = 330). Same arithmetic as before.
+      //   - `absolute`: waste_absolute is added in the component's minimum
+      //     stock unit (300 + 20 = 320). Lets the chef write exact quantities
+      //     like "300 ml + 20 ml de merma" without % math. The integer round
+      //     happens at the stock write — same as percent — so both modes are
+      //     consistent with the Int-unit invariant of the inventory core.
+      const wasteMode = (item as any).waste_mode ?? 'percent';
+      const baseQty = Number(item.quantity);
+      let perYield: number;
+      if (wasteMode === 'absolute') {
+        const wasteAbs = Number((item as any).waste_absolute ?? 0);
+        perYield = baseQty + (Number.isFinite(wasteAbs) ? wasteAbs : 0);
+      } else {
+        const lineWaste = Number(item.waste_percent ?? 0);
+        perYield = baseQty * (1 + lineWaste / 100);
+      }
       // Scaled by how many yields of `recipe` are being produced.
       const scaled = (perYield * rootMultiplier) / effectiveYield;
 

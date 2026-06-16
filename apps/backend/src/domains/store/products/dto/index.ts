@@ -290,6 +290,26 @@ export class CreateProductDto {
   @Type(() => Boolean)
   is_batch_produced?: boolean;
 
+  // ===== Control exacto de UoM (Fase UoM) =====
+  // FKs al catálogo global units_of_measure. El factor de conversión
+  // purchase→stock NO se confía del cliente: el backend lo deriva de
+  // factor_to_base del catálogo (ver products.service.ts).
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  stock_uom_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  purchase_uom_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  purchase_to_stock_factor?: number;
+
   @IsOptional()
   @IsArray()
   @IsInt({ each: true })
@@ -570,6 +590,26 @@ export class UpdateProductDto {
   @IsBoolean()
   @Type(() => Boolean)
   is_batch_produced?: boolean;
+
+  // ===== Control exacto de UoM (Fase UoM) =====
+  // FKs al catálogo global units_of_measure. El factor de conversión
+  // purchase→stock NO se confía del cliente: el backend lo deriva de
+  // factor_to_base del catálogo (ver products.service.ts).
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  stock_uom_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  purchase_uom_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  purchase_to_stock_factor?: number;
 
   @IsOptional()
   @IsArray()

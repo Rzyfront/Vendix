@@ -11,26 +11,29 @@
         label: 'Refrescar',
         icon: 'refresh-cw',
         variant: 'primary',
+      },
+      {
+        id: 'reconnect',
+        label: 'Reconectar',
+        icon: 'wifi',
+        variant: 'ghost',
+        visible: isManualMode(),
       }
     ]"
-    (actionClicked)="refresh()"
+    (actionClicked)="onHeaderAction($event)"
   >
     <app-badge
       slot="badge"
-      [variant]="connectionVariant()"
+      [variant]="isManualMode() ? 'warning' : connectionVariant()"
       size="sm"
       badgeStyle="outline"
     >
       <app-icon
-        [name]="
-          connectionState() === 'open' ? 'wifi' :
-          connectionState() === 'error' || connectionState() === 'closed' ? 'wifi-off' :
-          'loader'
-        "
+        [name]="modeIcon()"
         [size]="12"
-        [class.animate-spin]="isReconnecting()"
+        [class.animate-spin]="isReconnecting() && !isManualMode()"
       />
-      {{ connectionLabel() }}
+      {{ modeLabel() }}
     </app-badge>
   </app-sticky-header>
 
@@ -43,6 +46,17 @@
           Reintento {{ r.attempt }} en {{ (r.nextDelayMs / 1000) | number: '1.0-0' }}s…
         </span>
       }
+    </div>
+  }
+
+  @if (isManualMode()) {
+    <div class="kds-board__manual-banner" role="status">
+      <app-icon name="wifi-off" [size]="16" />
+      <span>
+        Modo manual: el stream en vivo no está disponible. Los datos se actualizan
+        cada 10s automáticamente. Usa <strong>Refrescar</strong> para forzar la sincronización
+        o <strong>Reconectar</strong> para intentar volver al modo en vivo.
+      </span>
     </div>
   }
 

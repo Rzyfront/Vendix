@@ -50,6 +50,14 @@ export interface PurchaseOrderItemRequest {
   sale_price?: number;
   brand_name?: string;
   category_names?: string;
+  /**
+   * Fase 3: UoM FKs. The receiving engine uses these to derive
+   * `purchase_to_stock_factor`. Required when the parent PO has
+   * `order_type='ingredient'`; ignored otherwise.
+   */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
+
 }
 
 /**
@@ -73,6 +81,15 @@ export interface CreatePurchaseOrderRequest {
   internal_notes?: string;
   created_by_user_id?: number;
   items: PurchaseOrderItemRequest[];
+  /**
+   * Fase 2: primary order type. Defaults to `retail`. When any line in
+   * the cart carries a product that is a pure ingredient, the cart
+   * service sets this to `ingredient`. Mixed-line orders (retail +
+   * ingredient in the same PO) are out of scope for V1 and will be
+   * rejected by the backend.
+   */
+  order_type?: 'retail' | 'ingredient';
+
 }
 
 /**
@@ -91,6 +108,12 @@ export function cartToPurchaseOrderRequest(
         quantity: item.quantity,
         unit_price: item.unit_cost,
         notes: item.notes,
+        // Fase 3: UoM FKs. The cart stores the FKs chosen in the modal
+        // (defaults to the product's persisted UoMs in ingredient mode).
+        // We pass them through as-is. If the parent PO is `retail`, the
+        // backend will null them out at the DB level.
+        purchase_uom_id: (item as any).purchase_uom_id ?? null,
+        stock_uom_id: (item as any).stock_uom_id ?? null,
         // Map lot/batch info
         batch_number: item.lot_info?.batch_number,
         manufacturing_date: item.lot_info?.manufacturing_date
@@ -127,11 +150,25 @@ export function cartToPurchaseOrderRequest(
     },
   );
 
+  // Fase 2: infer order_type from the cart items. Mixed-line is out
+  // of scope; if any item is a pure ingredient, the whole order is
+  // `ingredient`. Otherwise `retail` (default).
+  const isIngredientOrder = cartState.items.some((it: any) => {
+    const p: any = it.product;
+    if (!p) return false;
+    const sellable =
+      p.is_sellable === undefined || p.is_sellable === null
+        ? true
+        : !!p.is_sellable;
+    return !!p.is_ingredient && !sellable;
+  });
+
   return {
     organization_id: organizationId,
     supplier_id: cartState.supplierId!,
     location_id: cartState.locationId!,
     status: cartState.status === 'draft' ? 'draft' : 'approved',
+    order_type: isIngredientOrder ? 'ingredient' : 'retail',
     order_date: cartState.orderDate.toISOString(),
     expected_date: cartState.expectedDate?.toISOString(),
     payment_terms: cartState.paymentTerms,

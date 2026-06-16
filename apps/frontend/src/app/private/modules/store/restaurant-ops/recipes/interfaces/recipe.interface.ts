@@ -42,6 +42,12 @@ export interface RecipeItem {
   component_product_id: number;
   quantity: number | string;
   waste_percent: number | string;
+  /// 'percent' (legacy) or 'absolute' (Fase UoM). The default `percent`
+  /// preserves the existing behaviour for every existing row.
+  waste_mode?: 'percent' | 'absolute';
+  /// Absolute waste, in the component's minimum stock unit (ml, g, unit).
+  /// Only used when `waste_mode='absolute'`.
+  waste_absolute?: number | string;
   is_optional: boolean;
   created_at: string | Date;
   updated_at: string | Date;
@@ -74,6 +80,8 @@ export interface CreateRecipeItemDto {
   component_product_id: number;
   quantity: number;
   waste_percent?: number;
+  waste_mode?: 'percent' | 'absolute';
+  waste_absolute?: number;
   is_optional?: boolean;
 }
 
@@ -125,5 +133,10 @@ export interface RecipeItemFormControls {
   component_product_id: FormControl<number | null>;
   quantity: FormControl<number | null>;
   waste_percent: FormControl<number | null>;
+  /// Waste mode (Fase UoM). `percent` uses waste_percent; `absolute` uses
+  /// waste_absolute. Default `percent` for backward compatibility.
+  waste_mode: FormControl<'percent' | 'absolute'>;
+  /// Absolute waste, in the component's minimum stock unit.
+  waste_absolute: FormControl<number | null>;
   is_optional: FormControl<boolean>;
 }

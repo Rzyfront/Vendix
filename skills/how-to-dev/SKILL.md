@@ -75,6 +75,7 @@ Development may proceed directly only for trivial, low-risk edits where the rele
 After code or skill changes:
 
 - Use `buildcheck-dev` for development verification.
+- **Runtime API/endpoint verification uses `curl`, never Bruno.** Authenticate against dev with a seed owner account (`owner@techsolutions.co` or `owner@fashionretail.com`, password `1125634q`; see `apps/backend/prisma/seeds/users.seed.ts`), or ask the user for the `slug`, `email`, and `password` of an authorized dev test account. Bruno (`.bru`) is opt-in only when a developer explicitly requests it (`vendix-bruno-test`).
 - Use `skill-sync` after creating or modifying skills.
 - Run production build commands only when the human explicitly requests production verification.
 

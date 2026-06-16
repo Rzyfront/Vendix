@@ -1,0 +1,40 @@
+meta {
+  name: 05 Get PO + Approve
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/store/orders/purchase-orders/{{uom_po_id}}
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+script:post-response {
+  const d = res.body && res.body.data;
+  if (d) {
+    const items = d.purchase_order_items || d.items || [];
+    if (items.length) bru.setVar("uom_po_item_id", items[0].id);
+  }
+}
+
+tests {
+  test("PO item id capturado", function() {
+    expect(res.status).to.equal(200);
+    const d = res.body.data;
+    const items = d.purchase_order_items || d.items || [];
+    expect(items.length).to.be.greaterThan(0);
+  });
+}
+
+docs {
+  Captura el purchase_order_item_id de forma fiable (el body de create puede no
+  incluir los items). Aprobar la PO antes de recibir con la request de
+  Purchase Orders existente o:
+  PATCH {{baseUrl}}/store/orders/purchase-orders/{{uom_po_id}}/approve
+  (receive() no exige status approved, pero es el flujo correcto).
+}

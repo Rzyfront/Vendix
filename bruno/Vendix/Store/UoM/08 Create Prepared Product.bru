@@ -1,0 +1,41 @@
+meta {
+  name: 08 Create Prepared Product
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/store/products
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "name": "Plato Preparado UoM {{$timestamp}}",
+    "base_price": 15000,
+    "product_type": "prepared",
+    "is_sellable": true,
+    "is_ingredient": false,
+    "track_inventory": false,
+    "sku": "UOM-PLATO-{{$timestamp}}"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.data && res.body.data.id) {
+    bru.setVar("uom_prep_id", res.body.data.id);
+  }
+}
+
+tests {
+  test("Paso 4: plato prepared + sellable", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.data.product_type).to.equal('prepared');
+    expect(res.body.data.is_sellable).to.equal(true);
+  });
+}
