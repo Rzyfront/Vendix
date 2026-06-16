@@ -213,7 +213,7 @@ export default function SuppliersScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
-      toastSuccess('Proveedor eliminado');
+      toastSuccess('Proveedor desactivado');
     },
     onError: (error: any) => {
       const message = error?.response?.data?.message || error?.message || 'Error al eliminar el proveedor';

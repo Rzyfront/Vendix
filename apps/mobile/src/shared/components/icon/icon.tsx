@@ -392,6 +392,7 @@ import {
   Stethoscope,
   HeartPulse,
   Trash,
+  MapPin,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
 
@@ -407,6 +408,7 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'user-check': UserCheck,
   'user-plus': UserPlus,
   mail: Mail,
+  'map-pin': MapPin,
   phone: Phone,
   building: Building2,
   store: Store,

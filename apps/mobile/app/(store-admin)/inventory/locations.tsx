@@ -244,7 +244,7 @@ export default function LocationsScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['locations'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
-      toastSuccess('Ubicación eliminada correctamente');
+      toastSuccess('Ubicación desactivada correctamente');
     },
     onError: (error: any) => {
       const message = error?.response?.data?.message || error?.message || 'Error al eliminar la ubicación';
