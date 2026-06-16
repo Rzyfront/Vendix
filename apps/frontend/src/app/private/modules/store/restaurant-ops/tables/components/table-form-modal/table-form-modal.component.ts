@@ -57,7 +57,8 @@ interface TableForm {
  * - Si `table` tiene valor → edición. Submit emite `saved` con
  *   UpdateTableDto (solo los campos modificados).
  *
- * Sigue el patrón model-based de `app-modal` (no usa *ngIf ni [hidden]).
+ * Sigue el patrón model-based de `app-modal` (sin directivas estructurales
+ * legacy ni [hidden]; usa @if/@for de control flow).
  * Form tipado con strict null en los controles.
  */
 @Component({
