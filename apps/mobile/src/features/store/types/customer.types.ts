@@ -6,6 +6,7 @@ export interface Customer {
   last_name: string;
   email: string;
   phone?: string;
+  document_type?: string;
   document_number?: string;
   state: CustomerState;
   created_at: string;
@@ -47,6 +48,7 @@ export interface CreateCustomerDto {
   last_name: string;
   email: string;
   phone?: string;
+  document_type?: string;
   document_number?: string;
   state?: CustomerState;
 }

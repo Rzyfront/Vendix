@@ -1,88 +1,238 @@
-import { useCallback, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useState } from 'react';
+import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
+import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
+import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { DataCollectionService } from '@/features/store/services/data-collection.service';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
-import type { MetadataField } from '@/features/store/types/data-collection.types';
+import type { MetadataField, FieldType, EntityType, DisplayMode } from '@/features/store/types/data-collection.types';
+
+const ENTITY_LABELS: Record<string, string> = {
+  customer: 'Cliente',
+  booking: 'Reserva',
+  order: 'Orden',
+};
+
+const FIELD_TYPES: { value: FieldType; label: string }[] = [
+  { value: 'text', label: 'Texto' },
+  { value: 'number', label: 'Número' },
+  { value: 'date', label: 'Fecha' },
+  { value: 'select', label: 'Selección' },
+  { value: 'checkbox', label: 'Checkbox' },
+  { value: 'textarea', label: 'Área de texto' },
+  { value: 'file', label: 'Archivo' },
+  { value: 'email', label: 'Email' },
+  { value: 'phone', label: 'Teléfono' },
+  { value: 'url', label: 'URL' },
+];
+
+const DISPLAY_MODES: { value: DisplayMode; label: string }[] = [
+  { value: 'detail', label: 'Detalle' },
+  { value: 'summary', label: 'Resumen' },
+];
+
+const ENTITY_OPTIONS = ['customer', 'booking', 'order'] as const;
+
+// Opciones de filtro de entidad (web: [{id:'',label:'Todos'}, ...])
+const ENTITY_FILTER_OPTIONS: { value: string | undefined; label: string }[] = [
+  { value: undefined, label: 'Todos' },
+  ...ENTITY_OPTIONS.map((e) => ({ value: e as string, label: ENTITY_LABELS[e] })),
+];
 
 export default function FieldsScreen() {
+  const insets = useSafeAreaInsets();
   const [entityFilter, setEntityFilter] = useState<string | undefined>();
+  const [search, setSearch] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [editingField, setEditingField] = useState<MetadataField | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<MetadataField | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Form state
+  const [formLabel, setFormLabel] = useState('');
+  const [formKey, setFormKey] = useState('');
+  const [formEntityType, setFormEntityType] = useState<EntityType>('customer');
+  const [formFieldType, setFormFieldType] = useState<FieldType>('text');
+  const [formDescription, setFormDescription] = useState('');
+  const [formDisplayMode, setFormDisplayMode] = useState<DisplayMode>('detail');
+  const [formRequired, setFormRequired] = useState(false);
+  const [formOptionsText, setFormOptionsText] = useState('');
 
   const { data: fields, isLoading, isRefetching, refetch } = useQuery({
     queryKey: ['metadata-fields', entityFilter],
     queryFn: () => DataCollectionService.fields.list(entityFilter),
   });
 
+  const filteredFields = useMemo(() => {
+    if (!fields) return [];
+    const term = search.toLowerCase().trim();
+    if (!term) return fields;
+    return fields.filter(
+      (f) =>
+        f.label.toLowerCase().includes(term) ||
+        f.field_key.toLowerCase().includes(term) ||
+        f.field_type.toLowerCase().includes(term),
+    );
+  }, [fields, search]);
+
   const handleToggle = useCallback(async (field: MetadataField) => {
-    await DataCollectionService.fields.toggle(field.id);
-    refetch();
+    try {
+      await DataCollectionService.fields.toggle(field.id);
+      toastSuccess(field.is_active ? 'Campo desactivado' : 'Campo activado');
+      refetch();
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Error al cambiar el estado';
+      toastError(typeof message === 'string' ? message : 'Error al cambiar el estado');
+    }
   }, [refetch]);
 
-  const handleDelete = useCallback(async (id: number) => {
-    await DataCollectionService.fields.delete(id);
-    refetch();
-  }, [refetch]);
+  const handleSearch = useCallback((text: string) => {
+    setSearch(text);
+  }, []);
 
-  const ENTITY_LABELS: Record<string, string> = {
-    customer: 'Clientes',
-    booking: 'Reservas',
-    order: 'Órdenes',
-  };
+  const openCreateModal = useCallback(() => {
+    setEditingField(null);
+    setFormLabel('');
+    setFormKey('');
+    setFormEntityType('customer');
+    setFormFieldType('text');
+    setFormDescription('');
+    setFormDisplayMode('detail');
+    setFormRequired(false);
+    setFormOptionsText('');
+    setShowModal(true);
+  }, []);
 
-  const FIELD_TYPE_LABELS: Record<string, string> = {
-    text: 'Texto',
-    number: 'Número',
-    date: 'Fecha',
-    select: 'Selección',
-    checkbox: 'Checkbox',
-    textarea: 'Área de texto',
-    file: 'Archivo',
-    email: 'Email',
-    phone: 'Teléfono',
-    url: 'URL',
-  };
+  const openEditModal = useCallback((field: MetadataField) => {
+    setEditingField(field);
+    setFormLabel(field.label);
+    setFormKey(field.field_key);
+    setFormEntityType(field.entity_type);
+    setFormFieldType(field.field_type);
+    setFormDescription(field.description || '');
+    setFormDisplayMode(field.display_mode);
+    setFormRequired(field.is_required);
+    // Convertir options (array o record) a texto (uno por línea)
+    const opts = field.options;
+    if (Array.isArray(opts)) {
+      setFormOptionsText((opts as string[]).join('\n'));
+    } else if (opts && typeof opts === 'object') {
+      setFormOptionsText(Object.values(opts as Record<string, string>).join('\n'));
+    } else {
+      setFormOptionsText('');
+    }
+    setShowModal(true);
+  }, []);
+
+  const autoGenerateKey = useCallback((label: string) => {
+    if (!editingField) {
+      setFormKey(
+        label
+          .toLowerCase()
+          .replace(/[^a-z0-9\s]/g, '')
+          .replace(/\s+/g, '_')
+          .substring(0, 100),
+      );
+    }
+  }, [editingField]);
+
+  const handleSaveField = useCallback(async () => {
+    if (!formLabel.trim() || !formKey.trim()) return;
+    setActionLoading(true);
+    try {
+      const data: Partial<MetadataField> & { options?: string[] } = {
+        label: formLabel.trim(),
+        field_key: formKey.trim(),
+        entity_type: formEntityType,
+        field_type: formFieldType,
+        description: formDescription.trim() || undefined,
+        display_mode: formDisplayMode,
+        is_required: formRequired,
+      };
+      // Si el tipo es "select", enviar las opciones como array (web field-modal)
+      if (formFieldType === 'select' && formOptionsText.trim()) {
+        data.options = formOptionsText
+          .split('\n')
+          .map((o) => o.trim())
+          .filter(Boolean);
+      }
+      if (editingField) {
+        await DataCollectionService.fields.update(editingField.id, data);
+        toastSuccess('Campo actualizado');
+      } else {
+        await DataCollectionService.fields.create(data);
+        toastSuccess('Campo creado');
+      }
+      setShowModal(false);
+      refetch();
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Error al guardar el campo';
+      toastError(typeof message === 'string' ? message : 'Error al guardar el campo');
+    } finally {
+      setActionLoading(false);
+    }
+  }, [formLabel, formKey, formEntityType, formFieldType, formDescription, formDisplayMode, formRequired, formOptionsText, editingField, refetch]);
+
+  const handleDeleteField = useCallback(async () => {
+    if (!showDeleteConfirm) return;
+    setActionLoading(true);
+    try {
+      await DataCollectionService.fields.delete(showDeleteConfirm.id);
+      toastSuccess('Campo eliminado');
+      setShowDeleteConfirm(null);
+      refetch();
+    } catch (error: any) {
+      const message = error?.response?.data?.message || error?.message || 'Error al eliminar el campo';
+      toastError(typeof message === 'string' ? message : 'Error al eliminar el campo');
+    } finally {
+      setActionLoading(false);
+    }
+  }, [showDeleteConfirm, refetch]);
 
   const renderField = useCallback(
     ({ item }: { item: MetadataField }) => (
-      <View style={styles.fieldCard}>
-        <View style={styles.fieldHeader}>
-          <View style={styles.fieldInfo}>
-            <Text style={styles.fieldLabel}>{item.label}</Text>
-            <Text style={styles.fieldKey}>@{item.field_key}</Text>
+      <Pressable onPress={() => openEditModal(item)} style={styles.card}>
+        <View style={styles.cardHeader}>
+          <View style={styles.cardHeaderInfo}>
+            <Text style={styles.cardTitle}>{item.label}</Text>
+            <Text style={styles.cardSubtitle}>@{item.field_key}</Text>
           </View>
           <View style={[styles.statusDot, item.is_active ? styles.statusActive : styles.statusInactive]} />
         </View>
-        <View style={styles.fieldMeta}>
-          <View style={styles.fieldMetaTag}>
-            <Text style={styles.fieldMetaText}>{FIELD_TYPE_LABELS[item.field_type] || item.field_type}</Text>
+
+        <View style={styles.cardMetaRow}>
+          <View style={styles.metaTag}>
+            <Text style={styles.metaTagText}>{ENTITY_LABELS[item.entity_type] || item.entity_type}</Text>
           </View>
-          <View style={styles.fieldMetaTag}>
-            <Text style={styles.fieldMetaText}>{ENTITY_LABELS[item.entity_type] || item.entity_type}</Text>
+          <View style={styles.metaTag}>
+            <Text style={styles.metaTagText}>{FIELD_TYPES.find((t) => t.value === item.field_type)?.label || item.field_type}</Text>
           </View>
           {item.is_required && (
-            <View style={styles.fieldMetaTagRequired}>
-              <Text style={styles.fieldMetaTextRequired}>Obligatorio</Text>
+            <View style={styles.metaTagRequired}>
+              <Text style={styles.metaTagTextRequired}>Obligatorio</Text>
             </View>
           )}
         </View>
-        <View style={styles.fieldActions}>
-          <Pressable onPress={() => handleToggle(item)} style={styles.fieldActionBtn}>
+
+        <View style={styles.cardActions}>
+          <Pressable onPress={() => handleToggle(item)} style={styles.actionBtn}>
             <Icon
-              name={item.is_active ? 'toggle-right' : 'toggle-left'}
-              size={18}
+              name={item.is_active ? 'check-circle' : 'circle'}
+              size={20}
               color={item.is_active ? colors.primary : colorScales.gray[400]}
             />
           </Pressable>
-          <Pressable onPress={() => handleDelete(item.id)} style={styles.fieldActionBtn}>
+          <Pressable onPress={() => setShowDeleteConfirm(item)} style={styles.actionBtn}>
             <Icon name="trash-2" size={16} color={colorScales.red[500]} />
           </Pressable>
         </View>
-      </View>
+      </Pressable>
     ),
-    [handleToggle, handleDelete],
+    [handleToggle, openEditModal],
   );
 
   if (isLoading) {
@@ -96,68 +246,248 @@ export default function FieldsScreen() {
   return (
     <View style={styles.root}>
       <FlatList
-        data={fields ?? []}
+        data={filteredFields}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderField}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListHeaderComponent={
-          <View style={styles.filterRow}>
-            {['customer', 'booking', 'order'].map((type) => (
-              <Pressable
-                key={type}
-                onPress={() => setEntityFilter(entityFilter === type ? undefined : type)}
-                style={[
-                  styles.filterChip,
-                  entityFilter === type && styles.filterChipActive,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    entityFilter === type && styles.filterChipTextActive,
-                  ]}
-                >
-                  {ENTITY_LABELS[type]}
-                </Text>
+          <View>
+            {/* Entity filter chips (estilo web: incluye "Todos") */}
+            <View style={styles.filterRow}>
+              {ENTITY_FILTER_OPTIONS.map((opt) => {
+                const isActive = entityFilter === opt.value;
+                return (
+                  <Pressable
+                    key={opt.label}
+                    onPress={() => setEntityFilter(opt.value)}
+                    style={[
+                      styles.filterChip,
+                      isActive && styles.filterChipActive,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.filterChipText,
+                        isActive && styles.filterChipTextActive,
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {/* Title */}
+            <View style={styles.headerRow}>
+              <Text style={styles.headerTitle}>Campos Personalizados ({fields?.length ?? 0})</Text>
+            </View>
+            {/* Search + (+) button */}
+            <View style={styles.searchRow}>
+              <View style={styles.searchInputWrapper}>
+                <Icon name="search" size={16} color={colorScales.gray[400]} />
+                <TextInput
+                  value={search}
+                  onChangeText={handleSearch}
+                  placeholder="Buscar campos..."
+                  placeholderTextColor={colorScales.gray[400]}
+                  style={styles.searchInput}
+                />
+              </View>
+              <Pressable onPress={openCreateModal} style={styles.addBtn}>
+                <Icon name="plus" size={18} color={colors.primary} />
               </Pressable>
-            ))}
+            </View>
           </View>
         }
         ListEmptyComponent={
           <EmptyState
-            title="Sin campos"
-            description="No hay campos de metadatos configurados"
+            title="No hay campos"
+            description="Define los campos de datos para clientes, reservas y órdenes"
             icon="database"
+            actionLabel="Nuevo Campo"
+            onAction={openCreateModal}
           />
         }
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + spacing[8] }]}
+        keyboardShouldPersistTaps="handled"
+      />
+
+      {/* Create/Edit Modal */}
+      {showModal && (
+        <View style={styles.modalOverlay}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setShowModal(false)} />
+          <ScrollView style={styles.modalSheet} keyboardShouldPersistTaps="handled">
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>{editingField ? 'Editar Campo' : 'Nuevo Campo'}</Text>
+              <Pressable onPress={() => setShowModal(false)}>
+                <Icon name="x" size={20} color={colorScales.gray[500]} />
+              </Pressable>
+            </View>
+
+            {/* Label */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Label</Text>
+              <TextInput
+                value={formLabel}
+                onChangeText={(t) => { setFormLabel(t); autoGenerateKey(t); }}
+                placeholder="Ej: Fecha de nacimiento"
+                placeholderTextColor={colorScales.gray[400]}
+                style={styles.formInput}
+              />
+            </View>
+
+            {/* Key */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Key</Text>
+              <TextInput
+                value={formKey}
+                onChangeText={setFormKey}
+                placeholder="fecha_de_nacimiento"
+                placeholderTextColor={colorScales.gray[400]}
+                style={[styles.formInput, !!editingField && styles.formInputDisabled]}
+                editable={!editingField}
+              />
+            </View>
+
+            {/* Entity type */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Tipo de Entidad</Text>
+              <View style={styles.chipRow}>
+                {ENTITY_OPTIONS.map((type) => (
+                  <Pressable
+                    key={type}
+                    onPress={() => setFormEntityType(type)}
+                    style={[styles.chip, formEntityType === type && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, formEntityType === type && styles.chipTextActive]}>
+                      {ENTITY_LABELS[type]}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            {/* Field type */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Tipo de Campo</Text>
+              <View style={styles.chipRowWrapped}>
+                {FIELD_TYPES.map((ft) => (
+                  <Pressable
+                    key={ft.value}
+                    onPress={() => setFormFieldType(ft.value)}
+                    style={[styles.chip, formFieldType === ft.value && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, formFieldType === ft.value && styles.chipTextActive]}>
+                      {ft.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            {/* Description */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Descripción</Text>
+              <TextInput
+                value={formDescription}
+                onChangeText={setFormDescription}
+                placeholder="Descripción opcional..."
+                placeholderTextColor={colorScales.gray[400]}
+                style={styles.formTextarea}
+                multiline
+              />
+            </View>
+
+            {/* Display mode */}
+            <View style={styles.formGroup}>
+              <Text style={styles.formLabel}>Modo de Display</Text>
+              <View style={styles.chipRow}>
+                {DISPLAY_MODES.map((dm) => (
+                  <Pressable
+                    key={dm.value}
+                    onPress={() => setFormDisplayMode(dm.value)}
+                    style={[styles.chip, formDisplayMode === dm.value && styles.chipActive]}
+                  >
+                    <Text style={[styles.chipText, formDisplayMode === dm.value && styles.chipTextActive]}>
+                      {dm.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </View>
+
+            {/* Opciones (solo cuando field_type === 'select') — estilo web */}
+            {formFieldType === 'select' && (
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Opciones (una por línea)</Text>
+                <TextInput
+                  value={formOptionsText}
+                  onChangeText={setFormOptionsText}
+                  placeholder={'Opción 1\nOpción 2\nOpción 3'}
+                  placeholderTextColor={colorScales.gray[400]}
+                  style={[styles.formTextarea, { minHeight: 90 }]}
+                  multiline
+                />
+              </View>
+            )}
+
+            {/* Required toggle */}
+            <View style={styles.formGroup}>
+              <Pressable onPress={() => setFormRequired((v) => !v)} style={styles.toggleRow}>
+                <Text style={styles.formLabel}>Obligatorio</Text>
+                <View style={[styles.toggle, formRequired && styles.toggleActive]}>
+                  <View style={[styles.toggleThumb, formRequired && styles.toggleThumbActive]} />
+                </View>
+              </Pressable>
+            </View>
+
+            {/* Actions */}
+            <View style={styles.formActions}>
+              <Pressable onPress={() => setShowModal(false)} style={styles.cancelBtn}>
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSaveField}
+                style={[styles.saveBtn, (!formLabel.trim() || !formKey.trim() || actionLoading) && styles.saveBtnDisabled]}
+                disabled={!formLabel.trim() || !formKey.trim() || actionLoading}
+              >
+                <Text style={styles.saveBtnText}>
+                  {actionLoading ? 'Guardando...' : editingField ? 'Guardar' : 'Crear'}
+                </Text>
+              </Pressable>
+            </View>
+          </ScrollView>
+        </View>
+      )}
+
+      <ConfirmDialog
+        visible={!!showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(null)}
+        onConfirm={handleDeleteField}
+        title="Eliminar campo"
+        message={`¿Estás seguro de eliminar "${showDeleteConfirm?.label}"?`}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        destructive
+        loading={actionLoading}
       />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: colorScales.gray[50],
-  },
-  loader: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  listContent: {
-    paddingVertical: spacing[3],
-    paddingBottom: spacing[8],
-  },
-  separator: {
-    height: spacing[3],
-  },
+  root: { flex: 1, backgroundColor: colorScales.gray[50] },
+  loader: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colorScales.gray[50] },
+  listContent: { paddingBottom: spacing[8] },
+  separator: { height: spacing[3] },
+  // Filter chips
   filterRow: {
     flexDirection: 'row',
     gap: spacing[2],
-    marginBottom: spacing[3],
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[3],
+    paddingBottom: spacing[2],
   },
   filterChip: {
     paddingHorizontal: spacing[3],
@@ -167,91 +497,148 @@ const styles = StyleSheet.create({
     borderColor: colorScales.gray[200],
     backgroundColor: colors.background,
   },
-  filterChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+  filterChipActive: { backgroundColor: colorScales.green[50], borderColor: colorScales.green[500] },
+  filterChipText: { fontSize: typography.fontSize.sm, fontWeight: typography.fontWeight.medium, color: colorScales.gray[600] },
+  filterChipTextActive: { color: colorScales.green[600], fontWeight: typography.fontWeight.bold },
+  // Header
+  headerRow: { paddingHorizontal: spacing[4], paddingTop: spacing[1], paddingBottom: spacing[1] },
+  headerTitle: { fontSize: 12, fontWeight: '700', color: colorScales.gray[600], letterSpacing: 0.3 },
+  // Search row
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[3],
   },
-  filterChipText: {
+  searchInputWrapper: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.xl,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    minHeight: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  searchInput: {
+    flex: 1,
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colorScales.gray[600],
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[900],
+    padding: 0,
+    height: '100%',
   },
-  filterChipTextActive: {
-    color: colors.background,
+  addBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.xl,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: colors.background,
   },
-  fieldCard: {
+  // Card
+  card: {
     marginHorizontal: spacing[4],
     backgroundColor: colors.background,
     borderRadius: borderRadius.lg,
     padding: spacing[3],
     ...shadows.sm,
   },
-  fieldHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing[2],
-  },
-  fieldInfo: {
-    flex: 1,
-  },
-  fieldLabel: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
+  cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing[2] },
+  cardHeaderInfo: { flex: 1 },
+  cardTitle: { fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[900] },
+  cardSubtitle: { fontSize: typography.fontSize.xs, color: colorScales.gray[400], fontFamily: 'monospace' },
+  statusDot: { width: 10, height: 10, borderRadius: 5 },
+  statusActive: { backgroundColor: colorScales.green[600] },
+  statusInactive: { backgroundColor: colorScales.gray[300] },
+  cardMetaRow: { flexDirection: 'row', gap: spacing[1], marginBottom: spacing[2], flexWrap: 'wrap' },
+  metaTag: { backgroundColor: colorScales.gray[100], paddingHorizontal: spacing[2], paddingVertical: 2, borderRadius: borderRadius.sm },
+  metaTagText: { fontSize: 11, color: colorScales.gray[500] },
+  metaTagRequired: { backgroundColor: colorScales.amber[100], paddingHorizontal: spacing[2], paddingVertical: 2, borderRadius: borderRadius.sm },
+  metaTagTextRequired: { fontSize: 11, color: colorScales.amber[700], fontWeight: typography.fontWeight.medium },
+  cardActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing[2], borderTopWidth: 1, borderTopColor: colorScales.gray[100], paddingTop: spacing[2] },
+  actionBtn: { padding: spacing[1] },
+  // Modal
+  modalOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', zIndex: 100 },
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
+  modalSheet: { maxHeight: '90%', backgroundColor: colors.background, borderTopLeftRadius: borderRadius.xl, borderTopRightRadius: borderRadius.xl, padding: spacing[4] },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing[4] },
+  modalTitle: { fontSize: typography.fontSize.lg, fontWeight: '700', color: colorScales.gray[900] },
+  // Form
+  formGroup: { marginBottom: spacing[3] },
+  formLabel: { fontSize: typography.fontSize.xs, fontWeight: '600', color: colorScales.gray[500], marginBottom: spacing[1], textTransform: 'uppercase', letterSpacing: 0.5 },
+  formInput: {
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
     color: colorScales.gray[900],
+    fontSize: typography.fontSize.sm,
   },
-  fieldKey: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[400],
-    fontFamily: 'monospace',
+  formInputDisabled: { opacity: 0.6, backgroundColor: colorScales.gray[100] },
+  formTextarea: {
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    color: colorScales.gray[900],
+    fontSize: typography.fontSize.sm,
+    minHeight: 60,
+    textAlignVertical: 'top',
   },
-  statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  chipRow: { flexDirection: 'row', gap: spacing[2] },
+  chipRowWrapped: { flexDirection: 'row', gap: spacing[2], flexWrap: 'wrap' },
+  chip: {
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1.5],
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colors.background,
   },
-  statusActive: {
-    backgroundColor: '#059669',
-  },
-  statusInactive: {
+  chipActive: { backgroundColor: colorScales.green[50], borderColor: colorScales.green[500] },
+  chipText: { fontSize: typography.fontSize.sm, fontWeight: typography.fontWeight.medium, color: colorScales.gray[600] },
+  chipTextActive: { color: colorScales.green[600], fontWeight: typography.fontWeight.bold },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  toggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: colorScales.gray[300],
+    justifyContent: 'center',
+    padding: 2,
   },
-  fieldMeta: {
-    flexDirection: 'row',
-    gap: spacing[1],
-    marginBottom: spacing[2],
-    flexWrap: 'wrap',
+  toggleActive: { backgroundColor: colors.primary },
+  toggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: colors.background,
   },
-  fieldMetaTag: {
-    backgroundColor: colorScales.gray[100],
-    paddingHorizontal: spacing[2],
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
+  toggleThumbActive: { marginLeft: 20 },
+  formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing[2], marginTop: spacing[2] },
+  cancelBtn: { paddingHorizontal: spacing[4], paddingVertical: spacing[2] },
+  cancelBtnText: { fontSize: typography.fontSize.sm, color: colorScales.gray[600], fontWeight: typography.fontWeight.medium },
+  saveBtn: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.md,
   },
-  fieldMetaTagRequired: {
-    backgroundColor: '#fef3c7',
-    paddingHorizontal: spacing[2],
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
-  },
-  fieldMetaText: {
-    fontSize: 11,
-    color: colorScales.gray[500],
-  },
-  fieldMetaTextRequired: {
-    fontSize: 11,
-    color: '#d97706',
-    fontWeight: typography.fontWeight.medium,
-  },
-  fieldActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing[2],
-    borderTopWidth: 1,
-    borderTopColor: colorScales.gray[100],
-    paddingTop: spacing[2],
-  },
-  fieldActionBtn: {
-    padding: spacing[1],
-  },
+  saveBtnDisabled: { opacity: 0.5 },
+  saveBtnText: { fontSize: typography.fontSize.sm, fontWeight: typography.fontWeight.semibold, color: colors.background },
 });
