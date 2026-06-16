@@ -1,13 +1,18 @@
 import type { ISODateString } from './common.types';
 
+/**
+ * Stats del dashboard de organización (GET /organization/organizations/:id/stats).
+ * El backend devuelve el bloque `stats` con cada métrica como { value, sub_value } —
+ * `value` es el contador/importe del periodo, `sub_value` es el delta vs el periodo
+ * anterior (positivo = verde, negativo = rojo en el grid de stats).
+ */
 export interface OrganizationDashboardStats {
-  total_stores: number;
-  active_stores: number;
-  total_users: number;
-  total_orders_today: number;
-  total_orders_month: number;
-  revenue_month: number;
-  revenue_today: number;
+  stats: {
+    total_stores: { value: number; sub_value: number };
+    active_users: { value: number; sub_value: number };
+    monthly_orders: { value: number; sub_value: number };
+    revenue: { value: number; sub_value: number };
+  };
   pending_orders: number;
   low_stock_products: number;
   expiring_batches: number;

@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { User, UserSettings, AppType } from '../auth/auth.types';
+import { useTenantStore } from './tenant.store';
+
 
 interface AuthState {
   user: User | null;
@@ -50,7 +52,15 @@ export const useAuthStore = create<AuthState>()(
         default_panel_ui,
         access_token,
         refresh_token,
-      }) =>
+      }) => {
+        const org = user?.organizations || user?.store?.organizations || null;
+        const store = user?.store || null;
+        useTenantStore.getState().setOrganizationId(org?.id ? String(org.id) : null);
+        useTenantStore.getState().setOrganizationName(org?.name || null);
+        useTenantStore.getState().setStoreId(store?.id ? String(store.id) : null);
+        useTenantStore.getState().setStoreName(store?.name || null);
+        useTenantStore.getState().setStoreSlug(store?.slug || null);
+
         set({
           user,
           user_settings,
@@ -58,23 +68,35 @@ export const useAuthStore = create<AuthState>()(
           default_panel_ui: default_panel_ui || null,
           token: access_token,
           refreshToken: refresh_token,
-          roles: user.roles || [],
+          roles: user?.roles || [],
           permissions: [],
           isAuthenticated: true,
           isLoading: false,
-        }),
+        });
+      },
 
-      setUser: (user) =>
+      setUser: (user) => {
+        if (user) {
+          const org = user.organizations || user.store?.organizations || null;
+          const store = user.store || null;
+          useTenantStore.getState().setOrganizationId(org?.id ? String(org.id) : null);
+          useTenantStore.getState().setOrganizationName(org?.name || null);
+          useTenantStore.getState().setStoreId(store?.id ? String(store.id) : null);
+          useTenantStore.getState().setStoreName(store?.name || null);
+          useTenantStore.getState().setStoreSlug(store?.slug || null);
+        }
         set({
           user,
           roles: user?.roles || [],
           isAuthenticated: !!user,
-        }),
+        });
+      },
 
       setToken: (token) => set({ token }),
       setRefreshToken: (refreshToken) => set({ refreshToken }),
 
-      logout: () =>
+      logout: () => {
+        useTenantStore.getState().clearTenant();
         set({
           user: null,
           user_settings: null,
@@ -85,7 +107,8 @@ export const useAuthStore = create<AuthState>()(
           roles: [],
           permissions: [],
           isAuthenticated: false,
-        }),
+        });
+      },
     }),
     {
       name: 'vendix_auth_state',

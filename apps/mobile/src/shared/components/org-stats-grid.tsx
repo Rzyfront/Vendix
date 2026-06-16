@@ -12,6 +12,7 @@ interface OrgStatsGridProps {
     icon?: string;
     color?: string;
     trend?: { direction: 'up' | 'down' | 'flat'; value: string };
+    subText?: string;
   }>;
   columns?: 2 | 3 | 4;
   style?: StyleProp<ViewStyle>;
@@ -60,6 +61,11 @@ export function OrgStatsGrid({ stats, columns = 2, style }: OrgStatsGridProps) {
           <Text style={styles.label} numberOfLines={2}>
             {s.label}
           </Text>
+          {s.subText ? (
+            <Text style={styles.subText} numberOfLines={1}>
+              {s.subText}
+            </Text>
+          ) : null}
         </Card>
       ))}
     </View>
@@ -106,6 +112,11 @@ const styles = StyleSheet.create({
   label: {
     fontSize: typography.fontSize.xs,
     color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  subText: {
+    fontSize: 10,
+    color: colorScales.gray[400],
     marginTop: 2,
   },
 });

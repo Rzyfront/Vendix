@@ -1,5 +1,5 @@
-import { useState, useCallback, type ReactNode } from 'react';
-import { View, Pressable, Dimensions, StyleSheet } from 'react-native';
+import { useState, useCallback, useEffect, useRef, type ReactNode } from 'react';
+import { View, Pressable, Dimensions, StyleSheet, Animated, Easing } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -29,6 +29,50 @@ export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = '
   const pathname = usePathname();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+
+  const windowWidth = Dimensions.get('window').width;
+  const DRAWER_WIDTH = Math.min(windowWidth * 0.8, 320);
+
+  const [isMounted, setIsMounted] = useState(false);
+  const slideAnim = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (drawerOpen) {
+      setIsMounted(true);
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 300,
+          easing: Easing.bezier(0.2, 0.8, 0.2, 1),
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 300,
+          easing: Easing.bezier(0.2, 0.8, 0.2, 1),
+          useNativeDriver: true,
+        }),
+      ]).start();
+    } else {
+      Animated.parallel([
+        Animated.timing(slideAnim, {
+          toValue: -DRAWER_WIDTH,
+          duration: 250,
+          easing: Easing.bezier(0.25, 0, 0, 1),
+          useNativeDriver: true,
+        }),
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 250,
+          easing: Easing.bezier(0.25, 0, 0, 1),
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        setIsMounted(false);
+      });
+    }
+  }, [drawerOpen, DRAWER_WIDTH]);
 
   const userInitials = user
     ? `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() || 'U'
@@ -84,31 +128,40 @@ export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = '
       <UserDropdownModal
         visible={showUserMenu}
         onClose={() => setShowUserMenu(false)}
+        variant={variant}
       />
 
       {/* Drawer — rendered last to stay above all content */}
-      {drawerOpen && (
-        <Pressable
-          style={[styles.overlay, { zIndex: 100 }]}
-          onPress={closeDrawer}
+      {isMounted && (
+        <Animated.View
+          style={[
+            styles.overlay,
+            {
+              opacity: fadeAnim,
+              zIndex: 100,
+            },
+          ]}
         >
-          <View style={styles.flex} />
-        </Pressable>
+          <Pressable style={styles.flex} onPress={closeDrawer}>
+            <View style={styles.flex} />
+          </Pressable>
+        </Animated.View>
       )}
 
-      {drawerOpen && (
-        <View
+      {isMounted && (
+        <Animated.View
           style={[
             styles.drawer,
             {
-              width: Dimensions.get('window').width * 0.8,
+              width: DRAWER_WIDTH,
               paddingTop: insets.top,
               zIndex: 110,
+              transform: [{ translateX: slideAnim }],
             },
           ]}
         >
           <DrawerMenu currentRoute={pathname} onClose={closeDrawer} variant={variant} />
-        </View>
+        </Animated.View>
       )}
 
       {/* Toast notifications */}

@@ -1,22 +1,12 @@
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { Stack } from 'expo-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from '@/shared/theme';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { View, ActivityIndicator } from 'react-native';
+import { getQueryClient } from '@/core/api/query-client';
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: false,
-      staleTime: 30_000,
-      refetchOnWindowFocus: false,
-    },
-    mutations: {
-      retry: false,
-    },
-  },
-});
+const queryClient = getQueryClient();
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -44,3 +34,4 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
