@@ -1,0 +1,52 @@
+meta {
+  name: 16 Retail Regression - PO
+  type: http
+  seq: 17
+}
+
+post {
+  url: {{baseUrl}}/store/orders/purchase-orders
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "supplier_id": 102,
+    "location_id": 50,
+    "notes": "retail regression PO",
+    "items": [
+      { "product_id": {{uom_retail_id}}, "quantity": 10, "unit_price": 12000 }
+    ]
+  }
+}
+
+script:post-response {
+  const d = res.body && res.body.data;
+  if (d) bru.setVar("uom_retail_po_id", d.id);
+}
+
+tests {
+  test("Paso 7: PO retail creada", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+  });
+}
+
+docs {
+  Tras crear, capturar el item id (GET PO), aprobar y recibir con
+  quantity_received=10. ASSERT: el factor NO aplica (is_ingredient=false), por
+  lo que el stock sube en la cantidad CRUDA:
+  ```
+  -- quantity_on_hand = 10 (NO 10000); unit_cost = 12000 (sin dividir)
+  SELECT quantity_on_hand, cost_per_unit FROM stock_levels
+   WHERE product_id={{uom_retail_id}} AND location_id=50;   -- → 10 | 12000.0000
+
+  SELECT movement_type, quantity FROM inventory_movements
+   WHERE product_id={{uom_retail_id}};                       -- → stock_in | 10
+  ```
+}

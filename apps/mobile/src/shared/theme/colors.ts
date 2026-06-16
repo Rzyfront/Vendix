@@ -1,9 +1,11 @@
 export const colors = {
-  primary: '#22C55E',
-  primaryDark: '#1B3C2B',
+  // Brand colors aligned with the web (apps/frontend/src/styles.scss).
+  // Vendix green — the single source of truth lives in the web.
+  primary: '#2ecc71',
+  primaryDark: '#7ed7a5',
   primaryLight: '#F0FDF4',
-  background: '#FFFFFF',
-  card: '#F8FAFC',
+  background: '#f4f4f4',
+  card: '#FFFFFF',
   cardBorder: '#E4E4E7',
   inputBorder: '#D4D4D8',
   inputBg: '#FFFFFF',
@@ -12,7 +14,7 @@ export const colors = {
     secondary: '#71717A',
     muted: '#A1A1AA',
   },
-  success: '#22C55E',
+  success: '#2ecc71',
   warning: '#F59E0B',
   error: '#EF4444',
 };

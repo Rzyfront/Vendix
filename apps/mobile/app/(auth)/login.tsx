@@ -9,7 +9,7 @@ import {
   Image,
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
+import { getItem, setItem, deleteItem } from '@/core/storage/secure-storage';
 import { AuthService } from '@/core/auth/auth.service';
 import { isValidEmail } from '@/core/utils/validators';
 import { colors, spacing, borderRadius, typography, colorScales } from '@/shared/theme';
@@ -56,7 +56,7 @@ export default function LoginScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const saved = await SecureStore.getItemAsync(CREDENTIALS_KEY);
+        const saved = await getItem(CREDENTIALS_KEY);
         if (saved) {
           const creds = JSON.parse(saved);
           setVlink(creds.vlink || '');
@@ -70,12 +70,12 @@ export default function LoginScreen() {
 
   const persistCredentials = useCallback(async () => {
     if (rememberCredentials) {
-      await SecureStore.setItemAsync(
+      await setItem(
         CREDENTIALS_KEY,
         JSON.stringify({ vlink, email, password }),
       );
     } else {
-      await SecureStore.deleteItemAsync(CREDENTIALS_KEY);
+      await deleteItem(CREDENTIALS_KEY);
     }
   }, [rememberCredentials, vlink, email, password]);
 

@@ -1,0 +1,122 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    title="Gestión de mesas"
+    subtitle="Crea, edita y posiciona las mesas del restaurante"
+    icon="settings"
+    variant="glass"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <div
+    class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
+  >
+    <app-stats
+      title="Total"
+      [value]="stats().total"
+      smallText="Mesas registradas"
+      iconName="table"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    />
+    <app-stats
+      title="Disponibles"
+      [value]="stats().available"
+      smallText="Listas para abrir cuenta"
+      iconName="check"
+      iconBgColor="bg-green-100"
+      iconColor="text-green-600"
+    />
+    <app-stats
+      title="Ocupadas"
+      [value]="stats().occupied"
+      smallText="Con cuenta abierta"
+      iconName="users"
+      iconBgColor="bg-red-100"
+      iconColor="text-red-600"
+    />
+    <app-stats
+      title="Reservadas / Limpieza"
+      [value]="stats().reserved + stats().cleaning"
+      smallText="Bloqueadas o en reset"
+      iconName="clock"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+    />
+  </div>
+
+  <div class="p-2 md:p-4">
+    <div class="view-toggle-bar flex items-center justify-end gap-2 mb-3">
+      <div class="view-toggle inline-flex rounded-md border border-border overflow-hidden">
+        <button
+          type="button"
+          class="px-3 py-1.5 text-xs font-medium flex items-center gap-1"
+          [class.bg-primary-50]="view() === 'table'"
+          [class.text-primary-700]="view() === 'table'"
+          (click)="setView('table')"
+        >
+          <app-icon name="list" [size]="14"></app-icon>
+          Tabla
+        </button>
+        <button
+          type="button"
+          class="px-3 py-1.5 text-xs font-medium flex items-center gap-1"
+          [class.bg-primary-50]="view() === 'floor'"
+          [class.text-primary-700]="view() === 'floor'"
+          (click)="setView('floor')"
+        >
+          <app-icon name="layout-grid" [size]="14"></app-icon>
+          Plano
+        </button>
+      </div>
+    </div>
+
+    @if (isLoading()) {
+      <div class="loading">
+        <app-spinner size="md"></app-spinner>
+        <p>Cargando mesas…</p>
+      </div>
+    } @else if (view() === 'table') {
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+        <app-responsive-data-view
+          [data]="rows()"
+          [columns]="columns()"
+          [actions]="actions()"
+          [cardConfig]="cardConfig()"
+          [emptyMessage]="'Aún no hay mesas configuradas.'"
+          [emptyTitle]="'Sin mesas'"
+          [emptyDescription]="'Crea la primera mesa con el botón Nueva mesa.'"
+          [emptyActionText]="'Nueva mesa'"
+          [emptyActionIcon]="'plus'"
+          [showEmptyAction]="true"
+          (emptyActionClick)="openCreate()"
+          [loading]="isLoading()"
+          [striped]="true"
+          [hoverable]="true"
+        ></app-responsive-data-view>
+      </app-card>
+    } @else {
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+        <div class="p-2 md:p-4">
+          <p class="text-xs text-text-secondary mb-2">
+            Arrastra las mesas para reposicionarlas. Los cambios se guardan automáticamente.
+          </p>
+          <app-table-floor-map
+            [tables]="tables()"
+            [editable]="true"
+            (tableClicked)="openEdit($event)"
+            (tableMoved)="onTableMoved($event)"
+          />
+        </div>
+      </app-card>
+    }
+  </div>
+
+  <app-table-form-modal
+    [isOpen]="isFormOpen()"
+    [table]="editingTable()"
+    [loading]="isFormLoading()"
+    (isOpenChange)="closeForm()"
+    (saved)="onFormSaved()"
+  />
+</div>

@@ -1,0 +1,60 @@
+meta {
+  name: 12 Fire to Kitchen
+  type: http
+  seq: 13
+}
+
+post {
+  url: {{baseUrl}}/store/kitchen-fire
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "order_id": {{uom_order_id}},
+    "order_item_ids": [{{uom_order_item_id}}]
+  }
+}
+
+tests {
+  test("Paso 5: fire ejecutado, COGS=1600", function() {
+    expect(res.status).to.be.oneOf([200, 201]);
+    expect(res.body.success).to.be.true;
+    expect(Number(res.body.data.cogs_total)).to.equal(1600);
+    const firedItemId = Number(bru.getVar("uom_order_item_id"));
+    expect(res.body.data.fired_item_ids.map(Number)).to.include(firedItemId);
+  });
+}
+
+docs {
+  ## Asserts vía psql (descuento entero exacto + COGS FIFO)
+  ```
+  -- quantity_on_hand bajó round(300+20)=320 → 10000-320 = 9680 (ENTERO)
+  SELECT quantity_on_hand FROM stock_levels
+   WHERE product_id={{uom_insumo_id}} AND location_id=50;        -- → 9680
+
+  -- capa FIFO consumida en unidad mínima
+  SELECT quantity_remaining FROM inventory_cost_layers
+   WHERE product_id={{uom_insumo_id}};                            -- → 9680
+
+  -- movimiento de consumo
+  SELECT movement_type, quantity FROM inventory_movements
+   WHERE product_id={{uom_insumo_id}} AND movement_type='consumption'; -- → 320
+
+  -- COGS FIFO = 320 × 5 = 1600 → DR 6135 / CR 1435
+  SELECT coa.code, ael.debit_amount, ael.credit_amount
+    FROM accounting_entries ae
+    JOIN accounting_entry_lines ael ON ael.entry_id = ae.id
+    JOIN chart_of_accounts coa ON coa.id = ael.account_id
+   WHERE ae.source_type='kitchen.fired'
+     AND ae.description ILIKE '%orden #{{uom_order_id}}%'
+   ORDER BY ael.debit_amount DESC;
+   -- → 6135 | 1600.00 | 0.00
+   --   1435 | 0.00    | 1600.00
+  ```
+}

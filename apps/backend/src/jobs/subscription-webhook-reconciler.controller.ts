@@ -24,7 +24,7 @@ class TriggerWebhookReconcilerDto {
 
 /**
  * Manual trigger for the SaaS subscription webhook reconciler. Useful for:
- * - QA / Bruno tests that need to drive a reconciliation pass on demand.
+ * - QA / curl (or any HTTP client) that needs to drive a reconciliation pass on demand.
  * - Operators forcing a sweep after a Wompi delivery outage instead of
  *   waiting for the next 30-minute cron tick.
  *

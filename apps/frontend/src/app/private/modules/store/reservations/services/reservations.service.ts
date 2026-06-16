@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, map } from 'rxjs';
+import { Observable, map, catchError } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   Booking,
@@ -99,6 +99,32 @@ export class ReservationsService {
       map((response) => response.data || response),
     );
   }
+
+  /**
+   * Asigna (o reasigna) una mesa a una reserva. La mesa quedará
+   * marcada como 'reserved' si estaba 'available'.
+   */
+  assignTable(bookingId: number, tableId: number): Observable<Booking> {
+    return this.http
+      .patch<any>(`${this.apiUrl}/${bookingId}/assign-table`, { table_id: tableId })
+      .pipe(
+        map((res) => res?.data ?? res),
+      );
+  }
+
+  /**
+   * Sienta la reserva en la mesa asignada (o en la que se pase).
+   * Devuelve la table_session recién abierta.
+   */
+  seat(bookingId: number, tableId?: number): Observable<any> {
+    const body = tableId ? { table_id: tableId } : {};
+    return this.http
+      .patch<any>(`${this.apiUrl}/${bookingId}/seat`, body)
+      .pipe(
+        map((res) => res?.data ?? res),
+      );
+  }
+
 
   getStats(): Observable<BookingStats> {
     return this.http.get<any>(`${this.apiUrl}/stats`).pipe(

@@ -170,7 +170,10 @@ export class PurchaseOrdersController {
   @Post('scan')
   @Permissions('store:orders:purchase_orders:create')
   @UseInterceptors(FileInterceptor('file'))
-  async scanInvoice(@UploadedFile() file: Express.Multer.File) {
+  async scanInvoice(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('orderType') orderType?: 'retail' | 'ingredient',
+  ) {
     try {
       if (!file) {
         throw new VendixHttpException(ErrorCodes.INV_SCAN_NO_FILE);
@@ -184,7 +187,12 @@ export class PurchaseOrdersController {
       if (!allowedTypes.includes(file.mimetype)) {
         throw new VendixHttpException(ErrorCodes.INV_SCAN_INVALID_FILE);
       }
-      const result = await this.invoiceScannerService.scanInvoice(file);
+      // Fase 4: route to the matching AI app profile. Mixed-line orders
+      // are out of scope; the caller picks one profile per scan.
+      const result = await this.invoiceScannerService.scanInvoice(
+        file,
+        orderType === 'ingredient' ? 'ingredient' : 'retail',
+      );
       return this.responseService.success(
         result,
         'Factura escaneada exitosamente',

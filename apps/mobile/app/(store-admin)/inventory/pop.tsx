@@ -152,7 +152,7 @@ export default function PopScreen() {
         code: res.code,
         email: res.email,
         phone: res.phone,
-        is_active: res.state === 'active',
+        is_active: (res as any).state === 'active',
       };
       setSuppliers((prev) => [...prev, newSupplier]);
       cart.setSupplier(newSupplier.id, newSupplier.name);
@@ -182,7 +182,7 @@ export default function PopScreen() {
         name: res.name,
         code: res.code,
         type: res.type,
-        is_active: res.state === 'active',
+        is_active: (res as any).state === 'active',
       };
       setLocations((prev) => [...prev, newLocation]);
       cart.setLocation(newLocation.id, newLocation.name);
@@ -298,7 +298,7 @@ export default function PopScreen() {
     };
     cart.addToCart({
       product: tempProduct,
-      quantity: data.quantity,
+      quantity: data.quantity ?? 0,
       unit_cost: data.unit_cost || 0,
       is_prebulk: true,
       prebulk_data: data,

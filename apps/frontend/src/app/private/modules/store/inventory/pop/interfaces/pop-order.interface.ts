@@ -50,6 +50,21 @@ export interface PurchaseOrderItemRequest {
   sale_price?: number;
   brand_name?: string;
   category_names?: string;
+  /**
+   * Fase 3: UoM FKs. The receiving engine uses these to derive
+   * `purchase_to_stock_factor`. Required when the parent PO has
+   * `order_type='ingredient'`; ignored otherwise.
+   */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
+  /**
+   * Insumos desde compra: clasificación del producto nuevo (prebulk). El
+   * backend crea el producto con `is_ingredient`/`is_sellable` y, junto con
+   * las UoM, lo deja listo para consumo en recetas.
+   */
+  is_ingredient?: boolean;
+  is_sellable?: boolean;
+
 }
 
 /**
@@ -73,6 +88,15 @@ export interface CreatePurchaseOrderRequest {
   internal_notes?: string;
   created_by_user_id?: number;
   items: PurchaseOrderItemRequest[];
+  /**
+   * Fase 2: primary order type. Defaults to `retail`. When any line in
+   * the cart carries a product that is a pure ingredient, the cart
+   * service sets this to `ingredient`. Mixed-line orders (retail +
+   * ingredient in the same PO) are out of scope for V1 and will be
+   * rejected by the backend.
+   */
+  order_type?: 'retail' | 'ingredient';
+
 }
 
 /**
@@ -91,6 +115,12 @@ export function cartToPurchaseOrderRequest(
         quantity: item.quantity,
         unit_price: item.unit_cost,
         notes: item.notes,
+        // Fase 3: UoM FKs. The cart stores the FKs chosen in the modal
+        // (defaults to the product's persisted UoMs in ingredient mode).
+        // We pass them through as-is. If the parent PO is `retail`, the
+        // backend will null them out at the DB level.
+        purchase_uom_id: (item as any).purchase_uom_id ?? null,
+        stock_uom_id: (item as any).stock_uom_id ?? null,
         // Map lot/batch info
         batch_number: item.lot_info?.batch_number,
         manufacturing_date: item.lot_info?.manufacturing_date
@@ -121,17 +151,52 @@ export function cartToPurchaseOrderRequest(
         requestItem.sale_price = item.prebulk_data.sale_price;
         requestItem.brand_name = typeof item.prebulk_data.brand_id === 'string' ? item.prebulk_data.brand_id : undefined;
         requestItem.category_names = typeof item.prebulk_data.category_ids === 'string' ? item.prebulk_data.category_ids : undefined;
+        // Insumos desde compra: propaga la clasificación y, si es insumo, las
+        // UoM elegidas en el modal prebulk. El backend crea el producto con
+        // estos flags y deriva el factor de conversión al recibir.
+        requestItem.is_ingredient = item.prebulk_data.is_ingredient;
+        requestItem.is_sellable = item.prebulk_data.is_sellable;
+        if (item.prebulk_data.is_ingredient) {
+          requestItem.purchase_uom_id =
+            item.prebulk_data.purchase_uom_id ?? requestItem.purchase_uom_id ?? null;
+          requestItem.stock_uom_id =
+            item.prebulk_data.stock_uom_id ?? requestItem.stock_uom_id ?? null;
+        }
       }
 
       return requestItem;
     },
   );
 
+  // Fase 2: infer order_type from the cart items. Mixed-line is out
+  // of scope; if any item is a pure ingredient, the whole order is
+  // `ingredient`. Otherwise `retail` (default).
+  const isIngredientOrder = cartState.items.some((it: any) => {
+    // Caso prebulk (producto nuevo): la clasificación vive en prebulk_data,
+    // no en product (que es un dummy con id=0). Tiene prioridad.
+    if (it.is_prebulk && it.prebulk_data) {
+      const pb: any = it.prebulk_data;
+      const pbSellable =
+        pb.is_sellable === undefined || pb.is_sellable === null
+          ? true
+          : !!pb.is_sellable;
+      return !!pb.is_ingredient && !pbSellable;
+    }
+    const p: any = it.product;
+    if (!p) return false;
+    const sellable =
+      p.is_sellable === undefined || p.is_sellable === null
+        ? true
+        : !!p.is_sellable;
+    return !!p.is_ingredient && !sellable;
+  });
+
   return {
     organization_id: organizationId,
     supplier_id: cartState.supplierId!,
     location_id: cartState.locationId!,
     status: cartState.status === 'draft' ? 'draft' : 'approved',
+    order_type: isIngredientOrder ? 'ingredient' : 'retail',
     order_date: cartState.orderDate.toISOString(),
     expected_date: cartState.expectedDate?.toISOString(),
     payment_terms: cartState.paymentTerms,

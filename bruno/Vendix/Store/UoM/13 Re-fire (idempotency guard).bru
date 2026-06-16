@@ -1,0 +1,42 @@
+meta {
+  name: 13 Re-fire (idempotency guard)
+  type: http
+  seq: 14
+}
+
+post {
+  url: {{baseUrl}}/store/kitchen-fire
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "order_id": {{uom_order_id}},
+    "order_item_ids": [{{uom_order_item_id}}]
+  }
+}
+
+tests {
+  test("Paso 5: re-fire NO vuelve a descontar (guard inventory_consumed_at_fire)", function() {
+    // El item ya fue consumido al fire → no-op. El servicio devuelve success=false
+    // con mensaje de idempotencia cuando TODOS los items ya fueron disparados.
+    expect(res.body.success).to.equal(false);
+    expect(res.body.message).to.match(/idempotente|ya fueron enviados/i);
+  });
+}
+
+docs {
+  Tras esta request, el stock debe seguir en 9680 y solo debe existir 1
+  movimiento de consumo y 1 asiento kitchen.fired para la orden:
+  ```
+  SELECT count(*) FROM inventory_movements
+   WHERE product_id={{uom_insumo_id}} AND movement_type='consumption';  -- → 1
+  SELECT quantity_on_hand FROM stock_levels
+   WHERE product_id={{uom_insumo_id}} AND location_id=50;               -- → 9680
+  ```
+}

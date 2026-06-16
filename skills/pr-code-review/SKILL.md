@@ -7,7 +7,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke:
     [
@@ -80,16 +80,52 @@ Error: "HTTP 403" or "Resource not accessible"
 
 ## Critical Patterns
 
+### Pattern 0: Evidence Gate — Verify Before You Claim (MANDATORY)
+
+> **The review reports only what it has verified.** A suspicion is not a finding. A hypothesis does not affect the score. If you catch yourself writing "this could break", "the backend might reject", "verify with X before merging", or "puede romper" — STOP. **You** are the one who must run X. Execute the check, then report the *result*, not the worry.
+
+**The rule (non-negotiable):**
+
+1. **Every finding must be backed by an executed check.** State the evidence inline: the command you ran, the file/line you read, the DTO/endpoint you inspected. No evidence → not a finding.
+2. **Unverified hypotheses NEVER enter the Findings list and NEVER move the score.** At most, list them in a separate **"Open questions for the author"** section that carries **zero** score weight and is explicitly labeled as unverified.
+3. **A claim you told the reader to "verify later" is a claim you failed to verify.** This skill has Bash, file reads, and `gh` — there is no "later". Verify now or drop it.
+4. **When verification flips a suspicion, say so.** "Looked like a regression; checked the backend DTO — it's `@IsOptional()` and the service does `if (!item.x) continue`, so this *aligns* the contract" is far more valuable than a vague warning that never got checked.
+
+**How to verify by category (execute these — do not speculate):**
+
+| Suspicion | Verification (execute, then report the result) |
+|-----------|------------------------------------------------|
+| "This type change could break the backend" | Read the real DTO + service: `rg -n "field_name" apps/backend/src/**/dto/*.dto.ts` and check for `@IsOptional()`; grep how the service consumes it (`if (!item.x) continue`, `.filter(...)`). A frontend TS type is compile-time only — it changes no runtime payload by itself. |
+| "This endpoint may reject the new payload" | Read the controller/DTO/validator; if still unsure, `curl` the endpoint. Never guess an HTTP status. |
+| "Changing this token/constant breaks call sites" | `rg -n "<old-literal>\|token-name" <scope>` to count REAL call sites. Distinguish *intentional literals* from *missed token usages*, and *pre-existing debt* from *regression this PR introduces*. A raw count overstates impact. |
+| "This rename/removal leaves dangling references" | Fetch the **resulting** file at the PR head and grep it (see below) — do not trust the diff hunk alone. |
+| "Required field X is now optional → 0/undefined bug" | Read the type at its definition. If it is still `required`, the `?? 0` is dead-defensive code, not a bug. |
+
+**Read the resulting file, not just the diff hunk.** A `-` line in a hunk may be the *duplicate / dead* copy, not the active one (e.g. an object literal with duplicate keys — last definition wins). Before claiming "this removal breaks X", fetch the file at the PR head and confirm the final state:
+
+```bash
+HEAD_SHA=$(gh pr view N --repo OWNER/REPO --json headRefOid --jq '.headRefOid')
+gh api -X GET "repos/OWNER/REPO/contents/path/to/file.ext" -f ref=$HEAD_SHA --jq '.content' | base64 -d > /tmp/head_file
+rg -n "symbol" /tmp/head_file   # confirm what actually survives at HEAD
+```
+
+**Tag every finding with its evidence status:**
+- `✅ VERIFIED` — checked against real code / DTO / head file (cite the command or path).
+- `❓ OPEN QUESTION` — could not be verified from the repo (needs a running env or external service). Goes to the Open-questions section, **not** the scored Findings, and is flagged to the author.
+
 ### Pattern 1: Complete Review Flow (step by step)
 
 ```
 STEP 1 → Identify repos and list open PRs
 STEP 2 → Take the first PR and get metadata + files
-STEP 3 → Get the full diff and analyze it
-STEP 4 → Present findings to the user with a rating
-STEP 5 → Wait for decision: approve, request changes, or next PR
-STEP 6 → If a review is posted, use `gh pr review` to leave the comment
-STEP 7 → Repeat with the next PR
+STEP 3 → Get the full diff and analyze it — form hypotheses (suspicions, not findings yet)
+STEP 4 → VERIFY every hypothesis (Pattern 0): run rg/grep, read the real file/DTO,
+         fetch the head file, curl if needed. Confirm or DROP each one.
+STEP 5 → Present ONLY verified findings + rating. List unverified items separately as
+         "Open questions for the author" (zero score weight).
+STEP 6 → Wait for decision: approve, request changes, or next PR
+STEP 7 → If a review is posted, use `gh pr review` to leave the comment
+STEP 8 → Repeat with the next PR
 ```
 
 ### Pattern 2: The 7 Analysis Categories (ALWAYS review all of them)
@@ -140,6 +176,10 @@ A PR with no regression issues starts with a high base score.
 
 **The 80% threshold is the merge gate.** This is a hard requirement from `git-workflow` RULE 8 — no PR can be merged below 80%, regardless of how nice the comments are. A score in the 70-79% range is treated as **REQUEST CHANGES**, not as "approve with comments", because the dev must re-develop the failing items.
 
+**Only `✅ VERIFIED` findings affect the score (see Pattern 0).** Unverified suspicions carry **zero** weight — they cannot lower (or raise) the rating, and they cannot trigger REQUEST CHANGES. If a regression doubt is the only thing pushing a PR below 80% and you have not verified it, **verify it before scoring**: if it confirms, it counts; if it cannot be confirmed from the repo, it is an Open Question, not a regression. This prevents a sound, additive, CI-green PR from being blocked on speculation. Equally: do not *inflate* a score by ignoring a verified problem — the gate cuts both ways.
+
+**Distinguish pre-existing debt from regression introduced by this PR.** A hardcoded value or anti-pattern the PR did not touch is not a regression caused by this PR; at most it is a `Quality (x1)` follow-up, never a `Regression (x3)` blocker. Check with `git blame` / the diff whether the PR introduced it before weighting it x3.
+
 ### Pattern 4: Presentation Format for the User
 
 Always present each PR in this format:
@@ -152,15 +192,18 @@ Always present each PR in this format:
 ## Modified files
 (table with file, changes, what it does)
 
-## Findings
+## Findings  (ONLY ✅ verified — see Pattern 0)
 (organized by severity: CRITICAL > HIGH > MEDIUM > LOW)
-(each finding with: file, approximate line, relevant code, explanation, suggested fix)
+(each finding with: ✅ evidence tag — the command run or file/line checked — then file, approximate line, relevant code, explanation, suggested fix)
+
+## Open questions for the author  (❓ unverified — ZERO score weight)
+(suspicions that could not be confirmed from the repo; ask the author, never fold into the score)
 
 ## Core files touched
 (table with file, risk level, note)
 
 ## Rating: XX/100
-(the good, the bad, recommendation: APPROVE or REQUEST CHANGES)
+(the good, the bad, recommendation: APPROVE or REQUEST CHANGES — based ONLY on verified findings)
 ```
 
 ### Pattern 5: Review Message Format for GitHub
@@ -424,6 +467,12 @@ gh api repos/OWNER/REPO/pulls/N/comments \
 **Problem**: The PR has merge conflicts (`mergeable: false`), making it impossible to merge regardless of code quality.
 **Fix**: Resolve conflicts favoring the most stable changes or those the author considers most relevant. Then request re-review.
 **Review action**: Automatic 0/100, REQUEST CHANGES with brief decontextualized recommendation. No deep code analysis until conflicts are resolved.
+
+### Issue 9: Unverified hypothesis presented as a finding (REVIEW ANTI-PATTERN)
+
+**Problem**: The review lists "this could break the backend" / "verify with curl" / "puede romper en prod" as a finding and lets it drag the score below the 80% gate — without ever running the check. This blocks sound, additive PRs on speculation, and a single wrong guess (e.g. flagging an `@IsOptional()` field as a regression) can flip an APPROVE into a REQUEST CHANGES.
+**Fix**: Apply the Evidence Gate (Pattern 0). Run the check — read the DTO, `rg` the call sites, fetch the head file, `curl` the endpoint. Report the *result*, not the worry. If it genuinely cannot be verified from the repo, move it to "Open questions for the author" with zero score weight — never into scored Findings.
+**Review action**: Re-score using only `✅ VERIFIED` findings. A hypothesis that could not be confirmed does not count as a regression.
 
 ---
 

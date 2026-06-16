@@ -119,6 +119,16 @@ export class RecipeItemsEditorComponent implements OnInit {
         waste_percent: this.fb.nonNullable.control<number | null>(0, {
           validators: [Validators.min(0), Validators.max(100)],
         }),
+        // ===== Waste mode (Fase UoM) =====
+        // `percent` (legacy) uses waste_percent as a multiplier; `absolute`
+        // adds waste_absolute in the component's minimum stock unit. The
+        // default `percent` keeps every existing row behaving as before.
+        waste_mode: this.fb.nonNullable.control<'percent' | 'absolute'>(
+          'percent',
+        ),
+        waste_absolute: this.fb.nonNullable.control<number | null>(0, {
+          validators: [Validators.min(0)],
+        }),
         is_optional: this.fb.nonNullable.control(false),
       }),
     );
@@ -134,6 +144,17 @@ export class RecipeItemsEditorComponent implements OnInit {
    * Returns the option label for a given product_id without doing an extra
    * async lookup — uses the cached `ingredients()` signal.
    */
+  /**
+   * Returns the display label for a component product's stock unit, e.g.
+   * "ml" or "g". Used by the template to suffix the absolute-waste input
+   * with the right unit hint.
+   */
+  getStockUnitLabel(productId: number | null | undefined): string {
+    if (productId == null) return '';
+    const found = this.ingredients().find((i) => i.id === productId);
+    return found?.stock_unit || '';
+  }
+
   productLabel(productId: number | null | undefined): string {
     if (productId == null) return 'Selecciona un componente';
     const found = this.ingredients().find((i) => i.id === productId);

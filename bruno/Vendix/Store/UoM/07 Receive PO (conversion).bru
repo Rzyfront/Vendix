@@ -1,0 +1,48 @@
+meta {
+  name: 07 Receive PO (conversion)
+  type: http
+  seq: 8
+}
+
+patch {
+  url: {{baseUrl}}/store/orders/purchase-orders/{{uom_po_id}}/receive
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "items": [
+      { "id": {{uom_po_item_id}}, "quantity_received": 10 }
+    ]
+  }
+}
+
+tests {
+  test("Paso 3: PO recibida", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data.status).to.be.oneOf(['received', 'partially_received']);
+  });
+}
+
+docs {
+  ## Asserts vía psql (conversión 10 L × 1000 = 10000 ml)
+  ```
+  -- quantity_on_hand = 10000 ml
+  SELECT quantity_on_hand FROM stock_levels
+   WHERE product_id={{uom_insumo_id}} AND location_id=50;   -- → 10000
+
+  -- capa FIFO: quantity_remaining=10000 @ unit_cost=5.0000 (=5000/1000)
+  SELECT quantity_remaining, unit_cost FROM inventory_cost_layers
+   WHERE product_id={{uom_insumo_id}};                      -- → 10000 | 5.0000
+
+  -- movimiento stock_in con quantity=10000
+  SELECT movement_type, quantity FROM inventory_movements
+   WHERE product_id={{uom_insumo_id}};                      -- → stock_in | 10000
+  ```
+}

@@ -649,7 +649,7 @@ export default function AdjustmentsScreen() {
                         <View style={styles.selectedProductHeader}>
                           <Text style={styles.selectedProductName} numberOfLines={1}>{form.description || `Producto #${form.product_id}`}</Text>
                           <Pressable onPress={() => setForm({ ...form, product_id: 0, description: '' })} hitSlop={4}>
-                            <Icon name="trash" size={16} color={colors.error} />
+                            <Icon name="trash-2" size={16} color={colors.error} />
                           </Pressable>
                         </View>
                         <Text style={styles.selectedProductStock}>

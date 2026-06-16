@@ -1,0 +1,38 @@
+meta {
+  name: 02 GET Catalog UoM
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/store/uom
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+tests {
+  test("Paso 1: 6 unidades sembradas", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.be.an('array');
+    expect(res.body.data.length).to.equal(6);
+  });
+
+  test("Incluye codigos g/ml/L/unit", function() {
+    const codes = res.body.data.map(u => u.code);
+    expect(codes).to.include.members(['g', 'ml', 'L', 'unit']);
+  });
+
+  test("Captura ids ml y L", function() {
+    const ml = res.body.data.find(u => u.code === 'ml');
+    const L = res.body.data.find(u => u.code === 'L');
+    expect(ml).to.exist;
+    expect(L).to.exist;
+    bru.setVar("uom_ml_id", ml.id);
+    bru.setVar("uom_L_id", L.id);
+  });
+}

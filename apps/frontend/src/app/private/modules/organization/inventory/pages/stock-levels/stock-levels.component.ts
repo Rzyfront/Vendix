@@ -369,7 +369,7 @@ export class OrgStockLevelsComponent {
       label: 'Cantidad',
       align: 'right',
       priority: 2,
-      transform: (value) => String(this.asNumber(value)),
+      transform: (_value, item) => this.quantityDisplay(item),
     },
     {
       key: 'reserved_quantity',
@@ -426,7 +426,7 @@ export class OrgStockLevelsComponent {
       {
         key: 'quantity',
         label: 'Total',
-        transform: (value) => String(this.asNumber(value)),
+        transform: (_value, item) => this.quantityDisplay(item),
       },
       {
         key: 'reserved_quantity',
@@ -525,6 +525,22 @@ export class OrgStockLevelsComponent {
   }
 
   // ─── Helpers ─────────────────────────────────────────────────────────────
+
+  /**
+   * Modelo B: ingredients display the sealed unit count (e.g. "9") instead of
+   * the raw total in minimum units (e.g. 9680 ml). When the open container has
+   * a remainder, a discreet "(+1 abierto)" hint is appended. Non-ingredients
+   * (sealed_units == null) fall back to the raw quantity unchanged.
+   */
+  quantityDisplay(item?: OrgStockLevelRow): string {
+    if (item?.sealed_units != null) {
+      const sealed = this.asNumber(item.sealed_units);
+      const open = this.asNumber(item.open_remaining);
+      return open > 0 ? `${sealed} (+1 abierto)` : `${sealed}`;
+    }
+    return String(this.asNumber(item?.quantity));
+  }
+
   private asNumber(v: number | string | undefined | null): number {
     if (v === null || v === undefined) return 0;
     return typeof v === 'number' ? v : Number(v) || 0;

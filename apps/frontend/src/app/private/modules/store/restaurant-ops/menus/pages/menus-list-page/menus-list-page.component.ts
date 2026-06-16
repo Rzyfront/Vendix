@@ -11,7 +11,9 @@ import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
+  ButtonComponent,
   CardComponent,
+  IconComponent,
   DialogService,
   DropdownAction,
   EmptyStateComponent,
@@ -40,11 +42,13 @@ import { MenusService } from '../../services';
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
+    ButtonComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
+    IconComponent,
   ],
   templateUrl: './menus-list-page.component.html',
   styleUrl: './menus-list-page.component.scss',
@@ -249,6 +253,18 @@ export class MenusListPageComponent implements OnInit {
   onPageChange(page: number): void {
     this.filters.update((f) => ({ ...f, page }));
     this.loadMenus();
+  }
+
+  onCreateCombo(): void {
+    this.router.navigate(
+      ['/admin/products/create'],
+      {
+        queryParams: {
+          is_combo: 'true',
+          product_type: 'prepared',
+        },
+      },
+    );
   }
 
   onActionClick(action: string): void {

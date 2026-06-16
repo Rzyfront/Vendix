@@ -24,6 +24,8 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { ProductsService } from '../../../products/services/products.service';
+import { UomService } from '../../services/uom.service';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { StoreSettingsFacade } from '../../../../../../core/store/store-settings/store-settings.facade';
 import {
@@ -39,6 +41,14 @@ export interface PopProductConfigResult {
   quantity: number;
   unit_cost: number;
   pricing_type?: 'unit' | 'weight';
+  /**
+   * Fase 3: UoM FKs propagated to the cart line. The modal only fills
+   * these when the product is a pure ingredient and the store supports
+   * the capacity (Phase 0 resolver). When null/undefined, the cart
+   * leaves them null and the PO will be treated as `retail`.
+   */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
 }
 
 @Component({
@@ -140,7 +150,86 @@ export interface PopProductConfigResult {
               </div>
             </div>
 
-            <!-- Toggles -->
+            <!-- Fase 3: UoM-aware cost capture for pure ingredients -->
+            @if (ingredientMode()) {
+              <div
+                class="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2"
+                data-testid="pop-ingredient-uom"
+              >
+                <div class="flex items-center gap-2">
+                  <app-icon name="package" [size]="14" class="text-primary-600"></app-icon>
+                  <p
+                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
+                  >
+                    Unidad de medida del insumo
+                  </p>
+                </div>
+                <p class="text-xs text-text-muted">
+                  Captura el costo por la <strong>unidad de compra</strong>
+                  (la presentación que llega del proveedor). El sistema lo
+                  convertirá automáticamente a la unidad de stock usando el
+                  factor de la UoM.
+                </p>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div>
+                    <label
+                      class="block text-xs font-medium text-text-primary mb-1"
+                    >
+                      Unidad de compra
+                    </label>
+                    <select
+                      class="w-full px-2 py-1.5 text-sm rounded-lg border border-border bg-surface text-text-primary"
+                      [ngModel]="purchaseUomId()"
+                      (ngModelChange)="purchaseUomId.set($event)"
+                    >
+                      <option [ngValue]="null">— Seleccionar —</option>
+                      @for (u of uomCatalog(); track u.id) {
+                        <option [ngValue]="u.id">
+                          {{ u.code }} — {{ u.name }}
+                        </option>
+                      }
+                    </select>
+                  </div>
+                  <div>
+                    <label
+                      class="block text-xs font-medium text-text-primary mb-1"
+                    >
+                      Unidad de stock
+                    </label>
+                    <select
+                      class="w-full px-2 py-1.5 text-sm rounded-lg border border-border bg-surface text-text-primary"
+                      [ngModel]="stockUomId()"
+                      (ngModelChange)="stockUomId.set($event)"
+                    >
+                      <option [ngValue]="null">— Seleccionar —</option>
+                      @for (u of uomCatalog(); track u.id) {
+                        <option [ngValue]="u.id">
+                          {{ u.code }} — {{ u.name }}
+                        </option>
+                      }
+                    </select>
+                  </div>
+                </div>
+                @if (unitCapacity(); as cap) {
+                  <div
+                    class="flex items-center gap-2 text-xs text-primary bg-white/60 rounded-lg px-2 py-1.5"
+                    data-testid="pop-ingredient-capacity-preview"
+                  >
+                    <app-icon name="info" [size]="12"></app-icon>
+                    <span>
+                      1 {{ cap.purchaseUnit }} = {{ cap.value }}
+                      {{ cap.unit }} (factor de conversión).
+                    </span>
+                  </div>
+                }
+                <p class="text-[11px] text-text-muted">
+                  <strong>Etiqueta del costo:</strong>
+                  {{ costInputLabel() }}
+                </p>
+              </div>
+            }
+
+                        <!-- Toggles -->
             <app-setting-toggle
               label="Gestionar variantes"
               [description]="
@@ -553,6 +642,105 @@ export class PopProductConfigModalComponent {
   creatingVariants = signal(false);
 
   private productsService = inject(ProductsService);
+  /**
+   * Fase 3: UoM catalog for the unit-aware cost capture. The service is
+   * cached internally (shareReplay), so we can call `.getCatalog()`
+   * multiple times without re-fetching.
+   */
+  private uomService = inject(UomService);
+  /**
+   * Fase 3: capability resolver. Used to decide whether the modal can
+   * show the ingredient cost-capture UI at all.
+   */
+  private authFacade = inject(AuthFacade);
+  /**
+   * Fase 3: store capability flag (computed). When false, the modal
+   * always behaves as `retail` regardless of the product's
+   * `is_ingredient` flag.
+   */
+  readonly storeSupportsIngredients = this.authFacade.storeSupportsIngredients;
+  /**
+   * Fase 3: UoM catalog. Loaded on first modal open via a cached HTTP
+   * call. We store the rows for the unit-aware UI; the service handles
+   * caching across modal instances.
+   */
+  protected readonly uomCatalog = signal<Array<{
+    id: number;
+    code: string;
+    name: string;
+    dimension: string;
+    factor_to_base: number | string;
+    is_active: boolean;
+  }>>([]);
+  /**
+   * Fase 3: per-modal UoM selection. Defaults are derived from the
+   * product (if it has stock_uom_id/purchase_uom_id) and stay editable
+   * when the product is a pure ingredient.
+   */
+  readonly purchaseUomId = signal<number | null>(null);
+  readonly stockUomId = signal<number | null>(null);
+  /**
+   * Fase 3: is the product we are configuring a pure ingredient?
+   * `is_ingredient && !is_sellable`. Used to switch the modal to the
+   * unit-aware cost-capture mode.
+   */
+  readonly isPureIngredient = computed(() => {
+    const p: any = this.product();
+    if (!p) return false;
+    const sellable = p.is_sellable === undefined || p.is_sellable === null
+      ? true
+      : !!p.is_sellable;
+    return !!p.is_ingredient && !sellable;
+  });
+  /**
+   * Fase 3: effective ingredient mode. Only true when the product is a
+   * pure ingredient AND the store supports the capacity.
+   */
+  readonly ingredientMode = computed(
+    () => this.isPureIngredient() && this.storeSupportsIngredients(),
+  );
+  /**
+   * Fase 3: live preview of the purchase→stock factor the backend will
+   * compute on receive(). Mirrors `unitCapacity` from the product form
+   * and the backend `derivePurchaseToStockFactor`. Null when the user
+   * has not picked both UoMs, or they belong to different dimensions.
+   */
+  readonly unitCapacity = computed<{
+    value: number;
+    unit: string;
+    purchaseUnit: string;
+  } | null>(() => {
+    const purchaseId = this.purchaseUomId();
+    const stockId = this.stockUomId();
+    if (!purchaseId || !stockId) return null;
+    const opts = this.uomCatalog();
+    const stock = opts.find((u) => u.id === stockId);
+    const purchase = opts.find((u) => u.id === purchaseId);
+    if (!stock || !purchase) return null;
+    if (stock.dimension !== purchase.dimension) return null;
+    const sf = Number(stock.factor_to_base);
+    const pf = Number(purchase.factor_to_base);
+    if (!Number.isFinite(sf) || !Number.isFinite(pf) || pf <= 0) return null;
+    const factor = Math.round((pf / sf) * 1e6) / 1e6;
+    return {
+      value: factor,
+      unit: stock.code,
+      purchaseUnit: purchase.code,
+    };
+  });
+  /**
+   * Fase 3: dynamic label for the cost input. Retail mode keeps the
+   * existing text ("Costo unitario"). Ingredient mode shows the actual
+   * presentation ("Costo por L", "Costo por kg") so the user knows
+   * whether they are typing the per-bottle or per-ml price.
+   */
+  readonly costInputLabel = computed(() => {
+    if (!this.ingredientMode()) return 'Costo unitario';
+    const purchaseId = this.purchaseUomId();
+    if (!purchaseId) return 'Costo por unidad de compra';
+    const purchase = this.uomCatalog().find((u) => u.id === purchaseId);
+    return purchase ? `Costo por ${purchase.code}` : 'Costo por unidad de compra';
+  });
   private toastService = inject(ToastService);
   private storeSettingsFacade = inject(StoreSettingsFacade);
   private currencyService: CurrencyFormatService;
@@ -583,8 +771,66 @@ export class PopProductConfigModalComponent {
     effect(() => {
       if (this.isOpen()) {
         this.resetState();
+        this.loadUoMCatalog();
+        this.initializeIngredientUoMDefaults();
       }
     });
+  }
+
+  /**
+   * Fase 3: load the UoM catalog once per modal open. The service caches
+   * results internally (shareReplay), so this is a no-op after the first
+   * call. Errors are non-fatal: the modal falls back to retail-style
+   * capture and shows a toast.
+   */
+  private loadUoMCatalog(): void {
+    this.uomService
+      .getCatalog()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          const data = Array.isArray(res?.data) ? res.data : [];
+          this.uomCatalog.set(data);
+          // Re-resolve defaults once the catalog is in.
+          this.initializeIngredientUoMDefaults();
+        },
+        error: () => {
+          // Non-fatal: retail mode still works.
+          this.uomCatalog.set([]);
+        },
+      });
+  }
+
+  /**
+   * Fase 3: when the product is a pure ingredient, default the modal's
+   * UoM selection from the product itself (purchase_uom_id, stock_uom_id
+   * persisted at product create time). User can still change them in
+   * this modal; the preview updates live.
+   */
+  private initializeIngredientUoMDefaults(): void {
+    const p: any = this.product();
+    if (!p) return;
+    if (!this.isPureIngredient() || !this.storeSupportsIngredients()) {
+      // Not in ingredient mode: clear the UoM FKs so the cart line stays
+      // neutral and the PO will be `retail` by default.
+      this.purchaseUomId.set(null);
+      this.stockUomId.set(null);
+      return;
+    }
+    // Prefer product-defined UoMs; fall back to first UoM in catalog.
+    const catalog = this.uomCatalog();
+    const stockId =
+      p.stock_uom_id ??
+      (catalog.length > 0
+        ? catalog.find((u: any) => u.dimension === 'volume' || u.dimension === 'mass')?.id ?? catalog[0]?.id ?? null
+        : null);
+    const purchaseId =
+      p.purchase_uom_id ??
+      (catalog.length > 0
+        ? catalog.find((u: any) => u.id === stockId)?.id ?? stockId
+        : null);
+    this.stockUomId.set(stockId ?? null);
+    this.purchaseUomId.set(purchaseId ?? null);
   }
 
   get productHasVariants(): boolean {
@@ -770,6 +1016,11 @@ export class PopProductConfigModalComponent {
               ),
               pricing_type: pricingType,
               lot_info: lotInfo,
+              // Fase 3: UoM FKs. We propagate whatever the modal is
+              // currently holding (defaults to product's persisted UoMs
+              // in ingredient mode; null otherwise).
+              purchase_uom_id: this.purchaseUomId(),
+              stock_uom_id: this.stockUomId(),
             });
 
             this.creatingVariants.set(false);
@@ -802,6 +1053,9 @@ export class PopProductConfigModalComponent {
             : Number(this.product()?.cost || this.product()?.cost_price || 0),
           pricing_type: pricingType,
           lot_info: lotInfo,
+          // Fase 3: UoM FKs.
+          purchase_uom_id: this.purchaseUomId(),
+          stock_uom_id: this.stockUomId(),
         });
       } else {
         this.confirmed.emit({
@@ -812,6 +1066,9 @@ export class PopProductConfigModalComponent {
           ),
           pricing_type: pricingType,
           lot_info: lotInfo,
+          // Fase 3: UoM FKs.
+          purchase_uom_id: this.purchaseUomId(),
+          stock_uom_id: this.stockUomId(),
         });
       }
     } else {
@@ -822,6 +1079,9 @@ export class PopProductConfigModalComponent {
         ),
         pricing_type: pricingType,
         lot_info: lotInfo,
+        // Fase 3: UoM FKs.
+        purchase_uom_id: this.purchaseUomId(),
+        stock_uom_id: this.stockUomId(),
       });
     }
 

@@ -145,11 +145,19 @@ export interface PurchaseOrderItem {
     id: number;
     name: string;
     sku?: string;
+    // ===== UoM display hints (Fase UoM) =====
+    stock_unit?: string | null;
+    purchase_unit?: string | null;
+    purchase_to_stock_factor?: number | null;
   };
   products?: {
     id: number;
     name: string;
     sku?: string;
+    // ===== UoM display hints (Fase UoM) =====
+    stock_unit?: string | null;
+    purchase_unit?: string | null;
+    purchase_to_stock_factor?: number | null;
   };
   product_variants?: {
     id: number;

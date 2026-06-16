@@ -10,7 +10,7 @@
     />
 
     <div class="p-2 md:p-6 space-y-6">
-      <app-card title="Secciones" subtitle="Reordena con las flechas" [padding]="true">
+      <app-card title="Secciones" subtitle="Reordena con las flechas o haz clic en el nombre para renombrar" [padding]="true">
         <div class="flex flex-col md:flex-row gap-2 mb-4 md:items-end">
           <app-input
             class="flex-1"
@@ -33,17 +33,52 @@
         @for (section of m.sections; track section.id) {
           <div class="border border-border rounded-md p-3 mb-3">
             <div class="flex items-center justify-between mb-2">
-              <div class="flex items-center gap-2">
+              <div class="flex items-center gap-2 flex-1 min-w-0">
                 <app-button variant="outline" size="sm" (clicked)="moveSection(section, -1)">
                   <app-icon slot="icon" name="chevron-up" [size]="16" />
                 </app-button>
                 <app-button variant="outline" size="sm" (clicked)="moveSection(section, 1)">
                   <app-icon slot="icon" name="chevron-down" [size]="16" />
                 </app-button>
-                <h3 class="font-semibold text-sm md:text-base">{{ section.name }}</h3>
-                <span class="text-xs text-text-secondary">
-                  {{ section.items?.length ?? 0 }} productos
-                </span>
+                @if (isEditingSection(section.id)) {
+                  <input
+                    #sectionRenameInput
+                    type="text"
+                    class="flex-1 min-w-0 px-2 py-1 text-sm border border-primary-300 rounded"
+                    [value]="editingSectionName()"
+                    (input)="onEditSectionName($any($event.target).value)"
+                    (keyup.enter)="saveSectionName(section)"
+                    (keyup.escape)="cancelEditSection()"
+                    autofocus
+                  />
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    (clicked)="saveSectionName(section)"
+                  >
+                    <app-icon slot="icon" name="check" [size]="14" />
+                  </app-button>
+                  <app-button
+                    variant="ghost"
+                    size="sm"
+                    (clicked)="cancelEditSection()"
+                  >
+                    <app-icon slot="icon" name="x" [size]="14" />
+                  </app-button>
+                } @else {
+                  <h3 class="font-semibold text-sm md:text-base truncate">{{ section.name }}</h3>
+                  <app-button
+                    variant="ghost"
+                    size="sm"
+                    (clicked)="startEditSection(section)"
+                    customClasses="!p-1 !w-7 !h-7"
+                  >
+                    <app-icon slot="icon" name="edit-2" [size]="14" />
+                  </app-button>
+                  <span class="text-xs text-text-secondary">
+                    {{ section.items?.length ?? 0 }} productos
+                  </span>
+                }
               </div>
               <app-button variant="outline-danger" size="sm" (clicked)="deleteSection(section)">
                 <app-icon slot="icon" name="trash-2" [size]="14" />
@@ -89,13 +124,19 @@
                 Agregar producto
               </app-button>
             </div>
+            @if (selectedProductIsCombo()) {
+              <p class="text-[11px] text-amber-700 mt-2 flex items-center gap-1">
+                <app-icon name="info" [size]="12"></app-icon>
+                Este producto es un combo: al disparar a cocina descontará la receta del combo.
+              </p>
+            }
           </div>
         }
       </app-card>
 
       <app-card
         title="Ventanas de Disponibilidad"
-        subtitle="Días y horarios en que la carta está activa (menu-level)"
+        subtitle="Días y horarios en que la carta está activa (menu-level). Haz clic en el ícono de editar para modificar una ventana existente."
         [padding]="true"
       >
         <div class="grid grid-cols-1 md:grid-cols-4 gap-2 mb-4 md:items-end">
@@ -126,15 +167,54 @@
 
         <ul class="space-y-1">
           @for (w of m.availability_windows; track w.id) {
-            <li class="flex items-center justify-between bg-gray-50 px-3 py-2 rounded text-sm">
-              <span>
-                <strong>{{ dayLabels[w.day_of_week] }}</strong>
-                · {{ w.start_time }} – {{ w.end_time }}
-              </span>
-              <app-button variant="outline-danger" size="sm" (clicked)="deleteWindow(w)">
-                <app-icon slot="icon" name="trash-2" [size]="14" />
-                Eliminar
-              </app-button>
+            <li class="flex items-center justify-between bg-gray-50 px-3 py-2 rounded text-sm gap-2">
+              @if (isEditingWindow(w.id)) {
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-2 flex-1">
+                  <app-selector
+                    [options]="dayOptions"
+                    [ngModel]="editingWindowDraft().day_of_week"
+                    (ngModelChange)="onEditingDaySelect($event)"
+                  />
+                  <app-input
+                    [type]="'time'"
+                    [ngModel]="editingWindowDraft().start_time"
+                    (ngModelChange)="updateEditingWindow({ start_time: $event })"
+                  />
+                  <app-input
+                    [type]="'time'"
+                    [ngModel]="editingWindowDraft().end_time"
+                    (ngModelChange)="updateEditingWindow({ end_time: $event })"
+                  />
+                </div>
+                <div class="flex items-center gap-1">
+                  <app-button variant="primary" size="sm" (clicked)="saveWindow(w)">
+                    <app-icon slot="icon" name="check" [size]="14" />
+                    Guardar
+                  </app-button>
+                  <app-button variant="ghost" size="sm" (clicked)="cancelEditWindow()">
+                    <app-icon slot="icon" name="x" [size]="14" />
+                  </app-button>
+                </div>
+              } @else {
+                <span class="flex-1">
+                  <strong>{{ dayLabels[w.day_of_week] }}</strong>
+                  · {{ w.start_time }} – {{ w.end_time }}
+                </span>
+                <div class="flex items-center gap-1">
+                  <app-button
+                    variant="ghost"
+                    size="sm"
+                    (clicked)="startEditWindow(w)"
+                    customClasses="!p-1 !w-7 !h-7"
+                  >
+                    <app-icon slot="icon" name="edit-2" [size]="14" />
+                  </app-button>
+                  <app-button variant="outline-danger" size="sm" (clicked)="deleteWindow(w)">
+                    <app-icon slot="icon" name="trash-2" [size]="14" />
+                    Eliminar
+                  </app-button>
+                </div>
+              }
             </li>
           }
         </ul>

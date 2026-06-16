@@ -60,6 +60,8 @@ const lightTheme: Theme = {
 const darkTheme: Theme = {
   mode: 'dark',
   colors: {
+    // Dark theme aligned with the web dark palette:
+    // apps/frontend/src/styles.scss [data-theme="dark"] overrides.
     background: '#0F172A',
     surface: '#1E293B',
     card: '#1E293B',
@@ -71,10 +73,10 @@ const darkTheme: Theme = {
       secondary: '#94A3B8',
       muted: '#64748B',
     },
-    primary: '#4ADE80',
+    primary: '#7ed7a5',
     primaryDark: '#1B3C2B',
     primaryLight: '#14532D',
-    success: '#4ADE80',
+    success: '#7ed7a5',
     warning: '#FBBF24',
     error: '#F87171',
   },

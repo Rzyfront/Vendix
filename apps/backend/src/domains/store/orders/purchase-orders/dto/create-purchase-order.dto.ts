@@ -6,11 +6,12 @@ import {
   IsOptional,
   IsDateString,
   IsArray,
+  IsBoolean,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-import { purchase_order_status_enum } from '@prisma/client';
+import { purchase_order_status_enum, purchase_order_type_enum } from '@prisma/client';
 
 export class PurchaseOrderItemDto {
   @ApiProperty({ description: 'Product ID' })
@@ -32,6 +33,53 @@ export class PurchaseOrderItemDto {
   @IsNumber()
   @IsNotEmpty()
   unit_price: number;
+
+  /**
+   * Fase 2: UoM FKs consumed by the receiving engine to derive the
+   * `purchase_to_stock_factor`. Required when the parent PO has
+   * `order_type='ingredient'`; optional otherwise (retail = factor 1).
+   */
+  @ApiProperty({
+    description:
+      'Fase 2: Purchase UoM FK for ingredient orders. Required when order_type=ingredient.',
+    required: false,
+  })
+  @IsNumber()
+  @IsOptional()
+  purchase_uom_id?: number;
+
+  @ApiProperty({
+    description:
+      'Fase 2: Stock UoM FK for ingredient orders. Required when order_type=ingredient.',
+    required: false,
+  })
+  @IsNumber()
+  @IsOptional()
+  stock_uom_id?: number;
+
+  /**
+   * Ingredient flags. Apply ONLY to NEW products created from this order line
+   * (when the item has no `product_id`). Existing products keep their own
+   * flags untouched. Effective only if the store's industries support the
+   * `is_ingredient` capacity; otherwise the backend forces them off.
+   */
+  @ApiProperty({
+    description:
+      'Mark NEW product as an ingredient (insumo). Applies only to products created from this order line.',
+    required: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  is_ingredient?: boolean;
+
+  @ApiProperty({
+    description:
+      'Mark NEW product as sellable. Applies only to products created from this order line. Forced to false for pure ingredients.',
+    required: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  is_sellable?: boolean;
 
   @ApiProperty({ description: 'Discount percentage (optional)' })
   @IsNumber()
@@ -186,6 +234,21 @@ export class CreatePurchaseOrderDto {
   @IsEnum(purchase_order_status_enum)
   @IsOptional()
   status?: purchase_order_status_enum = purchase_order_status_enum.draft;
+  /**
+   * Fase 2: primary order type. Defaults to `retail`. Set to `ingredient`
+   * for purchase orders that stock insumos via the Modelo B (UoM catalog)
+   * and a non-trivial `purchase_to_stock_factor`. Mixed-line orders are
+   * out of scope for V1.
+   */
+  @ApiProperty({
+    description:
+      'Fase 2: primary order type (retail | ingredient). Defaults to retail for legacy orders.',
+    enum: purchase_order_type_enum,
+    required: false,
+  })
+  @IsEnum(purchase_order_type_enum)
+  @IsOptional()
+  order_type?: purchase_order_type_enum = purchase_order_type_enum.retail;
 
   @ApiProperty({ description: 'Order date' })
   @IsDateString()

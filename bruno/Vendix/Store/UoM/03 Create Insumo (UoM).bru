@@ -1,0 +1,68 @@
+meta {
+  name: 03 Create Insumo (UoM)
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/store/products
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "name": "Insumo UoM Leche {{$timestamp}}",
+    "base_price": 0,
+    "is_ingredient": true,
+    "is_sellable": false,
+    "product_type": "physical",
+    "track_inventory": true,
+    "sku": "UOM-LECHE-{{$timestamp}}"
+  }
+}
+
+script:post-response {
+  if (res.body && res.body.data && res.body.data.id) {
+    bru.setVar("uom_insumo_id", res.body.data.id);
+  }
+}
+
+tests {
+  test("Paso 2: insumo creado con is_ingredient=true", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data.is_ingredient).to.equal(true);
+  });
+}
+
+docs {
+  ## IMPORTANTE — gap de DTO (BUG P0)
+  Esta request NO puede enviar `stock_uom_id` / `purchase_uom_id` /
+  `purchase_to_stock_factor`: el ValidationPipe (forbidNonWhitelisted) los
+  rechaza con 400 porque CreateProductDto no los declara.
+
+  Tras crear el insumo, setear los FK UoM con un UPDATE acotado (fila de
+  prueba propia, seguro bajo CLAUDE.md §6 porque lleva WHERE):
+
+  ```sql
+  -- Sustituir <uom_insumo_id> por el id devuelto por esta request
+  UPDATE products
+     SET stock_uom_id = 4,            -- ml
+         purchase_uom_id = 5,         -- L
+         purchase_to_stock_factor = 1000,
+         stock_unit = 'ml',
+         purchase_unit = 'L'
+   WHERE id = <uom_insumo_id> AND store_id = 10;
+  ```
+
+  Ejecutar vía:
+  docker exec vendix_postgres psql -U username -d vendix_db -c "<SQL>"
+
+  Cuando los campos se expongan en el DTO, mover stock_uom_id/purchase_uom_id/
+  purchase_to_stock_factor al body:json de esta request y borrar esta nota.
+}

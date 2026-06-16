@@ -75,7 +75,8 @@ import { ProductUtils } from '../../utils/product.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
 import { environment } from '../../../../../../../environments/environment';
-import { saleLessThanBaseValidator } from '../../utils/product-validators';
+import { saleLessThanBaseValidator, uomDimensionMatchValidator } from '../../utils/product-validators';
+import { UomService, UnitOfMeasure, UomApiResponse } from '../../../inventory/services';
 import { PriceTiersService } from '../../../price-tiers/services/price-tiers.service';
 import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
 import {
@@ -466,6 +467,7 @@ export class ProductCreatePageComponent {
   private destroyRef = inject(DestroyRef);
   private barcodeService = inject(PosBarcodeService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly uomService = inject(UomService);
 
   /**
    * Industrias EFECTIVAS de la tienda, con la MISMA cascada de fuentes que
@@ -500,6 +502,166 @@ export class ProductCreatePageComponent {
   readonly isRestaurant = computed(() =>
     this.storeIndustries().includes('restaurant'),
   );
+  /**
+   * Fase 0: capability resolver reused from the auth facade. Identical
+   * semantics to `isRestaurant` for now, but expressed through the single
+   * `industriesSupportIngredients` helper so the gating can be extended
+   * beyond `restaurant` in one place. Used for the ingredient capacity.
+   */
+  readonly storeSupportsIngredients = this.authFacade.storeSupportsIngredients;
+
+  // ===== UoM catalog (Fase UoM) =====
+  private readonly uomCatalog = toSignal(this.uomService.getCatalog(), {
+    initialValue: { success: true, data: [] } as UomApiResponse<
+      UnitOfMeasure[]
+    >,
+  });
+  /** All active UoM rows. Cached at service level via shareReplay. */
+  readonly uomOptions = computed<UnitOfMeasure[]>(
+    () => this.uomCatalog()?.data ?? [],
+  );
+  /**
+   * UoM dropdown for the "stock unit" (minimum unit you consume in). Depends on
+   * the chosen PURCHASE unit: only units in the SAME dimension and of
+   * EQUAL-OR-SMALLER size (factor_to_base <= purchase's) are valid, so capacity
+   * = purchase/stock is always >= 1. Flow: pick the presentation you buy (L),
+   * then the form lists the minimum units you can stock in (ml, L). Reads
+   * `uomTick` (bumped on purchase change) to react. Empty until purchase is set.
+   */
+  readonly stockUomOptions = computed<SelectorOption[]>(() => {
+    this.uomTick();
+    const purchaseId = Number(this.productForm?.get('purchase_uom_id')?.value ?? 0);
+    const purchase = this.uomOptions().find((u) => u.id === purchaseId);
+    if (!purchase) return [];
+    const pf = Number(purchase.factor_to_base);
+    return this.uomOptions()
+      .filter(
+        (u) =>
+          u.dimension === purchase.dimension && Number(u.factor_to_base) <= pf,
+      )
+      .map((u) => ({ value: u.id, label: `${u.name} (${u.code})` }));
+  });
+  /**
+   * UoM dropdown for the "purchase unit" (presentation you receive). Free
+   * choice across all active units — it DRIVES the stock-unit options
+   * (`stockUomOptions` filters by this selection). Old `is_base/!is_base` split
+   * was wrong: `mg` (non-base) is smaller than base `g` → capacity 0, and
+   * `unit` (base) was excluded so count ingredients had no option at all.
+   */
+  readonly purchaseUomOptions = computed<SelectorOption[]>(() =>
+    this.uomOptions().map((u) => ({
+      value: u.id,
+      label: `${u.name} (${u.code})`,
+    })),
+  );
+  /** Lookup dimension by UoM id (for the validator closure). */
+  private uomDimensionById(id: number | null): string | null {
+    if (!id) return null;
+    return this.uomOptions().find((u) => u.id === id)?.dimension ?? null;
+  }
+  /** Convenience gate for the template: are we editing an ingredient? */
+  readonly isIngredient = computed(() => {
+    // Reactive-form values are not signals; depend on `formUpdateTrigger`
+    // (bumped on every valueChanges) so toggling "Es insumo" re-opens the
+    // UoM block. Without this dependency the computed froze at its first
+    // value (false) and never reacted. See vendix-zoneless-signals.
+    this.formUpdateTrigger();
+    return !!this.productForm?.get('is_ingredient')?.value;
+  });
+  /**
+   * Mirror of `isIngredient` for `is_sellable`. Defaults to true at form
+   * load; during edit the value comes from the persisted product. Used to
+   * drive the soft-exclusivity rule and the "pure ingredient" gate.
+   */
+  readonly isSellable = computed(() => {
+    this.formUpdateTrigger();
+    const v = this.productForm?.get('is_sellable')?.value;
+    return v === undefined || v === null ? true : !!v;
+  });
+  /**
+   * "Insumo puro": `is_ingredient` true AND `is_sellable` false. When this
+   * holds we hide every retail-sale construct (base_price, sale_price,
+   * multi-tier, e-commerce flag, featured, POS override, online link,
+   * promotions) and force the persisted payload to neutral values so the
+   * backend never receives contradictory state.
+   *
+   * Fase 1 of the insumos-vs-retail consolidation plan.
+   */
+  readonly isPureIngredient = computed(
+    () => this.isIngredient() && !this.isSellable(),
+  );
+
+
+  /**
+   * Bumped whenever a UoM dropdown changes so `unitCapacity` recomputes.
+   * (Reactive form values are not signals; this gives the computed a signal
+   * dependency for user-driven changes. On edit-load the catalog signal
+   * resolving already triggers a recompute.)
+   */
+  readonly uomTick = signal(0);
+
+  /**
+   * Modelo B: derived "volume per unit" (capacity of one sealed container),
+   * e.g. 1 L bought, ml stock → "1000 ml". Mirrors the backend
+   * `derivePurchaseToStockFactor` (round(purchase.factor / stock.factor)) so
+   * the product detail shows the same capacity the engine uses. Null unless
+   * both UoMs are set and share a dimension.
+   */
+  readonly unitCapacity = computed<{
+    value: number;
+    unit: string;
+    purchaseUnit: string;
+  } | null>(() => {
+    this.uomTick();
+    const opts = this.uomOptions();
+    const stockId = Number(this.productForm?.get('stock_uom_id')?.value ?? 0);
+    const purchaseId = Number(this.productForm?.get('purchase_uom_id')?.value ?? 0);
+    if (!stockId || !purchaseId) return null;
+    const stock = opts.find((u) => u.id === stockId);
+    const purchase = opts.find((u) => u.id === purchaseId);
+    if (!stock || !purchase || stock.dimension !== purchase.dimension) return null;
+    const sf = Number(stock.factor_to_base);
+    const pf = Number(purchase.factor_to_base);
+    if (!Number.isFinite(sf) || !Number.isFinite(pf) || sf <= 0 || pf <= 0) {
+      return null;
+    }
+    return {
+      value: Math.round(pf / sf),
+      unit: stock.code,
+      purchaseUnit: purchase.code,
+    };
+  });
+
+  /** Re-run validator + recompute capacity when the stock dropdown changes. */
+  onStockUomChange(): void {
+    this.uomTick.update((t) => t + 1);
+    this.productForm.updateValueAndValidity();
+  }
+
+  /**
+   * Purchase drives the stock options, so when it changes, clear the stock unit
+   * if it's no longer valid (different dimension or larger than the new
+   * purchase unit). Prevents a stale invalid combo (e.g. stock=g + purchase=L).
+   */
+  onPurchaseUomChange(): void {
+    this.uomTick.update((t) => t + 1);
+    const stockCtrl = this.productForm.get('stock_uom_id');
+    const stock = this.uomOptions().find(
+      (u) => u.id === Number(stockCtrl?.value ?? 0),
+    );
+    const purchase = this.uomOptions().find(
+      (u) => u.id === Number(this.productForm.get('purchase_uom_id')?.value ?? 0),
+    );
+    if (
+      stock &&
+      purchase &&
+      (stock.dimension !== purchase.dimension ||
+        Number(stock.factor_to_base) > Number(purchase.factor_to_base))
+    ) {
+      stockCtrl?.setValue(null);
+    }
+    this.productForm.updateValueAndValidity();
+  }
 
   // Data Collection Templates (for consultation configuration)
   dataCollectionTemplates: {
@@ -782,7 +944,184 @@ export class ProductCreatePageComponent {
     ];
   });
 
+  /**
+   * Fase 1: soft-exclusivity between `is_ingredient` and `is_sellable`.
+   *
+   * Form-level rule: turning ON `is_ingredient` forces `is_sellable=false`,
+   * and turning ON `is_sellable` forces `is_ingredient=false`. We use the
+   * previous value snapshot so we only push the OPPOSITE flag, never both
+   * (avoids ping-pong). `{ emitEvent: false }` prevents the patched control
+   * from re-triggering `valueChanges` and re-entering this method.
+   *
+   * The DB does NOT carry a hard constraint (per the plan), so a dual-role
+   * product (insumo + vendible) remains possible by editing the API directly
+   * — this is a UX guardrail, not a data rule.
+   */
+  private applyIngredientSellableSoftExclusivity(value: any): void {
+    const isIngredient = !!value?.is_ingredient;
+    const isSellable = value?.is_sellable === undefined || value?.is_sellable === null
+      ? true
+      : !!value.is_sellable;
+    const ingCtrl = this.productForm?.get('is_ingredient');
+    const sellCtrl = this.productForm?.get('is_sellable');
+    if (!ingCtrl || !sellCtrl) return;
+    const prevIng = !!this.lastIngredientFlag;
+    const prevSell = this.lastSellableFlag === undefined
+      ? true
+      : !!this.lastSellableFlag;
+    this.lastIngredientFlag = isIngredient;
+    this.lastSellableFlag = isSellable;
+    // Only react to the field that actually flipped.
+    if (isIngredient !== prevIng) {
+      if (isIngredient && sellCtrl.value !== false) {
+        sellCtrl.patchValue(false, { emitEvent: false });
+        this.lastSellableFlag = false;
+      }
+    }
+    if (isSellable !== prevSell) {
+      if (isSellable && ingCtrl.value !== false) {
+        ingCtrl.patchValue(false, { emitEvent: false });
+        this.lastIngredientFlag = false;
+      }
+    }
+  }
+  /** Last seen is_ingredient value (used to detect the just-flipped field). */
+  private lastIngredientFlag: boolean | null = null;
+  /** Last seen is_sellable value (undefined = not seen yet; treat as true). */
+  private lastSellableFlag: boolean | undefined = undefined;
+
+  /**
+   * Fase 1: when the product is a "pure ingredient"
+   * (`is_ingredient && !is_sellable`), we hide retail-sale constructs in the
+   * template and force the persisted payload to neutral values:
+   *  - base_price, sale_price/is_on_sale, allow_pos_price_override,
+   *    has_multiple_price_tiers + enabled_price_tier_ids, available_for_ecommerce,
+   *    is_featured, online_purchase_url.
+   *
+   * Implementation: we use Angular Reactive Form `disable()` + `reset()` on
+   * the controls so they are excluded from `value` and skipped on submit.
+   * We also drop the `Validators.required` on `base_price` while the
+   * ingredient flag is on (a pure ingredient does not need a sale price).
+   *
+   * Idempotent: safe to call from a valueChanges subscription and from an
+   * effect that watches `isPureIngredient()`.
+   */
+  private applyIngredientRetailControls(): void {
+    const form = this.productForm;
+    if (!form) return;
+    // isPureIngredient depends on the form, so guard with a reactive form
+    // check. formUpdateTrigger is read by isIngredient() / isSellable() so
+    // we touch it for an explicit dependency on every form change.
+    this.formUpdateTrigger();
+    const pure = this.isPureIngredient();
+    const controls: Array<[string, unknown]> = [
+      ['base_price', 0],
+      ['is_on_sale', false],
+      ['allow_pos_price_override', false],
+      ['has_multiple_price_tiers', false],
+      ['available_for_ecommerce', false],
+      ['is_featured', false],
+    ];
+    for (const [name, neutral] of controls) {
+      const ctrl = form.get(name);
+      if (!ctrl) continue;
+      if (pure) {
+        if (ctrl.enabled) ctrl.disable({ emitEvent: false });
+        // Reset to neutral so persisted payload never carries sale data.
+        ctrl.reset(neutral, { emitEvent: false });
+      } else {
+        if (ctrl.disabled) ctrl.enable({ emitEvent: false });
+      }
+    }
+    // base_price required-ness: drop when pure ingredient; restore otherwise.
+    const basePriceCtrl = form.get('base_price');
+    if (basePriceCtrl) {
+      const validators = (basePriceCtrl as any).validator
+        ? [(basePriceCtrl as any).validator]
+        : [];
+      // We rebuild a minimal validator set: clear required when pure,
+      // otherwise re-add the original required + min(0) pair via the
+      // helper. Easier and safer: store the original validator on first
+      // call, then swap.
+      const w = basePriceCtrl as any;
+      if (!w.__origBasePriceValidator) {
+        w.__origBasePriceValidator = w.validator;
+      }
+      if (pure) {
+        w.setValidators(null);
+      } else if (w.__origBasePriceValidator) {
+        w.setValidators(w.__origBasePriceValidator);
+      }
+      basePriceCtrl.updateValueAndValidity({ emitEvent: false });
+    }
+    // online_purchase_url + promotions list
+    const onlineUrlCtrl = form.get('online_purchase_url');
+    if (onlineUrlCtrl) {
+      if (pure) {
+        if (onlineUrlCtrl.enabled) onlineUrlCtrl.disable({ emitEvent: false });
+        onlineUrlCtrl.reset(null, { emitEvent: false });
+      } else if (onlineUrlCtrl.disabled) {
+        onlineUrlCtrl.enable({ emitEvent: false });
+      }
+    }
+    // Multi-tier ids: empty list when pure.
+    const tierIdsCtrl = form.get('enabled_price_tier_ids');
+    if (tierIdsCtrl) {
+      if (pure) {
+        if (tierIdsCtrl.enabled) tierIdsCtrl.disable({ emitEvent: false });
+        tierIdsCtrl.reset([], { emitEvent: false });
+      } else if (tierIdsCtrl.disabled) {
+        tierIdsCtrl.enable({ emitEvent: false });
+      }
+    }
+    // Promotions are stored on a sibling form/sub-form; we handle the
+    // common one if present.
+    const promoCtrl = form.get('promotions');
+    if (promoCtrl) {
+      if (pure) {
+        if (promoCtrl.enabled) promoCtrl.disable({ emitEvent: false });
+        promoCtrl.reset([], { emitEvent: false });
+      } else if (promoCtrl.disabled) {
+        promoCtrl.enable({ emitEvent: false });
+      }
+    }
+    // sale_price is a nested control under sale_price group in some forms;
+    // if it lives at root we reset it.
+    const salePriceCtrl = form.get('sale_price');
+    if (salePriceCtrl) {
+      if (pure) {
+        if (salePriceCtrl.enabled) salePriceCtrl.disable({ emitEvent: false });
+        salePriceCtrl.reset(0, { emitEvent: false });
+      } else if (salePriceCtrl.disabled) {
+        salePriceCtrl.enable({ emitEvent: false });
+      }
+    }
+  }
+
   constructor() {
+    // Deep-link desde otros módulos: si llegan queryParams (ej. ?is_combo=true&product_type=prepared)
+    // los aplicamos al form. Usamos toSignal(queryParamMap) para que sea reactivo.
+    const queryParamsSignal = toSignal(this.route.queryParamMap, {
+      initialValue: this.route.snapshot.queryParamMap,
+    });
+    effect(() => {
+      const params = queryParamsSignal();
+      const isCombo = params.get('is_combo') === 'true';
+      const productType = params.get('product_type');
+      if (isCombo || productType) {
+        const patch: any = {};
+        if (productType) patch.product_type = productType;
+        if (isCombo) {
+          patch.is_combo = true;
+          patch.is_sellable = true;
+          patch.is_ingredient = false;
+          // un combo suele ser prepared
+          if (!productType) patch.product_type = 'prepared';
+        }
+        this.productForm.patchValue(patch, { emitEvent: false });
+      }
+    });
+
     // Sincronizar trigger con cambios del formulario
     this.productForm.valueChanges
       .pipe(takeUntilDestroyed())
@@ -793,8 +1132,25 @@ export class ProductCreatePageComponent {
         if (next !== this.requiresBookingSig()) {
           this.requiresBookingSig.set(next);
         }
+        // Fase 1: soft-exclusivity between is_ingredient and is_sellable.
+        // We use the previous value (lastSnapshot) to detect the toggle that
+        // the user just flipped, so we only push the counter-flag in one
+        // direction (no infinite ping-pong). `{ emitEvent: false }` keeps
+        // the patched control from re-triggering this same subscription.
+        this.applyIngredientSellableSoftExclusivity(value);
         this.normalizeVariantTrackingForParent();
       });
+
+    // Re-apply retail-controls neutralization whenever the "is pure
+    // ingredient" state changes, including on edit-load. We watch the form
+    // valueChanges (already wired above) and re-evaluate here so disabled
+    // controls and required validators stay in sync with the latest flag.
+    effect(() => {
+      // touch the deps so this runs on every relevant change
+      const _pure = this.isPureIngredient();
+      const _store = this.storeSupportsIngredients();
+      this.applyIngredientRetailControls();
+    });
     this.productForm.statusChanges
       .pipe(takeUntilDestroyed())
       .subscribe(() => this.formUpdateTrigger.update((v) => v + 1));
@@ -1093,9 +1449,18 @@ export class ProductCreatePageComponent {
         is_ingredient: [false],
         is_combo: [false],
         is_batch_produced: [false],
+        // ===== UoM FKs (Fase UoM) =====
+        // The legacy string fields `stock_unit` / `purchase_unit` /
+        // `purchase_to_stock_factor` remain untouched for backfill. The
+        // FKs below are the source of truth once a UoM is picked.
+        stock_uom_id: [null as number | null],
+        purchase_uom_id: [null as number | null],
       },
       {
-        validators: [saleLessThanBaseValidator()],
+        validators: [
+          saleLessThanBaseValidator(),
+          uomDimensionMatchValidator((id: number | null) => this.uomDimensionById(id)),
+        ],
       },
     );
 
@@ -1261,6 +1626,9 @@ export class ProductCreatePageComponent {
       is_ingredient: !!product.is_ingredient,
       is_combo: !!product.is_combo,
       is_batch_produced: !!product.is_batch_produced,
+      // UoM FKs (Fase UoM)
+      stock_uom_id: (product as any).stock_uom_id ?? null,
+      purchase_uom_id: (product as any).purchase_uom_id ?? null,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -2043,6 +2411,37 @@ export class ProductCreatePageComponent {
     return (this.product?.stock_levels || []).length;
   }
 
+  // ===== Modelo B: vista por unidades selladas en el panel de inventario =====
+  /** True si el producto es insumo con capacidad por unidad (factor > 0). */
+  get isIngredientStock(): boolean {
+    const factor = Number((this.product as any)?.purchase_to_stock_factor);
+    return !!(this.product as any)?.is_ingredient && factor > 0;
+  }
+  /** Capacidad (volumen) por unidad sellada, ej. 1000 ml. */
+  private get stockCapacity(): number {
+    return Number((this.product as any)?.purchase_to_stock_factor) || 1;
+  }
+  /** Etiqueta de la unidad mínima (ml, g, ...). */
+  get stockUnitLabel(): string {
+    return ((this.product as any)?.stock_unit as string) || '';
+  }
+  /**
+   * "En inventario" mostrado: unidades selladas (floor(total/capacidad)) para
+   * insumos; el total crudo para retail. `totalStockOnHand` permanece en la
+   * unidad mínima para reservas/ajustes.
+   */
+  get displayStockOnHand(): number {
+    return this.isIngredientStock
+      ? Math.floor(this.totalStockOnHand / this.stockCapacity)
+      : this.totalStockOnHand;
+  }
+  /** "Disponible" mostrado: unidades selladas para insumos; raw para retail. */
+  get displayStockAvailable(): number {
+    return this.isIngredientStock
+      ? Math.floor(this.totalStockAvailable / this.stockCapacity)
+      : this.totalStockAvailable;
+  }
+
   isStockLevelLowStock(stockLevel: any): boolean {
     return (
       Number(stockLevel?.quantity_available ?? 0) <=
@@ -2520,6 +2919,10 @@ export class ProductCreatePageComponent {
       }
     }
 
+    // Fase 1: defense-in-depth — if the user is submitting a pure-ingredient
+    // product, neutralize retail fields right here so the payload cannot leak
+    // sale data even if a UI race left a value behind. Idempotent.
+    this.applyIngredientRetailControls();
     this.isSubmitting.set(true);
     const formValue = this.productForm.getRawValue();
 
@@ -2536,6 +2939,14 @@ export class ProductCreatePageComponent {
 
     const isServiceType = formValue.product_type === 'service';
 
+    // Fase 1: pure-ingredient short-circuit. If the product is a pure
+    // ingredient (is_ingredient && !is_sellable) we DO NOT trust the form
+    // value for retail-sale constructs; we force them to neutral values
+    // and let the backend ignore them. This keeps the persisted DTO
+    // coherent regardless of UI state.
+    const isPureIngredient = !!formValue.is_ingredient && !formValue.is_sellable;
+    const neutral = (v: any, fallback: any) => (isPureIngredient ? fallback : v);
+
     // Basic DTO
     const productData: CreateProductDto = {
       name: formValue.name,
@@ -2543,12 +2954,12 @@ export class ProductCreatePageComponent {
       description: formValue.description || undefined,
       cost_price: Number(formValue.cost_price),
       profit_margin: Number(formValue.profit_margin),
-      base_price: Number(formValue.base_price),
-      is_on_sale: !!formValue.is_on_sale,
-      sale_price: Number(formValue.sale_price),
-      available_for_ecommerce: !!formValue.available_for_ecommerce,
-      is_featured: !!formValue.is_featured,
-      allow_pos_price_override: !!formValue.allow_pos_price_override,
+      base_price: Number(neutral(formValue.base_price, 0)),
+      is_on_sale: !!neutral(formValue.is_on_sale, false),
+      sale_price: Number(neutral(formValue.sale_price, 0)),
+      available_for_ecommerce: !!neutral(formValue.available_for_ecommerce, false),
+      is_featured: !!neutral(formValue.is_featured, false),
+      allow_pos_price_override: !!neutral(formValue.allow_pos_price_override, false),
       sku: formValue.sku || undefined,
       barcode: formValue.barcode || undefined,
       track_inventory: isServiceType ? false : !!formValue.track_inventory,
@@ -2607,17 +3018,32 @@ export class ProductCreatePageComponent {
             }
           : undefined,
       // Multi-tarifa (Phase 4). Empaque ahora vive en cada tarifa.
-      has_multiple_price_tiers: !!formValue.has_multiple_price_tiers,
-      enabled_price_tier_ids: !!formValue.has_multiple_price_tiers
-        ? this.hasLoadedPriceTiers()
-          ? this.enabledPriceTierIdsFromRows()
-          : (this.product?.enabled_price_tier_ids ?? [])
-        : [],
+      // Fase 1: pure-ingredient short-circuits multi-tier (a pure ingredient
+      // does not sell through retail price tiers).
+      has_multiple_price_tiers: isPureIngredient
+        ? false
+        : !!formValue.has_multiple_price_tiers,
+      enabled_price_tier_ids: isPureIngredient
+        ? []
+        : !!formValue.has_multiple_price_tiers
+          ? this.hasLoadedPriceTiers()
+            ? this.enabledPriceTierIdsFromRows()
+            : (this.product?.enabled_price_tier_ids ?? [])
+          : [],
       // Restaurant Suite toggles (Fase B)
       is_sellable: formValue.is_sellable !== false,
       is_ingredient: !!formValue.is_ingredient,
       is_combo: !!formValue.is_combo,
       is_batch_produced: !!formValue.is_batch_produced,
+      // UoM FKs (Fase UoM) — only sent when the product is an ingredient.
+      // Sending `null` for non-ingredients keeps the column clean and the
+      // product list filters untouched.
+      stock_uom_id: formValue.is_ingredient
+        ? formValue.stock_uom_id ?? null
+        : null,
+      purchase_uom_id: formValue.is_ingredient
+        ? formValue.purchase_uom_id ?? null
+        : null,
     };
 
     // Add Variants - ALWAYS send the array so the backend can handle the toggle

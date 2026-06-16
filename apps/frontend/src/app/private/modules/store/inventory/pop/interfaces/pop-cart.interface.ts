@@ -134,6 +134,24 @@ export interface PreBulkData {
   category_ids?: number[] | string;
   is_on_sale?: boolean;
   sale_price?: number;
+  /**
+   * Fase 3 (insumos desde compra): marca el producto nuevo como insumo.
+   * Cuando es true, el backend lo crea con `is_ingredient=true` y la orden
+   * se infiere como `order_type='ingredient'`. Por defecto false (retail).
+   */
+  is_ingredient?: boolean;
+  /**
+   * Exclusividad suave con `is_ingredient`: cuando se marca como insumo,
+   * deja de ser vendible (`is_sellable=false`). Retail por defecto true.
+   */
+  is_sellable?: boolean;
+  /**
+   * UoM FKs capturadas en el modal prebulk cuando el producto es insumo.
+   * Null para productos retail. El backend las usa al recibir para derivar
+   * el `purchase_to_stock_factor` (Modelo B).
+   */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
 }
 
 /**
@@ -156,6 +174,14 @@ export interface PopCartItem {
   // Pre-bulk flag (temporary product not in catalog)
   is_prebulk?: boolean;
   prebulk_data?: PreBulkData;
+  /**
+   * Fase 3: UoM FKs the backend uses during reception to derive
+   * `purchase_to_stock_factor` (Modelo B). Required when the parent PO
+   * has `order_type='ingredient'`; the cart shows a live capacity preview
+   * (e.g. "1 L = 1000 ml") to make the user's intent explicit.
+   */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
   addedAt: Date;
 }
 
@@ -213,6 +239,13 @@ export interface AddToPopCartRequest {
   notes?: string;
   is_prebulk?: boolean;
   prebulk_data?: PreBulkData;
+  /**
+   * Fase 4: UoM FKs preseleccionadas (p.ej. por el scanner de facturas
+   * desde `uom_hint`). Se propagan al `PopCartItem` para que el backend
+   * derive el `purchase_to_stock_factor` al recibir. Null en retail.
+   */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
 }
 
 /**

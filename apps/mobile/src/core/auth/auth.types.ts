@@ -1,3 +1,6 @@
+// TODO(shared-types): replace with `export type AppType = DomainApp` from
+// `@vendix/shared-types` once libs/shared-types/index.d.ts is regenerated.
+// Tracked as a Knowledge Gap in the org-admin parity plan.
 export type AppType =
   | 'VENDIX_LANDING'
   | 'VENDIX_ADMIN'
@@ -38,6 +41,21 @@ export interface User {
   avatar_url?: string | null;
   organization_id?: number;
   main_store_id?: number;
+  // Profile fields returned by /auth/me and other profile endpoints
+  // (added to unblock typescheck on profile.tsx — these were already
+  // consumed by the UI before the type was extended).
+  document_type?: string;
+  document_number?: string;
+  addresses?: {
+    address_line1?: string;
+    address_line2?: string;
+    city?: string;
+    state_province?: string;
+    country?: string;
+    country_code?: string;
+    postal_code?: string;
+  }[];
+  created_at?: string;
   roles: string[];
   organizations?: {
     id: number;

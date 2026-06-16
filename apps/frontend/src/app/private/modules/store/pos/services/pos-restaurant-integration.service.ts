@@ -1,4 +1,5 @@
 import { Injectable, inject, signal, computed, DestroyRef } from '@angular/core';
+import { industriesSupportIngredients } from '../../../../../shared/constants/industry-modules.constant';
 import { HttpClient } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
@@ -127,6 +128,14 @@ export class PosRestaurantIntegrationService {
   /** `true` only when the active store is tagged with the `restaurant` industry. */
   readonly isRestaurantMode = computed(() =>
     this.industries().includes('restaurant'),
+  );
+  /**
+   * Fase 0: ingredient capacity flag for the same store industries. Today
+   * identical to `isRestaurantMode`, but routed through the shared resolver
+   * so future industries can opt in without touching call sites.
+   */
+  readonly storeSupportsIngredients = computed(() =>
+    industriesSupportIngredients(this.industries()),
   );
 
   /** Active menu snapshot used by the POS product picker to group items. */

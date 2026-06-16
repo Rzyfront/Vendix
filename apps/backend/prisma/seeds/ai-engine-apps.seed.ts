@@ -75,6 +75,65 @@ RULES:
       prompt_template: null,
     },
     {
+      key: 'invoice_ocr_ingredient',
+      name: 'Escaner de Facturas — Insumos (UoM)',
+      description:
+        'Variante de invoice_ocr para órdenes de insumo. Devuelve los mismos campos de retail + presentation / pack_size / uom_hint para sugerir la unidad de compra y de stock al usuario en el modal POP.',
+      output_format: 'json',
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 4500,
+      is_active: true,
+      system_prompt: `You are a purchase invoice data extraction system specialized in INGREDIENT orders. You analyze invoice images for kitchen / restaurant supply and return structured JSON.
+
+In addition to the retail invoice_ocr schema, you MUST also extract (when visible):
+- "presentation": how the item is packaged (e.g. "1 L bottle", "5 kg sack", "12-unit case")
+- "pack_size": number of base units per presentation, when inferable
+- "uom_hint": a UoM code that best matches the purchase unit (e.g. "L", "ml", "kg", "g", "unit")
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "supplier": {
+    "name": "string — full business name",
+    "tax_id": "string or null — NIT with verification digit",
+    "address": "string or null",
+    "phone": "string or null"
+  },
+  "invoice_number": "string",
+  "invoice_date": "YYYY-MM-DD",
+  "payment_terms": "string or null",
+  "line_items": [
+    {
+      "description": "string — product name as printed",
+      "quantity": number,
+      "unit_price": number,
+      "total": number,
+      "sku_if_visible": "string or null",
+      "presentation": "string or null",
+      "pack_size": number or null,
+      "uom_hint": "string or null"
+    }
+  ],
+  "subtotal": number,
+  "tax_amount": number,
+  "total": number,
+  "confidence": number (0-100)
+}
+
+RULES:
+1. Use EXACTLY these field names. Do NOT translate, rename, or add fields not in the schema.
+2. Convert Colombian number formats (1.234.567,89) to standard (1234567.89). Never return formatted numbers.
+3. NIT may appear as "NIT", "N.I.T.", "CC". Include verification digit with hyphen (e.g., "900123456-7").
+4. tax_amount = ONLY IVA. Do not include retenciones.
+5. Use null when a field is not present. Never invent data.
+6. presentation: extract verbatim when visible (e.g. "X 1 L", "CAJA 12 UN", "1 KG"). null if not present.
+7. pack_size: number of base units inside ONE presentation, when computable from the line (e.g. "12-unit case" → 12). null if not derivable.
+8. uom_hint: use one of L, ml, kg, g, unit. If unsure, use null.
+9. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.`,
+      prompt_template: null,
+    },
+        {
       key: 'rut_scanner',
       name: 'Escaner de RUT (Identidad Fiscal)',
       description:
@@ -620,7 +679,7 @@ Devuelve SOLO este JSON:
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'rut_scanner']) {
+    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -739,7 +798,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'rut_scanner']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);

@@ -29,6 +29,8 @@ import {
   MenuFull,
   MenuSection,
   MenuSectionItem,
+  UpdateMenuSectionDto,
+  UpdateAvailabilityWindowDto,
 } from '../../interfaces';
 import { MenusService } from '../../services';
 import { ProductsService } from '../../../../products/services/products.service';
@@ -95,6 +97,22 @@ export class MenuBuilderPageComponent implements OnInit {
     label: d,
   }));
 
+  /** Edición inline de nombre de sección (Fase 2 alignment). */
+  readonly editingSectionId = signal<number | null>(null);
+  readonly editingSectionName = signal<string>('');
+
+  /** Edición inline de ventana horaria (Fase 2 alignment). */
+  readonly editingWindowId = signal<number | null>(null);
+  readonly editingWindowDraft = signal<{
+    day_of_week: number;
+    start_time: string;
+    end_time: string;
+  }>({
+    day_of_week: 1,
+    start_time: '08:00',
+    end_time: '12:00',
+  });
+
   /** Mapea los productos disponibles al contrato SelectorOption del app-selector. */
   readonly productSelectorOptions = computed<SelectorOption[]>(() =>
     this.productOptions().map((p) => ({
@@ -132,6 +150,12 @@ export class MenuBuilderPageComponent implements OnInit {
   onDaySelect(value: string | number | null): void {
     this.updateNewWindow({ day_of_week: value == null ? 0 : Number(value) });
   }
+
+  readonly selectedProductIsCombo = computed(() => {
+    const id = this.newItemProductId();
+    if (id == null) return false;
+    return this.productOptions().find((p) => p.id === id)?.is_combo === true;
+  });
 
   readonly totalProductsInMenu = computed(() => {
     const m = this.menu();
@@ -319,6 +343,119 @@ export class MenuBuilderPageComponent implements OnInit {
             typeof e === 'string' ? e : 'Error al reordenar',
           ),
       });
+  }
+
+  // -------------------------- section rename (inline) ---------------
+
+  startEditSection(section: MenuSection): void {
+    this.editingSectionId.set(section.id);
+    this.editingSectionName.set(section.name);
+  }
+
+  cancelEditSection(): void {
+    this.editingSectionId.set(null);
+    this.editingSectionName.set('');
+  }
+
+  saveSectionName(section: MenuSection): void {
+    const name = this.editingSectionName().trim();
+    const menu = this.menu();
+    if (!menu || !name || name === section.name) {
+      this.cancelEditSection();
+      return;
+    }
+    const dto: UpdateMenuSectionDto = { name };
+    this.menusService
+      .updateSection(menu.id, section.id, dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Sección renombrada');
+          this.cancelEditSection();
+          this.loadMenu(menu.id);
+        },
+        error: (e: unknown) => {
+          this.toastService.error(
+            typeof e === 'string' ? e : 'Error al renombrar la sección',
+          );
+        },
+      });
+  }
+
+  onEditSectionName(value: string): void {
+    this.editingSectionName.set(value);
+  }
+
+  // -------------------------- window edit (inline) --------------------
+
+  startEditWindow(w: AvailabilityWindow): void {
+    this.editingWindowId.set(w.id);
+    this.editingWindowDraft.set({
+      day_of_week: w.day_of_week,
+      start_time: w.start_time,
+      end_time: w.end_time,
+    });
+  }
+
+  cancelEditWindow(): void {
+    this.editingWindowId.set(null);
+  }
+
+  saveWindow(w: AvailabilityWindow): void {
+    const draft = this.editingWindowDraft();
+    const menu = this.menu();
+    if (!menu) return;
+    // No-op si nada cambió.
+    if (
+      draft.day_of_week === w.day_of_week &&
+      draft.start_time === w.start_time &&
+      draft.end_time === w.end_time
+    ) {
+      this.cancelEditWindow();
+      return;
+    }
+    if (!draft.start_time || !draft.end_time) {
+      this.toastService.error('Hora de inicio y fin son obligatorias');
+      return;
+    }
+    const dto: UpdateAvailabilityWindowDto = {
+      day_of_week: draft.day_of_week,
+      start_time: draft.start_time,
+      end_time: draft.end_time,
+    };
+    this.menusService
+      .updateAvailability(w.id, dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Ventana actualizada');
+          this.cancelEditWindow();
+          this.loadMenu(menu.id);
+        },
+        error: (e: unknown) => {
+          this.toastService.error(
+            typeof e === 'string' ? e : 'Error al actualizar la ventana',
+          );
+        },
+      });
+  }
+
+  updateEditingWindow(patch: Partial<{ day_of_week: number; start_time: string; end_time: string }>): void {
+    this.editingWindowDraft.set({ ...this.editingWindowDraft(), ...patch });
+  }
+
+  onEditingDaySelect(value: string | number | null): void {
+    this.updateEditingWindow({
+      day_of_week: value == null ? 0 : Number(value),
+    });
+  }
+
+  isEditingSection(id: number): boolean {
+    return this.editingSectionId() === id;
+  }
+
+  isEditingWindow(id: number): boolean {
+    return this.editingWindowId() === id;
   }
 
   // -------------------------- availability windows ---------------------

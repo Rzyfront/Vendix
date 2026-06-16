@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import { ERROR_MESSAGES } from '../../../../../core/utils/error-messages';
@@ -73,6 +73,17 @@ export class AnunciosService {
 
   deleteAnuncio(id: number) {
     return this.http.delete<ApiResponse<null>>(`${this.apiUrl}/${id}`);
+  }
+
+  getImageBlob(
+    id: number,
+    variant: 'full' | 'thumb' = 'full',
+  ): Observable<HttpResponse<Blob>> {
+    return this.http.get(`${this.apiUrl}/${id}/image`, {
+      params: { variant },
+      responseType: 'blob',
+      observe: 'response',
+    });
   }
 
   productImageProxyUrl(imageId: number): string {

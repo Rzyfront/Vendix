@@ -195,6 +195,46 @@ export class MarketingAdCreativesService {
     };
   }
 
+  async getCreativeImageAsset(
+    id: number,
+    variant: 'full' | 'thumb' = 'full',
+  ): Promise<{ buffer: Buffer; contentType: string; fileName: string }> {
+    const creativeDelegate = this.getCreativeDelegate();
+    await this.ensureAdStorageAvailable();
+
+    const creative = !creativeDelegate
+      ? await this.getCreativeAssetKeysRaw(id)
+      : await this.runWithAdStorageGuard(() =>
+          creativeDelegate.findFirst({
+            where: { id },
+            select: { title: true, image_url: true, thumb_url: true },
+          }),
+        );
+
+    if (!creative) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+
+    const rawKey =
+      variant === 'thumb' ? creative.thumb_url : creative.image_url;
+    const key = this.s3Service.sanitizeForStorage(rawKey);
+    if (!key) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'El anuncio seleccionado no tiene una imagen disponible para descargar.',
+      );
+    }
+
+    const contentType = this.imageContentType(key);
+    const fileName = this.buildDownloadFileName(creative.title, contentType);
+
+    return {
+      buffer: await this.s3Service.downloadImage(key),
+      contentType,
+      fileName,
+    };
+  }
+
   async suggestPrompt(dto: SuggestMarketingAdPromptDto) {
     const productIds = this.uniqueNumbers(dto.product_ids || []);
     const products = productIds.length
@@ -1658,6 +1698,23 @@ export class MarketingAdCreativesService {
       .slice(0, 50);
   }
 
+  private buildDownloadFileName(
+    title: string | null | undefined,
+    contentType: string,
+  ): string {
+    const normalized = (title || '')
+      .normalize('NFD')
+      .replace(new RegExp('[\\u0300-\\u036f]', 'g'), '');
+    const slug = this.slugify(normalized) || 'anuncio';
+    const extensionByType: Record<string, string> = {
+      'image/png': '.png',
+      'image/jpeg': '.jpg',
+      'image/webp': '.webp',
+    };
+    const extension = extensionByType[contentType] || '.png';
+    return `${slug}${extension}`;
+  }
+
   private getCreativeDelegate(): any | null {
     const delegate = (this.prisma as any).marketing_ad_creatives;
     return delegate?.findMany && delegate?.count ? delegate : null;
@@ -2058,6 +2115,25 @@ export class MarketingAdCreativesService {
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
       `
       SELECT "id", "image_url", "thumb_url"
+      FROM "marketing_ad_creatives"
+      WHERE "id" = $1 AND "store_id" = $2
+      LIMIT 1
+      `,
+      id,
+      context.store_id,
+    );
+    return rows[0] || null;
+  }
+
+  private async getCreativeAssetKeysRaw(id: number) {
+    const context = this.getContext();
+    if (!(await this.hasAdStorage())) {
+      throw this.adStorageUnavailableException();
+    }
+
+    const rows = await this.prisma.$queryRawUnsafe<any[]>(
+      `
+      SELECT "id", "title", "image_url", "thumb_url"
       FROM "marketing_ad_creatives"
       WHERE "id" = $1 AND "store_id" = $2
       LIMIT 1

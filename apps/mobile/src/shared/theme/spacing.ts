@@ -21,11 +21,13 @@ export const spacing = {
   24: 96,
 };
 
+// Border-radius aligned with apps/frontend/src/styles.scss
+// --radius-* tokens (md=0.5rem=8, lg=0.75rem=12).
 export const borderRadius = {
   none: 0,
   sm: 4,
-  md: 6,
-  lg: 10,
+  md: 8,
+  lg: 12,
   xl: 12,
   '2xl': 16,
   full: 9999,

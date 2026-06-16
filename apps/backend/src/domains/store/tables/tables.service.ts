@@ -36,6 +36,21 @@ export interface FloorMapTable {
     guest_count: number | null;
   } | null;
   effective_status: TableStatus;
+  pending_bookings?: Array<{
+    id: number;
+    booking_number: string;
+    date: string | Date;
+    start_time: string;
+    end_time: string;
+    status: string;
+    customer: {
+      id: number;
+      first_name: string;
+      last_name: string;
+      phone: string | null;
+    } | null;
+    product: { id: number; name: string } | null;
+  }>;
 }
 
 /**
@@ -283,6 +298,28 @@ export class TablesService {
       }
     }
 
+    // Próximas reservas por mesa (pending o confirmed).
+    const bookings = await this.prisma.bookings.findMany({
+      where: {
+        table_id: { in: tableIds },
+        status: { in: ['pending', 'confirmed'] },
+        date: { gte: new Date(new Date().toISOString().slice(0, 10)) },
+      },
+      orderBy: [{ date: 'asc' }, { start_time: 'asc' }],
+      include: {
+        customer: {
+          select: { id: true, first_name: true, last_name: true, phone: true },
+        },
+        product: { select: { id: true, name: true } },
+      },
+    });
+    const bookingsByTable = new Map<number, typeof bookings>();
+    for (const b of bookings) {
+      const arr = bookingsByTable.get(b.table_id!) ?? [];
+      arr.push(b);
+      bookingsByTable.set(b.table_id!, arr);
+    }
+
     return tables.map((t): FloorMapTable => {
       const active = activeByTable.get(t.id) ?? null;
       return {
@@ -298,6 +335,25 @@ export class TablesService {
             }
           : null,
         effective_status: active ? 'occupied' : (t.status as TableStatus),
+        pending_bookings: (bookingsByTable.get(t.id) ?? []).map((b) => ({
+          id: b.id,
+          booking_number: b.booking_number,
+          date: b.date,
+          start_time: b.start_time,
+          end_time: b.end_time,
+          status: b.status,
+          customer: b.customer
+            ? {
+                id: b.customer.id,
+                first_name: b.customer.first_name,
+                last_name: b.customer.last_name,
+                phone: b.customer.phone ?? null,
+              }
+            : null,
+          product: b.product
+            ? { id: b.product.id, name: b.product.name }
+            : null,
+        })),
       };
     });
   }

@@ -97,17 +97,59 @@
           />
         </div>
 
-        <!-- Merma % -->
-        <div class="md:col-span-2">
-          <app-input
-            label="Merma %"
-            type="number"
-            formControlName="waste_percent"
-            placeholder="0"
-            [min]="0"
-            [max]="100"
-            step="0.5"
-          />
+        <!-- Merma: modo % vs absoluta (Fase UoM) -->
+        <div class="md:col-span-2 space-y-1">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-medium text-gray-700">Merma</span>
+            <div class="inline-flex rounded-md border border-gray-200 overflow-hidden text-[10px]">
+              <button
+                type="button"
+                class="px-2 py-0.5"
+                [class.bg-blue-600]="row.get('waste_mode')?.value === 'percent'"
+                [class.text-white]="row.get('waste_mode')?.value === 'percent'"
+                [class.text-gray-600]="row.get('waste_mode')?.value !== 'percent'"
+                (click)="row.get('waste_mode')?.setValue('percent')"
+              >
+                %
+              </button>
+              <button
+                type="button"
+                class="px-2 py-0.5"
+                [class.bg-blue-600]="row.get('waste_mode')?.value === 'absolute'"
+                [class.text-white]="row.get('waste_mode')?.value === 'absolute'"
+                [class.text-gray-600]="row.get('waste_mode')?.value !== 'absolute'"
+                (click)="row.get('waste_mode')?.setValue('absolute')"
+              >
+                absoluta
+              </button>
+            </div>
+            <span class="text-[10px] text-gray-500">
+              @if (row.get('waste_mode')?.value === 'absolute') {
+                en {{ row.get('component_product_id')?.value ? getStockUnitLabel(row.get('component_product_id')?.value) : 'unid. del insumo' }}
+              }
+            </span>
+          </div>
+
+          @if (row.get('waste_mode')?.value === 'absolute') {
+            <app-input
+              label="Merma absoluta"
+              type="number"
+              formControlName="waste_absolute"
+              placeholder="0"
+              [min]="0"
+              step="0.0001"
+            />
+          } @else {
+            <app-input
+              label="Merma %"
+              type="number"
+              formControlName="waste_percent"
+              placeholder="0"
+              [min]="0"
+              [max]="100"
+              step="0.5"
+            />
+          }
         </div>
 
         <!-- Opcional -->

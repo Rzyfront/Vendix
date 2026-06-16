@@ -924,6 +924,13 @@ export class StorePrismaService extends BasePrismaService {
     return this.baseClient.organizations;
   }
 
+  // Units of Measure catalog (Fase UoM). Global read-only data — same
+  // rationale as `countries` / `currencies` / `organizations`. Used to derive
+  // products.purchase_to_stock_factor from factor_to_base at create/update.
+  get units_of_measure() {
+    return this.baseClient.units_of_measure;
+  }
+
   get brands() {
     return this.scoped_client.brands;
   }

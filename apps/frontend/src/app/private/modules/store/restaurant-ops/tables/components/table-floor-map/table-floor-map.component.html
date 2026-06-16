@@ -1,4 +1,8 @@
-<div class="grid gap-3" [style.grid-template-columns]="'repeat(auto-fill, minmax(140px, 1fr))'">
+<div
+  class="grid gap-3"
+  [class.is-editable]="editable()"
+  [style.grid-template-columns]="'repeat(auto-fill, minmax(140px, 1fr))'"
+>
   @for (cell of groupedTables(); track trackByTableId($index, cell)) {
     <button
       type="button"
@@ -7,8 +11,16 @@
       [class.is-available]="cell.displayStatus === 'available'"
       [class.is-reserved]="cell.displayStatus === 'reserved'"
       [class.is-cleaning]="cell.displayStatus === 'cleaning'"
+      [class.is-editable]="editable()"
       [style.--cell-color]="cell.statusColor"
       (click)="onTableClick(cell.table)"
+      [draggable]="editable()"
+      [style.grid-column]="cellPos(cell.table).col"
+      [style.grid-row]="cellPos(cell.table).row"
+      (dragstart)="onDragStart($event, cell)"
+      (dragover)="onDragOver($event)"
+      (drop)="onDrop($event, cell)"
+      (dragend)="onDragEnd()"
       [attr.aria-label]="
         'Mesa ' +
         cell.table.name +
@@ -44,6 +56,12 @@
         </span>
         @if (cell.isOccupied && cell.table.active_session) {
           <span class="session-id">#{{ cell.table.active_session.id }}</span>
+        }
+        @if (cell.displayStatus === 'reserved' && (cell.table.pending_bookings?.length ?? 0) > 0) {
+          <span class="reservation-tag" title="Reservas pendientes">
+            <app-icon name="calendar" [size]="12"></app-icon>
+            {{ cell.table.pending_bookings?.length }}
+          </span>
         }
       </div>
     </button>

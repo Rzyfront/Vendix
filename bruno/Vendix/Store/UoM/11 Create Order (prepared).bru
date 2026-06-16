@@ -1,0 +1,52 @@
+meta {
+  name: 11 Create Order (prepared)
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{baseUrl}}/store/orders
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{uomToken}}
+}
+
+body:json {
+  {
+    "customer_id": 167,
+    "subtotal": 15000,
+    "total_amount": 15000,
+    "items": [
+      {
+        "product_id": {{uom_prep_id}},
+        "product_name": "Plato Preparado UoM",
+        "quantity": 1,
+        "unit_price": 15000,
+        "total_price": 15000,
+        "item_type": "product"
+      }
+    ]
+  }
+}
+
+script:post-response {
+  const d = res.body && res.body.data;
+  if (d) {
+    bru.setVar("uom_order_id", d.id);
+    const items = d.order_items || d.items || [];
+    if (items.length) bru.setVar("uom_order_item_id", items[0].id);
+  }
+}
+
+tests {
+  test("Paso 5: orden creada con 1 unidad del preparado", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+    const items = res.body.data.order_items || res.body.data.items || [];
+    expect(items.length).to.equal(1);
+    expect(items[0].inventory_consumed_at_fire).to.not.equal(true);
+  });
+}

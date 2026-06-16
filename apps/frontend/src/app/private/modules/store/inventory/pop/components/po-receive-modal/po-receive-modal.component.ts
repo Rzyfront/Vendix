@@ -17,6 +17,16 @@ interface ReceiveLineItem {
   quantity_received: number;
   pending: number;
   receive_quantity: number;
+  // ===== UoM display (Fase UoM) =====
+  // The receive_quantity is in the PURCHASE unit (the unit the operator
+  // sees on the PO line, e.g. L, kg, saco). The minimum stock unit
+  // (ml, g) and the factor are shown as informational hints only — the
+  // backend is the single place that multiplies by the factor to record
+  // stock in the minimum unit. See purchase-orders.service.ts ->
+  // resolveUoMConversion.
+  stock_unit?: string | null;
+  purchase_unit?: string | null;
+  purchase_to_stock_factor?: number | null;
 }
 
 @Component({
@@ -64,13 +74,27 @@ interface ReceiveLineItem {
                 </td>
                 <td class="py-2.5 px-3 text-center">
                   @if (item.pending > 0) {
-                    <input
-                      type="number"
-                      [min]="0"
-                      [max]="item.pending"
-                      class="w-20 rounded-md border border-border bg-surface px-2 py-1.5 text-center text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                      [(ngModel)]="item.receive_quantity"
-                    >
+                    <div class="flex flex-col items-center gap-0.5">
+                      <input
+                        type="number"
+                        [min]="0"
+                        [max]="item.pending"
+                        class="w-20 rounded-md border border-border bg-surface px-2 py-1.5 text-center text-sm text-text-primary focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                        [(ngModel)]="item.receive_quantity"
+                      >
+                      <!-- UoM hint (Fase UoM) — display only. The backend is
+                           the single place that converts to minimum stock
+                           unit using purchase_to_stock_factor. -->
+                      @if (item.purchase_to_stock_factor && item.purchase_to_stock_factor > 1) {
+                        <span class="text-[10px] text-gray-500">
+                          {{ item.purchase_unit }} × {{ item.purchase_to_stock_factor }}
+                          = {{ (item.receive_quantity || 0) * (item.purchase_to_stock_factor || 0) }}
+                          {{ item.stock_unit }}
+                        </span>
+                      } @else if (item.purchase_unit) {
+                        <span class="text-[10px] text-gray-500">{{ item.purchase_unit }}</span>
+                      }
+                    </div>
                   } @else {
                     <span class="text-xs text-success font-medium">Completo</span>
                   }
@@ -179,6 +203,10 @@ export class PoReceiveModalComponent {
           quantity_received: received,
           pending,
           receive_quantity: 0,
+          // Display hints for the UoM section in the receive row.
+          stock_unit: product?.stock_unit ?? null,
+          purchase_unit: product?.purchase_unit ?? null,
+          purchase_to_stock_factor: product?.purchase_to_stock_factor ?? null,
         };
       })
     );
