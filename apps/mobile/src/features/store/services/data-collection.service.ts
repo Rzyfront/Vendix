@@ -64,6 +64,16 @@ export const DataCollectionService = {
       return unwrap<DataCollectionTemplate>(res);
     },
 
+    async create(data: Partial<DataCollectionTemplate>): Promise<DataCollectionTemplate> {
+      const res = await apiClient.post(TEMPLATES_BASE, data);
+      return unwrap<DataCollectionTemplate>(res);
+    },
+
+    async update(id: number, data: Partial<DataCollectionTemplate>): Promise<DataCollectionTemplate> {
+      const res = await apiClient.patch(`${TEMPLATES_BASE}/${id}`, data);
+      return unwrap<DataCollectionTemplate>(res);
+    },
+
     async delete(id: number): Promise<void> {
       await apiClient.delete(`${TEMPLATES_BASE}/${id}`);
     },
