@@ -43,15 +43,17 @@
           [options]="yieldOptions()"
           [required]="true"
           [disabled]="isEditMode() || isLoadingProducts()"
-          helpText="Una receta solo puede existir una vez por producto. En modo edición este campo se bloquea."
+          tooltipText="El plato o sub-receta que produces con estos insumos. Una receta por producto. En modo edición este campo se bloquea."
         />
 
-        <app-input
+        <app-selector
           formControlName="yield_unit"
           label="Unidad de rendimiento"
-          placeholder="Ej. plato, porción, g, ml"
+          placeholder="Selecciona una unidad"
+          [options]="yieldUnitOptions"
+          [searchable]="true"
           [required]="true"
-          [maxlength]="20"
+          tooltipText="En qué unidad mides lo que produce la receta (porción, plato, g, ml…)."
         />
       </div>
 
@@ -64,7 +66,7 @@
           [min]="0"
           step="0.0001"
           [required]="true"
-          helpText="Cantidad producida por lote de la receta."
+          tooltipText="Cuánto produce un lote de la receta, en la unidad de rendimiento."
         />
 
         <app-input
@@ -75,7 +77,7 @@
           [min]="0"
           [max]="100"
           step="0.5"
-          helpText="Porcentaje de merma esperado para el rendimiento total."
+          tooltipText="Pérdida del plato terminado por el proceso (cocción, evaporación, residuo). Se aplica sobre el rendimiento total."
         />
 
         <app-setting-toggle

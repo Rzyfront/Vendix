@@ -47,7 +47,8 @@
   <div class="space-y-3">
     @for (row of items().controls; track row; let i = $index) {
       <div
-        class="rounded-lg p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-background border transition-colors"
+        class="recipe-item rounded-lg p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-background border transition-colors"
+        [class.recipe-item--just-added]="row === justAddedRow()"
         [style.borderColor]="
           isUnsaved(row)
             ? 'rgba(var(--color-primary-rgb), 0.4)'
@@ -77,12 +78,9 @@
             [disabled]="isLoadingIngredients()"
             [searchable]="true"
             [required]="true"
+            tooltipText="Insumo o sub-receta que entra en el plato."
+            (valueChange)="onComponentSelected($event, row)"
           />
-          @if (productUnit(row.value.component_product_id)) {
-            <p class="mt-1 text-xs text-text-secondary">
-              Unidad de medida: {{ productUnit(row.value.component_product_id) }}
-            </p>
-          }
         </div>
 
         <!-- Cantidad -->
@@ -94,62 +92,31 @@
             placeholder="0"
             [min]="0"
             step="0.0001"
-          />
+            tooltipText="Cuánto de este insumo lleva la receta, en su unidad de medida."
+            [suffixIcon]="true"
+          >
+            <span
+              slot="suffix-icon"
+              class="text-xs text-text-secondary font-medium"
+            >
+              {{ productUnit(row.value.component_product_id) }}
+            </span>
+          </app-input>
         </div>
 
-        <!-- Merma: modo % vs absoluta (Fase UoM) -->
-        <div class="md:col-span-2 space-y-1">
-          <div class="flex items-center gap-2">
-            <span class="text-xs font-medium text-gray-700">Merma</span>
-            <div class="inline-flex rounded-md border border-gray-200 overflow-hidden text-[10px]">
-              <button
-                type="button"
-                class="px-2 py-0.5"
-                [class.bg-blue-600]="row.get('waste_mode')?.value === 'percent'"
-                [class.text-white]="row.get('waste_mode')?.value === 'percent'"
-                [class.text-gray-600]="row.get('waste_mode')?.value !== 'percent'"
-                (click)="row.get('waste_mode')?.setValue('percent')"
-              >
-                %
-              </button>
-              <button
-                type="button"
-                class="px-2 py-0.5"
-                [class.bg-blue-600]="row.get('waste_mode')?.value === 'absolute'"
-                [class.text-white]="row.get('waste_mode')?.value === 'absolute'"
-                [class.text-gray-600]="row.get('waste_mode')?.value !== 'absolute'"
-                (click)="row.get('waste_mode')?.setValue('absolute')"
-              >
-                absoluta
-              </button>
-            </div>
-            <span class="text-[10px] text-gray-500">
-              @if (row.get('waste_mode')?.value === 'absolute') {
-                en {{ row.get('component_product_id')?.value ? getStockUnitLabel(row.get('component_product_id')?.value) : 'unid. del insumo' }}
-              }
-            </span>
-          </div>
-
-          @if (row.get('waste_mode')?.value === 'absolute') {
-            <app-input
-              label="Merma absoluta"
-              type="number"
-              formControlName="waste_absolute"
-              placeholder="0"
-              [min]="0"
-              step="0.0001"
-            />
-          } @else {
-            <app-input
-              label="Merma %"
-              type="number"
-              formControlName="waste_percent"
-              placeholder="0"
-              [min]="0"
-              [max]="100"
-              step="0.5"
-            />
-          }
+        <!-- Merma % (única vía UI; el modelo conserva waste_mode/waste_absolute
+             para no romper `syncItems()` del parent). -->
+        <div class="md:col-span-2">
+          <app-input
+            label="Merma %"
+            type="number"
+            formControlName="waste_percent"
+            placeholder="0"
+            [min]="0"
+            [max]="100"
+            step="0.5"
+            tooltipText="Porcentaje que se pierde de ESTE insumo al limpiarlo o prepararlo. Sube su costo real."
+          />
         </div>
 
         <!-- Opcional -->

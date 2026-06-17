@@ -93,6 +93,23 @@ export class RecipeFormPageComponent implements OnInit {
    */
   readonly yieldOptions = signal<SelectorOption[]>([]);
 
+  /**
+   * Curated list of yield units for restaurant recipes. Keeps `yield_unit`
+   * as a free VARCHAR(20) in the DB (no migration) while steering the user
+   * to the canonical codes used in the UoM catalog and the unit conversion
+   * pipeline.
+   */
+  readonly yieldUnitOptions: SelectorOption[] = [
+    { value: 'porción', label: 'Porción' },
+    { value: 'plato', label: 'Plato' },
+    { value: 'unidad', label: 'Unidad' },
+    { value: 'ración', label: 'Ración' },
+    { value: 'g', label: 'Gramos (g)' },
+    { value: 'kg', label: 'Kilogramos (kg)' },
+    { value: 'ml', label: 'Mililitros (ml)' },
+    { value: 'L', label: 'Litros (L)' },
+  ];
+
   readonly itemsArray = this.fb.nonNullable.array<
     FormGroup<RecipeItemFormControls>
   >([]);
