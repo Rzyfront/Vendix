@@ -166,6 +166,15 @@ export type AdjustmentType = 'damage' | 'loss' | 'theft' | 'expiration' | 'count
 export type AdjustmentState = 'pending' | 'applied';
 export type TransferState = 'pending' | 'in_transit' | 'completed' | 'cancelled';
 export type LocationType = 'warehouse' | 'store' | 'virtual';
+
+/**
+ * Aliases legacy — mantener para compatibilidad hacia atrás.
+ * El contrato real del backend es `is_active: boolean`
+ * (ver Prisma `inventory_locations`/`suppliers`, backend DTOs en
+ * `apps/backend/src/domains/store/inventory/{locations,suppliers}/dto/`,
+ * y el frontend Angular `inventory.interface.ts`).
+ * NO usar en código nuevo — usar `item.is_active` directamente.
+ */
 export type SupplierState = 'active' | 'inactive';
 export type LocationState = 'active' | 'inactive';
 

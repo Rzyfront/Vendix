@@ -15,6 +15,7 @@ import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
+import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 
 const TYPE_VARIANT: Record<LocationType, 'info' | 'warning' | 'default'> = {
@@ -243,7 +244,7 @@ export default function LocationsScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['locations'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
-      toastSuccess('Ubicación eliminada correctamente');
+      toastSuccess('Ubicación desactivada correctamente');
     },
     onError: (error: any) => {
       const message = error?.response?.data?.message || error?.message || 'Error al eliminar la ubicación';
@@ -253,6 +254,8 @@ export default function LocationsScreen() {
 
   // Estado del popup "más opciones" por card
   const [cardMoreAnchor, setCardMoreAnchor] = useState<{ top: number; right: number; item: Location } | null>(null);
+  // Estado del confirm dialog de eliminación
+  const [deleteTarget, setDeleteTarget] = useState<Location | null>(null);
 
   // Toggle estado desde la card
   const handleToggleActive = useCallback((item: Location) => {
@@ -266,11 +269,19 @@ export default function LocationsScreen() {
     });
   }, [screenW]);
 
-  // Confirmar eliminar
-  const handleDelete = useCallback((item: Location) => {
+  // Abrir confirm dialog de eliminar (cierra el popup "más opciones" primero)
+  const handleAskDelete = useCallback((item: Location) => {
     setCardMoreAnchor(null);
-    deleteMutation.mutate(item.id);
-  }, [deleteMutation]);
+    setDeleteTarget(item);
+  }, []);
+
+  // Confirmar eliminar
+  const handleConfirmDelete = useCallback(() => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    setDeleteTarget(null);
+    deleteMutation.mutate(id);
+  }, [deleteTarget, deleteMutation]);
 
   const allLocations = data?.pages.flatMap((p) => p.data) ?? [];
 
@@ -475,7 +486,7 @@ export default function LocationsScreen() {
             <View style={styles.dropdown}>
               <Pressable
                 style={styles.dropdownItem}
-                onPress={() => handleDelete(cardMoreAnchor.item)}
+                onPress={() => handleAskDelete(cardMoreAnchor.item)}
               >
                 <View style={[styles.dropdownIconWrap, { backgroundColor: colorScales.red[50] }]}>
                   <Ionicons name="trash" size={18} color={colorScales.red[600]} />
@@ -765,6 +776,23 @@ export default function LocationsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Confirm dialog de eliminación */}
+      <ConfirmDialog
+        visible={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        title="Eliminar ubicación"
+        message={
+          deleteTarget
+            ? `¿Estás seguro de eliminar "${deleteTarget.name}"? Esta acción no se puede deshacer.`
+            : ''
+        }
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        destructive
+        loading={deleteMutation.isPending}
+      />
     </View>
   );
 }
