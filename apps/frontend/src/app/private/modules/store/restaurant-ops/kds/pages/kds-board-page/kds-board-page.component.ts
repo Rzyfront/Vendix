@@ -268,20 +268,23 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Badge color per column header. */
-  columnBadgeVariant(
-    column: KdsColumn,
-  ): 'success' | 'warning' | 'error' | 'neutral' | 'info' {
+  /**
+   * Lucide icon per column/status — shown inside the solid header bar.
+   * Pairs the status color with a semantic glyph so the kitchen reads the
+   * column at a glance from across the line.
+   */
+  columnIcon(column: KdsColumn): string {
     switch (column) {
-      case 'ready':
-      case 'delivered':
-        return 'success';
-      case 'in_preparation':
-        return 'warning';
-      case 'cancelled':
-        return 'error';
       case 'pending':
-        return 'neutral';
+        return 'clock';
+      case 'in_preparation':
+        return 'flame';
+      case 'ready':
+        return 'circle-check';
+      case 'delivered':
+        return 'check-check';
+      case 'cancelled':
+        return 'circle-x';
     }
   }
 

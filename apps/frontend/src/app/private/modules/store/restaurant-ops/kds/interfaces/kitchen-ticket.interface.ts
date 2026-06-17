@@ -38,6 +38,8 @@ export interface KitchenTicket {
   id: number;
   store_id: number;
   order_id: number;
+  daily_number?: number | null;
+  order?: { order_number: string } | null;
   table_id?: number | null;
   status: KitchenTicketStatus;
   fired_at: string | Date;

@@ -10,6 +10,22 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { FireOrderItemsDto, KitchenTicketQueryDto } from './dto';
 
 /**
+ * Single source of truth for the kitchen-ticket payload shape returned to
+ * the KDS / POS. Exposes the parent order code (`order.order_number`) plus
+ * the per-item product summary. Used by all four ticket read paths so the
+ * contract stays consistent (`daily_number` lives on the ticket row).
+ */
+const KITCHEN_TICKET_INCLUDE = {
+  order: { select: { order_number: true } },
+  items: {
+    orderBy: { id: 'asc' },
+    include: {
+      product: { select: { id: true, name: true, sku: true, stock_unit: true } },
+    },
+  },
+} satisfies Prisma.kitchen_ticketsInclude;
+
+/**
  * Result of {@link KitchenFireService.fireOrderItems}. Returned to the
  * controller and (eventually) the POS UI to confirm the fire was
  * accepted and which items were actually consumed.
@@ -89,6 +105,20 @@ export class KitchenFireService {
     private readonly eventEmitter: EventEmitter2,
     private readonly sseService: NotificationsSseService,
   ) {}
+
+  /** Fecha de negocio 'YYYY-MM-DD' en tz de la tienda, desplazada por la hora de corte (default 3 AM → un ticket a la 1 AM cuenta para el día anterior). Configurable vía store_settings.settings.restaurant_ops.business_day_cutoff_hour. */
+  private async getBusinessDate(store_id: number): Promise<string> {
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id }, select: { settings: true },
+    });
+    const settings = (row?.settings ?? {}) as any;
+    const timezone = settings?.general?.timezone || 'America/Bogota';
+    const cutoffHour = Number(settings?.restaurant_ops?.business_day_cutoff_hour ?? 3) || 0;
+    const shifted = new Date(Date.now() - cutoffHour * 3_600_000);
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(shifted);
+  }
 
   // ---------------------------------------------------------------- fire
   async fireOrderItems(
@@ -203,6 +233,10 @@ export class KitchenFireService {
       locationByProduct.set(pid, loc);
     }
 
+    // 3c. Resolve the store business date (tz + cutoff-aware) BEFORE the
+    //     transaction; the advisory lock + daily counter run inside.
+    const businessDate = await this.getBusinessDate(store_id);
+
     // 4. ATOMIC TRANSACTION — for each item: per-leaf stock consumption +
     //    flag flip. Then create the kitchen_ticket + items.
     const result = await this.prisma.$transaction(async (tx) => {
@@ -270,6 +304,15 @@ export class KitchenFireService {
         });
       }
 
+      // Serialize the daily correlative per (store, business_date) with a
+      // transaction-scoped advisory lock so concurrent fires can't collide
+      // on the same daily_number. The lock auto-releases at commit/rollback.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate})::int)`;
+      const sameDayCount = await tx.kitchen_tickets.count({
+        where: { store_id, business_date: new Date(`${businessDate}T00:00:00.000Z`) },
+      });
+      const dailyNumber = sameDayCount + 1;
+
       // Create the kitchen_ticket + items (one ticket per fire call, one
       // item per fired order_item). Status defaults to 'pending'; Fase F
       // owns the KDS SSE controller that mutates these later.
@@ -278,6 +321,8 @@ export class KitchenFireService {
           store_id,
           order_id: order.id,
           status: 'pending',
+          daily_number: dailyNumber,
+          business_date: new Date(`${businessDate}T00:00:00.000Z`),
           fired_at: new Date(),
           items: {
             create: firedItemSnapshots.map((snap) => ({
@@ -326,16 +371,7 @@ export class KitchenFireService {
     try {
       const fullTicket = await this.prisma.kitchen_tickets.findFirst({
         where: { id: result.ticketId, store_id },
-        include: {
-          items: {
-            orderBy: { id: 'asc' },
-            include: {
-              product: {
-                select: { id: true, name: true, sku: true, stock_unit: true },
-              },
-            },
-          },
-        },
+        include: KITCHEN_TICKET_INCLUDE,
       });
       if (fullTicket) {
         this.pushKitchenEvent(store_id, {
@@ -396,16 +432,7 @@ export class KitchenFireService {
     }
     const ticket = await this.prisma.kitchen_tickets.findFirst({
       where: { id: ticketId, store_id },
-      include: {
-        items: {
-          orderBy: { id: 'asc' },
-          include: {
-            product: {
-              select: { id: true, name: true, sku: true, stock_unit: true },
-            },
-          },
-        },
-      },
+      include: KITCHEN_TICKET_INCLUDE,
     });
     if (!ticket) {
       throw new VendixHttpException(ErrorCodes.KITCHEN_TICKET_NOT_FOUND);
@@ -631,16 +658,7 @@ export class KitchenFireService {
         fired_at: { gte: cutoff },
       },
       orderBy: { fired_at: 'asc' },
-      include: {
-        items: {
-          orderBy: { id: 'asc' },
-          include: {
-            product: {
-              select: { id: true, name: true, sku: true, stock_unit: true },
-            },
-          },
-        },
-      },
+      include: KITCHEN_TICKET_INCLUDE,
     });
 
     return { data, total: data.length, server_ts: now.getTime() };
@@ -666,16 +684,7 @@ export class KitchenFireService {
         where,
         take: limit,
         orderBy: { fired_at: 'desc' },
-        include: {
-          items: {
-            orderBy: { id: 'asc' },
-            include: {
-              product: {
-                select: { id: true, name: true, sku: true, stock_unit: true },
-              },
-            },
-          },
-        },
+        include: KITCHEN_TICKET_INCLUDE,
       }),
       this.prisma.kitchen_tickets.count({ where }),
     ]);

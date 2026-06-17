@@ -9,7 +9,7 @@
   <header class="kds-card__header">
     <div class="kds-card__id">
       <span class="kds-card__hash">#</span>
-      <span class="kds-card__number">{{ ticket().id }}</span>
+      <span class="kds-card__number">{{ ticket().daily_number ?? ticket().id }}</span>
     </div>
     <div class="kds-card__meta">
       @if (ticket().table_id) {
@@ -18,7 +18,7 @@
         </span>
       }
       <span class="kds-card__order" title="Orden">
-        <app-icon name="file-text" [size]="12" /> Orden #{{ ticket().order_id }}
+        <app-icon name="file-text" [size]="12" /> Orden {{ ticket().order?.order_number ?? ('#' + ticket().order_id) }}
       </span>
     </div>
   </header>
@@ -73,7 +73,8 @@
     @if (ticket().status === 'pending') {
       <app-button
         variant="primary"
-        size="sm"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onStart()"
         [disabled]="isMutating()"
         [loading]="isMutating()"
@@ -82,8 +83,9 @@
         Iniciar
       </app-button>
       <app-button
-        variant="outline"
-        size="sm"
+        variant="outline-danger"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onCancel()"
         [disabled]="isMutating()"
       >
@@ -93,7 +95,8 @@
     } @else if (ticket().status === 'in_preparation') {
       <app-button
         variant="success"
-        size="sm"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onReady()"
         [disabled]="isMutating()"
         [loading]="isMutating()"
@@ -102,8 +105,9 @@
         Listo
       </app-button>
       <app-button
-        variant="outline"
-        size="sm"
+        variant="outline-danger"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onCancel()"
         [disabled]="isMutating()"
       >
@@ -113,7 +117,8 @@
     } @else if (ticket().status === 'ready') {
       <app-button
         variant="primary"
-        size="sm"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onDeliver()"
         [disabled]="isMutating()"
         [loading]="isMutating()"
@@ -122,8 +127,9 @@
         Entregar
       </app-button>
       <app-button
-        variant="outline"
-        size="sm"
+        variant="outline-danger"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onCancel()"
         [disabled]="isMutating()"
       >

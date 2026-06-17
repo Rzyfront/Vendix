@@ -93,61 +93,116 @@
 .kds-column {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  background: rgba(0, 0, 0, 0.02);
+  background: var(--color-surface, #ffffff);
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
   border-radius: 12px;
-  padding: 0.5rem;
+  /* Clip the solid header bar to the rounded top corners. */
+  overflow: hidden;
   min-height: 200px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
+/* ── Per-status theming ────────────────────────────────────────────────
+   Each column exposes its palette as custom properties consumed by the
+   header bar + body tint. ACTIVE states (prep/ready) get SOLID saturated
+   bars (deep tones that pass WCAG AA against white text); the neutral
+   PENDING bar stays calm; TERMINAL states (delivered/cancelled) recede
+   behind a muted theme bar with only a colored icon to carry the
+   green/red semantic — theme-safe in both light and dark. */
 [data-column='pending'] {
-  border-top: 3px solid rgba(107, 114, 128, 0.5);
+  --kds-h-bg: #475569;
+  --kds-h-fg: #ffffff;
+  --kds-tint: rgba(71, 85, 105, 0.05);
 }
 [data-column='in_preparation'] {
-  border-top: 3px solid rgba(251, 146, 60, 0.7);
+  --kds-h-bg: #c2410c;
+  --kds-h-fg: #ffffff;
+  --kds-tint: rgba(194, 65, 12, 0.05);
 }
+/* Listos = verde primary de Vendix (mismo par marca que el botón "Refrescar"). */
 [data-column='ready'] {
-  border-top: 3px solid rgba(16, 185, 129, 0.7);
+  --kds-h-bg: var(--color-primary, #2ecc71);
+  --kds-h-fg: var(--color-text-on-primary, #ffffff);
+  --kds-tint: rgba(46, 204, 113, 0.06);
 }
-/* Delivered = green (order left the kitchen successfully). */
+/* Entregados = azul de los badges (info/primary). */
 [data-column='delivered'] {
-  border-top: 3px solid rgba(34, 197, 94, 0.75);
-  background: rgba(34, 197, 94, 0.03);
+  --kds-h-bg: #2563eb;
+  --kds-h-fg: #ffffff;
+  --kds-tint: rgba(37, 99, 235, 0.05);
+  /* Still a touch dimmer than the active columns — terminal, but coloured. */
   opacity: 0.9;
 }
-/* Cancelled = red (order was voided). Visually distinct from delivered. */
 [data-column='cancelled'] {
-  border-top: 3px solid rgba(239, 68, 68, 0.7);
-  background: rgba(239, 68, 68, 0.03);
+  --kds-h-bg: #b91c1c;
+  --kds-h-fg: #ffffff;
+  --kds-tint: rgba(239, 68, 68, 0.05);
   opacity: 0.9;
 }
 
 .kds-column__header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 0 0.25rem;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--kds-h-bg, #475569);
+  color: var(--kds-h-fg, #ffffff);
+}
+
+.kds-column__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  /* Active/pending inherit the bar's fg (white); terminal columns override
+     with --kds-icon to keep the green/red signal on the muted bar. */
+  color: var(--kds-icon, inherit);
 }
 
 .kds-column__title {
+  flex: 1;
+  min-width: 0;
   margin: 0;
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--color-text-secondary, #4b5563);
+  letter-spacing: 0.06em;
+  color: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kds-column__count {
+  flex-shrink: 0;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  /* One rule for both bar styles: a translucent wash of the header's own
+     foreground colour — reads as frosted-white on solid bars and as a
+     soft neutral chip on the muted terminal bars. */
+  background: color-mix(in srgb, var(--kds-h-fg, #ffffff) 20%, transparent);
+  color: inherit;
 }
 
 .kds-column__body {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  padding: 0.5rem;
+  background: var(--kds-tint, transparent);
 }
 
 .kds-column__empty {
-  margin: 0;
-  padding: 1rem 0.5rem;
+  margin: auto 0;
+  padding: 1.5rem 0.5rem;
   text-align: center;
   font-size: 0.75rem;
   color: var(--color-text-tertiary, #9ca3af);
