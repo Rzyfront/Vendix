@@ -94,9 +94,11 @@ async function bootstrap() {
 
   const staticOrigins = [
     'http://localhost:4200',
+    'http://localhost:8081', // Expo Go (mobile dev)
+    'http://localhost:8082', // Metro web dev (reservado)
+    'http://localhost:8083', // Metro web dev con Expo SDK 54+
     'http://localhost',
     'http://localhost:3000',
-    'http://localhost:8081',
     // Production - Dynamically generated using BASE_DOMAIN env var
     `https://${baseDomain}`,
     `https://www.${baseDomain}`,
