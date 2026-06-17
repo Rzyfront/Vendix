@@ -137,12 +137,18 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
   ],
   template: `
     <div class="flex flex-col overflow-hidden pos-container">
-      <!-- POS Stats (hidden on mobile and in quotation mode) -->
-      @if (!isQuotationMode() && !isLayawayMode()) {
-        <div class="flex-none hidden lg:block pb-4">
-          <app-pos-stats [cartState]="cartState()"></app-pos-stats>
-        </div>
-      }
+      <!--
+        A/B TEST (2026-06): bloque de stats del POS (app-pos-stats) ocultado como
+        prueba A/B. Antes mostraba las stats en desktop fuera de los modos
+        cotizacion/separado. Restaurar este bloque tal cual si la metrica de
+        conversion lo justifica:
+        @if (!isQuotationMode() && !isLayawayMode()) {
+          <div class="flex-none hidden lg:block pb-4">
+            <app-pos-stats [cartState]="cartState()"></app-pos-stats>
+          </div>
+        }
+      -->
+
 
       <!-- Main POS Interface -->
       <div
