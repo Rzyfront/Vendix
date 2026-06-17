@@ -160,6 +160,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "f2f1cf38",
+      "created_by": "rzy",
+      "created_at": "2026-06-17T15:05:06Z",
+      "sessions": 13,
+      "memories": 13,
+      "prompts": 5
     }
   ]
 }
