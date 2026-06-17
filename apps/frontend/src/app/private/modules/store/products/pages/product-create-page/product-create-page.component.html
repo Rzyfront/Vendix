@@ -1674,7 +1674,65 @@
             </h2>
           </div>
 
-          <!-- Estado del Producto -->
+          <!-- Insumo: el Desglose reemplaza al Estado del Producto (Modelo B) -->
+          @if (isIngredientStock) {
+            <div
+              class="space-y-2 mb-4 p-3 bg-bg rounded-xl border border-border"
+            >
+              <div class="flex items-center gap-1.5">
+                <app-icon
+                  name="flask-conical"
+                  size="14"
+                  class="text-primary-600"
+                ></app-icon>
+                <p
+                  class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
+                >
+                  Desglose del insumo
+                </p>
+              </div>
+              <!-- Envases sellados -->
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-text-secondary"
+                  >Envases sellados</span
+                >
+                <span class="text-xs font-bold text-text-primary"
+                  >{{ displayStockOnHand }} und</span
+                >
+              </div>
+              <!-- Volumen abierto -->
+              @if (stockOpenRemaining > 0) {
+                <div class="flex items-center justify-between">
+                  <span class="text-xs text-text-secondary"
+                    >Volumen abierto</span
+                  >
+                  <span class="text-xs font-bold text-amber-600"
+                    >{{ stockOpenRemaining }} {{ stockUnitLabel }}</span
+                  >
+                </div>
+              }
+              <!-- Capacidad por envase -->
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-text-secondary"
+                  >Capacidad por envase</span
+                >
+                <span class="text-xs font-medium text-text-primary"
+                  >{{ stockUnitCapacity }} {{ stockUnitLabel }}</span
+                >
+              </div>
+              <!-- Volumen total -->
+              <div
+                class="flex items-center justify-between border-t border-border pt-1.5"
+              >
+                <span class="text-xs text-text-secondary">Volumen total</span>
+                <span class="text-xs font-bold text-primary-700"
+                  >{{ totalStockOnHand }} {{ stockUnitLabel }}</span
+                >
+              </div>
+            </div>
+          }
+          <!-- Estado del Producto (oculto para insumos) -->
+          @if (!isIngredientStock) {
           <div class="space-y-2 mb-4 p-3 bg-bg rounded-xl border border-border">
             <p
               class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
@@ -1765,6 +1823,7 @@
               </div>
             </div>
           </div>
+          }
 
           @if (!productForm.get("track_inventory")?.value) {
             <div
@@ -2112,11 +2171,16 @@
           <div class="p-3 bg-surface rounded-lg border border-border">
             <span
               class="block text-[9px] text-text-muted uppercase font-bold tracking-wider mb-1"
-              >Físico</span
+              >{{ isIngredientStock ? "En inventario" : "Físico" }}</span
             >
             <span class="text-lg font-bold text-text-primary">{{
-              totalStockOnHand
+              isIngredientStock ? displayStockOnHand : totalStockOnHand
             }}</span>
+            @if (isIngredientStock) {
+              <span class="block text-[9px] text-text-muted mt-0.5"
+                >und selladas</span
+              >
+            }
           </div>
           <div class="p-3 bg-surface rounded-lg border border-border">
             <span
@@ -2124,10 +2188,57 @@
               >Disponible</span
             >
             <span class="text-lg font-bold text-primary-600">{{
-              totalStockAvailable
+              isIngredientStock ? displayStockAvailable : totalStockAvailable
             }}</span>
+            @if (isIngredientStock) {
+              <span class="block text-[9px] text-text-muted mt-0.5"
+                >und selladas</span
+              >
+            }
           </div>
         </div>
+
+        <!-- Desglose del insumo (mobile, Modelo B) -->
+        @if (isIngredientStock) {
+          <div class="space-y-2 p-3 bg-bg rounded-xl border border-border">
+            <div class="flex items-center gap-1.5">
+              <app-icon
+                name="flask-conical"
+                size="14"
+                class="text-primary-600"
+              ></app-icon>
+              <p
+                class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
+              >
+                Desglose del insumo
+              </p>
+            </div>
+            @if (stockOpenRemaining > 0) {
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-text-secondary">Volumen abierto</span>
+                <span class="text-xs font-bold text-amber-600"
+                  >{{ stockOpenRemaining }} {{ stockUnitLabel }}</span
+                >
+              </div>
+            }
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-text-secondary"
+                >Capacidad por envase</span
+              >
+              <span class="text-xs font-medium text-text-primary"
+                >{{ stockUnitCapacity }} {{ stockUnitLabel }}</span
+              >
+            </div>
+            <div
+              class="flex items-center justify-between border-t border-border pt-1.5"
+            >
+              <span class="text-xs text-text-secondary">Volumen total</span>
+              <span class="text-xs font-bold text-primary-700"
+                >{{ totalStockOnHand }} {{ stockUnitLabel }}</span
+              >
+            </div>
+          </div>
+        }
 
         <!-- Actions -->
         <div class="flex gap-2">
@@ -3116,6 +3227,70 @@
       </div>
     </div>
 
+    <!-- Desglose del insumo (Modelo B) -->
+    @if (isIngredientStock) {
+      <div class="p-4 bg-bg rounded-xl border border-border space-y-3">
+        <h3
+          class="text-sm font-bold text-gray-900 flex items-center gap-2"
+        >
+          <app-icon
+            name="flask-conical"
+            size="16"
+            class="text-primary-600"
+          ></app-icon>
+          Desglose del insumo
+        </h3>
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div>
+            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5">
+              Envases sellados
+            </p>
+            <p class="text-lg font-bold text-text-primary">
+              {{ displayStockOnHand }}
+              <span class="text-xs font-medium text-text-muted">und</span>
+            </p>
+          </div>
+          <div>
+            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5">
+              Volumen abierto
+            </p>
+            <p
+              class="text-lg font-bold"
+              [class.text-amber-600]="stockOpenRemaining > 0"
+              [class.text-text-muted]="stockOpenRemaining === 0"
+            >
+              {{ stockOpenRemaining }}
+              <span class="text-xs font-medium text-text-muted">{{
+                stockUnitLabel
+              }}</span>
+            </p>
+          </div>
+          <div>
+            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5">
+              Capacidad / envase
+            </p>
+            <p class="text-lg font-bold text-text-primary">
+              {{ stockUnitCapacity }}
+              <span class="text-xs font-medium text-text-muted">{{
+                stockUnitLabel
+              }}</span>
+            </p>
+          </div>
+          <div>
+            <p class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5">
+              Volumen total
+            </p>
+            <p class="text-lg font-bold text-primary-700">
+              {{ totalStockOnHand }}
+              <span class="text-xs font-medium text-text-muted">{{
+                stockUnitLabel
+              }}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+    }
+
     <!-- Inventory by Location Table -->
     <div>
       <h3 class="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
@@ -3152,6 +3327,12 @@
               <div>
                 <span class="text-text-muted">Físico:</span>
                 <span class="font-medium ml-1">{{ sl.quantity_on_hand }}</span>
+                @if (isIngredientStock) {
+                  <span class="block text-[10px] text-text-muted mt-0.5">
+                    {{ slSealedUnits(sl) }} sell ·
+                    {{ slOpenRemaining(sl) }} {{ stockUnitLabel }} abierto
+                  </span>
+                }
               </div>
               <div>
                 <span class="text-text-muted">Reservado:</span>
@@ -3220,6 +3401,12 @@
                     class="px-4 py-3 text-center text-sm text-text-secondary font-medium"
                   >
                     {{ sl.quantity_on_hand }}
+                    @if (isIngredientStock) {
+                      <span class="block text-[10px] text-text-muted mt-0.5">
+                        {{ slSealedUnits(sl) }} sell ·
+                        {{ slOpenRemaining(sl) }} {{ stockUnitLabel }} abierto
+                      </span>
+                    }
                   </td>
                   <td
                     class="px-4 py-3 text-center text-sm text-primary-600 font-medium"

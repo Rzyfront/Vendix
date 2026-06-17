@@ -2442,6 +2442,35 @@ export class ProductCreatePageComponent {
       : this.totalStockAvailable;
   }
 
+  /**
+   * Volumen restante en el envase actualmente abierto, en unidad mínima
+   * (ej. 680 ml de un envase de 1000 ml). Espeja el backend
+   * `deriveUoMSplit` → `qty % capacidad`. 0 para retail o sin envase abierto.
+   */
+  get stockOpenRemaining(): number {
+    return this.isIngredientStock
+      ? this.totalStockOnHand % this.stockCapacity
+      : 0;
+  }
+
+  /** Capacidad (volumen) por envase sellado, ej. 1000 ml. Público para display. */
+  get stockUnitCapacity(): number {
+    return this.isIngredientStock ? this.stockCapacity : 0;
+  }
+
+  /** Unidades selladas en una bodega concreta (modal de detalle por ubicación). */
+  slSealedUnits(sl: any): number {
+    const qty = Number(sl?.quantity_on_hand ?? 0);
+    return this.isIngredientStock ? Math.floor(qty / this.stockCapacity) : qty;
+  }
+
+  /** Volumen abierto en una bodega concreta (modal de detalle por ubicación). */
+  slOpenRemaining(sl: any): number {
+    return this.isIngredientStock
+      ? Number(sl?.quantity_on_hand ?? 0) % this.stockCapacity
+      : 0;
+  }
+
   isStockLevelLowStock(stockLevel: any): boolean {
     return (
       Number(stockLevel?.quantity_available ?? 0) <=

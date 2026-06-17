@@ -412,10 +412,14 @@ small {
 }
 
 /* Compact mobile layouts */
-.grid,
+/* [EXPERIMENTO] gap global desactivado para validar layout más compacto.
+   Esta regla pisaba las utilidades gap-* de Tailwind (misma especificidad,
+   declarada después). Al desactivarla, cada componente recupera su gap
+   explícito (gap-2/gap-4/…) o el default 0 de Tailwind. */
+/* .grid,
 .flex {
   gap: var(--spacing-sm-mobile);
-}
+} */
 
 .list-item {
   padding: var(--spacing-sm-mobile) var(--spacing-md-mobile);
