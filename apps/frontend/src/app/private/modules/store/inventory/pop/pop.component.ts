@@ -40,7 +40,6 @@ import { PopMobileFooterComponent } from './components/pop-mobile-footer.compone
 import { PopCartModalComponent } from './components/pop-cart-modal.component';
 import {
   PopProductConfigModalComponent,
-  PopProductConfigResult,
 } from './components/pop-product-config-modal.component';
 import { PopOrderConfirmationModalComponent } from './components/pop-order-confirmation-modal.component';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
@@ -50,6 +49,11 @@ import {
   MatchedLineItem,
 } from './interfaces/invoice-scanner.interface';
 import { CostPreviewResponse } from '../interfaces';
+import {
+  PopProductConfigResult,
+  PopProductModalResult,
+} from './interfaces/pop-cart.interface';
+import { POP_USE_UNIFIED_MODAL } from './pop.config';
 
 /**
  * POP (Point of Purchase) Main Component
@@ -251,6 +255,13 @@ export class PopComponent implements OnInit, OnDestroy {
   showConfigModal = signal(false);
   configModalProduct = signal<PopProduct | null>(null);
   editingCartItemId = signal<string | null>(null);
+  /**
+   * Mode forwarded to the unified product modal. 'configure' (default)
+   * keeps the original flow; 'create' absorbs the prebulk-modal flow.
+   * Always 'configure' when `POP_USE_UNIFIED_MODAL` is false (legacy
+   * prebulk-modal handles creation).
+   */
+  configModalMode = signal<'create' | 'configure'>('configure');
 
   get editingCartItemVariant(): any {
     const id = this.editingCartItemId();
@@ -371,7 +382,28 @@ export class PopComponent implements OnInit, OnDestroy {
     });
   }
 
-  onConfigConfirmed(result: PopProductConfigResult): void {
+  onConfigConfirmed(result: PopProductModalResult): void {
+    // Fase 5: discriminator routes the unified modal's emit to the
+    // existing cart calls. Configure-mode keeps the original behaviour;
+    // create-mode is absorbed into `onPrebulkAdded` (same payload).
+    if (result.mode === 'create') {
+      this.onPrebulkAdded({
+        prebulkData: result.prebulkData,
+        quantity: result.quantity,
+        unit_cost: result.unit_cost,
+        notes: result.notes,
+      });
+      this.showConfigModal.set(false);
+      this.configModalProduct.set(null);
+      this.editingCartItemId.set(null);
+      return;
+    }
+
+    // Configure-mode: delegate to the original handler with a narrowed type.
+    this.onProductConfigured(result);
+  }
+
+  private onProductConfigured(result: PopProductConfigResult): void {
     const product = this.configModalProduct();
     if (!product) return;
 
@@ -525,15 +557,18 @@ export class PopComponent implements OnInit, OnDestroy {
           } else {
             this.configModalProduct.set({ ...item.product });
           }
+          this.configModalMode.set('configure');
           this.showConfigModal.set(true);
         },
         error: () => {
           this.configModalProduct.set({ ...item.product });
+          this.configModalMode.set('configure');
           this.showConfigModal.set(true);
         },
       });
     } else {
       this.configModalProduct.set({ ...item.product });
+      this.configModalMode.set('configure');
       this.showConfigModal.set(true);
     }
   }
