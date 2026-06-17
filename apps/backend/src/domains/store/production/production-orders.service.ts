@@ -86,7 +86,9 @@ export class ProductionOrdersService {
     if (!product) {
       throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
-    if (product.product_type !== 'prepared' || !product.is_batch_produced) {
+    // Un insumo producido en lote es product_type='physical' (nunca 'prepared');
+    // por eso la elegibilidad se basa SOLO en is_batch_produced.
+    if (!product.is_batch_produced) {
       throw new VendixHttpException(
         ErrorCodes.PRODUCTION_ORDER_NOT_BATCH,
       );

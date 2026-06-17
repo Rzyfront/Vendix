@@ -21,6 +21,7 @@ import {
 } from './dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
+import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
 
 @Controller('store/users')
@@ -33,6 +34,7 @@ export class StoreUsersController {
   ) {}
 
   @Get()
+  @Permissions('store:users:read')
   async findAll(@Query() query: QueryStoreUsersDto) {
     const result = await this.storeUsersService.findAll(query);
     return this.responseService.paginated(
@@ -46,12 +48,14 @@ export class StoreUsersController {
   // ─── Management Endpoints ───────────────────────────────────────────
 
   @Get('management/stats')
+  @Permissions('store:users:read')
   async getStats() {
     const result = await this.storeUserManagementService.getStats();
     return this.responseService.success(result);
   }
 
   @Get('management')
+  @Permissions('store:users:read')
   async managementFindAll(@Query() query: QueryStoreUsersDto) {
     const result = await this.storeUserManagementService.findAll(query);
     return this.responseService.paginated(
@@ -63,18 +67,21 @@ export class StoreUsersController {
   }
 
   @Get('management/:id')
+  @Permissions('store:users:read')
   async managementFindOne(@Param('id', ParseIntPipe) id: number) {
     const result = await this.storeUserManagementService.findOne(id);
     return this.responseService.success(result);
   }
 
   @Post('management')
+  @Permissions('store:users:create')
   async managementCreate(@Body() dto: CreateStoreUserDto) {
     const result = await this.storeUserManagementService.create(dto);
     return this.responseService.success(result, 'User created successfully');
   }
 
   @Patch('management/:id')
+  @Permissions('store:users:update')
   async managementUpdate(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateStoreUserDto,
@@ -84,6 +91,7 @@ export class StoreUsersController {
   }
 
   @Post('management/:id/deactivate')
+  @Permissions('store:users:update')
   async managementDeactivate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.storeUserManagementService.deactivate(id);
     return this.responseService.success(
@@ -93,6 +101,7 @@ export class StoreUsersController {
   }
 
   @Post('management/:id/reactivate')
+  @Permissions('store:users:update')
   async managementReactivate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.storeUserManagementService.reactivate(id);
     return this.responseService.success(
@@ -102,6 +111,7 @@ export class StoreUsersController {
   }
 
   @Patch('management/:id/roles')
+  @Permissions('store:users:update')
   async managementUpdateRoles(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateUserRolesDto,
@@ -111,6 +121,7 @@ export class StoreUsersController {
   }
 
   @Patch('management/:id/panel-ui')
+  @Permissions('store:users:update')
   async managementUpdatePanelUI(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpdateUserPanelUIDto,
@@ -123,6 +134,7 @@ export class StoreUsersController {
   }
 
   @Post('management/:id/reset-password')
+  @Permissions('store:users:update')
   async managementResetPassword(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: ResetPasswordStoreUserDto,

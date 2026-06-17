@@ -25,28 +25,40 @@
 </app-sticky-header>
 
 <div class="space-y-4 md:space-y-6 max-w-[1600px] mx-auto">
+  @if (isEditMode() && !productLoaded()) {
+    <!-- Esqueleto de carga: no renderizamos el form hasta tener la data, para
+         evitar el flash de secciones dependientes del tipo (insumo). -->
+    <div class="flex flex-col items-center justify-center py-24 gap-3">
+      <div
+        class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+      ></div>
+      <p class="text-sm text-text-muted">Cargando producto…</p>
+    </div>
+  } @else {
   <form
     [formGroup]="productForm"
     class="space-y-4 md:space-y-6"
     (submit)="preventNativeFormSubmit($event)"
     (keydown.enter)="preventImplicitEnterSubmit($event)"
   >
-    <!-- Tipo de Producto -->
-    <section
-      class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm"
-    >
-      <div class="flex items-center gap-2 mb-4">
-        <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
-        <h2 class="text-base font-bold text-gray-900">Tipo de Producto</h2>
-      </div>
-      <app-input-buttons
-        [options]="productTypeOptions()"
-        formControlName="product_type"
-        (valueChange)="onProductTypeChange($event)"
-        customWrapperClass="!mt-0"
+    <!-- Tipo de Producto — oculto en insumos (siempre Producto Físico) -->
+    @if (!isIngredient()) {
+      <section
+        class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm"
       >
-      </app-input-buttons>
-    </section>
+        <div class="flex items-center gap-2 mb-4">
+          <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
+          <h2 class="text-base font-bold text-gray-900">Tipo de Producto</h2>
+        </div>
+        <app-input-buttons
+          [options]="productTypeOptions()"
+          formControlName="product_type"
+          (valueChange)="onProductTypeChange($event)"
+          customWrapperClass="!mt-0"
+        >
+        </app-input-buttons>
+      </section>
+    }
 
     <!-- Main Grid: General Info + Images (Desktop layout) -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6">
@@ -857,12 +869,15 @@
               >
               </app-setting-toggle>
 
-              <app-setting-toggle
-                formControlName="is_combo"
-                label="Es combo / menú fijo"
-                description="Plato que agrupa varios productos a precio fijo"
-              >
-              </app-setting-toggle>
+              <!-- Combo / menú fijo — oculto en insumos (un insumo no es combo) -->
+              @if (!isIngredient()) {
+                <app-setting-toggle
+                  formControlName="is_combo"
+                  label="Es combo / menú fijo"
+                  description="Plato que agrupa varios productos a precio fijo"
+                >
+                </app-setting-toggle>
+              }
 
               <app-setting-toggle
                 formControlName="is_batch_produced"
@@ -870,6 +885,36 @@
                 description="Sub-receta que se produce y mantiene stock propio"
               >
               </app-setting-toggle>
+
+              <!-- CTA Producción: el stock de un insumo en lote se produce,
+                   no se compra. Guía al módulo Operaciones › Producción. -->
+              @if (productForm.get("is_batch_produced")?.value) {
+                <div
+                  class="md:col-span-2 w-full rounded-xl border border-border bg-bg p-4 flex flex-col sm:flex-row sm:items-center gap-3 mt-1"
+                >
+                  <div class="flex items-start gap-2 flex-1 min-w-0">
+                    <app-icon
+                      name="package-check"
+                      size="18"
+                      class="text-primary-600 shrink-0 mt-0.5"
+                    ></app-icon>
+                    <p class="text-sm text-text-secondary">
+                      Este insumo se produce por lote en
+                      <span class="font-semibold text-text-primary"
+                        >Operaciones › Producción</span
+                      >.
+                    </p>
+                  </div>
+                  <app-button
+                    variant="outline"
+                    customClasses="shrink-0"
+                    (clicked)="goToProduction()"
+                  >
+                    <app-icon slot="icon" name="arrow-right" size="16"></app-icon>
+                    Ir a Producción
+                  </app-button>
+                </div>
+              }
             }
 
             <!-- ===== UoM (Fase UoM) — solo si es insumo (fuente de verdad: storeSupportsIngredients) ===== -->
@@ -998,7 +1043,8 @@
           </div>
         </section>
 
-        @if (isEditMode()) {
+        <!-- Compra online — oculta en insumos no vendibles (no se venden online) -->
+        @if (isEditMode() && !isPureIngredient()) {
           <section
             class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
           >
@@ -3147,6 +3193,7 @@
       </section>
     }
   </form>
+  }
 </div>
 
 <!-- Quick Create Modals -->

@@ -834,6 +834,16 @@ export class ProductQueryDto {
   @IsBoolean()
   @Type(() => Boolean)
   is_sellable?: boolean;
+
+  /**
+   * Restaurant Suite — filtra el listado a productos producibles por lote
+   * (insumos con stock propio). El form de Producción envía `is_batch_produced=true`.
+   * Por defecto undefined para no alterar las lecturas del catálogo.
+   */
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  is_batch_produced?: boolean;
 }
 
 // Product Variants DTOs

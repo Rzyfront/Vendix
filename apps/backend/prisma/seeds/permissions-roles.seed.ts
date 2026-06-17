@@ -3651,6 +3651,27 @@ export async function seedPermissionsAndRoles(
       path: '/api/organization/fiscal/rules/*',
       method: 'POST',
     },
+
+    // Gestión de usuarios de tienda (store/users — solo owner/admin)
+    {
+      name: 'store:users:read',
+      description: 'Leer usuarios de tienda (listado, detalle y estadísticas)',
+      path: '/api/store/users',
+      method: 'GET',
+    },
+    {
+      name: 'store:users:create',
+      description: 'Crear usuario de tienda',
+      path: '/api/store/users/management',
+      method: 'POST',
+    },
+    {
+      name: 'store:users:update',
+      description:
+        'Actualizar usuario de tienda (datos, roles, panel_ui, activar/desactivar, restablecer contraseña)',
+      path: '/api/store/users/management',
+      method: 'PATCH',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.
@@ -3908,6 +3929,9 @@ export async function seedPermissionsAndRoles(
         p.name === 'store:inventory:suppliers:update' ||
         p.name === 'store:inventory:suppliers:delete'
       ) &&
+      // Gestión de usuarios de tienda (incl. su panel_ui) es exclusiva de
+      // owner/admin por decisión de negocio: manager NO administra usuarios.
+      !p.name.startsWith('store:users:') &&
       (p.name.startsWith('store:') ||
         p.name.startsWith('exogenous:') ||
         p.name.startsWith('payroll:') ||
