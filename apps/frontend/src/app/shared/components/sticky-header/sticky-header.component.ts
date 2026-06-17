@@ -232,10 +232,22 @@ export class StickyHeaderComponent implements AfterViewInit {
       ? this.findTabElement(container, activeTab)
       : container.querySelector<HTMLElement>('[aria-selected="true"]');
 
-    tabEl?.scrollIntoView({
-      behavior: 'smooth',
+    if (!tabEl) return;
+
+    // ISSUE-09: honor the user's reduced-motion preference (WCAG 2.1
+    // and vendix-ui-ux rule). Auto behavior snaps instantly to the
+    // new position; smooth gives the polished feel on capable devices.
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    tabEl.scrollIntoView({
+      behavior: reduceMotion ? 'auto' : 'smooth',
       block: 'nearest',
-      inline: 'nearest',
+      // ISSUE-09: center (not nearest) so the active tab parks in the
+      // middle of the strip instead of hugging the right edge.
+      inline: 'center',
     });
   }
 
@@ -246,5 +258,60 @@ export class StickyHeaderComponent implements AfterViewInit {
     return Array.from(
       container.querySelectorAll<HTMLElement>('[data-tab-id]'),
     ).find((el) => el.dataset['tabId'] === tabId);
+  }
+
+  /**
+   * ISSUE-09: WAI-ARIA roving-tabindex keyboard nav for the tablist.
+   * Tab/Shift+Tab enter / leave the tablist as a whole (the active
+   * tab is the only one with tabindex=0). ArrowLeft / ArrowRight
+   * move between visible, non-disabled tabs. Home / End jump to the
+   * first / last. The parent's `(tabChanged)` handler is fired so the
+   * existing constructor effect re-centers the strip via
+   * `scrollActiveTabIntoView`.
+   */
+  onTabsKeydown(event: KeyboardEvent): void {
+    const container = this.tabsScrollContainer()?.nativeElement;
+    if (!container) return;
+
+    const tabs = Array.from(
+      container.querySelectorAll<HTMLElement>('[role="tab"]'),
+    ).filter(
+      (el) => !el.hasAttribute('disabled') && el.getAttribute('aria-disabled') !== 'true',
+    );
+    if (!tabs.length) return;
+
+    const currentIndex = tabs.findIndex(
+      (el) => el.getAttribute('aria-selected') === 'true',
+    );
+    const safeIndex = currentIndex < 0 ? 0 : currentIndex;
+
+    let nextIndex: number | null = null;
+    switch (event.key) {
+      case 'ArrowRight':
+        nextIndex = (safeIndex + 1) % tabs.length;
+        break;
+      case 'ArrowLeft':
+        nextIndex = (safeIndex - 1 + tabs.length) % tabs.length;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = tabs.length - 1;
+        break;
+      default:
+        return; // not a key we handle
+    }
+
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const next = tabs[nextIndex];
+    const nextId = next.dataset['tabId'] ?? '';
+    if (nextId) {
+      this.tabChanged.emit(nextId);
+    }
+    // focus after the change is applied so screen readers pick up
+    // the new aria-selected=true on the focused element.
+    queueMicrotask(() => next.focus());
   }
 }
