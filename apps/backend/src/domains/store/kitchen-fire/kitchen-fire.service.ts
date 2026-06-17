@@ -20,7 +20,15 @@ const KITCHEN_TICKET_INCLUDE = {
   items: {
     orderBy: { id: 'asc' },
     include: {
-      product: { select: { id: true, name: true, sku: true, stock_unit: true } },
+      product: {
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          stock_unit: true,
+          preparation_time_minutes: true,
+        },
+      },
     },
   },
 } satisfies Prisma.kitchen_ticketsInclude;
@@ -191,12 +199,26 @@ export class KitchenFireService {
 
     // 3. Pre-load all recipes needed for the fired items (to avoid
     //    repeated lookups inside the transaction).
+    //
+    // Restaurant Suite — Fase K Gap 3: a `prepared` product with NO
+    // active recipe is still fireable — the kitchen can cook it by
+    // hand without deducting ingredient stock. The hard guard moves
+    // to `startPreparation` (it refuses to advance a ticket that
+    // contains a recipe-less item). At fire time we partition into:
+    //   - `preparedItems`: items with an active recipe (BOM explodes,
+    //     stock is consumed, COGS recognized).
+    //   - `recipeLessItems`: items with NO active recipe (no BOM, no
+    //     stock movement, cogsTotal stays at 0 for these rows).
+    // Both groups still create a `kitchen_ticket_item` and flip
+    // `inventory_consumed_at_fire=true` (so the payment path skips
+    // them).
     type PreparedItemContext = {
       orderItem: (typeof order.order_items)[number];
       recipeId: number;
       bomLines: BomExplosionLine[];
     };
     const preparedItems: PreparedItemContext[] = [];
+    const recipeLessItems: Array<(typeof order.order_items)[number]> = [];
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
       const recipe = await this.prisma.recipes.findFirst({
@@ -204,10 +226,14 @@ export class KitchenFireService {
         select: { id: true, product_id: true, is_active: true },
       });
       if (!recipe) {
-        throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NO_RECIPE);
+        // No recipe at all → cooked by hand, no inventory consume.
+        recipeLessItems.push(item);
+        continue;
       }
       if (!recipe.is_active) {
-        throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_RECIPE_INACTIVE);
+        // Inactive recipe → treat like no recipe (no consume).
+        recipeLessItems.push(item);
+        continue;
       }
       const bomLines = await this.recipesService.explodeBom(recipe.id, {
         [recipe.id]: 1,
@@ -300,6 +326,26 @@ export class KitchenFireService {
           orderItemId: orderItem.id,
           productId: orderItem.product_id!,
           productName: orderItem.product_name,
+          quantity: orderQty,
+        });
+      }
+
+      // Recipe-less items: same ticket, no stock movement, no COGS.
+      // We still flip `inventory_consumed_at_fire=true` so the payment
+      // path skips them and the anti-double-discount invariant holds
+      // (the kitchen will track the cook manually, the POS won't
+      // double-deduct the product's own stock).
+      for (const item of recipeLessItems) {
+        const orderQty = Number(item.quantity || 0);
+        if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
+        await tx.order_items.update({
+          where: { id: item.id },
+          data: { inventory_consumed_at_fire: true },
+        });
+        firedItemSnapshots.push({
+          orderItemId: item.id,
+          productId: item.product_id!,
+          productName: item.product_name,
           quantity: orderQty,
         });
       }
@@ -462,6 +508,36 @@ export class KitchenFireService {
     if (ticket.status === 'ready') {
       // Idempotent — already past this state.
       return ticket;
+    }
+
+    // Restaurant Suite — Fase K Gap 3: the ticket may contain
+    // `prepared` items with no active recipe (allowed to fire, see
+    // `fireOrderItems`). The operator can still mark them as
+    // delivered/cancelled directly, but moving the ticket into
+    // `in_preparation` is blocked because the kitchen would have
+    // nothing to deduct stock from. We check every product on the
+    // ticket against the recipes table.
+    const recipeLessItemIds: number[] = [];
+    for (const item of ticket.items ?? []) {
+      if (!item.product_id) continue;
+      const recipe = await this.prisma.recipes.findFirst({
+        where: { product_id: item.product_id, is_active: true },
+        select: { id: true },
+      });
+      if (!recipe) {
+        recipeLessItemIds.push(item.id);
+      }
+    }
+    if (recipeLessItemIds.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_NO_RECIPE,
+        undefined,
+        {
+          ticket_id: ticketId,
+          recipe_less_item_ids: recipeLessItemIds,
+          hint: 'Adjunta una receta activa al plato antes de iniciar la preparación, o cocínalo manualmente y márcalo como entregado.',
+        },
+      );
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {

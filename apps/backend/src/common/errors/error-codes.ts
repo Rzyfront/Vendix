@@ -2693,6 +2693,17 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Transición de estado del ticket no permitida',
   },
+  // Restaurant Suite — Fase K Gap 3: the ticket contains a `prepared`
+  // product with no active recipe; advancing to in_preparation is
+  // blocked because the kitchen would have no BOM to deduct stock
+  // from. The ticket must remain in `pending` until the operator
+  // attaches a recipe (or the operator cooks it manually and marks
+  // it delivered directly).
+  KITCHEN_TICKET_NO_RECIPE: {
+    code: 'KITCHEN_TICKET_NO_RECIPE',
+    httpStatus: 422,
+    devMessage: 'El ticket contiene un plato sin receta activa; no se puede iniciar la preparación',
+  },
   KITCHEN_TICKET_STREAM_NO_CONTEXT: {
     code: 'KITCHEN_TICKET_STREAM_NO_CONTEXT',
     httpStatus: 400,

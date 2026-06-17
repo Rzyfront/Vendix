@@ -355,6 +355,28 @@ export class OrdersService {
               },
             },
             product_variants: true,
+            // Restaurant Suite — Fase K Gap 2: surface the KDS state
+            // for every order_item so the order detail can show
+            // "Cocina: <estado>" badges per dish. We order by id desc
+            // so the most recent ticket-item wins; the controller
+            // post-filters to the non-terminal (or newest terminal)
+            // row in the response shape.
+            kitchen_ticket_items: {
+              orderBy: { id: 'desc' },
+              select: {
+                id: true,
+                status: true,
+                kitchen_ticket_id: true,
+                kitchen_ticket: {
+                  select: {
+                    id: true,
+                    status: true,
+                    daily_number: true,
+                    fired_at: true,
+                  },
+                },
+              },
+            },
           },
         },
         addresses_orders_billing_address_idToaddresses: true,

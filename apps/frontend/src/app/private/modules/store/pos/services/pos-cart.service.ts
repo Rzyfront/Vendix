@@ -949,6 +949,10 @@ export class PosCartService {
         weight: isWeightProduct ? weight : undefined,
         weight_unit: isWeightProduct ? (request.weight_unit || 'kg') : undefined,
         is_weight_product: isWeightProduct,
+        // Restaurant Suite — Fase K Gap 1: persist the cashier's
+        // "usar stock" choice on the cart item. Filtered out of the
+        // kitchen-fire call by the POS component.
+        skipKds: request.skipKds === true,
       };
       updatedItems = [newItem, ...currentState.items];
     }
