@@ -458,6 +458,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (itemQuantityChanged)="onCartItemQuantityChanged($event)"
         (itemRemoved)="onCartItemRemoved($event)"
         (clearCart)="onClearCart()"
+        (create)="onOpenCreateModal()"
         (shipping)="onShippingFromModal()"
         (checkout)="onCheckoutFromModal()"
       ></app-pos-cart-modal>
@@ -1359,6 +1360,9 @@ export class PosComponent {
    */
   onOpenCreateModal(): void {
     if (!this.cartState() || this.isEmpty) return;
+    // Close the mobile cart modal so the order-create modal is the only
+    // full-screen dialog open at a time.
+    this.showCartModal.set(false);
     this.showCreateOrderModal.set(true);
   }
 
