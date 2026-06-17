@@ -134,6 +134,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     LayawayConfigModalComponent,
     ReservationFormModalComponent,
     PosAISummaryModalComponent,
+    PosOrderCreateModalComponent,
   ],
   template: `
     <div class="flex flex-col overflow-hidden pos-container">
@@ -442,9 +443,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           (checkout)="onCheckout()"
           (quote)="onQuote()"
           (layaway)="onLayaway()"
-          (openTable)="showOpenTableModal.set(true)"
-          (fireKitchen)="onFireKitchen()"
-          (splitBill)="showSplitBillModal.set(true)"
         ></app-pos-mobile-footer>
       }
 
