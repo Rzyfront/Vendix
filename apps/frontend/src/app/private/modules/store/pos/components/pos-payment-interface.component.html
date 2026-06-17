@@ -99,6 +99,26 @@
         <h2 class="section-title">Pago</h2>
       </div>
 
+      @if (isRestaurantWithPrepared()) {
+        <div class="fulfillment-section">
+          <div class="fulfillment-section-title">
+            <app-icon name="utensils" [size]="16"></app-icon>
+            <span>Tipo de servicio</span>
+          </div>
+          <app-pos-fulfillment-selector
+            [value]="fulfillment()"
+            [consumoBlocked]="false"
+            (selectionChange)="fulfillment.set($event)"
+          ></app-pos-fulfillment-selector>
+          @if (fulfillment() === 'consumo' && tableId() == null) {
+            <div class="fulfillment-hint">
+              <app-icon name="info" [size]="14"></app-icon>
+              <span>Selecciona una mesa antes de cobrar esta orden como consumo.</span>
+            </div>
+          }
+        </div>
+      }
+
       <!-- Sub-section: Forma de Pago -->
       <div class="collapsible-subsection" [class.collapsed]="paymentFormCollapsed()">
         <div class="subsection-header" (click)="togglePaymentFormCollapsed()">

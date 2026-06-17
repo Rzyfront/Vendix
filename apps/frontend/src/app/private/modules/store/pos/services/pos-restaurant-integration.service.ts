@@ -1,7 +1,7 @@
 import { Injectable, inject, signal, computed, DestroyRef } from '@angular/core';
 import { industriesSupportIngredients } from '../../../../../shared/constants/industry-modules.constant';
 import { HttpClient } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
@@ -202,6 +202,57 @@ export class PosRestaurantIntegrationService {
           throwError(() => this.toMessage(err, 'No se pudo enviar a cocina')),
         ),
       );
+  }
+
+  /**
+   * Anti-doble-fire guard. Tracks whether the KDS has already been triggered
+   * for the current cart session (Create / Cobrar / Envío all share this flag
+   * to avoid double-discounting the same `prepared` order_items). The flag is
+   * reset by the POS component on clearCart / newSale.
+   */
+  private readonly _preparedFired = signal(false);
+  readonly preparedFiredForCurrentCart = this._preparedFired.asReadonly();
+  markPreparedFired(): void {
+    this._preparedFired.set(true);
+  }
+  resetPreparedFired(): void {
+    this._preparedFired.set(false);
+  }
+
+  /**
+   * Fire `prepared` order_items to the kitchen in a single, idempotent call.
+   * Returns `null` (no-op) when:
+   *  - the store is not a `restaurant` industry tenant, OR
+   *  - the caller passed an empty `orderItemIds` list, OR
+   *  - the cart session has already fired (anti-double-fire).
+   *
+   * Safe to call multiple times for the same `orderId`/`orderItemIds`: the
+   * backend `inventory_consumed_at_fire` guard (kitchen-fire.service.ts)
+   * returns the `skipped_item_ids` and never double-discounts.
+   *
+   * Failures are **swallowed**: the order/payment has already been persisted
+   * upstream (Create / Cobrar / Envío) so we do not roll back the sale. The
+   * operator sees a toast and can re-fire manually.
+   */
+  maybeFireKitchen(
+    orderId: number,
+    orderItemIds: number[],
+    notes?: string,
+  ): Observable<FireOrderItemsResponse | null> {
+    if (!this.isRestaurantMode() || !orderItemIds?.length) {
+      return of(null);
+    }
+    if (this._preparedFired()) {
+      return of(null);
+    }
+    this._preparedFired.set(true);
+    return this.fireOrderItems(orderId, orderItemIds, notes).pipe(
+      catchError((err) => {
+        // Roll the guard back so the operator can retry from the UI.
+        this._preparedFired.set(false);
+        return throwError(() => err);
+      }),
+    );
   }
 
   /**

@@ -40,6 +40,8 @@ import {
   PaymentMethod,
 } from '../services/pos-payment.service';
 import { PosCustomerService } from '../services/pos-customer.service';
+import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
+import { PosFulfillmentSelectorComponent, FulfillmentType } from './pos-fulfillment-selector.component';
 import { PosWalletService, WalletInfo } from '../services/pos-wallet.service';
 import {
   WompiService,
@@ -77,6 +79,7 @@ interface PaymentState {
     ButtonComponent,
     CurrencyPipe,
     CurrencyInputDirective,
+    PosFulfillmentSelectorComponent,
   ],
   templateUrl: './pos-payment-interface.component.html',
   styles: [
@@ -86,6 +89,35 @@ interface PaymentState {
         display: flex;
         flex-direction: column;
         gap: 16px;
+      }
+
+      /* Fulfillment selector (Restaurant stores with prepared items) */
+      .fulfillment-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(var(--color-muted-rgb, 245, 245, 245), 0.5);
+        border: 1px dashed var(--color-border);
+      }
+
+      .fulfillment-section-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--color-text-primary);
+      }
+
+      .fulfillment-hint {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        font-size: 12px;
+        color: rgb(194, 65, 12);
       }
 
       /* Section Styling */
@@ -1438,6 +1470,8 @@ export class PosPaymentInterfaceComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly cartState = input<CartState | null>(null);
+  /** Restaurant stores that have at least one `prepared` line in the cart. */
+  readonly isRestaurantWithPrepared = input<boolean>(false);
   readonly closed = output<void>();
   readonly paymentCompleted = output<any>();
   readonly requestCustomer = output<void>();
@@ -1447,6 +1481,15 @@ export class PosPaymentInterfaceComponent {
 
   paymentMethods = signal<PaymentMethod[]>([]);
   paymentForm: FormGroup;
+  /** Fulfillment type selected for this payment. Defaults to 'entrega' so
+   *  retail stores (and restaurants without prepared items) keep the legacy
+   *  UX untouched. Restaurant stores must explicitly choose 'consumo' when
+   *  the table is open; the parent (POS) is responsible for picking up the
+   *  value via `paymentCompleted.emit({ ..., fulfillment, tableId })`.
+   */
+  fulfillment = signal<FulfillmentType>('entrega');
+  readonly tableId = input<number | null>(null);
+
   paymentState = signal<PaymentState>({
     selectedMethod: null,
     cashReceived: 0,
@@ -1634,6 +1677,7 @@ export class PosPaymentInterfaceComponent {
   private fb = inject(FormBuilder);
   private paymentService = inject(PosPaymentService);
   private customerService = inject(PosCustomerService);
+private restaurantIntegration = inject(PosRestaurantIntegrationService);
   private toastService = inject(ToastService);
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
@@ -1932,6 +1976,11 @@ export class PosPaymentInterfaceComponent {
   canProcessPayment(): boolean {
     if (this.paymentState().isProcessing) return false;
 
+    // Restaurant + prepared: 'consumo' requires an open table
+    if (this.isRestaurantWithPrepared() && this.fulfillment() === 'consumo' && this.tableId() == null) {
+      return false;
+    }
+
     // Modo crédito: requiere cliente y saldo válido (cuotas solo para tipo 'installments')
     if (this.paymentState().paymentForm === 'credito') {
       const baseValid =
@@ -2083,6 +2132,9 @@ export class PosPaymentInterfaceComponent {
               change: response.change,
               message: response.message,
               isAnonymousSale: this.paymentState().isAnonymousSale,
+            
+              fulfillment: this.fulfillment(),
+              tableId: this.tableId(),
             });
             this.onModalClosed();
           } else {
@@ -2177,6 +2229,9 @@ export class PosPaymentInterfaceComponent {
               order: response.order,
               message: response.message,
               isCreditSale: true,
+            
+              fulfillment: this.fulfillment(),
+              tableId: this.tableId(),
             });
             this.onModalClosed();
           } else {
@@ -2260,6 +2315,9 @@ export class PosPaymentInterfaceComponent {
               order: response.order,
               message: response.message,
               isCreditSale: true,
+            
+              fulfillment: this.fulfillment(),
+              tableId: this.tableId(),
             });
             this.onModalClosed();
           } else {
@@ -2978,7 +3036,10 @@ export class PosPaymentInterfaceComponent {
       message: 'Pago con Wompi procesado correctamente',
       transactionId: result?.transactionId,
       isAnonymousSale: this.paymentState().isAnonymousSale,
-    });
+    
+              fulfillment: this.fulfillment(),
+              tableId: this.tableId(),
+            });
     this.onModalClosed();
   }
 
