@@ -123,8 +123,8 @@ export default function PopScreen() {
         InventoryService.getLocations({ page: 1, limit: 200 }),
         ProductService.list({ page: 1, limit: 200, include_variants: true }),
       ]);
-      setSuppliers((suppliersRes.data || []).map((s: any) => ({ id: Number(s.id), name: s.name, code: s.code, email: s.email, phone: s.phone, tax_id: s.tax_id, is_active: s.state === 'active' })));
-      setLocations((locationsRes.data || []).map((l: any) => ({ id: Number(l.id), name: l.name, code: l.code, type: l.type, is_active: l.state === 'active' })));
+      setSuppliers((suppliersRes.data || []).map((s: any) => ({ id: Number(s.id), name: s.name, code: s.code, email: s.email, phone: s.phone, tax_id: s.tax_id, is_active: !!s.is_active })));
+      setLocations((locationsRes.data || []).map((l: any) => ({ id: Number(l.id), name: l.name, code: l.code, type: l.type, is_active: !!l.is_active })));
       setProducts((productsRes.data || []) as PopProduct[]);
     } catch (err) {
       console.error('Error loading POP data:', err);
@@ -152,7 +152,7 @@ export default function PopScreen() {
         code: res.code,
         email: res.email,
         phone: res.phone,
-        is_active: (res as any).state === 'active',
+        is_active: !!res.is_active,
       };
       setSuppliers((prev) => [...prev, newSupplier]);
       cart.setSupplier(newSupplier.id, newSupplier.name);
@@ -182,7 +182,7 @@ export default function PopScreen() {
         name: res.name,
         code: res.code,
         type: res.type,
-        is_active: (res as any).state === 'active',
+        is_active: !!res.is_active,
       };
       setLocations((prev) => [...prev, newLocation]);
       cart.setLocation(newLocation.id, newLocation.name);

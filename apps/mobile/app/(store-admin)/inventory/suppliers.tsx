@@ -14,6 +14,7 @@ import { Spinner } from '@/shared/components/spinner/spinner';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
+import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 
 const STATE_LABELS = {
@@ -112,6 +113,7 @@ export default function SuppliersScreen() {
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<CreateSupplierDto & { is_active?: boolean }>({ ...emptyForm });
+  const [deleteTarget, setDeleteTarget] = useState<Supplier | null>(null);
 
   const FILTER_OPTIONS: { label: string; value: 'all' | 'active' | 'inactive' }[] = [
     { label: 'Todos los estados', value: 'all' },
@@ -211,7 +213,7 @@ export default function SuppliersScreen() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['suppliers'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
-      toastSuccess('Proveedor eliminado');
+      toastSuccess('Proveedor desactivado');
     },
     onError: (error: any) => {
       const message = error?.response?.data?.message || error?.message || 'Error al eliminar el proveedor';
@@ -266,6 +268,7 @@ export default function SuppliersScreen() {
       lead_time_days: form.lead_time_days ?? null,
       notes: form.notes?.trim() || undefined,
       address: form.address?.trim() || undefined,
+      is_active: !!form.is_active,
     };
     if (editingId) {
       updateMutation.mutate({ id: editingId, dto });
@@ -297,8 +300,15 @@ export default function SuppliersScreen() {
   }, [screenW]);
 
   const handleDelete = useCallback((item: Supplier) => {
-    deleteMutation.mutate(item.id);
-  }, [deleteMutation]);
+    setDeleteTarget(item);
+  }, []);
+
+  const handleConfirmDelete = useCallback(() => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    setDeleteTarget(null);
+    deleteMutation.mutate(id);
+  }, [deleteTarget, deleteMutation]);
 
   const isSubmitting = createMutation.isPending || updateMutation.isPending;
   const isFormValid = !!(form.name.trim() && form.code?.trim());
@@ -667,6 +677,23 @@ export default function SuppliersScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Confirm dialog de eliminación */}
+      <ConfirmDialog
+        visible={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        title="Eliminar proveedor"
+        message={
+          deleteTarget
+            ? `¿Estás seguro de eliminar a "${deleteTarget.name}"? Esta acción no se puede deshacer.`
+            : ''
+        }
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        destructive
+        loading={deleteMutation.isPending}
+      />
     </View>
   );
 }
