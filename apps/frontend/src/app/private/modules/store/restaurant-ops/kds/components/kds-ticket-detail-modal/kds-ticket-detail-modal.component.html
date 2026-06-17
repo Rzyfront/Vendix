@@ -1,0 +1,161 @@
+<app-modal
+  [isOpen]="isOpen()"
+  size="lg"
+>
+  <div slot="header" class="flex items-center gap-2 w-full">
+    <app-icon name="receipt" [size]="20" class="text-primary" />
+    <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
+      Ticket #{{ ticketDisplay()?.daily_number ?? ticketDisplay()?.id }}
+    </h3>
+    <span class="ml-auto flex items-center gap-2 text-[11px] text-[var(--color-text-secondary)]">
+      <app-icon name="clock" [size]="12" />
+      {{ elapsedLabel() }}
+    </span>
+  </div>
+
+  @if (ticketDisplay(); as t) {
+    <div class="space-y-4">
+      <!-- Order header -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-[12px] px-3 py-2 rounded-lg bg-[var(--color-surface-alt)] border border-[var(--color-border)]">
+        <div>
+          <p class="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)]">Orden</p>
+          <p class="font-semibold text-[var(--color-text-primary)]">
+            {{ t.order?.order_number ?? ('#' + t.order_id) }}
+          </p>
+        </div>
+        @if (t.table_id) {
+          <div>
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)]">Mesa</p>
+            <p class="font-semibold text-[var(--color-text-primary)]">{{ t.table_id }}</p>
+          </div>
+        }
+        <div>
+          <p class="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)]">Estado</p>
+          <app-badge [variant]="statusVariant()" size="xs">{{ statusLabel() }}</app-badge>
+        </div>
+      </div>
+
+      <!-- Items + recipes -->
+      <div class="space-y-3 max-h-[55vh] overflow-y-auto pr-1">
+        @for (item of t.items; track item.id) {
+          <div class="rounded-lg border border-[var(--color-border)] p-3">
+            <div class="flex items-start gap-2">
+              <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-[var(--color-text-primary)]">
+                  ×{{ item.quantity }} {{ item.product?.name || ('Producto #' + item.product_id) }}
+                </p>
+                @if (item.product?.preparation_time_minutes) {
+                  <p class="text-[11px] text-[var(--color-text-secondary)] flex items-center gap-1 mt-0.5">
+                    <app-icon name="clock" [size]="11" />
+                    Preparación: {{ item.product?.preparation_time_minutes }} min
+                  </p>
+                }
+                @if (item.notes) {
+                  <p class="text-[11px] italic text-[var(--color-text-secondary)] mt-1">
+                    “{{ item.notes }}”
+                  </p>
+                }
+              </div>
+              <app-badge
+                [variant]="item.status === 'ready' ? 'success' : item.status === 'in_preparation' ? 'warning' : item.status === 'cancelled' ? 'error' : 'neutral'"
+                size="xs"
+              >
+                {{ item.status }}
+              </app-badge>
+            </div>
+
+            <!-- Recipe (BOM) -->
+            <div class="mt-2 pt-2 border-t border-dashed border-[var(--color-border)]">
+              <p class="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">
+                Receta
+              </p>
+              @switch (recipeStateFor(item.product_id).status) {
+                @case ('loading') {
+                  <p class="text-[11px] text-[var(--color-text-secondary)] flex items-center gap-1">
+                    <app-icon name="loader" [size]="11" class="animate-spin" /> Cargando receta…
+                  </p>
+                }
+                @case ('ok') {
+                  @let recipe = recipeStateFor(item.product_id).recipe;
+                  @if (recipe?.items?.length) {
+                    <ul class="text-[11px] space-y-0.5">
+                      @for (ri of recipe?.items; track ri.id) {
+                        <li class="flex items-center gap-2">
+                          <span class="font-mono text-[var(--color-text-tertiary)]">×{{ ri.quantity }}</span>
+                          <span class="flex-1 truncate">{{ ri.component_product?.name || ('Producto #' + ri.component_product_id) }}</span>
+                          @if (ri.component_product?.stock_unit) {
+                            <span class="text-[10px] text-[var(--color-text-secondary)]">{{ ri.component_product?.stock_unit }}</span>
+                          }
+                        </li>
+                      }
+                    </ul>
+                  } @else {
+                    <p class="text-[11px] italic text-[var(--color-text-secondary)]">
+                      Receta sin ingredientes.
+                    </p>
+                  }
+                  @if (recipe?.preparation_notes) {
+                    <p class="text-[11px] italic text-[var(--color-text-secondary)] mt-1.5">
+                      “{{ recipe?.preparation_notes }}”
+                    </p>
+                  }
+                }
+                @case ('missing') {
+                  <p class="text-[11px] italic text-[var(--color-text-secondary)]">
+                    Receta no disponible.
+                  </p>
+                }
+                @case ('error') {
+                  <p class="text-[11px] italic text-[var(--color-text-secondary)]">
+                    No se pudo cargar la receta.
+                  </p>
+                }
+                @default {
+                  <p class="text-[11px] italic text-[var(--color-text-secondary)]">
+                    Receta no disponible.
+                  </p>
+                }
+              }
+            </div>
+          </div>
+        }
+      </div>
+    </div>
+  }
+
+  <!-- Action footer: replicates the board actions. stopPropagation
+       is implicit here (the click is on the inner <button>); the
+       board card click handler is on the outer <div>, so the modal
+       never re-opens on action. -->
+  @if (ticketDisplay(); as t) {
+    <div slot="footer" class="flex flex-wrap justify-end gap-2">
+      @if (t.status === 'pending') {
+        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
+          <app-icon slot="icon" name="x" [size]="14" /> Cancelar
+        </app-button>
+        <app-button variant="primary" (clicked)="onStart()" [disabled]="isMutating()" [loading]="isMutating()">
+          <app-icon slot="icon" name="play" [size]="14" /> Iniciar
+        </app-button>
+      } @else if (t.status === 'in_preparation') {
+        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
+          <app-icon slot="icon" name="x" [size]="14" /> Cancelar
+        </app-button>
+        <app-button variant="success" (clicked)="onReady()" [disabled]="isMutating()" [loading]="isMutating()">
+          <app-icon slot="icon" name="check" [size]="14" /> Listo
+        </app-button>
+      } @else if (t.status === 'ready') {
+        <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
+          <app-icon slot="icon" name="x" [size]="14" /> Cancelar
+        </app-button>
+        <app-button variant="primary" (clicked)="onDeliver()" [disabled]="isMutating()" [loading]="isMutating()">
+          <app-icon slot="icon" name="check-circle" [size]="14" /> Entregar
+        </app-button>
+      } @else {
+        <span class="text-[12px] text-[var(--color-text-secondary)] flex items-center gap-1">
+          <app-icon [name]="t.status === 'delivered' ? 'check-circle' : 'x-circle'" [size]="14" />
+          {{ statusLabel() }}
+        </span>
+      }
+    </div>
+  }
+</app-modal>

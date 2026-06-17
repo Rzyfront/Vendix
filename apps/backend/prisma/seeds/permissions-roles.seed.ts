@@ -2250,6 +2250,12 @@ export async function seedPermissionsAndRoles(
       method: 'GET',
     },
     {
+      name: 'store:orders:order_flow:reactivate',
+      description: 'Reactivate a previously cancelled order',
+      path: '/api/store/orders/:orderId/flow/reactivate',
+      method: 'POST',
+    },
+    {
       name: 'store:orders:purchase_orders:approve',
       description: 'Approve orders purchase orders',
       path: '/api/store/orders/purchase-orders',

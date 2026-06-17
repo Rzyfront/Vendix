@@ -1573,7 +1573,7 @@ export class PosComponent {
                   (i) =>
                     i.product_id === it.product_id &&
                     i.quantity === it.quantity,
-                ),
+                ) && !this.isCartItemSkipKds(it.product_id, (it as any).product_variant_id ?? null),
             )
             .map((it) => it.id);
           if (orderItemIds.length === 0) {
@@ -1651,6 +1651,10 @@ export class PosComponent {
       if (it.variant_id != null) {
         line.product_variant_id = it.variant_id;
       }
+      // Restaurant Suite — Fase K Gap 1: items flagged skipKds
+      // (cashier chose "Usar stock") are excluded from the kitchen
+      // dispatch list. Their product stock is consumed at payment.
+      if (it.skipKds) continue;
       preparedLines.push(line);
     }
 
@@ -1722,6 +1726,27 @@ export class PosComponent {
     this.showPaymentModal.set(false);
   }
 
+
+  /**
+   * Restaurant Suite — Fase K Gap 1: returns true when the cart item
+   * matching `productId`+`variantId` was added with `skipKds=true`
+   * (cashier chose "Usar stock" in the prepared-choice modal). Used
+   * to filter such items OUT of the fire-to-kitchen call list.
+   */
+  private isCartItemSkipKds(
+    productId: number | null,
+    variantId?: number | null,
+  ): boolean {
+    if (productId == null) return false;
+    const items = this.cartState()?.items ?? [];
+    return items.some((it: any) => {
+      const pid = Number(it?.product?.id);
+      if (pid !== productId) return false;
+      const vid = it?.variant_id ?? null;
+      if (vid !== (variantId ?? null)) return false;
+      return it?.skipKds === true;
+    });
+  }
 
   private fireKitchenFromCompletedOrder(order: any): void {
     if (!order?.id) return;

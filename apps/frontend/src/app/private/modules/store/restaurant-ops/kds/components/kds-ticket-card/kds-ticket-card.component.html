@@ -1,6 +1,13 @@
 <div
   class="kds-card"
-  [class.kds-card--urgent]="isUrgent() && !isTerminal(ticket().status)"
+  role="button"
+  tabindex="0"
+  (click)="onCardClick()"
+  (keydown.enter)="onCardClick()"
+  (keydown.space)="onCardClick()"
+  [class.kds-card--warning]="isWarning() && !isDanger()"
+  [class.kds-card--danger]="isDanger()"
+  [class.kds-card--urgent]="isWarning() && !isDanger()"
   [class.kds-card--delivered]="ticket().status === 'delivered'"
   [class.kds-card--cancelled]="ticket().status === 'cancelled'"
   [class.kds-card--mutating]="isMutating()"
@@ -37,7 +44,9 @@
     </app-badge>
     <span
       class="kds-card__elapsed"
-      [class.kds-card__elapsed--urgent]="isUrgent()"
+      [class.kds-card__elapsed--warning]="isWarning() && !isDanger()"
+      [class.kds-card__elapsed--danger]="isDanger()"
+      [class.kds-card__elapsed--urgent]="isWarning() && !isDanger()"
     >
       <app-icon name="clock" [size]="12" /> {{ elapsedLabel() }}
     </span>
@@ -68,8 +77,9 @@
     }
   </ul>
 
-  <!-- Actions -->
-  <footer class="kds-card__actions">
+  <!-- Actions (stopPropagation so clicking a button here does NOT
+       open the detail modal; the click is meant for the action). -->
+  <footer class="kds-card__actions" (click)="$event.stopPropagation()">
     @if (ticket().status === 'pending') {
       <app-button
         variant="primary"

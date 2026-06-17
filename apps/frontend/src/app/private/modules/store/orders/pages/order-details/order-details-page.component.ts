@@ -20,6 +20,7 @@ import {
   RefundRecord,
   FastTrackOrderDto,
   AssignShippingMethodDto,
+  ReactivateOrderDto,
 } from '../../interfaces/order.interface';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
@@ -139,6 +140,7 @@ export class OrderDetailsPageComponent {
   showShipModal = signal(false);
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
+  showReactivateModal = signal(false);
   showRefundModal = signal(false);
   showPaymentReceiptModal = signal(false);
 
@@ -180,6 +182,7 @@ export class OrderDetailsPageComponent {
   shipForm!: FormGroup;
   deliverForm!: FormGroup;
   cancelForm!: FormGroup;
+  reactivateForm!: FormGroup;
 
   // Currency
   currencySymbol;
@@ -542,6 +545,15 @@ export class OrderDetailsPageComponent {
         break;
 
       case 'cancelled':
+        if (this.isPrivilegedUser()) {
+          actions.push({
+            id: 'reactivate',
+            label: 'Reactivar Orden',
+            icon: 'rotate-ccw',
+            variant: 'warning',
+          });
+        }
+        break;
       case 'refunded':
         break;
     }
@@ -824,6 +836,10 @@ export class OrderDetailsPageComponent {
       reason: ['', [Validators.required, Validators.minLength(3)]],
     });
 
+    this.reactivateForm = this.fb.group({
+      reason: ['', [Validators.minLength(3)]],
+    });
+
     this.fastTrackForm = this.fb.group({
       payment: this.fb.group({
         payment_method_id: this.fb.control<number | null>(null),
@@ -991,6 +1007,9 @@ export class OrderDetailsPageComponent {
         break;
       case 'cancel':
         this.openCancelModal();
+        break;
+      case 'reactivate':
+        this.openReactivateModal();
         break;
       case 'refund':
         this.openRefundModal();
@@ -1277,6 +1296,55 @@ export class OrderDetailsPageComponent {
         error: (err) => {
           this.isProcessingAction.set(false);
           this.toastService.error(err.message || 'Error al cancelar la orden');
+        },
+      });
+  }
+
+  openReactivateModal(): void {
+    this.reactivateForm.reset();
+    this.showReactivateModal.set(true);
+  }
+
+  submitReactivation(): void {
+    if (!this.orderId) return;
+
+    // Build DTO from the form; reason is optional but must be at least
+    // 3 chars when present (validator enforces that).
+    const formValue = this.reactivateForm.value as { reason: string | null };
+    const dto: ReactivateOrderDto = formValue.reason
+      ? { reason: formValue.reason }
+      : {};
+
+    this.isProcessingAction.set(true);
+    this.ordersService
+      .flowReactivateOrder(this.orderId, dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.showReactivateModal.set(false);
+          this.isProcessingAction.set(false);
+          this.toastService.success('Orden reactivada');
+          this.loadData();
+        },
+        error: (err) => {
+          this.isProcessingAction.set(false);
+          // Backend may return a list of missing products under
+          // err.error.details.missing. Surface them so the operator knows
+          // exactly what to restock before retrying.
+          const missing: Array<{ product_name: string; available: number; required: number }> | undefined =
+            err?.error?.details?.missing;
+          const base = err.message || 'Error al reactivar la orden';
+          if (Array.isArray(missing) && missing.length > 0) {
+            const list = missing
+              .map(
+                (m) =>
+                  `  - ${m.product_name} (disponible ${m.available}, requerido ${m.required})`,
+              )
+              .join('\n');
+            this.toastService.error(`${base}\n${list}`);
+          } else {
+            this.toastService.error(base);
+          }
         },
       });
   }
@@ -1904,6 +1972,66 @@ export class OrderDetailsPageComponent {
     const quantity = Number(item.quantity || 0);
     if (quantity <= 0) return null;
     return consumed / quantity;
+  }
+
+  // ─── Restaurant Suite — Fase K Gap 2: per-item KDS state ─────
+  /**
+   * Picks the kitchen_ticket_item we want to surface for this
+   * order_item. Preference: a non-terminal (in-flight) row first,
+   * then the most recent row (highest id). Returns `null` if the
+   * item has never been fired to the kitchen.
+   */
+  kitchenStateFor(item: OrderItem):
+    | { status: string; kitchen_ticket_id?: number }
+    | null {
+    const items = item.kitchen_ticket_items;
+    if (!items || items.length === 0) return null;
+    const inFlight = items.find(
+      (k) => k.status === 'pending' || k.status === 'in_preparation' || k.status === 'ready',
+    );
+    if (inFlight) return inFlight;
+    return items[0]; // items are pre-sorted desc by the backend include
+  }
+
+  /** Localised label for the KDS state badge. */
+  kitchenStateLabel(ks: { status: string }): string {
+    switch (ks.status) {
+      case 'pending':
+        return 'Pendiente';
+      case 'in_preparation':
+        return 'En preparación';
+      case 'ready':
+        return 'Listo';
+      case 'delivered':
+        return 'Entregado';
+      case 'cancelled':
+        return 'Cancelado';
+      default:
+        return ks.status;
+    }
+  }
+
+  /**
+   * Tailwind class set for the KDS badge — kept aligned with the
+   * board's status palette. Returned as a string to play well with
+   * the existing `[class]="..."` binding style used in this
+   * template.
+   */
+  kitchenBadgeClass(ks: { status: string }): string {
+    switch (ks.status) {
+      case 'pending':
+        return 'bg-gray-100 text-gray-700 border border-gray-200';
+      case 'in_preparation':
+        return 'bg-amber-100 text-amber-800 border border-amber-200';
+      case 'ready':
+        return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+      case 'delivered':
+        return 'bg-sky-100 text-sky-800 border border-sky-200';
+      case 'cancelled':
+        return 'bg-red-100 text-red-700 border border-red-200';
+      default:
+        return 'bg-gray-100 text-gray-700 border border-gray-200';
+    }
   }
 
   getAuditActionLabel(action: string): string {

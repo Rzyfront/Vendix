@@ -21,6 +21,14 @@ export interface KitchenTicketProductRef {
   name: string;
   sku?: string | null;
   stock_unit?: string | null;
+  /**
+   * Restaurant Suite — Fase K Gap 5: preparation time in minutes
+   * (sourced from `products.preparation_time_minutes` via the
+   * kitchen-fire service include). Used to drive the urgency
+   * tier on the KDS card. Missing/0 ⇒ treated as the default
+   * (10 min).
+   */
+  preparation_time_minutes?: number | null;
 }
 
 export interface KitchenTicketItem {

@@ -158,10 +158,15 @@ import { POP_USE_UNIFIED_MODAL } from './pop.config';
     ></app-pop-cart-modal>
 
     <!-- Modals -->
-    <app-pop-prebulk-modal
-      [(isOpen)]="prebulkModalOpen"
-      (add)="onPrebulkAdded($event)"
-    ></app-pop-prebulk-modal>
+    <!-- Legacy prebulk modal: only rendered when the unified modal is
+         disabled (rollback path). With the flag on, creation is handled
+         by the unified config modal in 'create' mode. -->
+    @if (!useUnifiedModal) {
+      <app-pop-prebulk-modal
+        [(isOpen)]="prebulkModalOpen"
+        (add)="onPrebulkAdded($event)"
+      ></app-pop-prebulk-modal>
+    }
 
     <app-pop-supplier-quick-create
       [(isOpen)]="supplierModalOpen"
@@ -196,6 +201,7 @@ import { POP_USE_UNIFIED_MODAL } from './pop.config';
 
     <app-pop-product-config-modal
       [isOpen]="showConfigModal()"
+      [mode]="configModalMode()"
       [product]="configModalProduct()"
       [initialVariant]="editingCartItemVariant"
       [initialLotInfo]="editingCartItemLotInfo"
@@ -262,6 +268,14 @@ export class PopComponent implements OnInit, OnDestroy {
    * prebulk-modal handles creation).
    */
   configModalMode = signal<'create' | 'configure'>('configure');
+
+  /**
+   * Fase 5 rollout flag. When `true`, "Agregar producto nuevo" opens the
+   * unified product modal in `create` mode and the legacy prebulk modal
+   * is not rendered. Flip `POP_USE_UNIFIED_MODAL` to `false` in
+   * `pop.config.ts` to roll back to the separate prebulk modal.
+   */
+  readonly useUnifiedModal = POP_USE_UNIFIED_MODAL;
 
   get editingCartItemVariant(): any {
     const id = this.editingCartItemId();
@@ -373,6 +387,7 @@ export class PopComponent implements OnInit, OnDestroy {
           };
 
           this.configModalProduct.set(popProduct);
+          this.configModalMode.set('configure');
           this.showConfigModal.set(true);
         }
       },
@@ -396,6 +411,7 @@ export class PopComponent implements OnInit, OnDestroy {
       this.showConfigModal.set(false);
       this.configModalProduct.set(null);
       this.editingCartItemId.set(null);
+      this.configModalMode.set('configure');
       return;
     }
 
@@ -537,6 +553,8 @@ export class PopComponent implements OnInit, OnDestroy {
     this.showConfigModal.set(false);
     this.configModalProduct.set(null);
     this.editingCartItemId.set(null);
+    // Reset to the default so the next "Configurar" never inherits 'create'.
+    this.configModalMode.set('configure');
   }
 
   openItemConfigModal(item: PopCartItem): void {
@@ -584,6 +602,18 @@ export class PopComponent implements OnInit, OnDestroy {
   onProductAdded(event: any): void {}
 
   onManualAddRequested(): void {
+    if (this.useUnifiedModal) {
+      // Fase 5: open the unified modal in 'create' mode. No existing
+      // product (fresh identity capture); the emit is routed back through
+      // onConfigConfirmed → onPrebulkAdded, so the cart payload is
+      // identical to the legacy prebulk flow.
+      this.editingCartItemId.set(null);
+      this.configModalProduct.set(null);
+      this.configModalMode.set('create');
+      this.showConfigModal.set(true);
+      return;
+    }
+    // Rollback path: legacy prebulk modal.
     this.prebulkModalOpen.set(true);
   }
 

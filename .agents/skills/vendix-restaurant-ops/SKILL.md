@@ -48,7 +48,7 @@ A restaurant store works on three orthogonal product axes encoded as columns on
 | `is_ingredient` | `false` | Eligible as a component in `recipe_items`. |
 | `is_combo` | `false` | Combo/menú fijo (composed by recipe items pointing to sellable products). |
 | `is_batch_produced` | `false` | Sub-receta produced in a `production_order` (has its own stock). |
-| `stock_uom_id` / `purchase_uom_id` (FKs to `unit_of_measures`) | `null` | Integer-unit stock rule (see §Unit rule). The UoM catalog (mass/volume/count) is the source of truth; `purchase_to_stock_factor` is derived from the catalog (`round(purchase.factor_to_base / stock.factor_to_base)`) at receive() time. |
+| `stock_unit` / `purchase_unit` / `purchase_to_stock_factor` | `null` | Integer-unit stock rule (see §Unit rule). |
 
 Combinations cover the 4 cases: `harina` (false/true), `agua dual` (true/true),
 `camiseta retail` (true/false), `archivado` (false/false). The retail catalog
@@ -257,27 +257,3 @@ permission keys used by the controllers:
   it visible.
 - Migrating inventory quantities to `Decimal` in this MVP — defer with a
   dedicated migration plan that follows `vendix-prisma-migrations` rules.
-
-## Insumo vs Retail consolidation (Fase 0–4)
-
-As of the 2026-06 consolidation, the restaurant suite integrates the
-purchase-order UoM pipeline end-to-end:
-
-- A pure ingredient (`is_ingredient && !is_sellable`) hides the retail
-  sale constructs in the product form (Precios, Multi-Tarifa, e-commerce
-  flag, destacado, POS override, online link, promociones). The form
-  keeps `is_sellable` and `is_ingredient` mutually exclusive via
-  soft-exclusivity (the DB does NOT carry a hard constraint).
-- A purchase order carries a primary `order_type` (`retail | ingredient`).
-  Mixed-line orders are out of scope for V1.
-- The POP modal shows a unit-aware cost-capture UI when the product is a
-  pure ingredient and the store supports the capacity: a dynamic label
-  (`Costo por L`), a live preview of `1 L = 1000 ml` using the UoM
-  catalog, and FK selectors for `purchase_uom_id` / `stock_uom_id`.
-- The `invoice_ocr_ingredient` AI app extracts `presentation`,
-  `pack_size`, and `uom_hint` from invoices to pre-fill the UoM
-  selectors. The user always confirms manually.
-- Gating is centralized in `industriesSupportIngredients()` (frontend
-  constant) and `storeIndustriesSupportIngredients()` (backend helper).
-  Today only `restaurant` opts in; add a new entry in both places to
-  extend the capacity to a new industry.

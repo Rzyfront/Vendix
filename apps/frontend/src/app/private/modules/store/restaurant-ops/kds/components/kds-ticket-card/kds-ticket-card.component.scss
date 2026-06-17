@@ -15,10 +15,22 @@
   transition: box-shadow 200ms ease, transform 200ms ease,
     border-color 200ms ease;
 
-  &--urgent {
+  // Restaurant Suite — Fase K Gap 5: --warning is the amber tier
+  // reached when `elapsed >= smallest preparation_time_minutes`.
+  // --urgent is kept as a backward-compat alias.
+  &--urgent,
+  &--warning {
     border-color: rgba(234, 88, 12, 0.55);
     box-shadow: 0 0 0 1px rgba(234, 88, 12, 0.25),
       0 4px 12px rgba(234, 88, 12, 0.15);
+  }
+
+  // Restaurant Suite — Fase K Gap 5: --danger is the red tier
+  // reached 5 minutes after the warning threshold.
+  &--danger {
+    border-color: rgba(220, 38, 38, 0.7);
+    box-shadow: 0 0 0 1px rgba(220, 38, 38, 0.3),
+      0 4px 14px rgba(220, 38, 38, 0.18);
   }
 
   &--delivered {
@@ -112,8 +124,15 @@
   color: var(--color-text-secondary, #4b5563);
   font-weight: 600;
 
-  &--urgent {
+  // Restaurant Suite — Fase K Gap 5: --warning (amber) and
+  // --danger (red) modifiers for the elapsed-time label. --urgent
+  // remains as a backward-compat alias for --warning.
+  &--urgent,
+  &--warning {
     color: var(--color-warning, #ea580c);
+  }
+  &--danger {
+    color: var(--color-error, #dc2626);
   }
 }
 

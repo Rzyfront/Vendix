@@ -429,16 +429,31 @@ export class PopUomCaptureComponent {
   }
 
   /**
-   * User typed in the quantity field. The `lastEdited` field decides
-   * which cost is the anchor.
+   * User typed in the quantity field. The PREVIOUS `lastEdited` value is
+   * the anchor that decides what stays fixed:
+   *   - anchor 'total' → the user said "this is the batch total", so we
+   *     KEEP the total and re-derive the per-unit cost from the new qty.
+   *   - anchor 'unit'  → keep the per-unit cost; the total display
+   *     re-derives from `unitCost × quantity`.
+   * The anchor is preserved (not reset to 'quantity') so a sequence of
+   * quantity edits stays coherent (E2E #4: total stays at 30 000 while
+   * the unit cost tracks 5 000 → 10 000 → 2 500).
    */
   onQuantityEdit(raw: any): void {
     const qty = Math.max(1, Math.floor(Number(raw) || 1));
+    const anchor = this.lastEdited();
+    // Snapshot the total BEFORE quantity changes (= unit × old qty).
+    const totalBeforeChange = this.unitCost() * this.quantity();
     this.quantity.set(qty);
-    this.lastEdited.set('quantity');
-    // No emit here for the cost side: the total display re-derives
-    // automatically from `unitCost × quantity`. If we ever need to
-    // re-anchor the user-edited field, we can do it here.
+    if (anchor === 'total') {
+      const derived = qty > 0 ? totalBeforeChange / qty : totalBeforeChange;
+      this.unitCost.set(Math.round(derived * 100) / 100);
+      // Keep anchoring on the total for subsequent quantity edits.
+      this.lastEdited.set('total');
+    } else {
+      // Anchor is the per-unit cost: keep it; total display re-derives.
+      this.lastEdited.set('unit');
+    }
     this.emit();
   }
 

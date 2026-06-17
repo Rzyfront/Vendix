@@ -30,6 +30,7 @@ import {
   KitchenTicketsService,
 } from '../../services';
 import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-ticket-card.component';
+import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detail-modal/kds-ticket-detail-modal.component';
 
 /**
  * KDS Board — real-time kitchen display.
@@ -60,6 +61,7 @@ import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-tic
     IconComponent,
     BadgeComponent,
     KdsTicketCardComponent,
+    KdsTicketDetailModalComponent,
   ],
   templateUrl: './kds-board-page.component.html',
   styleUrl: './kds-board-page.component.scss',
@@ -107,6 +109,36 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
 
   /** Track which ticket ids are mid-mutation so cards can disable buttons. */
   readonly mutatingIds = signal<Set<number>>(new Set());
+
+  // ─── Restaurant Suite — Fase K Gap 4: detail modal state ───────
+  /** id of the ticket currently shown in the detail modal (null = closed). */
+  private readonly selectedTicketId = signal<number | null>(null);
+  readonly detailOpen = computed(() => this.selectedTicketId() != null);
+  /**
+   * Live ticket from the SSE-fed `tickets()` signal. Re-evaluates on
+   * every ticket.* event so the modal updates in real time without
+   * subscribing to the stream itself.
+   */
+  readonly detailTicket = computed<KitchenTicket | null>(() => {
+    const id = this.selectedTicketId();
+    if (id == null) return null;
+    return this.tickets().find((t) => t.id === id) ?? null;
+  });
+  /** Whether the modal's selected ticket is mid-mutation. */
+  readonly detailMutating = computed(() => {
+    const id = this.selectedTicketId();
+    return id != null && this.mutatingIds().has(id);
+  });
+
+  /** Open the detail modal for a given ticket. */
+  openDetail(ticket: KitchenTicket): void {
+    this.selectedTicketId.set(ticket.id);
+  }
+
+  /** Close the detail modal. */
+  closeDetail(): void {
+    this.selectedTicketId.set(null);
+  }
 
   /**
    * Single shared 1s ticker pushed down to every card as `[now]`.

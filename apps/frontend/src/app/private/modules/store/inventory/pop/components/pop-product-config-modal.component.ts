@@ -6,6 +6,7 @@ import {
   computed,
   effect,
   inject,
+  viewChild,
   DestroyRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -174,9 +175,12 @@ export type { PopProductConfigResult };
                   </div>
                 }
 
-                <!-- Pricing + cost (retail) or just cost (ingredient) -->
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  @if (!isIngredient()) {
+                <!-- Retail: precio venta + costo + cantidad en el form.
+                     Insumo: costo y cantidad los captura el bloque
+                     app-pop-uom-capture (bidireccional), para no duplicar
+                     ni desincronizar la cantidad del lote. -->
+                @if (!isIngredient()) {
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <app-input
                       label="Precio de Venta"
                       [currency]="true"
@@ -185,37 +189,46 @@ export type { PopProductConfigResult };
                       placeholder="0.00"
                       tooltipText="Opcional: precio de referencia para ventas"
                     ></app-input>
-                  }
-                  <app-input
-                    label="Costo unitario"
-                    [currency]="true"
-                    formControlName="unitCost"
-                    prefix="$"
-                    placeholder="0.00"
-                    [required]="!isIngredient()"
-                  ></app-input>
-                </div>
+                    <app-input
+                      label="Costo unitario"
+                      [currency]="true"
+                      formControlName="unitCost"
+                      prefix="$"
+                      placeholder="0.00"
+                      [required]="true"
+                    ></app-input>
+                  </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <app-input
-                    label="Cantidad"
-                    type="number"
-                    formControlName="quantity"
-                    placeholder="1"
-                    [required]="true"
-                  ></app-input>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <app-input
+                      label="Cantidad"
+                      type="number"
+                      formControlName="quantity"
+                      placeholder="1"
+                      [required]="true"
+                    ></app-input>
+                    <app-textarea
+                      label="Notas"
+                      formControlName="notes"
+                      placeholder="Notas adicionales..."
+                      [rows]="1"
+                    ></app-textarea>
+                  </div>
+                } @else {
                   <app-textarea
                     label="Notas"
                     formControlName="notes"
                     placeholder="Notas adicionales..."
                     [rows]="1"
                   ></app-textarea>
-                </div>
+                }
               </form>
             }
 
-            <!-- Pricing type selector (visible in both modes) -->
-            @if (!isIngredient()) {
+            <!-- Sale UoM selector. Excluyente con la captura de consumo:
+                 se muestra solo para producto retail (no insumo) en ambos
+                 modos. Insumo → bloque app-pop-uom-capture (abajo). -->
+            @if (!ingredientMode()) {
               <div>
                 <label class="block text-sm font-medium text-text-primary mb-2"
                   >Unidad de medida</label
@@ -768,12 +781,18 @@ export class PopProductConfigModalComponent {
     return !!p.is_ingredient && !sellable;
   });
   /**
-   * Fase 3: effective ingredient mode. Only true when the product is a
-   * pure ingredient AND the store supports the capacity.
+   * Effective ingredient mode — drives the venta/consumo UoM switch.
+   * Requires store capability, then:
+   *   - create mode: the "Es un insumo" toggle governs (no product yet).
+   *   - configure mode: derived from the existing product (pure ingredient).
+   * Fase 5: without the create-mode branch the UoM-capture block never
+   * showed when creating an ingredient (product() is null → false).
    */
-  readonly ingredientMode = computed(
-    () => this.isPureIngredient() && this.storeSupportsIngredients(),
-  );
+  readonly ingredientMode = computed(() => {
+    if (!this.storeSupportsIngredients()) return false;
+    if (this.createMode()) return this.isIngredient();
+    return this.isPureIngredient();
+  });
   /**
    * Fase 3: live preview of the purchase→stock factor the backend will
    * compute on receive(). Mirrors `unitCapacity` from the product form
@@ -850,7 +869,22 @@ export class PopProductConfigModalComponent {
         this.initializeIngredientUoMDefaults();
       }
     });
+
+    // Seed the shared UoM-capture sub-component from its inputs once it is
+    // rendered (it only exists under `@if (ingredientMode())`). Mirrors the
+    // "init on open" pattern the inline block used to have. In create mode
+    // this resets to empty (new product); in configure mode it reflects the
+    // product's persisted UoMs resolved by initializeIngredientUoMDefaults().
+    effect(() => {
+      const cap = this.uomCapture();
+      if (this.isOpen() && cap) {
+        cap.initFromInputs();
+      }
+    });
   }
+
+  /** Shared UoM-capture instance (present only in ingredient mode). */
+  private readonly uomCapture = viewChild(PopUomCaptureComponent);
 
   /**
    * Fase 3: load the UoM catalog once per modal open. The service caches
@@ -1022,9 +1056,12 @@ export class PopProductConfigModalComponent {
     this.purchaseUomId.set(result.purchaseUomId);
     this.stockUomId.set(result.stockUomId);
     if (this.createMode()) {
-      // The sub-component is the source of truth for ingredient cost.
+      // The sub-component is the source of truth for ingredient cost AND
+      // batch quantity (bidirectional capture). Keep the identity form in
+      // sync so onConfirm reads the canonical unit_cost and quantity even
+      // though the inputs are hidden for ingredients.
       this.identityForm.patchValue(
-        { unitCost: result.unitCost },
+        { unitCost: result.unitCost, quantity: result.quantity },
         { emitEvent: false },
       );
     }

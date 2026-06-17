@@ -24,10 +24,16 @@ export class PaymentTimeoutCleanupJob {
       const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
 
       // Find orders in pending_payment state older than 2 hours
-      // that have NO succeeded payment
+      // that have NO succeeded payment.
+      // Channel filter: exclude POS (channel != 'pos') — POS orders in
+      // pending_payment are a legitimate business state (open tab, store
+      // credit, deferred payment) and must NOT be auto-cancelled by this
+      // ecommerce-orphan-cleanup job. Using `not: 'pos'` is resilient to
+      // future channels (whatsapp, agent, marketplace, ...).
       const staleOrders = await this.prisma.orders.findMany({
         where: {
           state: 'pending_payment',
+          channel: { not: 'pos' },
           created_at: { lt: twoHoursAgo },
           payments: {
             none: { state: 'succeeded' },

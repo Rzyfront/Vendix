@@ -7,10 +7,10 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
-import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
-import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 
 /**
  * Decision made by the cashier on a `prepared` + track_inventory +

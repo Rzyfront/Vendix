@@ -98,6 +98,7 @@
                   [now]="now()"
                   [isMutating]="isMutating(ticket.id)"
                   [showDelivered]="column === 'delivered' || column === 'cancelled'"
+                  (cardClicked)="openDetail($event)"
                   (startClicked)="startTicket($event)"
                   (readyClicked)="markTicketReady($event)"
                   (deliverClicked)="markTicketDelivered($event)"
@@ -110,4 +111,15 @@
       }
     </div>
   }
+  <!-- Restaurant Suite — Fase K Gap 4: detail modal — opens on card click,
+       stays live via `detailTicket()` (derived from the SSE-fed `tickets()`). -->
+  <app-kds-ticket-detail-modal
+    [isOpen]="detailOpen()"
+    [ticket]="detailTicket()"
+    [isMutating]="detailMutating()"
+    (startClicked)="startTicket($event)"
+    (readyClicked)="markTicketReady($event)"
+    (deliverClicked)="markTicketDelivered($event)"
+    (cancelClicked)="cancelTicket($event)"
+  />
 </div>

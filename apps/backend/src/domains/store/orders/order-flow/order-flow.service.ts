@@ -18,6 +18,7 @@ import {
   CancelOrderDto,
   CancelPaymentDto,
   FastTrackOrderDto,
+  ReactivateOrderDto,
 } from './dto';
 import { SettingsService } from '../../settings/settings.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
@@ -36,7 +37,7 @@ const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
   shipped: ['delivered'],
   delivered: ['finished', 'refunded'],
   finished: ['refunded'],
-  cancelled: [],
+  cancelled: ['pending_payment', 'created', 'processing'],
   refunded: [],
 };
 
@@ -951,10 +952,169 @@ export class OrderFlowService {
     const updatedOrder = await this.updateOrderState(orderId, 'cancelled', {
       cancelled_at: new Date(),
       cancellation_reason: dto.reason,
+      // Persist the previous state so it can be restored by reactivateOrder().
+      // updateOrderState stores unknown keys into internal_notes._flow_metadata.
+      previous_state: order.state,
     });
 
     this.logger.log(`Order #${orderId} cancelled: ${dto.reason}`);
     return updatedOrder;
+  }
+
+  /**
+   * Reactivate a previously cancelled order.
+   *
+   * Restores the order to its previous state (saved at cancel time in
+   * `internal_notes._flow_metadata.previous_state`). When no previous state
+   * is recorded (e.g. orders cancelled by PaymentTimeoutCleanupJob, which
+   * writes a plain-text internal_notes), falls back to 'pending_payment'
+   * because that is the source state for every job-cancelled order.
+   *
+   * Stock is re-reserved for every order_item that:
+   *   - tracks inventory, AND
+   *   - is not a service
+   *
+   * The reservation is BLOCKING: if any of those items lacks enough stock
+   * the whole transaction is rolled back and a 400 is returned listing the
+   * missing products. The cancelled payments are left as-is (audit trail).
+   */
+  async reactivateOrder(orderId: number, dto: ReactivateOrderDto) {
+    const ALLOWED_TARGET_STATES: OrderState[] = [
+      'created',
+      'pending_payment',
+      'processing',
+    ];
+
+    const userId = RequestContextService.getUserId();
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Load order with items + products (track_inventory, product_type) + variants.
+      const order = await tx.orders.findFirst({
+        where: { id: orderId },
+        include: {
+          order_items: {
+            include: {
+              products: {
+                select: {
+                  id: true,
+                  name: true,
+                  track_inventory: true,
+                  product_type: true,
+                },
+              },
+              product_variants: { select: { id: true } },
+            },
+          },
+        },
+      });
+
+      if (!order) {
+        throw new NotFoundException(`Order #${orderId} not found`);
+      }
+
+      // 2. State guard — only cancelled orders can be reactivated.
+      if ((order.state as OrderState) !== 'cancelled') {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_STATUS_001,
+          `Cannot reactivate order in state '${order.state}'. ` +
+            `Reactivation is only allowed from 'cancelled'.`,
+        );
+      }
+
+      // 3. Resolve target state from previous_state metadata.
+      let targetState: OrderState = 'pending_payment';
+      if (order.internal_notes) {
+        try {
+          const parsed = JSON.parse(order.internal_notes);
+          const previous = parsed?._flow_metadata?.previous_state;
+          if (
+            typeof previous === 'string' &&
+            (ALLOWED_TARGET_STATES as string[]).includes(previous)
+          ) {
+            targetState = previous as OrderState;
+          }
+        } catch {
+          // Not JSON (e.g. job-cancelled orders): keep fallback 'pending_payment'.
+        }
+      }
+
+      // 4. Re-reserve stock (BLOCKING).
+      const missing: { product_id: number; product_name: string; available: number; required: number }[] = [];
+
+      for (const item of order.order_items) {
+        if (
+          !item.products?.track_inventory ||
+          item.products?.product_type === 'service'
+        ) {
+          continue;
+        }
+
+        const location_id =
+          await this.stockLevelManager.getDefaultLocationForProduct(
+            item.product_id,
+            item.product_variant_id || undefined,
+          );
+
+        // Direct read inside the tx to make the decision atomic with the
+        // reservation that follows.
+        const stockLevel = await tx.stock_levels.findFirst({
+          where: {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            location_id,
+          },
+          select: { quantity_available: true },
+        });
+
+        const available = stockLevel?.quantity_available ?? 0;
+        if (available < item.quantity) {
+          missing.push({
+            product_id: item.product_id,
+            product_name: item.products?.name ?? `Product #${item.product_id}`,
+            available,
+            required: item.quantity,
+          });
+          continue;
+        }
+
+        await this.stockLevelManager.reserveStock(
+          item.product_id,
+          item.product_variant_id || undefined,
+          location_id,
+          item.quantity,
+          'order',
+          orderId,
+          userId,
+          // Availability was just verified above; skip the internal check to
+          // avoid a TOCTOU between our read and the reservation.
+          false,
+          tx,
+        );
+      }
+
+      if (missing.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_VALIDATE_001,
+          `Cannot reactivate order: insufficient stock for ${missing.length} product(s)`,
+          { missing },
+        );
+      }
+
+      // 5. Transition cancelled -> targetState. validateTransition enforces
+      // the new VALID_TRANSITIONS row added in this same plan.
+      this.validateTransition('cancelled', targetState);
+
+      const updatedOrder = await this.updateOrderState(orderId, targetState, {
+        reactivated_at: new Date(),
+        reactivation_reason: dto.reason,
+      });
+
+      this.logger.log(
+        `Order #${orderId} reactivated to '${targetState}': ${dto.reason ?? '(no reason)'}`,
+      );
+
+      return updatedOrder;
+    });
   }
 
   /**
