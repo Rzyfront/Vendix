@@ -12,7 +12,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Editing recipes, BOM explosion, or sub-recipe production orders"
@@ -23,6 +23,9 @@ metadata:
     - "Working with order_items.inventory_consumed_at_fire flag"
     - "Working with product_type_enum='prepared' or the is_sellable/is_ingredient/is_combo/is_batch_produced flags"
     - "Editing industry gating so that only `restaurant` stores see restaurant_ops"
+    - "Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products"
+    - "Adding or adjusting KDS card urgency tiers (warning / danger) driven by preparation_time_minutes"
+    - "Wiring the KDS ticket detail modal (recipe + actions replica)"
 ---
 
 ## When to Use
@@ -131,6 +134,33 @@ at payment. The flow lives in `kitchen-fire`:
   is set; `fireOrderItems` returns the skipped item ids and errors if **all**
   items were skipped.
 
+### Fase K — Recipe-less fire (Gap 3) + `KITCHEN_TICKET_NO_RECIPE`
+
+A `prepared` product with **no active recipe** is still fireable to the
+kitchen. `fireOrderItems` partitions `firedItemIds` into:
+
+- `preparedItems` (active recipe): consume leaf ingredients, recognize COGS.
+- `recipeLessItems` (no active recipe OR inactive recipe): no BOM, no stock
+  movement, `cogsTotal` stays 0 for these rows. The flag
+  `inventory_consumed_at_fire=true` is still flipped so the payment path
+  skips them and the anti-double-discount invariant holds. The kitchen
+  cooks them manually (the stock of leaf ingredients is the operator's
+  concern, not the system's).
+
+`startPreparation(ticketId)` adds a hard guard: if ANY item in the ticket
+has no active recipe, the transition to `in_preparation` is rejected with
+`KITCHEN_TICKET_NO_RECIPE` (422, `apps/backend/src/common/errors/error-codes.ts`).
+The guard is per-ticket (not per-item) because the state model transitions
+the whole ticket. The operator can either attach a recipe first or mark
+the ticket as delivered directly to bypass `in_preparation`.
+
+**Invariant — new meaning of `inventory_consumed_at_fire`:**
+"disparado a KDS, el pago no lo toca, COGS puede ser 0" (not the old
+"consumido de receta"). The payment path guard at
+`payments.service.ts:2554` (`if (item.inventory_consumed_at_fire === true) continue;`)
+DOES NOT distinguish between the two cases — and that is correct: in both
+cases the KDS owns the item and the payment must not double-discount.
+
 ## Tables and Open Tab
 
 - `tables` is a per-store floor entity (`pos_x`, `pos_y`, `status`).
@@ -167,6 +197,55 @@ at payment. The flow lives in `kitchen-fire`:
   4-column layout. Reuse `app-sticky-header`, `app-stats`, `app-card`,
   `app-button`, `app-badge`, `app-icon`, `app-toast`, `app-spinner`.
 
+### Fase K — KDS card urgency (Gap 5)
+
+KDS card urgency is driven by `products.preparation_time_minutes` (also on
+`product_variants.preparation_time_minutes`, exposed via the single
+`KITCHEN_TICKET_INCLUDE` so snapshot and every SSE event carry it). The
+board computes the **smallest** prep time across the ticket's items;
+missing/0/negative values contribute the default of 10 minutes.
+
+- **Warning tier**: `elapsed >= smallest_prep * 60s` (amber border + label).
+- **Danger tier**: `elapsed >= (smallest_prep + 5) * 60s` (red border + label).
+- Both tiers are suppressed in terminal states (`delivered`, `cancelled`).
+- Legacy `--urgent` class is kept as a backward-compat alias for `--warning`;
+  do not delete without auditing old screenshots.
+
+The shared `now` ticker is pushed to every card from the board; one timer
+for the whole page (not per card).
+
+### Fase K — KDS ticket detail modal (Gap 4)
+
+Clicking a KDS card body opens `kds-ticket-detail-modal`
+(`apps/frontend/src/app/private/modules/store/restaurant-ops/kds/components/kds-ticket-detail-modal/`)
+showing:
+
+- Order header (number, table, status, elapsed).
+- The ticket items with quantities, names, notes, and prep time.
+- The active recipe for each item via `RecipesService.getByProduct`,
+  cached per `product_id` in a local `Map` to avoid hammering the API.
+  Graceful degradation to "Receta no disponible" on 403/404 (per R7, we
+  never block the modal on a missing recipe nor touch permissions).
+- Replica of the board actions (Start / Ready / Deliver / Cancel) that
+  re-emit to the parent handlers so the SSE pipeline stays the source of
+  truth.
+
+The modal is **live**: the board derives the ticket from the SSE-fed
+`tickets()` signal by id, so any board event updates the modal in real
+time. The actions footer uses `(click)="$event.stopPropagation()"` so
+clicking a button inside the modal never re-opens it.
+
+### Fase K — KDS state in order detail (Gap 2)
+
+`GET /api/store/orders/:id` (`orders.service.ts:findOne`) now includes
+`kitchen_ticket_items` (ordered desc by id) on every `order_item`. The
+order detail page surfaces a "Cocina: \<estado\>" badge per item with
+the colour map: pending→neutral, in_preparation→warning, ready→success,
+delivered→info, cancelled→error. Non-fired items show no badge. The
+helper `kitchenStateFor(item)` prefers a non-terminal (in-flight) row
+over the most recent terminal row, so the badge tracks the active state
+even after re-fires.
+
 ## Menu / Carta
 
 - A `menus` is a named carta with `menu_sections`, each with
@@ -202,6 +281,30 @@ at payment. The flow lives in `kitchen-fire`:
   `kitchen-fire`, `tables`, and `split-order` services.
 - The retail POS path is unchanged: defaults preserve `is_sellable=true`
   on all retail products.
+
+### Fase K — POS stock-vs-KDS decision (Gap 1, `skipKds`)
+
+A `prepared` product that **also tracks inventory and has stock > 0** is
+ambiguous: cook-from-scratch (consume ingredients at fire) vs sellable
+item (consume its own stock on payment). The POS surfaces
+`pos-prepared-choice-modal`
+(`apps/frontend/src/app/private/modules/store/pos/components/pos-prepared-choice-modal/`)
+to the cashier at add-to-cart time. The choice persists as
+`CartItem.skipKds`:
+
+- `skipKds=false` (default, "Producir por KDS"): the item is included in
+  `fireOrderItems`. Stock of leaf ingredients is consumed at fire; the
+  product's own stock is not touched.
+- `skipKds=true` ("Usar stock"): the item is **excluded** from
+  `fireOrderItems` (POS component filters the `order_item_ids` list).
+  No kitchen ticket is created. The product's own stock is consumed at
+  payment as a regular `sale` movement.
+
+The flag is purely cart-local — it is **NOT** persisted to
+`order_items`, so no DB migration is required. Retail-only stores never
+see the modal (gated on `isRestaurantMode()`). Combined with the
+`inventory_consumed_at_fire` guard in `updateInventoryFromOrder`, this
+preserves the anti-double-discount invariant without schema changes.
 
 ## Industry Gating (inverse rule)
 
