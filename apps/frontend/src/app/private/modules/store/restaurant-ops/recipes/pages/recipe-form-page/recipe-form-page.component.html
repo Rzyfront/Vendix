@@ -14,7 +14,9 @@
   (ngSubmit)="submit()"
   class="space-y-4 md:space-y-6 px-2 pb-4 md:px-0 md:pb-6"
 >
-  <app-card [responsive]="true" [padding]="true">
+  <!-- overflow visible so the searchable selector dropdown (yield_unit)
+       is not clipped by the card's md:overflow-hidden. -->
+  <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">
     <div class="space-y-4">
       <div class="flex items-start gap-2">
         <app-icon
@@ -86,17 +88,15 @@
           description="Disponible para producción y costeo."
         />
       </div>
-    </div>
-  </app-card>
 
-  <app-card [responsive]="true" [padding]="true">
-    <app-textarea
-      formControlName="preparation_notes"
-      label="Notas de preparación"
-      placeholder="Pasos, técnica, recomendaciones, temperatura, etc."
-      [rows]="4"
-      [maxlength]="2000"
-    />
+      <app-textarea
+        formControlName="preparation_notes"
+        label="Notas de preparación"
+        placeholder="Pasos, técnica, recomendaciones, temperatura, etc."
+        [rows]="4"
+        [maxlength]="2000"
+      />
+    </div>
   </app-card>
 
   <!-- overflow visible so the searchable component dropdown is not clipped by
