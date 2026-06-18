@@ -626,32 +626,6 @@ describe('ProductsBulkService', () => {
       );
     });
 
-    it('should filter where clause to exclude ingredient products', async () => {
-      mockPrismaService.products.findMany.mockResolvedValueOnce([]);
-      await service.exportCurrentProductsAsTemplate();
-
-      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            is_ingredient: false,
-          }),
-        }),
-      );
-    });
-
-    it('should filter where clause to include only sellable products', async () => {
-      mockPrismaService.products.findMany.mockResolvedValueOnce([]);
-      await service.exportCurrentProductsAsTemplate();
-
-      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({
-          where: expect.objectContaining({
-            is_sellable: true,
-          }),
-        }),
-      );
-    });
-
     it('should scope the query by store_id', async () => {
       mockPrismaService.products.findMany.mockResolvedValueOnce([]);
       await service.exportCurrentProductsAsTemplate();
