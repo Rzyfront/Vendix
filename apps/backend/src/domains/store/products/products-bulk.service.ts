@@ -1107,7 +1107,7 @@ export class ProductsBulkService {
       });
       if (productCount === 0) {
         throw new NotFoundException(
-          'No hay productos para exportar. Agrega al menos un producto antes de descargar la plantilla.',
+          'No hay productos en su tienda. Agrega productos antes de descargar la plantilla.',
         );
       }
 
@@ -1231,15 +1231,82 @@ export class ProductsBulkService {
 
       // Cualquier otro error (Prisma, timeout, permisos de DB, columna
       // faltante, etc.) se loguea con contexto y se convierte a un mensaje
-      // genérico legible para el cliente. NUNCA se propaga el error crudo de
-      // Prisma al frontend.
+      // legible para el cliente. NUNCA se propaga el error crudo de Prisma
+      // al frontend.
       this.logger.error(
         `[exportCurrentProductsAsTemplate] Fallo al generar plantilla para store ${storeId}`,
         err instanceof Error ? err.stack : String(err),
       );
       throw new InternalServerErrorException(
-        'No se pudo generar la plantilla de productos. Por favor intenta de nuevo o contacta al soporte si el problema persiste.',
+        this.translateErrorForUser(err),
       );
+    }
+  }
+
+  /**
+   * Traduce errores técnicos (Prisma, DB, red) a mensajes legibles para el
+   * cliente. Mapea los códigos de error de Prisma más comunes a una explicación
+   * clara en español + acción sugerida.
+   *
+   * Por qué existe: el cliente NUNCA debe ver "The column `X` does not exist"
+   * o "P2010: Raw query failed". Necesita saber QUÉ pasó y QUÉ hacer.
+   *
+   * El error técnico completo se loguea con stack trace en el catch para
+   * que el equipo de soporte pueda debuggear.
+   */
+  private translateErrorForUser(err: unknown): string {
+    // Prisma expone el código en `err.code` (string como "P1001", "P2010", etc.)
+    // y metadatos adicionales según el tipo de error.
+    const prismaCode =
+      err && typeof err === 'object' && 'code' in err
+        ? String((err as { code: unknown }).code)
+        : '';
+    const prismaMessage =
+      err && typeof err === 'object' && 'message' in err
+        ? String((err as { message: unknown }).message)
+        : '';
+
+    // Mapeo por código de Prisma (https://www.prisma.io/docs/orm/reference/error-reference)
+    const messages: Record<string, string> = {
+      // Conexión / disponibilidad
+      P1001: 'No se pudo conectar a la base de datos. Por favor intenta de nuevo en unos minutos.',
+      P1002: 'La conexión con la base de datos tardó demasiado. Por favor intenta de nuevo.',
+      P1003: 'La base de datos no está disponible. Por favor contacta al soporte si el problema persiste.',
+      P1008: 'La conexión con la base de datos se cerró inesperadamente. Por favor intenta de nuevo.',
+      P1017: 'La conexión con la base de datos fue rechazada. Por favor intenta de nuevo en unos minutos.',
+
+      // Schema / datos
+      P2010: 'La estructura de la base de datos no es la esperada. Por favor contacta al soporte técnico.',
+      P2025: 'No se encontraron los productos solicitados. Por favor actualiza la página e intenta de nuevo.',
+
+      // Constraints
+      P2002: 'Hay datos duplicados en tu tienda que impiden generar la plantilla. Por favor contacta al soporte.',
+      P2003: 'Hay datos relacionados que faltan en tu tienda. Por favor contacta al soporte.',
+    };
+
+    if (messages[prismaCode]) {
+      return messages[prismaCode];
+    }
+
+    // Heurísticas por mensaje (fallback cuando el código no es uno de los
+    // conocidos o el error viene de otra capa)
+    if (prismaMessage.includes('does not exist in the current database')) {
+      return 'La base de datos necesita una actualización. Por favor contacta al soporte técnico.';
+    }
+    if (prismaMessage.includes('permission denied')) {
+      return 'No tienes permisos para acceder a estos datos. Por favor contacta al administrador de tu tienda.';
+    }
+    if (prismaMessage.includes('timeout') || prismaMessage.includes('timed out')) {
+      return 'La operación tardó demasiado. Por favor intenta de nuevo.';
+    }
+    if (prismaMessage.includes('connection') && prismaMessage.includes('refused')) {
+      return 'No se pudo conectar a la base de datos. Por favor intenta de nuevo en unos minutos.';
+    }
+
+    // Fallback genérico — NUNCA se debería llegar aquí para errores de Prisma,
+    // pero queda como red de seguridad.
+    return 'No se pudo generar la plantilla de productos. Por favor intenta de nuevo o contacta al soporte si el problema persiste.';
+  }
     }
   }
 
