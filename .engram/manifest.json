@@ -160,6 +160,30 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "393fc7ff",
+      "created_by": "yoner",
+      "created_at": "2026-06-18T01:11:22Z",
+      "sessions": 2,
+      "memories": 8,
+      "prompts": 0
+    },
+    {
+      "id": "aca7df6f",
+      "created_by": "yoner",
+      "created_at": "2026-06-18T01:22:37Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "24d5879f",
+      "created_by": "yoner",
+      "created_at": "2026-06-18T01:27:03Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
