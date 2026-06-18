@@ -264,22 +264,28 @@ function CollapsibleSubmenu({ isExpanded, childrenCount, children }: Collapsible
   const [shouldRender, setShouldRender] = useState(isExpanded);
 
   useEffect(() => {
+    const animation = Animated.timing(animatedHeight, {
+      toValue: isExpanded ? 1 : 0,
+      duration: isExpanded ? 300 : 250,
+      useNativeDriver: false,
+    });
     if (isExpanded) {
       setShouldRender(true);
-      Animated.timing(animatedHeight, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
+      animation.start();
     } else {
-      Animated.timing(animatedHeight, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: false,
-      }).start(() => {
-        setShouldRender(false);
+      animation.start(({ finished }) => {
+        // Solo colapsamos el subárbol si la animación terminó de verdad;
+        // si fue interrumpida (cambio rápido de isExpanded o unmount)
+        // dejamos shouldRender como está para evitar parpadeo.
+        if (finished) setShouldRender(false);
       });
     }
+    // Cleanup: si el componente se desmonta o isExpanded cambia de nuevo
+    // antes de que termine la animación, la cancelamos para no settear
+    // state sobre un componente desmontado ni pelear dos animaciones.
+    return () => {
+      animation.stop();
+    };
   }, [isExpanded]);
 
   const height = animatedHeight.interpolate({
@@ -327,12 +333,11 @@ const SUBMENU_BUTTON_MARGIN_LEFT = 20; // matches web: button starts just after 
 export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerMenuProps) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  
+
   const user = useAuthStore((s) => s.user);
   const user_settings = useAuthStore((s) => s.user_settings);
   const store_settings = useAuthStore((s) => s.store_settings);
   const default_panel_ui = useAuthStore((s) => s.default_panel_ui);
-  const logout = useAuthStore((s) => s.logout);
   
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
   const [storeToSwitch, setStoreToSwitch] = useState<StoreListItem | null>(null);
@@ -613,12 +618,6 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     }
     setExpandedSections(nextExpanded);
     // No auto-navigate: the user must explicitly click a sub-item to navigate.
-  };
-
-  const handleLogout = () => {
-    onClose();
-    logout();
-    router.replace('/(auth)/login');
   };
 
   const isRouteActive = (href?: string) => {

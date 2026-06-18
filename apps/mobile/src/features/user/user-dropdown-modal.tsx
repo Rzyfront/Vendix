@@ -8,7 +8,6 @@ import {
   Modal as RNModal,
   TouchableWithoutFeedback,
   Alert,
-  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
