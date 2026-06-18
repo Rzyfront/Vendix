@@ -347,6 +347,7 @@ import {
                     [hiddenByStore]="hiddenByStore()"
                     [searchable]="true"
                     [parentSync]="true"
+                    [readOnly]="!canManageUsers()"
                     (valueChange)="onEditorValueChange($event)"
                   />
                 </div>
@@ -531,6 +532,23 @@ export class StoreUserEditModalComponent implements OnChanges {
           r.name.toLowerCase().includes('owner')),
     );
   });
+
+  /**
+   * Authorization of the LOGGED-IN user to manage other store users.
+   * This is independent from `isAdminOrOwner()` (which inspects the EDITED
+   * target's roles to pick which app_type tabs to show — pure UX). Here we
+   * gate the ability to edit/save another user's data + panel_ui.
+   *
+   * Prefers the named permission `store:users:update` when present, falling
+   * back to the owner/admin role of the logged-in user. Backed by AuthFacade
+   * signals (`userPermissions`/`ownerFlag`/`adminFlag`) so it stays reactive.
+   */
+  readonly canManageUsers = computed<boolean>(
+    () =>
+      this.authFacade.hasPermission('store:users:update') ||
+      this.authFacade.isOwner() ||
+      this.authFacade.isAdmin(),
+  );
 
   /** `value` for the shared editor — the active app_type's flat map. */
   readonly editorValue = computed<Record<string, boolean>>(() => {
@@ -758,6 +776,10 @@ export class StoreUserEditModalComponent implements OnChanges {
   }
 
   isSaveDisabled(): boolean {
+    // Defense in depth: a non owner/admin (or user without the
+    // `store:users:update` permission) can never save any tab of another
+    // user, regardless of the form/tab state.
+    if (!this.canManageUsers()) return true;
     switch (this.activeTab()) {
       case 'info':
         return this.infoForm.invalid || this.detailLoading();

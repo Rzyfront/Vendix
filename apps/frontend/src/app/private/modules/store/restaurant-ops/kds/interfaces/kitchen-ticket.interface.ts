@@ -21,6 +21,14 @@ export interface KitchenTicketProductRef {
   name: string;
   sku?: string | null;
   stock_unit?: string | null;
+  /**
+   * Restaurant Suite — Fase K Gap 5: preparation time in minutes
+   * (sourced from `products.preparation_time_minutes` via the
+   * kitchen-fire service include). Used to drive the urgency
+   * tier on the KDS card. Missing/0 ⇒ treated as the default
+   * (10 min).
+   */
+  preparation_time_minutes?: number | null;
 }
 
 export interface KitchenTicketItem {
@@ -38,9 +46,18 @@ export interface KitchenTicket {
   id: number;
   store_id: number;
   order_id: number;
+  daily_number?: number | null;
+  order?: { order_number: string } | null;
   table_id?: number | null;
   status: KitchenTicketStatus;
   fired_at: string | Date;
+  /**
+   * Business date (tz + ticket_closing_hour aware) assigned at fire time.
+   * Drives the KDS board reset: the board shows only the current business
+   * day's tickets. Serialized as an ISO string over SSE/REST (UTC midnight
+   * of the local business date). Null on legacy pre-migration tickets.
+   */
+  business_date?: string | Date | null;
   ready_at?: string | Date | null;
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
@@ -83,6 +100,11 @@ export type KdsEvent =
     }
   | {
       type: 'ticket.cancelled';
+      ticket: KitchenTicket;
+      ts: number;
+    }
+  | {
+      type: 'ticket.reverted';
       ticket: KitchenTicket;
       ts: number;
     };

@@ -23,6 +23,7 @@ import {
   CancelPaymentDto,
   CreateRefundDto,
   FastTrackOrderDto,
+  ReactivateOrderDto,
 } from './dto';
 import { ResponseService } from '@common/responses/response.service';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
@@ -193,6 +194,17 @@ export class OrderFlowController {
   ) {
     const order = await this.orderFlowService.cancelOrder(orderId, dto);
     return this.responseService.success(order, 'Order cancelled successfully');
+  }
+
+  @Post('reactivate')
+  @Permissions('store:orders:order_flow:reactivate')
+  @HttpCode(HttpStatus.OK)
+  async reactivateOrder(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: ReactivateOrderDto,
+  ) {
+    const order = await this.orderFlowService.reactivateOrder(orderId, dto);
+    return this.responseService.success(order, 'Order reactivated successfully');
   }
 
   @Post('refund')

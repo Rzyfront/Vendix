@@ -1,12 +1,10 @@
-import {
-  Component,
+import {Component,
   DestroyRef,
   inject,
   input,
   output,
   signal,
-  computed,
-} from '@angular/core';
+  computed, effect } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NgClass } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -83,6 +81,13 @@ export class OrdersListComponent {
   readonly create = output<void>();
   readonly viewOrder = output<string>();
   readonly refresh = output<void>();
+
+  /**
+   * Bug 2 (Fase K): when the parent increments this input, the list
+   * re-fetches. The orders page binds it to a counter that ticks on
+   * route re-entry so the POS-created order shows up without an F5.
+   */
+  readonly reloadTrigger = input<number>(0);
 
   readonly filters = input<OrderQuery>({
     search: '',
@@ -334,6 +339,14 @@ export class OrdersListComponent {
 
   constructor() {
     this.loadOrders();
+
+    // Bug 2 (Fase K): react to parent-triggered reload requests.
+    effect(() => {
+      const tick = this.reloadTrigger();
+      if (tick > 0) {
+        this.loadOrders();
+      }
+    });
   }
 
   // Computed property for hasFilters

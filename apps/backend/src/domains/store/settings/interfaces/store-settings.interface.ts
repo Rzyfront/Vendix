@@ -495,4 +495,5 @@ export interface ReservationsSettings {
 
 export interface OperationsSettings {
   default_preparation_time_minutes: number;
+  ticket_closing_hour?: number;
 }

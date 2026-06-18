@@ -14,7 +14,9 @@
   (ngSubmit)="submit()"
   class="space-y-4 md:space-y-6 px-2 pb-4 md:px-0 md:pb-6"
 >
-  <app-card [responsive]="true" [padding]="true">
+  <!-- overflow visible so the searchable selector dropdown (yield_unit)
+       is not clipped by the card's md:overflow-hidden. -->
+  <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">
     <div class="space-y-4">
       <div class="flex items-start gap-2">
         <app-icon
@@ -43,15 +45,17 @@
           [options]="yieldOptions()"
           [required]="true"
           [disabled]="isEditMode() || isLoadingProducts()"
-          helpText="Una receta solo puede existir una vez por producto. En modo edición este campo se bloquea."
+          tooltipText="El plato o sub-receta que produces con estos insumos. Una receta por producto. En modo edición este campo se bloquea."
         />
 
-        <app-input
+        <app-selector
           formControlName="yield_unit"
           label="Unidad de rendimiento"
-          placeholder="Ej. plato, porción, g, ml"
+          placeholder="Selecciona una unidad"
+          [options]="yieldUnitOptions"
+          [searchable]="true"
           [required]="true"
-          [maxlength]="20"
+          tooltipText="En qué unidad mides lo que produce la receta (porción, plato, g, ml…)."
         />
       </div>
 
@@ -64,7 +68,7 @@
           [min]="0"
           step="0.0001"
           [required]="true"
-          helpText="Cantidad producida por lote de la receta."
+          tooltipText="Cuánto produce un lote de la receta, en la unidad de rendimiento."
         />
 
         <app-input
@@ -75,7 +79,7 @@
           [min]="0"
           [max]="100"
           step="0.5"
-          helpText="Porcentaje de merma esperado para el rendimiento total."
+          tooltipText="Pérdida del plato terminado por el proceso (cocción, evaporación, residuo). Se aplica sobre el rendimiento total."
         />
 
         <app-setting-toggle
@@ -84,17 +88,15 @@
           description="Disponible para producción y costeo."
         />
       </div>
-    </div>
-  </app-card>
 
-  <app-card [responsive]="true" [padding]="true">
-    <app-textarea
-      formControlName="preparation_notes"
-      label="Notas de preparación"
-      placeholder="Pasos, técnica, recomendaciones, temperatura, etc."
-      [rows]="4"
-      [maxlength]="2000"
-    />
+      <app-textarea
+        formControlName="preparation_notes"
+        label="Notas de preparación"
+        placeholder="Pasos, técnica, recomendaciones, temperatura, etc."
+        [rows]="4"
+        [maxlength]="2000"
+      />
+    </div>
   </app-card>
 
   <!-- overflow visible so the searchable component dropdown is not clipped by

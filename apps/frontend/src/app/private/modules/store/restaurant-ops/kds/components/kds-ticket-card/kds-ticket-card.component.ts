@@ -46,6 +46,13 @@ export class KdsTicketCardComponent {
   readonly readyClicked = output<KitchenTicket>();
   readonly deliverClicked = output<KitchenTicket>();
   readonly cancelClicked = output<KitchenTicket>();
+  /**
+   * Restaurant Suite — Fase K Gap 4: emitted on click of the card
+   * body (NOT the actions footer). The board opens the detail
+   * modal in response. Action buttons stop propagation so they
+   * never trigger the modal open.
+   */
+  readonly cardClicked = output<KitchenTicket>();
 
   readonly elapsedSeconds = computed(() => {
     const fired = this.toDate(this.ticket().fired_at);
@@ -55,7 +62,41 @@ export class KdsTicketCardComponent {
 
   readonly elapsedLabel = computed(() => this.formatElapsed(this.elapsedSeconds()));
 
-  readonly isUrgent = computed(() => this.elapsedSeconds() >= 600);
+  /**
+   * Restaurant Suite — Fase K Gap 5: smallest `preparation_time_minutes`
+   * across the ticket's items. Items without a value contribute the
+   * default of 10 minutes (per spec: "platos sin tiempo usan el
+   * default 10 min"). A value of 0 or negative is treated as the
+   * default too.
+   */
+  readonly smallestPrepMinutes = computed<number>(() => {
+    const DEFAULT_MIN = 10;
+    const items = this.ticket()?.items ?? [];
+    if (items.length === 0) return DEFAULT_MIN;
+    let smallest = Number.POSITIVE_INFINITY;
+    for (const item of items) {
+      const raw = item.product?.preparation_time_minutes;
+      const v = Number(raw ?? 0);
+      const minutes = v > 0 ? v : DEFAULT_MIN;
+      if (minutes < smallest) smallest = minutes;
+    }
+    return Number.isFinite(smallest) ? smallest : DEFAULT_MIN;
+  });
+
+  /** Warning tier: `elapsed >= smallestPrepMinutes`. */
+  readonly isWarning = computed(() => {
+    if (this.isTerminal(this.ticket().status)) return false;
+    return this.elapsedSeconds() >= this.smallestPrepMinutes() * 60;
+  });
+
+  /** Danger tier: `elapsed >= smallestPrepMinutes + 5 min`. */
+  readonly isDanger = computed(() => {
+    if (this.isTerminal(this.ticket().status)) return false;
+    return (
+      this.elapsedSeconds() >=
+      (this.smallestPrepMinutes() + 5) * 60
+    );
+  });
 
   readonly statusLabel = computed(() =>
     KitchenTicketsService.statusLabel(this.ticket().status),
@@ -80,6 +121,10 @@ export class KdsTicketCardComponent {
   readonly isInPreparation = computed(
     () => this.ticket().status === 'in_preparation',
   );
+
+  onCardClick(): void {
+    this.cardClicked.emit(this.ticket());
+  }
 
   onStart(): void {
     if (this.isMutating()) return;

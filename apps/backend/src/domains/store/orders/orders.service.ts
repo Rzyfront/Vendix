@@ -73,11 +73,16 @@ export class OrdersService {
       await this.scheduleValidationService.validateOrThrow(store_id, true);
     }
 
-    const user = await this.prisma.users.findUnique({
-      where: { id: createOrderDto.customer_id },
-    });
-    if (!user) {
-      throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+    // `customer_id` is optional (POS counter / table-less flows may omit
+    // it for an anonymous "Consumidor Final" sale). Only validate the
+    // foreign key when the caller actually provided one.
+    if (createOrderDto.customer_id != null) {
+      const user = await this.prisma.users.findUnique({
+        where: { id: createOrderDto.customer_id },
+      });
+      if (!user) {
+        throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+      }
     }
 
     // Validate weight product coherence
@@ -103,7 +108,7 @@ export class OrdersService {
         // Use scoped client (creates are not scoped by extension but using correct service is good style)
         const order = await this.prisma.orders.create({
           data: {
-            customer_id: createOrderDto.customer_id,
+            customer_id: createOrderDto.customer_id ?? null,
             store_id: store_id, // Force strict store_id
             order_number: createOrderDto.order_number,
             state: createOrderDto.state || order_state_enum.created,
@@ -355,6 +360,28 @@ export class OrdersService {
               },
             },
             product_variants: true,
+            // Restaurant Suite — Fase K Gap 2: surface the KDS state
+            // for every order_item so the order detail can show
+            // "Cocina: <estado>" badges per dish. We order by id desc
+            // so the most recent ticket-item wins; the controller
+            // post-filters to the non-terminal (or newest terminal)
+            // row in the response shape.
+            kitchen_ticket_items: {
+              orderBy: { id: 'desc' },
+              select: {
+                id: true,
+                status: true,
+                kitchen_ticket_id: true,
+                kitchen_ticket: {
+                  select: {
+                    id: true,
+                    status: true,
+                    daily_number: true,
+                    fired_at: true,
+                  },
+                },
+              },
+            },
           },
         },
         addresses_orders_billing_address_idToaddresses: true,

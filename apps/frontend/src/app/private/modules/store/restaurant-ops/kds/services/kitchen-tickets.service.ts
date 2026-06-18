@@ -77,6 +77,17 @@ export class KitchenTicketsService {
   }
 
   /**
+   * Revierte el ticket al estado inmediatamente anterior
+   * (in_preparation → pending, ready → in_preparation,
+   * delivered → ready, cancelled → ready). El backend resuelve el
+   * estado destino y devuelve el ticket actualizado; el board lo
+   * reconcilia vía el evento SSE `ticket.reverted`.
+   */
+  revert(ticketId: number): Observable<KitchenTicket> {
+    return this.mutateTicket(ticketId, 'revert');
+  }
+
+  /**
    * Fire a batch of order items to the kitchen (creates a
    * `kitchen_ticket` and triggers the inventory + COGS seam in
    * Phase D). Returns the new ticket summary.
@@ -99,7 +110,7 @@ export class KitchenTicketsService {
 
   private mutateTicket(
     ticketId: number,
-    action: 'start' | 'ready' | 'delivered' | 'cancel',
+    action: 'start' | 'ready' | 'delivered' | 'cancel' | 'revert',
   ): Observable<KitchenTicket> {
     return this.http
       .post<ApiResponse<KitchenTicket>>(

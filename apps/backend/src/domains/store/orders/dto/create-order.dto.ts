@@ -117,9 +117,16 @@ export class CreateOrderItemDto {
 }
 
 export class CreateOrderDto {
+  /**
+   * Optional customer bound to the order. POS counter (consumidor final)
+   * and table-less flows may omit it; the resulting order is persisted as
+   * anonymous and `orders.customer_id` is `null`. When a valid id is
+   * provided, the row is linked to the corresponding `users` row.
+   */
+  @IsOptional()
   @IsInt()
   @Min(1)
-  customer_id: number;
+  customer_id?: number;
 
   /**
    * Optional. If provided, must match the store_id derived from RequestContext.

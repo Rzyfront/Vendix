@@ -26,6 +26,7 @@ import {
   PosRestaurantIntegrationService,
   OpenTableSessionResult,
 } from '../services/pos-restaurant-integration.service';
+import { PosCustomer } from '../services/pos-customer.service';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import type { Table } from '../../restaurant-ops/tables/interfaces';
@@ -299,6 +300,13 @@ export class PosOpenTableModalComponent {
 
   readonly isOpen = input<boolean>(false);
   readonly isOpenChange = output<boolean>();
+  /**
+   * Optional customer to bind to the new table session's draft order
+   * (Bug 3 / Fase K). When provided, the session is opened with this
+   * customer's id; otherwise the backend falls back to the opening
+   * user (legacy behavior).
+   */
+  readonly customer = input<PosCustomer | null>(null);
   readonly sessionOpened = output<OpenTableSessionResult>();
 
   readonly tables = signal<Table[]>([]);
@@ -402,8 +410,20 @@ export class PosOpenTableModalComponent {
     this.submitting.set(true);
     const rawGuest = this.form.value.guest_count;
     const guestCount = rawGuest == null || rawGuest === '' ? undefined : Number(rawGuest);
+    // Bug 3 (Fase K): forward the optional customer so the table
+    // session's draft order is linked to the picked client (or stays
+    // anonymous when none was chosen).
+    const customer = this.customer();
+    const customerId =
+      customer && Number.isFinite(Number(customer.id)) && Number(customer.id) > 0
+        ? Number(customer.id)
+        : undefined;
     this.integration
-      .openTableSession({ table_id: tableId, guest_count: guestCount })
+      .openTableSession({
+        table_id: tableId,
+        guest_count: guestCount,
+        ...(customerId ? { customer_id: customerId } : {}),
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {

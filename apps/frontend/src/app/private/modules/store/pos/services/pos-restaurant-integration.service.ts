@@ -1,7 +1,7 @@
 import { Injectable, inject, signal, computed, DestroyRef } from '@angular/core';
 import { industriesSupportIngredients } from '../../../../../shared/constants/industry-modules.constant';
 import { HttpClient } from '@angular/common/http';
-import { Observable, throwError } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
@@ -205,6 +205,57 @@ export class PosRestaurantIntegrationService {
   }
 
   /**
+   * Anti-doble-fire guard. Tracks whether the KDS has already been triggered
+   * for the current cart session (Create / Cobrar / Envío all share this flag
+   * to avoid double-discounting the same `prepared` order_items). The flag is
+   * reset by the POS component on clearCart / newSale.
+   */
+  private readonly _preparedFired = signal(false);
+  readonly preparedFiredForCurrentCart = this._preparedFired.asReadonly();
+  markPreparedFired(): void {
+    this._preparedFired.set(true);
+  }
+  resetPreparedFired(): void {
+    this._preparedFired.set(false);
+  }
+
+  /**
+   * Fire `prepared` order_items to the kitchen in a single, idempotent call.
+   * Returns `null` (no-op) when:
+   *  - the store is not a `restaurant` industry tenant, OR
+   *  - the caller passed an empty `orderItemIds` list, OR
+   *  - the cart session has already fired (anti-double-fire).
+   *
+   * Safe to call multiple times for the same `orderId`/`orderItemIds`: the
+   * backend `inventory_consumed_at_fire` guard (kitchen-fire.service.ts)
+   * returns the `skipped_item_ids` and never double-discounts.
+   *
+   * Failures are **swallowed**: the order/payment has already been persisted
+   * upstream (Create / Cobrar / Envío) so we do not roll back the sale. The
+   * operator sees a toast and can re-fire manually.
+   */
+  maybeFireKitchen(
+    orderId: number,
+    orderItemIds: number[],
+    notes?: string,
+  ): Observable<FireOrderItemsResponse | null> {
+    if (!this.isRestaurantMode() || !orderItemIds?.length) {
+      return of(null);
+    }
+    if (this._preparedFired()) {
+      return of(null);
+    }
+    this._preparedFired.set(true);
+    return this.fireOrderItems(orderId, orderItemIds, notes).pipe(
+      catchError((err) => {
+        // Roll the guard back so the operator can retry from the UI.
+        this._preparedFired.set(false);
+        return throwError(() => err);
+      }),
+    );
+  }
+
+  /**
    * Create a draft counter (table-less) order so its `prepared` items can be
    * fired to the kitchen without opening a table. Used for mostrador / para
    * llevar flows where there is no `table_session`. The backend creates the
@@ -221,9 +272,12 @@ export class PosRestaurantIntegrationService {
     notes?: string,
   ): Observable<CounterOrderResult> {
     const subtotal = lines.reduce((sum, l) => sum + (l.total_price || 0), 0);
-    const body = {
-      customer_id: customerId,
-      state: 'draft',
+    // `customer_id` is optional on the backend (Bug 4 / Fase K): POS
+    // counter flows can omit it for an anonymous Consumidor Final sale.
+    // We only include it when the caller actually provided a positive id.
+    const body: Record<string, any> = {
+      state: 'created',
+      ...(customerId && customerId > 0 ? { customer_id: customerId } : {}),
       subtotal: Number(subtotal.toFixed(2)),
       total_amount: Number(subtotal.toFixed(2)),
       internal_notes: notes,

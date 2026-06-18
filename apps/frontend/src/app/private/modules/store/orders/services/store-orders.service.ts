@@ -22,6 +22,7 @@ import {
   ShipOrderDto,
   DeliverOrderDto,
   CancelOrderDto,
+  ReactivateOrderDto,
   RefundOrderDto,
   CreateRefundRequest,
   RefundCalculationResult,
@@ -511,6 +512,17 @@ export class StoreOrdersService {
       map((r) => r.data || r),
       catchError((error) => {
         console.error('Error cancelling order:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  flowReactivateOrder(orderId: string, dto: ReactivateOrderDto): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/reactivate`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error reactivating order:', error);
         return throwError(() => new Error(this.extractErrorMessage(error)));
       }),
     );

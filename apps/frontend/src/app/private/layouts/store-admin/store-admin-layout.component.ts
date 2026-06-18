@@ -8,7 +8,11 @@ import {
   afterNextRender,
 } from '@angular/core';
 import { RouterModule } from '@angular/router';
-import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import {
+  toSignal,
+  toObservable,
+  takeUntilDestroyed,
+} from '@angular/core/rxjs-interop';
 import {
   SidebarComponent,
   MenuItem,
@@ -27,7 +31,7 @@ import { FiscalObligationBannerComponent } from '../../../shared/components/fisc
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
 import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 import { combineLatest } from 'rxjs';
-import { map, distinctUntilChanged, skip } from 'rxjs/operators';
+import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
 
 @Component({
   selector: 'app-store-admin-layout',
@@ -61,6 +65,7 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
       >
         <!-- Footer Content -->
         <div slot="footer" class="sidebar-footer-content">
+          @if (canManageSubscription()) {
           <a
             class="footer-info-item footer-info-item--clickable"
             routerLink="/admin/subscription"
@@ -126,6 +131,7 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
               </div>
             </div>
           </a>
+          }
         </div>
       </app-sidebar>
 
@@ -718,11 +724,76 @@ export class StoreAdminLayoutComponent {
     },
   ];
 
-  // Reactive menu items as signal via toSignal
+  /**
+   * Authorization of the LOGGED-IN user to manage store users. Drives both
+   * the "Usuarios" menu-entry visibility here and gates the settings/users
+   * route (`manageUsersGuard`). Prefers the named permission
+   * `store:users:update`, falling back to owner/admin role. Backed by
+   * AuthFacade signals so it stays reactive (zoneless-safe).
+   *
+   * Note: this is authorization, not panel_ui visibility — the "Usuarios"
+   * entry has no dedicated panel_ui key, so it is gated here by removing the
+   * menu item before the panel_ui/scope/fiscal `filterMenuItems` pass.
+   */
+  readonly canManageUsers = computed<boolean>(
+    () =>
+      this.authFacade.hasPermission('store:users:update') ||
+      this.authFacade.isOwner() ||
+      this.authFacade.isAdmin(),
+  );
+
+  /**
+   * Authorization of the LOGGED-IN user to manage the store subscription.
+   * Drives the sidebar footer subscription card visibility here and mirrors
+   * the `subscriptionManagementGuard` that gates the `/admin/subscription`
+   * route. Owner-only (owner + super_admin). Backed by AuthFacade signals so
+   * it stays reactive (zoneless-safe).
+   */
+  readonly canManageSubscription = computed<boolean>(
+    () =>
+      this.authFacade.isOwner() ||
+      this.authFacade.hasAnyRole([
+        'owner',
+        'OWNER',
+        'super_admin',
+        'STORE_OWNER',
+        'ORG_OWNER',
+      ]),
+  );
+
+  // Reactive menu items as signal via toSignal.
+  // Reacts to `canManageUsers`: the "Usuarios" entry is stripped from the
+  // base tree for users who cannot manage users, then the resulting tree is
+  // passed through the existing panel_ui/scope/fiscal filter pipeline.
   readonly filteredMenuItems = toSignal(
-    this.menuFilterService.filterMenuItems(this.allMenuItems),
+    toObservable(this.canManageUsers).pipe(
+      switchMap((canManageUsers) =>
+        this.menuFilterService.filterMenuItems(
+          this.getBaseMenuItems(canManageUsers),
+        ),
+      ),
+    ),
     { initialValue: [] as MenuItem[] },
   );
+
+  /**
+   * Returns the base menu tree, removing the "Usuarios" entry from the
+   * "Configuración" group when the logged-in user cannot manage users.
+   * Visibility-only defense in depth — the route guard is the real boundary.
+   */
+  private getBaseMenuItems(canManageUsers: boolean): MenuItem[] {
+    if (canManageUsers) return this.allMenuItems;
+    return this.allMenuItems.map((item) =>
+      item.children
+        ? {
+            ...item,
+            children: item.children.filter(
+              (child) => child.route !== '/admin/settings/users',
+            ),
+          }
+        : item,
+    );
+  }
 
   readonly posTourConfig = POS_TOUR_CONFIG;
 

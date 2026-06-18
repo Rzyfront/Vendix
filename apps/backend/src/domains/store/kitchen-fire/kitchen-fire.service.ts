@@ -10,6 +10,30 @@ import { NotificationsSseService } from '../notifications/notifications-sse.serv
 import { FireOrderItemsDto, KitchenTicketQueryDto } from './dto';
 
 /**
+ * Single source of truth for the kitchen-ticket payload shape returned to
+ * the KDS / POS. Exposes the parent order code (`order.order_number`) plus
+ * the per-item product summary. Used by all four ticket read paths so the
+ * contract stays consistent (`daily_number` lives on the ticket row).
+ */
+const KITCHEN_TICKET_INCLUDE = {
+  order: { select: { order_number: true } },
+  items: {
+    orderBy: { id: 'asc' },
+    include: {
+      product: {
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          stock_unit: true,
+          preparation_time_minutes: true,
+        },
+      },
+    },
+  },
+} satisfies Prisma.kitchen_ticketsInclude;
+
+/**
  * Result of {@link KitchenFireService.fireOrderItems}. Returned to the
  * controller and (eventually) the POS UI to confirm the fire was
  * accepted and which items were actually consumed.
@@ -36,6 +60,7 @@ export interface KdsSseEvent {
     | 'ticket.ready'
     | 'ticket.delivered'
     | 'ticket.cancelled'
+    | 'ticket.reverted'
     | 'ping';
   ticket?: any;
   tickets?: any[];
@@ -89,6 +114,20 @@ export class KitchenFireService {
     private readonly eventEmitter: EventEmitter2,
     private readonly sseService: NotificationsSseService,
   ) {}
+
+  /** Fecha de negocio 'YYYY-MM-DD' en tz de la tienda, desplazada por la hora de corte (default 3 AM → un ticket a la 1 AM cuenta para el día anterior). Configurable vía store_settings.settings.operations.ticket_closing_hour (con fallback legado a restaurant_ops.business_day_cutoff_hour). */
+  private async getBusinessDate(store_id: number): Promise<string> {
+    const row = await this.prisma.store_settings.findUnique({
+      where: { store_id }, select: { settings: true },
+    });
+    const settings = (row?.settings ?? {}) as any;
+    const timezone = settings?.general?.timezone || 'America/Bogota';
+    const cutoffHour = Number(settings?.operations?.ticket_closing_hour ?? settings?.restaurant_ops?.business_day_cutoff_hour ?? 3) || 0;
+    const shifted = new Date(Date.now() - cutoffHour * 3_600_000);
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(shifted);
+  }
 
   // ---------------------------------------------------------------- fire
   async fireOrderItems(
@@ -161,12 +200,26 @@ export class KitchenFireService {
 
     // 3. Pre-load all recipes needed for the fired items (to avoid
     //    repeated lookups inside the transaction).
+    //
+    // Restaurant Suite — Fase K Gap 3: a `prepared` product with NO
+    // active recipe is still fireable — the kitchen can cook it by
+    // hand without deducting ingredient stock. The hard guard moves
+    // to `startPreparation` (it refuses to advance a ticket that
+    // contains a recipe-less item). At fire time we partition into:
+    //   - `preparedItems`: items with an active recipe (BOM explodes,
+    //     stock is consumed, COGS recognized).
+    //   - `recipeLessItems`: items with NO active recipe (no BOM, no
+    //     stock movement, cogsTotal stays at 0 for these rows).
+    // Both groups still create a `kitchen_ticket_item` and flip
+    // `inventory_consumed_at_fire=true` (so the payment path skips
+    // them).
     type PreparedItemContext = {
       orderItem: (typeof order.order_items)[number];
       recipeId: number;
       bomLines: BomExplosionLine[];
     };
     const preparedItems: PreparedItemContext[] = [];
+    const recipeLessItems: Array<(typeof order.order_items)[number]> = [];
     for (const itemId of firedItemIds) {
       const item = order.order_items.find((oi) => oi.id === itemId)!;
       const recipe = await this.prisma.recipes.findFirst({
@@ -174,10 +227,14 @@ export class KitchenFireService {
         select: { id: true, product_id: true, is_active: true },
       });
       if (!recipe) {
-        throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_NO_RECIPE);
+        // No recipe at all → cooked by hand, no inventory consume.
+        recipeLessItems.push(item);
+        continue;
       }
       if (!recipe.is_active) {
-        throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_RECIPE_INACTIVE);
+        // Inactive recipe → treat like no recipe (no consume).
+        recipeLessItems.push(item);
+        continue;
       }
       const bomLines = await this.recipesService.explodeBom(recipe.id, {
         [recipe.id]: 1,
@@ -202,6 +259,10 @@ export class KitchenFireService {
       );
       locationByProduct.set(pid, loc);
     }
+
+    // 3c. Resolve the store business date (tz + cutoff-aware) BEFORE the
+    //     transaction; the advisory lock + daily counter run inside.
+    const businessDate = await this.getBusinessDate(store_id);
 
     // 4. ATOMIC TRANSACTION — for each item: per-leaf stock consumption +
     //    flag flip. Then create the kitchen_ticket + items.
@@ -270,6 +331,35 @@ export class KitchenFireService {
         });
       }
 
+      // Recipe-less items: same ticket, no stock movement, no COGS.
+      // We still flip `inventory_consumed_at_fire=true` so the payment
+      // path skips them and the anti-double-discount invariant holds
+      // (the kitchen will track the cook manually, the POS won't
+      // double-deduct the product's own stock).
+      for (const item of recipeLessItems) {
+        const orderQty = Number(item.quantity || 0);
+        if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
+        await tx.order_items.update({
+          where: { id: item.id },
+          data: { inventory_consumed_at_fire: true },
+        });
+        firedItemSnapshots.push({
+          orderItemId: item.id,
+          productId: item.product_id!,
+          productName: item.product_name,
+          quantity: orderQty,
+        });
+      }
+
+      // Serialize the daily correlative per (store, business_date) with a
+      // transaction-scoped advisory lock so concurrent fires can't collide
+      // on the same daily_number. The lock auto-releases at commit/rollback.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate})::int)`;
+      const sameDayCount = await tx.kitchen_tickets.count({
+        where: { store_id, business_date: new Date(`${businessDate}T00:00:00.000Z`) },
+      });
+      const dailyNumber = sameDayCount + 1;
+
       // Create the kitchen_ticket + items (one ticket per fire call, one
       // item per fired order_item). Status defaults to 'pending'; Fase F
       // owns the KDS SSE controller that mutates these later.
@@ -278,6 +368,8 @@ export class KitchenFireService {
           store_id,
           order_id: order.id,
           status: 'pending',
+          daily_number: dailyNumber,
+          business_date: new Date(`${businessDate}T00:00:00.000Z`),
           fired_at: new Date(),
           items: {
             create: firedItemSnapshots.map((snap) => ({
@@ -326,16 +418,7 @@ export class KitchenFireService {
     try {
       const fullTicket = await this.prisma.kitchen_tickets.findFirst({
         where: { id: result.ticketId, store_id },
-        include: {
-          items: {
-            orderBy: { id: 'asc' },
-            include: {
-              product: {
-                select: { id: true, name: true, sku: true, stock_unit: true },
-              },
-            },
-          },
-        },
+        include: KITCHEN_TICKET_INCLUDE,
       });
       if (fullTicket) {
         this.pushKitchenEvent(store_id, {
@@ -396,16 +479,7 @@ export class KitchenFireService {
     }
     const ticket = await this.prisma.kitchen_tickets.findFirst({
       where: { id: ticketId, store_id },
-      include: {
-        items: {
-          orderBy: { id: 'asc' },
-          include: {
-            product: {
-              select: { id: true, name: true, sku: true, stock_unit: true },
-            },
-          },
-        },
-      },
+      include: KITCHEN_TICKET_INCLUDE,
     });
     if (!ticket) {
       throw new VendixHttpException(ErrorCodes.KITCHEN_TICKET_NOT_FOUND);
@@ -435,6 +509,36 @@ export class KitchenFireService {
     if (ticket.status === 'ready') {
       // Idempotent — already past this state.
       return ticket;
+    }
+
+    // Restaurant Suite — Fase K Gap 3: the ticket may contain
+    // `prepared` items with no active recipe (allowed to fire, see
+    // `fireOrderItems`). The operator can still mark them as
+    // delivered/cancelled directly, but moving the ticket into
+    // `in_preparation` is blocked because the kitchen would have
+    // nothing to deduct stock from. We check every product on the
+    // ticket against the recipes table.
+    const recipeLessItemIds: number[] = [];
+    for (const item of ticket.items ?? []) {
+      if (!item.product_id) continue;
+      const recipe = await this.prisma.recipes.findFirst({
+        where: { product_id: item.product_id, is_active: true },
+        select: { id: true },
+      });
+      if (!recipe) {
+        recipeLessItemIds.push(item.id);
+      }
+    }
+    if (recipeLessItemIds.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_NO_RECIPE,
+        undefined,
+        {
+          ticket_id: ticketId,
+          recipe_less_item_ids: recipeLessItemIds,
+          hint: 'Adjunta una receta activa al plato antes de iniciar la preparación, o cocínalo manualmente y márcalo como entregado.',
+        },
+      );
     }
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -561,6 +665,45 @@ export class KitchenFireService {
       ticket: full.ticket,
       ts: Date.now(),
     });
+
+    // Restaurant lifecycle bridge: once EVERY kitchen ticket of this order is
+    // in a terminal state (delivered/cancelled) and at least one was actually
+    // delivered, the kitchen handoff is complete. We emit an event (AFTER the
+    // ticket mutations have committed above) so the orders domain can move the
+    // order `processing -> delivered`. We use the event pattern instead of
+    // injecting OrderFlowService here to avoid a cross-module dependency cycle
+    // (KitchenFireModule would otherwise have to import the orders/order-flow
+    // graph). The listener re-establishes the store tenant context via
+    // StoreContextRunner before calling OrderFlowService.updateOrderState.
+    try {
+      const orderId = (full.ticket as any)?.order_id ?? ticket.order_id;
+      if (orderId != null) {
+        const orderTickets = await this.prisma.kitchen_tickets.findMany({
+          where: { order_id: orderId, store_id },
+          select: { status: true },
+        });
+        const allTerminal = orderTickets.every(
+          (t) => t.status === 'delivered' || t.status === 'cancelled',
+        );
+        const anyDelivered = orderTickets.some(
+          (t) => t.status === 'delivered',
+        );
+        if (orderTickets.length > 0 && allTerminal && anyDelivered) {
+          this.eventEmitter.emit('kitchen.order_all_delivered', {
+            orderId,
+            storeId: store_id,
+          });
+        }
+      }
+    } catch (e) {
+      // Best-effort: never block the ticket delivery on the order-side bridge.
+      this.logger.warn(
+        `Failed to evaluate order-all-delivered bridge for ticket #${ticketId}: ${
+          (e as Error).message
+        }`,
+      );
+    }
+
     return full.ticket;
   }
 
@@ -604,18 +747,116 @@ export class KitchenFireService {
     return full.ticket;
   }
 
+  /**
+   * Reversa "un paso atrás" del estado de un ticket (botón del modal de
+   * detalle del KDS). El mapa de retroceso es:
+   *   pending        → (sin estado previo) → error KITCHEN_TICKET_CANNOT_REVERT
+   *   in_preparation → pending
+   *   ready          → in_preparation
+   *   delivered      → ready
+   *   cancelled      → ready
+   *
+   * Inventario: NO se toca. Los insumos se consumen en el fire (no en las
+   * transiciones del ticket), así que reactivar un ticket NUNCA re-consume ni
+   * devuelve stock. La reversa es puramente de estado (ticket + sus items).
+   *
+   * Bloqueo SÍNCRONO antes de mutar: cuando el ticket es terminal
+   * (delivered/cancelled) y tiene orden asociada, revertirlo implica reabrir
+   * la orden (delivered -> processing) vía el evento
+   * `kitchen.order_delivery_reverted`. Pero ese puente es async/best-effort y
+   * NO puede revertir una orden ya `finished`/`refunded`. Por eso validamos
+   * el estado de la orden ANTES de mutar el ticket: si la orden no es
+   * revertible, lanzamos y no dejamos el ticket en un estado inconsistente
+   * (revertido mientras la orden quedó finalizada).
+   */
+  async revertTicket(ticketId: number) {
+    const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Mapa de retroceso un-paso. `pending` no tiene estado previo.
+    const REVERT_MAP: Record<string, string | null> = {
+      pending: null,
+      in_preparation: 'pending',
+      ready: 'in_preparation',
+      delivered: 'ready',
+      cancelled: 'ready',
+    };
+    const target = REVERT_MAP[ticket.status];
+
+    if (target == null) {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_CANNOT_REVERT,
+        undefined,
+        { from: ticket.status },
+      );
+    }
+
+    const wasTerminal =
+      ticket.status === 'delivered' || ticket.status === 'cancelled';
+    const orderId = ticket.order_id;
+
+    // Bloqueo síncrono: si revertir el ticket reabre la orden, valida PRIMERO
+    // que la orden admita la reversa. No mutamos nada si no la admite.
+    if (wasTerminal && orderId != null) {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        select: { state: true },
+      });
+      const orderState = order?.state;
+      if (orderState === 'finished' || orderState === 'refunded') {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_TICKET_REVERT_ORDER_FINISHED,
+          undefined,
+          { orderState },
+        );
+      }
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.kitchen_tickets.update({
+        where: { id: ticketId },
+        data: { status: target as any, updated_at: new Date() },
+      });
+      await tx.kitchen_ticket_items.updateMany({
+        where: { kitchen_ticket_id: ticketId },
+        data: { status: target as any, updated_at: new Date() },
+      });
+    });
+
+    const full = await this.getTicketForStore(ticketId);
+    this.pushKitchenEvent(store_id, {
+      type: 'ticket.reverted',
+      ticket: full.ticket,
+      ts: Date.now(),
+      meta: { from: ticket.status, to: target },
+    });
+
+    // Si el ticket era terminal y tiene orden, emite el puente de reversa de
+    // entrega (delivered -> processing) DESPUÉS del commit. El listener es
+    // idempotente: no-op si la orden no está en `delivered`.
+    if (wasTerminal && orderId != null) {
+      this.eventEmitter.emit('kitchen.order_delivery_reverted', {
+        orderId,
+        storeId: store_id,
+      });
+    }
+
+    return full.ticket;
+  }
+
   // ---------------------------------------------------------------- snapshot
   /**
-   * Snapshot of all tickets relevant to the KDS board. Returns:
-   *  - All non-terminal tickets (pending / in_preparation / ready) whose
-   *    fired_at is within the window.
-   *  - Plus recent (last 60min) delivered + cancelled tickets so the
-   *    "Delivered" column can show what just left the kitchen.
+   * Snapshot of all tickets relevant to the KDS board. Returns the CURRENT
+   * business day's tickets — the board "resets" at the store's
+   * ticket_closing_hour (see getBusinessDate). Every ticket fired during the
+   * active business day is shown regardless of state; nothing from a previous
+   * business day leaks in once the cutoff hour passes.
    *
    * Used by both the explicit REST endpoint and the SSE warm-up.
    */
   async getActiveTicketsSnapshot(
-    windowMinutes: number = 120,
+    // Retained for SSE contract compat (the controller still passes it
+    // positionally), but the board now resets by business day, not by window.
+    _windowMinutes: number = 120,
   ): Promise<{ data: any[]; total: number; server_ts: number }> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -623,24 +864,15 @@ export class KitchenFireService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const now = new Date();
-    const cutoff = new Date(now.getTime() - windowMinutes * 60_000);
+    const businessDate = await this.getBusinessDate(store_id);
 
     const data = await this.prisma.kitchen_tickets.findMany({
       where: {
         store_id,
-        fired_at: { gte: cutoff },
+        business_date: new Date(`${businessDate}T00:00:00.000Z`),
       },
       orderBy: { fired_at: 'asc' },
-      include: {
-        items: {
-          orderBy: { id: 'asc' },
-          include: {
-            product: {
-              select: { id: true, name: true, sku: true, stock_unit: true },
-            },
-          },
-        },
-      },
+      include: KITCHEN_TICKET_INCLUDE,
     });
 
     return { data, total: data.length, server_ts: now.getTime() };
@@ -666,16 +898,7 @@ export class KitchenFireService {
         where,
         take: limit,
         orderBy: { fired_at: 'desc' },
-        include: {
-          items: {
-            orderBy: { id: 'asc' },
-            include: {
-              product: {
-                select: { id: true, name: true, sku: true, stock_unit: true },
-              },
-            },
-          },
-        },
+        include: KITCHEN_TICKET_INCLUDE,
       }),
       this.prisma.kitchen_tickets.count({ where }),
     ]);

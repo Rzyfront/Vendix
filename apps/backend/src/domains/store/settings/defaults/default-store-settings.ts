@@ -337,6 +337,7 @@ export function getDefaultStoreSettings(): StoreSettings {
     // Operations - Preparation and delivery defaults
     operations: {
       default_preparation_time_minutes: 15,
+      ticket_closing_hour: 3,
     },
 
     // Legacy: Mantener por compatibilidad (redundante con branding)

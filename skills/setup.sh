@@ -3,10 +3,11 @@
 # AI Skills Setup Script
 # ============================================================================
 # Synchronizes skills to provider-specific directories:
-# - OpenCode: .opencode/skills/
-# - Claude:   .claude/skills/
-# - Gemini:   .agent/skills/
-# - Agents:   .agents/skills/
+# - OpenCode:  .opencode/skills/
+# - Claude:    .claude/skills/
+# - Gemini:    .agent/skills/
+# - Agents:    .agents/skills/
+# - Mavis:     ~/.mavis/agents/mavis/skills/   (Mavis agent-level skills)
 #
 # Also generates entry point configurations (CLAUDE.md, etc.)
 # ============================================================================
@@ -194,6 +195,18 @@ generate_agents() {
     log_success "Synced skills to $skills_dest"
 }
 
+generate_mavis() {
+    local skills_dest="$HOME/.mavis/agents/mavis/skills"
+
+    log_info "Configuring for Mavis (agent-level)..."
+
+    mkdir -p "$skills_dest"
+
+    sync_skills_to_dir "$skills_dest"
+
+    log_success "Synced skills to $skills_dest"
+}
+
 main() {
     cd "$REPO_ROOT"
     
@@ -203,6 +216,7 @@ main() {
         generate_gemini
         generate_opencode
         generate_agents
+        generate_mavis
     else
         case "$1" in
             --claude) generate_claude ;;
@@ -210,7 +224,8 @@ main() {
             --gemini) generate_gemini ;;
             --opencode) generate_opencode ;;
             --agents) generate_agents ;;
-            *) echo "Usage: $0 [--all|--sync|--claude|--copilot|--gemini|--opencode|--agents]" ;;
+            --mavis) generate_mavis ;;
+            *) echo "Usage: $0 [--all|--sync|--claude|--copilot|--gemini|--opencode|--agents|--mavis]" ;;
         esac
     fi
 }

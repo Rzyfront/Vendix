@@ -4,6 +4,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { TablesService } from './tables.service';
+import { SettingsService } from '../settings/settings.service';
 import { OpenTableSessionDto, AddItemsToTableSessionDto } from './dto';
 
 /**
@@ -79,6 +80,7 @@ export class TableSessionsService {
   constructor(
     private prisma: StorePrismaService,
     private tablesService: TablesService,
+    private settingsService: SettingsService,
   ) {}
 
   // ------------------------------------------------------------------ helpers
@@ -129,13 +131,13 @@ export class TableSessionsService {
     //    later via the normal order update path.
     const customerId = dto.customer_id ?? userId;
 
-    // 3. Resolve currency. Re-read from store_settings; default to
-    //    'COP' to match the rest of the project.
-    const storeSettings = await this.prisma.store_settings.findFirst({
-      where: { store_id: storeId },
-      select: { currency: true },
-    });
-    const currency = storeSettings?.currency ?? 'COP';
+    // 3. Resolve currency via the shared SettingsService. The
+    //    `store_settings` table does not have a top-level `currency`
+    //    column — it lives inside the `settings` JSON blob under
+    //    `general.currency`. Falling back to 'COP' to match the rest
+    //    of the project.
+    const currency = await this.settingsService.getStoreCurrency();
+    const safeCurrency = currency || 'COP';
 
     // 4. Generate an order number. We use the same numeric pattern
     //    as `OrdersService.generateOrderNumber` (T- + ts) to avoid
@@ -159,7 +161,7 @@ export class TableSessionsService {
           state: 'draft',
           channel: 'pos',
           delivery_type: 'direct_delivery',
-          currency,
+          currency: safeCurrency,
           subtotal_amount: 0,
           tax_amount: 0,
           shipping_cost: 0,

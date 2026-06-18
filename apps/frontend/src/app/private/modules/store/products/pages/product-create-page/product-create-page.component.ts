@@ -715,6 +715,14 @@ export class ProductCreatePageComponent {
   aiDescriptionUsesLeft = signal(3);
   aiDescriptionLimitReached = computed(() => this.aiDescriptionUsesLeft() <= 0);
   isEditMode = signal(false);
+  /**
+   * En modo edición, false hasta que `loadProduct` patchea el form. El template
+   * no renderiza el formulario hasta entonces para evitar el flash de secciones
+   * dependientes del tipo (insumo): sin esto se ve un instante todo el UI de
+   * producto y luego se oculta al llegar `is_ingredient=true`. Una sola vez:
+   * no se resetea en recargas post-guardado (el form ya está montado).
+   */
+  readonly productLoaded = signal(false);
   productId: number | null = null;
   product: Product | null = null;
   readonly onlinePurchaseProduct = signal<Product | null>(null);
@@ -976,6 +984,15 @@ export class ProductCreatePageComponent {
       if (isIngredient && sellCtrl.value !== false) {
         sellCtrl.patchValue(false, { emitEvent: false });
         this.lastSellableFlag = false;
+      }
+      // Al activar "Es insumo": un insumo siempre es Producto Físico
+      // (nunca servicio ni plato preparado) y nunca un combo/menú fijo.
+      // Forzamos esos valores y ocultamos sus controles en el template.
+      if (isIngredient) {
+        this.productForm
+          .get('product_type')
+          ?.patchValue('physical', { emitEvent: false });
+        this.productForm.get('is_combo')?.patchValue(false, { emitEvent: false });
       }
     }
     if (isSellable !== prevSell) {
@@ -1555,6 +1572,8 @@ export class ProductCreatePageComponent {
         this.product = product;
         this.onlinePurchaseProduct.set(product);
         this.patchForm(product);
+        // Form ya poblado → render con `is_ingredient` resuelto (sin flash).
+        this.productLoaded.set(true);
         // Auto-load tier rows if the product already has multi-tarifa enabled.
         if (product.has_multiple_price_tiers) {
           this.loadPriceTiersForProduct(id, product.enabled_price_tier_ids);
@@ -2442,6 +2461,35 @@ export class ProductCreatePageComponent {
       : this.totalStockAvailable;
   }
 
+  /**
+   * Volumen restante en el envase actualmente abierto, en unidad mínima
+   * (ej. 680 ml de un envase de 1000 ml). Espeja el backend
+   * `deriveUoMSplit` → `qty % capacidad`. 0 para retail o sin envase abierto.
+   */
+  get stockOpenRemaining(): number {
+    return this.isIngredientStock
+      ? this.totalStockOnHand % this.stockCapacity
+      : 0;
+  }
+
+  /** Capacidad (volumen) por envase sellado, ej. 1000 ml. Público para display. */
+  get stockUnitCapacity(): number {
+    return this.isIngredientStock ? this.stockCapacity : 0;
+  }
+
+  /** Unidades selladas en una bodega concreta (modal de detalle por ubicación). */
+  slSealedUnits(sl: any): number {
+    const qty = Number(sl?.quantity_on_hand ?? 0);
+    return this.isIngredientStock ? Math.floor(qty / this.stockCapacity) : qty;
+  }
+
+  /** Volumen abierto en una bodega concreta (modal de detalle por ubicación). */
+  slOpenRemaining(sl: any): number {
+    return this.isIngredientStock
+      ? Number(sl?.quantity_on_hand ?? 0) % this.stockCapacity
+      : 0;
+  }
+
   isStockLevelLowStock(stockLevel: any): boolean {
     return (
       Number(stockLevel?.quantity_available ?? 0) <=
@@ -2978,7 +3026,12 @@ export class ProductCreatePageComponent {
         typeof formValue.pricing_type === 'object'
           ? formValue.pricing_type.value
           : formValue.pricing_type || 'unit',
-      product_type: formValue.product_type || 'physical',
+      // Un insumo es SIEMPRE producto físico (nunca servicio ni plato).
+      // Se fuerza aquí además del gating del form, por robustez ante datos
+      // contradictorios o carreras de UI.
+      product_type: formValue.is_ingredient
+        ? 'physical'
+        : formValue.product_type || 'physical',
       preparation_time_minutes: formValue.preparation_time_minutes
         ? Number(formValue.preparation_time_minutes)
         : undefined,
@@ -3033,7 +3086,8 @@ export class ProductCreatePageComponent {
       // Restaurant Suite toggles (Fase B)
       is_sellable: formValue.is_sellable !== false,
       is_ingredient: !!formValue.is_ingredient,
-      is_combo: !!formValue.is_combo,
+      // Un insumo no puede ser combo / menú fijo: se neutraliza por robustez.
+      is_combo: formValue.is_ingredient ? false : !!formValue.is_combo,
       is_batch_produced: !!formValue.is_batch_produced,
       // UoM FKs (Fase UoM) — only sent when the product is an ingredient.
       // Sending `null` for non-ingredients keeps the column clean and the
@@ -3293,6 +3347,16 @@ export class ProductCreatePageComponent {
         queryParams: { product_id: this.productId },
       });
     }
+  }
+
+  /**
+   * CTA para insumos producidos en lote (`is_batch_produced`): el stock de
+   * estos insumos no se compra, se PRODUCE vía Operaciones › Producción.
+   * Navega al módulo de órdenes de producción (ruta absoluta, misma
+   * convención que `goToPurchase`).
+   */
+  goToProduction(): void {
+    this.router.navigate(['/admin/restaurant-ops/production']);
   }
 
   closeAdjustmentModal(): void {

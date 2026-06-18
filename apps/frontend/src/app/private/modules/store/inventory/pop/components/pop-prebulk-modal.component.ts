@@ -36,6 +36,14 @@ import { PreBulkData } from '../interfaces/pop-cart.interface';
  * UX aligned with `product-create-modal.component` (structured sections,
  * Reactive Forms, currency input mode). The product is NOT persisted in
  * the catalog — it only lives on this specific purchase order.
+ *
+ * @deprecated Reemplazado por `PopProductConfigModalComponent` con
+ * `mode='create'` (Fase 5 — modal unificado). El orquestador
+ * (`pop.component.ts`) ahora enruta la creación manual al modal
+ * unificado cuando `POP_USE_UNIFIED_MODAL=true` (default). Este
+ * componente queda **inerte** y pendiente de eliminación con
+ * autorización explícita (regla dura de memoria). Mantener el archivo
+ * para no romper la rama legacy cuando el flag está en `false`.
  */
 @Component({
   selector: 'app-pop-prebulk-modal',
@@ -454,6 +462,14 @@ export class PopPreBulkModalComponent {
   // ============================================================
 
   constructor() {
+    // Fase 5: emit a single deprecation warning the first time this
+    // modal is instantiated. The orchestrator only loads this component
+    // when `POP_USE_UNIFIED_MODAL=false`, so production users on the
+    // default flag never see this warning.
+    console.warn(
+      '[POP] PopPreBulkModalComponent is deprecated. Use PopProductConfigModalComponent(mode="create") instead. See pop.config.ts.',
+    );
+
     // Reset the form whenever the modal closes, so each open starts clean.
     effect(() => {
       if (!this.isOpen()) {
