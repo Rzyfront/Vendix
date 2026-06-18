@@ -3,11 +3,11 @@
     [title]="category()?.label || 'Analíticas'"
     [subtitle]="category()?.description || ''"
     [icon]="category()?.icon || 'chart-bar'"
-    [tabs]="tabs()"
     [actions]="headerActions()"
     (actionClicked)="onActionClick($event)"
-    tabsAriaLabel="Navegacion de analiticas"
   ></app-sticky-header>
+
+  <app-analytics-tab-bar [categoryId]="categoryId() ?? 'overview'"></app-analytics-tab-bar>
 
   <main class="shell-content">
     <router-outlet></router-outlet>
