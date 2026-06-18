@@ -1,6 +1,6 @@
 import { type ReactNode } from 'react';
 import { View, Text, StyleSheet, type ViewStyle, type ViewProps } from 'react-native';
-import { colorScales, spacing, borderRadius, typography } from '@/shared/theme';
+import { colorScales, spacing, borderRadius, typography, interFonts } from '@/shared/theme';
 import { Icon } from '../icon/icon';
 
 interface StatsCardProps extends ViewProps {
@@ -16,55 +16,65 @@ interface StatsCardProps extends ViewProps {
 
 const styles = StyleSheet.create({
   card: {
-    width: 150,
+    width: 160,
+    height: 90,
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderRadius: borderRadius.xl,
     borderWidth: 1,
-    borderColor: '#e5e7eb',
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    gap: 1,
+    borderColor: colorScales.gray[200],
+    padding: 12,
+    position: 'relative',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
   },
   label: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colorScales.gray[500],
-    letterSpacing: 0.5,
+    fontSize: 10,
+    fontFamily: interFonts.bold,
+    color: colorScales.gray[400],
     textTransform: 'uppercase',
-    marginTop: 2,
-    maxWidth: '85%',
+    maxWidth: '75%',
   },
   value: {
     fontSize: 20,
-    fontWeight: '800',
+    fontFamily: interFonts.bold,
     color: colorScales.gray[900],
+    lineHeight: 24,
     marginTop: 2,
   },
   description: {
-    fontSize: 9,
-    fontWeight: '500',
-    color: '#059669',
-    marginTop: 1,
+    fontSize: 10,
+    fontFamily: interFonts.medium,
+    color: colorScales.gray[400],
+    marginTop: 2,
   },
   iconContainer: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 12,
+    right: 12,
     width: 28,
     height: 28,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 1,
   },
   trendRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 1,
+    marginTop: 2,
     flexWrap: 'nowrap',
   },
   trendText: {
-    fontSize: 9,
-    fontWeight: '600',
+    fontSize: 10,
+    fontFamily: interFonts.bold,
   },
   trendPositive: {
     color: colorScales.green[600],
@@ -73,7 +83,8 @@ const styles = StyleSheet.create({
     color: colorScales.red[600],
   },
   trendLabel: {
-    fontSize: 9,
+    fontSize: 10,
+    fontFamily: interFonts.medium,
     color: colorScales.gray[400],
     marginLeft: spacing[1],
     flexShrink: 1,
@@ -93,7 +104,7 @@ export function StatsCard({
 }: StatsCardProps) {
   const iconContent =
     typeof icon === 'string'
-      ? <Icon name={icon} size={12} color={iconColor} />
+      ? <Icon name={icon} size={13} color={iconColor} />
       : icon;
 
   return (
@@ -103,36 +114,39 @@ export function StatsCard({
           {iconContent}
         </View>
       )}
-      <Text style={styles.label} numberOfLines={1}>
-        {label}
-      </Text>
-      <Text
-        style={styles.value}
-        numberOfLines={1}
-        adjustsFontSizeToFit
-        minimumFontScale={0.7}
-      >
-        {value}
-      </Text>
-      {description && (
-        <Text style={styles.description} numberOfLines={1}>
-          {description}
+      <View style={styles.content}>
+        <Text style={styles.label} numberOfLines={1}>
+          {label}
         </Text>
-      )}
-      {trend && (
-        <View style={styles.trendRow}>
-          <Text
-            style={[styles.trendText, trend.positive ? styles.trendPositive : styles.trendNegative]}
-            numberOfLines={1}
-          >
-            {trend.positive ? '+' : ''}
-            {trend.value}%
+        <Text
+          style={styles.value}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.7}
+        >
+          {value}
+        </Text>
+        {description && (
+          <Text style={styles.description} numberOfLines={1}>
+            {description}
           </Text>
-          <Text style={styles.trendLabel} numberOfLines={1}>
-            vs mes pasado
-          </Text>
-        </View>
-      )}
+        )}
+        {trend && (
+          <View style={styles.trendRow}>
+            <Text
+              style={[styles.trendText, trend.positive ? styles.trendPositive : styles.trendNegative]}
+              numberOfLines={1}
+            >
+              {trend.positive ? '+' : ''}
+              {trend.value}%
+            </Text>
+            <Text style={styles.trendLabel} numberOfLines={1}>
+              vs mes pasado
+            </Text>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
+
