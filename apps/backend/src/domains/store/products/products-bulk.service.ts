@@ -1101,8 +1101,6 @@ export class ProductsBulkService {
       where: {
         store_id: storeId,
         state: { not: 'archived' },
-        is_ingredient: false,
-        is_sellable: true,
       },
     });
     if (productCount === 0) {
@@ -1126,8 +1124,6 @@ export class ProductsBulkService {
         where: {
           store_id: storeId,
           state: { not: 'archived' },
-          is_ingredient: false,
-          is_sellable: true,
         },
         orderBy: { id: 'asc' },
         take: CHUNK_SIZE,
