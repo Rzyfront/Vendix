@@ -75,7 +75,7 @@ export type { PopProductConfigResult };
       [isOpen]="isOpen()"
       title="Configurar producto"
       [subtitle]="product()?.name"
-      size="sm"
+      size="md"
       (closed)="onClose()"
       (cancel)="onClose()"
     >
@@ -199,7 +199,7 @@ export type { PopProductConfigResult };
                     ></app-input>
                   </div>
 
-                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div class="md:max-w-[14rem]">
                     <app-input
                       label="Cantidad"
                       type="number"
@@ -207,13 +207,13 @@ export type { PopProductConfigResult };
                       placeholder="1"
                       [required]="true"
                     ></app-input>
-                    <app-textarea
-                      label="Notas"
-                      formControlName="notes"
-                      placeholder="Notas adicionales..."
-                      [rows]="1"
-                    ></app-textarea>
                   </div>
+                  <app-textarea
+                    label="Notas"
+                    formControlName="notes"
+                    placeholder="Notas adicionales..."
+                    [rows]="2"
+                  ></app-textarea>
                 } @else {
                   <app-textarea
                     label="Notas"
@@ -272,26 +272,32 @@ export type { PopProductConfigResult };
               ></app-pop-uom-capture>
             }
 
-                        <!-- Toggles (variants only in configure mode) -->
-            @if (configureMode()) {
-              <app-setting-toggle
-                label="Gestionar variantes"
-                [description]="
-                  productHasVariants
-                    ? 'Seleccionar variantes del producto para la orden'
-                    : 'Crear variantes para este producto'
-                "
-                [ngModel]="hasVariantsToggle()"
-                (changed)="hasVariantsToggle.set($event)"
-              ></app-setting-toggle>
-            }
+            <!-- Toggles (variants only in configure mode) -->
+            <div
+              class="grid grid-cols-1 gap-3"
+              [class.md:grid-cols-2]="configureMode()"
+            >
+              @if (configureMode()) {
+                <app-setting-toggle
+                  label="Gestionar variantes"
+                  [description]="
+                    productHasVariants
+                      ? 'Seleccionar variantes del producto para la orden'
+                      : 'Crear variantes para este producto'
+                  "
+                  [ngModel]="hasVariantsToggle()"
+                  (changed)="hasVariantsToggle.set($event)"
+                ></app-setting-toggle>
+              }
 
-            <app-setting-toggle
-              label="Gestionar lote"
-              description="Asignar número de lote y fechas de fabricación/vencimiento"
-              [ngModel]="requiresLotToggle()"
-              (changed)="requiresLotToggle.set($event)"
-            ></app-setting-toggle>
+              <app-setting-toggle
+                label="Gestionar lote"
+                description="Asignar número de lote y fechas de fabricación/vencimiento"
+                [ngModel]="requiresLotToggle()"
+                (changed)="requiresLotToggle.set($event)"
+                [class.md:col-span-2]="!configureMode()"
+              ></app-setting-toggle>
+            </div>
           </div>
         }
 
