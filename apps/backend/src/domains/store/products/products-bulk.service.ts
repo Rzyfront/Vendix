@@ -1105,7 +1105,12 @@ export class ProductsBulkService {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const products = await this.prisma.products.findMany({
-        where: { store_id: storeId },
+        where: {
+          store_id: storeId,
+          state: { not: 'archived' },
+          is_ingredient: false,
+          is_sellable: true,
+        },
         orderBy: { id: 'asc' },
         take: CHUNK_SIZE,
         ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
