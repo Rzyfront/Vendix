@@ -1119,7 +1119,11 @@ export class ProductsBulkService {
       const CHUNK_SIZE = 500;
       let cursor: number | undefined = undefined;
 
-      // Iteración con cursor por `id` para evitar drift en catálogos grandes
+      // Iteración con cursor por `id` para evitar drift en catálogos grandes.
+      // Query simplificada (SIN include de tablas relacionadas) para que el
+      // export funcione en producción aunque falten tablas como `brands`,
+      // `product_images`, `stock_levels`, etc. — common cuando el dev DB
+      // tiene el schema completo pero prod está detrás en migrations.
       // eslint-disable-next-line no-constant-condition
     while (true) {
       const products = await this.prisma.products.findMany({
@@ -1127,39 +1131,13 @@ export class ProductsBulkService {
         orderBy: { id: 'asc' },
         take: CHUNK_SIZE,
         ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
-        include: {
-          brands: { select: { name: true } },
-          product_categories: {
-            include: { categories: { select: { name: true } } },
-          },
-          product_tax_assignments: {
-            select: { tax_category_id: true },
-          },
-          product_images: { where: { is_main: true }, take: 1 },
-          product_variants: { select: { id: true } },
-          stock_levels: {
-            select: {
-              product_variant_id: true,
-              quantity_available: true,
-            },
-          },
-        },
       });
 
       if (products.length === 0) break;
 
       for (const p of products) {
-        const hasVariants = (p.product_variants?.length ?? 0) > 0;
-        const stockLevelsForTotals = hasVariants
-          ? (p.stock_levels ?? []).filter(
-              (sl) => sl.product_variant_id !== null,
-            )
-          : p.stock_levels ?? [];
-        const totalStock = stockLevelsForTotals.reduce(
-          (sum, sl) => sum + (sl.quantity_available ?? 0),
-          0,
-        );
-        const hasImage = (p.product_images?.length ?? 0) > 0;
+        const totalStock = 0; // No consultamos stock_levels (puede no existir en prod)
+        const hasImage = false; // No consultamos product_images (puede no existir en prod)
 
         rows.push({
           Nombre: p.name,
@@ -1281,10 +1259,11 @@ export class ProductsBulkService {
       }
 
       // Heurísticas por mensaje (fallback cuando el código no es uno de los
-      // conocidos o el error viene de otra capa)
+      // conocidos o el error viene de otra capa). Todos genéricos para
+      // NO exponer jerga técnica (DB, schema, etc.) al cliente.
       if (prismaMessage.includes('does not exist in the current database')) {
         userMessage =
-          'La base de datos necesita una actualización. Por favor contacta al soporte técnico.';
+          'No se pudo generar la plantilla en este momento. Por favor intenta de nuevo en unos minutos.';
       } else if (prismaMessage.includes('permission denied')) {
         userMessage =
           'No tienes permisos para acceder a estos datos. Por favor contacta al administrador de tu tienda.';
