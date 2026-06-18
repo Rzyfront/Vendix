@@ -5,7 +5,7 @@ import { AdminShell } from '@/shared/layouts/admin-shell';
 import { useAuthStore } from '@/core/store/auth.store';
 
 const routeTitles: Record<string, string> = {
-  dashboard: 'Dashboard',
+  dashboard: 'Panel principal',
   stores: 'Tiendas',
   users: 'Usuarios',
   roles: 'Roles',

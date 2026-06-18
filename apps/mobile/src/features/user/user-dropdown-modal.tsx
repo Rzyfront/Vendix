@@ -19,6 +19,7 @@ import { getQueryClient } from '@/core/api/query-client';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
+import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 
 interface UserDropdownModalProps {
   visible: boolean;
@@ -44,6 +45,7 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
   const storeName = useTenantStore((s) => s.storeName);
   const storeSlug = useTenantStore((s) => s.storeSlug);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   // Fetch fresh user settings so the module count is real
   const { data: freshSettings } = useQuery({
@@ -120,6 +122,11 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
       setIsProcessing(true);
       try {
         await AuthService.switchEnvironment('ORG_ADMIN');
+        // Limpiar el cache de React Query para que las queries se ejecuten
+        // con el nuevo token ORG_ADMIN (no mostrar datos de STORE_ADMIN).
+        const qc = getQueryClient();
+        await qc.cancelQueries();
+        qc.clear();
         router.replace('/(org-admin)/dashboard' as never);
       } catch {
         toastError('Error al cambiar de entorno');
@@ -129,56 +136,34 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
     }, 100);
   };
 
+  const performSwitch = async () => {
+    if (!storeSlug) return;
+    setIsProcessing(true);
+    try {
+      await AuthService.switchEnvironment('STORE_ADMIN', storeSlug);
+      // Limpiar el cache de React Query para que las queries se ejecuten
+      // con el nuevo token STORE_ADMIN (no mostrar datos de ORG_ADMIN).
+      const qc = getQueryClient();
+      await qc.cancelQueries();
+      qc.clear();
+      toastSuccess(`Cambiado al entorno de la tienda "${storeName ?? storeSlug}"`);
+      setShowConfirm(false);
+      onClose();
+      router.replace('/(store-admin)/dashboard' as never);
+    } catch (error: any) {
+      toastError(error?.message || 'Error al cambiar a la tienda');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const handleGoToStore = () => {
     // Sin storeSlug no hay tienda a la que volver — solo cerramos el modal.
     if (!storeSlug) {
       onClose();
       return;
     }
-    // La web siempre muestra el prompt de confirmación al cambiar de entorno,
-    // sin importar el entry point (drawer, lista de tiendas, dropdown de usuario).
-    // Mismo texto y patrón que apps/frontend/src/app/private/modules/organization/stores/stores.component.ts
-    // y que el drawer mobile (apps/mobile/src/shared/layouts/drawer-menu.tsx).
-    onClose();
-
-    const performSwitch = async () => {
-      setIsProcessing(true);
-      try {
-        await AuthService.switchEnvironment('STORE_ADMIN', storeSlug);
-        // Limpiar el cache de React Query para que las queries se ejecuten
-        // con el nuevo token STORE_ADMIN (no mostrar datos de ORG_ADMIN).
-        const qc = getQueryClient();
-        await qc.cancelQueries();
-        qc.clear();
-        toastSuccess(`Cambiado al entorno de la tienda "${storeName ?? storeSlug}"`);
-        router.replace('/(store-admin)/dashboard' as never);
-      } catch (error: any) {
-        toastError(error?.message || 'Error al cambiar a la tienda');
-      } finally {
-        setIsProcessing(false);
-      }
-    };
-
-    setTimeout(() => {
-      if (Platform.OS === 'web') {
-        const confirmed = window.confirm(`¿Deseas cambiar al entorno de administración de la tienda "${storeName ?? storeSlug}"?\n\nSerás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`);
-        if (confirmed) {
-          performSwitch();
-        }
-      } else {
-        Alert.alert(
-          'Cambiar al entorno de la tienda',
-          `¿Deseas cambiar al entorno de administración de la tienda "${storeName ?? storeSlug}"?\n\nSerás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`,
-          [
-            { text: 'Cancelar', style: 'cancel' },
-            {
-              text: 'Cambiar de entorno',
-              onPress: performSwitch,
-            },
-          ]
-        );
-      }
-    }, 100);
+    setShowConfirm(true);
   };
 
   const canSwitchToOrganization = (): boolean => {
@@ -305,6 +290,16 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
           </TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>
+      <ConfirmDialog
+        visible={showConfirm}
+        onClose={() => setShowConfirm(false)}
+        onConfirm={performSwitch}
+        title="Cambiar al entorno de la tienda"
+        message={`¿Deseas cambiar al entorno de administración de la tienda "${storeName ?? storeSlug}"?\n\nSerás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`}
+        confirmLabel="Cambiar de entorno"
+        cancelLabel="Cancelar"
+        loading={isProcessing}
+      />
     </RNModal>
   );
 }
