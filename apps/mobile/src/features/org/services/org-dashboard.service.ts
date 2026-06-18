@@ -7,8 +7,11 @@ export const OrgDashboardService = {
   // (ver apps/backend/src/domains/organization/organizations/organizations.controller.ts)
   // Aún no hay constante equivalente en Endpoints.ORGANIZATION.* — cuando se
   // agregue, reemplazar el path literal por la constante.
-  getStats: async (organizationId: string) =>
-    apiGet<OrganizationDashboardStats>(`/organization/organizations/${organizationId}/stats`),
+  getStats: async (organizationId: string, period?: string) =>
+    apiGet<OrganizationDashboardStats>(
+      `/organization/organizations/${organizationId}/stats`,
+      period ? { period } : undefined,
+    ),
   getRecentOrders: async (limit = 10) =>
     apiGet<RecentOrder[]>(Endpoints.ORGANIZATION.DASHBOARD.RECENT, { limit }),
   getStorePerformance: async () =>
