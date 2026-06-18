@@ -830,7 +830,7 @@ export default function StoresList() {
       <View style={styles.pageHeader}>
         <View style={styles.pageHeaderText}>
           <Text style={styles.pageTitle}>
-            {user?.organizations?.name ?? 'Organización'}
+            Organizaciones
           </Text>
           <Text style={styles.pageSubtitle}>Gestión de tiendas</Text>
         </View>
