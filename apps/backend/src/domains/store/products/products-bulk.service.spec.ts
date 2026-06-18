@@ -664,5 +664,29 @@ describe('ProductsBulkService', () => {
         }),
       );
     });
+
+    it('should throw NotFoundException with a clear message when no products exist', async () => {
+      mockPrismaService.products.count.mockResolvedValueOnce(0);
+
+      await expect(service.exportCurrentProductsAsTemplate()).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.exportCurrentProductsAsTemplate()).rejects.toThrow(
+        /No hay productos para exportar/,
+      );
+    });
+
+    it('should not call findMany when no products exist', async () => {
+      mockPrismaService.products.count.mockResolvedValueOnce(0);
+      mockPrismaService.products.findMany.mockClear();
+
+      try {
+        await service.exportCurrentProductsAsTemplate();
+      } catch {
+        // expected
+      }
+
+      expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+    });
   });
 });

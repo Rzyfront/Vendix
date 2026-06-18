@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
@@ -1091,6 +1091,24 @@ export class ProductsBulkService {
     const storeId = context?.store_id;
     if (!storeId) {
       throw new BadRequestException('No se pudo determinar la tienda actual');
+    }
+
+    // Validar que la tienda tenga al menos un producto antes de generar el
+    // archivo. Sin esta validación, el export produce un XLSX con solo headers
+    // (sin filas) que el frontend no puede manejar — el usuario recibe un
+    // toast genérico de "error desconocido" en vez de un mensaje claro.
+    const productCount = await this.prisma.products.count({
+      where: {
+        store_id: storeId,
+        state: { not: 'archived' },
+        is_ingredient: false,
+        is_sellable: true,
+      },
+    });
+    if (productCount === 0) {
+      throw new NotFoundException(
+        'No hay productos para exportar. Agrega al menos un producto antes de descargar la plantilla.',
+      );
     }
 
     const baseHeaders = this.getProductTemplateHeaders();
