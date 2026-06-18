@@ -7,6 +7,8 @@ import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, typography, spacing, borderRadius } from '@/shared/theme';
 import { useQuery } from '@tanstack/react-query';
 import type { StoreListItem } from '@/core/models/org-admin/store.types';
+import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
+import { toastError } from '@/shared/components/toast/toast.store';
 
 interface MenuItem {
   label: string;
@@ -172,8 +174,8 @@ const baseOrgMenuItems: MenuItem[] = [
 
 const storeMenuItems: MenuItem[] = [
   { label: 'Panel Principal', icon: 'home', href: '/(store-admin)/dashboard' },
-  { label: 'Punto de venta', icon: 'shopping-cart', href: '/(store-admin)/pos' },
-  { label: 'Órdenes', icon: 'clipboard-list', href: '/(store-admin)/orders' },
+  { label: 'Punto de venta', icon: 'store', href: '/(store-admin)/pos' },
+  { label: 'Órdenes', icon: 'shopping-cart', href: '/(store-admin)/orders' },
   { label: 'Productos', icon: 'package', href: '/(store-admin)/products' },
   {
     label: 'Inventario', icon: 'warehouse', href: '/(store-admin)/inventory/pop',
@@ -197,9 +199,9 @@ const storeMenuItems: MenuItem[] = [
   { label: 'Tienda en línea', icon: 'shopping-bag', href: '/(store-admin)/online-store' },
   { label: 'Marketing', icon: 'megaphone', href: '/(store-admin)/marketing' },
   { label: 'Analíticas', icon: 'chart-line', href: '/(store-admin)/analytics' },
-  { label: 'Gastos', icon: 'receipt', href: '/(store-admin)/expenses' },
+  { label: 'Gastos', icon: 'wallet', href: '/(store-admin)/expenses' },
   { label: 'Facturación', icon: 'file-text', href: '/(store-admin)/invoicing', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'invoicing' },
-  { label: 'Contabilidad', icon: 'calculator', href: '/(store-admin)/accounting', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'accounting' },
+  { label: 'Contabilidad', icon: 'book-open', href: '/(store-admin)/accounting', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'accounting' },
   { label: 'Ayuda', icon: 'help-circle', href: '/(store-admin)/help' },
   { label: 'Configuración', icon: 'settings', href: '/(store-admin)/settings' },
 ];
@@ -232,6 +234,7 @@ const moduleKeyMap: Record<string, string | string[]> = {
   Dominios: ['domains', 'settings_domains'],
 
   // STORE_ADMIN mappings
+  Inventario: 'inventory',
   'Punto de venta': 'pos',
   'Punto de Venta': 'pos',
   Productos: 'products',
@@ -313,7 +316,7 @@ const SUBMENU_L_HEIGHT = 14;  // height before the horizontal branch turns
 const SUBMENU_DOT_SIZE = 6;   // matches web 6px dot
 const SUBMENU_DOT_BORDER_WIDTH = 1.5;
 const SUBMENU_TOP_GAP = 10;
-const SUBMENU_TREE_COLOR = '#2f6f4e'; // matches web --color-secondary (dark green)
+const SUBMENU_TREE_COLOR = '#162b21'; // matches web --color-secondary (dark green/black)
 // Dot center should be at end of L-connector (SUBMENU_L_WIDTH = 10px).
 // Dot container is 16px wide → center at container_left + 8.
 // We want center at 10 → container_left = 10 - 8 = 2.
@@ -332,11 +335,43 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
   const logout = useAuthStore((s) => s.logout);
   
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
+  const [storeToSwitch, setStoreToSwitch] = useState<StoreListItem | null>(null);
+  const [switching, setSwitching] = useState(false);
+
+  const handleConfirmSwitch = async () => {
+    if (!storeToSwitch) return;
+    setSwitching(true);
+    try {
+      const { AuthService } = await import('@/core/auth/auth.service');
+      await AuthService.switchEnvironment('STORE_ADMIN', storeToSwitch.slug);
+
+      // Crítico: limpiar todo el cache de React Query para que las
+      // queries se ejecuten con el nuevo token STORE_ADMIN
+      const { getQueryClient } = await import('@/core/api/query-client');
+      const qc = getQueryClient();
+      await qc.cancelQueries();
+      qc.clear();
+
+      setStoreToSwitch(null);
+      onClose();
+      router.replace('/(store-admin)/dashboard' as never);
+    } catch (error: any) {
+      toastError(error?.message || 'No se pudo cambiar al entorno de la tienda. Intenta de nuevo.');
+    } finally {
+      setSwitching(false);
+    }
+  };
 
   const config = variantConfig[variant];
-  const displayName = user?.store?.name || user?.organizations?.name || 'Vendix';
-  const displaySlug = user?.store?.slug || user?.organizations?.slug || '';
-  const orgLogoUrl = user?.store?.logo_url || user?.organizations?.logo_url || null;
+  const displayName = variant === 'org'
+    ? 'Organizaciones'
+    : user?.store?.name || user?.organizations?.name || 'Vendix';
+  const displaySlug = variant === 'org'
+    ? user?.organizations?.slug || ''
+    : user?.store?.slug || user?.organizations?.slug || '';
+  const orgLogoUrl = variant === 'org'
+    ? user?.organizations?.logo_url || null
+    : user?.store?.logo_url || user?.organizations?.logo_url || null;
   const vlinkUrl = displaySlug ? `/${displaySlug}` : '#';
 
   // Contextos y scopes de organización
@@ -404,13 +439,25 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     return disabled;
   }, [fiscalStatus]);
 
+  const storePanelUi = useMemo<Record<string, boolean>>(() => {
+    if (appType === 'STORE_ADMIN' && store_settings?.panel_ui?.STORE_ADMIN) {
+      return store_settings.panel_ui.STORE_ADMIN as Record<string, boolean>;
+    }
+    return {};
+  }, [store_settings, appType]);
+
   const isModuleKeyVisible = (
     moduleKey: string | string[],
     panelUi: Record<string, boolean>,
     disabled: Set<string>
   ): boolean => {
     const keys = Array.isArray(moduleKey) ? moduleKey : [moduleKey];
-    return keys.some((key) => panelUi[key] === true && !disabled.has(key));
+    return keys.some((key) => {
+      if (storePanelUi[key] === false) {
+        return false;
+      }
+      return panelUi[key] === true && !disabled.has(key);
+    });
   };
 
   // Cargar tiendas dinámicas solo para variant=org
@@ -450,55 +497,8 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
               label: s.name,
               icon: 'store',
               action: () => {
-                onClose();
-                const performSwitch = async () => {
-                  try {
-                    const { AuthService } = await import('@/core/auth/auth.service');
-                    await AuthService.switchEnvironment('STORE_ADMIN', s.slug);
-
-                    // Crítico: limpiar todo el cache de React Query para que las
-                    // queries se ejecuten con el nuevo token STORE_ADMIN
-                    const { getQueryClient } = await import('@/core/api/query-client');
-                    const qc = getQueryClient();
-                    await qc.cancelQueries();
-                    qc.clear();
-
-                    router.replace('/(store-admin)/dashboard' as never);
-                  } catch (error: any) {
-                    if (Platform.OS === 'web') {
-                      window.alert(error?.message || 'No se pudo cambiar al entorno de la tienda. Intenta de nuevo.');
-                    } else {
-                      Alert.alert(
-                        'Error al cambiar de entorno',
-                        error?.message || 'No se pudo cambiar al entorno de la tienda. Intenta de nuevo.',
-                        [{ text: 'OK' }]
-                      );
-                    }
-                  }
-                };
-
-                setTimeout(() => {
-                  if (Platform.OS === 'web') {
-                    const confirmed = window.confirm(`¿Deseas cambiar al entorno de administración de la tienda "${s.name}"?\n\nSerás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`);
-                    if (confirmed) {
-                      performSwitch();
-                    }
-                  } else {
-                    Alert.alert(
-                      'Cambiar al entorno de la tienda',
-                      `¿Deseas cambiar al entorno de administración de la tienda "${s.name}"?\n\nSerás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`,
-                      [
-                        { text: 'Cancelar', style: 'cancel' },
-                        {
-                          text: 'Cambiar de entorno',
-                          onPress: performSwitch,
-                        }
-                      ]
-                    );
-                  }
-                }, 100);
+                setStoreToSwitch(s);
               },
-
             })),
           ],
         };
@@ -603,23 +603,16 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     }, 100);
   };
 
-  const toggleSection = (label: string, item: MenuItem) => {
+  const toggleSection = (label: string, _item: MenuItem) => {
     const wasExpanded = !!expandedSections[label];
-    
-    // Exclusive Accordion: Close other submenus
+
+    // Exclusive Accordion: close all others, toggle this one
     const nextExpanded: Record<string, boolean> = {};
     if (!wasExpanded) {
       nextExpanded[label] = true;
     }
     setExpandedSections(nextExpanded);
-
-    // Auto-navigate to first child with valid href
-    if (!wasExpanded && item.children?.length) {
-      const firstChildWithHref = item.children.find((child) => child.href && !child.action);
-      if (firstChildWithHref?.href) {
-        handleNavigate(firstChildWithHref.href);
-      }
-    }
+    // No auto-navigate: the user must explicitly click a sub-item to navigate.
   };
 
   const handleLogout = () => {
@@ -734,7 +727,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                       const isActiveChild = isRouteActive(child.href);
                       const isLastChild = index === item.children!.length - 1;
                       return (
-                        <View key={child.href} style={styles.submenuItemWrapper}>
+                        <View key={child.href ?? `${child.label}-${index}`} style={styles.submenuItemWrapper}>
                           {index === 0 && <View style={styles.submenuTopConnector} />}
                           <View style={styles.submenuLConnector} />
                           {!isLastChild && <View style={styles.submenuSegmentAfter} />}
@@ -836,6 +829,16 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
           );
         })}
       </ScrollView>
+      <ConfirmDialog
+        visible={storeToSwitch !== null}
+        onClose={() => setStoreToSwitch(null)}
+        onConfirm={handleConfirmSwitch}
+        title="Cambiar al entorno de la tienda"
+        message={`¿Deseas cambiar al entorno de administración de la tienda "${storeToSwitch?.name}"?\n\nSerás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`}
+        confirmLabel="Cambiar de entorno"
+        cancelLabel="Cancelar"
+        loading={switching}
+      />
     </View>
   );
 }

@@ -8,6 +8,8 @@ interface ChartFallbackProps {
 }
 
 export function TrendChartFallback({ data, title }: ChartFallbackProps) {
+  const maxRevenue = Math.max(...data.map(item => item.revenue)) || 1;
+
   return (
     <View>
       {title && (
@@ -15,27 +17,30 @@ export function TrendChartFallback({ data, title }: ChartFallbackProps) {
       )}
       <View style={styles.container}>
         {data.map((d, i) => {
-          const isHighest = d.revenue === Math.max(...data.map(item => item.revenue));
+          const isHighest = d.revenue === maxRevenue;
+          const percentage = (d.revenue / maxRevenue) * 100;
+          const formattedValue = d.revenue >= 1000000
+            ? `$${(d.revenue / 1000000).toFixed(1)}M`
+            : d.revenue >= 1000
+              ? `$${(d.revenue / 1000).toFixed(0)}K`
+              : `$${d.revenue.toLocaleString()}`;
+
           return (
             <View key={d.x} style={styles.row}>
               <Text style={styles.label}>{d.x}</Text>
-              <View style={[styles.barContainer, isHighest && styles.barContainerHighlight]}>
+              <View style={styles.barContainer}>
                 <View
                   style={[
                     styles.bar,
                     {
-                      height: Math.max(4, (d.revenue / (Math.max(...data.map(item => item.revenue)) || 1)) * 100),
+                      width: `${Math.max(4, percentage)}%`,
                     },
                     isHighest && styles.barHighlight,
                   ]}
                 />
               </View>
               <Text style={[styles.value, isHighest && styles.valueHighlight]}>
-                {d.revenue >= 1000000
-                  ? `${(d.revenue / 1000000).toFixed(1)}M`
-                  : d.revenue >= 1000
-                    ? `${(d.revenue / 1000).toFixed(0)}K`
-                    : d.revenue.toLocaleString()}
+                {formattedValue}
               </Text>
             </View>
           );
@@ -58,15 +63,41 @@ export function ChannelListFallback({ data, title }: ChannelListFallbackProps) {
       {title && (
         <Text style={styles.title}>{title}</Text>
       )}
-      {data.map((item, index) => (
-        <View key={index} style={styles.channelRow}>
-          <View style={[styles.channelDot, { backgroundColor: item.color }]} />
-          <Text style={styles.channelLabel}>{item.label}</Text>
-          <Text style={styles.channelValue}>
-            {((item.value / total) * 100).toFixed(0)}%
-          </Text>
-        </View>
-      ))}
+      <View style={styles.container}>
+        {data.map((item, index) => {
+          const percentage = (item.value / total) * 100;
+          const formattedValue = item.value >= 1000000
+            ? `$${(item.value / 1000000).toFixed(1)}M`
+            : item.value >= 1000
+              ? `$${(item.value / 1000).toFixed(0)}K`
+              : `$${item.value.toLocaleString()}`;
+
+          return (
+            <View key={index} style={styles.channelItem}>
+              <View style={styles.channelHeaderRow}>
+                <View style={styles.channelDotAndLabel}>
+                  <View style={[styles.channelDot, { backgroundColor: item.color }]} />
+                  <Text style={styles.channelLabel}>{item.label}</Text>
+                </View>
+                <Text style={styles.channelValue}>
+                  {percentage.toFixed(0)}% <Text style={styles.channelValueAmount}>({formattedValue})</Text>
+                </Text>
+              </View>
+              <View style={styles.channelTrack}>
+                <View
+                  style={[
+                    styles.channelFill,
+                    {
+                      backgroundColor: item.color,
+                      width: `${Math.max(2, percentage)}%`,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -109,7 +140,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing[3],
   },
   container: {
-    gap: spacing[2],
+    gap: spacing[3],
   },
   row: {
     flexDirection: 'row',
@@ -120,23 +151,20 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     fontFamily: typography.fontFamily,
     color: colors.text.secondary,
-    width: 50,
+    width: 45,
   },
   barContainer: {
     flex: 1,
-    height: 24,
+    height: 8,
     backgroundColor: colorScales.gray[100],
-    borderRadius: borderRadius.sm,
-    justifyContent: 'flex-end',
+    borderRadius: borderRadius.full,
+    flexDirection: 'row',
     overflow: 'hidden',
   },
   bar: {
-    borderRadius: borderRadius.sm,
+    height: '100%',
+    borderRadius: borderRadius.full,
     backgroundColor: colorScales.gray[300],
-    width: '100%',
-  },
-  barContainerHighlight: {
-    backgroundColor: colors.primaryLight,
   },
   barHighlight: {
     backgroundColor: colors.primary,
@@ -146,33 +174,56 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.semibold,
     fontFamily: typography.fontFamily,
     color: colors.text.primary,
-    width: 50,
+    width: 60,
     textAlign: 'right',
   },
   valueHighlight: {
     color: colors.primary,
   },
-  channelRow: {
+  channelItem: {
+    gap: spacing[1],
+  },
+  channelHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[3],
-    marginBottom: spacing[2],
+    justifyContent: 'space-between',
+  },
+  channelDotAndLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
   },
   channelDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   channelLabel: {
-    flex: 1,
     fontSize: typography.fontSize.sm,
     fontFamily: typography.fontFamily,
     color: colors.text.primary,
+    fontWeight: typography.fontWeight.medium,
   },
   channelValue: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
     fontFamily: typography.fontFamily,
     color: colors.text.primary,
+  },
+  channelValueAmount: {
+    fontSize: typography.fontSize.xs,
+    fontFamily: typography.fontFamily,
+    color: colors.text.secondary,
+    fontWeight: typography.fontWeight.normal,
+  },
+  channelTrack: {
+    height: 6,
+    backgroundColor: colorScales.gray[100],
+    borderRadius: borderRadius.full,
+    overflow: 'hidden',
+  },
+  channelFill: {
+    height: '100%',
+    borderRadius: borderRadius.full,
   },
 });
