@@ -1207,6 +1207,16 @@ export class ProductsBulkService {
       cursor = products[products.length - 1].id;
     }
 
+    // Si no se recolectaron filas (tienda vacía, o findMany() falló por
+    // schema drift), lanzar NotFoundException con el mismo mensaje que usa
+    // el count() check. Esto evita que el cliente descargue un Excel vacío
+    // con solo headers — un archivo inútil.
+    if (rows.length === 0) {
+      throw new NotFoundException(
+        'No hay productos en su tienda. Agrega productos antes de descargar la plantilla.',
+      );
+    }
+
     // Si la tienda no tiene productos, igual devolver una hoja con los headers
     // (fila vacía) para que el usuario vea la estructura esperada.
     const ws = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [], {
