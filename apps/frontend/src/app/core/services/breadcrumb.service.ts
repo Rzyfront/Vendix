@@ -1244,18 +1244,6 @@ export class BreadcrumbService {
       parent: 'Reseñas',
       icon: 'star',
     },
-    {
-      path: '/admin/analytics/expenses/summary',
-      title: 'Resumen de Gastos',
-      parent: 'Gastos',
-      icon: 'wallet',
-    },
-    {
-      path: '/admin/analytics/expenses/by-category',
-      title: 'Gastos por Categoría',
-      parent: 'Gastos',
-      icon: 'folder',
-    },
 
     // Settings
     {
