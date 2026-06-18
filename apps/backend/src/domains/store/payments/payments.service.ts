@@ -2389,6 +2389,19 @@ export class PaymentsService {
       );
     }
 
+    // Venta normal (sin sesión de mesa): los ítems son obligatorios para
+    // construir la orden. `dto.items` es opcional a nivel de DTO solo para
+    // soportar el cierre de mesa (manejado arriba), así que lo estrechamos
+    // aquí antes de usarlo en `resolveTierSnapshotsForItems` y el map.
+    const items = dto.items;
+    if (!items || items.length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Una venta POS requiere al menos un ítem.',
+        { reason: 'items_required' },
+      );
+    }
+
     let retries = 3;
     let orderNumber: string;
 
@@ -2398,7 +2411,7 @@ export class PaymentsService {
     const context = RequestContextService.getContext();
     const tierSnapshots = await this.resolveTierSnapshotsForItems(
       tx,
-      dto.items,
+      items,
       context,
     );
 
@@ -2409,7 +2422,7 @@ export class PaymentsService {
 
         // Create order items from backend-normalized financial snapshots.
         const orderItems = await Promise.all(
-          dto.items.map((item, index) =>
+          items.map((item, index) =>
             this.buildPosOrderItem(
               tx,
               item,
