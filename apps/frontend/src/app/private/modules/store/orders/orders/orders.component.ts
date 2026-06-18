@@ -1,5 +1,5 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { NavigationEnd, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 // Import components
@@ -35,8 +35,30 @@ export class OrdersComponent {
     revenueGrowthRate: 0,
   });
 
+  /**
+   * Bug 2 (Fase K): tick counter that increments every time the user
+   * re-enters `/admin/orders/sales` (or the orders host route). The
+   * list component watches it via an effect and re-fetches the orders
+   * so the POS-created order shows up without a manual refresh.
+   */
+  reloadTick = signal(0);
+
   constructor() {
     this.loadOrderStats();
+    this.router.events
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((evt) => {
+        if (evt instanceof NavigationEnd) {
+          // Re-entering the orders host route (after a POS sale) should
+          // re-fetch. Avoid firing on child navigations that don't
+          // remount the list (e.g. order detail back-and-forth).
+          if (evt.urlAfterRedirects.startsWith('/admin/orders') &&
+              !evt.urlAfterRedirects.match(/^\/admin\/orders\/[^/]+/)) {
+            this.reloadTick.update((n) => n + 1);
+            this.loadOrderStats();
+          }
+        }
+      });
   }
 
   loadOrderStats(): void {
@@ -72,8 +94,11 @@ export class OrdersComponent {
     this.router.navigate(['/admin/orders', id]);
   }
 
-  // Refresh orders and stats
+  // Refresh orders and stats. Bug 2 (Fase K): also tick the list
+  // reload trigger so the existing "refresh" action in the toolbar
+  // does the right thing without waiting for a route change.
   refreshOrders(): void {
     this.loadOrderStats();
+    this.reloadTick.update((n) => n + 1);
   }
 }

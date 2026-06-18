@@ -7893,23 +7893,27 @@ model table_sessions {
 /// Multiple tickets per order are allowed (e.g. starter, main, dessert
 /// fire in separate waves). Per-item state lives in kitchen_ticket_items.
 model kitchen_tickets {
-  id         Int                       @id @default(autoincrement())
-  store_id   Int
-  order_id   Int
-  table_id   Int?
-  status     kitchen_ticket_state_enum @default(pending)
-  fired_at   DateTime                  @default(now()) @db.Timestamp(6)
-  ready_at   DateTime?                 @db.Timestamp(6)
-  created_at DateTime?                 @default(now()) @db.Timestamp(6)
-  updated_at DateTime?                 @default(now()) @db.Timestamp(6)
+  id            Int                       @id @default(autoincrement())
+  store_id      Int
+  order_id      Int
+  table_id      Int?
+  status        kitchen_ticket_state_enum @default(pending)
+  daily_number  Int?
+  business_date DateTime?                 @db.Date
+  fired_at      DateTime                  @default(now()) @db.Timestamp(6)
+  ready_at      DateTime?                 @db.Timestamp(6)
+  created_at    DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at    DateTime?                 @default(now()) @db.Timestamp(6)
 
   store stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
   order orders                 @relation(fields: [order_id], references: [id], onUpdate: NoAction)
   items kitchen_ticket_items[]
 
+  @@unique([store_id, business_date, daily_number])
   @@index([store_id, status])
   @@index([store_id, order_id])
   @@index([store_id, fired_at])
+  @@index([store_id, business_date])
 }
 
 /// A single line on a kitchen ticket. Tracks per-item state and optional

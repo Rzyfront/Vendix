@@ -228,11 +228,19 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   cash_register_session_id?: number;
 
+  /**
+   * Order items. Required for normal sales. When `table_session_id` is
+   * provided the cashier is closing out an open table, so the items are
+   * already on the draft order; in that case the body may omit them
+   * (the backend re-derives totals from the table's existing order).
+   * Either way, items sent are appended to the table's order so a
+   * "final adjustments before pay" use case still works.
+   */
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PosOrderItemDto)
-  items: PosOrderItemDto[];
+  items?: PosOrderItemDto[];
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
@@ -450,6 +458,21 @@ export class CreatePosPaymentDto {
   @IsOptional()
   @IsString()
   return_url?: string;
+
+  /**
+   * Optional table session id. When provided, the POS payment must be
+   * applied to the existing draft order of the table (table_sessions
+   * binds the order via `order_id`). This is the bridge between
+   * `pos-payment-interface` (which can open/select a table inline
+   * before charging) and the table-backed "cuenta abierta" flow:
+   * without it, the cashier would end up with a brand-new order for
+   * the same table. Validated against the current store context.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  table_session_id?: number;
 }
 
 // DTO para actualizar una orden existente con pago

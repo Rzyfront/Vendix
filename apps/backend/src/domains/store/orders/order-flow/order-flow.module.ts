@@ -14,6 +14,8 @@ import { CashRegistersModule } from '../../cash-registers/cash-registers.module'
 import { SettingsModule } from '../../settings/settings.module';
 import { OrderEtaService } from '../services/order-eta.service';
 import { OrderAutoFulfillmentListener } from './listeners/order-auto-fulfillment.listener';
+import { KitchenOrderDeliveredListener } from './listeners/kitchen-order-delivered.listener';
+import { KitchenOrderDeliveryRevertedListener } from './listeners/kitchen-order-delivery-reverted.listener';
 
 @Module({
   imports: [PrismaModule, ResponseModule, CashRegistersModule, SettingsModule],
@@ -27,6 +29,10 @@ import { OrderAutoFulfillmentListener } from './listeners/order-auto-fulfillment
     OrderEtaService,
     // P3.4: ORG-scope auto-fulfillment of ecommerce orders.
     OrderAutoFulfillmentListener,
+    // Restaurant: KDS delivered -> order processing->delivered bridge.
+    KitchenOrderDeliveredListener,
+    // Restaurant: KDS reversa -> order delivered->processing bridge.
+    KitchenOrderDeliveryRevertedListener,
   ],
   exports: [OrderFlowService, RefundFlowService, OrderEtaService],
 })

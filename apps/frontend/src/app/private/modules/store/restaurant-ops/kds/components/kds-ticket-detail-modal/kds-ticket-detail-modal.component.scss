@@ -1,0 +1,8 @@
+/**
+ * KdsTicketDetailModal — minimal local styles. Layout is in the
+ * template (Tailwind utility classes). Kept for any future theming
+ * hooks the modal might need.
+ */
+:host {
+  display: contents;
+}

@@ -1,6 +1,7 @@
-import { Injectable, signal, DestroyRef, inject } from '@angular/core';
+import { Injectable, signal, DestroyRef, inject, effect } from '@angular/core';
 import { toObservable, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, NavigationEnd } from '@angular/router';
+import { Title } from '@angular/platform-browser';
 import { filter } from 'rxjs/operators';
 
 export interface BreadcrumbItem {
@@ -1083,7 +1084,7 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/analytics/inventory/overview',
-      title: 'Inventario',
+      title: 'Resumen de Inventario',
       parent: 'Analíticas',
       icon: 'warehouse',
     },
@@ -1143,13 +1144,13 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/analytics/sales/by-product',
-      title: 'Ventas por Producto',
+      title: 'Por Producto',
       parent: 'Ventas',
       icon: 'package',
     },
     {
       path: '/admin/analytics/sales/by-category',
-      title: 'Ventas por Categoría',
+      title: 'Por Categoria',
       parent: 'Ventas',
       icon: 'folder',
     },
@@ -1161,13 +1162,13 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/analytics/sales/by-customer',
-      title: 'Ventas por Cliente',
+      title: 'Por Cliente',
       parent: 'Ventas',
       icon: 'users',
     },
     {
       path: '/admin/analytics/sales/by-payment',
-      title: 'Ventas por Pago',
+      title: 'Por Metodo de Pago',
       parent: 'Ventas',
       icon: 'credit-card',
     },
@@ -1191,13 +1192,13 @@ export class BreadcrumbService {
     },
     {
       path: '/admin/analytics/inventory/valuation',
-      title: 'Valoración de Inventario',
+      title: 'Valoracion',
       parent: 'Inventario',
       icon: 'dollar-sign',
     },
     {
       path: '/admin/analytics/inventory/movement-analysis',
-      title: 'Análisis de Movimientos',
+      title: 'Analisis de Movimientos',
       parent: 'Inventario',
       icon: 'bar-chart',
     },
@@ -1321,6 +1322,76 @@ export class BreadcrumbService {
 
   constructor(private router: Router) {
     this.initializeBreadcrumb();
+    this.seedAnalyticsRoutes();
+    this.installTitleEffect();
+  }
+
+  /**
+   * Siembra la tabla de rutas con los views y categorías de Analíticas desde
+   * el `analytics-registry` (single source of truth). Es idempotente: entradas
+   * con el mismo path ya presentes en la tabla estática NO se duplican (gana
+   * la estática, que es la conservadora y permite correcciones manuales).
+   *
+   * Se ejecuta como lazy import para evitar acoplar el ciclo de DI del core
+   * con el del módulo de analytics, y para que SSR (donde `window` no existe)
+   * no rompa la construcción.
+   */
+  private seedAnalyticsRoutes(): void {
+    if (typeof window === 'undefined') return;
+
+    void import(
+      '../../private/modules/store/analytics/config/analytics-registry'
+    ).then(({ ANALYTICS_VIEWS, ANALYTICS_CATEGORIES, getCategoryById }) => {
+      for (const view of ANALYTICS_VIEWS) {
+        if (this.routes.some((r) => r.path === view.route)) continue;
+        const cat = getCategoryById(view.category);
+        if (!cat) continue;
+        this.routes.push({
+          path: view.route,
+          title: view.title,
+          parent: cat.label,
+          icon: view.icon,
+        });
+      }
+
+      for (const cat of ANALYTICS_CATEGORIES) {
+        const shellPath = `/admin/analytics/${cat.id}`;
+        if (this.routes.some((r) => r.path === shellPath)) continue;
+        this.routes.push({
+          path: shellPath,
+          title: cat.label,
+          parent: 'Tienda',
+          icon: cat.icon,
+        });
+      }
+    });
+  }
+
+  /**
+   * Sincroniza `document.title` con el breadcrumb actual usando un `effect()`
+   * zoneless. El guard evita que el fallback por defecto (`Dashboard` sin
+   * parent) pisotee el `Title.setTitle` del layout público
+   * `store-ecommerce-layout.component.ts`, que setea el nombre de la tienda.
+   *
+   * Formato del título: `Padre > Hijo | Vendix` (cuando hay parent) o
+   * `Vendix` (cuando no hay match y se muestra el fallback — pero en ese caso
+   * el guard ya retornó sin tocar el title).
+   */
+  private installTitleEffect(): void {
+    const titleService = inject(Title);
+    effect(() => {
+      const crumb = this.breadcrumb();
+      // Guard: no pisar el título del layout público store-ecommerce
+      if (crumb.current.label === 'Dashboard' && !crumb.parent) return;
+
+      const segments = [crumb.parent?.label, crumb.current.label].filter(
+        Boolean,
+      ) as string[];
+      const fullTitle = segments.length
+        ? `${segments.join(' > ')} | Vendix`
+        : 'Vendix';
+      titleService.setTitle(fullTitle);
+    });
   }
 
   private initializeBreadcrumb() {

@@ -5,6 +5,7 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
 
 export interface OperationsSettings {
   default_preparation_time_minutes: number;
+  ticket_closing_hour?: number;
 }
 
 @Component({
@@ -21,10 +22,15 @@ export class OperationsSettingsForm {
     default_preparation_time_minutes: new FormControl<number>(15, {
       nonNullable: true,
     }),
+    ticket_closing_hour: new FormControl<number>(3, { nonNullable: true }),
   });
 
   get defaultPrepTimeControl(): FormControl<number> {
     return this.form.get('default_preparation_time_minutes') as FormControl<number>;
+  }
+
+  get ticketClosingHourControl(): FormControl<number> {
+    return this.form.get('ticket_closing_hour') as FormControl<number>;
   }
 
   constructor() {

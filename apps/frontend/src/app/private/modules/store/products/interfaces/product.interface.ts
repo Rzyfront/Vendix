@@ -468,6 +468,9 @@ export interface ProductQueryDto {
   // frontend.
   is_ingredient?: boolean;
   is_sellable?: boolean;
+  // Producibles por lote (insumos con stock propio). El form de Producción
+  // envía is_batch_produced=true; el backend lo aplica en el WHERE.
+  is_batch_produced?: boolean;
 }
 
 // Respuestas paginadas

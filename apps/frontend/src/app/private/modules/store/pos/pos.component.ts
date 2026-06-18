@@ -61,6 +61,7 @@ import { PosOrderConfirmationComponent } from './components/pos-order-confirmati
 import { PosCartComponent } from './cart/pos-cart.component';
 import { PosMobileFooterComponent } from './components/pos-mobile-footer.component';
 import { PosCartModalComponent } from './components/pos-cart-modal.component';
+import { PosOrderCreateModalComponent, PosOrderCreateResult } from './components/pos-order-create-modal.component';
 import { PosShippingModalComponent } from './components/pos-shipping-modal/pos-shipping-modal.component';
 import { StoreSettingsService } from '../settings/general/services/store-settings.service';
 import type { BusinessHours } from '../../../../core/models/store-settings.interface';
@@ -87,8 +88,6 @@ import {
   PosRestaurantIntegrationService,
   CounterOrderLine,
 } from './services/pos-restaurant-integration.service';
-import { PosOpenTableModalComponent } from './components/pos-open-table-modal.component';
-import { PosSplitBillModalComponent } from './components/pos-split-bill-modal.component';
 import { TaxesService } from '../products/services/taxes.service';
 import { TaxCategory } from '../products/interfaces';
 
@@ -135,17 +134,22 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
     LayawayConfigModalComponent,
     ReservationFormModalComponent,
     PosAISummaryModalComponent,
-    PosOpenTableModalComponent,
-    PosSplitBillModalComponent,
+    PosOrderCreateModalComponent,
   ],
   template: `
     <div class="flex flex-col overflow-hidden pos-container">
-      <!-- POS Stats (hidden on mobile and in quotation mode) -->
-      @if (!isQuotationMode() && !isLayawayMode()) {
-        <div class="flex-none hidden lg:block pb-4">
-          <app-pos-stats [cartState]="cartState()"></app-pos-stats>
-        </div>
-      }
+      <!--
+        A/B TEST (2026-06): bloque de stats del POS (app-pos-stats) ocultado como
+        prueba A/B. Antes mostraba las stats en desktop fuera de los modos
+        cotizacion/separado. Restaurar este bloque tal cual si la metrica de
+        conversion lo justifica:
+        @if (!isQuotationMode() && !isLayawayMode()) {
+          <div class="flex-none hidden lg:block pb-4">
+            <app-pos-stats [cartState]="cartState()"></app-pos-stats>
+          </div>
+        }
+      -->
+
 
       <!-- Main POS Interface -->
       <div
@@ -399,18 +403,12 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 [isEditMode]="isEditMode()"
                 [isQuotationMode]="isQuotationMode()"
                 [isLayawayMode]="isLayawayMode()"
-                [restaurantMode]="restaurantIntegration.isRestaurantMode()"
-                [hasOpenTableSession]="restaurantIntegration.hasOpenTableSession()"
-                [hasPreparedItems]="hasUnfiredPreparedItems()"
-                (saveDraft)="onSaveDraft()"
+                (create)="onOpenCreateModal()"
                 (shipping)="onShipping()"
                 (checkout)="onCheckout()"
                 (quote)="onQuote()"
                 (layaway)="onLayaway()"
-                (openTable)="showOpenTableModal.set(true)"
-                (fireKitchen)="onFireKitchen()"
-                (splitBill)="showSplitBillModal.set(true)"
-              ></app-pos-cart>
+                ></app-pos-cart>
             </div>
           </div>
 
@@ -438,19 +436,13 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [isQuotationMode]="isQuotationMode()"
           [isLayawayMode]="isLayawayMode()"
           [canCreateCustomItems]="canCreateCustomItems()"
-          [restaurantMode]="restaurantIntegration.isRestaurantMode()"
-          [hasOpenTableSession]="restaurantIntegration.hasOpenTableSession()"
-          [hasPreparedItems]="hasUnfiredPreparedItems()"
           (viewCart)="onOpenCartModal()"
           (customItem)="openCustomItemModal()"
-          (saveDraft)="onSaveDraft()"
-          (shipping)="onShipping()"
+          (create)="onOpenCreateModal()"
+                (shipping)="onShipping()"
           (checkout)="onCheckout()"
           (quote)="onQuote()"
           (layaway)="onLayaway()"
-          (openTable)="showOpenTableModal.set(true)"
-          (fireKitchen)="onFireKitchen()"
-          (splitBill)="showSplitBillModal.set(true)"
         ></app-pos-mobile-footer>
       }
 
@@ -466,7 +458,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (itemQuantityChanged)="onCartItemQuantityChanged($event)"
         (itemRemoved)="onCartItemRemoved($event)"
         (clearCart)="onClearCart()"
-        (saveDraft)="onSaveDraftFromModal()"
+        (create)="onOpenCreateModal()"
         (shipping)="onShippingFromModal()"
         (checkout)="onCheckoutFromModal()"
       ></app-pos-cart-modal>
@@ -604,10 +596,13 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       <app-pos-payment-interface
         [isOpen]="showPaymentModal()"
         [cartState]="cartState()"
+        [isRestaurantWithPrepared]="isRestaurantWithPrepared()"
+        [tableId]="restaurantIntegration.currentTableSession()?.table_id ?? null"
         (closed)="onPaymentModalClosed()"
         (paymentCompleted)="onPaymentCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
         (customerSelected)="onPaymentCustomerSelected($event)"
+        (tableSessionOpened)="onPaymentTableSessionOpened($event)"
       ></app-pos-payment-interface>
 
       <app-pos-shipping-modal
@@ -704,22 +699,13 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         ></app-layaway-config-modal>
       }
 
-      <!-- Restaurant ops (Fase H): Open Table + Split Bill modals -->
-      @defer (when showOpenTableModal() && restaurantIntegration.isRestaurantMode()) {
-        <app-pos-open-table-modal
-          [isOpen]="showOpenTableModal()"
-          (isOpenChange)="showOpenTableModal.set($event)"
-          (sessionOpened)="onTableSessionOpened($event)"
-        ></app-pos-open-table-modal>
-      }
-
-      @defer (when showSplitBillModal() && restaurantIntegration.hasOpenTableSession()) {
-        <app-pos-split-bill-modal
-          [isOpen]="showSplitBillModal()"
-          (isOpenChange)="showSplitBillModal.set($event)"
-          (splitCompleted)="onSplitBillCompleted($event)"
-        ></app-pos-split-bill-modal>
-      }
+      <!-- Create order modal (Crear) — replaces the legacy 'Guardar' flow -->
+      <app-pos-order-create-modal
+        [isOpen]="showCreateOrderModal()"
+        (isOpenChange)="showCreateOrderModal.set($event)"
+        (created)="onCreateOrderConfirmed($event)"
+        (cancelled)="showCreateOrderModal.set(false)"
+      ></app-pos-order-create-modal>
     </div>
   `,
   styles: [
@@ -839,11 +825,27 @@ export class PosComponent {
    */
   readonly hasUnfiredPreparedItems = computed(() => {
     if (!this.restaurantIntegration.isRestaurantMode()) return false;
+    // Bug 1 (Fase K): lines flagged skipKds don't go to the kitchen,
+    // so they must not be counted as "unfired prepared". The kitchen
+    // dispatch and the table-append gate both depend on this signal.
     return this.cartItems().some(
       (it) =>
-        it.itemType !== 'custom' && it.product?.product_type === 'prepared',
+        it.itemType !== 'custom' &&
+        it.product?.product_type === 'prepared' &&
+        it.skipKds !== true,
     );
   });
+  /** Restaurant + cart with at least one `prepared` item. Drives the
+   *  fulfillment selector inside the payment modal. */
+  readonly isRestaurantWithPrepared = computed(
+    () =>
+      this.restaurantIntegration.isRestaurantMode() &&
+      this.hasUnfiredPreparedItems(),
+  );
+  /** Convenience accessor for restaurant mode. */
+  isRestaurantMode(): boolean {
+    return this.restaurantIntegration.isRestaurantMode();
+  }
   selectedCustomer = signal<PosCustomer | null>(null);
   loading = signal(false);
 
@@ -851,6 +853,11 @@ export class PosComponent {
   editingCustomer = signal<PosCustomer | null>(null);
 
   showPaymentModal = signal(false);
+  /** Fulfillment type chosen for the current payment. Mirrors the
+   *  payment-modal selector so the parent can react when the modal closes. */
+  paymentFulfillment = signal<'consumo' | 'entrega' | null>(null);
+  /** Table id chosen for the current payment. */
+  paymentTableId = signal<number | null>(null);
 
   showShippingModal = signal(false);
 
@@ -958,9 +965,8 @@ export class PosComponent {
   isLayawayMode = signal(false);
   showLayawayConfigModal = signal(false);
 
-  // Restaurant ops (Fase H): modals gated on `isRestaurantMode`
-  showOpenTableModal = signal(false);
-  showSplitBillModal = signal(false);
+  // Create order modal (Crear action — replaces the legacy 'Guardar')
+  showCreateOrderModal = signal(false);
 
   // Mobile detection signal
   isMobile = signal(false);
@@ -1252,6 +1258,20 @@ export class PosComponent {
       });
   }
 
+  /**
+   * Bug 1 (Fase K): a table session was opened from inside the payment
+   * modal. The integration service already updated its
+   * `currentTableSession` signal inside `openTableSession`; we only
+   * need to mirror the tableId on the local payment state so the next
+   * open of the modal keeps it.
+   */
+  onPaymentTableSessionOpened(result: any): void {
+    const tableId = result?.session?.table_id ?? null;
+    if (tableId != null) {
+      this.paymentTableId.set(tableId);
+    }
+  }
+
   onProductSelected(product: any): void {}
 
   onProductAddedToCart(event: { product: any; quantity: number }): void {
@@ -1343,29 +1363,55 @@ export class PosComponent {
       });
   }
 
+  /**
+   * Legacy entrypoint kept for any call site that still binds to it.
+   * The "Crear" UX is now handled by `onOpenCreateModal` which opens the
+   * order-create modal (with the fulfillment selector for restaurant
+   * stores and the anti-double-fire KDS guard).
+   */
   onSaveDraft(): void {
+    this.onOpenCreateModal();
+  }
+
+  /**
+   * Open the "Crear orden" modal. The modal owns the create flow
+   * (retail draft / restaurant counter draft / append-to-table) and the
+   * KDS fire. On success the cart is cleared.
+   */
+  onOpenCreateModal(): void {
     if (!this.cartState() || this.isEmpty) return;
+    // Close the mobile cart modal so the order-create modal is the only
+    // full-screen dialog open at a time.
+    this.showCartModal.set(false);
+    this.showCreateOrderModal.set(true);
+  }
 
-    this.loading.set(true);
-
-    const createdBy = 'current_user';
-
-    this.paymentService
-      .saveDraft(this.cartState()!, createdBy)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response: any) => {
-          this.loading.set(false);
-          this.toastService.success(
-            response.message || 'Borrador guardado correctamente',
-          );
-          this.onClearCart();
-        },
-        error: (error: any) => {
-          this.loading.set(false);
-          this.toastService.error(error.message || 'Error al guardar borrador');
-        },
-      });
+  /**
+   * Post-create handler invoked by `app-pos-order-create-modal`. Persists
+   * the new order id so the operator can re-print / track it, and
+   * surfaces the order-confirmation screen.
+   */
+  onCreateOrderConfirmed(result: PosOrderCreateResult): void {
+    this.showCreateOrderModal.set(false);
+    if (!result?.order) return;
+    this.currentOrderId.set(result.order.id ? String(result.order.id) : null);
+    this.currentOrderNumber.set(result.order.order_number ?? null);
+    this.completedOrder.set({
+      ...(result.order || {}),
+      isCreateOrder: true,
+      fulfillment: result.fulfillment,
+      tableId: result.tableId,
+      firedToKitchen: result.firedToKitchen,
+      items: this.cartState()?.items.map((it) => ({
+        product_id: (it.product as any).id,
+        product_name: it.product.name,
+        quantity: it.quantity,
+        unit_price: it.unitPrice,
+        total_price: it.totalPrice,
+        variant_id: it.variant_id,
+      })) ?? [],
+    });
+    this.showOrderConfirmation.set(true);
   }
 
   onQuote(): void {
@@ -1500,28 +1546,6 @@ export class PosComponent {
       });
   }
 
-  // ─── Restaurant ops handlers (Fase H) ─────────────────────────────
-  // These stay minimal: the heavy lifting lives in
-  // PosRestaurantIntegrationService + the kitchen-fire / table-sessions /
-  // split-order backend modules. The component only orchestrates the
-  // user-facing flow: open a session, fire items, split the bill.
-
-  onTableSessionOpened(_result: any): void {
-    // Session is already cached in PosRestaurantIntegrationService.currentTableSession
-    // by the modal. We clear the local cart so the operator starts adding
-    // items to the table session via the add-items endpoint.
-    this.cartService
-      .clearCart()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          const orderId = this.restaurantIntegration.currentTableSession()?.order_id;
-          this.currentOrderId.set(orderId != null ? String(orderId) : null);
-        },
-        error: () => undefined,
-      });
-  }
-
   onFireKitchen(): void {
     const session = this.restaurantIntegration.currentTableSession();
     // No open table → counter / takeaway flow (mostrador / para llevar).
@@ -1569,7 +1593,7 @@ export class PosComponent {
                   (i) =>
                     i.product_id === it.product_id &&
                     i.quantity === it.quantity,
-                ),
+                ) && !this.isCartItemSkipKds(it.product_id, (it as any).product_variant_id ?? null),
             )
             .map((it) => it.id);
           if (orderItemIds.length === 0) {
@@ -1647,6 +1671,10 @@ export class PosComponent {
       if (it.variant_id != null) {
         line.product_variant_id = it.variant_id;
       }
+      // Restaurant Suite — Fase K Gap 1: items flagged skipKds
+      // (cashier chose "Usar stock") are excluded from the kitchen
+      // dispatch list. Their product stock is consumed at payment.
+      if (it.skipKds) continue;
       preparedLines.push(line);
     }
 
@@ -1657,8 +1685,15 @@ export class PosComponent {
       return;
     }
 
-    // Cliente General fallback (id=1) mirrors the unified POS sale path.
-    const customerId = Number(this.selectedCustomer()?.id ?? 1) || 1;
+    // Bug 4 (Fase K): orders.customer_id is optional. Only forward the
+    // id when the operator actually picked a customer; otherwise the
+    // integration service omits the field and the backend stores an
+    // anonymous Consumidor Final order.
+    const customer = this.selectedCustomer();
+    const customerId =
+      customer && Number.isFinite(Number(customer.id)) && Number(customer.id) > 0
+        ? Number(customer.id)
+        : 0;
 
     this.loading.set(true);
     this.restaurantIntegration
@@ -1703,19 +1738,6 @@ export class PosComponent {
       });
   }
 
-  onSplitBillCompleted(_result: any): void {
-    // Refresh the table session so the operator sees the updated order_items.
-    const session = this.restaurantIntegration.currentTableSession();
-    if (!session) return;
-    this.restaurantIntegration
-      .refreshTableSession(session.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => undefined,
-        error: () => undefined,
-      });
-  }
-
   onCheckout(): void {
     if (!this.cartState() || this.isEmpty) return;
 
@@ -1731,15 +1753,81 @@ export class PosComponent {
     this.showPaymentModal.set(false);
   }
 
+
+  /**
+   * Restaurant Suite — Fase K Gap 1: returns true when the cart item
+   * matching `productId`+`variantId` was added with `skipKds=true`
+   * (cashier chose "Usar stock" in the prepared-choice modal). Used
+   * to filter such items OUT of the fire-to-kitchen call list.
+   */
+  private isCartItemSkipKds(
+    productId: number | null,
+    variantId?: number | null,
+  ): boolean {
+    if (productId == null) return false;
+    const items = this.cartState()?.items ?? [];
+    return items.some((it: any) => {
+      const pid = Number(it?.product?.id);
+      if (pid !== productId) return false;
+      const vid = it?.variant_id ?? null;
+      if (vid !== (variantId ?? null)) return false;
+      return it?.skipKds === true;
+    });
+  }
+
+  private fireKitchenFromCompletedOrder(order: any): void {
+    if (!order?.id) return;
+    if (!this.isRestaurantMode() || !this.hasUnfiredPreparedItems()) return;
+    if (this.restaurantIntegration.preparedFiredForCurrentCart()) return;
+    // The POS payment backend does not surface `order_items` in the same
+    // shape as the counter-draft order. We pull ids from the response when
+    // available, otherwise we fall back to a no-op (the operator can
+    // re-fire from the KDS page).
+    // Bug 1 (Fase K): lines flagged skipKds in the cart are NOT sent to
+    // the kitchen — their own stock is consumed at payment.
+    const orderItemIds: number[] = Array.isArray(order?.order_items)
+      ? order.order_items
+          .filter(
+            (it: any) => !this.isCartItemSkipKds(it?.product_id, it?.product_variant_id),
+          )
+          .map((it: any) => Number(it.id))
+          .filter(Number.isFinite)
+      : [];
+    if (orderItemIds.length === 0) return;
+    this.restaurantIntegration
+      .maybeFireKitchen(Number(order.id), orderItemIds)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          if (res && res.fired_item_ids.length > 0) {
+            this.toastService.success('Orden cobrada y enviada a cocina');
+          }
+        },
+        error: (err) => {
+          console.error('KDS fire-after-pay failed', err);
+        },
+      });
+  }
   onPaymentCompleted(paymentData: any): void {
     if (!this.cartState() || this.isEmpty) return;
 
     this.loading.set(false);
     this.showPaymentModal.set(false);
 
+    // Capture fulfillment + tableId chosen in the payment modal so the
+    // parent can audit / forward them, then reset the local signals.
+    const paymentFulfillment: 'consumo' | 'entrega' | null =
+      paymentData.fulfillment ?? this.paymentFulfillment();
+    const paymentTableId: number | null =
+      paymentData.tableId ?? this.paymentTableId();
+    this.paymentFulfillment.set(paymentFulfillment);
+    this.paymentTableId.set(paymentTableId);
+
     if (paymentData.success) {
       this.currentOrderId.set(paymentData.order?.id);
       this.currentOrderNumber.set(paymentData.order?.order_number);
+      this.fireKitchenFromCompletedOrder(paymentData.order);
+
 
       const cs = this.cartState();
       const csm = this.cartSummary();
@@ -2143,11 +2231,6 @@ export class PosComponent {
       });
   }
 
-  onSaveDraftFromModal(): void {
-    this.showCartModal.set(false);
-    this.onSaveDraft();
-  }
-
   onCheckoutFromModal(): void {
     this.showCartModal.set(false);
     this.onCheckout();
@@ -2180,6 +2263,9 @@ export class PosComponent {
     if (shippingData.success) {
       this.currentOrderId.set(shippingData.order?.id);
       this.currentOrderNumber.set(shippingData.order?.order_number);
+
+      // Restaurant + prepared: fire KDS too (Envío is a full sale, not just shipping)
+      this.fireKitchenFromCompletedOrder(shippingData.order);
 
       const cs = this.cartState();
       const csm = this.cartSummary();

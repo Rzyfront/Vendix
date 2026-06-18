@@ -885,12 +885,17 @@ export class PosCartService {
 
     // For weight products, we don't combine with existing items (different weights)
     // Identity: product.id + variant_id + weight (for weight products)
+    // PLUS the cashier's stock-vs-KDS choice (skipKds). Bug 1 (Fase K):
+    // two lines of the same product with different skipKds decisions
+    // must NOT collapse into a single cart line, otherwise we lose the
+    // decision when filtering `skipKds` for the fire-to-kitchen call.
     const existingItemIndex = isWeightProduct
       ? -1 // Don't combine weight items
       : currentState.items.findIndex(
           (item) =>
             item.product.id === request.product.id &&
-            (item.variant_id || null) === (request.variant?.id || null),
+            (item.variant_id || null) === (request.variant?.id || null) &&
+            (item.skipKds ?? false) === (request.skipKds === true),
         );
 
     // Variant-aware pricing
@@ -949,6 +954,10 @@ export class PosCartService {
         weight: isWeightProduct ? weight : undefined,
         weight_unit: isWeightProduct ? (request.weight_unit || 'kg') : undefined,
         is_weight_product: isWeightProduct,
+        // Restaurant Suite — Fase K Gap 1: persist the cashier's
+        // "usar stock" choice on the cart item. Filtered out of the
+        // kitchen-fire call by the POS component.
+        skipKds: request.skipKds === true,
       };
       updatedItems = [newItem, ...currentState.items];
     }

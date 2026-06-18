@@ -137,6 +137,24 @@ export interface OrderItem {
   updated_at: string;
   products?: Product;
   product_variants?: ProductVariant;
+  /**
+   * Restaurant Suite — Fase K Gap 2: KDS state for this order_item.
+   * Populated by GET /store/orders/:id when the item has been fired
+   * to the kitchen. Empty array for retail-only items. The detail
+   * page picks the most recent non-terminal (or newest terminal)
+   * ticket-item to render the "Cocina: <estado>" badge.
+   */
+  kitchen_ticket_items?: Array<{
+    id: number;
+    status: 'pending' | 'in_preparation' | 'ready' | 'delivered' | 'cancelled';
+    kitchen_ticket_id: number;
+    kitchen_ticket?: {
+      id: number;
+      status: 'pending' | 'in_preparation' | 'ready' | 'delivered' | 'cancelled';
+      daily_number?: number | null;
+      fired_at?: string | Date | null;
+    };
+  }>;
 }
 
 export interface Address {
@@ -547,6 +565,10 @@ export interface DeliverOrderDto {
 
 export interface CancelOrderDto {
   reason: string;
+}
+
+export interface ReactivateOrderDto {
+  reason?: string;
 }
 
 export interface RefundOrderDto {

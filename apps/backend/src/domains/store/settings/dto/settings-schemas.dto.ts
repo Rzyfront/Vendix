@@ -643,6 +643,14 @@ export class OperationsSettingsDto {
   @IsNumber()
   @Min(0)
   default_preparation_time_minutes?: number;
+
+  @ApiProperty({ example: 3, required: false, description: 'Hora (0-23) de cierre/reseteo diario del KDS' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(23)
+  ticket_closing_hour?: number;
 }
 
 export class PanelUISettingsDto {

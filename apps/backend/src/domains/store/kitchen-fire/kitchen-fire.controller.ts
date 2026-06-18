@@ -147,10 +147,7 @@ export class KitchenFireController {
    */
   @Sse('stream')
   @Permissions('store:kitchen_fire:read')
-  stream(
-    @Req() req: Request,
-    @Query() query: KdsSnapshotQueryDto,
-  ): Observable<MessageEvent> {
+  stream(@Req() req: Request): Observable<MessageEvent> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
     if (!store_id) {
@@ -158,7 +155,18 @@ export class KitchenFireController {
     }
 
     const subject = this.sseService.getOrCreate(store_id);
-    const windowMinutes = query.windowMinutes ?? 120;
+
+    // `windowMinutes` se lee CRUDO de la query — NO usamos `@Query()` con
+    // DTO aquí. EventSource solo puede autenticarse por `?token=` (no puede
+    // setear el header Authorization), y el ValidationPipe global
+    // (`forbidNonWhitelisted: true`) rechazaría esa propiedad `token` con
+    // un BadRequestException, que en SSE se emite como `event: error` y
+    // tumba el stream. Es el mismo motivo por el que notifications/stream
+    // usa solo `@Req()`. El endpoint REST /snapshot sí conserva el DTO.
+    const rawWindow = Number(req.query.windowMinutes);
+    const windowMinutes = Number.isFinite(rawWindow)
+      ? Math.min(Math.max(Math.trunc(rawWindow), 5), 720)
+      : 120;
 
     req.on('close', () => {
       this.sseService.unsubscribe(store_id);
@@ -285,6 +293,25 @@ export class KitchenFireController {
     } catch (error: any) {
       return this.responseService.error(
         error.message || 'Error al cancelar el ticket',
+        error.response?.message || error.message,
+        error.status || 400,
+        error.error_code,
+      );
+    }
+  }
+
+  @Post('tickets/:id/revert')
+  @Permissions('store:kitchen_fire:update')
+  async revertTicket(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const ticket = await this.kitchenFireService.revertTicket(id);
+      return this.responseService.success(
+        ticket,
+        'Ticket revertido al paso anterior',
+      );
+    } catch (error: any) {
+      return this.responseService.error(
+        error.message || 'Error al revertir el ticket',
         error.response?.message || error.message,
         error.status || 400,
         error.error_code,

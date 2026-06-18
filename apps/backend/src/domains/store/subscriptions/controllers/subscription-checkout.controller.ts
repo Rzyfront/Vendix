@@ -19,6 +19,9 @@ import { PlatformGatewayService } from '../../../superadmin/subscriptions/gatewa
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import { UseGuards } from '@nestjs/common';
 import { CheckoutPreviewDto } from '../dto/checkout-preview.dto';
 import { CheckoutCommitDto } from '../dto/checkout-commit.dto';
@@ -35,7 +38,8 @@ import { SkipSubscriptionGate } from '../decorators/skip-subscription-gate.decor
 const DECIMAL_ZERO = new Prisma.Decimal(0);
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
+@Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
 @SkipSubscriptionGate()
 @Controller('store/subscriptions/checkout')
 export class SubscriptionCheckoutController {

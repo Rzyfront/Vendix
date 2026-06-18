@@ -673,6 +673,20 @@ export class PaymentsService {
           user,
         ))!;
         const order = orderCreation.order;
+
+        // Restaurant POS — detect whether this order has at least one kitchen
+        // ticket actually fired to the KDS. `skipKds` lines never create a
+        // ticket, so this discriminator ("esperar cocina") is true only when
+        // real prepared items were sent to the kitchen. Scoped by the same
+        // transaction client (kitchen_tickets is store-scoped); we also
+        // exclude cancelled tickets. When true, the payment leaves the order
+        // in `processing` instead of `finished`.
+        const orderKitchenTickets = await tx.kitchen_tickets.findMany({
+          where: { order_id: order.id, status: { not: 'cancelled' } },
+          select: { id: true },
+        });
+        const hasKitchenItems = (orderKitchenTickets?.length ?? 0) > 0;
+
         const promotionsSnapshot: OrderPromotionSnapshot[] =
           orderCreation.promotionsSnapshot ?? [];
         const appliedPromotionDetails =
@@ -888,6 +902,7 @@ export class PaymentsService {
             order.id,
             'succeeded',
             order.delivery_type,
+            hasKitchenItems,
           );
         } else if (isDigitalPayment) {
           // Digital methods (Wompi, wallet) — mark as pending, process AFTER commit
@@ -896,6 +911,7 @@ export class PaymentsService {
             order.id,
             'pending_payment',
             order.delivery_type,
+            hasKitchenItems,
           );
         } else if (!createPosPaymentDto.is_draft) {
           // Credit sale - update order status
@@ -905,6 +921,7 @@ export class PaymentsService {
             order.id,
             'pending_payment',
             order.delivery_type,
+            hasKitchenItems,
           );
         }
 
@@ -2163,14 +2180,192 @@ export class PaymentsService {
   /**
    * Create or update order from POS data
    */
+  /**
+   * Bug 1 / Obj 4 (Fase K): apply a POS payment to an already-open
+   * `table_sessions` row. Loads the session's draft order, appends the
+   * POS items as `order_items`, recalculates totals, and returns the
+   * order so the rest of `processPosPayment` (payments, inventory,
+   * COGS, journal entries) reuses the same flow as a fresh sale.
+   *
+   * Validation:
+   *  - The session must belong to the current store.
+   *  - The session must be open (no `closed_at`).
+   *  - The bound order must exist and be in a payable state (`draft` or
+   *    `created`).
+   */
+  private async applyPosPaymentToTableSession(
+    tx: any,
+    dto: CreatePosPaymentDto,
+    user: any,
+    dtoStoreId: number,
+  ): Promise<{
+    order: any;
+    promotionsSnapshot: any[];
+    appliedPromotions: any[];
+    couponInfo: { coupon_id: number | null; coupon_code: string | null; discount_amount: number };
+  }> {
+    const tableSessionId = dto.table_session_id!;
+
+    const session = await tx.table_sessions.findUnique({
+      where: { id: tableSessionId },
+      include: { order: true },
+    });
+    if (!session) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_NOT_FOUND,
+        'Sesión de mesa no encontrada',
+      );
+    }
+    if (session.store_id !== dtoStoreId) {
+      throw new VendixHttpException(
+        ErrorCodes.STORE_CONTEXT_001,
+        'La mesa pertenece a otra tienda',
+      );
+    }
+    if (session.closed_at != null) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ALREADY_OPEN,
+        'La mesa ya está cerrada',
+      );
+    }
+    if (!session.order) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_NOT_FOUND,
+        'La sesión de mesa no tiene una orden vinculada',
+      );
+    }
+
+    // Same multi-tarifa validation as the regular path. `dto.items`
+    // is optional when a table session is being closed out — the items
+    // already live on the draft order. We only validate tiers when the
+    // caller actually sent items, to keep the close-out path
+    // dependency-free.
+    const context = RequestContextService.getContext();
+    const tierSnapshots =
+      dto.items && dto.items.length > 0
+        ? await this.resolveTierSnapshotsForItems(tx, dto.items, context)
+        : [];
+
+    // Build the new order_items from the POS payload (if any).
+    const newItems =
+      dto.items && dto.items.length > 0
+        ? await Promise.all(
+            dto.items.map((item, index) =>
+              this.buildPosOrderItem(
+                tx,
+                item,
+                dtoStoreId,
+                user,
+                tierSnapshots[index],
+              ),
+            ),
+          )
+        : [];
+
+    // Re-derive totals from the (now augmented) order. We re-fetch the
+    // order with its current items to compute the new sums in one pass.
+    const existingItems = await tx.order_items.findMany({
+      where: { order_id: session.order_id },
+    });
+    const mergedItems = [...existingItems, ...newItems];
+
+    const newSubtotal = this.roundMoney(
+      mergedItems.reduce(
+        (sum, item) => sum + Number(item.total_price || 0),
+        0,
+      ),
+    );
+    const newTax = this.roundMoney(
+      mergedItems.reduce((sum, item) => {
+        const nestedTaxes = (item as any).order_item_taxes ?? [];
+        if (Array.isArray(nestedTaxes) && nestedTaxes.length > 0) {
+          return (
+            sum +
+            nestedTaxes.reduce(
+              (taxSum: number, tax: any) =>
+                taxSum + Number(tax.tax_amount || 0),
+              0,
+            )
+          );
+        }
+        const multiplier =
+          Number((item as any).weight || 0) > 0
+            ? 1
+            : Number(item.quantity || 1);
+        return sum + Number(item.tax_amount_item || 0) * multiplier;
+      }, 0),
+    );
+    const shippingCost = this.roundMoney(dto.shipping_cost || 0);
+    // Re-evaluate promotions + coupons over the merged subtotal so the
+    // final total stays consistent with the fresh path.
+    const promotionQuote = await this.calculatePosPromotionQuote(dto);
+    const couponInfo = await this.calculatePosCouponDiscount(
+      dto,
+      newSubtotal,
+      promotionQuote.total_discount,
+    );
+    const totalDiscount = this.roundMoney(
+      promotionQuote.total_discount + couponInfo.discount_amount,
+    );
+    const grandTotal = this.roundMoney(
+      Math.max(0, newSubtotal + newTax - totalDiscount + shippingCost),
+    );
+
+    // Persist new items + totals on the session's order. Customer is
+    // updated here (in case the picker was changed) but only when one is
+    // provided; an anonymous sale keeps the existing customer_id.
+    const updated = await tx.orders.update({
+      where: { id: session.order_id },
+      data: {
+        ...(dto.customer_id != null ? { customer_id: dto.customer_id } : {}),
+        ...(newItems.length > 0
+          ? { order_items: { create: newItems } }
+          : {}),
+        subtotal_amount: newSubtotal,
+        tax_amount: newTax,
+        discount_amount: totalDiscount,
+        grand_total: grandTotal,
+        shipping_cost: shippingCost,
+        updated_at: new Date(),
+        // The table's own order already carries `channel=pos` from the
+        // session creation; we keep that and just refresh totals.
+      },
+      include: { order_items: true, stores: true },
+    });
+
+    // Close the table session so the table flips back to its terminal
+    // status. The order itself is left in `created` so the rest of the
+    // POS payment pipeline (payments row, inventory, journal) runs as
+    // usual; the table just stops accumulating new items.
+    //
+    // We also transition the table row to `cleaning` to match the canonical
+    // close path in `TableSessionsService.closeSession`. Without this the
+    // `tables.status` would stay `occupied` after a POS close-out, which
+    // is misleading to staff (the seat is free, but the next cashier sees the
+    // table as still occupied) and can race with the next `openTableSession`
+    // call on the same table.
+    await tx.table_sessions.update({
+      where: { id: session.id },
+      data: { closed_at: new Date() },
+    });
+    await tx.tables.update({
+      where: { id: session.table_id },
+      data: { status: 'cleaning', updated_at: new Date() },
+    });
+
+    return {
+      order: updated,
+      promotionsSnapshot: promotionQuote.order_promotions_snapshot ?? [],
+      appliedPromotions: promotionQuote.applied_promotions ?? [],
+      couponInfo,
+    };
+  }
+
   private async createOrUpdateOrderFromPos(
     tx: any,
     dto: CreatePosPaymentDto,
     user: any,
   ) {
-    let retries = 3;
-    let orderNumber: string;
-
     // store_id is guaranteed by processPosPayment (line ~612) which copies it
     // from RequestContext. Re-assert here so downstream typing is non-null and
     // we fail fast with a domain error if the invariant ever breaks.
@@ -2179,13 +2374,44 @@ export class PaymentsService {
     }
     const dtoStoreId: number = dto.store_id;
 
+    // Bug 1 / Obj 4 (Fase K): when the cashier opened/selected a table
+    // from the inline picker in `pos-payment-interface`, the payment must
+    // be applied to the existing draft order bound to that table session
+    // instead of creating a brand-new order. Otherwise the table would
+    // end up with two orders (the session's draft + the POS payment
+    // order) and the cashier would have to reconcile them by hand.
+    if (dto.table_session_id != null) {
+      return await this.applyPosPaymentToTableSession(
+        tx,
+        dto,
+        user,
+        dtoStoreId,
+      );
+    }
+
+    // Venta normal (sin sesión de mesa): los ítems son obligatorios para
+    // construir la orden. `dto.items` es opcional a nivel de DTO solo para
+    // soportar el cierre de mesa (manejado arriba), así que lo estrechamos
+    // aquí antes de usarlo en `resolveTierSnapshotsForItems` y el map.
+    const items = dto.items;
+    if (!items || items.length === 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PAY_VALIDATE_001,
+        'Una venta POS requiere al menos un ítem.',
+        { reason: 'items_required' },
+      );
+    }
+
+    let retries = 3;
+    let orderNumber: string;
+
     // Multi-tarifa (Fase 5.5): si alguna línea trae applied_price_tier_id,
     // validar permiso server-side ANTES de armar items. Patrón espejo de
     // OrdersService.resolveTierSnapshotsForItems.
     const context = RequestContextService.getContext();
     const tierSnapshots = await this.resolveTierSnapshotsForItems(
       tx,
-      dto.items,
+      items,
       context,
     );
 
@@ -2196,7 +2422,7 @@ export class PaymentsService {
 
         // Create order items from backend-normalized financial snapshots.
         const orderItems = await Promise.all(
-          dto.items.map((item, index) =>
+          items.map((item, index) =>
             this.buildPosOrderItem(
               tx,
               item,
@@ -2499,13 +2725,21 @@ export class PaymentsService {
     orderId: number,
     paymentState: string,
     deliveryType?: string,
+    hasKitchenItems = false,
   ) {
     let orderState: string;
     const additionalData: any = { updated_at: new Date() };
 
     switch (paymentState) {
       case 'succeeded':
-        if (deliveryType === 'home_delivery') {
+        if (hasKitchenItems) {
+          // Restaurant POS — paid but NOT finished. The order stays in
+          // `processing` ("pagada / en cocina") until the KDS delivers every
+          // kitchen ticket (or the 4h auto-finish job runs). We intentionally
+          // do NOT set `completed_at` here: the sale is paid but the lifecycle
+          // is still open (cocina pendiente).
+          orderState = 'processing';
+        } else if (deliveryType === 'home_delivery') {
           // Shipping order — needs to be prepared and dispatched
           orderState = 'processing';
         } else {

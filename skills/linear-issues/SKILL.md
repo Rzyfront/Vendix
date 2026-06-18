@@ -8,6 +8,18 @@ description: |
   "Quickss" (key QUI), and project "Vendix" — hardcoded, not configurable.
   Do NOT use for editing the workspace, managing teams/projects, or working
   with a different Linear workspace.
+license: MIT
+metadata:
+  author: rzyfront
+  version: "1.0"
+  scope: [root]
+  auto_invoke:
+    - "Creating an issue in Linear"
+    - "Creating a ticket in Linear"
+    - "Creating a bug in Linear for Vendix"
+    - "Listing Vendix issues in Linear"
+    - "Updating the status of a Vendix Linear issue"
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 # Linear Issues (Vendix · Quickss)

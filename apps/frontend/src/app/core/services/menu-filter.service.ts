@@ -71,8 +71,8 @@ export class MenuFilterService {
     'Plan Separe': 'orders_layaway',
     Reservas: 'orders_reservations',
 
-    // ORG_ADMIN - Compras (consolidado)
-    Compras: ['purchase_orders', 'orders_purchase_orders', 'orders'],
+    // ORG_ADMIN - Compras (consolidado) + analytics_purchases (Analiticas > Compras)
+    Compras: ['analytics_purchases', 'purchase_orders', 'orders_purchase_orders', 'orders'],
 
     // STORE_ADMIN - Inventario (padre + submódulos)
     Inventario: 'inventory',
@@ -86,7 +86,7 @@ export class MenuFilterService {
     // STORE_ADMIN - Clientes (padre + submódulos)
     Clientes: 'customers',
     'Todos los Clientes': 'customers_all',
-    Reseñas: 'customers_reviews',
+    Reseñas: ['analytics_reviews', 'customers_reviews'],
     'Recolección de Datos': 'customers_data_collection',
 
     // STORE_ADMIN - Marketing (padre + submódulos)

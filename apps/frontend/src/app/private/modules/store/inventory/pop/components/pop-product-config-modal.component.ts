@@ -6,11 +6,18 @@ import {
   computed,
   effect,
   inject,
+  viewChild,
   DestroyRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { FormsModule } from '@angular/forms';
+import {
+  FormBuilder,
+  FormGroup,
+  FormsModule,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -22,6 +29,7 @@ import { SettingToggleComponent } from '../../../../../../shared/components/sett
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { ProductsService } from '../../../products/services/products.service';
 import { UomService } from '../../services/uom.service';
@@ -32,43 +40,42 @@ import {
   PopProduct,
   PopProductVariant,
   LotInfo,
+  PopProductConfigResult,
+  PopProductModalResult,
+  PreBulkData,
 } from '../interfaces/pop-cart.interface';
+import {
+  PopUomCaptureComponent,
+  PopUomCaptureResult,
+} from './pop-uom-capture.component';
 
-export interface PopProductConfigResult {
-  variant?: PopProductVariant | null;
-  variants?: PopProductVariant[];
-  lot_info?: LotInfo;
-  quantity: number;
-  unit_cost: number;
-  pricing_type?: 'unit' | 'weight';
-  /**
-   * Fase 3: UoM FKs propagated to the cart line. The modal only fills
-   * these when the product is a pure ingredient and the store supports
-   * the capacity (Phase 0 resolver). When null/undefined, the cart
-   * leaves them null and the PO will be treated as `retail`.
-   */
-  purchase_uom_id?: number | null;
-  stock_uom_id?: number | null;
-}
+// Re-export for backward compatibility with consumers that imported the
+// type from the modal file. The canonical declaration now lives in
+// `interfaces/pop-cart.interface.ts` so the discriminated union
+// `PopProductModalResult` can reference it.
+export type { PopProductConfigResult };
 
 @Component({
   selector: 'app-pop-product-config-modal',
   standalone: true,
   imports: [
     FormsModule,
+    ReactiveFormsModule,
     ModalComponent,
     ScrollableTabsComponent,
     SettingToggleComponent,
     IconComponent,
     ButtonComponent,
     InputComponent,
+    TextareaComponent,
+    PopUomCaptureComponent,
   ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
       title="Configurar producto"
       [subtitle]="product()?.name"
-      size="sm"
+      size="md"
       (closed)="onClose()"
       (cancel)="onClose()"
     >
@@ -84,174 +91,218 @@ export interface PopProductConfigResult {
         <!-- Tab: General -->
         @if (activeTab() === 'general') {
           <div class="flex flex-col gap-4">
-            <!-- Product info card -->
-            <div
-              class="flex items-center gap-3 p-3 rounded-xl bg-muted/30 border border-border/50"
-            >
+            <!-- Product info card (configure mode only) -->
+            @if (configureMode()) {
               <div
-                class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0"
+                class="flex items-center gap-3 p-3 rounded-xl bg-muted/30 border border-border/50"
               >
-                <app-icon
-                  name="package"
-                  [size]="20"
-                  class="text-primary"
-                ></app-icon>
-              </div>
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-medium text-text-primary truncate">
-                  {{ product()?.name }}
-                </p>
-                <div class="flex items-center gap-3 mt-0.5">
-                  @if (product()?.code) {
-                    <span class="text-xs text-text-muted font-mono"
-                      >SKU: {{ product()?.code }}</span
-                    >
-                  }
-                  <span class="text-xs font-semibold text-text-primary">
-                    Costo:
-                    {{
-                      formatCurrency(
-                        +(product()?.cost || product()?.cost_price || 0)
-                      )
-                    }}
-                  </span>
+                <div
+                  class="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0"
+                >
+                  <app-icon
+                    name="package"
+                    [size]="20"
+                    class="text-primary"
+                  ></app-icon>
                 </div>
-              </div>
-            </div>
-
-            <!-- Pricing type selector -->
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2"
-                >Unidad de medida</label
-              >
-              <div class="flex gap-2">
-                <button
-                  class="flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all"
-                  [class]="
-                    selectedPricingType() === 'unit'
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-surface text-text-secondary hover:border-primary/50'
-                  "
-                  (click)="selectedPricingType.set('unit')"
-                >
-                  Unidad
-                </button>
-                <button
-                  class="flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all"
-                  [class]="
-                    selectedPricingType() === 'weight'
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-surface text-text-secondary hover:border-primary/50'
-                  "
-                  (click)="selectedPricingType.set('weight')"
-                >
-                  Peso (kg)
-                </button>
-              </div>
-            </div>
-
-            <!-- Fase 3: UoM-aware cost capture for pure ingredients -->
-            @if (ingredientMode()) {
-              <div
-                class="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-2"
-                data-testid="pop-ingredient-uom"
-              >
-                <div class="flex items-center gap-2">
-                  <app-icon name="package" [size]="14" class="text-primary-600"></app-icon>
-                  <p
-                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
-                  >
-                    Unidad de medida del insumo
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium text-text-primary truncate">
+                    {{ product()?.name }}
                   </p>
-                </div>
-                <p class="text-xs text-text-muted">
-                  Captura el costo por la <strong>unidad de compra</strong>
-                  (la presentación que llega del proveedor). El sistema lo
-                  convertirá automáticamente a la unidad de stock usando el
-                  factor de la UoM.
-                </p>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <div>
-                    <label
-                      class="block text-xs font-medium text-text-primary mb-1"
-                    >
-                      Unidad de compra
-                    </label>
-                    <select
-                      class="w-full px-2 py-1.5 text-sm rounded-lg border border-border bg-surface text-text-primary"
-                      [ngModel]="purchaseUomId()"
-                      (ngModelChange)="purchaseUomId.set($event)"
-                    >
-                      <option [ngValue]="null">— Seleccionar —</option>
-                      @for (u of uomCatalog(); track u.id) {
-                        <option [ngValue]="u.id">
-                          {{ u.code }} — {{ u.name }}
-                        </option>
-                      }
-                    </select>
-                  </div>
-                  <div>
-                    <label
-                      class="block text-xs font-medium text-text-primary mb-1"
-                    >
-                      Unidad de stock
-                    </label>
-                    <select
-                      class="w-full px-2 py-1.5 text-sm rounded-lg border border-border bg-surface text-text-primary"
-                      [ngModel]="stockUomId()"
-                      (ngModelChange)="stockUomId.set($event)"
-                    >
-                      <option [ngValue]="null">— Seleccionar —</option>
-                      @for (u of uomCatalog(); track u.id) {
-                        <option [ngValue]="u.id">
-                          {{ u.code }} — {{ u.name }}
-                        </option>
-                      }
-                    </select>
-                  </div>
-                </div>
-                @if (unitCapacity(); as cap) {
-                  <div
-                    class="flex items-center gap-2 text-xs text-primary bg-white/60 rounded-lg px-2 py-1.5"
-                    data-testid="pop-ingredient-capacity-preview"
-                  >
-                    <app-icon name="info" [size]="12"></app-icon>
-                    <span>
-                      1 {{ cap.purchaseUnit }} = {{ cap.value }}
-                      {{ cap.unit }} (factor de conversión).
+                  <div class="flex items-center gap-3 mt-0.5">
+                    @if (product()?.code) {
+                      <span class="text-xs text-text-muted font-mono"
+                        >SKU: {{ product()?.code }}</span
+                      >
+                    }
+                    <span class="text-xs font-semibold text-text-primary">
+                      Costo:
+                      {{
+                        formatCurrency(
+                          +(product()?.cost || product()?.cost_price || 0)
+                        )
+                      }}
                     </span>
                   </div>
-                }
-                <p class="text-[11px] text-text-muted">
-                  <strong>Etiqueta del costo:</strong>
-                  {{ costInputLabel() }}
-                </p>
+                </div>
               </div>
             }
 
-                        <!-- Toggles -->
-            <app-setting-toggle
-              label="Gestionar variantes"
-              [description]="
-                productHasVariants
-                  ? 'Seleccionar variantes del producto para la orden'
-                  : 'Crear variantes para este producto'
-              "
-              [ngModel]="hasVariantsToggle()"
-              (changed)="hasVariantsToggle.set($event)"
-            ></app-setting-toggle>
+            <!-- Identity form (create mode only) -->
+            @if (createMode()) {
+              <form
+                [formGroup]="identityForm"
+                class="rounded-xl border border-border/50 bg-muted/20 p-3 space-y-3"
+                data-testid="pop-create-identity"
+              >
+                <p
+                  class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
+                >
+                  Identidad del producto
+                </p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div class="md:col-span-2">
+                    <app-input
+                      label="Nombre del Producto"
+                      formControlName="name"
+                      placeholder="Ej: Material genérico"
+                      [required]="true"
+                    ></app-input>
+                  </div>
+                  <app-input
+                    label="SKU / Código"
+                    formControlName="code"
+                    placeholder="Ej: MAN-001"
+                    [required]="true"
+                  ></app-input>
+                  <app-input
+                    label="Descripción corta"
+                    formControlName="description"
+                    placeholder="Opcional"
+                  ></app-input>
+                </div>
 
-            <app-setting-toggle
-              label="Gestionar lote"
-              description="Asignar número de lote y fechas de fabricación/vencimiento"
-              [ngModel]="requiresLotToggle()"
-              (changed)="requiresLotToggle.set($event)"
-            ></app-setting-toggle>
+                <!-- Retail vs ingredient classification (only when the
+                     store supports ingredients; mirrors prebulk-modal) -->
+                @if (storeSupportsIngredients()) {
+                  <div class="pt-1">
+                    <app-setting-toggle
+                      label="Es un insumo"
+                      description="Marca este producto como insumo para recetas. Dejará de venderse directamente y se medirá por unidades de compra y stock."
+                      [ngModel]="isIngredient()"
+                      (changed)="onIngredientToggle($event)"
+                    ></app-setting-toggle>
+                  </div>
+                }
+
+                <!-- Retail: precio venta + costo + cantidad en el form.
+                     Insumo: costo y cantidad los captura el bloque
+                     app-pop-uom-capture (bidireccional), para no duplicar
+                     ni desincronizar la cantidad del lote. -->
+                @if (!isIngredient()) {
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <app-input
+                      label="Precio de Venta"
+                      [currency]="true"
+                      formControlName="basePrice"
+                      prefix="$"
+                      placeholder="0.00"
+                      tooltipText="Opcional: precio de referencia para ventas"
+                    ></app-input>
+                    <app-input
+                      label="Costo unitario"
+                      [currency]="true"
+                      formControlName="unitCost"
+                      prefix="$"
+                      placeholder="0.00"
+                      [required]="true"
+                    ></app-input>
+                  </div>
+
+                  <div class="md:max-w-[14rem]">
+                    <app-input
+                      label="Cantidad"
+                      type="number"
+                      formControlName="quantity"
+                      placeholder="1"
+                      [required]="true"
+                    ></app-input>
+                  </div>
+                  <app-textarea
+                    label="Notas"
+                    formControlName="notes"
+                    placeholder="Notas adicionales..."
+                    [rows]="2"
+                  ></app-textarea>
+                } @else {
+                  <app-textarea
+                    label="Notas"
+                    formControlName="notes"
+                    placeholder="Notas adicionales..."
+                    [rows]="1"
+                  ></app-textarea>
+                }
+              </form>
+            }
+
+            <!-- Sale UoM selector. Excluyente con la captura de consumo:
+                 se muestra solo para producto retail (no insumo) en ambos
+                 modos. Insumo → bloque app-pop-uom-capture (abajo). -->
+            @if (!ingredientMode()) {
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2"
+                  >Unidad de medida</label
+                >
+                <div class="flex gap-2">
+                  <button
+                    class="flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all"
+                    [class]="
+                      selectedPricingType() === 'unit'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-surface text-text-secondary hover:border-primary/50'
+                    "
+                    (click)="selectedPricingType.set('unit')"
+                  >
+                    Unidad
+                  </button>
+                  <button
+                    class="flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-all"
+                    [class]="
+                      selectedPricingType() === 'weight'
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border bg-surface text-text-secondary hover:border-primary/50'
+                    "
+                    (click)="selectedPricingType.set('weight')"
+                  >
+                    Peso (kg)
+                  </button>
+                </div>
+              </div>
+            }
+
+            <!-- Fase 3+5: UoM-aware cost capture (shared sub-component, bidirectional). -->
+            @if (ingredientMode()) {
+              <app-pop-uom-capture
+                [isIngredient]="true"
+                [initialPurchaseUomId]="purchaseUomId()"
+                [initialStockUomId]="stockUomId()"
+                [initialUnitCost]="initialUnitCost()"
+                [initialQuantity]="configureMode() ? 1 : createQuantity()"
+                (changed)="onUomCaptureChanged($event)"
+              ></app-pop-uom-capture>
+            }
+
+            <!-- Toggles (variants only in configure mode) -->
+            <div
+              class="grid grid-cols-1 gap-3"
+              [class.md:grid-cols-2]="configureMode()"
+            >
+              @if (configureMode()) {
+                <app-setting-toggle
+                  label="Gestionar variantes"
+                  [description]="
+                    productHasVariants
+                      ? 'Seleccionar variantes del producto para la orden'
+                      : 'Crear variantes para este producto'
+                  "
+                  [ngModel]="hasVariantsToggle()"
+                  (changed)="hasVariantsToggle.set($event)"
+                ></app-setting-toggle>
+              }
+
+              <app-setting-toggle
+                label="Gestionar lote"
+                description="Asignar número de lote y fechas de fabricación/vencimiento"
+                [ngModel]="requiresLotToggle()"
+                (changed)="requiresLotToggle.set($event)"
+                [class.md:col-span-2]="!configureMode()"
+              ></app-setting-toggle>
+            </div>
           </div>
         }
 
         <!-- Tab: Variantes -->
-        @if (activeTab() === 'variants') {
+        @if (activeTab() === 'variants' && configureMode()) {
           @if (isCreatingVariants()) {
             <!-- Variant Creation Mode -->
             <div class="flex flex-col gap-3">
@@ -605,14 +656,57 @@ export interface PopProductConfigResult {
 })
 export class PopProductConfigModalComponent {
   private destroyRef = inject(DestroyRef);
+  private fb = inject(FormBuilder);
   readonly isOpen = input(false);
   readonly product = input<PopProduct | null>(null);
   readonly initialVariant = input<PopProductVariant | null>(null);
   readonly initialLotInfo = input<LotInfo | null>(null);
   readonly initialPricingType = input<'unit' | 'weight'>('unit');
   readonly isEditing = input(false);
-  readonly confirmed = output<PopProductConfigResult>();
+
+  /**
+   * Unified-modal mode (Fase 5).
+   * - 'configure' (default): existing flow — configures a catalog product.
+   * - 'create': absorbs the prebulk flow — captures identity + cost + qty
+   *   + (optional) UoM and emits a `prebulkData` payload.
+   */
+  readonly mode = input<'create' | 'configure'>('configure');
+
+  readonly confirmed = output<PopProductModalResult>();
   readonly closed = output<void>();
+
+  /** Convenience flags derived from `mode()`. */
+  readonly createMode = computed(() => this.mode() === 'create');
+  readonly configureMode = computed(() => this.mode() === 'configure');
+
+  // ----------------------------------------------------------------
+  // Create-mode state (Fase 5)
+  // ----------------------------------------------------------------
+
+  /**
+   * Reactive identity + pricing form for create mode. Mirrors the fields
+   * from the prebulk-modal so the emitted `prebulkData` is a 1:1 map.
+   */
+  readonly identityForm: FormGroup = this.fb.group({
+    name: ['', [Validators.required, Validators.maxLength(255)]],
+    code: ['', [Validators.required, Validators.maxLength(64)]],
+    description: [''],
+    quantity: [1, [Validators.required, Validators.min(1)]],
+    unitCost: [0, [Validators.required, Validators.min(0)]],
+    basePrice: [0, [Validators.min(0)]],
+    notes: [''],
+  });
+
+  /** Create-mode ingredient classification (mirrors prebulk). */
+  readonly isIngredient = signal(false);
+  readonly isSellable = signal(true);
+  /** Live create quantity (read from the form, kept in sync). */
+  readonly createQuantity = signal<number>(1);
+  /** Initial unit cost shown in `pop-uom-capture` (configure mode). */
+  readonly initialUnitCost = computed(() => {
+    const p: any = this.product();
+    return Number(p?.cost || p?.cost_price || 0);
+  });
 
   // Tab state
   activeTab = signal<string>('general');
@@ -693,12 +787,18 @@ export class PopProductConfigModalComponent {
     return !!p.is_ingredient && !sellable;
   });
   /**
-   * Fase 3: effective ingredient mode. Only true when the product is a
-   * pure ingredient AND the store supports the capacity.
+   * Effective ingredient mode — drives the venta/consumo UoM switch.
+   * Requires store capability, then:
+   *   - create mode: the "Es un insumo" toggle governs (no product yet).
+   *   - configure mode: derived from the existing product (pure ingredient).
+   * Fase 5: without the create-mode branch the UoM-capture block never
+   * showed when creating an ingredient (product() is null → false).
    */
-  readonly ingredientMode = computed(
-    () => this.isPureIngredient() && this.storeSupportsIngredients(),
-  );
+  readonly ingredientMode = computed(() => {
+    if (!this.storeSupportsIngredients()) return false;
+    if (this.createMode()) return this.isIngredient();
+    return this.isPureIngredient();
+  });
   /**
    * Fase 3: live preview of the purchase→stock factor the backend will
    * compute on receive(). Mirrors `unitCapacity` from the product form
@@ -775,7 +875,22 @@ export class PopProductConfigModalComponent {
         this.initializeIngredientUoMDefaults();
       }
     });
+
+    // Seed the shared UoM-capture sub-component from its inputs once it is
+    // rendered (it only exists under `@if (ingredientMode())`). Mirrors the
+    // "init on open" pattern the inline block used to have. In create mode
+    // this resets to empty (new product); in configure mode it reflects the
+    // product's persisted UoMs resolved by initializeIngredientUoMDefaults().
+    effect(() => {
+      const cap = this.uomCapture();
+      if (this.isOpen() && cap) {
+        cap.initFromInputs();
+      }
+    });
   }
+
+  /** Shared UoM-capture instance (present only in ingredient mode). */
+  private readonly uomCapture = viewChild(PopUomCaptureComponent);
 
   /**
    * Fase 3: load the UoM catalog once per modal open. The service caches
@@ -936,8 +1051,54 @@ export class PopProductConfigModalComponent {
     }
   }
 
+  /**
+   * Called by `<app-pop-uom-capture>` whenever the user settles a value.
+   * In configure mode the UoM FKs are read directly from the parent's
+   * signals (mirroring the previous inline block); in create mode the
+   * component also writes `unitCost` back into the identity form so the
+   * "Costo unitario" input and the UoM-capture block stay in sync.
+   */
+  onUomCaptureChanged(result: PopUomCaptureResult): void {
+    this.purchaseUomId.set(result.purchaseUomId);
+    this.stockUomId.set(result.stockUomId);
+    if (this.createMode()) {
+      // The sub-component is the source of truth for ingredient cost AND
+      // batch quantity (bidirectional capture). Keep the identity form in
+      // sync so onConfirm reads the canonical unit_cost and quantity even
+      // though the inputs are hidden for ingredients.
+      this.identityForm.patchValue(
+        { unitCost: result.unitCost, quantity: result.quantity },
+        { emitEvent: false },
+      );
+    }
+  }
+
+  /**
+   * Soft exclusivity: turning the ingredient flag on marks the product as
+   * non-sellable; turning it off restores sellable and clears the UoM
+   * selection so a retail product never carries stale FKs. Mirrors the
+   * prebulk-modal behavior.
+   */
+  onIngredientToggle(value: boolean): void {
+    this.isIngredient.set(value);
+    this.isSellable.set(!value);
+    if (!value) {
+      this.purchaseUomId.set(null);
+      this.stockUomId.set(null);
+    }
+  }
+
   canConfirm(): boolean {
     if (this.creatingVariants()) return false;
+    if (this.createMode()) {
+      // Create mode: identity form must be valid; if ingredient, both UoMs
+      // are mandatory. Variant management is hidden in create mode.
+      if (this.identityForm.invalid) return false;
+      if (this.isIngredient()) {
+        return this.purchaseUomId() != null && this.stockUomId() != null;
+      }
+      return true;
+    }
     if (this.isCreatingVariants()) {
       return this.generatedVariants.length > 0;
     }
@@ -948,6 +1109,41 @@ export class PopProductConfigModalComponent {
 
   onConfirm(): void {
     if (!this.canConfirm()) return;
+
+    // ----------------------------------------------------------------
+    // CREATE mode (Fase 5) — absorbs the prebulk-modal flow.
+    // ----------------------------------------------------------------
+    if (this.createMode()) {
+      this.identityForm.markAllAsTouched();
+      const v = this.identityForm.value;
+      const ingredient = this.isIngredient();
+
+      const prebulkData: PreBulkData = {
+        name: v.name,
+        code: v.code,
+        description: v.description || undefined,
+        base_price: Number(v.basePrice) || 0,
+        is_ingredient: ingredient,
+        is_sellable: this.isSellable(),
+        // UoM FKs only travel for ingredients; retail stays null.
+        purchase_uom_id: ingredient ? this.purchaseUomId() : null,
+        stock_uom_id: ingredient ? this.stockUomId() : null,
+      };
+
+      this.confirmed.emit({
+        mode: 'create',
+        prebulkData,
+        quantity: Number(v.quantity),
+        unit_cost: Number(v.unitCost),
+        notes: v.notes || undefined,
+      });
+      this.closed.emit();
+      return;
+    }
+
+    // ----------------------------------------------------------------
+    // CONFIGURE mode — original flow (variants / lot / UoM).
+    // ----------------------------------------------------------------
 
     // Creating new variants mode
     if (
@@ -1009,6 +1205,7 @@ export class PopProductConfigModalComponent {
             const pricingType = this.selectedPricingType();
 
             this.confirmed.emit({
+              mode: 'configure',
               variants: createdVariants,
               quantity: 1,
               unit_cost: Number(
@@ -1016,9 +1213,6 @@ export class PopProductConfigModalComponent {
               ),
               pricing_type: pricingType,
               lot_info: lotInfo,
-              // Fase 3: UoM FKs. We propagate whatever the modal is
-              // currently holding (defaults to product's persisted UoMs
-              // in ingredient mode; null otherwise).
               purchase_uom_id: this.purchaseUomId(),
               stock_uom_id: this.stockUomId(),
             });
@@ -1046,6 +1240,7 @@ export class PopProductConfigModalComponent {
       if (this.isEditing()) {
         const variant = selectedVariants[0];
         this.confirmed.emit({
+          mode: 'configure',
           variant,
           quantity: 1,
           unit_cost: variant?.cost_price
@@ -1053,12 +1248,12 @@ export class PopProductConfigModalComponent {
             : Number(this.product()?.cost || this.product()?.cost_price || 0),
           pricing_type: pricingType,
           lot_info: lotInfo,
-          // Fase 3: UoM FKs.
           purchase_uom_id: this.purchaseUomId(),
           stock_uom_id: this.stockUomId(),
         });
       } else {
         this.confirmed.emit({
+          mode: 'configure',
           variants: selectedVariants,
           quantity: 1,
           unit_cost: Number(
@@ -1066,20 +1261,19 @@ export class PopProductConfigModalComponent {
           ),
           pricing_type: pricingType,
           lot_info: lotInfo,
-          // Fase 3: UoM FKs.
           purchase_uom_id: this.purchaseUomId(),
           stock_uom_id: this.stockUomId(),
         });
       }
     } else {
       this.confirmed.emit({
+        mode: 'configure',
         quantity: 1,
         unit_cost: Number(
           this.product()?.cost || this.product()?.cost_price || 0,
         ),
         pricing_type: pricingType,
         lot_info: lotInfo,
-        // Fase 3: UoM FKs.
         purchase_uom_id: this.purchaseUomId(),
         stock_uom_id: this.stockUomId(),
       });
@@ -1213,6 +1407,20 @@ export class PopProductConfigModalComponent {
 
   private resetState(): void {
     this.activeTab.set('general');
+
+    // Reset create-mode state on every open so each create starts clean.
+    this.identityForm.reset({
+      name: '',
+      code: '',
+      description: '',
+      quantity: 1,
+      unitCost: 0,
+      basePrice: 0,
+      notes: '',
+    });
+    this.isIngredient.set(false);
+    this.isSellable.set(true);
+    this.createQuantity.set(1);
 
     // Pre-fill pricing type
     this.selectedPricingType.set(

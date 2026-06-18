@@ -163,9 +163,13 @@ import { getModulesHiddenByIndustries } from '../../constants/industry-modules.c
                 <app-icon name="layout" [size]="20"></app-icon>
                 Módulos del Panel: {{ getAppTypeLabel(currentAppType()) }}
               </h4>
-              <span class="text-xs text-gray-400"
-                >Personaliza la visibilidad de tus herramientas</span
-              >
+              <span class="text-xs text-gray-400">
+                @if (canEditModules) {
+                  Personaliza la visibilidad de tus herramientas
+                } @else {
+                  Visibilidad gestionada por tu administrador
+                }
+              </span>
             </div>
             <app-panel-ui-modules-editor
               [appType]="currentAppType()"
@@ -175,9 +179,17 @@ import { getModulesHiddenByIndustries } from '../../constants/industry-modules.c
               [newKeys]="newKeysForActiveApp()"
               [searchable]="true"
               [parentSync]="true"
+              [readOnly]="!canEditModules"
               (valueChange)="onEditorValueChange($event)"
             ></app-panel-ui-modules-editor>
-            @if (hasModuleError()) {
+            @if (!canEditModules) {
+              <p class="text-[10px] text-gray-400 mt-2 flex items-center gap-1">
+                <app-icon name="lock" [size]="10"></app-icon>
+                Solo un administrador o propietario puede editar la visibilidad de
+                los módulos
+              </p>
+            }
+            @if (canEditModules && hasModuleError()) {
               <div class="text-xs text-red-500 mt-4 flex items-center gap-1">
                 <app-icon name="alert-circle" [size]="14"></app-icon>
                 Debes habilitar al menos un módulo para poder navegar
@@ -259,6 +271,10 @@ export class SettingsModalComponent {
   currentSettings: any = null;
   readonly currentAppType = signal<string>('ORG_ADMIN');
   canChangeAppType: boolean = false;
+  /** Owner/admin only: editar la visibilidad del propio panel_ui es privilegiado.
+   *  El acceso a módulos de un usuario común lo curan owner/admin desde el
+   *  módulo de usuarios, no el propio usuario. */
+  canEditModules = false;
   isSingleStore = false;
   isOwner = false;
   readonly upgrading = signal(false);
@@ -366,6 +382,9 @@ export class SettingsModalComponent {
     // Use synchronous methods from AuthFacade
     this.canChangeAppType =
       this.authFacade.isOwner() || this.authFacade.isAdmin();
+    // Editar la visibilidad de módulos es solo owner/admin (misma regla que el
+    // cambio de tipo de aplicación). Un rol no privilegiado no puede tocarla.
+    this.canEditModules = this.canChangeAppType;
   }
 
   // ===== Form population helpers =====
@@ -610,21 +629,9 @@ export class SettingsModalComponent {
       next: (response) => {
         const currentConfig = response.data?.config || response.config || {};
 
-        // NO modificar el campo 'app' - solo actualizar panel_ui del app type actual.
-        const configObj = {
-          ...currentConfig,
-
-          // Merge panel_ui: preservar app types no editados y actualizar solo el actual.
-          // For STORE_ADMIN, the diff excludes modules gated by industry or the
-          // store panel UI (their stored user value is preserved untouched).
-          panel_ui: {
-            ...currentConfig.panel_ui, // Preservar todos los app types existentes
-            [this.currentAppType()]: this.buildPanelUiDiff(
-              this.currentAppType(),
-              formValue,
-              currentConfig,
-            ),
-          },
+        // NO modificar el campo 'app'. Preferences siempre; panel_ui solo si el rol puede.
+        const configObj: any = {
+          ...currentConfig, // preserva panel_ui existente intacto por defecto
 
           // Merge preferences: preservar preferencias existentes
           preferences: {
@@ -633,6 +640,23 @@ export class SettingsModalComponent {
             theme: formValue.preferences.theme,
           },
         };
+
+        // Editar la visibilidad de módulos es solo owner/admin. Un usuario no
+        // privilegiado nunca persiste auto-ediciones: su panel_ui queda intacto
+        // (lo curan owner/admin desde el módulo de usuarios).
+        if (this.canEditModules) {
+          // Merge panel_ui: preservar app types no editados y actualizar solo el actual.
+          // For STORE_ADMIN, the diff excludes modules gated by industry or the
+          // store panel UI (their stored user value is preserved untouched).
+          configObj.panel_ui = {
+            ...currentConfig.panel_ui, // Preservar todos los app types existentes
+            [this.currentAppType()]: this.buildPanelUiDiff(
+              this.currentAppType(),
+              formValue,
+              currentConfig,
+            ),
+          };
+        }
 
         const dto = { config: configObj };
 

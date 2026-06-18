@@ -268,3 +268,53 @@ export interface PopCartValidationError {
   field: string;
   message: string;
 }
+
+// ============================================================================
+// Unified Product Modal Result (Fase 5 — modal unificado)
+// ============================================================================
+
+/**
+ * Configure-mode result. Centralized here (moved from
+ * `pop-product-config-modal.component.ts`) so the discriminated union
+ * below can reference it without circular imports. The modal component
+ * re-exports it for backward compatibility.
+ */
+export interface PopProductConfigResult {
+  variant?: PopProductVariant | null;
+  variants?: PopProductVariant[];
+  lot_info?: LotInfo;
+  quantity: number;
+  unit_cost: number;
+  pricing_type?: 'unit' | 'weight';
+  /**
+   * Fase 3: UoM FKs propagated to the cart line. The modal only fills
+   * these when the product is a pure ingredient and the store supports
+   * the capacity (Phase 0 resolver). When null/undefined, the cart
+   * leaves them null and the PO will be treated as `retail`.
+   */
+  purchase_uom_id?: number | null;
+  stock_uom_id?: number | null;
+}
+
+/**
+ * Discriminated union emitted by the unified product modal
+ * (`PopProductConfigModalComponent` in `mode: 'create' | 'configure'`).
+ *
+ * The shape is a 1:1 mapping to the payloads the cart already accepts:
+ * - `create`     → `addToCart({ is_prebulk: true, prebulk_data, quantity, unit_cost, notes })`
+ * - `configure`  → `addToCart` / `updateCartItem` with `variant`, `variants`, `lot_info`,
+ *                  `pricing_type`, `unit_cost`, and optional UoM FKs.
+ *
+ * The discriminated `mode` lets the orchestrator (`pop.component.ts`) route
+ * the result to the existing cart calls without changes to
+ * `cartToPurchaseOrderRequest`.
+ */
+export type PopProductModalResult =
+  | {
+      mode: 'create';
+      prebulkData: PreBulkData;
+      quantity: number;
+      unit_cost: number;
+      notes?: string;
+    }
+  | (PopProductConfigResult & { mode: 'configure' });

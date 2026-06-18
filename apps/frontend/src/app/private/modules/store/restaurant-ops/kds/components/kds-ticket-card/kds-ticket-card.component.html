@@ -1,6 +1,13 @@
 <div
   class="kds-card"
-  [class.kds-card--urgent]="isUrgent() && !isTerminal(ticket().status)"
+  role="button"
+  tabindex="0"
+  (click)="onCardClick()"
+  (keydown.enter)="onCardClick()"
+  (keydown.space)="onCardClick()"
+  [class.kds-card--warning]="isWarning() && !isDanger()"
+  [class.kds-card--danger]="isDanger()"
+  [class.kds-card--urgent]="isWarning() && !isDanger()"
   [class.kds-card--delivered]="ticket().status === 'delivered'"
   [class.kds-card--cancelled]="ticket().status === 'cancelled'"
   [class.kds-card--mutating]="isMutating()"
@@ -9,7 +16,7 @@
   <header class="kds-card__header">
     <div class="kds-card__id">
       <span class="kds-card__hash">#</span>
-      <span class="kds-card__number">{{ ticket().id }}</span>
+      <span class="kds-card__number">{{ ticket().daily_number ?? ticket().id }}</span>
     </div>
     <div class="kds-card__meta">
       @if (ticket().table_id) {
@@ -18,7 +25,7 @@
         </span>
       }
       <span class="kds-card__order" title="Orden">
-        <app-icon name="file-text" [size]="12" /> Orden #{{ ticket().order_id }}
+        <app-icon name="file-text" [size]="12" /> Orden {{ ticket().order?.order_number ?? ('#' + ticket().order_id) }}
       </span>
     </div>
   </header>
@@ -37,7 +44,9 @@
     </app-badge>
     <span
       class="kds-card__elapsed"
-      [class.kds-card__elapsed--urgent]="isUrgent()"
+      [class.kds-card__elapsed--warning]="isWarning() && !isDanger()"
+      [class.kds-card__elapsed--danger]="isDanger()"
+      [class.kds-card__elapsed--urgent]="isWarning() && !isDanger()"
     >
       <app-icon name="clock" [size]="12" /> {{ elapsedLabel() }}
     </span>
@@ -68,12 +77,14 @@
     }
   </ul>
 
-  <!-- Actions -->
-  <footer class="kds-card__actions">
+  <!-- Actions (stopPropagation so clicking a button here does NOT
+       open the detail modal; the click is meant for the action). -->
+  <footer class="kds-card__actions" (click)="$event.stopPropagation()">
     @if (ticket().status === 'pending') {
       <app-button
         variant="primary"
-        size="sm"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onStart()"
         [disabled]="isMutating()"
         [loading]="isMutating()"
@@ -82,8 +93,9 @@
         Iniciar
       </app-button>
       <app-button
-        variant="outline"
-        size="sm"
+        variant="outline-danger"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onCancel()"
         [disabled]="isMutating()"
       >
@@ -93,7 +105,8 @@
     } @else if (ticket().status === 'in_preparation') {
       <app-button
         variant="success"
-        size="sm"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onReady()"
         [disabled]="isMutating()"
         [loading]="isMutating()"
@@ -102,8 +115,9 @@
         Listo
       </app-button>
       <app-button
-        variant="outline"
-        size="sm"
+        variant="outline-danger"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onCancel()"
         [disabled]="isMutating()"
       >
@@ -113,7 +127,8 @@
     } @else if (ticket().status === 'ready') {
       <app-button
         variant="primary"
-        size="sm"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onDeliver()"
         [disabled]="isMutating()"
         [loading]="isMutating()"
@@ -122,8 +137,9 @@
         Entregar
       </app-button>
       <app-button
-        variant="outline"
-        size="sm"
+        variant="outline-danger"
+        size="xsm"
+        [fullWidth]="true"
         (clicked)="onCancel()"
         [disabled]="isMutating()"
       >

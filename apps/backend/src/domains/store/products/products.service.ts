@@ -952,6 +952,7 @@ export class ProductsService {
       product_type,
       requires_booking,
       is_sellable,
+      is_batch_produced,
     } = query;
     const skip = (page - 1) * limit;
 
@@ -993,6 +994,7 @@ export class ProductsService {
       ...(product_type && { product_type }),
       ...(requires_booking !== undefined && { requires_booking }),
       ...(is_sellable !== undefined && { is_sellable }),
+      ...(is_batch_produced !== undefined && { is_batch_produced }),
     };
 
     // Resolve POS stock scope so we can constrain the stock_levels includes at

@@ -147,6 +147,7 @@ export class PanelUiModulesEditorComponent {
       this.value();
       this.hiddenByIndustry();
       this.hiddenByStore();
+      this.readOnly();
       this.applyValueAndGating();
     });
   }
@@ -244,6 +245,7 @@ export class PanelUiModulesEditorComponent {
   private syncDisabledStates(): void {
     const form = this._form();
     if (Object.keys(form.controls).length === 0) return;
+    const readOnly = this.readOnly();
     const hiddenI = this.hiddenByIndustry();
     const hiddenS = this.hiddenByStore();
     const keys = this.allKeys();
@@ -254,16 +256,18 @@ export class PanelUiModulesEditorComponent {
       if (hiddenI.includes(key) || hiddenS.includes(key)) {
         ctrl.disable({ emitEvent: false });
         ctrl.setValue(false, { emitEvent: false });
+      } else if (readOnly) {
+        // Read-only: preservar el valor almacenado pero renderizar el toggle
+        // deshabilitado (opacity-50 + not-allowed) para que se vea el bloqueo.
+        ctrl.disable({ emitEvent: false });
       } else {
         ctrl.enable({ emitEvent: false });
       }
     }
 
-    // Parent sync: when a parent is off, its children render disabled
-    // for visual consistency (the value is preserved in the form, so
-    // toggling the parent back ON restores them). Gated children stay
-    // disabled via the loop above.
-    if (this.parentSync()) {
+    // El cascade padre/hijo solo aplica cuando se puede editar; en read-only
+    // ya quedó todo deshabilitado en el bucle anterior.
+    if (!readOnly && this.parentSync()) {
       for (const parent of this.modulesWithChildren()) {
         const parentOff = form.get(parent.key)?.value === false;
         for (const child of parent.children || []) {
