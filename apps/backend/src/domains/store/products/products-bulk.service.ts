@@ -1098,10 +1098,7 @@ export class ProductsBulkService {
     // (sin filas) que el frontend no puede manejar — el usuario recibe un
     // toast genérico de "error desconocido" en vez de un mensaje claro.
     const productCount = await this.prisma.products.count({
-      where: {
-        store_id: storeId,
-        state: { not: 'archived' },
-      },
+      where: { store_id: storeId },
     });
     if (productCount === 0) {
       throw new NotFoundException(
@@ -1121,10 +1118,7 @@ export class ProductsBulkService {
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const products = await this.prisma.products.findMany({
-        where: {
-          store_id: storeId,
-          state: { not: 'archived' },
-        },
+        where: { store_id: storeId },
         orderBy: { id: 'asc' },
         take: CHUNK_SIZE,
         ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
