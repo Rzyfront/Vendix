@@ -284,7 +284,7 @@ function CollapsibleSubmenu({ isExpanded, childrenCount, children }: Collapsible
 
   const height = animatedHeight.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, childrenCount * 36], // 10+10 paddingVertical + 2 marginVertical + extra buffer
+    outputRange: [0, childrenCount * 40], // 10+10 paddingVertical + 2 marginVertical + text height + extra buffer
   });
 
   if (!shouldRender && !isExpanded) return null;
@@ -293,6 +293,79 @@ function CollapsibleSubmenu({ isExpanded, childrenCount, children }: Collapsible
     <Animated.View style={{ height, overflow: 'hidden' }}>
       {children}
     </Animated.View>
+  );
+}
+
+interface SidebarButtonProps {
+  onPress: () => void;
+  isActive?: boolean;
+  isLocked?: boolean;
+  pressedStyle: any;
+  activeStyle?: any;
+  baseStyle: any;
+  children: React.ReactNode;
+}
+
+function SidebarButton({
+  onPress,
+  isActive = false,
+  isLocked = false,
+  pressedStyle,
+  activeStyle,
+  baseStyle,
+  children,
+}: SidebarButtonProps) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(1)).current;
+
+  const handlePressIn = () => {
+    Animated.parallel([
+      Animated.spring(scale, {
+        toValue: 0.97,
+        useNativeDriver: true,
+        speed: 50,
+        bounciness: 0,
+      }),
+      Animated.timing(opacity, {
+        toValue: 0.85,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const handlePressOut = () => {
+    Animated.parallel([
+      Animated.spring(scale, {
+        toValue: 1.0,
+        useNativeDriver: true,
+        speed: 40,
+        bounciness: 4,
+      }),
+      Animated.timing(opacity, {
+        toValue: 1.0,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  return (
+    <Pressable
+      onPress={onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={({ pressed }) => [
+        baseStyle,
+        isActive && activeStyle,
+        pressed && pressedStyle,
+        isLocked && styles.lockedItem,
+      ]}
+    >
+      <Animated.View style={{ transform: [{ scale }], opacity, flexDirection: 'row', alignItems: 'center', width: '100%' }}>
+        {children}
+      </Animated.View>
+    </Pressable>
   );
 }
 
@@ -621,13 +694,20 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
     router.replace('/(auth)/login');
   };
 
+  const normalizePath = (path: string) => {
+    if (!path) return '';
+    let clean = path.replace(/\/\([^)]+\)/g, '').replace(/\([^)]+\)\//g, '').replace(/\([^)]+\)/g, '');
+    clean = clean.replace(/^\/+|\/+$/g, '');
+    return clean;
+  };
+
   const isRouteActive = (href?: string) => {
     if (!href) return false;
-    const normalizedHref = href.replace(/\/\([^)]+\)/g, '');
-    const cleanHref = normalizedHref === '' ? '/' : normalizedHref;
+    const cleanHref = normalizePath(href);
+    const cleanRoute = normalizePath(currentRoute);
     
-    if (cleanHref === '/') return currentRoute === '/';
-    return currentRoute === cleanHref || currentRoute.startsWith(cleanHref + '/');
+    if (cleanHref === '') return cleanRoute === '';
+    return cleanRoute === cleanHref || cleanRoute.startsWith(cleanHref + '/');
   };
 
   const hasActiveChild = (item: MenuItem) =>
@@ -677,7 +757,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
           if (hasChildren) {
             return (
               <View key={item.label}>
-                <Pressable
+                <SidebarButton
                   onPress={() => {
                     if (item._locked) {
                       handleLockedItemClick(item);
@@ -685,11 +765,9 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                       toggleSection(item.label, item);
                     }
                   }}
-                  style={({ pressed }) => [
-                    styles.menuItem,
-                    pressed && styles.menuItemPressed,
-                    item._locked && styles.lockedItem,
-                  ]}
+                  baseStyle={styles.menuItem}
+                  pressedStyle={styles.menuItemPressed}
+                  isLocked={item._locked}
                 >
                   <View style={styles.menuIcon}>
                     <Icon
@@ -719,7 +797,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                       color={colorScales.gray[400]}
                     />
                   )}
-                </Pressable>
+                </SidebarButton>
 
                 <CollapsibleSubmenu isExpanded={isExpanded && !item._locked} childrenCount={item.children!.length}>
                   <View style={styles.submenuContainer}>
@@ -743,7 +821,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                             )}
                           </View>
 
-                          <Pressable
+                          <SidebarButton
                             onPress={() => {
                               if (child._locked) {
                                 handleLockedItemClick(child);
@@ -753,12 +831,11 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                                 handleNavigate(child.href);
                               }
                             }}
-                            style={({ pressed }) => [
-                              styles.subMenuItem,
-                              isActiveChild && styles.subMenuItemActive,
-                              (!isActiveChild && pressed) && styles.subMenuItemPressed,
-                              child._locked && styles.lockedSubmenuItem,
-                            ]}
+                            isActive={isActiveChild}
+                            isLocked={child._locked}
+                            baseStyle={styles.subMenuItem}
+                            activeStyle={styles.subMenuItemActive}
+                            pressedStyle={styles.subMenuItemPressed}
                           >
                             <Text
                               style={[
@@ -777,7 +854,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                                 </Text>
                               </View>
                             )}
-                          </Pressable>
+                          </SidebarButton>
                         </View>
                       );
                     })}
@@ -788,7 +865,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
           }
 
           return (
-            <Pressable
+            <SidebarButton
               key={item.href}
               onPress={() => {
                 if (item._locked) {
@@ -797,12 +874,11 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                   handleNavigate(item.href);
                 }
               }}
-              style={({ pressed }) => [
-                styles.menuItem,
-                isParentActive && styles.menuItemActive,
-                (!isParentActive && pressed) && styles.menuItemPressed,
-                item._locked && styles.lockedItem,
-              ]}
+              isActive={isParentActive}
+              isLocked={item._locked}
+              baseStyle={styles.menuItem}
+              activeStyle={styles.menuItemActive}
+              pressedStyle={styles.menuItemPressed}
             >
               <View style={styles.menuIcon}>
                 <Icon
@@ -825,7 +901,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
                   </Text>
                 </View>
               )}
-            </Pressable>
+            </SidebarButton>
           );
         })}
       </ScrollView>
@@ -972,7 +1048,7 @@ const styles = StyleSheet.create({
     left: 0,        // starts at tree line
     top: 0,
     width: SUBMENU_L_WIDTH + 2,  // L horizontal reach
-    height: SUBMENU_L_HEIGHT,
+    height: '50%',
     borderLeftWidth: SUBMENU_LINE_WIDTH,
     borderBottomWidth: SUBMENU_LINE_WIDTH,
     borderLeftColor: SUBMENU_TREE_COLOR,
@@ -991,7 +1067,7 @@ const styles = StyleSheet.create({
   submenuSegmentAfter: {
     position: 'absolute',
     left: 0,
-    top: SUBMENU_L_HEIGHT,
+    top: '50%',
     bottom: 0,
     width: SUBMENU_LINE_WIDTH,
     backgroundColor: SUBMENU_TREE_COLOR,
