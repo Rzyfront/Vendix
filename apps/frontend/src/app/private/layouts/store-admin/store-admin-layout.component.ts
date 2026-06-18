@@ -65,6 +65,7 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
       >
         <!-- Footer Content -->
         <div slot="footer" class="sidebar-footer-content">
+          @if (canManageSubscription()) {
           <a
             class="footer-info-item footer-info-item--clickable"
             routerLink="/admin/subscription"
@@ -130,6 +131,7 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
               </div>
             </div>
           </a>
+          }
         </div>
       </app-sidebar>
 
@@ -738,6 +740,25 @@ export class StoreAdminLayoutComponent {
       this.authFacade.hasPermission('store:users:update') ||
       this.authFacade.isOwner() ||
       this.authFacade.isAdmin(),
+  );
+
+  /**
+   * Authorization of the LOGGED-IN user to manage the store subscription.
+   * Drives the sidebar footer subscription card visibility here and mirrors
+   * the `subscriptionManagementGuard` that gates the `/admin/subscription`
+   * route. Owner-only (owner + super_admin). Backed by AuthFacade signals so
+   * it stays reactive (zoneless-safe).
+   */
+  readonly canManageSubscription = computed<boolean>(
+    () =>
+      this.authFacade.isOwner() ||
+      this.authFacade.hasAnyRole([
+        'owner',
+        'OWNER',
+        'super_admin',
+        'STORE_OWNER',
+        'ORG_OWNER',
+      ]),
   );
 
   // Reactive menu items as signal via toSignal.

@@ -602,6 +602,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
         (paymentCompleted)="onPaymentCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
         (customerSelected)="onPaymentCustomerSelected($event)"
+        (tableSessionOpened)="onPaymentTableSessionOpened($event)"
       ></app-pos-payment-interface>
 
       <app-pos-shipping-modal
@@ -824,9 +825,14 @@ export class PosComponent {
    */
   readonly hasUnfiredPreparedItems = computed(() => {
     if (!this.restaurantIntegration.isRestaurantMode()) return false;
+    // Bug 1 (Fase K): lines flagged skipKds don't go to the kitchen,
+    // so they must not be counted as "unfired prepared". The kitchen
+    // dispatch and the table-append gate both depend on this signal.
     return this.cartItems().some(
       (it) =>
-        it.itemType !== 'custom' && it.product?.product_type === 'prepared',
+        it.itemType !== 'custom' &&
+        it.product?.product_type === 'prepared' &&
+        it.skipKds !== true,
     );
   });
   /** Restaurant + cart with at least one `prepared` item. Drives the
@@ -1252,6 +1258,20 @@ export class PosComponent {
       });
   }
 
+  /**
+   * Bug 1 (Fase K): a table session was opened from inside the payment
+   * modal. The integration service already updated its
+   * `currentTableSession` signal inside `openTableSession`; we only
+   * need to mirror the tableId on the local payment state so the next
+   * open of the modal keeps it.
+   */
+  onPaymentTableSessionOpened(result: any): void {
+    const tableId = result?.session?.table_id ?? null;
+    if (tableId != null) {
+      this.paymentTableId.set(tableId);
+    }
+  }
+
   onProductSelected(product: any): void {}
 
   onProductAddedToCart(event: { product: any; quantity: number }): void {
@@ -1665,8 +1685,15 @@ export class PosComponent {
       return;
     }
 
-    // Cliente General fallback (id=1) mirrors the unified POS sale path.
-    const customerId = Number(this.selectedCustomer()?.id ?? 1) || 1;
+    // Bug 4 (Fase K): orders.customer_id is optional. Only forward the
+    // id when the operator actually picked a customer; otherwise the
+    // integration service omits the field and the backend stores an
+    // anonymous Consumidor Final order.
+    const customer = this.selectedCustomer();
+    const customerId =
+      customer && Number.isFinite(Number(customer.id)) && Number(customer.id) > 0
+        ? Number(customer.id)
+        : 0;
 
     this.loading.set(true);
     this.restaurantIntegration
@@ -1756,8 +1783,15 @@ export class PosComponent {
     // shape as the counter-draft order. We pull ids from the response when
     // available, otherwise we fall back to a no-op (the operator can
     // re-fire from the KDS page).
+    // Bug 1 (Fase K): lines flagged skipKds in the cart are NOT sent to
+    // the kitchen — their own stock is consumed at payment.
     const orderItemIds: number[] = Array.isArray(order?.order_items)
-      ? order.order_items.map((it: any) => Number(it.id)).filter(Number.isFinite)
+      ? order.order_items
+          .filter(
+            (it: any) => !this.isCartItemSkipKds(it?.product_id, it?.product_variant_id),
+          )
+          .map((it: any) => Number(it.id))
+          .filter(Number.isFinite)
       : [];
     if (orderItemIds.length === 0) return;
     this.restaurantIntegration

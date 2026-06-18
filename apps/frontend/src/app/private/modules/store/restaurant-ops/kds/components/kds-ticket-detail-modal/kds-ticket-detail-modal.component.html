@@ -1,17 +1,17 @@
 <app-modal
   [isOpen]="isOpen()"
   size="lg"
+  [title]="'Ticket #' + (ticketDisplay()?.daily_number ?? ticketDisplay()?.id ?? '')"
+  [showCloseButton]="true"
+  (cancel)="onClose()"
 >
-  <div slot="header" class="flex items-center gap-2 w-full">
-    <app-icon name="receipt" [size]="20" class="text-primary" />
-    <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
-      Ticket #{{ ticketDisplay()?.daily_number ?? ticketDisplay()?.id }}
-    </h3>
-    <span class="ml-auto flex items-center gap-2 text-[11px] text-[var(--color-text-secondary)]">
-      <app-icon name="clock" [size]="12" />
-      {{ elapsedLabel() }}
-    </span>
-  </div>
+  <!-- Icono a la izquierda del título (slot header) -->
+  <app-icon slot="header" name="receipt" [size]="20" class="text-primary" />
+  <!-- Tiempo transcurrido alineado a la derecha del título -->
+  <span slot="header-end" class="flex items-center gap-1 text-[11px] text-[var(--color-text-secondary)] whitespace-nowrap">
+    <app-icon name="clock" [size]="12" />
+    {{ elapsedLabel() }}
+  </span>
 
   @if (ticketDisplay(); as t) {
     <div class="space-y-4">
@@ -128,7 +128,20 @@
        board card click handler is on the outer <div>, so the modal
        never re-opens on action. -->
   @if (ticketDisplay(); as t) {
-    <div slot="footer" class="flex flex-wrap justify-end gap-2">
+    <div slot="footer" class="flex flex-wrap items-center justify-end gap-2">
+      <!-- Reversa al paso anterior: SOLO en el modal, nunca en las cards.
+           Visible para cualquier estado distinto de 'pending'. -->
+      @if (canRevert()) {
+        <app-button
+          variant="ghost"
+          class="mr-auto"
+          (clicked)="onRevert()"
+          [disabled]="isMutating()"
+        >
+          <app-icon slot="icon" name="arrow-left" [size]="14" />
+          Volver a {{ previousStateLabel() }}
+        </app-button>
+      }
       @if (t.status === 'pending') {
         <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar

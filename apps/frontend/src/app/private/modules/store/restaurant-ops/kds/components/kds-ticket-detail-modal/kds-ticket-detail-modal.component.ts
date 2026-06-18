@@ -63,6 +63,14 @@ export class KdsTicketDetailModalComponent {
   readonly readyClicked = output<KitchenTicket>();
   readonly deliverClicked = output<KitchenTicket>();
   readonly cancelClicked = output<KitchenTicket>();
+  /**
+   * Reversa al paso anterior — disponible SOLO en este modal (nunca en
+   * las cards del board). El board pide confirmación y delega en
+   * `KitchenTicketsService.revert`.
+   */
+  readonly revertClicked = output<KitchenTicket>();
+  /** Cierre del modal (X / backdrop / Escape) propagado al board. */
+  readonly closed = output<void>();
 
   /** Hide actions when the card itself wouldn't expose them either. */
   readonly showDelivered = input<boolean>(true);
@@ -116,6 +124,40 @@ export class KdsTicketDetailModalComponent {
     const mm = String(Math.floor(sec / 60)).padStart(2, '0');
     const ss = String(sec % 60).padStart(2, '0');
     return `${mm}:${ss}`;
+  });
+
+  /**
+   * Un ticket es reversible desde cualquier estado distinto de
+   * `pending` (que es el estado inicial y no tiene paso anterior).
+   * Es decir: in_preparation / ready / delivered / cancelled SÍ;
+   * pending y sin-ticket NO.
+   */
+  readonly canRevert = computed(() => {
+    const s = this.ticketDisplay()?.status;
+    return s != null && s !== 'pending';
+  });
+
+  /**
+   * Etiqueta legible del estado DESTINO al revertir (paso anterior).
+   *  - in_preparation → 'Pendiente'
+   *  - ready          → 'En preparación'
+   *  - delivered      → 'Listo'
+   *  - cancelled      → 'Listo'
+   */
+  readonly previousStateLabel = computed(() => {
+    const s = this.ticketDisplay()?.status;
+    switch (s) {
+      case 'in_preparation':
+        return 'Pendiente';
+      case 'ready':
+        return 'En preparación';
+      case 'delivered':
+        return 'Listo';
+      case 'cancelled':
+        return 'Listo';
+      default:
+        return '';
+    }
   });
 
   constructor() {
@@ -206,5 +248,13 @@ export class KdsTicketDetailModalComponent {
   onCancel(): void {
     const t = this.ticketDisplay();
     if (t) this.cancelClicked.emit(t);
+  }
+  onRevert(): void {
+    const t = this.ticketDisplay();
+    if (t) this.revertClicked.emit(t);
+  }
+  /** Emite el cierre al board para que resetee `selectedTicketId`. */
+  onClose(): void {
+    this.closed.emit();
   }
 }

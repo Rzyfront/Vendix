@@ -2704,6 +2704,23 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'El ticket contiene un plato sin receta activa; no se puede iniciar la preparación',
   },
+  // Restaurant Suite — reversa de estado del ticket (KDS "un paso atrás"):
+  // el ticket ya está en su estado inicial (`pending`) y no existe un
+  // estado previo al que retroceder.
+  KITCHEN_TICKET_CANNOT_REVERT: {
+    code: 'KITCHEN_TICKET_CANNOT_REVERT',
+    httpStatus: 409,
+    devMessage: 'El ticket está en su estado inicial y no se puede revertir.',
+  },
+  // Restaurant Suite — reversa de estado del ticket: revertir un ticket
+  // terminal (delivered/cancelled) implicaría revertir la entrega de la
+  // orden asociada, pero la orden ya está finalizada/reembolsada y no
+  // admite esa reversa.
+  KITCHEN_TICKET_REVERT_ORDER_FINISHED: {
+    code: 'KITCHEN_TICKET_REVERT_ORDER_FINISHED',
+    httpStatus: 409,
+    devMessage: 'La orden ya está finalizada; no se puede revertir la entrega del ticket.',
+  },
   KITCHEN_TICKET_STREAM_NO_CONTEXT: {
     code: 'KITCHEN_TICKET_STREAM_NO_CONTEXT',
     httpStatus: 400,

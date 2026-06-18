@@ -419,6 +419,23 @@ export class OrderDetailsPageComponent {
   // | shipped         | any         | paid    | Deliver (standard modal)                            |
   // | delivered       | any         | paid    | Finish (safety net), Refund                         |
 
+  // ── Kitchen-order detection ──
+  //
+  // A POS/restaurant order is considered a "kitchen order" when at least one
+  // of its items has been fired to the kitchen. The only kitchen signal the
+  // detail payload (GET /store/orders/:id) exposes on `order_items` is the
+  // `kitchen_ticket_items` array — populated only for prepared items sent to
+  // the KDS. For kitchen orders in `processing`, shipping/dispatch actions are
+  // irrelevant: the operator finalizes the order directly once the kitchen is
+  // done (backend allows `processing → finished`).
+  readonly isKitchenOrder = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    return (order.order_items ?? []).some(
+      (item) => (item.kitchen_ticket_items?.length ?? 0) > 0,
+    );
+  });
+
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
     if (!order) return [];
@@ -445,6 +462,9 @@ export class OrderDetailsPageComponent {
     const actions: OrderActionConfig[] = [];
 
     switch (state) {
+      // `draft` (POS counter orders before confirmation) behaves exactly like
+      // `created`: register payment, modify (privileged), cancel. Fall-through.
+      case 'draft':
       case 'created':
         if (channel !== 'pos' || !hasPaid) {
           actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
@@ -491,7 +511,13 @@ export class OrderDetailsPageComponent {
         break;
 
       case 'processing':
-        if (delivery === 'home_delivery') {
+        if (this.isKitchenOrder()) {
+          // Kitchen orders skip shipping/dispatch entirely: once the kitchen
+          // finishes, the operator finalizes directly. Reuse the exact same
+          // `finish` action config/handler as `delivered` (backend allows
+          // `processing → finished`).
+          actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
+        } else if (delivery === 'home_delivery') {
           actions.push({ id: 'ship', label: 'Marcar como Enviado', icon: 'truck', variant: 'primary' });
         } else if (isPickup) {
           actions.push({ id: 'ship', label: 'Listo para Recoger', icon: 'package', variant: 'primary' });
@@ -774,6 +800,7 @@ export class OrderDetailsPageComponent {
     const order = this.order();
     if (!order) return 'gray';
     const colorMap: Record<string, StickyHeaderBadgeColor> = {
+      draft: 'gray',
       created: 'gray',
       pending_payment: 'yellow',
       processing: 'blue',
@@ -1903,6 +1930,7 @@ export class OrderDetailsPageComponent {
   formatStatus(status: string | undefined): string {
     if (!status) return 'Desconocido';
     const labels: Record<string, string> = {
+      draft: 'Borrador',
       created: 'Creada',
       pending_payment: 'Pago Pendiente',
       processing: 'Procesando',

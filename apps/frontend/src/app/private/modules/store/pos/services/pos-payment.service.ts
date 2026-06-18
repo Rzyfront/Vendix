@@ -356,6 +356,7 @@ export class PosPaymentService {
     cartState: CartState,
     paymentRequest: PaymentRequest,
     createdBy: string,
+    tableSessionId?: number | null,
   ): Observable<any> {
     const sessionError = this.validateCashRegisterSession();
     if (sessionError) return sessionError;
@@ -421,6 +422,12 @@ export class PosPaymentService {
       coupon_id: cartState.appliedCoupon?.id,
       coupon_code: cartState.appliedCoupon?.code,
       booking_ids: cartState.pendingBookings?.map(b => b.id) || [],
+      // Bug 1 / Obj 4 (Fase K): when the cashier opened/selected a
+      // table from the inline picker in `pos-payment-interface`, the
+      // backend closes out the table's existing draft order instead
+      // of creating a brand-new one. The backend re-derives totals
+      // from the items already on the order.
+      ...(tableSessionId != null ? { table_session_id: tableSessionId } : {}),
     };
 
     // For anonymous sales, use "Consumidor Final" as customer name
@@ -775,20 +782,19 @@ export class PosPaymentService {
 
     const register_id = this.getRegisterId(); // Optional for drafts
 
-    if (!cartState.customer) {
-      return throwError(
-        () =>
-          new Error('Debe seleccionar un cliente para guardar el borrador.'),
-      );
-    }
-
     // Drafts: backend still recalculates discounts when saved.
     // See `processSaleWithPayment` comment for the rationale.
-    const draft_data = {
-      customer_id: cartState.customer.id,
-      customer_name: `${cartState.customer.first_name} ${cartState.customer.last_name}`,
-      customer_email: cartState.customer.email,
-      customer_phone: cartState.customer.phone,
+    // `customer` is optional — POS drafts can be anonymous (Consumidor
+    // Final). When present, link to the customer row; when missing, the
+    // backend stores the order with `customer_id = null`.
+    const customer = cartState.customer;
+    const draft_data: Record<string, any> = {
+      ...(customer?.id ? { customer_id: customer.id } : {}),
+      customer_name: customer
+        ? `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim()
+        : 'Consumidor Final',
+      ...(customer?.email ? { customer_email: customer.email } : {}),
+      ...(customer?.phone ? { customer_phone: customer.phone } : {}),
       store_id: this.getStoreId(),
       items: this.mapCartItemsForPos(cartState),
       subtotal: Number(cartState.summary.subtotal.toFixed(2)),

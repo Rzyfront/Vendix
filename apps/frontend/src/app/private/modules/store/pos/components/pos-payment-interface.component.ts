@@ -42,6 +42,8 @@ import {
 import { PosCustomerService } from '../services/pos-customer.service';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosFulfillmentSelectorComponent, FulfillmentType } from './pos-fulfillment-selector.component';
+import { PosOpenTableModalComponent, } from './pos-open-table-modal.component';
+import { OpenTableSessionResult } from '../services/pos-restaurant-integration.service';
 import { PosWalletService, WalletInfo } from '../services/pos-wallet.service';
 import {
   WompiService,
@@ -80,6 +82,7 @@ interface PaymentState {
     CurrencyPipe,
     CurrencyInputDirective,
     PosFulfillmentSelectorComponent,
+    PosOpenTableModalComponent,
   ],
   templateUrl: './pos-payment-interface.component.html',
   styles: [
@@ -99,8 +102,10 @@ interface PaymentState {
         margin-bottom: 12px;
         padding: 12px;
         border-radius: 12px;
-        background: rgba(var(--color-muted-rgb, 245, 245, 245), 0.5);
-        border: 1px dashed var(--color-border);
+        /* Acorde al modal: fondo sutil theme-aware (muted a 0.1) + borde
+           sólido, en vez del slate saturado al 0.5 que se veía oscuro. */
+        background: var(--color-muted);
+        border: 1px solid var(--color-border);
       }
 
       .fulfillment-section-title {
@@ -118,6 +123,40 @@ interface PaymentState {
         align-items: center;
         font-size: 12px;
         color: rgb(194, 65, 12);
+      }
+
+      /* Bug 1 (Fase K): inline table picker CTA + selected table pill. */
+      .open-table-cta {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 12px;
+        border-radius: 10px;
+        background: var(--color-surface);
+        border: 1px solid var(--color-border);
+        color: var(--color-text-primary);
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.18s ease;
+      }
+
+      .open-table-cta:hover {
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+      }
+
+      .table-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(var(--color-primary-rgb), 0.08);
+        border: 1px solid rgba(var(--color-primary-rgb), 0.3);
+        color: var(--color-primary);
+        font-size: 13px;
+        font-weight: 600;
       }
 
       /* Section Styling */
@@ -1478,6 +1517,8 @@ export class PosPaymentInterfaceComponent {
   readonly requestRegisterConfig = output<void>();
   readonly draftSaved = output<any>();
   readonly customerSelected = output<PosCustomer>();
+  /** Bug 1 (Fase K): emitted when the inline picker opens a session. */
+  readonly tableSessionOpened = output<OpenTableSessionResult>();
 
   paymentMethods = signal<PaymentMethod[]>([]);
   paymentForm: FormGroup;
@@ -1489,6 +1530,17 @@ export class PosPaymentInterfaceComponent {
    */
   fulfillment = signal<FulfillmentType>('entrega');
   readonly tableId = input<number | null>(null);
+  /** Bug 1 (Fase K): local mirror of the picked table id so the modal
+   *  can unblock canProcessPayment even when the parent POS hasn't yet
+   *  persisted a currentTableSession. Emitted up via sessionOpened. */
+  readonly pickedTableId = signal<number | null>(null);
+  /** Bug 1 (Fase K): mirror of the opened table_session id so the POS
+   *  payment payload can include `table_session_id` and the backend
+   *  closes out the table's existing draft order instead of creating
+   *  a brand-new one. */
+  readonly pickedSessionId = signal<number | null>(null);
+  /** Bug 1 (Fase K): toggles the inline PosOpenTableModalComponent. */
+  readonly openTablePicker = signal(false);
 
   paymentState = signal<PaymentState>({
     selectedMethod: null,
@@ -1672,6 +1724,33 @@ export class PosPaymentInterfaceComponent {
 
   get customerEmail(): string {
     return this.cartState()?.customer?.email || '';
+  }
+
+  /**
+   * Bug 1 (Fase K): when the cashier switches back to 'entrega', clear
+   * any picked table id so the next click on 'consumo' reopens the
+   * picker from scratch.
+   */
+  onFulfillmentChange(next: FulfillmentType): void {
+    this.fulfillment.set(next);
+    if (next !== 'consumo') {
+      this.pickedTableId.set(null);
+    }
+  }
+
+  /**
+   * Bug 1 (Fase K): a session was opened from the inline picker —
+   * mirror the table id locally so canProcessPayment unblocks, and
+   * bubble the result up so the parent POS can sync its own state.
+   */
+  onTableSessionPicked(result: OpenTableSessionResult): void {
+    this.openTablePicker.set(false);
+    const session = result?.session ?? result;
+    const tableId = session?.table_id ?? null;
+    const sessionId = (session as any)?.id ?? null;
+    this.pickedTableId.set(tableId);
+    this.pickedSessionId.set(sessionId);
+    this.tableSessionOpened.emit(result);
   }
 
   private fb = inject(FormBuilder);
@@ -1976,9 +2055,15 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
   canProcessPayment(): boolean {
     if (this.paymentState().isProcessing) return false;
 
-    // Restaurant + prepared: 'consumo' requires an open table
-    if (this.isRestaurantWithPrepared() && this.fulfillment() === 'consumo' && this.tableId() == null) {
-      return false;
+    // Restaurant + prepared: 'consumo' requires an open table. Bug 1
+    // (Fase K): the picker is embedded in this modal, so the table id
+    // can come from the parent (input) OR from `pickedTableId` (the
+    // session opened via the inline picker). Either unblocks the CTA.
+    if (this.isRestaurantWithPrepared() && this.fulfillment() === 'consumo') {
+      const t = this.tableId() ?? this.pickedTableId();
+      if (t == null) {
+        return false;
+      }
     }
 
     // Modo crédito: requiere cliente y saldo válido (cuotas solo para tipo 'installments')
@@ -2109,6 +2194,11 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
         this.cartState()!,
         payment_request,
         'current_user',
+        // Bug 1 / Obj 4 (Fase K): when the inline picker opened a
+        // table from inside this modal, forward the session id so
+        // the backend closes out that table's existing draft order
+        // instead of creating a brand-new one.
+        this.pickedSessionId() ?? null,
       )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -2134,7 +2224,7 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
               isAnonymousSale: this.paymentState().isAnonymousSale,
             
               fulfillment: this.fulfillment(),
-              tableId: this.tableId(),
+              tableId: this.tableId() ?? this.pickedTableId(),
             });
             this.onModalClosed();
           } else {
@@ -2231,7 +2321,7 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
               isCreditSale: true,
             
               fulfillment: this.fulfillment(),
-              tableId: this.tableId(),
+              tableId: this.tableId() ?? this.pickedTableId(),
             });
             this.onModalClosed();
           } else {
@@ -2317,7 +2407,7 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
               isCreditSale: true,
             
               fulfillment: this.fulfillment(),
-              tableId: this.tableId(),
+              tableId: this.tableId() ?? this.pickedTableId(),
             });
             this.onModalClosed();
           } else {
@@ -3038,7 +3128,7 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
       isAnonymousSale: this.paymentState().isAnonymousSale,
     
               fulfillment: this.fulfillment(),
-              tableId: this.tableId(),
+              tableId: this.tableId() ?? this.pickedTableId(),
             });
     this.onModalClosed();
   }

@@ -29,6 +29,7 @@ import {
   KdsSseService,
   KitchenTicketsService,
 } from '../../services';
+import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-ticket-card.component';
 import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detail-modal/kds-ticket-detail-modal.component';
 
@@ -72,8 +73,10 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly storeSettings = inject(StoreSettingsFacade);
 
   readonly columns = KDS_COLUMNS;
+  /** Raw ticket set from the SSE/snapshot service (unfiltered by day). */
   readonly tickets = this.kdsSse.tickets;
   readonly connectionState = this.kdsSse.connectionState;
   readonly lastReconnect = this.kdsSse.lastReconnect;
@@ -81,22 +84,79 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   readonly mode = this.kdsSse.mode;
   readonly consecutiveFailures = this.kdsSse.consecutiveFailures;
 
+  /**
+   * Restaurant Suite — business-day clearing of the KDS board.
+   *
+   * The board must show only the CURRENT business day's tickets and
+   * reset when the clock crosses the store's `ticket_closing_hour`
+   * (e.g. 3 AM). We mirror the backend's `getBusinessDate` logic EXACTLY
+   * (Intl date formatting on a `now - closingHour` shifted instant, NO
+   * timezone-instant math) so FE and BE agree on the same YYYY-MM-DD
+   * boundary without offset drift.
+   */
+  private readonly closingHour = computed<number>(() => {
+    const value = this.storeSettings.settings()?.operations?.ticket_closing_hour;
+    return typeof value === 'number' && value >= 0 && value <= 23 ? value : 3;
+  });
+
+  private readonly timezone = computed<string>(
+    () => this.storeSettings.settings()?.general?.timezone || 'America/Bogota',
+  );
+
+  /**
+   * Current business date as 'YYYY-MM-DD'. Recomputed off the 1s `now`
+   * tick so it flips the instant the clock crosses `closingHour`.
+   * Formula matches backend `getBusinessDate`: shift the instant back by
+   * `closingHour` hours, then format the wall-clock date in the store tz.
+   */
+  readonly currentBusinessDate = computed<string>(() => {
+    const closingHour = this.closingHour();
+    const tz = this.timezone();
+    const shifted = new Date(this.now() - closingHour * 3_600_000);
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(shifted);
+  });
+
+  /**
+   * Tickets visible on the board: only those whose `business_date`
+   * matches `currentBusinessDate`. Legacy tickets without a
+   * `business_date` (null/absent) are KEPT so behavior is unchanged for
+   * pre-migration data. Derived from the raw `tickets()` signal — the
+   * source is never mutated.
+   */
+  readonly visibleTickets = computed<KitchenTicket[]>(() => {
+    const businessDate = this.currentBusinessDate();
+    return this.tickets().filter((t) => {
+      const raw = t.business_date;
+      if (raw == null) return true; // legacy fallback: keep
+      const prefix =
+        raw instanceof Date
+          ? raw.toISOString().slice(0, 10)
+          : String(raw).slice(0, 10);
+      return prefix === businessDate;
+    });
+  });
+
   readonly pendingTickets = computed(() =>
-    this.tickets().filter((t) => t.status === 'pending'),
+    this.visibleTickets().filter((t) => t.status === 'pending'),
   );
   readonly inPreparationTickets = computed(() =>
-    this.tickets().filter((t) => t.status === 'in_preparation'),
+    this.visibleTickets().filter((t) => t.status === 'in_preparation'),
   );
   readonly readyTickets = computed(() =>
-    this.tickets().filter((t) => t.status === 'ready'),
+    this.visibleTickets().filter((t) => t.status === 'ready'),
   );
   /** Only delivered tickets — kept separate from cancelled (green column). */
   readonly deliveredTickets = computed(() =>
-    this.tickets().filter((t) => t.status === 'delivered'),
+    this.visibleTickets().filter((t) => t.status === 'delivered'),
   );
   /** Only cancelled/voided tickets (red column). */
   readonly cancelledTickets = computed(() =>
-    this.tickets().filter((t) => t.status === 'cancelled'),
+    this.visibleTickets().filter((t) => t.status === 'cancelled'),
   );
 
   readonly columnCounts = computed<Record<KdsColumn, number>>(() => ({
@@ -109,6 +169,24 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
 
   /** Track which ticket ids are mid-mutation so cards can disable buttons. */
   readonly mutatingIds = signal<Set<number>>(new Set());
+
+  /**
+   * Baseline por ticket capturado al iniciar la mutación. El spinner se
+   * mantiene hasta que el board recibe el evento SSE de ese ticket (su
+   * `status`/`updated_at` cambia respecto al baseline) o hasta que vence
+   * el fallback por timeout. Ver `runMutation` y el effect reconciliador.
+   */
+  private readonly mutationBaselines = new Map<
+    number,
+    { status: KitchenTicket['status']; updatedAt: string | null }
+  >();
+  /** Handles de los timeouts de seguridad por ticket (fallback SSE). */
+  private readonly mutationTimeouts = new Map<
+    number,
+    ReturnType<typeof setTimeout>
+  >();
+  /** Tiempo máximo que el spinner espera al SSE antes de auto-liberarse. */
+  private static readonly MUTATION_SSE_TIMEOUT_MS = 5_000;
 
   // ─── Restaurant Suite — Fase K Gap 4: detail modal state ───────
   /** id of the ticket currently shown in the detail modal (null = closed). */
@@ -152,6 +230,13 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    * the failure → open transition without firing on the initial connect.
    */
   private readonly prevState = signal<KdsConnectionState>('idle');
+
+  /**
+   * Previous business date, used by the rollover effect to detect the
+   * day boundary crossing without firing on the very first run. `null`
+   * means "not yet seeded".
+   */
+  private readonly prevBusinessDate = signal<string | null>(null);
 
   /** Connection indicator label + color for the header chip. */
   readonly connectionLabel = computed(() => {
@@ -220,6 +305,46 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       }
       untracked(() => this.prevState.set(current));
     });
+
+    // Reconciliador de mutaciones: observa `tickets()` y libera el
+    // spinner de cada id pendiente cuando ese ticket cambia respecto al
+    // baseline capturado en `beginMutation` (es decir, cuando llegó el
+    // evento SSE). El fallback por timeout en `beginMutation` cubre el
+    // caso de que el SSE nunca llegue. Resuelve la condición de carrera
+    // del antiguo `next` optimista.
+    effect(() => {
+      const list = this.tickets();
+      if (this.mutationBaselines.size === 0) return;
+      untracked(() => {
+        for (const [id, baseline] of this.mutationBaselines) {
+          const ticket = list.find((t) => t.id === id);
+          if (!ticket) continue; // aún no reconciliado
+          const changed =
+            ticket.status !== baseline.status ||
+            this.normalizeTs(ticket.updated_at) !== baseline.updatedAt;
+          if (changed) {
+            this.finishMutation(id);
+          }
+        }
+      });
+    });
+
+    // Day rollover: when `currentBusinessDate` flips (the clock crossed
+    // the store's `ticket_closing_hour`), drop the previous day's
+    // SSE-held tickets by re-snapshotting from the backend, which now
+    // returns only the current business day. We DON'T fire on the very
+    // first run (seeding `prevBusinessDate`), only on an actual change.
+    effect(() => {
+      const today = this.currentBusinessDate();
+      const previous = untracked(this.prevBusinessDate);
+      untracked(() => this.prevBusinessDate.set(today));
+      if (previous === null) return; // skip initial seed
+      if (previous === today) return; // no boundary crossed
+      // Rebuild the in-memory set from the backend for the new day.
+      this.kdsSse.refreshSnapshot(120).catch(() => {
+        // Silencioso: el SSE/polling reconciliará en el siguiente evento.
+      });
+    });
   }
 
   ngOnInit(): void {
@@ -233,6 +358,12 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       clearInterval(this.tickHandle);
       this.tickHandle = null;
     }
+    // Limpia los timeouts de seguridad de mutaciones que quedaron en vuelo.
+    for (const handle of this.mutationTimeouts.values()) {
+      clearTimeout(handle);
+    }
+    this.mutationTimeouts.clear();
+    this.mutationBaselines.clear();
   }
 
   /**
@@ -362,27 +493,119 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
       });
   }
 
+  /**
+   * Revierte el ticket al paso anterior (solo se invoca desde el modal
+   * de detalle). Pide confirmación, igual que `cancelTicket`, y delega
+   * en `KitchenTicketsService.revert`. El estado destino lo resuelve el
+   * backend y el board lo reconcilia vía el evento SSE `ticket.reverted`.
+   */
+  revertTicket(ticket: KitchenTicket): void {
+    this.dialogService
+      .confirm({
+        title: 'Volver al paso anterior',
+        message: `¿Revertir el ticket #${ticket.id} al estado anterior?`,
+        confirmText: 'Volver al paso anterior',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.runMutation(ticket.id, () =>
+          this.ticketsService.revert(ticket.id),
+        );
+      });
+  }
+
+  /**
+   * Ejecuta una mutación de ticket y mantiene el spinner activo hasta
+   * que el board CONFIRME el cambio por SSE (anti condición de carrera).
+   *
+   * Estrategia (ver `mutationBaselines` + el effect reconciliador del
+   * constructor): antes de mutar capturamos un baseline del ticket
+   * (`status` + `updated_at`). En el `next` del HTTP NO limpiamos el
+   * spinner de inmediato (el viejo comportamiento optimista creaba una
+   * carrera: el id se liberaba antes de que el evento SSE reconciliara
+   * el estado, dejando que la card mostrara el estado viejo por un
+   * instante o que un segundo click disparara una transición inválida).
+   * En su lugar:
+   *  - dejamos el id en `mutatingIds`;
+   *  - un único `effect` observa `tickets()` y libera el id cuando ese
+   *    ticket cambia respecto al baseline (status distinto o updated_at
+   *    posterior) — es decir, cuando llegó el SSE;
+   *  - un `setTimeout` de seguridad (5s) libera el id igualmente si el
+   *    SSE nunca llega, para no dejar el spinner colgado.
+   * En `error` limpiamos el id + toast (como antes).
+   */
   private runMutation(
     ticketId: number,
     obsFactory: () => import('rxjs').Observable<KitchenTicket>,
   ): void {
-    this.addMutating(ticketId);
+    this.beginMutation(ticketId);
     obsFactory()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          // The SSE stream will reconcile the cache. We just need to
-          // stop showing the spinner. We optimistically clear here in
-          // case the SSE event is slow (keystroke feels responsive).
-          this.removeMutating(ticketId);
+          // No limpiamos aquí: dejamos que el effect reconcilie contra
+          // el evento SSE (con fallback por timeout). Esto evita la
+          // carrera HTTP-next vs SSE-event.
         },
         error: (err: unknown) => {
-          this.removeMutating(ticketId);
+          this.finishMutation(ticketId);
           this.toastService.error(
             typeof err === 'string' ? err : 'Error al actualizar el ticket',
           );
         },
       });
+  }
+
+  /**
+   * Marca el id como "pendiente de confirmación SSE": captura el
+   * baseline, lo añade a `mutatingIds` y arma el timeout de seguridad.
+   */
+  private beginMutation(ticketId: number): void {
+    const current = this.tickets().find((t) => t.id === ticketId);
+    this.mutationBaselines.set(ticketId, {
+      status: current?.status ?? 'pending',
+      updatedAt: this.normalizeTs(current?.updated_at),
+    });
+    this.addMutating(ticketId);
+    // Fallback: si el SSE nunca llega, liberamos el id igualmente.
+    this.clearMutationTimeout(ticketId);
+    this.mutationTimeouts.set(
+      ticketId,
+      setTimeout(
+        () => this.finishMutation(ticketId),
+        KdsBoardPageComponent.MUTATION_SSE_TIMEOUT_MS,
+      ),
+    );
+  }
+
+  /**
+   * Libera el id (spinner off) y limpia su baseline + timeout. Es
+   * idempotente: lo llaman tanto el effect reconciliador como el
+   * timeout y el handler de error.
+   */
+  private finishMutation(ticketId: number): void {
+    if (!this.mutationBaselines.has(ticketId) && !this.isMutating(ticketId)) {
+      return;
+    }
+    this.clearMutationTimeout(ticketId);
+    this.mutationBaselines.delete(ticketId);
+    this.removeMutating(ticketId);
+  }
+
+  private clearMutationTimeout(ticketId: number): void {
+    const handle = this.mutationTimeouts.get(ticketId);
+    if (handle) {
+      clearTimeout(handle);
+      this.mutationTimeouts.delete(ticketId);
+    }
+  }
+
+  /** Normaliza updated_at (Date | string | null) a un string comparable. */
+  private normalizeTs(value: string | Date | null | undefined): string | null {
+    if (value == null) return null;
+    return value instanceof Date ? value.toISOString() : String(value);
   }
 
   private addMutating(id: number): void {

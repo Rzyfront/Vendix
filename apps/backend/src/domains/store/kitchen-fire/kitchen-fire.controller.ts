@@ -299,4 +299,23 @@ export class KitchenFireController {
       );
     }
   }
+
+  @Post('tickets/:id/revert')
+  @Permissions('store:kitchen_fire:update')
+  async revertTicket(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const ticket = await this.kitchenFireService.revertTicket(id);
+      return this.responseService.success(
+        ticket,
+        'Ticket revertido al paso anterior',
+      );
+    } catch (error: any) {
+      return this.responseService.error(
+        error.message || 'Error al revertir el ticket',
+        error.response?.message || error.message,
+        error.status || 400,
+        error.error_code,
+      );
+    }
+  }
 }

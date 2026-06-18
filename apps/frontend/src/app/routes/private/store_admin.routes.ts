@@ -3,6 +3,7 @@ import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
 import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard';
+import { subscriptionManagementGuard } from '../../core/guards/subscription-management.guard';
 import { manageUsersGuard } from '../../core/guards/manage-users.guard';
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
 import { InvoicingEffects } from '../../private/modules/store/invoicing/state/effects/invoicing.effects';
@@ -671,6 +672,7 @@ export const storeAdminRoutes: Routes = [
       // Subscription Routes
       {
         path: 'subscription',
+        canActivate: [subscriptionManagementGuard],
         loadChildren: () =>
           import('../../private/modules/store/subscription/subscription.routes').then(
             (m) => m.default,

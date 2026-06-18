@@ -51,6 +51,13 @@ export interface KitchenTicket {
   table_id?: number | null;
   status: KitchenTicketStatus;
   fired_at: string | Date;
+  /**
+   * Business date (tz + ticket_closing_hour aware) assigned at fire time.
+   * Drives the KDS board reset: the board shows only the current business
+   * day's tickets. Serialized as an ISO string over SSE/REST (UTC midnight
+   * of the local business date). Null on legacy pre-migration tickets.
+   */
+  business_date?: string | Date | null;
   ready_at?: string | Date | null;
   created_at?: string | Date | null;
   updated_at?: string | Date | null;
@@ -93,6 +100,11 @@ export type KdsEvent =
     }
   | {
       type: 'ticket.cancelled';
+      ticket: KitchenTicket;
+      ts: number;
+    }
+  | {
+      type: 'ticket.reverted';
       ticket: KitchenTicket;
       ts: number;
     };

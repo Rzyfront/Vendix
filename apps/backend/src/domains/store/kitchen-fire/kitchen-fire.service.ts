@@ -60,6 +60,7 @@ export interface KdsSseEvent {
     | 'ticket.ready'
     | 'ticket.delivered'
     | 'ticket.cancelled'
+    | 'ticket.reverted'
     | 'ping';
   ticket?: any;
   tickets?: any[];
@@ -114,14 +115,14 @@ export class KitchenFireService {
     private readonly sseService: NotificationsSseService,
   ) {}
 
-  /** Fecha de negocio 'YYYY-MM-DD' en tz de la tienda, desplazada por la hora de corte (default 3 AM → un ticket a la 1 AM cuenta para el día anterior). Configurable vía store_settings.settings.restaurant_ops.business_day_cutoff_hour. */
+  /** Fecha de negocio 'YYYY-MM-DD' en tz de la tienda, desplazada por la hora de corte (default 3 AM → un ticket a la 1 AM cuenta para el día anterior). Configurable vía store_settings.settings.operations.ticket_closing_hour (con fallback legado a restaurant_ops.business_day_cutoff_hour). */
   private async getBusinessDate(store_id: number): Promise<string> {
     const row = await this.prisma.store_settings.findUnique({
       where: { store_id }, select: { settings: true },
     });
     const settings = (row?.settings ?? {}) as any;
     const timezone = settings?.general?.timezone || 'America/Bogota';
-    const cutoffHour = Number(settings?.restaurant_ops?.business_day_cutoff_hour ?? 3) || 0;
+    const cutoffHour = Number(settings?.operations?.ticket_closing_hour ?? settings?.restaurant_ops?.business_day_cutoff_hour ?? 3) || 0;
     const shifted = new Date(Date.now() - cutoffHour * 3_600_000);
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -664,6 +665,45 @@ export class KitchenFireService {
       ticket: full.ticket,
       ts: Date.now(),
     });
+
+    // Restaurant lifecycle bridge: once EVERY kitchen ticket of this order is
+    // in a terminal state (delivered/cancelled) and at least one was actually
+    // delivered, the kitchen handoff is complete. We emit an event (AFTER the
+    // ticket mutations have committed above) so the orders domain can move the
+    // order `processing -> delivered`. We use the event pattern instead of
+    // injecting OrderFlowService here to avoid a cross-module dependency cycle
+    // (KitchenFireModule would otherwise have to import the orders/order-flow
+    // graph). The listener re-establishes the store tenant context via
+    // StoreContextRunner before calling OrderFlowService.updateOrderState.
+    try {
+      const orderId = (full.ticket as any)?.order_id ?? ticket.order_id;
+      if (orderId != null) {
+        const orderTickets = await this.prisma.kitchen_tickets.findMany({
+          where: { order_id: orderId, store_id },
+          select: { status: true },
+        });
+        const allTerminal = orderTickets.every(
+          (t) => t.status === 'delivered' || t.status === 'cancelled',
+        );
+        const anyDelivered = orderTickets.some(
+          (t) => t.status === 'delivered',
+        );
+        if (orderTickets.length > 0 && allTerminal && anyDelivered) {
+          this.eventEmitter.emit('kitchen.order_all_delivered', {
+            orderId,
+            storeId: store_id,
+          });
+        }
+      }
+    } catch (e) {
+      // Best-effort: never block the ticket delivery on the order-side bridge.
+      this.logger.warn(
+        `Failed to evaluate order-all-delivered bridge for ticket #${ticketId}: ${
+          (e as Error).message
+        }`,
+      );
+    }
+
     return full.ticket;
   }
 
@@ -707,18 +747,116 @@ export class KitchenFireService {
     return full.ticket;
   }
 
+  /**
+   * Reversa "un paso atrás" del estado de un ticket (botón del modal de
+   * detalle del KDS). El mapa de retroceso es:
+   *   pending        → (sin estado previo) → error KITCHEN_TICKET_CANNOT_REVERT
+   *   in_preparation → pending
+   *   ready          → in_preparation
+   *   delivered      → ready
+   *   cancelled      → ready
+   *
+   * Inventario: NO se toca. Los insumos se consumen en el fire (no en las
+   * transiciones del ticket), así que reactivar un ticket NUNCA re-consume ni
+   * devuelve stock. La reversa es puramente de estado (ticket + sus items).
+   *
+   * Bloqueo SÍNCRONO antes de mutar: cuando el ticket es terminal
+   * (delivered/cancelled) y tiene orden asociada, revertirlo implica reabrir
+   * la orden (delivered -> processing) vía el evento
+   * `kitchen.order_delivery_reverted`. Pero ese puente es async/best-effort y
+   * NO puede revertir una orden ya `finished`/`refunded`. Por eso validamos
+   * el estado de la orden ANTES de mutar el ticket: si la orden no es
+   * revertible, lanzamos y no dejamos el ticket en un estado inconsistente
+   * (revertido mientras la orden quedó finalizada).
+   */
+  async revertTicket(ticketId: number) {
+    const { ticket, store_id } = await this.getTicketForStore(ticketId);
+
+    // Mapa de retroceso un-paso. `pending` no tiene estado previo.
+    const REVERT_MAP: Record<string, string | null> = {
+      pending: null,
+      in_preparation: 'pending',
+      ready: 'in_preparation',
+      delivered: 'ready',
+      cancelled: 'ready',
+    };
+    const target = REVERT_MAP[ticket.status];
+
+    if (target == null) {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_CANNOT_REVERT,
+        undefined,
+        { from: ticket.status },
+      );
+    }
+
+    const wasTerminal =
+      ticket.status === 'delivered' || ticket.status === 'cancelled';
+    const orderId = ticket.order_id;
+
+    // Bloqueo síncrono: si revertir el ticket reabre la orden, valida PRIMERO
+    // que la orden admita la reversa. No mutamos nada si no la admite.
+    if (wasTerminal && orderId != null) {
+      const order = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        select: { state: true },
+      });
+      const orderState = order?.state;
+      if (orderState === 'finished' || orderState === 'refunded') {
+        throw new VendixHttpException(
+          ErrorCodes.KITCHEN_TICKET_REVERT_ORDER_FINISHED,
+          undefined,
+          { orderState },
+        );
+      }
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.kitchen_tickets.update({
+        where: { id: ticketId },
+        data: { status: target as any, updated_at: new Date() },
+      });
+      await tx.kitchen_ticket_items.updateMany({
+        where: { kitchen_ticket_id: ticketId },
+        data: { status: target as any, updated_at: new Date() },
+      });
+    });
+
+    const full = await this.getTicketForStore(ticketId);
+    this.pushKitchenEvent(store_id, {
+      type: 'ticket.reverted',
+      ticket: full.ticket,
+      ts: Date.now(),
+      meta: { from: ticket.status, to: target },
+    });
+
+    // Si el ticket era terminal y tiene orden, emite el puente de reversa de
+    // entrega (delivered -> processing) DESPUÉS del commit. El listener es
+    // idempotente: no-op si la orden no está en `delivered`.
+    if (wasTerminal && orderId != null) {
+      this.eventEmitter.emit('kitchen.order_delivery_reverted', {
+        orderId,
+        storeId: store_id,
+      });
+    }
+
+    return full.ticket;
+  }
+
   // ---------------------------------------------------------------- snapshot
   /**
-   * Snapshot of all tickets relevant to the KDS board. Returns:
-   *  - All non-terminal tickets (pending / in_preparation / ready) whose
-   *    fired_at is within the window.
-   *  - Plus recent (last 60min) delivered + cancelled tickets so the
-   *    "Delivered" column can show what just left the kitchen.
+   * Snapshot of all tickets relevant to the KDS board. Returns the CURRENT
+   * business day's tickets — the board "resets" at the store's
+   * ticket_closing_hour (see getBusinessDate). Every ticket fired during the
+   * active business day is shown regardless of state; nothing from a previous
+   * business day leaks in once the cutoff hour passes.
    *
    * Used by both the explicit REST endpoint and the SSE warm-up.
    */
   async getActiveTicketsSnapshot(
-    windowMinutes: number = 120,
+    // Retained for SSE contract compat (the controller still passes it
+    // positionally), but the board now resets by business day, not by window.
+    _windowMinutes: number = 120,
   ): Promise<{ data: any[]; total: number; server_ts: number }> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
@@ -726,12 +864,12 @@ export class KitchenFireService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const now = new Date();
-    const cutoff = new Date(now.getTime() - windowMinutes * 60_000);
+    const businessDate = await this.getBusinessDate(store_id);
 
     const data = await this.prisma.kitchen_tickets.findMany({
       where: {
         store_id,
-        fired_at: { gte: cutoff },
+        business_date: new Date(`${businessDate}T00:00:00.000Z`),
       },
       orderBy: { fired_at: 'asc' },
       include: KITCHEN_TICKET_INCLUDE,

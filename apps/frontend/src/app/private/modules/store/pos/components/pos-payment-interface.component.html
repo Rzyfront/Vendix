@@ -108,13 +108,32 @@
           <app-pos-fulfillment-selector
             [value]="fulfillment()"
             [consumoBlocked]="false"
-            (selectionChange)="fulfillment.set($event)"
+            (selectionChange)="onFulfillmentChange($event)"
           ></app-pos-fulfillment-selector>
-          @if (fulfillment() === 'consumo' && tableId() == null) {
-            <div class="fulfillment-hint">
-              <app-icon name="info" [size]="14"></app-icon>
-              <span>Selecciona una mesa antes de cobrar esta orden como consumo.</span>
-            </div>
+
+          @if (fulfillment() === 'consumo') {
+            @if (tableId() == null) {
+              <!-- Bug 1 (Fase K): inline CTA to open/select a table from
+                   the payment interface so the cashier can unblock
+                   canProcessPayment without leaving the modal. -->
+              <button
+                type="button"
+                class="open-table-cta"
+                (click)="openTablePicker.set(true)"
+              >
+                <app-icon name="layout-grid" [size]="16"></app-icon>
+                <span>Abrir mesa</span>
+              </button>
+              <div class="fulfillment-hint">
+                <app-icon name="info" [size]="14"></app-icon>
+                <span>Selecciona una mesa antes de cobrar esta orden como consumo.</span>
+              </div>
+            } @else {
+              <div class="table-pill">
+                <app-icon name="layout-grid" [size]="14"></app-icon>
+                <span>Mesa #{{ tableId() }}</span>
+              </div>
+            }
           }
         </div>
       }
@@ -754,4 +773,16 @@
       {{ paymentState().paymentForm === 'credito' ? 'Crear Venta a Crédito' : isWompiSelected() ? 'Pagar con Wompi' : paymentState().selectedMethod?.type === 'cash' ? 'Cobrar' : paymentState().selectedMethod?.type === 'wallet' ? 'Pagar con Wallet' : 'Confirmar Pago' }}
     </button>
   </div>
+
+  <!-- Bug 1 (Fase K): inline table picker for restaurant stores.
+       Reuses the same PosOpenTableModalComponent the create-order flow
+       uses; on sessionOpened it propagates the tableId to the parent. -->
+  @if (isRestaurantWithPrepared()) {
+    <app-pos-open-table-modal
+      [isOpen]="openTablePicker()"
+      (isOpenChange)="openTablePicker.set($event)"
+      [customer]="cartState()?.customer ?? null"
+      (sessionOpened)="onTableSessionPicked($event)"
+    ></app-pos-open-table-modal>
+  }
 </app-modal>

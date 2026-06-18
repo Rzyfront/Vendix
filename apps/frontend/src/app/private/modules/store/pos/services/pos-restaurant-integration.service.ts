@@ -272,9 +272,12 @@ export class PosRestaurantIntegrationService {
     notes?: string,
   ): Observable<CounterOrderResult> {
     const subtotal = lines.reduce((sum, l) => sum + (l.total_price || 0), 0);
-    const body = {
-      customer_id: customerId,
-      state: 'draft',
+    // `customer_id` is optional on the backend (Bug 4 / Fase K): POS
+    // counter flows can omit it for an anonymous Consumidor Final sale.
+    // We only include it when the caller actually provided a positive id.
+    const body: Record<string, any> = {
+      state: 'created',
+      ...(customerId && customerId > 0 ? { customer_id: customerId } : {}),
       subtotal: Number(subtotal.toFixed(2)),
       total_amount: Number(subtotal.toFixed(2)),
       internal_notes: notes,

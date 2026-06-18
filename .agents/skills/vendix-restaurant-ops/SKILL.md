@@ -12,7 +12,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.1"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Editing recipes, BOM explosion, or sub-recipe production orders"
@@ -26,6 +26,8 @@ metadata:
     - "Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products"
     - "Adding or adjusting KDS card urgency tiers (warning / danger) driven by preparation_time_minutes"
     - "Wiring the KDS ticket detail modal (recipe + actions replica)"
+    - "Modifying the POS payment close-out against an open table (table_session_id, applyPosPaymentToTableSession, table status cleaning)"
+    - "Modifying the POS open-table flow that propagates an optional customer to the session and draft order"
 ---
 
 ## When to Use
@@ -179,6 +181,77 @@ cases the KDS owns the item and the payment must not double-discount.
     source `order_items`. Split must never create new consumption movements;
     inventory is already gone (taken at fire). The flag propagation is what
     keeps `payments.updateInventoryFromOrder` from re-discounting.
+
+### Fase K — POS end-to-end (crear → mesa → cliente → cobrar)
+
+The restaurant POS supports three fulfillment types (mostrador, delivery,
+consumo) and an optional customer binding. The flow must work **end-to-end
+without DB migrations** and stay aligned with the existing table / customer
+APIs. Key invariants, encoded during the K-feature stabilization:
+
+- `orders.customer_id` is **`Int?` nullable** at the Prisma layer. The
+  `create-order.dto` declares it `@IsOptional() @IsInt() @Min(1)` so a
+  counter / table-less sale can omit it; `orders.service.create` skips the
+  `users.findUnique` FK lookup when null and persists `customer_id ?? null`
+  on the row. Symmetrically, `payments.service.processSaleWithPayment`
+  forwards the cart customer only when the cart has one. There is **no
+  "Cliente General / id=1" sentinel** — true anonymous is the source of
+  truth.
+- `OpenTableSessionDto.customer_id?` already existed (Fase E). The
+  `PosOpenTableModalComponent` now exposes a `[customer]` input and
+  forwards it in the `openTableSession` call, so opening a table attaches
+  the customer (if any) to the session **and** the linked draft order.
+- The cart merge key in `pos-cart.service.processAddToCart` is
+  `product.id + variant_id + skipKds` (boolean). The `skipKds` field is
+  part of the identity because two same-product lines with different
+  KDS-vs-stock decisions must NOT collapse — they take different code
+  paths at fire time.
+- `PosOrderCreateModalComponent.onConfirm` re-routes so the
+  **table-session branch always wins** when a session is open. The
+  pre-existing `hasUnfiredPreparedItems` check used to fall through to
+  the retail `createRetailDraft` path on consumption sales, which
+  silently orphaned the table. The fix: if a session is open, the modal
+  always calls `appendToTableAndFire` (with `skipKds` lines filtered
+  out of the fire list). `preparedItemIdsFromOrder` and the cart-level
+  `hasUnfiredPreparedItems` both skip `skipKds` lines when deciding
+  whether to fire the kitchen.
+- `PosPaymentInterfaceComponent` (the cobro modal) gained an inline
+  table picker for the `consumo` fulfillment: a CTA "Abrir mesa" embeds
+  the same `PosOpenTableModalComponent` used by the create flow. The
+  picker writes to `pickedTableId` and `pickedSessionId` signals;
+  `canProcessPayment` falls back to `tableId() ?? pickedTableId()` so the
+  Cobrar button unblocks. `processSaleWithPayment(cart, payment, user,
+  tableSessionId?)` is the new 4-arg signature that forwards
+  `table_session_id` to the backend.
+- `PaymentsService.createOrUpdateOrderFromPos` branches on
+  `dto.table_session_id`. When present, it delegates to
+  `applyPosPaymentToTableSession` (new helper): loads the session,
+  validates it belongs to the request store and is still open, optionally
+  appends new `order_items` to the existing draft order, re-derives
+  `subtotal_amount` / `tax_amount` / `discount_amount` / `grand_total`
+  from the merged items (re-running promotion + coupon quote), persists
+  the totals, marks the session `closed_at = now()`, **and** transitions
+  the table to `status='cleaning'` (matching `TableSessionsService.closeSession`
+  semantics — without this the table stays `occupied` forever after a POS
+  close-out and blocks the next `openTableSession` call on the same table).
+  The order then flows through the normal payment / inventory / journal
+  pipeline; no special-casing downstream.
+- The fire / payment path now filters `skipKds` in **three** places: the
+  cart-level `hasUnfiredPreparedItems` (POS component), the
+  `preparedItemIdsFromOrder` helper (create modal), and the actual fire
+  loops in `fireCounterOrder` and `fireKitchenFromCompletedOrder`. Lines
+  with `skipKds=true` are excluded from `order_item_ids` sent to the
+  kitchen and `inventory_consumed_at_fire` is not set on them — their
+  stock is consumed at payment time as a regular `sale` movement, not at
+  fire.
+- The orders list (`orders-list.component`) is loaded via `loadComponent`
+  (lazy), so the constructor runs fresh on each navigation. The
+  `OrdersComponent` host subscribes to `router.events` and increments a
+  `reloadTick` signal on `NavigationEnd` to `/admin/orders` (and
+  excluding detail sub-routes). The list binds `[reloadTrigger]="reloadTick()"`
+  and re-fetches on tick change via an `effect`. The bug "POS sale
+  doesn't show up in /admin/orders/sales until I hit F5" is fixed
+  without backend changes — `findAll` was already correct.
 
 ## KDS (Kitchen Display System)
 

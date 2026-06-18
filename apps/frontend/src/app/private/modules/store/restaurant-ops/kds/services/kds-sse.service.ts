@@ -5,6 +5,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import {
   KdsEvent,
@@ -162,20 +163,17 @@ export class KdsSseService {
 
   /**
    * Fetch manual contra /snapshot. Devuelve la lista nueva y la aplica.
-   * Usado por el botón "Refrescar" del board.
+   * Usado por el botón "Refrescar" del board. Usamos `firstValueFrom`
+   * (en vez de `.subscribe`) porque es un flujo async one-shot dentro de
+   * una Promise — el observable HTTP completa solo y no necesita
+   * gestión de suscripción manual.
    */
   async refreshSnapshot(windowMinutes: number = 120): Promise<KitchenTicket[]> {
-    return new Promise((resolve, reject) => {
-      this.ticketsService
-        .getSnapshot(windowMinutes)
-        .subscribe({
-          next: (resp) => {
-            this.applySnapshot(resp.tickets);
-            resolve(resp.tickets);
-          },
-          error: (err) => reject(err),
-        });
-    });
+    const resp = await firstValueFrom(
+      this.ticketsService.getSnapshot(windowMinutes),
+    );
+    this.applySnapshot(resp.tickets);
+    return resp.tickets;
   }
 
   /** Cleanup on service destroy (rare — service is root-provided). */
@@ -276,6 +274,10 @@ export class KdsSseService {
       this.applySnapshot(event.tickets);
       return;
     }
+    // Todos los `ticket.*` (created/started/ready/delivered/cancelled/
+    // reverted) traen el ticket completo en `event.ticket` con el mismo
+    // shape, por lo que `ticket.reverted` se reconcilia con el MISMO
+    // upsert por id que `ticket.delivered` — sin lógica especial.
     if (!('ticket' in event) || !event.ticket) return;
     const incoming = event.ticket as KitchenTicket;
     const id = incoming?.id;
