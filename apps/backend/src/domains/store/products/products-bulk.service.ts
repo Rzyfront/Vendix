@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, InternalServerErrorException, NotFoundException, Logger } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
@@ -1093,29 +1093,34 @@ export class ProductsBulkService {
       throw new BadRequestException('No se pudo determinar la tienda actual');
     }
 
-    // Validar que la tienda tenga al menos un producto antes de generar el
-    // archivo. Sin esta validación, el export produce un XLSX con solo headers
-    // (sin filas) que el frontend no puede manejar — el usuario recibe un
-    // toast genérico de "error desconocido" en vez de un mensaje claro.
-    const productCount = await this.prisma.products.count({
-      where: { store_id: storeId },
-    });
-    if (productCount === 0) {
-      throw new NotFoundException(
-        'No hay productos para exportar. Agrega al menos un producto antes de descargar la plantilla.',
-      );
-    }
+    // Wrap TODO el export en try-catch para que el cliente NUNCA vea un error
+    // de Prisma crudo. Errores legítimos (empty state) se re-lanzan tal cual;
+    // cualquier otro fallo (Prisma, red, permisos) se convierte en un
+    // mensaje amigable y se loguea para debugging.
+    try {
+      // Validar que la tienda tenga al menos un producto antes de generar el
+      // archivo. Sin esta validación, el export produce un XLSX con solo headers
+      // (sin filas) que el frontend no puede manejar — el usuario recibe un
+      // toast genérico de "error desconocido" en vez de un mensaje claro.
+      const productCount = await this.prisma.products.count({
+        where: { store_id: storeId },
+      });
+      if (productCount === 0) {
+        throw new NotFoundException(
+          'No hay productos para exportar. Agrega al menos un producto antes de descargar la plantilla.',
+        );
+      }
 
-    const baseHeaders = this.getProductTemplateHeaders();
-    const extraHeaders = ['Precio Compra', 'Cantidad Actual', 'Tiene Imagen'];
-    const headers = [...baseHeaders, ...extraHeaders];
+      const baseHeaders = this.getProductTemplateHeaders();
+      const extraHeaders = ['Precio Compra', 'Cantidad Actual', 'Tiene Imagen'];
+      const headers = [...baseHeaders, ...extraHeaders];
 
-    const rows: Record<string, any>[] = [];
-    const CHUNK_SIZE = 500;
-    let cursor: number | undefined = undefined;
+      const rows: Record<string, any>[] = [];
+      const CHUNK_SIZE = 500;
+      let cursor: number | undefined = undefined;
 
-    // Iteración con cursor por `id` para evitar drift en catálogos grandes
-    // eslint-disable-next-line no-constant-condition
+      // Iteración con cursor por `id` para evitar drift en catálogos grandes
+      // eslint-disable-next-line no-constant-condition
     while (true) {
       const products = await this.prisma.products.findMany({
         where: { store_id: storeId },
@@ -1213,6 +1218,29 @@ export class ProductsBulkService {
     XLSX.utils.book_append_sheet(wb, ws, 'Productos Actuales');
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    } catch (err) {
+      // Re-throw errores legítimos con mensaje ya-amigable (NotFoundException del
+      // empty state, BadRequestException del contexto, etc.) — son intencionales
+      // y el frontend los muestra tal cual.
+      if (
+        err instanceof NotFoundException ||
+        err instanceof BadRequestException
+      ) {
+        throw err;
+      }
+
+      // Cualquier otro error (Prisma, timeout, permisos de DB, columna
+      // faltante, etc.) se loguea con contexto y se convierte a un mensaje
+      // genérico legible para el cliente. NUNCA se propaga el error crudo de
+      // Prisma al frontend.
+      this.logger.error(
+        `[exportCurrentProductsAsTemplate] Fallo al generar plantilla para store ${storeId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+      throw new InternalServerErrorException(
+        'No se pudo generar la plantilla de productos. Por favor intenta de nuevo o contacta al soporte si el problema persiste.',
+      );
+    }
   }
 
   /**
