@@ -261,22 +261,22 @@ function CollapsibleSubmenu({ isExpanded, childrenCount, children }: Collapsible
   const [shouldRender, setShouldRender] = useState(isExpanded);
 
   useEffect(() => {
+    const animation = Animated.timing(animatedHeight, {
+      toValue: isExpanded ? 1 : 0,
+      duration: isExpanded ? 300 : 250,
+      useNativeDriver: false,
+    });
     if (isExpanded) {
       setShouldRender(true);
-      Animated.timing(animatedHeight, {
-        toValue: 1,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
+      animation.start();
     } else {
-      Animated.timing(animatedHeight, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: false,
-      }).start(() => {
-        setShouldRender(false);
+      animation.start(({ finished }) => {
+        if (finished) setShouldRender(false);
       });
     }
+    return () => {
+      animation.stop();
+    };
   }, [isExpanded]);
 
   const height = animatedHeight.interpolate({
@@ -402,8 +402,7 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
   const user_settings = useAuthStore((s) => s.user_settings);
   const store_settings = useAuthStore((s) => s.store_settings);
   const default_panel_ui = useAuthStore((s) => s.default_panel_ui);
-  const logout = useAuthStore((s) => s.logout);
-  
+
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
 
   const config = variantConfig[variant];
@@ -693,12 +692,6 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
         handleNavigate(firstChildWithHref.href);
       }
     }
-  };
-
-  const handleLogout = () => {
-    onClose();
-    logout();
-    router.replace('/(auth)/login');
   };
 
   const normalizePath = (path: string) => {
