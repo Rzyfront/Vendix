@@ -16,6 +16,7 @@ import { AuthService } from '@/core/auth/auth.service';
 import { OrgStoreService } from '@/features/org/services/org-store.service';
 import { getQueryClient } from '@/core/api/query-client';
 import type { StoreListItem } from '@/core/models/org-admin/store.types';
+import { StatsCard } from '@/shared/components/stats-card/stats-card';
 
 import {
   SearchBar,
@@ -851,20 +852,15 @@ export default function StoresList() {
         style={styles.statsScroll}
       >
         {statCards.map((card) => (
-          <View key={card.label} style={styles.statCard}>
-            <View style={[styles.statIconWrap, { backgroundColor: card.iconBg }]}>
-              <Icon name={card.icon} size={18} color={card.iconColor} />
-            </View>
-            <Text style={styles.statValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7}>
-              {card.value}
-            </Text>
-            <Text style={styles.statLabel} numberOfLines={1}>
-              {card.label}
-            </Text>
-            <Text style={styles.statSub} numberOfLines={1}>
-              {card.description}
-            </Text>
-          </View>
+          <StatsCard
+            key={card.label}
+            label={card.label}
+            value={card.value}
+            description={card.description}
+            icon={card.icon}
+            iconBg={card.iconBg}
+            iconColor={card.iconColor}
+          />
         ))}
       </ScrollView>
 
@@ -1089,39 +1085,6 @@ const styles = StyleSheet.create({
     gap: spacing[3],
     paddingHorizontal: spacing[4],
     paddingBottom: spacing[1],
-  },
-  statCard: {
-    width: 150,
-    backgroundColor: '#fff',
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    padding: spacing[3],
-    alignItems: 'flex-start',
-  },
-  statIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: spacing[2],
-  },
-  statValue: {
-    fontSize: typography.fontSize['2xl'],
-    fontFamily: interFonts.bold,
-    color: colorScales.gray[900],
-  },
-  statLabel: {
-    fontSize: typography.fontSize.xs,
-    fontFamily: interFonts.semibold,
-    color: colorScales.gray[700],
-    marginTop: 2,
-  },
-  statSub: {
-    fontSize: typography.fontSize.xs,
-    fontFamily: interFonts.regular,
-    color: colorScales.gray[400],
   },
 
   // ── Table card wrapper ──
