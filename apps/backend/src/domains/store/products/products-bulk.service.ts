@@ -1139,12 +1139,25 @@ export class ProductsBulkService {
       // tiene el schema completo pero prod está detrás en migrations.
       // eslint-disable-next-line no-constant-condition
     while (true) {
-      const products = await this.prisma.products.findMany({
-        where: { store_id: storeId },
-        orderBy: { id: 'asc' },
-        take: CHUNK_SIZE,
-        ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
-      });
+      // El findMany también puede fallar (e.g. columna `id` del orderBy no
+      // existe en prod por schema drift). Lo envolvemos en try-catch con la
+      // misma estrategia: log + tratar como "no hay productos" para que el
+      // cliente vea el mensaje amigable en vez del Prisma error.
+      let products: any[] = [];
+      try {
+        products = await this.prisma.products.findMany({
+          where: { store_id: storeId },
+          orderBy: { id: 'asc' },
+          take: CHUNK_SIZE,
+          ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
+        });
+      } catch (err) {
+        this.logger.error(
+          `[exportCurrentProductsAsTemplate] findMany() failed for store ${storeId} — probable schema drift`,
+          err instanceof Error ? err.stack : String(err),
+        );
+        break; // Salir del while — generamos Excel vacío
+      }
 
       if (products.length === 0) break;
 
