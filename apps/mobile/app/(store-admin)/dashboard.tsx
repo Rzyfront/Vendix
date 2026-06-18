@@ -19,7 +19,9 @@ const PRESETS: { label: string; value: DatePreset }[] = [
   { label: 'Hoy', value: 'today' },
   { label: 'Ayer', value: 'yesterday' },
   { label: 'Esta Semana', value: 'thisWeek' },
+  { label: 'Semana Pasada', value: 'lastWeek' },
   { label: 'Este Mes', value: 'thisMonth' },
+  { label: 'Mes Pasado', value: 'lastMonth' },
   { label: 'Este Año', value: 'thisYear' },
 ];
 
@@ -91,17 +93,15 @@ const styles = StyleSheet.create({
   alertsCard: {
     marginBottom: spacing[4],
   },
-  alertRow: {
+  alertsBody: {
+    gap: spacing[2],
+  },
+  alertCallout: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-  },
-  alertRowLast: {
-    borderBottomWidth: 0,
-    paddingBottom: 0,
+    padding: spacing[3],
+    borderRadius: borderRadius.lg,
   },
   alertLeft: {
     flexDirection: 'row',
@@ -109,19 +109,17 @@ const styles = StyleSheet.create({
     gap: spacing[3],
     flex: 1,
   },
-  alertDot: {
-    height: 8,
-    width: 8,
-    borderRadius: borderRadius.full,
+  alertIconWrapper: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  alertLabel: {
-    fontSize: typography.fontSize.sm,
-    color: colors.text.primary,
-  },
-  alertCount: {
+  alertLabelText: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
-    color: colors.text.primary,
+    flex: 1,
   },
   chartContainer: {
     minHeight: 120,
@@ -157,7 +155,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
-    rowGap: spacing[3],
+    rowGap: spacing[2],
   },
   quickLinkItem: {
     width: '48%',
@@ -165,19 +163,20 @@ const styles = StyleSheet.create({
   quickLinkButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing[2],
-    paddingVertical: spacing[4],
-    backgroundColor: colors.primaryLight,
+    gap: spacing[2.5],
+    paddingVertical: spacing[3.5],
+    paddingHorizontal: spacing[3],
+    backgroundColor: colorScales.gray[50],
     borderRadius: borderRadius.lg,
     borderWidth: 1,
-    borderColor: colors.primary,
-    minHeight: 56,
+    borderColor: colorScales.gray[100],
+    minHeight: 48,
   },
   quickLinkText: {
-    fontSize: typography.fontSize.sm,
+    fontSize: 13,
     fontWeight: typography.fontWeight.medium,
-    color: colors.primary,
+    color: colors.text.primary,
+    flex: 1,
   },
 });
 
@@ -265,18 +264,58 @@ const DashboardScreen = () => {
   }, [trends]);
 
   const alerts = useMemo(() => {
-    const items: { label: string; count: number; color: string; route: string }[] = [];
-    if (stats?.dispatchPendingCount) {
-      items.push({ label: 'Despachos pendientes', count: stats.dispatchPendingCount, color: colors.warning, route: '/orders?status=processing' });
-    }
-    if (stats?.refundPendingCount) {
-      items.push({ label: 'Reembolsos pendientes', count: stats.refundPendingCount, color: colors.warning, route: '/orders?status=refunded' });
-    }
+    const items: {
+      label: string;
+      count: number;
+      color: string;
+      bgColor: string;
+      iconBgColor: string;
+      icon: string;
+      route: string;
+    }[] = [];
     if (inventory?.low_stock_count) {
-      items.push({ label: 'Stock bajo', count: inventory.low_stock_count, color: colors.warning, route: '/inventory' });
+      items.push({
+        label: 'bajo stock',
+        count: inventory.low_stock_count,
+        color: colors.warning,
+        bgColor: colorScales.amber[50],
+        iconBgColor: colorScales.amber[100],
+        icon: 'alert-triangle',
+        route: '/analytics/inventory',
+      });
     }
     if (inventory?.out_of_stock_count) {
-      items.push({ label: 'Sin stock', count: inventory.out_of_stock_count, color: colors.error, route: '/inventory' });
+      items.push({
+        label: 'agotados',
+        count: inventory.out_of_stock_count,
+        color: colors.error,
+        bgColor: colorScales.red[50],
+        iconBgColor: colorScales.red[100],
+        icon: 'x-circle',
+        route: '/analytics/inventory',
+      });
+    }
+    if (stats?.dispatchPendingCount) {
+      items.push({
+        label: 'listas para despachar',
+        count: stats.dispatchPendingCount,
+        color: colors.primary,
+        bgColor: colors.primaryLight,
+        iconBgColor: '#e8f8f0',
+        icon: 'truck',
+        route: '/orders?status=processing',
+      });
+    }
+    if (stats?.refundPendingCount) {
+      items.push({
+        label: 'reembolsos pendientes',
+        count: stats.refundPendingCount,
+        color: colorScales.blue[600],
+        bgColor: colorScales.blue[50],
+        iconBgColor: colorScales.blue[100],
+        icon: 'rotate-ccw',
+        route: '/orders?status=refunded',
+      });
     }
     return items;
   }, [stats, inventory]);
@@ -295,10 +334,13 @@ const DashboardScreen = () => {
   }, [channelData]);
 
   const quickLinks = [
-    { label: 'Ventas', icon: 'bar-chart-2', route: '/analytics' },
-    { label: 'Productos', icon: 'package', route: '/products' },
-    { label: 'Órdenes', icon: 'shopping-bag', route: '/orders' },
-    { label: 'Gastos', icon: 'wallet', route: '/expenses' },
+    { label: 'Resumen de Ventas', icon: 'trending-up', route: '/analytics/sales' },
+    { label: 'Ventas por Producto', icon: 'package', route: '/analytics/products' },
+    { label: 'Órdenes', icon: 'shopping-cart', route: '/orders' },
+    { label: 'Stock Info', icon: 'alert-triangle', route: '/analytics/inventory' },
+    { label: 'Gastos', icon: 'credit-card', route: '/expenses' },
+    { label: 'Clientes', icon: 'users', route: '/customers' },
+    { label: 'Compras', icon: 'shopping-bag', route: '/inventory/pop' },
   ];
 
   if (summaryError) {
@@ -337,6 +379,8 @@ const DashboardScreen = () => {
                   label: 'Ingresos',
                   value: formatCurrency(summary.total_revenue),
                   icon: <Icon name="dollar-sign" size={14} color={colors.primary} />,
+                  iconBg: '#e8f8f0',
+                  iconColor: colors.primary,
                   trend:
                     summary.revenue_growth != null
                       ? { value: summary.revenue_growth, positive: summary.revenue_growth >= 0 }
@@ -345,11 +389,29 @@ const DashboardScreen = () => {
                 {
                   label: 'Órdenes',
                   value: summary.total_orders.toLocaleString(),
-                  icon: <Icon name="shopping-cart" size={14} color={colors.primary} />,
+                  icon: <Icon name="shopping-cart" size={14} color={colorScales.blue[500]} />,
+                  iconBg: colorScales.blue[50],
+                  iconColor: colorScales.blue[500],
                   trend:
                     summary.orders_growth != null
                       ? { value: summary.orders_growth, positive: summary.orders_growth >= 0 }
                       : undefined,
+                },
+                {
+                  label: 'Ticket Prom.',
+                  value: formatCurrency(summary.average_order_value || 0),
+                  icon: <Icon name="receipt" size={14} color={colorScales.blue[600]} />,
+                  iconBg: colorScales.blue[50],
+                  iconColor: colorScales.blue[600],
+                  description: `${summary.total_units_sold || 0} uds. vendidas`,
+                },
+                {
+                  label: 'Clientes',
+                  value: (summary.total_customers || 0).toLocaleString(),
+                  icon: <Icon name="users" size={14} color={colorScales.amber[600]} />,
+                  iconBg: colorScales.amber[50],
+                  iconColor: colorScales.amber[600],
+                  description: 'clientes únicos',
                 },
               ]}
             />
@@ -381,34 +443,36 @@ const DashboardScreen = () => {
             </Card>
           )}
 
-          {alerts.length > 0 && (
-            <Card style={styles.alertsCard}>
-              <Card.Header title="Alertas" />
-              <Card.Body>
-                {alerts.map((alert, idx) => (
+          <Card style={styles.alertsCard}>
+            <Card.Header title="Alertas Operativas" />
+            <Card.Body style={styles.alertsBody}>
+              {alerts.length > 0 ? (
+                alerts.map((alert) => (
                   <Pressable
                     key={alert.label}
                     style={({ pressed }) => [
-                      styles.alertRow,
-                      idx === alerts.length - 1 && styles.alertRowLast,
-                      pressed && styles.alertPressable,
+                      styles.alertCallout,
+                      { backgroundColor: alert.bgColor },
+                      pressed && { opacity: 0.8 },
                     ]}
                     onPress={() => router.push(alert.route as any)}
                   >
                     <View style={styles.alertLeft}>
-                      <View
-                        style={[styles.alertDot, { backgroundColor: alert.color }]}
-                      />
-                      <Text style={styles.alertLabel} numberOfLines={1}>
-                        {alert.label}
+                      <View style={[styles.alertIconWrapper, { backgroundColor: alert.iconBgColor }]}>
+                        <Icon name={alert.icon as any} size={14} color={alert.color} />
+                      </View>
+                      <Text style={[styles.alertLabelText, { color: alert.color }]} numberOfLines={1}>
+                        {alert.count} {alert.label}
                       </Text>
                     </View>
-                    <Text style={styles.alertCount}>{alert.count}</Text>
+                    <Icon name="chevron-right" size={14} color={alert.color} style={{ opacity: 0.6 }} />
                   </Pressable>
-                ))}
-              </Card.Body>
-            </Card>
-          )}
+                ))
+              ) : (
+                <EmptyState title="Todo en orden" description="Sin alertas pendientes" />
+              )}
+            </Card.Body>
+          </Card>
 
           <Card style={styles.quickLinksCard}>
             <Card.Header title="Accesos Rápidos" />
@@ -419,12 +483,12 @@ const DashboardScreen = () => {
                     <Pressable
                       style={({ pressed }) => [
                         styles.quickLinkButton,
-                        pressed && { opacity: 0.7 },
+                        pressed && { backgroundColor: colorScales.gray[100] },
                       ]}
                       onPress={() => router.push(link.route as any)}
                     >
-                      <Icon name={link.icon as any} size={20} color={colors.primary} />
-                      <Text style={styles.quickLinkText}>{link.label}</Text>
+                      <Icon name={link.icon as any} size={16} color={colors.text.secondary} />
+                      <Text style={styles.quickLinkText} numberOfLines={1}>{link.label}</Text>
                     </Pressable>
                   </View>
                 ))}
