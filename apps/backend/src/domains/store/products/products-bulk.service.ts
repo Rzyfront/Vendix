@@ -15,6 +15,7 @@ import {
   BulkUploadTemplateDto,
   BulkProductAnalysisResultDto,
   BulkProductAnalysisItemDto,
+  ProductState,
 } from './dto';
 import { generateSlug } from '@common/utils/slug.util';
 import { toTitleCase } from '@common/utils/format.util';
@@ -1103,16 +1104,21 @@ export class ProductsBulkService {
       // y se trata como 0 productos para que el cliente vea el mensaje
       // amigable en vez de un Prisma error crudo.
       //
-      // Filtramos `state: { not: 'archived' }` para excluir productos
-      // archivados que el cliente NO ve en la UI. Sin este filter, el
-      // export traería 120+ productos "viejos" que parecen estar en la
+      // Filtramos `state: { not: ProductState.ARCHIVED }` para excluir
+      // productos archivados que el cliente NO ve en la UI. Sin este filter,
+      // el export traería 120+ productos "viejos" que parecen estar en la
       // tienda pero en realidad están archivados.
+      //
+      // Usamos la constante `ProductState.ARCHIVED` (en vez del string
+      // literal) para que el compilador verifique que el valor del enum
+      // sigue existiendo si alguien renombra o elimina el miembro del enum
+      // en `./dto`. Defensa contra typos silenciosos.
       let productCount = 0;
       try {
         productCount = await this.prisma.products.count({
           where: {
             store_id: storeId,
-            state: { not: 'archived' },
+            state: { not: ProductState.ARCHIVED },
           },
         });
       } catch (err) {
@@ -1152,14 +1158,15 @@ export class ProductsBulkService {
       // misma estrategia: log + tratar como "no hay productos" para que el
       // cliente vea el mensaje amigable en vez del Prisma error.
       //
-      // Mismo filter `state: { not: 'archived' }` que en el count para
-      // excluir archivados y matchear la UI.
+      // Mismo filter `state: { not: ProductState.ARCHIVED }` que en el
+      // count para excluir archivados y matchear la UI. Usar la constante
+      // del enum (no string literal) previene drift si el enum cambia.
       let products: any[] = [];
       try {
         products = await this.prisma.products.findMany({
           where: {
             store_id: storeId,
-            state: { not: 'archived' },
+            state: { not: ProductState.ARCHIVED },
           },
           orderBy: { id: 'asc' },
           take: CHUNK_SIZE,

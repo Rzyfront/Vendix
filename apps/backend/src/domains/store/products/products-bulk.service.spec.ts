@@ -649,5 +649,40 @@ describe('ProductsBulkService', () => {
 
       expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
     });
+
+    // Regla de negocio: los productos archivados NUNCA deben salir en la
+    // descarga del template (mismo criterio que la UI usa para ocultarlos
+    // en el listado de productos). Verificamos que tanto el count() previo
+    // como el findMany() del chunk paginado filtren por `state: { not:
+    // ProductState.ARCHIVED }`. Si esto se rompe, el usuario descarga 120+
+    // productos "viejos" que aparecen como si estuvieran activos.
+    it('should exclude archived products from both count() and findMany()', async () => {
+      // Simular que hay productos no-archivados (count > 0) para que sí se
+      // llegue a llamar findMany. Devolver [] corta el loop inmediatamente.
+      mockPrismaService.products.count.mockResolvedValueOnce(5);
+      mockPrismaService.products.findMany.mockResolvedValueOnce([]);
+
+      try {
+        await service.exportCurrentProductsAsTemplate();
+      } catch {
+        // Puede lanzar NotFoundException porque rows queda vacío; no nos
+        // importa acá — lo que validamos son las llamadas a Prisma.
+      }
+
+      const expectedArchiveFilter = {
+        state: { not: ProductState.ARCHIVED },
+      };
+
+      expect(mockPrismaService.products.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining(expectedArchiveFilter),
+        }),
+      );
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining(expectedArchiveFilter),
+        }),
+      );
+    });
   });
 });
