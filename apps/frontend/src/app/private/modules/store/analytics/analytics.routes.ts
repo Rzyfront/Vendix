@@ -300,31 +300,6 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
-      // Expenses Analytics (NO shell - discarded from sidebar per issue, routes kept for backward compatibility)
-      {
-        path: 'expenses',
-        children: [
-          {
-            path: '',
-            pathMatch: 'full',
-            redirectTo: 'summary',
-          },
-          {
-            path: 'summary',
-            loadComponent: () =>
-              import('./pages/expenses/expense-summary.component').then(
-                (c) => c.ExpenseSummaryComponent,
-              ),
-          },
-          {
-            path: 'by-category',
-            loadComponent: () =>
-              import('./pages/expenses/expenses-by-category.component').then(
-                (c) => c.ExpensesByCategoryComponent,
-              ),
-          },
-        ],
-      },
       // Financial Analytics (shell)
       {
         path: 'financial',
