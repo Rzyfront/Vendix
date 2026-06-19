@@ -881,30 +881,6 @@ export default function OrgDashboard() {
           ))}
         </ScrollView>
 
-        {/* ── Alert cards ───────────────────────────────────────────────────── */}
-        {stats && (stats.low_stock_products > 0 || stats.expiring_batches > 0 || stats.pending_orders > 0) ? (
-          <View style={styles.alertsRow}>
-            {stats.pending_orders > 0 ? (
-              <View style={[styles.alertCard, { backgroundColor: '#fef3c7' }]}>
-                <Text style={[styles.alertValue, { color: '#b45309' }]}>{stats.pending_orders}</Text>
-                <Text style={styles.alertLabel}>Órdenes{'\n'}pendientes</Text>
-              </View>
-            ) : null}
-            {stats.low_stock_products > 0 ? (
-              <View style={[styles.alertCard, { backgroundColor: '#fee2e2' }]}>
-                <Text style={[styles.alertValue, { color: '#b91c1c' }]}>{stats.low_stock_products}</Text>
-                <Text style={styles.alertLabel}>Stock{'\n'}bajo</Text>
-              </View>
-            ) : null}
-            {stats.expiring_batches > 0 ? (
-              <View style={[styles.alertCard, { backgroundColor: '#dbeafe' }]}>
-                <Text style={[styles.alertValue, { color: '#1d4ed8' }]}>{stats.expiring_batches}</Text>
-                <Text style={styles.alertLabel}>Lotes por{'\n'}vencer</Text>
-              </View>
-            ) : null}
-          </View>
-        ) : null}
-
         {/* ── Resumen de ganancias ──────────────────────────────────────────── */}
         <SectionCard
           title="Resumen de ganancias"
@@ -1085,30 +1061,6 @@ const styles = StyleSheet.create({
     gap: spacing[3],
     paddingHorizontal: spacing[4],
     paddingBottom: spacing[1],
-  },
-  // Alerts
-  alertsRow: {
-    flexDirection: 'row',
-    gap: spacing[2],
-  },
-  alertCard: {
-    flex: 1,
-    alignItems: 'center',
-    borderRadius: borderRadius.lg,
-    paddingVertical: 12,
-    paddingHorizontal: 8,
-  },
-  alertValue: {
-    fontSize: 20,
-    fontFamily: interFonts.bold,
-  },
-  alertLabel: {
-    fontSize: 11,
-    fontFamily: interFonts.regular,
-    color: colorScales.gray[600],
-    marginTop: 2,
-    textAlign: 'center',
-    lineHeight: 15,
   },
   // Period picker
   periodPicker: {
