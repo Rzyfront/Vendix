@@ -754,11 +754,21 @@ export class KitchenFireService {
     const fired_item_ids = result.firedItemSnapshots.map(
       (s) => s.orderItemId,
     );
+    // Plan KDS fire-flows — COGS integrity fix: the auto-fire callers (POS
+    // payment B5/B6, split B7) build this event AFTER their own commit and
+    // pass organization_id=undefined. Without a valid org the accounting
+    // listener cannot resolve the org-scoped COGS mapping/accounting entity,
+    // so the `kitchen.fired` journal entry (DR 6135 / CR 1435) is silently
+    // dropped — inventory leaves the books but COGS is never recognized.
+    // Derive the org from the request context (the same source the manual
+    // fire path uses inline) so auto-fired sales post their COGS too.
+    const effective_organization_id =
+      organization_id ?? RequestContextService.getContext()?.organization_id;
     try {
       this.eventEmitter.emit('kitchen.fired', {
         kitchen_ticket_id: result.ticketId,
         order_id: orderId,
-        organization_id,
+        organization_id: effective_organization_id,
         store_id,
         total_cost: result.cogsTotal,
         consumed_line_count: result.consumedLineCount,
