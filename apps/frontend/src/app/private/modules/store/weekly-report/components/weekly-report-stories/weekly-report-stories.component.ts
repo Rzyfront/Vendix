@@ -89,12 +89,17 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
   imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe],
   template: `
     <div
+      class="stories-backdrop"
+      (click)="onBackdropClick($event)"
+    >
+    <div
       class="stories-shell"
       role="dialog"
       aria-modal="true"
       [attr.aria-label]="'Tu semana en Vendix'"
       [style.background]="palette().background"
       [style.color]="palette().foreground"
+      (click)="$event.stopPropagation()"
     >
       <!-- progress bar -->
       @if (slides().length > 0) {
@@ -404,6 +409,14 @@ export class WeeklyReportStoriesComponent {
   }
 
   // ─── Close / Mark viewed ────────────────────────────────────────────────
+  /**
+   * Click en el backdrop cierra el modal. La propagación se detiene en
+   * `.stories-shell` para que clicks internos no cierren accidentalmente.
+   */
+  onBackdropClick(_event: MouseEvent): void {
+    this.onClose();
+  }
+
   onClose(): void {
     const r = this.report() ?? this.service.latestReport();
     if (r && !r.viewed_at) {

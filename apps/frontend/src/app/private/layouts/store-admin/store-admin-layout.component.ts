@@ -6,6 +6,7 @@ import {
   computed,
   DestroyRef,
   afterNextRender,
+  effect,
 } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import {
@@ -162,6 +163,13 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
         <app-subscription-banner />
         <app-fiscal-obligation-banner />
 
+        <!-- Weekly Report banner (Tu Semana en Vendix) -->
+        @if (currentStoreId()) {
+          <app-weekly-report-banner
+            (openTakeover)="onOpenWeeklyReport($event)"
+          ></app-weekly-report-banner>
+        }
+
         <!-- Page Content -->
         <main
           class="flex-1 flex flex-col overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
@@ -224,6 +232,8 @@ export class StoreAdminLayoutComponent {
   readonly currentStoreId = computed<number | null>(
     () => (this.storeSignal() as any)?.id ?? null,
   );
+
+
   /** Snapshot visible actualmente en el takeover (signal). */
   readonly weeklyReportSnapshot = signal<WeeklyReportSnapshot | null>(null);
   /** Toggle del modal takeover. */
@@ -239,7 +249,10 @@ export class StoreAdminLayoutComponent {
   onCloseWeeklyReport(): void {
     this.showWeeklyReportTakeover.set(false);
     // Refresca para reflejar el nuevo viewed_at.
-    this.weeklyReportService.refresh().subscribe();
+    this.weeklyReportService
+      .refresh()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
   }
 
   // --- Facade data as signals ---
@@ -853,6 +866,37 @@ export class StoreAdminLayoutComponent {
   };
 
   constructor() {
+    // ─── Weekly Report: fetch inicial cuando el store está disponible ───
+    // Se ejecuta desde el layout (no desde el banner) para garantizar que
+    // el reporte se cargue apenas el usuario llega al dashboard, sin
+    // depender del ciclo de vida del banner (que puede no montarse si
+    // currentStoreId() es null en algún edge case). El banner re-usa el
+    // signal del servicio y se renderiza reactivamente cuando _latest
+    // cambia.
+    effect(() => {
+      const storeId = this.currentStoreId();
+      const report = this.weeklyReportService.latestReport();
+      // Si no hay reporte todavía, cargarlo.
+      if (storeId && !report) {
+        this.weeklyReportService
+          .getLatest()
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe();
+        return;
+      }
+      // Si hay un reporte no visto y el takeover no está abierto, abrirlo
+      // automáticamente la primera vez.
+      if (
+        report &&
+        !report.viewed_at &&
+        !this.showWeeklyReportTakeover() &&
+        !this.weeklyReportSnapshot()
+      ) {
+        this.weeklyReportSnapshot.set(report);
+        this.showWeeklyReportTakeover.set(true);
+      }
+    });
+
     // Mark sidebar as ready after first render
     afterNextRender(() => {
       this.sidebarReady.set(true);
