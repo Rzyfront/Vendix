@@ -7,6 +7,7 @@ import { RolesModule } from './roles/roles.module';
 import { PermissionsModule } from './permissions/permissions.module';
 import { AuditModule } from './audit/audit.module';
 import { StoresModule } from './stores/stores.module';
+import { SuperadminWeeklyReportModule } from './weekly-report/superadmin-weekly-report.module';
 import { UsersModule } from './users/users.module';
 import { PaymentMethodsModule } from './payment-methods/payment-methods.module';
 import { TemplatesModule } from './templates/templates.module';
@@ -35,6 +36,7 @@ import { SuperadminInvoicingModule } from './invoicing/superadmin-invoicing.modu
     PermissionsModule,
     RolesModule,
     StoresModule,
+    SuperadminWeeklyReportModule,
     UsersModule,
     AuditModule,
     PaymentMethodsModule,
