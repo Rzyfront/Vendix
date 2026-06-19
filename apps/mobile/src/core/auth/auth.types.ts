@@ -64,6 +64,11 @@ export interface User {
     logo_url?: string | null;
     onboarding?: any;
     domain_settings?: any;
+    operating_scope?: 'STORE' | 'ORGANIZATION';
+    fiscal_scope?: 'STORE' | 'ORGANIZATION';
+    organization_settings?: {
+      settings?: any;
+    };
   };
   store?: {
     id: number;
@@ -77,6 +82,11 @@ export interface User {
       name: string;
       slug: string;
       domain_settings?: any;
+      operating_scope?: 'STORE' | 'ORGANIZATION';
+      fiscal_scope?: 'STORE' | 'ORGANIZATION';
+      organization_settings?: {
+        settings?: any;
+      };
     };
   };
 }

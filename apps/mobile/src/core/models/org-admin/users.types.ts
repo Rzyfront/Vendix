@@ -5,6 +5,7 @@ export type UserState = 'ACTIVE' | 'INVITED' | 'SUSPENDED' | 'DISABLED';
 export interface OrgUser {
   id: string;
   email: string;
+  username: string;
   first_name: string;
   last_name: string;
   phone?: string;
@@ -40,9 +41,12 @@ export interface UpdateUserInput {
 }
 
 export interface UserStats {
-  total_users: number;
-  active_users: number;
-  invited_users: number;
-  suspended_users: number;
-  by_role: Array<{ role: string; count: number }>;
+  total_usuarios: number;
+  activos: number;
+  pendientes: number;
+  con_2fa: number;
+  inactivos: number;
+  suspendidos: number;
+  email_verificado: number;
+  archivados: number;
 }

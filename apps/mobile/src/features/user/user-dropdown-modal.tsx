@@ -7,19 +7,24 @@ import {
   ScrollView,
   Modal as RNModal,
   TouchableWithoutFeedback,
+  Alert,
+  Platform,
 } from 'react-native';
-import { useRouter, usePathname } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { AuthService } from '@/core/auth/auth.service';
+import { getQueryClient } from '@/core/api/query-client';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
-import { toastError } from '@/shared/components/toast/toast.store';
+import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
+import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 
 interface UserDropdownModalProps {
   visible: boolean;
   onClose: () => void;
+  variant?: 'store' | 'org' | 'super';
 }
 
 interface MenuOption {
@@ -31,9 +36,8 @@ interface MenuOption {
   badge?: number;
 }
 
-export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) {
+export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserDropdownModalProps) {
   const router = useRouter();
-  const pathname = usePathname();
   const user = useAuthStore((s) => s.user);
   const userSettings = useAuthStore((s) => s.user_settings);
   const defaultPanelUi = useAuthStore((s) => s.default_panel_ui);
@@ -41,6 +45,7 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
   const storeName = useTenantStore((s) => s.storeName);
   const storeSlug = useTenantStore((s) => s.storeSlug);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   // Fetch fresh user settings so the module count is real
   const { data: freshSettings } = useQuery({
@@ -50,7 +55,7 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
     staleTime: 60000,
   });
 
-  const isOrgAdmin = pathname.startsWith('/(org-admin)');
+  const isOrgAdmin = variant === 'org';
 
   const userInitials = user
     ? `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() || 'U'
@@ -111,36 +116,63 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
     router.push('/(store-admin)/user-settings' as never);
   };
 
-  const handleGoToOrganization = async () => {
+  const handleGoToOrganization = () => {
     onClose();
+    setTimeout(async () => {
+      setIsProcessing(true);
+      try {
+        await AuthService.switchEnvironment('ORG_ADMIN');
+        // Limpiar el cache de React Query para que las queries se ejecuten
+        // con el nuevo token ORG_ADMIN (no mostrar datos de STORE_ADMIN).
+        const qc = getQueryClient();
+        await qc.cancelQueries();
+        qc.clear();
+        router.replace('/(org-admin)/dashboard' as never);
+      } catch {
+        toastError('Error al cambiar de entorno');
+      } finally {
+        setIsProcessing(false);
+      }
+    }, 100);
+  };
+
+  const performSwitch = async () => {
+    if (!storeSlug) return;
     setIsProcessing(true);
     try {
-      await AuthService.switchEnvironment('ORG_ADMIN');
-      router.replace('/(org-admin)/dashboard' as never);
-    } catch {
-      toastError('Error al cambiar de entorno');
+      await AuthService.switchEnvironment('STORE_ADMIN', storeSlug);
+      // Limpiar el cache de React Query para que las queries se ejecuten
+      // con el nuevo token STORE_ADMIN (no mostrar datos de ORG_ADMIN).
+      const qc = getQueryClient();
+      await qc.cancelQueries();
+      qc.clear();
+      toastSuccess(`Cambiado al entorno de la tienda "${storeName ?? storeSlug}"`);
+      setShowConfirm(false);
+      onClose();
+      router.replace('/(store-admin)/dashboard' as never);
+    } catch (error: any) {
+      toastError(error?.message || 'Error al cambiar a la tienda');
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleGoToStore = async () => {
-    onClose();
-    setIsProcessing(true);
-    try {
-      if (storeSlug) {
-        await AuthService.switchEnvironment('STORE_ADMIN', storeSlug);
-      }
-      router.replace('/(store-admin)/dashboard' as never);
-    } catch {
-      toastError('Error al cambiar a la tienda');
-    } finally {
-      setIsProcessing(false);
+  const handleGoToStore = () => {
+    // Sin storeSlug no hay tienda a la que volver — solo cerramos el modal.
+    if (!storeSlug) {
+      onClose();
+      return;
     }
+    setShowConfirm(true);
   };
 
   const canSwitchToOrganization = (): boolean => {
-    return !!(user?.roles?.includes('owner') || user?.roles?.includes('admin') || user?.roles?.includes('super_admin'));
+    const hasOrgRoles = !!(user?.roles?.includes('owner') || user?.roles?.includes('admin') || user?.roles?.includes('super_admin'));
+    return hasOrgRoles && !isOrgAdmin;
+  };
+
+  const canSwitchToStore = (): boolean => {
+    return isOrgAdmin && !!storeSlug;
   };
 
   const menuOptions: MenuOption[] = [
@@ -155,13 +187,12 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
       action: handleGoToSettings,
       badge: newModuleCount > 0 ? newModuleCount : undefined,
     },
-    ...(storeId
-      ? ([{
-          label: storeName ? `Volver a ${storeName}` : 'Volver a tienda',
-          icon: 'arrow-left',
-          action: handleGoToStore,
-        }] as MenuOption[])
-      : []),
+    {
+      label: storeName ? `Volver a ${storeName}` : 'Volver a tienda',
+      icon: 'arrow-left',
+      action: handleGoToStore,
+      condition: canSwitchToStore,
+    },
     {
       label: 'Administrar Organización',
       icon: 'building',
@@ -201,6 +232,8 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
                   <Text style={styles.headerEmail} numberOfLines={1}>{userEmail}</Text>
                 </View>
               </View>
+
+              <View style={styles.divider} />
 
               {/* New Modules Banner */}
               {newModuleCount > 0 && (
@@ -257,6 +290,16 @@ export function UserDropdownModal({ visible, onClose }: UserDropdownModalProps) 
           </TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>
+      <ConfirmDialog
+        visible={showConfirm}
+        onClose={() => setShowConfirm(false)}
+        onConfirm={performSwitch}
+        title="Cambiar al entorno de la tienda"
+        message={`¿Deseas cambiar al entorno de administración de la tienda "${storeName ?? storeSlug}"?\n\nSerás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`}
+        confirmLabel="Cambiar de entorno"
+        cancelLabel="Cancelar"
+        loading={isProcessing}
+      />
     </RNModal>
   );
 }
@@ -285,7 +328,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: '#F0FDF4',
+    backgroundColor: '#F9FAFB',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: colorScales.gray[200],
   },
   avatar: {
     width: 48,
