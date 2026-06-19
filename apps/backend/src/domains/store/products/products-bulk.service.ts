@@ -1093,19 +1093,6 @@ export class ProductsBulkService {
       throw new BadRequestException('No se pudo determinar la tienda actual');
     }
 
-    // [DEBUG-TEMP] Log de auditoría para diagnosticar data leak multi-tenant.
-    // Imprime el contexto (user, store, org) y un sample de productos.
-    // QUITAR después de diagnosticar.
-    const dbgProducts = await this.prisma.products.findMany({
-      where: { store_id: storeId },
-      select: { id: true, name: true, sku: true, store_id: true },
-      take: 5,
-      orderBy: { id: 'asc' },
-    });
-    this.logger.warn(
-      `[EXPORT-AUDIT] user_id=${context?.user_id} organization_id=${context?.organization_id} store_id=${storeId} returned=${dbgProducts.length} samples=[${dbgProducts.map((p) => `(${p.id}/${p.name}/${p.store_id})`).join(', ')}]`,
-    );
-
     // Wrap TODO el export en try-catch para que el cliente NUNCA vea un error
     // de Prisma crudo. Errores legítimos (empty state) se re-lanzan tal cual;
     // cualquier otro fallo (Prisma, red, permisos) se convierte en un
@@ -1115,10 +1102,18 @@ export class ProductsBulkService {
       // archivo. Si el count() falla (e.g. schema drift en prod), se loguea
       // y se trata como 0 productos para que el cliente vea el mensaje
       // amigable en vez de un Prisma error crudo.
+      //
+      // Filtramos `state: { not: 'archived' }` para excluir productos
+      // archivados que el cliente NO ve en la UI. Sin este filter, el
+      // export traería 120+ productos "viejos" que parecen estar en la
+      // tienda pero en realidad están archivados.
       let productCount = 0;
       try {
         productCount = await this.prisma.products.count({
-          where: { store_id: storeId },
+          where: {
+            store_id: storeId,
+            state: { not: 'archived' },
+          },
         });
       } catch (err) {
         // Schema drift probable (columna o tabla faltante en prod). Logueamos
@@ -1156,10 +1151,16 @@ export class ProductsBulkService {
       // existe en prod por schema drift). Lo envolvemos en try-catch con la
       // misma estrategia: log + tratar como "no hay productos" para que el
       // cliente vea el mensaje amigable en vez del Prisma error.
+      //
+      // Mismo filter `state: { not: 'archived' }` que en el count para
+      // excluir archivados y matchear la UI.
       let products: any[] = [];
       try {
         products = await this.prisma.products.findMany({
-          where: { store_id: storeId },
+          where: {
+            store_id: storeId,
+            state: { not: 'archived' },
+          },
           orderBy: { id: 'asc' },
           take: CHUNK_SIZE,
           ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
