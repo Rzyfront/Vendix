@@ -1393,6 +1393,23 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.dispatch_note_items;
   }
 
+  // Dispatch Routes (Planillas) models
+  get dispatch_routes() {
+    return this.scoped_client.dispatch_routes;
+  }
+
+  get dispatch_route_stops() {
+    return this.scoped_client.dispatch_route_stops;
+  }
+
+  get dispatch_route_stop_history() {
+    return this.scoped_client.dispatch_route_stop_history;
+  }
+
+  get vehicles() {
+    return this.scoped_client.vehicles;
+  }
+
   // Accounts Receivable models
   get accounts_receivable() {
     return this.scoped_client.accounts_receivable;

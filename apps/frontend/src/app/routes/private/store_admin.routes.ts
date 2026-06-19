@@ -252,6 +252,20 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'planillas',
+            loadComponent: () =>
+              import('../../private/modules/store/planillas-rutas/planillas-rutas.component').then(
+                (c) => c.PlanillasRutasComponent,
+              ),
+          },
+          {
+            path: 'planillas/:id',
+            loadComponent: () =>
+              import('../../private/modules/store/planillas-rutas/pages/planilla-detail-page/planilla-detail-page.component').then(
+                (c) => c.PlanillaDetailPageComponent,
+              ),
+          },
+          {
             path: ':id',
             loadComponent: () =>
               import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(

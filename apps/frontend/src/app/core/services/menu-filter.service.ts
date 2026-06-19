@@ -68,6 +68,7 @@ export class MenuFilterService {
     'Ordenes de Compra': 'orders_purchase_orders',
     Cotizaciones: 'orders_quotations',
     Remisiones: 'orders_dispatch_notes',
+    'Planillas de Ruta': 'orders_dispatch_routes',
     'Plan Separe': 'orders_layaway',
     Reservas: 'orders_reservations',
 

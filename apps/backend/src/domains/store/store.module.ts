@@ -39,6 +39,7 @@ import { ReservationsModule } from './reservations/reservations.module';
 import { ReviewsModule } from './reviews/reviews.module';
 import { AIChatModule } from './ai-chat/ai-chat.module';
 import { DispatchNotesModule } from './dispatch-notes/dispatch-notes.module';
+import { DispatchRoutesModule } from './dispatch-routes/dispatch-routes.module';
 import { McpModule } from './mcp/mcp.module';
 import { AccountsReceivableModule } from './accounts-receivable/accounts-receivable.module';
 import { WalletModule } from './wallet/wallet.module';
@@ -101,6 +102,7 @@ import { UomModule } from './uom/uom.module';
     ReviewsModule,
     AIChatModule,
     DispatchNotesModule,
+    DispatchRoutesModule,
     McpModule,
     AccountsReceivableModule,
     WalletModule,

@@ -33,6 +33,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-currency-formatting` |
 | -- | `vendix-customer-auth` |
 | -- | `vendix-date-timezone` |
+| Editing dispatch_routes, dispatch_route_stops, or route-flow | `vendix-dispatch-routes` |
+| Working with DSD route settlement, declared_cash variance, or PDF planilla | `vendix-dispatch-routes` |
+| Adding or editing fiscal withholding breakdown per stop (retefuente/reteiva/reteica) | `vendix-dispatch-routes` |
+| Modifying the planillas-rutas frontend module | `vendix-dispatch-routes` |
 | -- | `vendix-engram` |
 | -- | `vendix-frontend` |
 | -- | `vendix-frontend-routing` |

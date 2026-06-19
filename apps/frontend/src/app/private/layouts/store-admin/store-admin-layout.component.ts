@@ -336,6 +336,11 @@ export class StoreAdminLayoutComponent {
           route: '/admin/orders/dispatch-notes',
         },
         {
+          label: 'Planillas de Ruta',
+          icon: 'route',
+          route: '/admin/orders/planillas',
+        },
+        {
           label: 'Plan Separe',
           icon: 'circle',
           route: '/admin/orders/layaway',
