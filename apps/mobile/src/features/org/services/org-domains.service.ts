@@ -65,6 +65,8 @@ export const OrgDomainsService = {
     apiGet<DnsRecord[]>(Endpoints.ORGANIZATION.DOMAINS.ROOTS_DNS.replace(':rootId', rootId)),
   provisionNext: async (rootId: string, body?: { subdomain?: string }) =>
     apiPost(Endpoints.ORGANIZATION.DOMAINS.PROVISION_NEXT.replace(':rootId', rootId), body),
+  provisionNextById: async (id: string) =>
+    apiPost<Domain>(Endpoints.ORGANIZATION.DOMAINS.PROVISION_NEXT_BY_ID.replace(':id', id), {}),
   verifyRoot: async (rootId: string) =>
     apiPost(Endpoints.ORGANIZATION.DOMAINS.VERIFY_ROOT.replace(':rootId', rootId), {}),
   checkDuplicate: async (hostname: string) =>
