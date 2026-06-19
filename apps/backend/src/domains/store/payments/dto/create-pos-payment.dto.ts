@@ -142,6 +142,18 @@ export class PosOrderItemDto {
   @Min(1)
   @Type(() => Number)
   applied_price_tier_id?: number;
+
+  // Plan KDS fire-flows: marca de la intención del cajero en el POS
+  // ("usar stock" en el modal de prepared-choice). Si true, el item NO
+  // se enviará a cocina y su stock se descontará en el pago (sales
+  // movement). Solo aplica a líneas `product_type='prepared'`; para
+  // cualquier otro tipo el campo se ignora silenciosamente. Persistido
+  // en `order_items.skip_kds` para que el backend lo recuerde hasta
+  // el momento del pago.
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  skip_kds?: boolean;
 }
 
 export class PosInstallmentTermsDto {
@@ -228,11 +240,19 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   cash_register_session_id?: number;
 
+  /**
+   * Order items. Required for normal sales. When `table_session_id` is
+   * provided the cashier is closing out an open table, so the items are
+   * already on the draft order; in that case the body may omit them
+   * (the backend re-derives totals from the table's existing order).
+   * Either way, items sent are appended to the table's order so a
+   * "final adjustments before pay" use case still works.
+   */
+  @IsOptional()
   @IsArray()
-  @ArrayMinSize(1)
   @ValidateNested({ each: true })
   @Type(() => PosOrderItemDto)
-  items: PosOrderItemDto[];
+  items?: PosOrderItemDto[];
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
@@ -450,6 +470,21 @@ export class CreatePosPaymentDto {
   @IsOptional()
   @IsString()
   return_url?: string;
+
+  /**
+   * Optional table session id. When provided, the POS payment must be
+   * applied to the existing draft order of the table (table_sessions
+   * binds the order via `order_id`). This is the bridge between
+   * `pos-payment-interface` (which can open/select a table inline
+   * before charging) and the table-backed "cuenta abierta" flow:
+   * without it, the cashier would end up with a brand-new order for
+   * the same table. Validated against the current store context.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  table_session_id?: number;
 }
 
 // DTO para actualizar una orden existente con pago

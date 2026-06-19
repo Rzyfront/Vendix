@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
+import { SettingsModule } from '../settings/settings.module';
+import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module';
 import { TablesController } from './tables.controller';
 import { TablesService } from './tables.service';
 import { TableSessionsController } from './table-sessions.controller';
@@ -29,7 +31,7 @@ import { SplitOrderService } from './split-order.service';
  * flows that depend on it run later, after the session is open).
  */
 @Module({
-  imports: [ResponseModule, PrismaModule],
+  imports: [ResponseModule, PrismaModule, SettingsModule, KitchenFireModule],
   controllers: [
     TablesController,
     TableSessionsController,

@@ -7,23 +7,13 @@
 >
   @if (visibleTabs().length) {
     <div class="sticky-header-tabs-row">
-      @if (showLeftArrow()) {
-        <button
-          type="button"
-          class="sticky-header-tabs-arrow sticky-header-tabs-arrow--left"
-          aria-label="Ver pestañas anteriores"
-          (click)="scrollTabs('left')"
-        >
-          <app-icon name="chevron-left" size="14"></app-icon>
-        </button>
-      }
-
       <nav
         #tabsScrollContainer
         class="sticky-header-tabs"
         role="tablist"
         [attr.aria-label]="tabsAriaLabel()"
         (scroll)="onTabsScroll()"
+        (keydown)="onTabsKeydown($event)"
       >
         @for (tab of visibleTabs(); track tab.id) {
           @if (tab.route) {
@@ -42,7 +32,13 @@
                 isTabActive(tab, rla.isActive) ? 'page' : null
               "
               [attr.aria-disabled]="tab.disabled ? 'true' : null"
-              [attr.tabindex]="tab.disabled ? -1 : null"
+              [attr.tabindex]="
+                tab.disabled
+                  ? -1
+                  : isTabActive(tab, rla.isActive)
+                    ? 0
+                    : -1
+              "
               (click)="onTabClick(tab, $event)"
             >
               @if (tab.icon) {
@@ -65,6 +61,9 @@
               [class.sticky-header-tab--active]="isTabActive(tab)"
               [class.sticky-header-tab--disabled]="tab.disabled"
               [attr.aria-selected]="isTabActive(tab)"
+              [attr.tabindex]="
+                tab.disabled ? -1 : isTabActive(tab) ? 0 : -1
+              "
               (click)="onTabClick(tab)"
             >
               @if (tab.icon) {
@@ -80,17 +79,6 @@
           }
         }
       </nav>
-
-      @if (showRightArrow()) {
-        <button
-          type="button"
-          class="sticky-header-tabs-arrow sticky-header-tabs-arrow--right"
-          aria-label="Ver más pestañas"
-          (click)="scrollTabs('right')"
-        >
-          <app-icon name="chevron-right" size="14"></app-icon>
-        </button>
-      }
     </div>
   }
 

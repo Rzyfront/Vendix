@@ -12,7 +12,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Editing recipes, BOM explosion, or sub-recipe production orders"
@@ -23,6 +23,11 @@ metadata:
     - "Working with order_items.inventory_consumed_at_fire flag"
     - "Working with product_type_enum='prepared' or the is_sellable/is_ingredient/is_combo/is_batch_produced flags"
     - "Editing industry gating so that only `restaurant` stores see restaurant_ops"
+    - "Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products"
+    - "Adding or adjusting KDS card urgency tiers (warning / danger) driven by preparation_time_minutes"
+    - "Wiring the KDS ticket detail modal (recipe + actions replica)"
+    - "Modifying the POS payment close-out against an open table (table_session_id, applyPosPaymentToTableSession, table status cleaning)"
+    - "Modifying the POS open-table flow that propagates an optional customer to the session and draft order"
 ---
 
 ## When to Use
@@ -48,7 +53,7 @@ A restaurant store works on three orthogonal product axes encoded as columns on
 | `is_ingredient` | `false` | Eligible as a component in `recipe_items`. |
 | `is_combo` | `false` | Combo/menú fijo (composed by recipe items pointing to sellable products). |
 | `is_batch_produced` | `false` | Sub-receta produced in a `production_order` (has its own stock). |
-| `stock_uom_id` / `purchase_uom_id` (FKs to `unit_of_measures`) | `null` | Integer-unit stock rule (see §Unit rule). The UoM catalog (mass/volume/count) is the source of truth; `purchase_to_stock_factor` is derived from the catalog (`round(purchase.factor_to_base / stock.factor_to_base)`) at receive() time. |
+| `stock_unit` / `purchase_unit` / `purchase_to_stock_factor` | `null` | Integer-unit stock rule (see §Unit rule). |
 
 Combinations cover the 4 cases: `harina` (false/true), `agua dual` (true/true),
 `camiseta retail` (true/false), `archivado` (false/false). The retail catalog
@@ -131,6 +136,33 @@ at payment. The flow lives in `kitchen-fire`:
   is set; `fireOrderItems` returns the skipped item ids and errors if **all**
   items were skipped.
 
+### Fase K — Recipe-less fire (Gap 3) + `KITCHEN_TICKET_NO_RECIPE`
+
+A `prepared` product with **no active recipe** is still fireable to the
+kitchen. `fireOrderItems` partitions `firedItemIds` into:
+
+- `preparedItems` (active recipe): consume leaf ingredients, recognize COGS.
+- `recipeLessItems` (no active recipe OR inactive recipe): no BOM, no stock
+  movement, `cogsTotal` stays 0 for these rows. The flag
+  `inventory_consumed_at_fire=true` is still flipped so the payment path
+  skips them and the anti-double-discount invariant holds. The kitchen
+  cooks them manually (the stock of leaf ingredients is the operator's
+  concern, not the system's).
+
+`startPreparation(ticketId)` adds a hard guard: if ANY item in the ticket
+has no active recipe, the transition to `in_preparation` is rejected with
+`KITCHEN_TICKET_NO_RECIPE` (422, `apps/backend/src/common/errors/error-codes.ts`).
+The guard is per-ticket (not per-item) because the state model transitions
+the whole ticket. The operator can either attach a recipe first or mark
+the ticket as delivered directly to bypass `in_preparation`.
+
+**Invariant — new meaning of `inventory_consumed_at_fire`:**
+"disparado a KDS, el pago no lo toca, COGS puede ser 0" (not the old
+"consumido de receta"). The payment path guard at
+`payments.service.ts:2554` (`if (item.inventory_consumed_at_fire === true) continue;`)
+DOES NOT distinguish between the two cases — and that is correct: in both
+cases the KDS owns the item and the payment must not double-discount.
+
 ## Tables and Open Tab
 
 - `tables` is a per-store floor entity (`pos_x`, `pos_y`, `status`).
@@ -150,6 +182,77 @@ at payment. The flow lives in `kitchen-fire`:
     inventory is already gone (taken at fire). The flag propagation is what
     keeps `payments.updateInventoryFromOrder` from re-discounting.
 
+### Fase K — POS end-to-end (crear → mesa → cliente → cobrar)
+
+The restaurant POS supports three fulfillment types (mostrador, delivery,
+consumo) and an optional customer binding. The flow must work **end-to-end
+without DB migrations** and stay aligned with the existing table / customer
+APIs. Key invariants, encoded during the K-feature stabilization:
+
+- `orders.customer_id` is **`Int?` nullable** at the Prisma layer. The
+  `create-order.dto` declares it `@IsOptional() @IsInt() @Min(1)` so a
+  counter / table-less sale can omit it; `orders.service.create` skips the
+  `users.findUnique` FK lookup when null and persists `customer_id ?? null`
+  on the row. Symmetrically, `payments.service.processSaleWithPayment`
+  forwards the cart customer only when the cart has one. There is **no
+  "Cliente General / id=1" sentinel** — true anonymous is the source of
+  truth.
+- `OpenTableSessionDto.customer_id?` already existed (Fase E). The
+  `PosOpenTableModalComponent` now exposes a `[customer]` input and
+  forwards it in the `openTableSession` call, so opening a table attaches
+  the customer (if any) to the session **and** the linked draft order.
+- The cart merge key in `pos-cart.service.processAddToCart` is
+  `product.id + variant_id + skipKds` (boolean). The `skipKds` field is
+  part of the identity because two same-product lines with different
+  KDS-vs-stock decisions must NOT collapse — they take different code
+  paths at fire time.
+- `PosOrderCreateModalComponent.onConfirm` re-routes so the
+  **table-session branch always wins** when a session is open. The
+  pre-existing `hasUnfiredPreparedItems` check used to fall through to
+  the retail `createRetailDraft` path on consumption sales, which
+  silently orphaned the table. The fix: if a session is open, the modal
+  always calls `appendToTableAndFire` (with `skipKds` lines filtered
+  out of the fire list). `preparedItemIdsFromOrder` and the cart-level
+  `hasUnfiredPreparedItems` both skip `skipKds` lines when deciding
+  whether to fire the kitchen.
+- `PosPaymentInterfaceComponent` (the cobro modal) gained an inline
+  table picker for the `consumo` fulfillment: a CTA "Abrir mesa" embeds
+  the same `PosOpenTableModalComponent` used by the create flow. The
+  picker writes to `pickedTableId` and `pickedSessionId` signals;
+  `canProcessPayment` falls back to `tableId() ?? pickedTableId()` so the
+  Cobrar button unblocks. `processSaleWithPayment(cart, payment, user,
+  tableSessionId?)` is the new 4-arg signature that forwards
+  `table_session_id` to the backend.
+- `PaymentsService.createOrUpdateOrderFromPos` branches on
+  `dto.table_session_id`. When present, it delegates to
+  `applyPosPaymentToTableSession` (new helper): loads the session,
+  validates it belongs to the request store and is still open, optionally
+  appends new `order_items` to the existing draft order, re-derives
+  `subtotal_amount` / `tax_amount` / `discount_amount` / `grand_total`
+  from the merged items (re-running promotion + coupon quote), persists
+  the totals, marks the session `closed_at = now()`, **and** transitions
+  the table to `status='cleaning'` (matching `TableSessionsService.closeSession`
+  semantics — without this the table stays `occupied` forever after a POS
+  close-out and blocks the next `openTableSession` call on the same table).
+  The order then flows through the normal payment / inventory / journal
+  pipeline; no special-casing downstream.
+- The fire / payment path now filters `skipKds` in **three** places: the
+  cart-level `hasUnfiredPreparedItems` (POS component), the
+  `preparedItemIdsFromOrder` helper (create modal), and the actual fire
+  loops in `fireCounterOrder` and `fireKitchenFromCompletedOrder`. Lines
+  with `skipKds=true` are excluded from `order_item_ids` sent to the
+  kitchen and `inventory_consumed_at_fire` is not set on them — their
+  stock is consumed at payment time as a regular `sale` movement, not at
+  fire.
+- The orders list (`orders-list.component`) is loaded via `loadComponent`
+  (lazy), so the constructor runs fresh on each navigation. The
+  `OrdersComponent` host subscribes to `router.events` and increments a
+  `reloadTick` signal on `NavigationEnd` to `/admin/orders` (and
+  excluding detail sub-routes). The list binds `[reloadTrigger]="reloadTick()"`
+  and re-fetches on tick change via an `effect`. The bug "POS sale
+  doesn't show up in /admin/orders/sales until I hit F5" is fixed
+  without backend changes — `findAll` was already correct.
+
 ## KDS (Kitchen Display System)
 
 - KDS uses SSE on subject `kitchen:{store_id}` — same pattern as
@@ -166,6 +269,55 @@ at payment. The flow lives in `kitchen-fire`:
   `apps/frontend/src/app/private/modules/store/restaurant-ops/kds/` with a
   4-column layout. Reuse `app-sticky-header`, `app-stats`, `app-card`,
   `app-button`, `app-badge`, `app-icon`, `app-toast`, `app-spinner`.
+
+### Fase K — KDS card urgency (Gap 5)
+
+KDS card urgency is driven by `products.preparation_time_minutes` (also on
+`product_variants.preparation_time_minutes`, exposed via the single
+`KITCHEN_TICKET_INCLUDE` so snapshot and every SSE event carry it). The
+board computes the **smallest** prep time across the ticket's items;
+missing/0/negative values contribute the default of 10 minutes.
+
+- **Warning tier**: `elapsed >= smallest_prep * 60s` (amber border + label).
+- **Danger tier**: `elapsed >= (smallest_prep + 5) * 60s` (red border + label).
+- Both tiers are suppressed in terminal states (`delivered`, `cancelled`).
+- Legacy `--urgent` class is kept as a backward-compat alias for `--warning`;
+  do not delete without auditing old screenshots.
+
+The shared `now` ticker is pushed to every card from the board; one timer
+for the whole page (not per card).
+
+### Fase K — KDS ticket detail modal (Gap 4)
+
+Clicking a KDS card body opens `kds-ticket-detail-modal`
+(`apps/frontend/src/app/private/modules/store/restaurant-ops/kds/components/kds-ticket-detail-modal/`)
+showing:
+
+- Order header (number, table, status, elapsed).
+- The ticket items with quantities, names, notes, and prep time.
+- The active recipe for each item via `RecipesService.getByProduct`,
+  cached per `product_id` in a local `Map` to avoid hammering the API.
+  Graceful degradation to "Receta no disponible" on 403/404 (per R7, we
+  never block the modal on a missing recipe nor touch permissions).
+- Replica of the board actions (Start / Ready / Deliver / Cancel) that
+  re-emit to the parent handlers so the SSE pipeline stays the source of
+  truth.
+
+The modal is **live**: the board derives the ticket from the SSE-fed
+`tickets()` signal by id, so any board event updates the modal in real
+time. The actions footer uses `(click)="$event.stopPropagation()"` so
+clicking a button inside the modal never re-opens it.
+
+### Fase K — KDS state in order detail (Gap 2)
+
+`GET /api/store/orders/:id` (`orders.service.ts:findOne`) now includes
+`kitchen_ticket_items` (ordered desc by id) on every `order_item`. The
+order detail page surfaces a "Cocina: \<estado\>" badge per item with
+the colour map: pending→neutral, in_preparation→warning, ready→success,
+delivered→info, cancelled→error. Non-fired items show no badge. The
+helper `kitchenStateFor(item)` prefers a non-terminal (in-flight) row
+over the most recent terminal row, so the badge tracks the active state
+even after re-fires.
 
 ## Menu / Carta
 
@@ -202,6 +354,30 @@ at payment. The flow lives in `kitchen-fire`:
   `kitchen-fire`, `tables`, and `split-order` services.
 - The retail POS path is unchanged: defaults preserve `is_sellable=true`
   on all retail products.
+
+### Fase K — POS stock-vs-KDS decision (Gap 1, `skipKds`)
+
+A `prepared` product that **also tracks inventory and has stock > 0** is
+ambiguous: cook-from-scratch (consume ingredients at fire) vs sellable
+item (consume its own stock on payment). The POS surfaces
+`pos-prepared-choice-modal`
+(`apps/frontend/src/app/private/modules/store/pos/components/pos-prepared-choice-modal/`)
+to the cashier at add-to-cart time. The choice persists as
+`CartItem.skipKds`:
+
+- `skipKds=false` (default, "Producir por KDS"): the item is included in
+  `fireOrderItems`. Stock of leaf ingredients is consumed at fire; the
+  product's own stock is not touched.
+- `skipKds=true` ("Usar stock"): the item is **excluded** from
+  `fireOrderItems` (POS component filters the `order_item_ids` list).
+  No kitchen ticket is created. The product's own stock is consumed at
+  payment as a regular `sale` movement.
+
+The flag is purely cart-local — it is **NOT** persisted to
+`order_items`, so no DB migration is required. Retail-only stores never
+see the modal (gated on `isRestaurantMode()`). Combined with the
+`inventory_consumed_at_fire` guard in `updateInventoryFromOrder`, this
+preserves the anti-double-discount invariant without schema changes.
 
 ## Industry Gating (inverse rule)
 
@@ -257,27 +433,3 @@ permission keys used by the controllers:
   it visible.
 - Migrating inventory quantities to `Decimal` in this MVP — defer with a
   dedicated migration plan that follows `vendix-prisma-migrations` rules.
-
-## Insumo vs Retail consolidation (Fase 0–4)
-
-As of the 2026-06 consolidation, the restaurant suite integrates the
-purchase-order UoM pipeline end-to-end:
-
-- A pure ingredient (`is_ingredient && !is_sellable`) hides the retail
-  sale constructs in the product form (Precios, Multi-Tarifa, e-commerce
-  flag, destacado, POS override, online link, promociones). The form
-  keeps `is_sellable` and `is_ingredient` mutually exclusive via
-  soft-exclusivity (the DB does NOT carry a hard constraint).
-- A purchase order carries a primary `order_type` (`retail | ingredient`).
-  Mixed-line orders are out of scope for V1.
-- The POP modal shows a unit-aware cost-capture UI when the product is a
-  pure ingredient and the store supports the capacity: a dynamic label
-  (`Costo por L`), a live preview of `1 L = 1000 ml` using the UoM
-  catalog, and FK selectors for `purchase_uom_id` / `stock_uom_id`.
-- The `invoice_ocr_ingredient` AI app extracts `presentation`,
-  `pack_size`, and `uom_hint` from invoices to pre-fill the UoM
-  selectors. The user always confirms manually.
-- Gating is centralized in `industriesSupportIngredients()` (frontend
-  constant) and `storeIndustriesSupportIngredients()` (backend helper).
-  Today only `restaurant` opts in; add a new entry in both places to
-  extend the capacity to a new industry.

@@ -1,0 +1,8 @@
+/**
+ * PosPreparedChoiceModal — minimal styles. Layout lives in the
+ * template (Tailwind). Kept for component-local tokens / future
+ * dark-mode overrides.
+ */
+:host {
+  display: contents;
+}

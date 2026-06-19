@@ -2,7 +2,7 @@
   <!-- Header -->
   <app-sticky-header
     title="KDS — Pantalla de Cocina"
-    subtitle="Tickets activos en tiempo real (vía SSE)"
+    subtitle="Tickets activos en tiempo real"
     icon="flame"
     variant="glass"
     [actions]="[
@@ -50,13 +50,9 @@
   }
 
   @if (isManualMode()) {
-    <div class="kds-board__manual-banner" role="status">
-      <app-icon name="wifi-off" [size]="16" />
-      <span>
-        Modo manual: el stream en vivo no está disponible. Los datos se actualizan
-        cada 10s automáticamente. Usa <strong>Refrescar</strong> para forzar la sincronización
-        o <strong>Reconectar</strong> para intentar volver al modo en vivo.
-      </span>
+    <div class="kds-board__manual-pill" role="status">
+      <app-icon name="wifi-off" [size]="14" aria-hidden="true" />
+      <span>Modo manual · sincronizando cada 10s</span>
     </div>
   }
 
@@ -73,10 +69,19 @@
       @for (column of columns; track column) {
         <section class="kds-column" [attr.data-column]="column">
           <header class="kds-column__header">
+            <app-icon
+              class="kds-column__icon"
+              [name]="columnIcon(column)"
+              [size]="16"
+              aria-hidden="true"
+            />
             <h3 class="kds-column__title">{{ columnTitle(column) }}</h3>
-            <app-badge size="xsm" [variant]="columnBadgeVariant(column)">
+            <span
+              class="kds-column__count"
+              [attr.aria-label]="columnCounts()[column] + ' tickets en ' + columnTitle(column)"
+            >
               {{ columnCounts()[column] }}
-            </app-badge>
+            </span>
           </header>
 
           <div class="kds-column__body">
@@ -89,6 +94,7 @@
                   [now]="now()"
                   [isMutating]="isMutating(ticket.id)"
                   [showDelivered]="column === 'delivered' || column === 'cancelled'"
+                  (cardClicked)="openDetail($event)"
                   (startClicked)="startTicket($event)"
                   (readyClicked)="markTicketReady($event)"
                   (deliverClicked)="markTicketDelivered($event)"
@@ -101,4 +107,17 @@
       }
     </div>
   }
+  <!-- Restaurant Suite — Fase K Gap 4: detail modal — opens on card click,
+       stays live via `detailTicket()` (derived from the SSE-fed `tickets()`). -->
+  <app-kds-ticket-detail-modal
+    [isOpen]="detailOpen()"
+    [ticket]="detailTicket()"
+    [isMutating]="detailMutating()"
+    (startClicked)="startTicket($event)"
+    (readyClicked)="markTicketReady($event)"
+    (deliverClicked)="markTicketDelivered($event)"
+    (cancelClicked)="cancelTicket($event)"
+    (revertClicked)="revertTicket($event)"
+    (closed)="closeDetail()"
+  />
 </div>

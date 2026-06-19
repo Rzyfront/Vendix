@@ -5,6 +5,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
+import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import {
   KdsEvent,
@@ -42,15 +43,21 @@ export type KdsMode = 'live' | 'manual';
 
 /** Configuración del fallback polling. Exportada para que el board pueda leerla. */
 export const KDS_POLLING_INTERVAL_MS = 10_000;
-export const KDS_MAX_RECONNECT_ATTEMPTS = 5;
+/**
+ * Ventana máxima de reconexión. Seguimos reintentando con backoff durante
+ * 5 minutos; si se agota sin volver a `open`, dejamos de reintentar y caemos
+ * a modo manual (polling) en silencio. Los intentos solo se reinician al
+ * refrescar la página o pulsar "Reconectar".
+ */
+export const KDS_RECONNECT_WINDOW_MS = 5 * 60_000;
 
 /**
  * KDS SSE service — wraps the browser's EventSource with explicit
  * reconnection, exponential backoff (1s → 2s → 4s → …, max 30s) and
  * snapshot reconciliation.
  *
- * Si los reintentos consecutivos superan `KDS_MAX_RECONNECT_ATTEMPTS`
- * sin volver a `open`, el servicio transiciona a `mode='manual'` y
+ * Si la reconexión no vuelve a `open` dentro de `KDS_RECONNECT_WINDOW_MS`
+ * (5 min), el servicio transiciona a `mode='manual'` y
  * arranca un `setInterval` contra `KitchenTicketsService.getSnapshot`
  * para mantener los tickets frescos sin SSE.
  *
@@ -75,6 +82,12 @@ export class KdsSseService {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private pollingTimer: ReturnType<typeof setInterval> | null = null;
   private reconnectAttempt = 0;
+  /**
+   * Inicio de la ventana de reconexión (epoch ms); `null` cuando estamos
+   * conectados. Se fija en el primer fallo del ciclo y se reinicia al
+   * reconectar (`onopen`/`connect`) o al refrescar (`reset`).
+   */
+  private reconnectStartedAt: number | null = null;
   private destroyed = false;
 
   /** All tickets the KDS currently knows about, keyed by id. */
@@ -120,6 +133,10 @@ export class KdsSseService {
     if (this.mode() !== 'live') {
       this.mode.set('live');
     }
+    // Un connect deliberado (init de la página o botón "Reconectar") arranca
+    // una ventana de reconexión nueva.
+    this.reconnectStartedAt = null;
+    this.reconnectAttempt = 0;
     this.openEventSource(windowMinutes);
   }
 
@@ -141,6 +158,7 @@ export class KdsSseService {
   reset(): void {
     this.disconnect();
     this.reconnectAttempt = 0;
+    this.reconnectStartedAt = null;
     this.consecutiveFailures.set(0);
     this.tickets.set([]);
     this.lastError.set(null);
@@ -162,20 +180,17 @@ export class KdsSseService {
 
   /**
    * Fetch manual contra /snapshot. Devuelve la lista nueva y la aplica.
-   * Usado por el botón "Refrescar" del board.
+   * Usado por el botón "Refrescar" del board. Usamos `firstValueFrom`
+   * (en vez de `.subscribe`) porque es un flujo async one-shot dentro de
+   * una Promise — el observable HTTP completa solo y no necesita
+   * gestión de suscripción manual.
    */
   async refreshSnapshot(windowMinutes: number = 120): Promise<KitchenTicket[]> {
-    return new Promise((resolve, reject) => {
-      this.ticketsService
-        .getSnapshot(windowMinutes)
-        .subscribe({
-          next: (resp) => {
-            this.applySnapshot(resp.tickets);
-            resolve(resp.tickets);
-          },
-          error: (err) => reject(err),
-        });
-    });
+    const resp = await firstValueFrom(
+      this.ticketsService.getSnapshot(windowMinutes),
+    );
+    this.applySnapshot(resp.tickets);
+    return resp.tickets;
   }
 
   /** Cleanup on service destroy (rare — service is root-provided). */
@@ -219,6 +234,7 @@ export class KdsSseService {
 
     es.onopen = () => {
       this.reconnectAttempt = 0;
+      this.reconnectStartedAt = null;
       this.consecutiveFailures.set(0);
       this.connectionState.set('open');
       this.lastError.set(null);
@@ -236,7 +252,7 @@ export class KdsSseService {
       // EventSource will internally try to reconnect on its own, but we
       // close it and manage reconnects ourselves so the backoff is
       // visible to the UI.
-      this.lastError.set('Stream connection error');
+      this.lastError.set('Reconectando con cocina…');
       this.connectionState.set('error');
       this.consecutiveFailures.update((n) => n + 1);
       try {
@@ -276,6 +292,10 @@ export class KdsSseService {
       this.applySnapshot(event.tickets);
       return;
     }
+    // Todos los `ticket.*` (created/started/ready/delivered/cancelled/
+    // reverted) traen el ticket completo en `event.ticket` con el mismo
+    // shape, por lo que `ticket.reverted` se reconcilia con el MISMO
+    // upsert por id que `ticket.delivered` — sin lógica especial.
     if (!('ticket' in event) || !event.ticket) return;
     const incoming = event.ticket as KitchenTicket;
     const id = incoming?.id;
@@ -294,6 +314,19 @@ export class KdsSseService {
 
   private scheduleReconnect(reason: string, windowMinutes: number): void {
     if (this.destroyed) return;
+    // Marca el inicio de la ventana de reconexión en el primer fallo del
+    // ciclo. Se reinicia en `onopen`, `connect` y `reset`.
+    if (this.reconnectStartedAt === null) {
+      this.reconnectStartedAt = Date.now();
+    }
+    // Límite por TIEMPO (no por número de intentos): seguimos reintentando
+    // con backoff hasta agotar la ventana de 5 min. Si se agota sin volver a
+    // `open`, dejamos de reintentar y caemos a modo manual (polling cada
+    // 10s) en silencio — sin reiniciar hasta un refresh/reconnect manual.
+    if (Date.now() - this.reconnectStartedAt >= KDS_RECONNECT_WINDOW_MS) {
+      this.transitionToManual();
+      return;
+    }
     this.reconnectAttempt += 1;
     // Exponential backoff: 1s, 2s, 4s, 8s, 16s, capped at 30s.
     const delay = Math.min(1_000 * 2 ** (this.reconnectAttempt - 1), 30_000);
@@ -307,19 +340,17 @@ export class KdsSseService {
       this.reconnectTimer = null;
       this.openEventSource(windowMinutes);
     }, delay);
-    // Si superamos el máximo de reintentos, transicionamos a manual.
-    if (this.reconnectAttempt >= KDS_MAX_RECONNECT_ATTEMPTS) {
-      this.transitionToManual();
-    }
   }
 
   private transitionToManual(): void {
     if (this.mode() === 'manual') return;
-    this.lastError.set(
-      `Stream no disponible tras ${this.reconnectAttempt} reintentos. Cambiando a modo manual.`,
-    );
     this.mode.set('manual');
-    // Limpiamos cualquier intento pendiente de reconnect.
+    // "Déjalo ir": ocultamos el aviso de error/reintento. El modo manual
+    // (polling cada 10s) es la degradación silenciosa; el banner compacto de
+    // modo manual comunica el estado sin alarmar. Los intentos NO se
+    // reinician hasta un refresh/reconnect manual.
+    this.lastError.set(null);
+    this.lastReconnect.set(null);
     this.clearReconnectTimer();
     if (this.eventSource) {
       try {

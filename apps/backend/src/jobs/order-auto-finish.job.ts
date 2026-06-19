@@ -24,14 +24,33 @@ export class OrderAutoFinishJob {
     this.logger.log('Starting auto-finish job for delivered orders...');
 
     try {
-      const cutoffDate = new Date();
-      cutoffDate.setHours(cutoffDate.getHours() - 24);
+      const now = new Date();
+      const cutoff24h = new Date(now);
+      cutoff24h.setHours(cutoff24h.getHours() - 24);
+      const cutoff4h = new Date(now);
+      cutoff4h.setHours(cutoff4h.getHours() - 4);
 
-      // Find distinct stores with deliverable orders (unscoped query)
+      // Find distinct stores with auto-finishable orders (unscoped query).
+      // We match BOTH windows so a store with only restaurant-POS orders still
+      // gets the tenant context and runs pass 2 inside
+      // `autoFinishDeliveredOrders`:
+      //   - Ecommerce/retail (24h): 'delivered' for >24h.
+      //   - Restaurant-POS (4h): channel='pos' + kitchen tickets, in
+      //     'processing'/'delivered' for >4h.
       const storesWithOrders = await this.globalPrisma.orders.findMany({
         where: {
-          state: 'delivered',
-          updated_at: { lte: cutoffDate },
+          OR: [
+            {
+              state: 'delivered',
+              updated_at: { lte: cutoff24h },
+            },
+            {
+              channel: 'pos',
+              kitchen_tickets: { some: {} },
+              state: { in: ['processing', 'delivered'] },
+              updated_at: { lte: cutoff4h },
+            },
+          ],
         },
         select: { store_id: true },
         distinct: ['store_id'],

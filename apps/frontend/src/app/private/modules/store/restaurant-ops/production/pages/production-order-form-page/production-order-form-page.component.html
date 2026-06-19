@@ -1,7 +1,7 @@
 <div class="w-full overflow-x-hidden">
   <app-sticky-header
     title="Nueva Producción"
-    subtitle="Producir un lote de un producto preparado a partir de su receta"
+    subtitle="Producir un lote de un producto producible por lote a partir de su receta"
     icon="flame"
     variant="glass"
   />
@@ -22,8 +22,8 @@
         </p>
         <p>
           Fabrica un <strong>lote</strong> de un
-          <strong>producto preparado</strong> (un plato o una sub-receta)
-          siguiendo su <strong>receta</strong>. Al completarla, se
+          <strong>producto producible por lote</strong> (un insumo o una
+          sub-receta) siguiendo su <strong>receta</strong>. Al completarla, se
           <strong>descuentan los insumos</strong> del inventario y se
           <strong>suma el stock</strong> del producto terminado.
         </p>
@@ -38,7 +38,7 @@
 
     <app-card
       title="Datos de la producción"
-      subtitle="Elige el producto preparado, su receta y la cantidad que planeas producir"
+      subtitle="Elige el producto producible por lote, su receta y la cantidad que planeas producir"
     >
       <form
         [formGroup]="form"
@@ -47,13 +47,13 @@
       >
         <div class="md:col-span-2">
           <app-selector
-            label="Producto preparado"
+            label="Producto producible por lote"
             [placeholder]="
               isLoadingProducts()
                 ? 'Cargando productos...'
                 : 'Selecciona el producto a producir'
             "
-            helpText="El plato o sub-receta que vas a producir en lote. Solo son producibles los productos «preparados» marcados como «producido por lote»."
+            helpText="El insumo o sub-receta que vas a producir en lote. Solo son producibles los productos marcados como «producido por lote»."
             [options]="productOptions()"
             [required]="true"
             [formControl]="productIdControl"
@@ -70,7 +70,7 @@
               />
               <span>
                 No tienes productos configurados para producción en lote. Edita un
-                producto <strong>preparado</strong>, actívale
+                producto, actívale
                 <strong>«producido por lote»</strong> y crea su
                 <strong>receta</strong> antes de generar una producción.
               </span>

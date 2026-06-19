@@ -40,6 +40,10 @@ import { PosScaleService } from '../services/pos-scale.service';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosVariantSelectorComponent } from './pos-variant-selector/pos-variant-selector.component';
 import { PosStockSourcingModalComponent } from './pos-stock-sourcing-modal.component';
+import {
+  PosPreparedChoiceModalComponent,
+  PreparedChoice,
+} from './pos-prepared-choice-modal/pos-prepared-choice-modal.component';
 import { StockSourcingSuggestionResponse } from '../models/sourcing.model';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -65,6 +69,7 @@ import {
     CurrencyPipe,
     PosVariantSelectorComponent,
     PosStockSourcingModalComponent,
+    PosPreparedChoiceModalComponent,
     BadgeComponent,
   ],
   schemas: [NO_ERRORS_SCHEMA],
@@ -455,6 +460,14 @@ import {
       [variantLabel]="sourcingVariantLabel()"
       (closed)="onSourcingModalClosed()"
     ></app-pos-stock-sourcing-modal>
+
+    <!-- Restaurant Suite — Fase K Gap 1: choice modal for prepared
+         + track_inventory + stock greater than 0 products. -->
+    <app-pos-prepared-choice-modal
+      [isOpen]="preparedChoiceOpen()"
+      [product]="preparedChoiceProduct()"
+      (decided)="onPreparedChoice($event)"
+    ></app-pos-prepared-choice-modal>
   `,
   styles: [
     `
@@ -1103,6 +1116,61 @@ export class PosProductSelectionComponent {
     this.sourcingVariantLabel.set('');
   }
 
+  // ─── Restaurant Suite — Fase K Gap 1: prepared/track_inventory/stock choice ──
+  /** True when the prepared-choice modal is visible. */
+  readonly preparedChoiceOpen = signal(false);
+  /** Product the cashier is currently deciding on. */
+  readonly preparedChoiceProduct = signal<{
+    id: number;
+    name: string;
+    stock?: number;
+    sku?: string | null;
+  } | null>(null);
+  /** Resolver captured at modal-open time; invoked with the cashier's choice. */
+  private preparedChoiceResolver:
+    | ((choice: PreparedChoice) => void)
+    | null = null;
+
+  /**
+   * Returns true if the product qualifies for the stock-vs-KDS
+   * decision modal: a `prepared` product_type that tracks inventory
+   * and has stock > 0. Only meaningful in a `restaurant` store
+   * industry (we don't prompt retail stores).
+   */
+  private shouldPromptPreparedChoice(product: any): boolean {
+    if (!this.restaurantIntegration.isRestaurantMode()) return false;
+    if (product?.product_type !== 'prepared') return false;
+    if (product?.track_inventory === false) return false;
+    const stock = Number(product?.stock ?? 0);
+    return stock > 0;
+  }
+
+  /** Opens the choice modal and returns a promise resolved with the cashier's pick. */
+  private askPreparedChoice(product: any): Promise<PreparedChoice> {
+    return new Promise<PreparedChoice>((resolve) => {
+      this.preparedChoiceProduct.set({
+        id: Number(product.id),
+        name: String(product.name ?? ''),
+        stock: Number(product.stock ?? 0),
+        sku: product.sku ?? null,
+      });
+      this.preparedChoiceResolver = resolve;
+      this.preparedChoiceOpen.set(true);
+    });
+  }
+
+  /** Modal callback — runs the resolver and closes the modal. */
+  onPreparedChoice(result: {
+    product: { id: number; name: string; stock?: number };
+    choice: PreparedChoice;
+  }): void {
+    const resolver = this.preparedChoiceResolver;
+    this.preparedChoiceResolver = null;
+    this.preparedChoiceOpen.set(false);
+    this.preparedChoiceProduct.set(null);
+    if (resolver) resolver(result.choice);
+  }
+
   private async addToCartNormal(product: any): Promise<void> {
     if (product.track_inventory !== false) {
       if (product.stock > 0 && this.isProductLowStock(product)) {
@@ -1144,6 +1212,16 @@ export class PosProductSelectionComponent {
       return;
     }
 
+    // Restaurant Suite — Fase K Gap 1: prepared + track_inventory +
+    // stock>0 product → ask the cashier whether to use stock or
+    // produce via KDS before adding to cart.
+    let skipKds = false;
+    if (this.shouldPromptPreparedChoice(product)) {
+      const choice = await this.askPreparedChoice(product);
+      if (choice === 'cancel') return;
+      skipKds = choice === 'stock';
+    }
+
     // Regular unit product
     this.addingToCart.add(product.id);
 
@@ -1151,12 +1229,16 @@ export class PosProductSelectionComponent {
       .addToCart({
         product: product,
         quantity: 1,
+        skipKds,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
-          this.toastService.success(`${product.name} agregado al carrito`);
+          const tag = skipKds ? ' (usar stock)' : '';
+          this.toastService.success(
+            `${product.name} agregado al carrito${tag}`,
+          );
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {

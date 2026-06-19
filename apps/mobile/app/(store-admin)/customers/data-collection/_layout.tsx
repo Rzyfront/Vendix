@@ -1,7 +1,7 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Slot, useRouter, useSegments } from 'expo-router';
 import { Icon } from '@/shared/components/icon/icon';
-import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
+import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 
 const TABS = [
   { id: 'fields', label: 'Campos', icon: 'database' },
@@ -25,11 +25,13 @@ export default function DataCollectionLayout() {
 
   return (
     <View style={styles.root}>
-      <View style={styles.tabBar}>
+      {/* Tab bar: sticky + elevation (estilo web sticky top-0 backdrop-blur shadow-sm) */}
+      <View style={styles.tabBarWrap}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.tabList}
+          style={styles.tabBar}
         >
           {TABS.map((tab) => {
             const isActive = tab.id === activeTab;
@@ -62,10 +64,14 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colorScales.gray[50],
   },
-  tabBar: {
+  tabBarWrap: {
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[200],
+    ...shadows.sm,
+  },
+  tabBar: {
+    flexGrow: 0,
   },
   tabList: {
     flexDirection: 'row',

@@ -93,7 +93,11 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
 
             @if (isOpen()) {
               <div
-                class="absolute z-[10000] w-full mt-1 bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto rounded-xl"
+                class="absolute z-[10000] w-full bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto rounded-xl"
+                [class.mt-1]="!dropUp()"
+                [class.mb-1]="dropUp()"
+                [class.top-full]="!dropUp()"
+                [class.bottom-full]="dropUp()"
                 >
                 <div class="p-2 border-b border-border sticky top-0 bg-[var(--color-surface)]">
                   <input
@@ -222,6 +226,18 @@ export class SelectorComponent implements ControlValueAccessor {
   // --- Searchable mode state ---
   readonly isOpen = signal<boolean>(false);
   readonly searchTerm = signal<string>('');
+  /**
+   * When true the panel opens ABOVE the trigger (drop-up) so it is not
+   * clipped by the viewport. Default false keeps the historic below
+   * behaviour; the open handler recomputes the direction by measuring
+   * the available space, mirroring the `resolvePosition` pattern in
+   * `tooltip.component.ts`.
+   */
+  readonly dropUp = signal<boolean>(false);
+
+  /** Estimated panel height used to decide whether to flip. Matches
+   *  the visual `max-h-60` (~240px) plus the search-input row. */
+  private readonly panelEstimatedHeight = 260;
 
   readonly filteredOptions = computed<SelectorOption[]>(() => {
     const term = this.searchTerm().toLowerCase().trim();
@@ -285,8 +301,28 @@ export class SelectorComponent implements ControlValueAccessor {
     if (this.isDisabled()) return;
     if (!this.isOpen()) {
       this.searchTerm.set('');
+      this.dropUp.set(this.shouldOpenUpward());
     }
     this.isOpen.update((v) => !v);
+  }
+
+  /**
+   * Returns true if there is not enough space below the trigger to render
+   * the dropdown panel and more space is available above. Measures the
+   * trigger rect against the viewport, mirroring how `tooltip.component.ts`
+   * flips out-of-bounds tooltips.
+   */
+  private shouldOpenUpward(): boolean {
+    const hostEl = this.elementRef.nativeElement as HTMLElement | undefined;
+    if (!hostEl) return false;
+    const rect = hostEl.getBoundingClientRect();
+    const viewportHeight =
+      typeof window !== 'undefined' ? window.innerHeight : 0;
+    const spaceBelow = viewportHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    return (
+      spaceBelow < this.panelEstimatedHeight && spaceAbove > spaceBelow
+    );
   }
 
   selectOption(option: SelectorOption): void {

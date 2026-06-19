@@ -1,18 +1,32 @@
-import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import {
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+  TextInput,
+  Modal,
+  Dimensions,
+  ScrollView,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CustomerService } from '@/features/store/services/customer.service';
 import { useTenantStore } from '@/core/store/tenant.store';
-import type { Customer, CustomerState, CustomerStats } from '@/features/store/types';
+import type { Customer, CustomerState, CustomerStats, UpdateCustomerDto, CreateCustomerDto } from '@/features/store/types';
+import { Avatar } from '@/shared/components/avatar/avatar';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Icon } from '@/shared/components/icon/icon';
-import { RecordCard } from '@/shared/components/record-card/record-card';
-import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
+import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
+import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { formatCurrency } from '@/shared/utils/currency';
-import { formatRelative } from '@/shared/utils/date';
+import { formatDate, formatRelative } from '@/shared/utils/date';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 
 const STATE_FILTERS: { label: string; value?: CustomerState }[] = [
@@ -25,41 +39,135 @@ function customerName(customer: Customer): string {
   return `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'Cliente sin nombre';
 }
 
-const CustomerCard = ({ customer, onPress }: { customer: Customer; onPress: () => void }) => {
+type CustomerCardProps = {
+  customer: Customer;
+  onView: () => void;
+  onEdit: () => void;
+  onMoreActions: (ref: View, item: Customer) => void;
+};
+
+const CustomerCard = ({ customer, onView, onEdit, onMoreActions }: CustomerCardProps) => {
   const fullName = customerName(customer);
   const orders = Number(customer.total_orders ?? 0);
+  const isActive = customer.state === 'active';
+  const moreBtnRef = useRef<View>(null);
 
   return (
-    <RecordCard
-      title={fullName}
-      subtitle={customer.email || customer.document_number || 'Sin correo registrado'}
-      media={{ avatarName: fullName }}
-      badges={[
-        {
-          label: customer.state === 'active' ? 'Activo' : 'Inactivo',
-          variant: customer.state === 'active' ? 'success' : 'warning',
-        },
-      ]}
-      details={[
-        { label: 'Teléfono', value: customer.phone || 'Sin teléfono', icon: 'phone' },
-        { label: 'Órdenes', value: orders, icon: 'shopping-bag' },
-        {
-          label: 'Última compra',
-          value: customer.last_purchase_at ? formatRelative(customer.last_purchase_at) : 'Sin compras',
-          icon: 'calendar',
-        },
-        {
-          label: 'Documento',
-          value: customer.document_number || 'No registrado',
-          icon: 'file-text',
-        },
-      ]}
-      footerLabel="Total gastado"
-      footerValue={formatCurrency(customer.total_spent ?? 0)}
-      footerTone="success"
-      onPress={onPress}
-      style={{ marginHorizontal: spacing[4] }}
-    />
+    <View style={styles.customerCard}>
+      {/* Top row: avatar (user icon) + nombre/email + badge estado (estilo web) */}
+      <View style={styles.cardTopRow}>
+        <View style={styles.cardMedia}>
+          <Icon name="user" size={22} color={colorScales.gray[500]} />
+        </View>
+
+        <View style={styles.cardCenter}>
+          <Text style={styles.cardTitle} numberOfLines={1}>{fullName}</Text>
+          <Text style={styles.cardEmail} numberOfLines={1}>
+            {customer.email || 'Sin correo registrado'}
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.cardStatusBadge,
+            { backgroundColor: isActive ? colorScales.green[50] : colorScales.blue[50] },
+          ]}
+        >
+          <Text
+            style={[
+              styles.cardStatusBadgeText,
+              { color: isActive ? colorScales.green[700] : colorScales.blue[700] },
+            ]}
+          >
+            {isActive ? 'Activo' : 'Inactivo'}
+          </Text>
+        </View>
+      </View>
+
+      {/* Detalles: 5 items en grid 3+2 — Teléfono / Documento / Pedidos (row 1) + Última compra / Registrado (row 2) */}
+      {/* Row 1: 3 columnas */}
+      <View style={styles.cardDetailsRow3}>
+        <View style={styles.cardDetailItemThird}>
+          <View style={styles.cardDetailLabelRow}>
+            <Icon name="phone" size={11} color={colorScales.gray[400]} />
+            <Text style={styles.cardDetailLabel}>TELÉFONO</Text>
+          </View>
+          <Text style={styles.cardDetailValue} numberOfLines={1}>
+            {customer.phone || '—'}
+          </Text>
+        </View>
+
+        <View style={styles.cardDetailItemThird}>
+          <View style={styles.cardDetailLabelRow}>
+            <Icon name="credit-card" size={11} color={colorScales.gray[400]} />
+            <Text style={styles.cardDetailLabel}>DOCUMENTO</Text>
+          </View>
+          <Text style={styles.cardDetailValue} numberOfLines={1}>
+            {customer.document_number || '—'}
+          </Text>
+        </View>
+
+        <View style={styles.cardDetailItemThird}>
+          <View style={styles.cardDetailLabelRow}>
+            <Icon name="shopping-bag" size={11} color={colorScales.gray[400]} />
+            <Text style={styles.cardDetailLabel}>PEDIDOS</Text>
+          </View>
+          <Text style={styles.cardDetailValue} numberOfLines={1}>{orders}</Text>
+        </View>
+      </View>
+
+      {/* Row 2: 2 columnas */}
+      <View style={styles.cardDetailsRow2}>
+        <View style={styles.cardDetailItemHalf}>
+          <View style={styles.cardDetailLabelRow}>
+            <Icon name="clock" size={11} color={colorScales.gray[400]} />
+            <Text style={styles.cardDetailLabel}>ÚLTIMA COMPRA</Text>
+          </View>
+          <Text style={styles.cardDetailValue} numberOfLines={1}>
+            {customer.last_purchase_at ? formatRelative(customer.last_purchase_at) : '—'}
+          </Text>
+        </View>
+
+        <View style={styles.cardDetailItemHalf}>
+          <View style={styles.cardDetailLabelRow}>
+            <Icon name="calendar" size={11} color={colorScales.gray[400]} />
+            <Text style={styles.cardDetailLabel}>REGISTRADO</Text>
+          </View>
+          <Text style={styles.cardDetailValue} numberOfLines={1}>
+            {customer.created_at ? formatDate(customer.created_at) : '—'}
+          </Text>
+        </View>
+      </View>
+
+      {/* Footer: Total gastado + 3 acciones (Ver / Editar / Eliminar) — estilo web */}
+      <View style={styles.cardFooter}>
+        <View style={styles.cardFooterLeft}>
+          <Text style={styles.cardFooterLabel}>TOTAL GASTADO</Text>
+          <Text style={styles.cardFooterValue}>
+            {formatCurrency(customer.total_spent ?? 0)}
+          </Text>
+        </View>
+        <View style={styles.cardActions}>
+          {/* Ver: ojo gris (popup) */}
+          <Pressable onPress={onView} hitSlop={6} style={styles.cardActionView}>
+            <Icon name="eye" size={16} color={colorScales.gray[500]} />
+          </Pressable>
+          {/* Editar: lápiz azul (popup) */}
+          <Pressable onPress={onEdit} hitSlop={6} style={styles.cardActionEdit}>
+            <Icon name="edit" size={16} color={colorScales.blue[600]} />
+          </Pressable>
+          {/* Eliminar: 3 puntos gris oscuro (popup) */}
+          <Pressable
+            ref={moreBtnRef}
+            onPress={() => onMoreActions(moreBtnRef.current as View, customer)}
+            hitSlop={6}
+            style={styles.cardActionMore}
+          >
+            <Ionicons name="ellipsis-horizontal" size={16} color={colorScales.gray[700]} />
+          </Pressable>
+        </View>
+      </View>
+    </View>
   );
 };
 
@@ -76,11 +184,62 @@ const CustomerStatsGrid = ({ stats }: { stats: CustomerStats | undefined }) => (
 
 export default function CustomersScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState<CustomerState | undefined>();
-  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [page, setPage] = useState(1);
   const storeId = useTenantStore((s) => s.storeId);
+  const screenW = Dimensions.get('window').width;
+  const insets = useSafeAreaInsets();
+
+  // Popups de Acciones (+) y Filtros — estilo web (options-dropdown)
+  const [showActions, setShowActions] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [showFilterTypeList, setShowFilterTypeList] = useState(false);
+  const actionsBtnRef = useRef<View>(null);
+  const filterBtnRef = useRef<View>(null);
+  const [actionsPos, setActionsPos] = useState({ top: 0, right: 0 });
+  const [filterPos, setFilterPos] = useState({ top: 0, right: 0 });
+
+  // Estado del popup "más opciones" por card (Eliminar)
+  const [cardMoreAnchor, setCardMoreAnchor] = useState<{ top: number; right: number; item: Customer } | null>(null);
+
+  // Estado del confirm dialog de eliminación
+  const [deleteTarget, setDeleteTarget] = useState<Customer | null>(null);
+
+  // Estado del modal Ver (popup eye)
+  const [viewTarget, setViewTarget] = useState<Customer | null>(null);
+
+  // Estado del modal Editar (popup pencil) + form
+  const [editTarget, setEditTarget] = useState<Customer | null>(null);
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editDocumentType, setEditDocumentType] = useState<string>('');
+  const [editDocument, setEditDocument] = useState('');
+  const [showEditDocTypeDropdown, setShowEditDocTypeDropdown] = useState(false);
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+
+  // Estado del modal Nuevo Cliente (popup) + form
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createFirstName, setCreateFirstName] = useState('');
+  const [createLastName, setCreateLastName] = useState('');
+  const [createEmail, setCreateEmail] = useState('');
+  const [createPhone, setCreatePhone] = useState('');
+  const [createDocumentType, setCreateDocumentType] = useState<string>('');
+  const [createDocumentNumber, setCreateDocumentNumber] = useState('');
+  const [showCreateDocTypeDropdown, setShowCreateDocTypeDropdown] = useState(false);
+  const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
+
+  // Tipos de documento (alineado con customer-modal web)
+  const CREATE_DOCUMENT_TYPES = [
+    { value: 'CC', label: 'Cédula de Ciudadanía' },
+    { value: 'CE', label: 'Cédula de Extranjería' },
+    { value: 'NIT', label: 'NIT' },
+    { value: 'PAS', label: 'Pasaporte' },
+    { value: 'TI', label: 'Tarjeta de Identidad' },
+  ];
 
   const { data: stats } = useQuery({
     queryKey: ['customer-stats', storeId],
@@ -105,6 +264,51 @@ export default function CustomersScreen() {
       }),
   });
 
+  // Mutación: eliminar cliente (estilo web: toast success/error + invalidar queries)
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => CustomerService.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['customer-stats'] });
+      toastSuccess('Cliente eliminado correctamente');
+    },
+    onError: (error: any) => {
+      const message = error?.response?.data?.message || error?.message || 'Error al eliminar el cliente';
+      toastError(typeof message === 'string' ? message : 'Error al eliminar el cliente');
+    },
+  });
+
+  // Mutación: actualizar cliente (popup Editar)
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateCustomerDto }) =>
+      CustomerService.update(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['customer-stats'] });
+      toastSuccess('Cliente actualizado correctamente');
+      setEditTarget(null);
+    },
+    onError: (error: any) => {
+      const message = error?.response?.data?.message || error?.message || 'Error al actualizar el cliente';
+      toastError(typeof message === 'string' ? message : 'Error al actualizar el cliente');
+    },
+  });
+
+  // Mutación: crear cliente (popup Nuevo Cliente)
+  const createMutation = useMutation({
+    mutationFn: (data: CreateCustomerDto) => CustomerService.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      queryClient.invalidateQueries({ queryKey: ['customer-stats'] });
+      toastSuccess('Cliente creado exitosamente');
+      closeCreateModal();
+    },
+    onError: (error: any) => {
+      const message = error?.response?.data?.message || error?.message || 'Error al crear el cliente';
+      toastError(typeof message === 'string' ? message : 'Error al crear el cliente');
+    },
+  });
+
   const customers = pageData?.data ?? [];
   const pagination = pageData?.pagination;
   const totalPages = pagination?.totalPages ?? 1;
@@ -114,14 +318,185 @@ export default function CustomersScreen() {
     setPage(1);
   }, []);
 
+  // Mostrar popup "más opciones" (Eliminar) — mide posición del botón
+  const handleMoreActions = useCallback(
+    (ref: View, item: Customer) => {
+      ref.measureInWindow((x, y, w, h) => {
+        setCardMoreAnchor({ top: y + h + 6, right: screenW - x - w, item });
+      });
+    },
+    [screenW],
+  );
+
+  // Abrir confirm dialog de eliminar
+  const handleAskDelete = useCallback((item: Customer) => {
+    setCardMoreAnchor(null);
+    setDeleteTarget(item);
+  }, []);
+
+  // Confirmar eliminar
+  const handleConfirmDelete = useCallback(() => {
+    if (!deleteTarget) return;
+    const id = deleteTarget.id;
+    setDeleteTarget(null);
+    deleteMutation.mutate(id);
+  }, [deleteTarget, deleteMutation]);
+
+  // Abrir popup de Acciones del botón (+) — mide posición
+  const openActions = useCallback(() => {
+    actionsBtnRef.current?.measureInWindow((x, y, w, h) => {
+      setActionsPos({ top: y + h + 6, right: screenW - x - w });
+      setShowActions(true);
+    });
+  }, [screenW]);
+
+  // Abrir popup de Filtros del botón filtro — mide posición
+  const openFilters = useCallback(() => {
+    filterBtnRef.current?.measureInWindow((x, y, w, h) => {
+      setFilterPos({ top: y + h + 6, right: screenW - x - w });
+      setShowFilters(true);
+      setShowFilterTypeList(false);
+    });
+  }, [screenW]);
+
+  // Acción: Carga Masiva — mismo `action: 'bulk-upload'` de la web (pendiente para mobile)
+  const handleBulkUpload = useCallback(() => {
+    setShowActions(false);
+    setShowFilters(false);
+    toastError('Carga masiva próximamente disponible');
+  }, []);
+
+  // Acción: Nuevo Cliente — abre popup modal con el form de creación
+  const openCreateModal = useCallback(() => {
+    setShowActions(false);
+    setShowFilters(false);
+    setCreateFirstName('');
+    setCreateLastName('');
+    setCreateEmail('');
+    setCreatePhone('');
+    setCreateDocumentType('');
+    setCreateDocumentNumber('');
+    setCreateErrors({});
+    setShowCreateDocTypeDropdown(false);
+    setCreateModalOpen(true);
+  }, []);
+
+  const closeCreateModal = useCallback(() => {
+    setCreateModalOpen(false);
+    setCreateErrors({});
+    setShowCreateDocTypeDropdown(false);
+  }, []);
+
+  const handleSubmitCreate = useCallback(() => {
+    setCreateErrors({});
+    const newErrors: Record<string, string> = {};
+    if (!createFirstName.trim()) {
+      newErrors.firstName = 'El nombre es requerido';
+    } else if (createFirstName.trim().length < 2) {
+      newErrors.firstName = 'Mínimo 2 caracteres';
+    }
+    if (!createLastName.trim()) {
+      newErrors.lastName = 'El apellido es requerido';
+    } else if (createLastName.trim().length < 2) {
+      newErrors.lastName = 'Mínimo 2 caracteres';
+    }
+    if (!createEmail.trim()) {
+      newErrors.email = 'El email es requerido';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(createEmail)) {
+      newErrors.email = 'Ingresa un email válido';
+    }
+    if (createPhone.trim() && !/^[\d+#*\s()-]+$/.test(createPhone.trim())) {
+      newErrors.phone = 'El teléfono solo admite números y + # * ( ) -';
+    }
+    if (Object.keys(newErrors).length > 0) {
+      setCreateErrors(newErrors);
+      toastError('Revisa los campos marcados');
+      return;
+    }
+    const dto: CreateCustomerDto = {
+      first_name: createFirstName.trim(),
+      last_name: createLastName.trim(),
+      email: createEmail.trim(),
+      phone: createPhone.trim() || undefined,
+      document_type: createDocumentType || undefined,
+      document_number: createDocumentNumber.trim() || undefined,
+    };
+    createMutation.mutate(dto);
+  }, [createFirstName, createLastName, createEmail, createPhone, createDocumentType, createDocumentNumber, createMutation]);
+
+  // Abrir popup Ver (eye) — muestra detalles del cliente
+  const handleView = useCallback((item: Customer) => {
+    setViewTarget(item);
+  }, []);
+
+  // Abrir popup Editar (pencil) — pre-rellena form con datos del cliente
+  const handleEdit = useCallback((item: Customer) => {
+    setEditTarget(item);
+    setEditFirstName(item.first_name || '');
+    setEditLastName(item.last_name || '');
+    setEditEmail(item.email || '');
+    setEditPhone(item.phone || '');
+    setEditDocumentType(item.document_type || '');
+    setEditDocument(item.document_number || '');
+    setShowEditDocTypeDropdown(false);
+    setEditErrors({});
+  }, []);
+
+  const closeEditModal = useCallback(() => {
+    setEditTarget(null);
+    setEditErrors({});
+    setShowEditDocTypeDropdown(false);
+  }, []);
+
+  const handleSaveEdit = useCallback(() => {
+    if (!editTarget) return;
+    setEditErrors({});
+    // Validar
+    const newErrors: Record<string, string> = {};
+    if (!editFirstName.trim()) {
+      newErrors.firstName = 'El nombre es requerido';
+    } else if (editFirstName.trim().length < 2) {
+      newErrors.firstName = 'Mínimo 2 caracteres';
+    }
+    if (!editLastName.trim()) {
+      newErrors.lastName = 'El apellido es requerido';
+    } else if (editLastName.trim().length < 2) {
+      newErrors.lastName = 'Mínimo 2 caracteres';
+    }
+    if (!editEmail.trim()) {
+      newErrors.email = 'El email es requerido';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editEmail)) {
+      newErrors.email = 'Ingresa un email válido';
+    }
+    if (editPhone.trim() && !/^[\d+#*\s()-]+$/.test(editPhone.trim())) {
+      newErrors.phone = 'El teléfono solo admite números y + # * ( ) -';
+    }
+    if (Object.keys(newErrors).length > 0) {
+      setEditErrors(newErrors);
+      toastError('Revisa los campos marcados');
+      return;
+    }
+    const dto: UpdateCustomerDto = {
+      first_name: editFirstName.trim(),
+      last_name: editLastName.trim(),
+      email: editEmail.trim(),
+      phone: editPhone.trim() || undefined,
+      document_type: editDocumentType || undefined,
+      document_number: editDocument.trim() || undefined,
+    };
+    updateMutation.mutate({ id: editTarget.id, data: dto });
+  }, [editTarget, editFirstName, editLastName, editEmail, editPhone, editDocumentType, editDocument, updateMutation]);
+
   const renderCustomer = useCallback(
     ({ item }: { item: Customer }) => (
       <CustomerCard
         customer={item}
-        onPress={() => router.push(`/(store-admin)/customers/${item.id}` as never)}
+        onView={() => handleView(item)}
+        onEdit={() => handleEdit(item)}
+        onMoreActions={handleMoreActions}
       />
     ),
-    [router],
+    [handleView, handleEdit, handleMoreActions],
   );
 
   const paginationRange = useMemo(() => {
@@ -173,51 +548,41 @@ export default function CustomersScreen() {
             <CustomerStatsGrid stats={stats} />
             <Text style={styles.title}>Todos los Clientes ({pagination?.total ?? 0})</Text>
             <View style={styles.searchRow}>
-              <SearchBar
-                value={search}
-                onChangeText={handleSearch}
-                onClear={() => handleSearch('')}
-                placeholder="Buscar clientes..."
-                style={styles.searchBar}
-              />
+              <View style={styles.searchInputWrap}>
+                <Ionicons name="search-outline" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
+                <TextInput
+                  style={styles.searchInputField}
+                  value={search}
+                  onChangeText={handleSearch}
+                  placeholder="Buscar clientes..."
+                  placeholderTextColor={colorScales.gray[400]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="search"
+                />
+                {search.length > 0 && (
+                  <Pressable onPress={() => handleSearch('')} hitSlop={8}>
+                    <Ionicons name="close" size={16} color={colorScales.gray[400]} />
+                  </Pressable>
+                )}
+              </View>
               <Pressable
-                onPress={() => router.push('/(store-admin)/customers/create' as never)}
-                style={styles.searchActionBtn}
+                ref={actionsBtnRef}
+                onPress={openActions}
+                style={styles.iconBtn}
+                hitSlop={6}
               >
-                <Icon name="plus" size={18} color={colors.primary} />
+                <Icon name="plus" size={20} color={colors.primary} />
               </Pressable>
               <Pressable
-                onPress={() => setShowFilterDropdown((p) => !p)}
-                style={styles.searchFilterBtn}
+                ref={filterBtnRef}
+                onPress={openFilters}
+                style={styles.iconBtn}
+                hitSlop={6}
               >
                 <Icon name="filter" size={18} color={colors.primary} />
               </Pressable>
             </View>
-            {showFilterDropdown && (
-              <View style={styles.filterDropdown}>
-                {STATE_FILTERS.map((f) => (
-                  <Pressable
-                    key={f.label}
-                    onPress={() => {
-                      setStateFilter(f.value);
-                      setShowFilterDropdown(false);
-                      setPage(1);
-                    }}
-                    style={[
-                      styles.filterOption,
-                      f.value === stateFilter && styles.filterOptionActive,
-                    ]}
-                  >
-                    <Icon
-                      name="check"
-                      size={14}
-                      color={f.value === stateFilter ? colors.primary : 'transparent'}
-                    />
-                    <Text style={styles.filterOptionText}>{f.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
           </View>
         }
         ListEmptyComponent={
@@ -265,15 +630,574 @@ export default function CustomersScreen() {
           ) : null
         }
         refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} />}
-        contentContainerStyle={styles.listContent}
+        contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + spacing[6] }]}
       />
 
-      <Pressable
-        onPress={() => router.push('/(store-admin)/customers/create' as never)}
-        style={styles.fab}
+      {/* Popup de Acciones (botón +) — dropdownActions web: Carga Masiva + Nuevo Cliente */}
+      <Modal visible={showActions} transparent animationType="fade" onRequestClose={() => setShowActions(false)}>
+        <Pressable style={styles.dropdownBackdrop} onPress={() => setShowActions(false)} />
+        <View style={[styles.dropdownPositioner, { top: actionsPos.top, right: actionsPos.right }]}>
+          <View style={[styles.dropdownArrow, { marginRight: 14 }]} />
+          <View style={styles.dropdown}>
+            <Pressable style={styles.dropdownItem} onPress={handleBulkUpload}>
+              <View style={styles.dropdownIconWrap}>
+                <Ionicons name="cloud-upload-outline" size={18} color={colorScales.gray[500]} />
+              </View>
+              <Text style={styles.dropdownItemText}>Carga Masiva</Text>
+            </Pressable>
+            <View style={styles.dropdownDivider} />
+            <Pressable style={styles.dropdownItem} onPress={openCreateModal}>
+              <View style={[styles.dropdownIconWrap, { backgroundColor: colorScales.green[50] }]}>
+                <Ionicons name="add-outline" size={18} color={colors.primary} />
+              </View>
+              <Text style={styles.dropdownItemPrimary}>Nuevo Cliente</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Popup de Filtros (botón filtro) — options-dropdown web: Filtros (Estado) + Acciones */}
+      <Modal
+        visible={showFilters}
+        transparent
+        animationType="fade"
+        onRequestClose={() => { setShowFilters(false); setShowFilterTypeList(false); }}
       >
-        <Icon name="plus" size={24} color={colors.background} />
-      </Pressable>
+        <Pressable
+          style={styles.dropdownBackdrop}
+          onPress={() => { setShowFilters(false); setShowFilterTypeList(false); }}
+        />
+        <View style={[styles.dropdownPositioner, { top: filterPos.top, right: filterPos.right }]}>
+          <View style={[styles.dropdownArrow, { marginRight: Math.max(filterPos.right, 14) }]} />
+          <View style={styles.filterPopup}>
+            {/* Header: Filtros */}
+            <View style={styles.filterPopupHeader}>
+              <Text style={styles.filterPopupTitle}>Filtros</Text>
+            </View>
+            {/* Body: Estado select */}
+            <View style={styles.filterPopupBody}>
+              <Text style={styles.filterPopupLabel}>Estado</Text>
+              <Pressable
+                style={styles.filterPopupSelect}
+                onPress={() => setShowFilterTypeList(!showFilterTypeList)}
+              >
+                <Text style={styles.filterPopupSelectText}>
+                  {STATE_FILTERS.find((f) => f.value === stateFilter)?.label ?? 'Todos'}
+                </Text>
+                <Ionicons
+                  name={showFilterTypeList ? 'chevron-up' : 'chevron-down'}
+                  size={16}
+                  color={colorScales.gray[500]}
+                />
+              </Pressable>
+              {showFilterTypeList && (
+                <View style={styles.filterPopupOptionsList}>
+                  {STATE_FILTERS.map((opt) => (
+                    <Pressable
+                      key={opt.label}
+                      style={[
+                        styles.filterPopupOption,
+                        opt.value === stateFilter && styles.filterPopupOptionActive,
+                      ]}
+                      onPress={() => {
+                        setStateFilter(opt.value);
+                        setPage(1);
+                        setShowFilterTypeList(false);
+                        setShowFilters(false);
+                      }}
+                    >
+                      <Text
+                        style={[
+                          styles.filterPopupOptionText,
+                          opt.value === stateFilter && styles.filterPopupOptionTextActive,
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                      {opt.value === stateFilter && (
+                        <Ionicons name="checkmark" size={16} color={colors.primary} />
+                      )}
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </View>
+            {/* Acciones: Carga Masiva + Nuevo Cliente */}
+            <View style={styles.filterPopupActionsDivider} />
+            <View style={styles.filterPopupActions}>
+              <Pressable style={styles.dropdownItem} onPress={handleBulkUpload}>
+                <View style={styles.dropdownIconWrap}>
+                  <Ionicons name="cloud-upload-outline" size={18} color={colorScales.gray[500]} />
+                </View>
+                <Text style={styles.dropdownItemText}>Carga Masiva</Text>
+              </Pressable>
+              <View style={styles.dropdownDivider} />
+              <Pressable style={styles.dropdownItem} onPress={openCreateModal}>
+                <View style={[styles.dropdownIconWrap, { backgroundColor: colorScales.green[50] }]}>
+                  <Ionicons name="add-outline" size={18} color={colors.primary} />
+                </View>
+                <Text style={styles.dropdownItemPrimary}>Nuevo Cliente</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Popup "más opciones" por card (Eliminar) — mismo estilo que locations.tsx */}
+      {cardMoreAnchor && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setCardMoreAnchor(null)}>
+          <Pressable style={styles.dropdownBackdrop} onPress={() => setCardMoreAnchor(null)} />
+          <View style={[styles.dropdownPositioner, { top: cardMoreAnchor.top, right: cardMoreAnchor.right }]}>
+            <View style={[styles.dropdownArrow, { marginRight: 14 }]} />
+            <View style={styles.dropdown}>
+              <Pressable
+                style={styles.dropdownItem}
+                onPress={() => handleAskDelete(cardMoreAnchor.item)}
+              >
+                <View style={[styles.dropdownIconWrap, { backgroundColor: colorScales.red[50] }]}>
+                  <Ionicons name="trash" size={18} color={colorScales.red[600]} />
+                </View>
+                <Text style={styles.dropdownItemDanger}>Eliminar</Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Confirm dialog de eliminación — estilo web */}
+      <ConfirmDialog
+        visible={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+        title="Eliminar cliente"
+        message={
+          deleteTarget
+            ? `¿Estás seguro de que quieres eliminar a "${customerName(deleteTarget)}"? Esta acción no se puede deshacer.`
+            : ''
+        }
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        destructive
+        loading={deleteMutation.isPending}
+      />
+
+      {/* Modal Ver (popup eye) — muestra detalles del cliente estilo web */}
+      <Modal visible={!!viewTarget} transparent animationType="fade" onRequestClose={() => setViewTarget(null)}>
+        <View style={styles.createModalOverlay}>
+          <View style={styles.createModal}>
+            {/* Header */}
+            <View style={styles.createHeader}>
+              <View style={styles.createHeaderText}>
+                <Text style={styles.createTitle}>Detalle del Cliente</Text>
+                <Text style={styles.createSubtitle}>Información completa del cliente</Text>
+              </View>
+              <Pressable onPress={() => setViewTarget(null)} hitSlop={8} style={styles.createCloseBtn}>
+                <Ionicons name="close" size={22} color={colorScales.gray[500]} />
+              </Pressable>
+            </View>
+
+            {/* Body: avatar + nombre + status + grid de detalles */}
+            <ScrollView style={styles.createBody} contentContainerStyle={styles.createBodyContent} showsVerticalScrollIndicator={false}>
+              {viewTarget && (
+                <>
+                  <View style={styles.viewProfileRow}>
+                    <Avatar name={customerName(viewTarget)} size="lg" style={styles.viewAvatar} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.viewName}>{customerName(viewTarget)}</Text>
+                      <Text style={styles.viewEmail}>{viewTarget.email || 'Sin correo'}</Text>
+                      <View
+                        style={[
+                          styles.viewStatusBadge,
+                          { backgroundColor: viewTarget.state === 'active' ? colorScales.green[50] : colorScales.gray[100] },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.viewStatusBadgeText,
+                            { color: viewTarget.state === 'active' ? colorScales.green[700] : colorScales.gray[500] },
+                          ]}
+                        >
+                          {viewTarget.state === 'active' ? 'Activo' : 'Inactivo'}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  <View style={styles.viewGrid}>
+                    <View style={styles.viewGridItem}>
+                      <View style={styles.viewGridLabelRow}>
+                        <Icon name="phone" size={13} color={colorScales.gray[400]} />
+                        <Text style={styles.viewGridLabel}>TELÉFONO</Text>
+                      </View>
+                      <Text style={styles.viewGridValue}>{viewTarget.phone || '—'}</Text>
+                    </View>
+                    <View style={styles.viewGridItem}>
+                      <View style={styles.viewGridLabelRow}>
+                        <Icon name="credit-card" size={13} color={colorScales.gray[400]} />
+                        <Text style={styles.viewGridLabel}>DOCUMENTO</Text>
+                      </View>
+                      <Text style={styles.viewGridValue}>{viewTarget.document_number || '—'}</Text>
+                    </View>
+                    <View style={styles.viewGridItem}>
+                      <View style={styles.viewGridLabelRow}>
+                        <Icon name="shopping-bag" size={13} color={colorScales.gray[400]} />
+                        <Text style={styles.viewGridLabel}>PEDIDOS</Text>
+                      </View>
+                      <Text style={styles.viewGridValue}>{Number(viewTarget.total_orders ?? 0)}</Text>
+                    </View>
+                    <View style={styles.viewGridItem}>
+                      <View style={styles.viewGridLabelRow}>
+                        <Icon name="dollar-sign" size={13} color={colorScales.gray[400]} />
+                        <Text style={styles.viewGridLabel}>TOTAL GASTADO</Text>
+                      </View>
+                      <Text style={styles.viewGridValue}>{formatCurrency(viewTarget.total_spent ?? 0)}</Text>
+                    </View>
+                    <View style={styles.viewGridItem}>
+                      <View style={styles.viewGridLabelRow}>
+                        <Icon name="clock" size={13} color={colorScales.gray[400]} />
+                        <Text style={styles.viewGridLabel}>ÚLTIMA COMPRA</Text>
+                      </View>
+                      <Text style={styles.viewGridValue}>{viewTarget.last_purchase_at ? formatRelative(viewTarget.last_purchase_at) : '—'}</Text>
+                    </View>
+                    <View style={styles.viewGridItem}>
+                      <View style={styles.viewGridLabelRow}>
+                        <Icon name="calendar" size={13} color={colorScales.gray[400]} />
+                        <Text style={styles.viewGridLabel}>REGISTRADO</Text>
+                      </View>
+                      <Text style={styles.viewGridValue}>{viewTarget.created_at ? formatDate(viewTarget.created_at) : '—'}</Text>
+                    </View>
+                  </View>
+                </>
+              )}
+            </ScrollView>
+
+            {/* Footer: Cerrar + Ver detalle completo */}
+            <View style={styles.createFooter}>
+              <Pressable style={styles.cancelBtn} onPress={() => setViewTarget(null)}>
+                <Text style={styles.cancelBtnText}>Cerrar</Text>
+              </Pressable>
+              <View style={styles.actionSpacer} />
+              <Pressable
+                style={styles.confirmBtn}
+                onPress={() => {
+                  const id = viewTarget?.id;
+                  setViewTarget(null);
+                  if (id) router.push(`/(store-admin)/customers/${id}` as never);
+                }}
+              >
+                <Text style={styles.confirmBtnText}>Ver detalle completo</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Editar (popup pencil) — form con datos del cliente (estilo web) */}
+      <Modal visible={!!editTarget} transparent animationType="fade" onRequestClose={closeEditModal}>
+        <View style={styles.createModalOverlay}>
+          <View style={styles.createModal}>
+            {/* Header */}
+            <View style={styles.createHeader}>
+              <View style={styles.createHeaderText}>
+                <Text style={styles.createTitle}>Editar cliente</Text>
+                <Text style={styles.createSubtitle}>Administra la información del cliente</Text>
+              </View>
+              <Pressable onPress={closeEditModal} hitSlop={8} style={styles.createCloseBtn}>
+                <Ionicons name="close" size={22} color={colorScales.gray[500]} />
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.createBody} contentContainerStyle={styles.createBodyContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* Email */}
+              <View>
+                <Text style={styles.editFormLabel}>EMAIL <Text style={styles.requiredStar}>*</Text></Text>
+                <TextInput
+                  style={[styles.editInput, !!editErrors.email && styles.editInputError]}
+                  value={editEmail}
+                  onChangeText={(v) => { setEditEmail(v); setEditErrors((p) => { const n = { ...p }; delete n.email; return n; }); }}
+                  placeholder="cliente@ejemplo.com"
+                  placeholderTextColor={colorScales.gray[400]}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                {!!editErrors.email && <Text style={styles.editErrorText}>{editErrors.email}</Text>}
+              </View>
+
+              {/* Nombre + Apellido (row) */}
+              <View style={styles.editRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editFormLabel}>NOMBRE <Text style={styles.requiredStar}>*</Text></Text>
+                  <TextInput
+                    style={[styles.editInput, !!editErrors.firstName && styles.editInputError]}
+                    value={editFirstName}
+                    onChangeText={(v) => { setEditFirstName(v); setEditErrors((p) => { const n = { ...p }; delete n.firstName; return n; }); }}
+                    placeholder="Ej. María"
+                    placeholderTextColor={colorScales.gray[400]}
+                  />
+                  {!!editErrors.firstName && <Text style={styles.editErrorText}>{editErrors.firstName}</Text>}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editFormLabel}>APELLIDO <Text style={styles.requiredStar}>*</Text></Text>
+                  <TextInput
+                    style={[styles.editInput, !!editErrors.lastName && styles.editInputError]}
+                    value={editLastName}
+                    onChangeText={(v) => { setEditLastName(v); setEditErrors((p) => { const n = { ...p }; delete n.lastName; return n; }); }}
+                    placeholder="Ej. Rodríguez"
+                    placeholderTextColor={colorScales.gray[400]}
+                  />
+                  {!!editErrors.lastName && <Text style={styles.editErrorText}>{editErrors.lastName}</Text>}
+                </View>
+              </View>
+
+              {/* Teléfono */}
+              <View>
+                <Text style={styles.editFormLabel}>TELÉFONO</Text>
+                <TextInput
+                  style={[styles.editInput, !!editErrors.phone && styles.editInputError]}
+                  value={editPhone}
+                  onChangeText={(v) => { setEditPhone(v); setEditErrors((p) => { const n = { ...p }; delete n.phone; return n; }); }}
+                  placeholder="+57 300 567 8900"
+                  placeholderTextColor={colorScales.gray[400]}
+                  keyboardType="phone-pad"
+                />
+                {!!editErrors.phone && <Text style={styles.editErrorText}>{editErrors.phone}</Text>}
+              </View>
+
+              {/* Tipo documento + Nº documento (row) — estilo web */}
+              <View style={styles.editRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editFormLabel}>TIPO DOCUMENTO</Text>
+                  <Pressable
+                    style={[styles.editInput, styles.createSelectTrigger]}
+                    onPress={() => setShowEditDocTypeDropdown((v) => !v)}
+                  >
+                    <Text style={[
+                      styles.createSelectText,
+                      !editDocumentType && styles.createSelectPlaceholder,
+                    ]}>
+                      {CREATE_DOCUMENT_TYPES.find((d) => d.value === editDocumentType)?.label
+                        || 'Seleccionar tipo'}
+                    </Text>
+                    <Ionicons
+                      name={showEditDocTypeDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colorScales.gray[500]}
+                    />
+                  </Pressable>
+                  {showEditDocTypeDropdown && (
+                    <View style={styles.createSelectDropdown}>
+                      {CREATE_DOCUMENT_TYPES.map((d) => (
+                        <Pressable
+                          key={d.value}
+                          onPress={() => {
+                            setEditDocumentType(d.value);
+                            setShowEditDocTypeDropdown(false);
+                          }}
+                          style={[
+                            styles.createSelectOption,
+                            editDocumentType === d.value && styles.editStateChipActive,
+                          ]}
+                        >
+                          <Text style={[
+                            styles.createSelectOptionText,
+                            editDocumentType === d.value && styles.editStateChipTextActive,
+                          ]}>
+                            {d.label}
+                          </Text>
+                          {editDocumentType === d.value && (
+                            <Ionicons name="checkmark" size={16} color={colors.primary} />
+                          )}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editFormLabel}>Nº DOCUMENTO</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editDocument}
+                    onChangeText={setEditDocument}
+                    placeholder="12345678"
+                    placeholderTextColor={colorScales.gray[400]}
+                  />
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Footer: Cancelar (oscuro) + Actualizar (primary verde) — estilo web */}
+            <View style={styles.createFooter}>
+              <Pressable style={styles.cancelBtn} onPress={closeEditModal}>
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </Pressable>
+              <View style={styles.actionSpacer} />
+              <Pressable
+                style={[styles.confirmBtn, updateMutation.isPending && styles.confirmBtnDisabled]}
+                onPress={handleSaveEdit}
+                disabled={updateMutation.isPending}
+              >
+                <Text style={styles.confirmBtnText}>
+                  {updateMutation.isPending ? 'Actualizando...' : 'Actualizar'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal Nuevo Cliente (popup) — estilo web con campos de la imagen */}
+      <Modal visible={createModalOpen} transparent animationType="fade" onRequestClose={closeCreateModal}>
+        <View style={styles.createModalOverlay}>
+          <View style={styles.createModal}>
+            {/* Header */}
+            <View style={styles.createHeader}>
+              <View style={styles.createHeaderText}>
+                <Text style={styles.createTitle}>Crear cliente</Text>
+                <Text style={styles.createSubtitle}>Administra la información del cliente</Text>
+              </View>
+              <Pressable onPress={closeCreateModal} hitSlop={8} style={styles.createCloseBtn}>
+                <Ionicons name="close" size={22} color={colorScales.gray[500]} />
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.createBody} contentContainerStyle={styles.createBodyContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+              {/* Correo electrónico */}
+              <View>
+                <Text style={styles.createFormLabel}>CORREO ELECTRONICO <Text style={styles.requiredStar}>*</Text></Text>
+                <TextInput
+                  style={[styles.createInput, !!createErrors.email && styles.editInputError]}
+                  value={createEmail}
+                  onChangeText={(v) => { setCreateEmail(v); setCreateErrors((p) => { const n = { ...p }; delete n.email; return n; }); }}
+                  placeholder="cliente@ejemplo.com"
+                  placeholderTextColor={colorScales.gray[400]}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                {!!createErrors.email && <Text style={styles.editErrorText}>{createErrors.email}</Text>}
+              </View>
+
+              {/* Nombre + Apellido (row) */}
+              <View style={styles.editRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.createFormLabel}>NOMBRE <Text style={styles.requiredStar}>*</Text></Text>
+                  <TextInput
+                    style={[styles.createInput, !!createErrors.firstName && styles.editInputError]}
+                    value={createFirstName}
+                    onChangeText={(v) => { setCreateFirstName(v); setCreateErrors((p) => { const n = { ...p }; delete n.firstName; return n; }); }}
+                    placeholder="Ej. María"
+                    placeholderTextColor={colorScales.gray[400]}
+                  />
+                  {!!createErrors.firstName && <Text style={styles.editErrorText}>{createErrors.firstName}</Text>}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.createFormLabel}>APELLIDO <Text style={styles.requiredStar}>*</Text></Text>
+                  <TextInput
+                    style={[styles.createInput, !!createErrors.lastName && styles.editInputError]}
+                    value={createLastName}
+                    onChangeText={(v) => { setCreateLastName(v); setCreateErrors((p) => { const n = { ...p }; delete n.lastName; return n; }); }}
+                    placeholder="Ej. Rodríguez"
+                    placeholderTextColor={colorScales.gray[400]}
+                  />
+                  {!!createErrors.lastName && <Text style={styles.editErrorText}>{createErrors.lastName}</Text>}
+                </View>
+              </View>
+
+              {/* Teléfono */}
+              <View>
+                <Text style={styles.createFormLabel}>TELÉFONO</Text>
+                <TextInput
+                  style={[styles.createInput, !!createErrors.phone && styles.editInputError]}
+                  value={createPhone}
+                  onChangeText={(v) => { setCreatePhone(v); setCreateErrors((p) => { const n = { ...p }; delete n.phone; return n; }); }}
+                  placeholder="+57 300 000 0000"
+                  placeholderTextColor={colorScales.gray[400]}
+                  keyboardType="phone-pad"
+                />
+                {!!createErrors.phone && <Text style={styles.editErrorText}>{createErrors.phone}</Text>}
+              </View>
+
+              {/* Tipo de documento + Número de documento (row) */}
+              <View style={styles.editRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.createFormLabel}>TIPO DE DOCUMENTO</Text>
+                  <Pressable
+                    style={[styles.createInput, styles.createSelectTrigger]}
+                    onPress={() => setShowCreateDocTypeDropdown((v) => !v)}
+                  >
+                    <Text style={[
+                      styles.createSelectText,
+                      !createDocumentType && styles.createSelectPlaceholder,
+                    ]}>
+                      {CREATE_DOCUMENT_TYPES.find((d) => d.value === createDocumentType)?.label
+                        || 'Selecciona un tipo'}
+                    </Text>
+                    <Ionicons
+                      name={showCreateDocTypeDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colorScales.gray[500]}
+                    />
+                  </Pressable>
+                  {showCreateDocTypeDropdown && (
+                    <View style={styles.createSelectDropdown}>
+                      {CREATE_DOCUMENT_TYPES.map((d) => (
+                        <Pressable
+                          key={d.value}
+                          onPress={() => {
+                            setCreateDocumentType(d.value);
+                            setShowCreateDocTypeDropdown(false);
+                          }}
+                          style={[
+                            styles.createSelectOption,
+                            createDocumentType === d.value && styles.editStateChipActive,
+                          ]}
+                        >
+                          <Text style={[
+                            styles.createSelectOptionText,
+                            createDocumentType === d.value && styles.editStateChipTextActive,
+                          ]}>
+                            {d.label}
+                          </Text>
+                          {createDocumentType === d.value && (
+                            <Ionicons name="checkmark" size={16} color={colors.primary} />
+                          )}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.createFormLabel}>NÚMERO DE DOCUMENTO</Text>
+                  <TextInput
+                    style={styles.createInput}
+                    value={createDocumentNumber}
+                    onChangeText={setCreateDocumentNumber}
+                    placeholder={createDocumentType ? 'Selecciona primero el tipo' : 'Selecciona primero el tipo'}
+                    placeholderTextColor={colorScales.gray[400]}
+                    editable={!!createDocumentType}
+                  />
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Footer: Cancelar + Crear — estilo web */}
+            <View style={styles.createFooter}>
+              <Pressable style={styles.cancelBtn} onPress={closeCreateModal}>
+                <Text style={styles.cancelBtnText}>Cancelar</Text>
+              </Pressable>
+              <View style={styles.actionSpacer} />
+              <Pressable
+                style={[styles.confirmBtn, createMutation.isPending && styles.confirmBtnDisabled]}
+                onPress={handleSubmitCreate}
+                disabled={createMutation.isPending}
+              >
+                <Text style={styles.confirmBtnText}>
+                  {createMutation.isPending ? 'Creando...' : 'Crear'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -293,102 +1217,431 @@ const styles = StyleSheet.create({
     backgroundColor: colorScales.gray[50],
   },
   title: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold,
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold as any,
     color: colorScales.gray[900],
-    marginBottom: spacing[4],
-    marginTop: spacing[2],
+    marginTop: spacing[3],
+    marginBottom: spacing[2],
     paddingHorizontal: spacing[4],
   },
   searchRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing[2],
-    marginBottom: spacing[5],
     paddingHorizontal: spacing[4],
+    paddingBottom: spacing[3],
   },
-  searchBar: {
+  searchInputWrap: {
     flex: 1,
-    height: 44,
-    backgroundColor: colors.background,
-    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
     borderWidth: 1,
     borderColor: colorScales.gray[200],
+    minHeight: 40,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 3,
     elevation: 1,
   },
-  searchActionBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+  searchIcon: { marginRight: spacing[2] },
+  searchInputField: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[900],
+    padding: 0,
+    height: '100%',
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.background,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.background,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 3,
     elevation: 1,
   },
-  searchFilterBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+  /* === Modales Ver / Editar — estilo web (mismo patrón que locations.tsx createModal) === */
+  createModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing[4],
+  },
+  createModal: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 8,
+  },
+  createHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[3],
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[4],
+    paddingBottom: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  createHeaderText: { flex: 1 },
+  createTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[900],
+  },
+  createSubtitle: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  createCloseBtn: { padding: spacing[1] },
+  createBody: { flexGrow: 0, flexShrink: 1, maxHeight: 480 },
+  createBodyContent: { padding: spacing[4], gap: spacing[3] },
+  createFooter: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[3],
+    paddingBottom: spacing[4],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[200],
+    backgroundColor: colors.background,
+    gap: spacing[2],
+  },
+  cancelBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: borderRadius.full,
+    backgroundColor: colorScales.gray[900],
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  cancelBtnText: {
+    fontSize: 13,
+    fontWeight: typography.fontWeight.bold as any,
+    color: colors.background,
+  },
+  actionSpacer: { width: spacing[3] },
+  confirmBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: borderRadius.full,
+    backgroundColor: colorScales.green[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmBtnDisabled: { backgroundColor: colorScales.gray[100] },
+  confirmBtnText: {
+    fontSize: 13,
+    fontWeight: typography.fontWeight.bold as any,
+    color: colorScales.green[800],
+  },
+
+  /* Modal Ver — header con avatar + nombre + status + grid de detalles */
+  viewProfileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    paddingBottom: spacing[2],
+  },
+  viewAvatar: {
+    width: 56,
+    height: 56,
+  },
+  viewName: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[900],
+  },
+  viewEmail: {
+    fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  viewStatusBadge: {
+    alignSelf: 'flex-start',
+    marginTop: spacing[1],
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: 3,
+    borderRadius: borderRadius.full,
+  },
+  viewStatusBadgeText: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  viewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[2],
+    marginTop: spacing[2],
+  },
+  viewGridItem: {
+    flexGrow: 1,
+    flexBasis: '47%',
+    minWidth: 126,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[50],
     borderWidth: 1,
+    borderColor: colorScales.gray[100],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+  },
+  viewGridLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+  },
+  viewGridLabel: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  viewGridValue: {
+    marginTop: 2,
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[800],
+  },
+
+  /* Modal Editar — form */
+  editRow: { flexDirection: 'row', gap: spacing[3] },
+  editFormLabel: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[500],
+    marginBottom: spacing[1.5],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  editInput: {
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2.5],
+    fontSize: 14,
+    color: colorScales.gray[900],
+    backgroundColor: colors.background,
+    fontFamily: typography.fontFamily,
+  },
+  editInputError: { borderColor: colorScales.red[500] },
+  editErrorText: {
+    fontSize: 11,
+    color: colorScales.red[600],
+    marginTop: spacing[1],
+  },
+  editStateRow: { flexDirection: 'row', gap: spacing[2] },
+  editStateChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[1.5],
+    paddingVertical: spacing[2.5],
+    paddingHorizontal: spacing[3],
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colors.background,
+  },
+  editStateChipActive: {
+    backgroundColor: colorScales.green[50],
+    borderColor: colorScales.green[500],
+  },
+  editStateChipText: {
+    fontSize: 13,
+    fontWeight: typography.fontWeight.medium as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[700],
+  },
+  editStateChipTextActive: {
+    color: colors.primary,
+    fontWeight: typography.fontWeight.bold as any,
+  },
+
+  /* Modal Nuevo Cliente — form con campos de la imagen */
+  createFormLabel: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[500],
+    marginBottom: spacing[1.5],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  requiredStar: { color: colorScales.red[500] },
+  createInput: {
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2.5],
+    fontSize: 14,
+    color: colorScales.gray[900],
+    backgroundColor: colors.background,
+    fontFamily: typography.fontFamily,
+  },
+  createSelectTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing[2.5],
+  },
+  createSelectText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[900],
+  },
+  createSelectPlaceholder: { color: colorScales.gray[400] },
+  createSelectDropdown: {
+    marginTop: spacing[1],
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
+  },
+  createSelectOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing[2.5],
+    paddingHorizontal: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  createSelectOptionText: {
+    fontSize: 14,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[700],
+  },
+
+  /* === Filter popup (estilo web options-dropdown) === */
+  filterPopup: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    width: 220,
+    ...shadows.lg,
+    overflow: 'hidden',
+  },
+  filterPopupHeader: {
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[3],
+    paddingBottom: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  filterPopupTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[900],
+  },
+  filterPopupBody: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    gap: spacing[2],
+  },
+  filterPopupLabel: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[700],
+  },
+  filterPopupSelect: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing[2.5],
+    paddingHorizontal: spacing[3],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1.5,
     borderColor: colors.primary,
     backgroundColor: colors.background,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
   },
-  filterDropdown: {
-    backgroundColor: colors.background,
+  filterPopupSelectText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[800],
+  },
+  filterPopupOptionsList: {
+    marginTop: spacing[1],
     borderWidth: 1,
     borderColor: colorScales.gray[200],
     borderRadius: borderRadius.lg,
-    marginBottom: spacing[3],
-    ...shadows.md,
+    backgroundColor: colors.background,
+    overflow: 'hidden',
   },
-  filterOption: {
+  filterPopupOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[2],
+    justifyContent: 'space-between',
+    paddingVertical: spacing[2.5],
     paddingHorizontal: spacing[3],
-    paddingVertical: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
   },
-  filterOptionActive: {
-    backgroundColor: colorScales.gray[50],
+  filterPopupOptionActive: {
+    backgroundColor: colorScales.green[50],
   },
-  filterOptionText: {
+  filterPopupOptionText: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colorScales.gray[800],
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[700],
+  },
+  filterPopupOptionTextActive: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colors.primary,
+  },
+  filterPopupActionsDivider: {
+    height: 1,
+    backgroundColor: colorScales.gray[100],
+  },
+  filterPopupActions: {
+    paddingVertical: spacing[1],
   },
   listContent: {
-    paddingBottom: spacing[24],
+    paddingBottom: spacing[6],
   },
   separator: {
     height: spacing[3],
-  },
-  fab: {
-    position: 'absolute',
-    bottom: spacing[6],
-    right: spacing[6],
-    width: 56,
-    height: 56,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.lg,
   },
   pagination: {
     flexDirection: 'row',
@@ -426,7 +1679,7 @@ const styles = StyleSheet.create({
   },
   pageNumText: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
+    fontWeight: typography.fontWeight.medium as any,
     color: colorScales.gray[700],
   },
   pageNumTextActive: {
@@ -437,5 +1690,257 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: typography.fontSize.sm,
     color: colorScales.gray[400],
+  },
+
+  /* === Customer card — estilo web: top row (avatar + nombre/email + badge) + grid (4 details) + footer (total + 3 acciones) === */
+  customerCard: {
+    marginHorizontal: spacing[3],
+    marginBottom: spacing[3],
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[3],
+    padding: spacing[4],
+    paddingBottom: spacing[2],
+  },
+  cardMedia: {
+    width: 44,
+    height: 44,
+    borderRadius: borderRadius.full,
+    backgroundColor: colorScales.gray[50],
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardAvatar: {
+    width: 44,
+    height: 44,
+  },
+  cardCenter: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  cardTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[900],
+  },
+  cardEmail: {
+    fontSize: typography.fontSize.sm,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[500],
+  },
+  cardStatusBadge: {
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: 3,
+    borderRadius: borderRadius.full,
+    alignSelf: 'flex-start',
+  },
+  cardStatusBadgeText: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  cardDetailsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[3],
+  },
+  cardDetailsRow3: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[2],
+  },
+  cardDetailsRow2: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[3],
+  },
+  cardDetailItemThird: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[50],
+    borderWidth: 1,
+    borderColor: colorScales.gray[100],
+    paddingHorizontal: spacing[2.5],
+    paddingVertical: spacing[2],
+  },
+  cardDetailItemHalf: {
+    flex: 1,
+    minWidth: 0,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[50],
+    borderWidth: 1,
+    borderColor: colorScales.gray[100],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+  },
+  cardDetailItem: {
+    flexGrow: 1,
+    flexBasis: '47%',
+    minWidth: 126,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[50],
+    borderWidth: 1,
+    borderColor: colorScales.gray[100],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+  },
+  cardDetailLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+  },
+  cardDetailLabel: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  cardDetailValue: {
+    marginTop: 2,
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[800],
+  },
+  cardFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+    backgroundColor: colorScales.gray[50],
+  },
+  cardFooterLeft: {
+    gap: 2,
+  },
+  cardFooterLabel: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  cardFooterValue: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[900],
+  },
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  cardActionView: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardActionEdit: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.blue[50],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardActionMore: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[200],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* Dropdown de acciones (popup "Eliminar") — mismo estilo que locations.tsx */
+  dropdownBackdrop: { flex: 1 },
+  dropdownPositioner: { position: 'absolute', alignItems: 'flex-end' },
+  dropdownArrow: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 8,
+    borderRightWidth: 8,
+    borderBottomWidth: 8,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: colors.background,
+    marginRight: 14,
+    marginBottom: -1,
+  },
+  dropdown: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    minWidth: 200,
+    ...shadows.lg,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2.5],
+    paddingHorizontal: spacing[3],
+  },
+  dropdownItemText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[700],
+  },
+  dropdownItemPrimary: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.bold as any,
+    fontFamily: typography.fontFamily,
+    color: colors.primary,
+  },
+  dropdownIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dropdownDivider: {
+    height: 1,
+    backgroundColor: colorScales.gray[100],
+  },
+  dropdownItemDanger: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.bold as any,
+    color: colorScales.red[600],
   },
 });

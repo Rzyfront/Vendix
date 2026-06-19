@@ -15,5 +15,21 @@
         ></app-input>
       </div>
     </div>
+    <div>
+      <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Cierre de día</h4>
+      <div class="space-y-4">
+        <app-input
+          [formControl]="ticketClosingHourControl"
+          type="number"
+          label="Hora de cierre de tickets"
+          placeholder="3"
+          helperText="hora (0-23) a la que el KDS limpia y reinicia los tickets del día"
+          min="0"
+          max="23"
+          size="sm"
+          (inputChange)="onFieldChange()"
+        ></app-input>
+      </div>
+    </div>
   </div>
 </div>

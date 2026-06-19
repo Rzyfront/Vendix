@@ -21,13 +21,34 @@
   gap: 0.125rem;
   overflow-x: auto;
   max-width: 100%;
+  min-height: 1px; /* ISSUE-09: prevents 0-height flash on first paint */
   padding: 0;
   overscroll-behavior-x: contain;
-  scroll-padding-inline: 2rem;
+  scroll-padding-inline: 16px;
   scroll-behavior: smooth;
   -ms-overflow-style: none;
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x; /* ISSUE-09: explicit horizontal pan; avoids page scroll on Firefox mobile */
+  scroll-snap-type: x mandatory; /* ISSUE-09: always park on a tab */
+  /* ISSUE-09: edge-fade indicator — replaces the absolute arrow buttons.
+     Composites against the actual content (so it adapts to dark mode
+     automatically) and adds zero DOM. 24px stops match the prior
+     visual depth. */
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 24px,
+    #000 calc(100% - 24px),
+    transparent 100%
+  );
 
   &::-webkit-scrollbar {
     display: none;
@@ -97,7 +118,8 @@
   opacity: 0.78;
   cursor: pointer;
   position: relative;
-  scroll-margin-inline: 2rem;
+  scroll-margin-inline: 16px;
+  scroll-snap-align: center; /* ISSUE-09: centers the active tab in the strip */
   transition:
     background-color 150ms ease,
     color 150ms ease,

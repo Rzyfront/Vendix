@@ -8,6 +8,17 @@ description: |
   the personal API key, resolves and caches the team/project/labels/state
   UUIDs in `.linear/config.json`, and confirms with a smoke-test read. Do NOT
   use for creating or mutating issues (use `linear-issues` instead).
+license: MIT
+metadata:
+  author: rzyfront
+  version: "1.0"
+  scope: [root]
+  auto_invoke:
+    - "Bootstrapping local Linear credentials for Vendix"
+    - "Configuring the Vendix Linear API key"
+    - "Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json"
+    - "Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo"
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 # Linear Connect (Vendix · Quickss)

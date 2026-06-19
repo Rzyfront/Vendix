@@ -38,6 +38,14 @@ export interface CartItem {
   // `quantity` counts PACKAGES; stock consumed = quantity * units_per_package
   // and `unitPrice`/`finalPrice` are WHOLE-PACKAGE prices.
   units_per_package?: number | null;
+  // Restaurant Suite — Fase K Gap 1: when true the cart item is
+  // excluded from the kitchen-fire call (`fireOrderItems` will not
+  // receive its order_item_id). The product's own stock is then
+  // consumed at PAYMENT time as a regular `sale` movement. The flag
+  // is purely cart-local — it is NOT persisted to `order_items` so
+  // no DB migration is required. Defaults to false (legacy
+  // behaviour: send to kitchen).
+  skipKds?: boolean;
 }
 
 export interface CartDiscount {
@@ -104,6 +112,15 @@ export interface AddToCartRequest {
   // Weight product fields
   weight?: number;
   weight_unit?: 'kg' | 'g' | 'lb';
+  /**
+   * Restaurant Suite — Fase K Gap 1: when true the item is added to
+   * the cart with `skipKds=true`, meaning the POS will NOT fire it
+   * to the kitchen. The product's own stock is deducted at payment
+   * time. The cashier UI surfaces this choice via the
+   * `pos-prepared-choice-modal` for `prepared` products that track
+   * inventory and have stock > 0.
+   */
+  skipKds?: boolean;
 }
 
 export interface AddCustomItemRequest {

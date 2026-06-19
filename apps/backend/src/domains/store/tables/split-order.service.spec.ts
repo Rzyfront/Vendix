@@ -171,7 +171,15 @@ describe('SplitOrderService — splitByItems + splitByAmount (Fase E smoke)', ()
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue(context);
 
-    service = new SplitOrderService(prismaMock as any);
+    // Plan KDS fire-flows: SplitOrderService now takes a KitchenFireService
+// for the auto-fire path inside runSplit. The existing tests in this
+// file do not exercise the auto-fire path; we pass a minimal stub so
+// the constructor compiles without dragging in the full module.
+service = new SplitOrderService(prismaMock as any, {
+  prepareFireContext: jest.fn(),
+  fireOrderItemsInTx: jest.fn(),
+  emitKitchenFiredAfterCommit: jest.fn(),
+} as any);
   });
 
   afterEach(() => jest.clearAllMocks());

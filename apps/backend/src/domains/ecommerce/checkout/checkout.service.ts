@@ -34,6 +34,7 @@ import { PromotionEngineService } from '../../store/promotions/promotion-engine/
 import { CouponsService } from '../../store/coupons/coupons.service';
 import { CouponAppliesTo } from '../../store/coupons/dto';
 import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote.interface';
+import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 
 @Injectable()
 export class CheckoutService {
@@ -1023,8 +1024,13 @@ export class CheckoutService {
       },
     });
 
+    // Restaurant fire-to-kitchen deferral: prepared items with an active
+    // recipe are excluded from reservation (computed once for the whole cart).
+    const deferredPreparedProductIds =
+      await this.getDeferredPreparedProductIds(cart_items);
+
     for (const item of cart_items) {
-      if (!this.shouldReserveStock(item)) continue;
+      if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
       try {
         // P3.4: Resolves to central warehouse when org scope = ORGANIZATION,
         // otherwise falls back to the legacy per-product default location.
@@ -1521,8 +1527,13 @@ export class CheckoutService {
       currency: order.currency,
     });
 
+    // Restaurant fire-to-kitchen deferral: prepared items with an active
+    // recipe are excluded from reservation (computed once for the whole cart).
+    const deferredPreparedProductIds =
+      await this.getDeferredPreparedProductIds(cart_items);
+
     for (const item of cart_items) {
-      if (!this.shouldReserveStock(item)) continue;
+      if (!this.shouldReserveStock(item, deferredPreparedProductIds)) continue;
       try {
         // P3.4: Resolves to central warehouse when org scope = ORGANIZATION,
         // otherwise falls back to the legacy per-product default location.
@@ -2140,11 +2151,92 @@ export class CheckoutService {
     return sanitized.length > 0 ? sanitized : 'receipt';
   }
 
-  private shouldReserveStock(item: any): boolean {
+  private shouldReserveStock(
+    item: any,
+    deferredPreparedProductIds?: Set<number>,
+  ): boolean {
+    // Restaurant fire-to-kitchen deferral: a `prepared` product with an active
+    // recipe in a restaurant store must NOT reserve (nor consume) inventory at
+    // checkout. Its ingredient stock is consumed at kitchen-fire. The set of
+    // such product ids is precomputed once per checkout via
+    // `getDeferredPreparedProductIds`. Non-restaurant stores, prepared products
+    // without an active recipe, and non-prepared products are unaffected.
+    if (deferredPreparedProductIds?.has(item.product_id)) {
+      return false;
+    }
     return this.stockValidatorService.resolveEffectiveTracking(
       item.product,
       item.product_variant ?? undefined,
     );
+  }
+
+  /**
+   * Restaurant-only deferral gate for ecommerce checkout reservations.
+   *
+   * Mirrors the fire-to-kitchen inventory rule already implemented in
+   * `order-flow.service.ts` and `payments.updateInventoryFromOrder`: in a
+   * `restaurant` store, `order_items` whose product is
+   * `product_type='prepared'` AND has an ACTIVE recipe do not reserve or
+   * consume inventory outside of kitchen-fire. Their ingredient stock is
+   * consumed at fire-to-kitchen (`kitchen-fire.service.ts`), not at checkout.
+   *
+   * Returns the set of `product_id`s that must be EXCLUDED from the stock
+   * reservation loop. The result is intended to be computed ONCE per checkout
+   * and reused across the reservation loop (no per-item DB calls).
+   *
+   * Strict gate — returns an empty set (no deferral, legacy behavior) when:
+   * - the store is not a restaurant (`storeIsRestaurant` is false),
+   * - there are no `prepared` items in the cart,
+   * - no store context is available.
+   *
+   * Prepared products WITHOUT an active recipe keep the normal reservation
+   * behavior (only prepared + active recipe is deferred).
+   */
+  private async getDeferredPreparedProductIds(
+    cart_items: Array<{ product_id: number; product: any }>,
+  ): Promise<Set<number>> {
+    const empty = new Set<number>();
+
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      return empty;
+    }
+
+    // Collect prepared product ids first; if there are none we can skip the
+    // store-industries lookup entirely.
+    const preparedProductIds = Array.from(
+      new Set(
+        cart_items
+          .filter((item) => item.product?.product_type === 'prepared')
+          .map((item) => item.product_id),
+      ),
+    );
+    if (preparedProductIds.length === 0) {
+      return empty;
+    }
+
+    // `stores` getter is unscoped (baseClient); filter by store_id explicitly
+    // for tenant safety (vendix-prisma-scopes).
+    const store = await this.prisma.stores.findFirst({
+      where: { id: store_id },
+      select: { industries: true },
+    });
+    if (!storeIsRestaurant(store?.industries)) {
+      return empty;
+    }
+
+    // Single query for active recipes of the prepared products. `recipes` is
+    // store-scoped on `store_prisma` (scoped_client injects store_id); a
+    // `findMany` with a `where` is scope-safe (not a unique op).
+    const activeRecipes = await this.store_prisma.recipes.findMany({
+      where: {
+        product_id: { in: preparedProductIds },
+        is_active: true,
+      },
+      select: { product_id: true },
+    });
+
+    return new Set(activeRecipes.map((r) => r.product_id));
   }
 
   /**

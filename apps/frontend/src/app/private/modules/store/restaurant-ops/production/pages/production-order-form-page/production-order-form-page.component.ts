@@ -73,9 +73,9 @@ export class ProductionOrderFormPageComponent implements OnInit {
 
   readonly isSubmitting = signal(false);
 
-  /** Prepared products as options; non-batch ones are rendered disabled with a hint. */
+  /** Productos producibles por lote como opciones del selector (todas habilitadas). */
   readonly productOptions = signal<SelectorOption[]>([]);
-  /** True when prepared products exist but none are batch-eligible — drives the guidance note. */
+  /** True cuando no hay productos producibles por lote — muestra la nota guía. */
   readonly noEligibleProducts = signal(false);
   /** Active recipes for the currently selected product. */
   readonly recipeOptions = signal<SelectorOption[]>([]);
@@ -119,7 +119,7 @@ export class ProductionOrderFormPageComponent implements OnInit {
     return this.form.controls.notes;
   }
 
-  /** Loaded prepared products, kept to resolve stock_unit on selection. */
+  /** Productos producibles por lote cargados, para resolver stock_unit al seleccionar. */
   private preparedProducts: Product[] = [];
 
   ngOnInit(): void {
@@ -134,15 +134,14 @@ export class ProductionOrderFormPageComponent implements OnInit {
   private loadPreparedProducts(): void {
     this.isLoadingProducts.set(true);
     this.productIdControl.disable({ emitEvent: false });
-    // El backend filtra product_type server-side (verificado), así que NO
-    // re-filtramos por tipo en cliente ni sobre-pedimos. Mostramos todos los
-    // preparados y marcamos como deshabilitados los que aún no son producibles
-    // por lote (is_batch_produced=false), con una pista para activarlos.
+    // El backend filtra is_batch_produced=true server-side: todos los productos
+    // devueltos ya son producibles por lote (un insumo es physical, no prepared),
+    // así que todas las opciones quedan habilitadas.
     this.productsService
       .getProducts({
         limit: 200,
         state: ProductState.ACTIVE,
-        product_type: 'prepared',
+        is_batch_produced: true,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -151,29 +150,25 @@ export class ProductionOrderFormPageComponent implements OnInit {
           this.preparedProducts = rows;
           this.productOptions.set(
             rows.map((p: Product) => {
-              const batchReady = p.is_batch_produced === true;
               const base = p.sku
                 ? `${p.sku} · ${p.stock_unit ?? ''}`.trim()
                 : (p.stock_unit ?? '');
               return {
                 value: p.id,
                 label: p.name,
-                description: batchReady
-                  ? base || undefined
-                  : `${base ? base + ' · ' : ''}Activa «producido por lote»`,
-                disabled: !batchReady,
+                description: base || undefined,
               } as SelectorOption;
             }),
           );
-          this.noEligibleProducts.set(
-            rows.length > 0 &&
-              !rows.some((p: Product) => p.is_batch_produced === true),
-          );
+          // Sin productos producibles por lote disponibles para producir.
+          this.noEligibleProducts.set(rows.length === 0);
           this.productIdControl.enable({ emitEvent: false });
           this.isLoadingProducts.set(false);
         },
         error: () => {
-          this.toastService.error('No se pudieron cargar los productos preparados');
+          this.toastService.error(
+            'No se pudieron cargar los productos producibles por lote',
+          );
           this.productIdControl.enable({ emitEvent: false });
           this.isLoadingProducts.set(false);
         },

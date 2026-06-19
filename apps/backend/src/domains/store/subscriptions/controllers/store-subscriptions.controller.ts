@@ -26,6 +26,9 @@ import { SubscriptionRedemptionService } from '../services/subscription-redempti
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import { UseGuards } from '@nestjs/common';
 import { SubscribeDto } from '../dto/subscribe.dto';
 import { CancelDto } from '../dto/cancel.dto';
@@ -36,7 +39,7 @@ import { SkipSubscriptionGate } from '../decorators/skip-subscription-gate.decor
 import { PromotionalRulesEvaluator } from '../evaluators/promotional-rules.evaluator';
 import { PromoEligibilityResult } from '../types/promo.types';
 
-@UseGuards(PermissionsGuard)
+@UseGuards(PermissionsGuard, RolesGuard)
 @SkipSubscriptionGate()
 @Controller('store/subscriptions')
 export class StoreSubscriptionsController {
@@ -266,6 +269,7 @@ export class StoreSubscriptionsController {
    * states are `issued` / `overdue`).
    */
   @Permissions('subscriptions:write')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Post('retry-payment')
   async retryPayment() {
     const storeId = RequestContextService.getStoreId();
@@ -310,6 +314,7 @@ export class StoreSubscriptionsController {
   }
 
   @Permissions('subscriptions:write')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Post('subscribe')
   async subscribe(@Body() dto: SubscribeDto) {
     const storeId = RequestContextService.getStoreId();
@@ -441,6 +446,7 @@ export class StoreSubscriptionsController {
   }
 
   @Permissions('subscriptions:write')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Post('cancel')
   async cancel(@Body() dto: CancelDto) {
     const storeId = RequestContextService.getStoreId();
@@ -484,6 +490,7 @@ export class StoreSubscriptionsController {
     return this.responseService.success(result, 'Subscription cancelled');
   }
 
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Post('uncancel')
   @SkipSubscriptionGate()
   async uncancel() {
@@ -510,6 +517,7 @@ export class StoreSubscriptionsController {
    * `current_period_end` the renewal cron has already applied the swap and
    * the operation returns 4xx (SUBSCRIPTION_010).
    */
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Delete('scheduled-change')
   @SkipSubscriptionGate()
   async cancelScheduledPlanChange() {
@@ -533,6 +541,7 @@ export class StoreSubscriptionsController {
     );
   }
 
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Post('support-request')
   @SkipSubscriptionGate()
   async supportRequest(
@@ -553,6 +562,7 @@ export class StoreSubscriptionsController {
   }
 
   @Permissions('subscriptions:read')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Get('current/invoices')
   async getInvoices(@Query() query: SubscriptionQueryDto) {
     const storeId = RequestContextService.getStoreId();
@@ -591,6 +601,7 @@ export class StoreSubscriptionsController {
   }
 
   @Permissions('subscriptions:read')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Get('current/invoices/:invoiceId')
   async getInvoice(@Param('invoiceId') invoiceId: string) {
     const storeId = RequestContextService.getStoreId();
@@ -640,6 +651,7 @@ export class StoreSubscriptionsController {
    * purposes. Streams a `application/pdf` payload.
    */
   @Permissions('subscriptions:read')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @SkipSubscriptionGate()
   @Get('current/invoices/:invoiceId/pdf')
   async getInvoicePdf(
@@ -688,6 +700,7 @@ export class StoreSubscriptionsController {
    * cuando la subscripción esté suspendida o bloqueada.
    */
   @Permissions('subscriptions:read')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @SkipSubscriptionGate()
   @Get('current/events')
   async getEvents(
@@ -875,6 +888,7 @@ export class StoreSubscriptionsController {
   // ── Payment Methods ────────────────────────────────────────────────
 
   @Permissions('subscriptions:read')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Get('payment-methods')
   async listPaymentMethods() {
     const data = await this.paymentMethods.listForStore();
@@ -882,6 +896,7 @@ export class StoreSubscriptionsController {
   }
 
   @Permissions('subscriptions:read')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Get('payment-methods/widget-config')
   async getPaymentMethodWidgetConfig() {
     const storeId = RequestContextService.getStoreId();
@@ -897,6 +912,7 @@ export class StoreSubscriptionsController {
   }
 
   @Permissions('subscriptions:write')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Post('payment-methods/tokenize')
   async tokenizePaymentMethod(@Body() dto: TokenizePaymentMethodDto) {
     const data = await this.paymentMethods.tokenize(dto);
@@ -904,6 +920,7 @@ export class StoreSubscriptionsController {
   }
 
   @Permissions('subscriptions:write')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Put('payment-methods/:id/default')
   async setDefaultPaymentMethod(@Param('id') id: string) {
     const data = await this.paymentMethods.setDefault(id);
@@ -911,6 +928,7 @@ export class StoreSubscriptionsController {
   }
 
   @Permissions('subscriptions:write')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Delete('payment-methods/:id')
   async removePaymentMethod(@Param('id') id: string) {
     await this.paymentMethods.remove(id);
@@ -924,6 +942,7 @@ export class StoreSubscriptionsController {
    * / replace the card.
    */
   @Permissions('subscriptions:read')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Get('payment-methods/:id/charges')
   async listPaymentMethodCharges(
     @Param('id') id: string,
@@ -942,6 +961,7 @@ export class StoreSubscriptionsController {
    * audits the replacement in `subscription_events`.
    */
   @Permissions('subscriptions:write')
+  @Roles(UserRole.OWNER, UserRole.SUPER_ADMIN)
   @Post('payment-methods/:id/replace')
   async replacePaymentMethod(
     @Param('id') id: string,

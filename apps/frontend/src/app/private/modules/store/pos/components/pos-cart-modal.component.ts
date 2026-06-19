@@ -264,11 +264,11 @@ import {
           <div class="modal-actions-row">
             <button
               class="action-btn save-btn"
-              (click)="saveDraft.emit()"
+              (click)="create.emit()"
               [disabled]="!cartState()?.items?.length"
               >
-              <app-icon name="save" [size]="18"></app-icon>
-              <span>Guardar</span>
+              <app-icon name="clipboard-list" [size]="18"></app-icon>
+              <span>Crear</span>
             </button>
             <button
               class="action-btn shipping-btn"
@@ -860,7 +860,7 @@ export class PosCartModalComponent {
   readonly itemQuantityChanged = output<{ itemId: string; quantity: number }>();
   readonly itemRemoved = output<string>();
   readonly clearCart = output<void>();
-  readonly saveDraft = output<void>();
+  readonly create = output<void>();
   readonly shipping = output<void>();
   readonly checkout = output<void>();
 

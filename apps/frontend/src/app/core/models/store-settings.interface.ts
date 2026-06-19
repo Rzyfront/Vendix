@@ -72,6 +72,11 @@ export interface InventorySettings {
 
 export interface OperationsSettings {
   default_preparation_time_minutes: number;
+  /**
+   * Hour (0–23) at which the KDS board clears and resets the day's tickets.
+   * Mirrors backend `operations.ticket_closing_hour`. Default 3 (3 AM).
+   */
+  ticket_closing_hour?: number;
 }
 
 export interface CheckoutSettings {

@@ -17,6 +17,19 @@ export interface FireOrderItemsResult {
   ticket?: KitchenTicket;
 }
 
+/**
+ * Structured error thrown by ticket mutations. Unlike the snapshot/fire
+ * paths (which throw a plain string), mutations preserve the backend
+ * `error_code` so the board can branch on specific cases — e.g.
+ * `KITCHEN_TICKET_NO_RECIPE` → "ir a recetas" dialog — instead of showing a
+ * generic toast.
+ */
+export interface KitchenMutationError {
+  code: string | null;
+  message: string;
+  details?: any;
+}
+
 interface ApiResponse<T> {
   success: boolean;
   data: T;
@@ -77,6 +90,17 @@ export class KitchenTicketsService {
   }
 
   /**
+   * Revierte el ticket al estado inmediatamente anterior
+   * (in_preparation → pending, ready → in_preparation,
+   * delivered → ready, cancelled → ready). El backend resuelve el
+   * estado destino y devuelve el ticket actualizado; el board lo
+   * reconcilia vía el evento SSE `ticket.reverted`.
+   */
+  revert(ticketId: number): Observable<KitchenTicket> {
+    return this.mutateTicket(ticketId, 'revert');
+  }
+
+  /**
    * Fire a batch of order items to the kitchen (creates a
    * `kitchen_ticket` and triggers the inventory + COGS seam in
    * Phase D). Returns the new ticket summary.
@@ -99,7 +123,7 @@ export class KitchenTicketsService {
 
   private mutateTicket(
     ticketId: number,
-    action: 'start' | 'ready' | 'delivered' | 'cancel',
+    action: 'start' | 'ready' | 'delivered' | 'cancel' | 'revert',
   ): Observable<KitchenTicket> {
     return this.http
       .post<ApiResponse<KitchenTicket>>(
@@ -108,7 +132,7 @@ export class KitchenTicketsService {
       )
       .pipe(
         map((res) => res.data),
-        catchError(this.handleError),
+        catchError(this.handleMutationError),
       );
   }
 
@@ -131,9 +155,7 @@ export class KitchenTicketsService {
 
   // ─── Error mapping ───────────────────────────────────────────────────
 
-  private handleError = (error: any): Observable<never> => {
-    // eslint-disable-next-line no-console
-    console.error('KitchenTicketsService Error:', error);
+  private deriveErrorMessage(error: any): string {
     let message = 'Error al procesar la solicitud';
     const apiMessage = error?.error?.message;
     if (apiMessage) {
@@ -157,6 +179,30 @@ export class KitchenTicketsService {
     } else if (typeof error?.status === 'number' && error.status >= 500) {
       message = 'Error del servidor. Inténtalo más tarde';
     }
-    return throwError(() => message);
+    return message;
+  }
+
+  private handleError = (error: any): Observable<never> => {
+    // eslint-disable-next-line no-console
+    console.error('KitchenTicketsService Error:', error);
+    return throwError(() => this.deriveErrorMessage(error));
+  };
+
+  /**
+   * Error handler for ticket mutations. Preserves the backend `error_code`
+   * + `details` (e.g. `KITCHEN_TICKET_NO_RECIPE`) so the KDS board can branch
+   * to an actionable dialog instead of a generic toast. The snapshot/fire
+   * paths keep `handleError` (string) so their existing consumers' contract
+   * is unchanged.
+   */
+  private handleMutationError = (error: any): Observable<never> => {
+    // eslint-disable-next-line no-console
+    console.error('KitchenTicketsService Error:', error);
+    const mutationError: KitchenMutationError = {
+      code: error?.error?.error_code ?? error?.error?.code ?? null,
+      message: this.deriveErrorMessage(error),
+      details: error?.error?.details ?? null,
+    };
+    return throwError(() => mutationError);
   };
 }

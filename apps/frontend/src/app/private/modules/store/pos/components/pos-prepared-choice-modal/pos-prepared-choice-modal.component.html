@@ -1,0 +1,73 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="onCancel()"
+  size="md"
+>
+  <div slot="header" class="flex items-center gap-2">
+    <app-icon name="utensils" [size]="20" class="text-primary" />
+    <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
+      ¿Cómo despacho este plato?
+    </h3>
+  </div>
+
+  @if (productDisplay(); as p) {
+    <div class="space-y-4">
+      <div class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[var(--color-surface-alt)] border border-[var(--color-border)]">
+        <div class="min-w-0">
+          <p class="text-sm font-semibold text-[var(--color-text-primary)] truncate">
+            {{ p.name }}
+          </p>
+          @if (p.sku) {
+            <p class="text-[11px] font-mono text-[var(--color-text-secondary)]">
+              SKU: {{ p.sku }}
+            </p>
+          }
+        </div>
+        <app-badge variant="info" size="xs">
+          <app-icon slot="icon" name="package" [size]="11" />
+          Stock: {{ stockLabel() }}
+        </app-badge>
+      </div>
+
+      <p class="text-[12px] text-[var(--color-text-secondary)]">
+        El plato es <strong>preparado</strong> y tiene stock propio. Decide cómo se despacha:
+      </p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <button
+          type="button"
+          (click)="onStock()"
+          class="text-left p-3 rounded-xl border-2 border-[var(--color-border)] hover:border-emerald-400 hover:bg-emerald-50/40 transition-colors"
+        >
+          <div class="flex items-center gap-2 mb-1">
+            <app-icon name="package" [size]="16" class="text-emerald-600" />
+            <span class="text-sm font-semibold">Usar stock</span>
+          </div>
+          <p class="text-[11px] text-[var(--color-text-secondary)] leading-snug">
+            No se envía a cocina. El stock del plato se descuenta al cobrar
+            (como una venta normal).
+          </p>
+        </button>
+
+        <button
+          type="button"
+          (click)="onKds()"
+          class="text-left p-3 rounded-xl border-2 border-[var(--color-border)] hover:border-amber-400 hover:bg-amber-50/40 transition-colors"
+        >
+          <div class="flex items-center gap-2 mb-1">
+            <app-icon name="flame" [size]="16" class="text-amber-600" />
+            <span class="text-sm font-semibold">Producir por KDS</span>
+          </div>
+          <p class="text-[11px] text-[var(--color-text-secondary)] leading-snug">
+            Se envía a cocina. Se descuenta el inventario de los
+            ingredientes al disparar; el plato se prepara manualmente.
+          </p>
+        </button>
+      </div>
+    </div>
+  }
+
+  <div slot="footer" class="flex justify-end gap-2">
+    <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
+  </div>
+</app-modal>

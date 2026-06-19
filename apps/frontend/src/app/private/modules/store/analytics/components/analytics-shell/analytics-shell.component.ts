@@ -1,24 +1,22 @@
 import { Component, computed, inject } from '@angular/core';
 import { RouterOutlet, ActivatedRoute, Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { map } from 'rxjs';
 import {
   AnalyticsCategoryId,
   getCategoryById,
-  getViewsByCategory,
 } from '../../config/analytics-registry';
 import {
   StickyHeaderComponent,
-  StickyHeaderTab,
   StickyHeaderActionButton,
 } from '../../../../../../shared/components/sticky-header/sticky-header.component';
+import { AnalyticsTabBarComponent } from '../analytics-tab-bar/analytics-tab-bar.component';
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 import { dateRangeToQueryParams } from '../../../shared/utils/date-range-params.util';
 
 @Component({
   selector: 'app-analytics-shell',
   standalone: true,
-  imports: [RouterOutlet, StickyHeaderComponent],
+  imports: [RouterOutlet, StickyHeaderComponent, AnalyticsTabBarComponent],
   templateUrl: './analytics-shell.component.html',
   styleUrls: ['./analytics-shell.component.scss'],
 })
@@ -27,25 +25,19 @@ export class AnalyticsShellComponent {
   private readonly router = inject(Router);
   private readonly dateRangeSync = inject(DateRangeSyncService);
 
-  private readonly categoryId = toSignal(
-    this.route.data.pipe(map((data) => data['categoryId'] as AnalyticsCategoryId)),
+  // `initialValue` evita el "no initial value" warning del audit script zoneless
+  // y permite que `categoryId` se lea sincrónicamente dentro de `computed()`.
+  private readonly routeData = toSignal(this.route.data, {
+    initialValue: this.route.snapshot.data,
+  });
+
+  readonly categoryId = computed<AnalyticsCategoryId | undefined>(
+    () => this.routeData()['categoryId'] as AnalyticsCategoryId | undefined,
   );
 
   readonly category = computed(() => {
     const categoryId = this.categoryId();
     return categoryId ? getCategoryById(categoryId) : undefined;
-  });
-
-  readonly tabs = computed<StickyHeaderTab[]>(() => {
-    const categoryId = this.categoryId();
-    if (!categoryId) return [];
-
-    return getViewsByCategory(categoryId).map((view) => ({
-      id: view.key,
-      label: view.title,
-      icon: view.icon,
-      route: view.route,
-    }));
   });
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [

@@ -84,6 +84,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Applying @SkipSubscriptionGate to bypass StoreOperationsGuard on a handler/controller | `vendix-subscription-gate` |
 | Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules | `vendix-zoneless-signals` |
 | Binding form controls in Angular templates | `vendix-angular-forms` |
+| Bootstrapping local Linear credentials for Vendix | `linear-connect` |
 | Branching off or rebasing onto origin/dev before work | `git-workflow` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
@@ -104,6 +105,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Configuring MCP authentication | `vendix-mcp-server` |
 | Configuring middleware | `vendix-backend-middleware` |
 | Configuring panel_ui visibility | `vendix-panel-ui` |
+| Configuring the Vendix Linear API key | `linear-connect` |
 | Consulting or updating keys/README.md production runbook | `vendix-cloud-operations` |
 | Creating AI queue processors | `vendix-ai-queue` |
 | Creating AI-powered features | `vendix-ai-engine` |
@@ -114,7 +116,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating Frontend Modules | `vendix-frontend-module` |
 | Creating SaaS subscription invoices or rev-share splits | `vendix-saas-billing` |
 | Creating Seeds | `vendix-prisma-seed` |
+| Creating a bug in Linear for Vendix | `linear-issues` |
 | Creating a new skill | `skill-creator` |
+| Creating a ticket in Linear | `linear-issues` |
+| Creating an issue in Linear | `linear-issues` |
 | Creating auth modal components | `vendix-customer-auth` |
 | Creating date inputs in forms | `vendix-date-timezone` |
 | Creating files, classes, interfaces, enums, or routes | `vendix-naming-conventions` |
@@ -188,6 +193,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Invalidating the sub:features:{storeId} Redis cache | `vendix-subscription-gate` |
+| Listing Vendix issues in Linear | `linear-issues` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
 | Mapping store_subscription_state_enum to allow/warn/block | `vendix-subscription-gate` |
@@ -209,9 +215,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Pulling the latest Engram memories (engram sync --import) before starting work | `git-workflow` |
 | Querying by date ranges in backend | `vendix-date-timezone` |
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
+| Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
+| Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json | `linear-connect` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
 | Running an automated code review (pr-code-review) on a PR before merging | `git-workflow` |
@@ -234,6 +242,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Understanding settings inheritance and defaults | `vendix-settings-system` |
 | Updating notification subscriptions or notification preferences | `vendix-notifications-system` |
 | Updating skill guidance or documenting repeatable AI patterns | `skill-creator` |
+| Updating the status of a Vendix Linear issue | `linear-issues` |
 | Uploading files, handling S3 URLs, or saving image URLs to database | `vendix-s3-storage` |
 | User explicitly requests business analysis | `vendix-business-analysis` |
 | User requests agent teams, subordinate agents, parallel agents, or background agents | `agent-teams` |

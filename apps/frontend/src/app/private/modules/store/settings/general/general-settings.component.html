@@ -104,7 +104,7 @@
             <h2 class="section-title">Operaciones</h2>
           </div>
           <div class="section-body">
-            <app-operations-settings-form [settings]="settings().operations || { default_preparation_time_minutes: 15 }"
+            <app-operations-settings-form [settings]="settings().operations || { default_preparation_time_minutes: 15, ticket_closing_hour: 3 }"
               (settingsChange)="onSectionChange('operations', $event)" />
           </div>
         </section>

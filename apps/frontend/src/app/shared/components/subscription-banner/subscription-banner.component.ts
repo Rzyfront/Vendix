@@ -205,10 +205,29 @@ export class SubscriptionBannerComponent implements OnInit {
     return 'none';
   });
 
+  // Role gate — the banner exposes subscription-management CTAs that only the
+  // store owner (and super_admin) can act on. Non-owner store users (cashiers,
+  // staff) must never see it. Reads signal-backed AuthFacade flags so it stays
+  // reactive under zoneless change detection.
+  private readonly canManageSubscription = computed<boolean>(() => {
+    return (
+      this.authFacade.isOwner() ||
+      this.authFacade.hasAnyRole([
+        'owner',
+        'OWNER',
+        'super_admin',
+        'STORE_OWNER',
+        'ORG_OWNER',
+      ])
+    );
+  });
+
   readonly visible = computed(() => {
     // S1.2 — Banner is STORE-only. Hide it for ORG_ADMIN / SUPER_ADMIN
     // / logout (currentStoreId === null) regardless of any cached state.
     if (this.currentStoreId() === null) return false;
+    // Role gate — hide entirely for non-owner store users.
+    if (!this.canManageSubscription()) return false;
     if (this.dismissed()) return false;
     // RNC-PaidPlan — Top alert is now driven by the unified subscription UI
     // state (ADR-4). Only `expiring_soon` and `grace_*` surface here; pending

@@ -18,6 +18,7 @@ import {
   CancelOrderDto,
   CancelPaymentDto,
   FastTrackOrderDto,
+  ReactivateOrderDto,
 } from './dto';
 import { SettingsService } from '../../settings/settings.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
@@ -25,6 +26,7 @@ import { MovementsService } from '../../cash-registers/movements/movements.servi
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { OrderEtaService } from '../services/order-eta.service';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
+import { storeIsRestaurant } from '../../../../common/helpers/industry-capabilities.helper';
 
 type OrderState = order_state_enum;
 
@@ -32,11 +34,14 @@ const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
   draft: ['created', 'cancelled'],
   created: ['pending_payment', 'processing', 'finished', 'cancelled'],
   pending_payment: ['processing', 'finished', 'cancelled'],
-  processing: ['shipped', 'cancelled'],
+  processing: ['shipped', 'delivered', 'finished', 'cancelled'],
   shipped: ['delivered'],
-  delivered: ['finished', 'refunded'],
+  // 'processing' habilita la reversa de entrega del ticket de cocina
+  // (KDS "un paso atrás"): cuando el ticket terminal vuelve a 'ready',
+  // la orden retrocede delivered -> processing (ver revertKitchenOrderDelivery).
+  delivered: ['finished', 'refunded', 'processing'],
   finished: ['refunded'],
-  cancelled: [],
+  cancelled: ['pending_payment', 'created', 'processing'],
   refunded: [],
 };
 
@@ -75,6 +80,35 @@ export class OrderFlowService {
     }
 
     return order;
+  }
+
+  /**
+   * F2-guard — Restaurant Suite: an order must NEVER move to `finished`
+   * while it still has kitchen items the cook has not handed off. "Pending"
+   * means `kitchen_ticket_items.status NOT IN ('delivered','cancelled')`.
+   *
+   * Scope-safe: `kitchen_ticket_items` is registered in `StorePrismaService`
+   * (auto-scoped through `kitchen_ticket.store_id`), so counting through the
+   * `kitchen_ticket.order_id` relation never leaks across tenants. Accepts an
+   * optional transaction client so callers inside a `$transaction` see their
+   * own uncommitted writes.
+   *
+   * Returns `true` when at least one undelivered kitchen item exists. For
+   * non-restaurant / non-fired orders the count is 0, so it returns `false`
+   * and never blocks the normal retail/ecommerce finish path.
+   */
+  private async hasPendingKitchenItems(
+    orderId: number,
+    client: { kitchen_ticket_items: { count: (args: any) => Promise<number> } } = this
+      .prisma,
+  ): Promise<boolean> {
+    const pendingCount = await client.kitchen_ticket_items.count({
+      where: {
+        kitchen_ticket: { order_id: orderId },
+        status: { notIn: ['delivered', 'cancelled'] },
+      },
+    });
+    return pendingCount > 0;
   }
 
   private validateTransition(
@@ -188,7 +222,7 @@ export class OrderFlowService {
         const orderWithItems = await this.prisma.orders.findUnique({
           where: { id: orderId },
           include: {
-            stores: { select: { organization_id: true } },
+            stores: { select: { organization_id: true, industries: true } },
             order_items: {
               include: {
                 products: {
@@ -225,6 +259,24 @@ export class OrderFlowService {
               item.products?.product_type === 'service'
             )
               continue;
+
+            // Plan KDS fire-flows (B4a): for restaurant stores, items
+            // flagged `prepared` with skip_kds=false are NOT decremented
+            // here — their COGS + stock consumption will happen in
+            // fire-to-kitchen (the operator / auto-fire / manual-fire
+            // path). Items with skip_kds=true still flow through here
+            // (they were never candidates for the kitchen).
+            // For non-restaurant stores the behavior is unchanged: the
+            // legacy path decrements everything as it always did.
+            if (
+              storeIsRestaurant(
+                (orderWithItems as any)?.stores?.industries,
+              ) &&
+              item.products?.product_type === 'prepared' &&
+              !item.skip_kds
+            ) {
+              continue;
+            }
 
             const location_id =
               await this.stockLevelManager.getDefaultLocationForProduct(
@@ -265,6 +317,21 @@ export class OrderFlowService {
               item.products?.product_type === 'service'
             )
               continue;
+            // Plan KDS fire-flows (B4a): for restaurant stores, items
+            // flagged `prepared` with skip_kds=false have their COGS
+            // already recognized in fire-to-kitchen (accounting entry
+            // 6135/1435 emitted by the kitchen.fired listener); the
+            // `order.completed` event must not double-count them by
+            // re-summing cost_price here.
+            if (
+              storeIsRestaurant(
+                (orderWithItems as any)?.stores?.industries,
+              ) &&
+              item.products?.product_type === 'prepared' &&
+              !item.skip_kds
+            ) {
+              continue;
+            }
             totalCost += Number(item.cost_price || 0) * item.quantity;
           }
         }
@@ -445,6 +512,19 @@ export class OrderFlowService {
           order: updatedOrder,
           payment: { transaction_id: transactionId, change },
         };
+      }
+
+      // F2-guard (fast-track "other vía"): a direct payment normally finishes
+      // a direct_delivery/other order in one shot. `fastTrackOrder` reaches
+      // `finished` through THIS branch (not via `confirmDelivery`), so the
+      // guard must live here too. It is still an explicit operator action, so
+      // we THROW — consistent with the manual `confirmDelivery` path. The
+      // payment row was already created above; the caller surfaces the 422 and
+      // the operator finishes once the kitchen delivers.
+      if (await this.hasPendingKitchenItems(orderId)) {
+        throw new VendixHttpException(
+          ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
+        );
       }
 
       this.validateTransition(order.state as OrderState, 'finished');
@@ -887,14 +967,109 @@ export class OrderFlowService {
   }
 
   /**
-   * Confirm delivery by customer (delivered -> finished)
+   * Restaurant lifecycle bridge (KDS → order): when every kitchen ticket of a
+   * paid restaurant order has been delivered, the order moves
+   * `processing -> delivered`. Invoked by the orders listener that consumes
+   * the `kitchen.order_all_delivered` event (already running inside the store
+   * tenant context via StoreContextRunner).
+   *
+   * Idempotent and tolerant: it is a no-op when the order is not in
+   * `processing` (e.g. it was already finished by the operator or auto-finish),
+   * so duplicate / late events never throw.
+   */
+  async markKitchenOrderDelivered(orderId: number) {
+    const order = await this.getOrder(orderId);
+
+    if (order.state !== 'processing') {
+      this.logger.debug(
+        `Order #${orderId} not in 'processing' (is '${order.state}') — skipping KDS delivered bridge`,
+      );
+      return order;
+    }
+
+    this.validateTransition(order.state as OrderState, 'delivered');
+    const updatedOrder = await this.updateOrderState(orderId, 'delivered', {
+      delivered_at: new Date(),
+      kitchen_all_delivered: true,
+    });
+
+    this.logger.log(
+      `Order #${orderId} moved to 'delivered' (all kitchen tickets delivered)`,
+    );
+    return updatedOrder;
+  }
+
+  /**
+   * Restaurant lifecycle bridge (KDS reversa → order): contrapartida de
+   * {@link markKitchenOrderDelivered}. Cuando un ticket terminal se revierte
+   * "un paso atrás" desde el KDS (delivered/cancelled → ready), la orden que
+   * ya había sido movida a `delivered` por el puente de entrega debe volver a
+   * `processing` para reabrir el flujo de cocina. Invocado por el listener que
+   * consume `kitchen.order_delivery_reverted` (ya corriendo dentro del contexto
+   * de tienda vía StoreContextRunner).
+   *
+   * Idempotente y tolerante: si la orden no existe, o su estado NO es
+   * `delivered` (p.ej. ya fue finalizada, reembolsada, o nunca llegó a
+   * delivered porque tenía otros tickets aún abiertos), es un no-op. Así, una
+   * reversa que no corresponde a un retroceso real de la orden nunca lanza ni
+   * fuerza una transición inválida. La transición delivered -> processing está
+   * habilitada en VALID_TRANSITIONS.
+   */
+  async revertKitchenOrderDelivery(orderId: number) {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      select: { id: true, state: true },
+    });
+
+    // No-op idempotente: orden inexistente o no entregada → nada que revertir.
+    if (!order || order.state !== 'delivered') {
+      this.logger.debug(
+        `Order #${orderId} not in 'delivered' (is '${
+          order?.state ?? 'missing'
+        }') — skipping KDS delivery-reverted bridge`,
+      );
+      return order;
+    }
+
+    this.validateTransition(order.state as OrderState, 'processing');
+    const updatedOrder = await this.updateOrderState(orderId, 'processing', {
+      kitchen_delivery_reverted: true,
+    });
+
+    this.logger.log(
+      `Order #${orderId} reverted to 'processing' (kitchen ticket delivery reverted)`,
+    );
+    return updatedOrder;
+  }
+
+  /**
+   * Confirm delivery by customer (delivered -> finished).
+   *
+   * Also the "Finalizar Orden" path for restaurant POS orders: a paid
+   * kitchen order sits in `processing` ("pagada / en cocina") and must be
+   * finishable directly without first passing through `delivered`. Both
+   * `delivered` and `processing` are therefore accepted here; the underlying
+   * `processing -> finished` transition is enabled in VALID_TRANSITIONS.
    */
   async confirmDelivery(orderId: number) {
     const order = await this.getOrder(orderId);
 
-    if (order.state !== 'delivered') {
+    const FINISHABLE_STATES: OrderState[] = ['delivered', 'processing'];
+    if (!FINISHABLE_STATES.includes(order.state as OrderState)) {
       throw new BadRequestException(
-        `Cannot confirm delivery for order in state '${order.state}'. Order must be in 'delivered' state.`,
+        `Cannot confirm delivery for order in state '${order.state}'. ` +
+          `Order must be in one of: [${FINISHABLE_STATES.join(', ')}].`,
+      );
+    }
+
+    // F2-guard (MANUAL finish): a cashier/operator cannot finish an order
+    // that still has undelivered kitchen items. This is the explicit-action
+    // path, so we THROW (the operator must wait for the kitchen or mark the
+    // tickets delivered first). Automatic paths (credit payment, forgiveness,
+    // POS payment, auto-finish job) handle this by NOT finishing instead.
+    if (await this.hasPendingKitchenItems(orderId)) {
+      throw new VendixHttpException(
+        ErrorCodes.ORDER_HAS_PENDING_KITCHEN_ITEMS,
       );
     }
 
@@ -951,10 +1126,169 @@ export class OrderFlowService {
     const updatedOrder = await this.updateOrderState(orderId, 'cancelled', {
       cancelled_at: new Date(),
       cancellation_reason: dto.reason,
+      // Persist the previous state so it can be restored by reactivateOrder().
+      // updateOrderState stores unknown keys into internal_notes._flow_metadata.
+      previous_state: order.state,
     });
 
     this.logger.log(`Order #${orderId} cancelled: ${dto.reason}`);
     return updatedOrder;
+  }
+
+  /**
+   * Reactivate a previously cancelled order.
+   *
+   * Restores the order to its previous state (saved at cancel time in
+   * `internal_notes._flow_metadata.previous_state`). When no previous state
+   * is recorded (e.g. orders cancelled by PaymentTimeoutCleanupJob, which
+   * writes a plain-text internal_notes), falls back to 'pending_payment'
+   * because that is the source state for every job-cancelled order.
+   *
+   * Stock is re-reserved for every order_item that:
+   *   - tracks inventory, AND
+   *   - is not a service
+   *
+   * The reservation is BLOCKING: if any of those items lacks enough stock
+   * the whole transaction is rolled back and a 400 is returned listing the
+   * missing products. The cancelled payments are left as-is (audit trail).
+   */
+  async reactivateOrder(orderId: number, dto: ReactivateOrderDto) {
+    const ALLOWED_TARGET_STATES: OrderState[] = [
+      'created',
+      'pending_payment',
+      'processing',
+    ];
+
+    const userId = RequestContextService.getUserId();
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Load order with items + products (track_inventory, product_type) + variants.
+      const order = await tx.orders.findFirst({
+        where: { id: orderId },
+        include: {
+          order_items: {
+            include: {
+              products: {
+                select: {
+                  id: true,
+                  name: true,
+                  track_inventory: true,
+                  product_type: true,
+                },
+              },
+              product_variants: { select: { id: true } },
+            },
+          },
+        },
+      });
+
+      if (!order) {
+        throw new NotFoundException(`Order #${orderId} not found`);
+      }
+
+      // 2. State guard — only cancelled orders can be reactivated.
+      if ((order.state as OrderState) !== 'cancelled') {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_STATUS_001,
+          `Cannot reactivate order in state '${order.state}'. ` +
+            `Reactivation is only allowed from 'cancelled'.`,
+        );
+      }
+
+      // 3. Resolve target state from previous_state metadata.
+      let targetState: OrderState = 'pending_payment';
+      if (order.internal_notes) {
+        try {
+          const parsed = JSON.parse(order.internal_notes);
+          const previous = parsed?._flow_metadata?.previous_state;
+          if (
+            typeof previous === 'string' &&
+            (ALLOWED_TARGET_STATES as string[]).includes(previous)
+          ) {
+            targetState = previous as OrderState;
+          }
+        } catch {
+          // Not JSON (e.g. job-cancelled orders): keep fallback 'pending_payment'.
+        }
+      }
+
+      // 4. Re-reserve stock (BLOCKING).
+      const missing: { product_id: number; product_name: string; available: number; required: number }[] = [];
+
+      for (const item of order.order_items) {
+        if (
+          !item.products?.track_inventory ||
+          item.products?.product_type === 'service'
+        ) {
+          continue;
+        }
+
+        const location_id =
+          await this.stockLevelManager.getDefaultLocationForProduct(
+            item.product_id,
+            item.product_variant_id || undefined,
+          );
+
+        // Direct read inside the tx to make the decision atomic with the
+        // reservation that follows.
+        const stockLevel = await tx.stock_levels.findFirst({
+          where: {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            location_id,
+          },
+          select: { quantity_available: true },
+        });
+
+        const available = stockLevel?.quantity_available ?? 0;
+        if (available < item.quantity) {
+          missing.push({
+            product_id: item.product_id,
+            product_name: item.products?.name ?? `Product #${item.product_id}`,
+            available,
+            required: item.quantity,
+          });
+          continue;
+        }
+
+        await this.stockLevelManager.reserveStock(
+          item.product_id,
+          item.product_variant_id || undefined,
+          location_id,
+          item.quantity,
+          'order',
+          orderId,
+          userId,
+          // Availability was just verified above; skip the internal check to
+          // avoid a TOCTOU between our read and the reservation.
+          false,
+          tx,
+        );
+      }
+
+      if (missing.length > 0) {
+        throw new VendixHttpException(
+          ErrorCodes.ORD_VALIDATE_001,
+          `Cannot reactivate order: insufficient stock for ${missing.length} product(s)`,
+          { missing },
+        );
+      }
+
+      // 5. Transition cancelled -> targetState. validateTransition enforces
+      // the new VALID_TRANSITIONS row added in this same plan.
+      this.validateTransition('cancelled', targetState);
+
+      const updatedOrder = await this.updateOrderState(orderId, targetState, {
+        reactivated_at: new Date(),
+        reactivation_reason: dto.reason,
+      });
+
+      this.logger.log(
+        `Order #${orderId} reactivated to '${targetState}': ${dto.reason ?? '(no reason)'}`,
+      );
+
+      return updatedOrder;
+    });
   }
 
   /**
@@ -963,32 +1297,71 @@ export class OrderFlowService {
    * Note: Uses updated_at as proxy for delivered_at since that field isn't in schema
    */
   async autoFinishDeliveredOrders(): Promise<number> {
-    const cutoffDate = new Date();
-    cutoffDate.setHours(cutoffDate.getHours() - 24);
+    const now = new Date();
+    const cutoff24h = new Date(now);
+    cutoff24h.setHours(cutoff24h.getHours() - 24);
+    const cutoff4h = new Date(now);
+    cutoff4h.setHours(cutoff4h.getHours() - 4);
 
-    // Find orders in 'delivered' state where updated_at (when they entered delivered state) is > 24h ago
-    const ordersToFinish = await this.prisma.orders.findMany({
+    // Pass 1 — Ecommerce / retail (24h):
+    // Orders in 'delivered' for >24h, EXCLUDING restaurant-POS orders (those
+    // are handled by pass 2 with a shorter 4h window). A restaurant-POS order
+    // is `channel='pos'` AND has at least one kitchen ticket.
+    const ecommerceOrders = await this.prisma.orders.findMany({
       where: {
         state: 'delivered',
-        updated_at: {
-          lte: cutoffDate,
-        },
+        updated_at: { lte: cutoff24h },
+        NOT: { channel: 'pos', kitchen_tickets: { some: {} } },
       },
       select: { id: true },
     });
 
+    // Pass 2 — Restaurant-POS (4h):
+    // POS orders with kitchen tickets that have been paid+fired ('processing')
+    // or already handed off ('delivered') for >4h. These auto-finish faster
+    // because the seat is long gone; the operator rarely taps "Finalizar".
+    const restaurantOrders = await this.prisma.orders.findMany({
+      where: {
+        channel: 'pos',
+        kitchen_tickets: { some: {} },
+        state: { in: ['processing', 'delivered'] },
+        updated_at: { lte: cutoff4h },
+      },
+      select: { id: true },
+    });
+
+    // Merge by id so an order matched by both passes (defensive) is finished once.
+    const idsToFinish = new Set<number>([
+      ...ecommerceOrders.map((o) => o.id),
+      ...restaurantOrders.map((o) => o.id),
+    ]);
+
     let finishedCount = 0;
-    for (const order of ordersToFinish) {
+    for (const orderId of idsToFinish) {
       try {
-        await this.updateOrderState(order.id, 'finished', {
+        // F2-guard (AUTOMATIC path): SKIP — never auto-finish an order that
+        // still has undelivered kitchen items. We do not throw; the order is
+        // simply left for a later cycle (the cutoff query will pick it up
+        // again once the kitchen delivers). Restaurant-POS orders sit in
+        // `processing` precisely while the KDS works on them.
+        if (await this.hasPendingKitchenItems(orderId)) {
+          this.logger.log(
+            `Order #${orderId} skipped by auto-finish: kitchen items still pending.`,
+          );
+          continue;
+        }
+        // updateOrderState enforces VALID_TRANSITIONS; both 'delivered' and
+        // 'processing' allow the move to 'finished'. The auto_finished/
+        // auto_finished_at metadata is preserved in internal_notes as before.
+        await this.updateOrderState(orderId, 'finished', {
           auto_finished: true,
           auto_finished_at: new Date().toISOString(),
         });
         finishedCount++;
-        this.logger.log(`Order #${order.id} auto-finished after 24h`);
+        this.logger.log(`Order #${orderId} auto-finished`);
       } catch (error) {
         this.logger.error(
-          `Failed to auto-finish order #${order.id}: ${error.message}`,
+          `Failed to auto-finish order #${orderId}: ${error.message}`,
         );
       }
     }
@@ -1094,9 +1467,21 @@ export class OrderFlowService {
 
     // If fully paid, transition to finished
     if (newRemainingBalance <= 0.01) {
-      this.validateTransition(order.state as OrderState, 'finished');
-      orderUpdateData.state = 'finished';
-      orderUpdateData.completed_at = new Date();
+      // F2-guard (AUTOMATIC path): do NOT finish a fully-paid order while the
+      // kitchen still has undelivered items. We must NOT throw here — the
+      // payment is legitimate and has to be recorded — so we just skip the
+      // finish transition and leave the order in its current state. It will
+      // finish later (manual `confirmDelivery` or the auto-finish job) once
+      // the kitchen delivers.
+      if (await this.hasPendingKitchenItems(orderId)) {
+        this.logger.log(
+          `Order #${orderId} fully paid but kept open: kitchen items still pending (not finishing).`,
+        );
+      } else {
+        this.validateTransition(order.state as OrderState, 'finished');
+        orderUpdateData.state = 'finished';
+        orderUpdateData.completed_at = new Date();
+      }
     }
 
     await this.prisma.orders.update({
@@ -1279,9 +1664,20 @@ export class OrderFlowService {
     });
 
     if (remaining.length === 0 && newRemaining <= 0.01) {
-      this.validateTransition(order.state as OrderState, 'finished');
-      orderUpdate.state = 'finished';
-      orderUpdate.completed_at = new Date();
+      // F2-guard (AUTOMATIC path): mirror `registerCreditPayment` — the
+      // forgiveness is recorded regardless, but we do NOT finish the order
+      // while kitchen items are still undelivered, and we do NOT throw. The
+      // order finishes later via manual `confirmDelivery` or the
+      // auto-finish job.
+      if (await this.hasPendingKitchenItems(orderId)) {
+        this.logger.log(
+          `Order #${orderId} fully settled (forgiveness) but kept open: kitchen items still pending (not finishing).`,
+        );
+      } else {
+        this.validateTransition(order.state as OrderState, 'finished');
+        orderUpdate.state = 'finished';
+        orderUpdate.completed_at = new Date();
+      }
     }
 
     await this.prisma.orders.update({

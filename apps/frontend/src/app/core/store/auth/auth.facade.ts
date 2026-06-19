@@ -222,6 +222,25 @@ export class AuthFacade {
       [];
     return industriesSupportIngredients(industries);
   });
+  /**
+   * Capability resolver: true if the active store is a restaurant. Reads
+   * the SAME industries cascade as `storeSupportsIngredients` (settings →
+   * login → []) so the two stay in lockstep, and returns whether the list
+   * includes `'restaurant'`. Source of truth is
+   * `store_settings.settings.general.industries`. Defaults to `false` when
+   * no industries are loaded yet.
+   */
+  readonly isRestaurant = computed<boolean>(() => {
+    const fromSettings = (this.storeSettings() as any)?.general?.industries as
+      | string[]
+      | undefined;
+    const fromLogin = this.userIndustries();
+    const industries =
+      fromSettings ||
+      (Array.isArray(fromLogin) ? fromLogin : null) ||
+      [];
+    return industries.includes('restaurant');
+  });
   readonly storeSettings = toSignal(this.storeSettings$, { initialValue: null as any });
   readonly fiscalStatus = toSignal(this.fiscalStatus$, { initialValue: null as any });
   readonly activeFiscalAreas = toSignal(this.activeFiscalAreas$, { initialValue: [] as FiscalArea[] });

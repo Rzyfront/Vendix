@@ -2609,6 +2609,14 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'La receta asociada al producto está inactiva',
   },
+  // Plan KDS fire-flows: el endpoint de fire selectivo (POST /store/kitchen-fire)
+  // se gatea a tiendas con industria 'restaurant'. Esta tienda no la tiene.
+  RESTAURANT_NOT_ENABLED: {
+    code: 'RESTAURANT_NOT_ENABLED',
+    httpStatus: 422,
+    devMessage:
+      'Esta tienda no tiene habilitada la industria restaurant; el envio a cocina (KDS) no esta disponible',
+  },
   // ── Tables & Table Sessions (Restaurant Suite Fase E) ─────────
   TABLE_NOT_FOUND: {
     code: 'TABLE_NOT_FOUND',
@@ -2693,10 +2701,50 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Transición de estado del ticket no permitida',
   },
+  // Restaurant Suite — Fase K Gap 3: the ticket contains a `prepared`
+  // product with no active recipe; advancing to in_preparation is
+  // blocked because the kitchen would have no BOM to deduct stock
+  // from. The ticket must remain in `pending` until the operator
+  // attaches a recipe (or the operator cooks it manually and marks
+  // it delivered directly).
+  KITCHEN_TICKET_NO_RECIPE: {
+    code: 'KITCHEN_TICKET_NO_RECIPE',
+    httpStatus: 422,
+    devMessage: 'El ticket contiene un plato sin receta activa; no se puede iniciar la preparación',
+  },
+  // Restaurant Suite — reversa de estado del ticket (KDS "un paso atrás"):
+  // el ticket ya está en su estado inicial (`pending`) y no existe un
+  // estado previo al que retroceder.
+  KITCHEN_TICKET_CANNOT_REVERT: {
+    code: 'KITCHEN_TICKET_CANNOT_REVERT',
+    httpStatus: 409,
+    devMessage: 'El ticket está en su estado inicial y no se puede revertir.',
+  },
+  // Restaurant Suite — reversa de estado del ticket: revertir un ticket
+  // terminal (delivered/cancelled) implicaría revertir la entrega de la
+  // orden asociada, pero la orden ya está finalizada/reembolsada y no
+  // admite esa reversa.
+  KITCHEN_TICKET_REVERT_ORDER_FINISHED: {
+    code: 'KITCHEN_TICKET_REVERT_ORDER_FINISHED',
+    httpStatus: 409,
+    devMessage: 'La orden ya está finalizada; no se puede revertir la entrega del ticket.',
+  },
   KITCHEN_TICKET_STREAM_NO_CONTEXT: {
     code: 'KITCHEN_TICKET_STREAM_NO_CONTEXT',
     httpStatus: 400,
     devMessage: 'No hay contexto de tienda para abrir el stream KDS',
+  },
+  // Restaurant Suite — F2-guard: una orden NUNCA puede pasar a `finished`
+  // si tiene `kitchen_ticket_items` sin entregar (status NOT IN
+  // ('delivered','cancelled')). Se lanza solo en el cierre MANUAL
+  // (`confirmDelivery`); los flujos automáticos (pago a crédito, perdón de
+  // cuota, pago POS, job de auto-finish) NO lanzan: simplemente no
+  // finalizan la orden y la dejan para cuando la cocina entregue.
+  ORDER_HAS_PENDING_KITCHEN_ITEMS: {
+    code: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+    httpStatus: 422,
+    devMessage:
+      'No se puede finalizar la orden: tiene platos en cocina sin entregar.',
   },
   // ── Menus / Carta (Restaurant Suite Fase G) ────────────────────────────
   MENU_NOT_FOUND: {

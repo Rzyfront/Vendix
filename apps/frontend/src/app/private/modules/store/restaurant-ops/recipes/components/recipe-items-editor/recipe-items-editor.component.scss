@@ -1,3 +1,21 @@
 :host {
   display: block;
 }
+
+/**
+ * Halo animation played for ~0.3s on a freshly added row to draw the eye.
+ * The animation is keyframed from primary-rgb at 0.45 alpha to fully
+ * transparent at 8px, giving the impression of a soft pulse around the row.
+ */
+@keyframes recipe-item-halo {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--color-primary-rgb), 0.45);
+  }
+  100% {
+    box-shadow: 0 0 0 8px rgba(var(--color-primary-rgb), 0);
+  }
+}
+
+.recipe-item--just-added {
+  animation: recipe-item-halo 0.3s ease-out;
+}

@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import {
   SplitByItemsDto,
   SplitByAmountDto,
@@ -11,6 +13,13 @@ import {
 
 /**
  * Result of a split: the source order id, plus the new sub-orders.
+ *
+ * Plan KDS fire-flows (B9): when the split auto-fires the source order's
+ * `prepared` items to the kitchen, `kitchen_fire` carries the ticket id
+ * + fired count so the caller (split modal / toast) can show "N platos
+ * enviados a cocina" without a follow-up roundtrip. Null when the
+ * store is not a restaurant OR the source had no `prepared` items
+ * left to fire.
  */
 export interface SplitResult {
   source_order_id: number;
@@ -20,6 +29,11 @@ export interface SplitResult {
     grand_total: Prisma.Decimal | number;
     items_count: number;
   }>;
+  kitchen_fire: {
+    fired_count: number;
+    kitchen_ticket_id: number;
+    cogs_total: number;
+  } | null;
 }
 
 /**
@@ -53,7 +67,10 @@ export interface SplitResult {
 export class SplitOrderService {
   private readonly logger = new Logger(SplitOrderService.name);
 
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private readonly kitchenFireService: KitchenFireService,
+  ) {}
 
   // ------------------------------------------------------------------ helpers
   private requireStoreId(): number {
@@ -264,12 +281,45 @@ export class SplitOrderService {
         applied_price_tier_name_snapshot: string | null;
         stock_units_consumed: number | null;
         inventory_consumed_at_fire: boolean;
+        skip_kds: boolean;
+        products: { product_type: string } | null;
       }>;
     },
     groups: number[][],
   ): Promise<SplitResult> {
     const subOrders: SplitResult['sub_orders'] = [];
     const itemById = new Map(order.order_items.map((it) => [it.id, it]));
+
+    // Plan KDS fire-flows (B7): collect candidate `prepared` items that
+    // are not yet fire-tracked AND not flagged `skip_kds` so we can
+    // fire them as part of the split transaction. After the split the
+    // source order is cancelled; if we leave the fire for later, the
+    // sub-orders inherit the FALSE flag and the payment path will
+    // discount the stock at sale (no kitchen ticket = no KDS = blind
+    // cocina). Fire here so the COGS recognition happens in fire
+    // (invariant) and the sub-orders inherit the TRUE flag.
+    const fireCandidateIds = order.order_items
+      .filter((it) =>
+        it.inventory_consumed_at_fire === false &&
+        it.skip_kds !== true &&
+        it.product_id != null &&
+        (it as any).products?.product_type === 'prepared',
+      )
+      .map((it) => it.id);
+    type SplitFireResult = {
+      ticketId: number;
+      firedItemSnapshots: Array<{
+        orderItemId: number;
+        productId: number;
+        productName: string;
+        quantity: number;
+      }>;
+      cogsTotal: number;
+      consumedLineCount: number;
+    };
+    const splitFireResult: { value: SplitFireResult | null } = {
+      value: null,
+    };
 
     await this.prisma.$transaction(async (tx) => {
       for (let i = 0; i < groups.length; i += 1) {
@@ -378,6 +428,37 @@ export class SplitOrderService {
         });
       }
 
+      // Plan KDS fire-flows (B7): auto-fire the pending `prepared`
+      // items from the source order BEFORE we cancel it. After this
+      // returns the source order is cancelled, but the
+      // `inventory_consumed_at_fire` flag on the source's order_items
+      // is set to TRUE by the fire core; the sub-orders we just
+      // created propagated the flag (Fase E rule), and they will
+      // inherit the TRUE value when the flag flip happens here.
+      //
+      // Atomicity: fire is INSIDE the split $transaction. If fire
+      // fails, the whole split rolls back (no orphan sub-orders).
+      if (fireCandidateIds.length > 0) {
+        const storeRow = await tx.stores.findUnique({
+          where: { id: order.store_id },
+          select: { industries: true },
+        });
+        if (storeIsRestaurant(storeRow?.industries)) {
+          const ctx = await this.kitchenFireService.prepareFireContext(
+            order.id,
+            fireCandidateIds,
+          );
+          if (ctx && ctx.firedItemIds.length > 0) {
+            splitFireResult.value =
+              await this.kitchenFireService.fireOrderItemsInTx(
+                tx,
+                order.store_id,
+                ctx,
+              );
+          }
+        }
+      }
+
       // Mark the source order as 'cancelled' with a note. We use
       // 'cancelled' (not 'finished') because the order is being
       // superseded by the sub-orders; 'finished' would let the
@@ -399,9 +480,38 @@ export class SplitOrderService {
       `Order split: source=${order.id} → ${subOrders.length} sub-orders`,
     );
 
+    // Plan KDS fire-flows (B9): after the split $transaction commits,
+    // emit kitchen.fired + push KDS SSE snapshot for the auto-fire we
+    // just did. Failures are logged but never bubble up: the split is
+    // already persisted and the operator can re-fire from the KDS page.
+    if (splitFireResult.value) {
+      try {
+        await this.kitchenFireService.emitKitchenFiredAfterCommit(
+          order.store_id,
+          undefined,
+          splitFireResult.value,
+          order.id,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Failed to emit kitchen.fired for split auto-fire on order #${order.id}: ${
+            (err as Error).message
+          }`,
+          (err as Error).stack,
+        );
+      }
+    }
+
     return {
       source_order_id: order.id,
       sub_orders: subOrders,
+      kitchen_fire: splitFireResult.value
+        ? {
+            fired_count: splitFireResult.value.firedItemSnapshots.length,
+            kitchen_ticket_id: splitFireResult.value.ticketId,
+            cogs_total: Number(splitFireResult.value.cogsTotal.toFixed(4)),
+          }
+        : null,
     };
   }
 

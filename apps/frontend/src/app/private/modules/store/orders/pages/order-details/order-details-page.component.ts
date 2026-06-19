@@ -20,8 +20,10 @@ import {
   RefundRecord,
   FastTrackOrderDto,
   AssignShippingMethodDto,
+  ReactivateOrderDto,
 } from '../../interfaces/order.interface';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
+import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
@@ -139,11 +141,65 @@ export class OrderDetailsPageComponent {
   showShipModal = signal(false);
   showDeliverModal = signal(false);
   showCancelModal = signal(false);
+  showReactivateModal = signal(false);
   showRefundModal = signal(false);
   showPaymentReceiptModal = signal(false);
 
   // Processing state
   isProcessingAction = signal(false);
+  // Plan KDS fire-flows (F3): loading flag for the manual fire button.
+  isSendingToKitchen = signal(false);
+  /**
+   * Plan KDS fire-flows (F3): set of `order_item.id` the operator has
+   * checked for selective fire. Empty by default — when empty the fire
+   * action falls back to "all pending" (todo-o-nada legacy behaviour).
+   */
+  readonly selectedKitchenItemIds = signal<Set<number>>(new Set<number>());
+  /**
+   * Plan KDS fire-flows (F3): loading flag for the batch fire action.
+   * Mirrors `isSendingToKitchen` (kept as a backward-compat alias) so the
+   * template can bind a single, clearly-named signal.
+   */
+  readonly isFiringKitchen = this.isSendingToKitchen;
+  /**
+   * Items on the current order that are `prepared`, not flagged
+   * `skip_kds`, and have no kitchen_ticket_items yet (i.e. the
+   * auto-fire did not catch them, or the order predates the
+   * auto-fire path). The detail page renders the selective
+   * "Enviar a cocina" UI only when this is non-empty.
+   */
+  readonly pendingKitchenItems = computed<OrderItem[]>(() => {
+    const order = this.order();
+    if (!order?.order_items) return [];
+    return order.order_items.filter(
+      (it) =>
+        it.product_id != null &&
+        it.skip_kds !== true &&
+        it.inventory_consumed_at_fire !== true &&
+        (it.kitchen_ticket_items?.length ?? 0) === 0 &&
+        it.products?.product_type === 'prepared',
+    );
+  });
+  /**
+   * Backward-compat alias for the legacy name used elsewhere on this page.
+   */
+  readonly unfiredPreparedItems = this.pendingKitchenItems;
+  /** True if the active store is a restaurant (industries cascade). */
+  readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
+  /**
+   * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
+   * for restaurant stores, when there is at least one pending prepared
+   * item, and the order is not in a terminal state (cancelled/refunded).
+   */
+  readonly canShowKitchenDispatch = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    if (!this.isRestaurant()) return false;
+    if (this.pendingKitchenItems().length === 0) return false;
+    const terminalStates: OrderState[] = ['cancelled', 'refunded'];
+    if (terminalStates.includes(order.state as OrderState)) return false;
+    return true;
+  });
   isLoadingPaymentReceipt = signal(false);
   loadingPaymentReceiptId = signal<number | null>(null);
   paymentReceiptPreview = signal<PaymentReceiptPreview | null>(null);
@@ -180,6 +236,7 @@ export class OrderDetailsPageComponent {
   shipForm!: FormGroup;
   deliverForm!: FormGroup;
   cancelForm!: FormGroup;
+  reactivateForm!: FormGroup;
 
   // Currency
   currencySymbol;
@@ -416,6 +473,23 @@ export class OrderDetailsPageComponent {
   // | shipped         | any         | paid    | Deliver (standard modal)                            |
   // | delivered       | any         | paid    | Finish (safety net), Refund                         |
 
+  // ── Kitchen-order detection ──
+  //
+  // A POS/restaurant order is considered a "kitchen order" when at least one
+  // of its items has been fired to the kitchen. The only kitchen signal the
+  // detail payload (GET /store/orders/:id) exposes on `order_items` is the
+  // `kitchen_ticket_items` array — populated only for prepared items sent to
+  // the KDS. For kitchen orders in `processing`, shipping/dispatch actions are
+  // irrelevant: the operator finalizes the order directly once the kitchen is
+  // done (backend allows `processing → finished`).
+  readonly isKitchenOrder = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    return (order.order_items ?? []).some(
+      (item) => (item.kitchen_ticket_items?.length ?? 0) > 0,
+    );
+  });
+
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
     if (!order) return [];
@@ -442,6 +516,9 @@ export class OrderDetailsPageComponent {
     const actions: OrderActionConfig[] = [];
 
     switch (state) {
+      // `draft` (POS counter orders before confirmation) behaves exactly like
+      // `created`: register payment, modify (privileged), cancel. Fall-through.
+      case 'draft':
       case 'created':
         if (channel !== 'pos' || !hasPaid) {
           actions.push({ id: 'pay', label: 'Registrar Pago', icon: 'credit-card', variant: 'primary' });
@@ -488,7 +565,13 @@ export class OrderDetailsPageComponent {
         break;
 
       case 'processing':
-        if (delivery === 'home_delivery') {
+        if (this.isKitchenOrder()) {
+          // Kitchen orders skip shipping/dispatch entirely: once the kitchen
+          // finishes, the operator finalizes directly. Reuse the exact same
+          // `finish` action config/handler as `delivered` (backend allows
+          // `processing → finished`).
+          actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
+        } else if (delivery === 'home_delivery') {
           actions.push({ id: 'ship', label: 'Marcar como Enviado', icon: 'truck', variant: 'primary' });
         } else if (isPickup) {
           actions.push({ id: 'ship', label: 'Listo para Recoger', icon: 'package', variant: 'primary' });
@@ -542,6 +625,15 @@ export class OrderDetailsPageComponent {
         break;
 
       case 'cancelled':
+        if (this.isPrivilegedUser()) {
+          actions.push({
+            id: 'reactivate',
+            label: 'Reactivar Orden',
+            icon: 'rotate-ccw',
+            variant: 'warning',
+          });
+        }
+        break;
       case 'refunded':
         break;
     }
@@ -762,6 +854,7 @@ export class OrderDetailsPageComponent {
     const order = this.order();
     if (!order) return 'gray';
     const colorMap: Record<string, StickyHeaderBadgeColor> = {
+      draft: 'gray',
       created: 'gray',
       pending_payment: 'yellow',
       processing: 'blue',
@@ -798,6 +891,12 @@ export class OrderDetailsPageComponent {
   private authFacade = inject(AuthFacade);
   private ticketService = inject(PosTicketService);
   private posShippingService = inject(PosShippingService);
+  // Plan KDS fire-flows (F3): manual selective fire for online orders
+  // with `prepared` items that were never auto-fired (the auto-fire
+  // runs in the payment $transaction; for orders paid before this
+  // patch, or for online orders not auto-fireable, the operator can
+  // dispatch them from this page).
+  private kitchenTicketsService = inject(KitchenTicketsService);
   private sanitizer = inject(DomSanitizer);
 
   constructor() {
@@ -822,6 +921,10 @@ export class OrderDetailsPageComponent {
 
     this.cancelForm = this.fb.group({
       reason: ['', [Validators.required, Validators.minLength(3)]],
+    });
+
+    this.reactivateForm = this.fb.group({
+      reason: ['', [Validators.minLength(3)]],
     });
 
     this.fastTrackForm = this.fb.group({
@@ -991,6 +1094,9 @@ export class OrderDetailsPageComponent {
         break;
       case 'cancel':
         this.openCancelModal();
+        break;
+      case 'reactivate':
+        this.openReactivateModal();
         break;
       case 'refund':
         this.openRefundModal();
@@ -1277,6 +1383,55 @@ export class OrderDetailsPageComponent {
         error: (err) => {
           this.isProcessingAction.set(false);
           this.toastService.error(err.message || 'Error al cancelar la orden');
+        },
+      });
+  }
+
+  openReactivateModal(): void {
+    this.reactivateForm.reset();
+    this.showReactivateModal.set(true);
+  }
+
+  submitReactivation(): void {
+    if (!this.orderId) return;
+
+    // Build DTO from the form; reason is optional but must be at least
+    // 3 chars when present (validator enforces that).
+    const formValue = this.reactivateForm.value as { reason: string | null };
+    const dto: ReactivateOrderDto = formValue.reason
+      ? { reason: formValue.reason }
+      : {};
+
+    this.isProcessingAction.set(true);
+    this.ordersService
+      .flowReactivateOrder(this.orderId, dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.showReactivateModal.set(false);
+          this.isProcessingAction.set(false);
+          this.toastService.success('Orden reactivada');
+          this.loadData();
+        },
+        error: (err) => {
+          this.isProcessingAction.set(false);
+          // Backend may return a list of missing products under
+          // err.error.details.missing. Surface them so the operator knows
+          // exactly what to restock before retrying.
+          const missing: Array<{ product_name: string; available: number; required: number }> | undefined =
+            err?.error?.details?.missing;
+          const base = err.message || 'Error al reactivar la orden';
+          if (Array.isArray(missing) && missing.length > 0) {
+            const list = missing
+              .map(
+                (m) =>
+                  `  - ${m.product_name} (disponible ${m.available}, requerido ${m.required})`,
+              )
+              .join('\n');
+            this.toastService.error(`${base}\n${list}`);
+          } else {
+            this.toastService.error(base);
+          }
         },
       });
   }
@@ -1835,6 +1990,7 @@ export class OrderDetailsPageComponent {
   formatStatus(status: string | undefined): string {
     if (!status) return 'Desconocido';
     const labels: Record<string, string> = {
+      draft: 'Borrador',
       created: 'Creada',
       pending_payment: 'Pago Pendiente',
       processing: 'Procesando',
@@ -1904,6 +2060,159 @@ export class OrderDetailsPageComponent {
     const quantity = Number(item.quantity || 0);
     if (quantity <= 0) return null;
     return consumed / quantity;
+  }
+
+  // ─── Restaurant Suite — Fase K Gap 2: per-item KDS state ─────
+  /**
+   * Picks the kitchen_ticket_item we want to surface for this
+   * order_item. Preference: a non-terminal (in-flight) row first,
+   * then the most recent row (highest id). Returns `null` if the
+   * item has never been fired to the kitchen.
+   */
+  kitchenStateFor(item: OrderItem):
+    | { status: string; kitchen_ticket_id?: number }
+    | null {
+    const items = item.kitchen_ticket_items;
+    if (!items || items.length === 0) return null;
+    const inFlight = items.find(
+      (k) => k.status === 'pending' || k.status === 'in_preparation' || k.status === 'ready',
+    );
+    if (inFlight) return inFlight;
+    return items[0]; // items are pre-sorted desc by the backend include
+  }
+
+  // ─── Plan KDS fire-flows (F3): per-plate selection ───────────
+  /** Toggle a single pending item in/out of the fire selection. */
+  toggleKitchenItem(id: number): void {
+    this.selectedKitchenItemIds.update((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** True if the given order_item is currently selected for fire. */
+  isKitchenItemSelected(id: number): boolean {
+    return this.selectedKitchenItemIds().has(id);
+  }
+
+  /** Select every pending (prepared, unfired) item. */
+  selectAllPendingKitchen(): void {
+    this.selectedKitchenItemIds.set(
+      new Set(this.pendingKitchenItems().map((it) => it.id)),
+    );
+  }
+
+  /** Clear the fire selection. */
+  clearKitchenSelection(): void {
+    this.selectedKitchenItemIds.set(new Set<number>());
+  }
+
+  /**
+   * Plan KDS fire-flows (F3): fire the SELECTED `prepared` items to the
+   * kitchen from the order detail page. If nothing is selected, falls back
+   * to firing all pending items (legacy all-or-nothing behaviour). Re-fetches
+   * the order on success so the kitchen_ticket_items badges refresh (the SSE
+   * stream is not always live on this page).
+   */
+  fireSelectedToKitchen(): void {
+    const order = this.order();
+    if (!order?.id) return;
+    const selected = this.selectedKitchenItemIds();
+    const ids = selected.size
+      ? this.pendingKitchenItems()
+          .filter((it) => selected.has(it.id))
+          .map((it) => it.id)
+      : this.pendingKitchenItems().map((it) => it.id);
+    if (ids.length === 0) return;
+    this.isFiringKitchen.set(true);
+    this.kitchenTicketsService
+      .fireOrderItems({ order_id: order.id, order_item_ids: ids })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isFiringKitchen.set(false);
+          this.clearKitchenSelection();
+          this.toastService.success('Enviado a cocina');
+          // Re-fetch the order so the kitchen_ticket_items badges update.
+          this.refreshOrder();
+        },
+        error: (err: unknown) => {
+          this.isFiringKitchen.set(false);
+          // Generic error — the backend may reject with
+          // RESTAURANT_NOT_ENABLED on a non-restaurant store, or
+          // KITCHEN_FIRE_ALL_ALREADY_CONSUMED if the items are
+          // already fired. We do not leak the recipe check
+          // (Plan F3: error toast must be generic; the recipe error
+          // belongs to startPreparation, not the fire path).
+          this.toastService.error('No se pudo enviar a cocina');
+          console.error('KDS fire-from-detail failed', err);
+        },
+      });
+  }
+
+  /**
+   * Plan KDS fire-flows (F3): re-fetch the current order so the
+   * kitchen_ticket_items badges + the unfired-prepared computed
+   * stay in sync after a fire mutation. Lightweight: same endpoint
+   * the page already loaded from, no extra roundtrip beyond a
+   * refetch.
+   */
+  private refreshOrder(): void {
+    const id = this.order()?.id;
+    if (!id) return;
+    this.ordersService
+      .getOrderById(String(id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          const data = res?.data ?? res;
+          if (data) this.order.set(data);
+        },
+        error: () => undefined,
+      });
+  }
+
+  /** Localised label for the KDS state badge. */
+  kitchenStateLabel(ks: { status: string }): string {
+    switch (ks.status) {
+      case 'pending':
+        return 'Pendiente';
+      case 'in_preparation':
+        return 'En preparación';
+      case 'ready':
+        return 'Listo';
+      case 'delivered':
+        return 'Entregado';
+      case 'cancelled':
+        return 'Cancelado';
+      default:
+        return ks.status;
+    }
+  }
+
+  /**
+   * Tailwind class set for the KDS badge — kept aligned with the
+   * board's status palette. Returned as a string to play well with
+   * the existing `[class]="..."` binding style used in this
+   * template.
+   */
+  kitchenBadgeClass(ks: { status: string }): string {
+    switch (ks.status) {
+      case 'pending':
+        return 'bg-gray-100 text-gray-700 border border-gray-200';
+      case 'in_preparation':
+        return 'bg-amber-100 text-amber-800 border border-amber-200';
+      case 'ready':
+        return 'bg-emerald-100 text-emerald-800 border border-emerald-200';
+      case 'delivered':
+        return 'bg-sky-100 text-sky-800 border border-sky-200';
+      case 'cancelled':
+        return 'bg-red-100 text-red-700 border border-red-200';
+      default:
+        return 'bg-gray-100 text-gray-700 border border-gray-200';
+    }
   }
 
   getAuditActionLabel(action: string): string {
