@@ -138,6 +138,19 @@ export interface OrderItem {
   products?: Product;
   product_variants?: ProductVariant;
   /**
+   * Plan KDS fire-flows: persisted on the backend at order creation.
+   * - `inventory_consumed_at_fire`: `true` once the item has been
+   *   fired to the kitchen (kitchen_ticket row exists) OR is
+   *   recipe-less and still routed through the fire core. False on
+   *   creation. The detail page uses this to know if a line is
+   *   eligible for the manual selective fire.
+   * - `skip_kds`: cashier's "usar stock" intent. `true` means the
+   *   line will never be fired (stock consumed at payment). Hidden
+   *   from the manual fire button.
+   */
+  inventory_consumed_at_fire?: boolean;
+  skip_kds?: boolean;
+  /**
    * Restaurant Suite — Fase K Gap 2: KDS state for this order_item.
    * Populated by GET /store/orders/:id when the item has been fired
    * to the kitchen. Empty array for retail-only items. The detail
@@ -174,6 +187,7 @@ export interface Product {
   description?: string;
   sku: string;
   price: number;
+  product_type?: 'physical' | 'prepared' | 'service' | string;
   final_price: number;
   image_url?: string;
 }

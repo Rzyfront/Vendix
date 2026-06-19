@@ -142,6 +142,18 @@ export class PosOrderItemDto {
   @Min(1)
   @Type(() => Number)
   applied_price_tier_id?: number;
+
+  // Plan KDS fire-flows: marca de la intención del cajero en el POS
+  // ("usar stock" en el modal de prepared-choice). Si true, el item NO
+  // se enviará a cocina y su stock se descontará en el pago (sales
+  // movement). Solo aplica a líneas `product_type='prepared'`; para
+  // cualquier otro tipo el campo se ignora silenciosamente. Persistido
+  // en `order_items.skip_kds` para que el backend lo recuerde hasta
+  // el momento del pago.
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  skip_kds?: boolean;
 }
 
 export class PosInstallmentTermsDto {

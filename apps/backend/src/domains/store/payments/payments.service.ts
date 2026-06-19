@@ -47,6 +47,8 @@ import { WebhookHandlerService } from './services/webhook-handler.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { WithholdingFlowService } from '../withholding-tax/withholding-flow.service';
 import type { WithholdingResolution } from '../withholding-tax/withholding-flow.service';
+import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
+import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -89,6 +91,7 @@ export class PaymentsService {
     private readonly webhookHandler: WebhookHandlerService,
     private readonly priceResolverService: PriceResolverService,
     private readonly withholdingFlow: WithholdingFlowService,
+    private readonly kitchenFireService: KitchenFireService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -674,6 +677,39 @@ export class PaymentsService {
         ))!;
         const order = orderCreation.order;
 
+        // Plan KDS fire-flows (B5): the auto-fire result captured inside
+        // the larger payment $transaction. Defaults to null when the store
+        // is not a restaurant OR when the order has nothing `prepared` to
+        // fire. After commit the helper `emitKitchenFiredAfterCommit` is
+        // called from outside the transaction so the kitchen.fired event
+        // + SSE push are NEVER fired before the database commits.
+        let kitchenFireResult:
+          | {
+              ticketId: number;
+              firedItemSnapshots: Array<{
+                orderItemId: number;
+                productId: number;
+                productName: string;
+                quantity: number;
+              }>;
+              cogsTotal: number;
+              consumedLineCount: number;
+            }
+          | null = null;
+
+        // Plan KDS fire-flows (B6): when the payment closed out a table
+        // session, the auto-fire already ran INSIDE
+        // `applyPosPaymentToTableSession` (so it is atomic with the
+        // session close). Adopt its result here so the response, the
+        // `hasKitchenItems` discriminator, and the post-commit
+        // `kitchen.fired` emission all behave exactly like the fresh-sale
+        // B5 path. The B5 auto-fire block further below becomes a no-op
+        // for these items (their `inventory_consumed_at_fire` flag is now
+        // true).
+        if (orderCreation.kitchenFire) {
+          kitchenFireResult = orderCreation.kitchenFire;
+        }
+
         // Restaurant POS — detect whether this order has at least one kitchen
         // ticket actually fired to the KDS. `skipKds` lines never create a
         // ticket, so this discriminator ("esperar cocina") is true only when
@@ -681,11 +717,19 @@ export class PaymentsService {
         // transaction client (kitchen_tickets is store-scoped); we also
         // exclude cancelled tickets. When true, the payment leaves the order
         // in `processing` instead of `finished`.
+        // Plan KDS fire-flows (B5): the `hasKitchenItems` flag decides
+        // whether the order stays in `processing` (kitchen is working
+        // on it) or moves to `finished` (kitchen is not in the loop).
+        // We start by reading pre-existing tickets (manual fire) and
+        // upgrade the flag to `true` after the auto-fire block below
+        // runs (which may create new tickets). The `let` binding is
+        // required because the auto-fire runs later in the same
+        // closure.
         const orderKitchenTickets = await tx.kitchen_tickets.findMany({
           where: { order_id: order.id, status: { not: 'cancelled' } },
           select: { id: true },
         });
-        const hasKitchenItems = (orderKitchenTickets?.length ?? 0) > 0;
+        let hasKitchenItems = (orderKitchenTickets?.length ?? 0) > 0;
 
         const promotionsSnapshot: OrderPromotionSnapshot[] =
           orderCreation.promotionsSnapshot ?? [];
@@ -877,6 +921,101 @@ export class PaymentsService {
           }
         }
 
+        // ----------------------------------------------------------------
+        // Plan KDS fire-flows (B5): auto-fire `prepared` items to the kitchen
+        // for restaurant stores, INSIDE the payment $transaction so the
+        // `inventory_consumed_at_fire` flag flip + the per-leaf stock
+        // consumption + the kitchen_ticket create are atomic with the order
+        // write. After commit, the `kitchen.fired` event + SSE push run from
+        // outside the transaction (anti-pattern: do not emit before commit).
+        //
+        // Gating: only restaurant stores. Non-restaurant stores keep the
+        // existing `updateInventoryFromOrder` path which moves stock as
+        // `sales` movement at payment (no COGS recognition split).
+        //
+        // skip_kds lines: NEVER fired. They are routed through
+        // `updateInventoryFromOrder` (the existing guard
+        // `inventory_consumed_at_fire` is FALSE for them so the sale
+        // movement runs). Their own stock is consumed at payment.
+        //
+        // home_delivery / credit sale: we still fire here. Fire is
+        // independent of delivery; the kitchen must receive the order when
+        // it is paid, regardless of whether the customer is in-store or
+        // waiting at home. The state machine (processing vs finished) is
+        // handled by `updateOrderPaymentStatus` based on
+        // `hasKitchenItems`.
+        // ----------------------------------------------------------------
+        if (createPosPaymentDto.requires_payment && !createPosPaymentDto.is_draft) {
+          // Resolve industries once per call (no cache to keep the patch
+          // safe; the per-payment cost is one extra small query).
+          const storeRow = await tx.stores.findUnique({
+            where: { id: createPosPaymentDto.store_id },
+            select: { industries: true },
+          });
+          if (storeIsRestaurant(storeRow?.industries)) {
+            // Collect candidate order_item_ids: all `prepared` items
+            // with skip_kds=false. Persisted items already carry the
+            // product_type via the products relation; we re-load the
+            // items with their product_type to be safe.
+            const fireableItems = await tx.order_items.findMany({
+              where: {
+                order_id: order.id,
+                skip_kds: false,
+                product_id: { not: null },
+                inventory_consumed_at_fire: false,
+                products: { product_type: 'prepared' },
+              },
+              select: { id: true, product_id: true },
+            });
+            const candidateIds = fireableItems.map((i) => i.id);
+            if (candidateIds.length > 0) {
+              // prepareFireContext uses the scoped prisma client (this
+              // service's `prisma` field), reads recipes + BOM + default
+              // locations OUTSIDE this $transaction. Safe because they
+              // are catalog reads (no race with the fire write).
+              // Plan KDS fire-flows (B5): pass the caller's `tx` so
+              // the catalog reads (recipes, BOM, locations) happen
+              // on the SAME connection as the order write. Without
+              // this, prepareFireContext would use a separate
+              // connection that cannot see the just-inserted
+              // order_items and KITCHEN_FIRE_ORDER_NOT_FOUND would
+              // bubble up to the POS.
+              const ctx = await this.kitchenFireService.prepareFireContext(
+                order.id,
+                candidateIds,
+                tx,
+              );
+              if (ctx && ctx.firedItemIds.length > 0) {
+                // store_id is narrowed to non-null in
+                // `createOrUpdateOrderFromPos` (throws on null at line
+                // ~2384). Re-assert locally so TS is happy.
+                if (createPosPaymentDto.store_id == null) {
+                  throw new VendixHttpException(
+                    ErrorCodes.STORE_CONTEXT_001,
+                  );
+                }
+                kitchenFireResult =
+                  await this.kitchenFireService.fireOrderItemsInTx(
+                    tx,
+                    createPosPaymentDto.store_id,
+                    ctx,
+                  );
+              }
+            }
+          }
+        }
+
+        // Plan KDS fire-flows (B5): if the auto-fire created a new
+        // kitchen ticket, the order must stay in `processing` (the
+        // kitchen is now working on it). Flip the flag so the
+        // downstream `updateOrderPaymentStatus` call picks the right
+        // branch.
+        if (kitchenFireResult !== null) {
+          hasKitchenItems = true;
+        }
+
+        let inventoryCost = 0;
+
         // 2. Process payment if required
         let payment: any = null;
         const isDigitalPayment =
@@ -932,7 +1071,7 @@ export class PaymentsService {
           createPosPaymentDto.requires_payment &&
           order.delivery_type !== 'home_delivery';
 
-        let inventoryCost = 0;
+
         if (createPosPaymentDto.update_inventory && isDirectDeliveryFinished) {
           inventoryCost = await this.updateInventoryFromOrder(tx, order);
         }
@@ -1132,6 +1271,23 @@ export class PaymentsService {
               ]
             : [];
 
+        // Plan KDS fire-flows (B5): refresh the in-memory `order`
+        // so the response carries the post-payments state (e.g.
+        // `processing` when the auto-fire created a kitchen
+        // ticket; `finished` when there is no kitchen). The
+        // pre-existing bug was that the response built the
+        // `status` from the initial `order.state` snapshot taken
+        // before `updateOrderPaymentStatus` ran, so the POS was
+        // always told the order was `created` even when the BD
+        // had moved it to `processing`.
+        const refreshed = await tx.orders.findUnique({
+          where: { id: order.id },
+          select: { id: true, order_number: true, state: true },
+        });
+        if (refreshed) {
+          order.state = refreshed.state;
+        }
+
         return {
           success: true,
           message: isDigitalPayment
@@ -1156,6 +1312,19 @@ export class PaymentsService {
             applied_promotions: appliedPromotionsResponse,
             applied_coupons: appliedCouponsResponse,
           },
+          // Plan KDS fire-flows (B9): surface the fire result so the POS
+          // can show "X platos enviados a cocina" without a second
+          // roundtrip. Null when no fire happened (non-restaurant store,
+          // no prepared items, all skip_kds, etc).
+          kitchen_fire: kitchenFireResult
+            ? {
+                fired_count: kitchenFireResult.firedItemSnapshots.length,
+                kitchen_ticket_id: kitchenFireResult.ticketId,
+                cogs_total: Number(
+                  kitchenFireResult.cogsTotal.toFixed(4),
+                ),
+              }
+            : null,
           applied_promotions: appliedPromotionsResponse,
           applied_coupons: appliedCouponsResponse,
           payment: payment
@@ -1177,6 +1346,38 @@ export class PaymentsService {
           _digitalPaymentPending: isDigitalPayment || false,
         };
       });
+
+      // Plan KDS fire-flows (B5 / B9): AFTER the payment $transaction
+      // commits, emit the kitchen.fired event + push the KDS SSE
+      // snapshot for the auto-fire we just did. Failures here MUST NOT
+      // roll back the payment: the order + payment + fire are
+      // already persisted and visible to the kitchen via the
+      // REST snapshot endpoint, so the operator can re-fetch.
+      if (result.kitchen_fire && result.kitchen_fire.kitchen_ticket_id) {
+        try {
+          // We do not have `kitchenFireResult.cogsTotal` after commit;
+          // the helper re-emits the same shape we built inside the
+          // transaction. We pass the minimal info we DO have.
+          await this.kitchenFireService.emitKitchenFiredAfterCommit(
+            createPosPaymentDto.store_id,
+            undefined,
+            {
+              ticketId: result.kitchen_fire.kitchen_ticket_id,
+              firedItemSnapshots: [],
+              cogsTotal: result.kitchen_fire.cogs_total || 0,
+              consumedLineCount: 0,
+            },
+            result.order.id,
+          );
+        } catch (err) {
+          this.logger.error(
+            `Failed to emit kitchen.fired for ticket #${result.kitchen_fire.kitchen_ticket_id}: ${
+              (err as Error).message
+            }`,
+            (err as Error).stack,
+          );
+        }
+      }
 
       // Process digital payments AFTER transaction commit (order is now visible)
       if (result.success && result._digitalPaymentPending) {
@@ -2143,6 +2344,10 @@ export class PaymentsService {
       // relación. Por eso lo asignamos abajo como `applied_price_tier: { connect }`.
       applied_price_tier_name_snapshot: params.tierSnap?.tier_name ?? null,
       stock_units_consumed: params.tierSnap?.stock_units_consumed ?? null,
+      // Plan KDS fire-flows: persistir la marca de "usar stock" del cajero.
+      // Solo aplica a líneas `product_type='prepared'`; para el resto se
+      // ignora. Default false para preservar el comportamiento retail.
+      skip_kds: !!params.item.skip_kds,
     };
 
     if (params.tierSnap?.tier_id != null) {
@@ -2203,6 +2408,23 @@ export class PaymentsService {
     promotionsSnapshot: any[];
     appliedPromotions: any[];
     couponInfo: { coupon_id: number | null; coupon_code: string | null; discount_amount: number };
+    // Plan KDS fire-flows (B6): the auto-fire result captured inside the
+    // table close-out, so the caller (`processPosPayment`) can surface it
+    // in the response (`kitchen_fire`), flip `hasKitchenItems`, and emit
+    // the `kitchen.fired` event + KDS SSE push AFTER the payment commit.
+    // Null when nothing was fired (non-restaurant store, no prepared items,
+    // all already consumed, all skip_kds).
+    kitchenFire: {
+      ticketId: number;
+      firedItemSnapshots: Array<{
+        orderItemId: number;
+        productId: number;
+        productName: string;
+        quantity: number;
+      }>;
+      cogsTotal: number;
+      consumedLineCount: number;
+    } | null;
   }> {
     const tableSessionId = dto.table_session_id!;
 
@@ -2333,6 +2555,71 @@ export class PaymentsService {
       include: { order_items: true, stores: true },
     });
 
+    // ----------------------------------------------------------------
+    // Plan KDS fire-flows (B6): auto-fire the pending `prepared` items
+    // of the table's draft order to the kitchen BEFORE the session is
+    // closed. Same core as B5 (`processPosPayment`) and B7
+    // (`split-order.service`): resolve the fireable order_item_ids
+    // (prepared + active recipe handled inside `prepareFireContext` +
+    // `inventory_consumed_at_fire=false` + NOT skip_kds — including the
+    // items just appended in this close-out), then call
+    // `prepareFireContext` + `fireOrderItemsInTx` INSIDE the same
+    // $transaction so the flag flip + leaf-stock consumption +
+    // kitchen_ticket create are atomic with the order/session write.
+    //
+    // The deferred `kitchen.fired` event + KDS SSE push run AFTER the
+    // payment $transaction commits, from `processPosPayment` (which
+    // owns the commit boundary and calls `emitKitchenFiredAfterCommit`).
+    //
+    // Anti-double-fire: once these items are flagged
+    // `inventory_consumed_at_fire=true`, the B5 block in
+    // `processPosPayment` re-reads candidates with that flag = false and
+    // finds nothing, so it becomes a no-op. The same flag keeps
+    // `updateInventoryFromOrder` from re-discounting at payment.
+    let kitchenFire:
+      | {
+          ticketId: number;
+          firedItemSnapshots: Array<{
+            orderItemId: number;
+            productId: number;
+            productName: string;
+            quantity: number;
+          }>;
+          cogsTotal: number;
+          consumedLineCount: number;
+        }
+      | null = null;
+    if (storeIsRestaurant((updated as any).stores?.industries)) {
+      const fireableItems = await tx.order_items.findMany({
+        where: {
+          order_id: session.order_id,
+          skip_kds: false,
+          product_id: { not: null },
+          inventory_consumed_at_fire: false,
+          products: { product_type: 'prepared' },
+        },
+        select: { id: true },
+      });
+      const candidateIds = fireableItems.map((i) => i.id);
+      if (candidateIds.length > 0) {
+        // Pass `tx` so the catalog reads (recipes, BOM, default
+        // locations) and the just-appended order_items are visible on
+        // the SAME connection as the order write (mirrors B5).
+        const ctx = await this.kitchenFireService.prepareFireContext(
+          session.order_id,
+          candidateIds,
+          tx,
+        );
+        if (ctx && ctx.firedItemIds.length > 0) {
+          kitchenFire = await this.kitchenFireService.fireOrderItemsInTx(
+            tx,
+            dtoStoreId,
+            ctx,
+          );
+        }
+      }
+    }
+
     // Close the table session so the table flips back to its terminal
     // status. The order itself is left in `created` so the rest of the
     // POS payment pipeline (payments row, inventory, journal) runs as
@@ -2358,6 +2645,7 @@ export class PaymentsService {
       promotionsSnapshot: promotionQuote.order_promotions_snapshot ?? [],
       appliedPromotions: promotionQuote.applied_promotions ?? [],
       couponInfo,
+      kitchenFire,
     };
   }
 
@@ -2556,6 +2844,21 @@ export class PaymentsService {
           promotionsSnapshot: promotionQuote.order_promotions_snapshot,
           appliedPromotions: promotionQuote.applied_promotions,
           couponInfo,
+          // Plan KDS fire-flows (B6): the fresh-sale path does NOT fire here;
+          // its auto-fire runs later in `processPosPayment` (B5). Keep the
+          // shape aligned with the table close-out branch so the caller can
+          // read `kitchenFire` uniformly.
+          kitchenFire: null as null | {
+            ticketId: number;
+            firedItemSnapshots: Array<{
+              orderItemId: number;
+              productId: number;
+              productName: string;
+              quantity: number;
+            }>;
+            cogsTotal: number;
+            consumedLineCount: number;
+          },
         };
       } catch (error) {
         if (
@@ -2720,6 +3023,28 @@ export class PaymentsService {
    * For POS home delivery with payment: created -> processing (needs shipping)
    * For POS without payment (credit sale): stays in 'created'
    */
+  /**
+   * F2-guard helper — true when the order still has kitchen items the cook
+   * has not handed off (`kitchen_ticket_items.status NOT IN
+   * ('delivered','cancelled')`). Mirrors `OrderFlowService.hasPendingKitchenItems`
+   * but runs on the payment `$transaction` client so it sees uncommitted
+   * writes from this same POS payment. Scope-safe: `kitchen_ticket_items` is
+   * auto-scoped through `kitchen_ticket.store_id` in StorePrismaService, and
+   * we further constrain by `kitchen_ticket.order_id`.
+   */
+  private async hasPendingKitchenItemsTx(
+    tx: any,
+    orderId: number,
+  ): Promise<boolean> {
+    const pendingCount = await tx.kitchen_ticket_items.count({
+      where: {
+        kitchen_ticket: { order_id: orderId },
+        status: { notIn: ['delivered', 'cancelled'] },
+      },
+    });
+    return pendingCount > 0;
+  }
+
   private async updateOrderPaymentStatus(
     tx: any,
     orderId: number,
@@ -2741,6 +3066,20 @@ export class PaymentsService {
           orderState = 'processing';
         } else if (deliveryType === 'home_delivery') {
           // Shipping order — needs to be prepared and dispatched
+          orderState = 'processing';
+        } else if (await this.hasPendingKitchenItemsTx(tx, orderId)) {
+          // F2-guard (POS payment, AUTOMATIC path): defensive backstop.
+          // `hasKitchenItems` is normally TRUE whenever the auto-fire
+          // (B5/B6) created a ticket BEFORE this call, so the first branch
+          // already routes those orders to `processing`. But if for any
+          // reason the discriminator is FALSE while the order still has
+          // undelivered kitchen_ticket_items (e.g. ordering races, a
+          // ticket created out of band), we must NOT finish the order.
+          // Force `processing` instead of `finished`. We do NOT throw here
+          // — throwing would roll back the whole payment.
+          this.logger.log(
+            `Order #${orderId} paid but kept in 'processing': undelivered kitchen items detected (F2-guard).`,
+          );
           orderState = 'processing';
         } else {
           // Direct POS sale — finished immediately

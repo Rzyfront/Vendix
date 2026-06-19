@@ -166,6 +166,12 @@ export class PosPaymentService {
       price_override_reason: item.isPriceOverridden
         ? item.priceOverrideReason
         : undefined,
+      // Plan KDS fire-flows (F1): forward the cashier's "usar stock" intent
+      // from the cart so the backend can persist it on order_items and
+      // route the line through the payment-side inventory decrement
+      // instead of the kitchen fire. Only meaningful for `prepared`
+      // products; ignored for everything else.
+      skip_kds: item.skipKds === true,
     };
   }
 

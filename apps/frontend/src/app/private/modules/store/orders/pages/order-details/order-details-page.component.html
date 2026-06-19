@@ -386,6 +386,33 @@
                           <app-icon name="flame" [size]="10" />
                           Cocina: {{ kitchenStateLabel(ks) }}
                         </span>
+                      } @else if (
+                        canShowKitchenDispatch() &&
+                        item.products?.product_type === 'prepared' &&
+                        !item.skip_kds &&
+                        !item.inventory_consumed_at_fire
+                      ) {
+                        <!-- Plan KDS fire-flows (F3): the item is
+                             `prepared`, the cashier didn't flag it as
+                             `usar stock`, and it has not been fired.
+                             The detail page offers a per-plate checkbox so
+                             the operator can SELECT which dishes to dispatch
+                             and fire them in a batch from the action bar
+                             below. -->
+                        <label
+                          class="inline-flex items-center gap-1.5 mt-1 cursor-pointer select-none text-[11px] font-semibold text-amber-800"
+                          [title]="'Seleccionar este plato para enviar a cocina'"
+                        >
+                          <input
+                            type="checkbox"
+                            class="h-3.5 w-3.5 rounded border-amber-300 text-amber-600 focus:ring-amber-500 cursor-pointer"
+                            [checked]="isKitchenItemSelected(item.id)"
+                            [disabled]="isFiringKitchen()"
+                            (change)="toggleKitchenItem(item.id)"
+                          />
+                          <app-icon name="flame" [size]="10" />
+                          Enviar a cocina
+                        </label>
                       }
                       @if (parseVariantAttributes(item.variant_attributes); as attrs) {
                         @if (attrs.length) {
@@ -439,6 +466,50 @@
                 </div>
 	              }
 	            </div>
+
+            <!-- Plan KDS fire-flows (F3): selective per-plate dispatch
+                 action bar. Visible only for restaurant stores with at
+                 least one pending prepared item and a non-terminal order.
+                 The per-item checkboxes above feed the selection; an empty
+                 selection fires all pending items. -->
+            @if (canShowKitchenDispatch()) {
+              <div
+                class="mt-4 border-t border-border pt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+              >
+                <p class="text-xs text-gray-500">
+                  {{ selectedKitchenItemIds().size }} de
+                  {{ pendingKitchenItems().length }} plato(s) seleccionado(s)
+                </p>
+                <div class="flex flex-wrap items-center gap-2">
+                  <app-button
+                    variant="ghost"
+                    size="sm"
+                    [disabled]="isFiringKitchen()"
+                    (clicked)="selectAllPendingKitchen()"
+                  >
+                    Seleccionar todo
+                  </app-button>
+                  <app-button
+                    variant="ghost"
+                    size="sm"
+                    [disabled]="isFiringKitchen() || selectedKitchenItemIds().size === 0"
+                    (clicked)="clearKitchenSelection()"
+                  >
+                    Limpiar
+                  </app-button>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    [loading]="isFiringKitchen()"
+                    [disabled]="pendingKitchenItems().length === 0"
+                    (clicked)="fireSelectedToKitchen()"
+                  >
+                    <app-icon slot="icon" name="flame" [size]="14" />
+                    Enviar a cocina
+                  </app-button>
+                </div>
+              </div>
+            }
 	            @if (appliedTierSummary().length > 0) {
 	              <div class="mt-4 border-t border-border pt-3">
 	                <p class="text-xs font-bold uppercase tracking-wide text-gray-500 mb-2">

@@ -1775,38 +1775,15 @@ export class PosComponent {
     });
   }
 
-  private fireKitchenFromCompletedOrder(order: any): void {
-    if (!order?.id) return;
-    if (!this.isRestaurantMode() || !this.hasUnfiredPreparedItems()) return;
-    if (this.restaurantIntegration.preparedFiredForCurrentCart()) return;
-    // The POS payment backend does not surface `order_items` in the same
-    // shape as the counter-draft order. We pull ids from the response when
-    // available, otherwise we fall back to a no-op (the operator can
-    // re-fire from the KDS page).
-    // Bug 1 (Fase K): lines flagged skipKds in the cart are NOT sent to
-    // the kitchen — their own stock is consumed at payment.
-    const orderItemIds: number[] = Array.isArray(order?.order_items)
-      ? order.order_items
-          .filter(
-            (it: any) => !this.isCartItemSkipKds(it?.product_id, it?.product_variant_id),
-          )
-          .map((it: any) => Number(it.id))
-          .filter(Number.isFinite)
-      : [];
-    if (orderItemIds.length === 0) return;
-    this.restaurantIntegration
-      .maybeFireKitchen(Number(order.id), orderItemIds)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (res) => {
-          if (res && res.fired_item_ids.length > 0) {
-            this.toastService.success('Orden cobrada y enviada a cocina');
-          }
-        },
-        error: (err) => {
-          console.error('KDS fire-after-pay failed', err);
-        },
-      });
+  // Plan KDS fire-flows (F2): the fire post-pago is now done by the
+  // backend inside the payment $transaction (PaymentsService
+  // auto-fire). This method is a NO-OP kept for backward compat with
+  // any external caller; it intentionally does not invoke the network
+  // because the backend is the single source of truth for the KDS
+  // dispatch on sale.
+  private fireKitchenFromCompletedOrder(_order: any): void {
+    // Deprecated: see comment above.
+    return;
   }
   onPaymentCompleted(paymentData: any): void {
     if (!this.cartState() || this.isEmpty) return;
@@ -1826,8 +1803,20 @@ export class PosComponent {
     if (paymentData.success) {
       this.currentOrderId.set(paymentData.order?.id);
       this.currentOrderNumber.set(paymentData.order?.order_number);
-      this.fireKitchenFromCompletedOrder(paymentData.order);
-
+      // Plan KDS fire-flows (F2): the backend auto-fires `prepared`
+      // items inside the payment $transaction for restaurant stores,
+      // so the fire from the frontend is no longer needed (and was a
+      // silent no-op because POS payment does not surface
+      // `order.order_items` with ids). Surface the server's
+      // `kitchen_fire.fired_count` as a toast so the cashier sees the
+      // KDS dispatch without polling.
+      const fireInfo: any = (paymentData as any)?.order?.kitchen_fire ??
+        (paymentData as any)?.kitchen_fire;
+      if (fireInfo && Number(fireInfo.fired_count) > 0) {
+        this.toastService.success(
+          `${fireInfo.fired_count} plato(s) enviados a cocina (ticket #${fireInfo.kitchen_ticket_id})`,
+        );
+      }
 
       const cs = this.cartState();
       const csm = this.cartSummary();
@@ -2264,8 +2253,16 @@ export class PosComponent {
       this.currentOrderId.set(shippingData.order?.id);
       this.currentOrderNumber.set(shippingData.order?.order_number);
 
-      // Restaurant + prepared: fire KDS too (Envío is a full sale, not just shipping)
-      this.fireKitchenFromCompletedOrder(shippingData.order);
+      // Plan KDS fire-flows (F2): the backend auto-fires `prepared`
+      // items inside the payment $transaction for restaurant stores.
+      // Surface the server's `kitchen_fire.fired_count` as a toast.
+      const fireInfo: any = (shippingData as any)?.order?.kitchen_fire ??
+        (shippingData as any)?.kitchen_fire;
+      if (fireInfo && Number(fireInfo.fired_count) > 0) {
+        this.toastService.success(
+          `${fireInfo.fired_count} plato(s) enviados a cocina (ticket #${fireInfo.kitchen_ticket_id})`,
+        );
+      }
 
       const cs = this.cartState();
       const csm = this.cartSummary();

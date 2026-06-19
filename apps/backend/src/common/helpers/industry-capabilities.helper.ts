@@ -38,3 +38,27 @@ export function storeIndustriesSupportIngredients(
     ),
   );
 }
+
+/**
+ * Backend capability resolver: returns true when at least one of the given
+ * store industries is `restaurant`. Mirrors the canonical store-industry
+ * gating (`stores.industries`) used by `Vendix-core` for restaurant-only
+ * features (KDS, fire-to-kitchen, table sessions, recipes).
+ *
+ * Plan KDS fire-flows: the auto-fire path (POS payment, table close, split)
+ * is gated here so non-restaurant stores never see the new code paths. The
+ * manual selective fire endpoint (POST /store/kitchen-fire) also uses this
+ * resolver and returns `RESTAURANT_NOT_ENABLED` when it returns false.
+ *
+ * OR semantics: a multi-industry store that includes `restaurant` is treated
+ * as a restaurant for KDS purposes. Safe to call with null/undefined/empty
+ * arrays; returns false then.
+ */
+export function storeIsRestaurant(
+  industries: industry_enum[] | string[] | null | undefined,
+): boolean {
+  if (!industries || industries.length === 0) {
+    return false;
+  }
+  return industries.some((industry) => industry === 'restaurant');
+}

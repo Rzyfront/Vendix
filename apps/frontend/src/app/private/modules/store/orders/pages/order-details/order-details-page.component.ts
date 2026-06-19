@@ -23,6 +23,7 @@ import {
   ReactivateOrderDto,
 } from '../../interfaces/order.interface';
 import { PosShippingService } from '../../../pos/services/pos-shipping.service';
+import { KitchenTicketsService } from '../../../restaurant-ops/kds/services/kitchen-tickets.service';
 import { PosShippingOption } from '../../../pos/models/shipping.model';
 import { AlertBannerComponent, DialogService, ModalComponent, ToastService, TimelineComponent } from '../../../../../../shared/components';
 import { TimelineStep, TimelineVariant } from '../../../../../../shared/components/timeline/timeline.interfaces';
@@ -146,6 +147,59 @@ export class OrderDetailsPageComponent {
 
   // Processing state
   isProcessingAction = signal(false);
+  // Plan KDS fire-flows (F3): loading flag for the manual fire button.
+  isSendingToKitchen = signal(false);
+  /**
+   * Plan KDS fire-flows (F3): set of `order_item.id` the operator has
+   * checked for selective fire. Empty by default — when empty the fire
+   * action falls back to "all pending" (todo-o-nada legacy behaviour).
+   */
+  readonly selectedKitchenItemIds = signal<Set<number>>(new Set<number>());
+  /**
+   * Plan KDS fire-flows (F3): loading flag for the batch fire action.
+   * Mirrors `isSendingToKitchen` (kept as a backward-compat alias) so the
+   * template can bind a single, clearly-named signal.
+   */
+  readonly isFiringKitchen = this.isSendingToKitchen;
+  /**
+   * Items on the current order that are `prepared`, not flagged
+   * `skip_kds`, and have no kitchen_ticket_items yet (i.e. the
+   * auto-fire did not catch them, or the order predates the
+   * auto-fire path). The detail page renders the selective
+   * "Enviar a cocina" UI only when this is non-empty.
+   */
+  readonly pendingKitchenItems = computed<OrderItem[]>(() => {
+    const order = this.order();
+    if (!order?.order_items) return [];
+    return order.order_items.filter(
+      (it) =>
+        it.product_id != null &&
+        it.skip_kds !== true &&
+        it.inventory_consumed_at_fire !== true &&
+        (it.kitchen_ticket_items?.length ?? 0) === 0 &&
+        it.products?.product_type === 'prepared',
+    );
+  });
+  /**
+   * Backward-compat alias for the legacy name used elsewhere on this page.
+   */
+  readonly unfiredPreparedItems = this.pendingKitchenItems;
+  /** True if the active store is a restaurant (industries cascade). */
+  readonly isRestaurant = computed<boolean>(() => this.authFacade.isRestaurant());
+  /**
+   * Plan KDS fire-flows (F3): show the per-plate kitchen dispatch UI only
+   * for restaurant stores, when there is at least one pending prepared
+   * item, and the order is not in a terminal state (cancelled/refunded).
+   */
+  readonly canShowKitchenDispatch = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    if (!this.isRestaurant()) return false;
+    if (this.pendingKitchenItems().length === 0) return false;
+    const terminalStates: OrderState[] = ['cancelled', 'refunded'];
+    if (terminalStates.includes(order.state as OrderState)) return false;
+    return true;
+  });
   isLoadingPaymentReceipt = signal(false);
   loadingPaymentReceiptId = signal<number | null>(null);
   paymentReceiptPreview = signal<PaymentReceiptPreview | null>(null);
@@ -837,6 +891,12 @@ export class OrderDetailsPageComponent {
   private authFacade = inject(AuthFacade);
   private ticketService = inject(PosTicketService);
   private posShippingService = inject(PosShippingService);
+  // Plan KDS fire-flows (F3): manual selective fire for online orders
+  // with `prepared` items that were never auto-fired (the auto-fire
+  // runs in the payment $transaction; for orders paid before this
+  // patch, or for online orders not auto-fireable, the operator can
+  // dispatch them from this page).
+  private kitchenTicketsService = inject(KitchenTicketsService);
   private sanitizer = inject(DomSanitizer);
 
   constructor() {
@@ -2019,6 +2079,99 @@ export class OrderDetailsPageComponent {
     );
     if (inFlight) return inFlight;
     return items[0]; // items are pre-sorted desc by the backend include
+  }
+
+  // ─── Plan KDS fire-flows (F3): per-plate selection ───────────
+  /** Toggle a single pending item in/out of the fire selection. */
+  toggleKitchenItem(id: number): void {
+    this.selectedKitchenItemIds.update((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  /** True if the given order_item is currently selected for fire. */
+  isKitchenItemSelected(id: number): boolean {
+    return this.selectedKitchenItemIds().has(id);
+  }
+
+  /** Select every pending (prepared, unfired) item. */
+  selectAllPendingKitchen(): void {
+    this.selectedKitchenItemIds.set(
+      new Set(this.pendingKitchenItems().map((it) => it.id)),
+    );
+  }
+
+  /** Clear the fire selection. */
+  clearKitchenSelection(): void {
+    this.selectedKitchenItemIds.set(new Set<number>());
+  }
+
+  /**
+   * Plan KDS fire-flows (F3): fire the SELECTED `prepared` items to the
+   * kitchen from the order detail page. If nothing is selected, falls back
+   * to firing all pending items (legacy all-or-nothing behaviour). Re-fetches
+   * the order on success so the kitchen_ticket_items badges refresh (the SSE
+   * stream is not always live on this page).
+   */
+  fireSelectedToKitchen(): void {
+    const order = this.order();
+    if (!order?.id) return;
+    const selected = this.selectedKitchenItemIds();
+    const ids = selected.size
+      ? this.pendingKitchenItems()
+          .filter((it) => selected.has(it.id))
+          .map((it) => it.id)
+      : this.pendingKitchenItems().map((it) => it.id);
+    if (ids.length === 0) return;
+    this.isFiringKitchen.set(true);
+    this.kitchenTicketsService
+      .fireOrderItems({ order_id: order.id, order_item_ids: ids })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.isFiringKitchen.set(false);
+          this.clearKitchenSelection();
+          this.toastService.success('Enviado a cocina');
+          // Re-fetch the order so the kitchen_ticket_items badges update.
+          this.refreshOrder();
+        },
+        error: (err: unknown) => {
+          this.isFiringKitchen.set(false);
+          // Generic error — the backend may reject with
+          // RESTAURANT_NOT_ENABLED on a non-restaurant store, or
+          // KITCHEN_FIRE_ALL_ALREADY_CONSUMED if the items are
+          // already fired. We do not leak the recipe check
+          // (Plan F3: error toast must be generic; the recipe error
+          // belongs to startPreparation, not the fire path).
+          this.toastService.error('No se pudo enviar a cocina');
+          console.error('KDS fire-from-detail failed', err);
+        },
+      });
+  }
+
+  /**
+   * Plan KDS fire-flows (F3): re-fetch the current order so the
+   * kitchen_ticket_items badges + the unfired-prepared computed
+   * stay in sync after a fire mutation. Lightweight: same endpoint
+   * the page already loaded from, no extra roundtrip beyond a
+   * refetch.
+   */
+  private refreshOrder(): void {
+    const id = this.order()?.id;
+    if (!id) return;
+    this.ordersService
+      .getOrderById(String(id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res: any) => {
+          const data = res?.data ?? res;
+          if (data) this.order.set(data);
+        },
+        error: () => undefined,
+      });
   }
 
   /** Localised label for the KDS state badge. */

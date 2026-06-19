@@ -210,6 +210,16 @@ export class TableSessionPageComponent implements OnInit {
           this.toastService.success(
             `Cuenta dividida en ${result.sub_orders.length} sub-órdenes`,
           );
+          // Plan KDS fire-flows (F4): if the backend auto-fired
+          // prepared items as part of the split, surface the
+          // fired count so the operator knows the kitchen is on
+          // it.
+          const fire = (result as any)?.kitchen_fire;
+          if (fire && Number(fire.fired_count) > 0) {
+            this.toastService.success(
+              `${fire.fired_count} plato(s) enviados a cocina (ticket #${fire.kitchen_ticket_id})`,
+            );
+          }
           this.router.navigate(['/admin/restaurant-ops/tables']);
         },
         error: (err: unknown) => {
@@ -239,6 +249,13 @@ export class TableSessionPageComponent implements OnInit {
           this.toastService.success(
             `Cuenta dividida en ${result.sub_orders.length} sub-órdenes`,
           );
+          // Plan KDS fire-flows (F4): see onSplitByItems above.
+          const fire = (result as any)?.kitchen_fire;
+          if (fire && Number(fire.fired_count) > 0) {
+            this.toastService.success(
+              `${fire.fired_count} plato(s) enviados a cocina (ticket #${fire.kitchen_ticket_id})`,
+            );
+          }
           this.router.navigate(['/admin/restaurant-ops/tables']);
         },
         error: (err: unknown) => {

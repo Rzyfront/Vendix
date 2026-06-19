@@ -1079,6 +1079,16 @@ model order_items {
   // el descuento NO se vuelva a aplicar al pagar. Default false → no afecta
   // el flujo retail existente.
   inventory_consumed_at_fire       Boolean                  @default(false)
+  // Restaurant Suite Fase K / Plan KDS fire-flows: marca persistida de la intencion
+  // del cajero al aniadir el item al carrito ("usar stock" en pos-prepared-choice-modal).
+  // - skip_kds=true: el item NO se enviara a cocina; su stock se descuenta en el
+  //   pago (sales movement), no en fire. Pensado para platos preparados que el
+  //   operador sabe que ya no requieren paso por cocina (ej. producto terminado
+  //   listo para entrega inmediata desde mostrador).
+  // - skip_kds=false (default): item elegible para fire. kitchen-fire.service.ts
+  //   decide al final segun product_type='prepared' y existencia de receta activa.
+  // Default false preserva el comportamiento actual para ordenes existentes.
+  skip_kds                         Boolean                  @default(false)
   created_at                       DateTime?                @default(now()) @db.Timestamp(6)
   updated_at                       DateTime?                @default(now()) @db.Timestamp(6)
   inventory_transactions           inventory_transactions[]

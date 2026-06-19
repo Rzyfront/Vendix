@@ -8,6 +8,7 @@ import { RequestContextService } from '../../../common/context/request-context.s
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { FireOrderItemsDto, KitchenTicketQueryDto } from './dto';
+import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 
 /**
  * Single source of truth for the kitchen-ticket payload shape returned to
@@ -45,6 +46,33 @@ export interface FireOrderItemsResult {
   skipped_item_ids: number[];
   cogs_total: number;
   consumed_line_count: number;
+}
+
+/**
+ * Plan KDS fire-flows (B2): the pre-exploded context the caller has already
+ * resolved OUTSIDE the transaction (recipes, BOM, default locations,
+ * business date, partition into prepared/recipe-less). The fire-in-tx
+ * core receives this as input so the same atomic body can be reused from
+ * the auto-fire paths (POS payment / table close / split) without
+ * re-running the pre-explosion. The caller is responsible for
+ * scoping the catalog reads to the right tenant.
+ */
+export interface PreExplodedFireContext {
+  order: {
+    id: number;
+    order_number: string;
+  };
+  firedItemIds: number[];
+  skippedItemIds: number[];
+  preparedItems: Array<{
+    orderItem: { id: number; product_id: number | null; product_name: string; quantity: any };
+    recipeId: number;
+    bomLines: BomExplosionLine[];
+  }>;
+  recipeLessItems: Array<{ id: number; product_id: number | null; product_name: string; quantity: any }>;
+  locationByProduct: Map<number, number>;
+  businessDate: string;
+  user_id?: number;
 }
 
 /**
@@ -139,6 +167,19 @@ export class KitchenFireService {
     const user_id = context?.user_id;
     if (!store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    // Plan KDS fire-flows (B8): gate the manual fire endpoint to
+    // `restaurant` stores. Non-restaurant stores don't have a kitchen;
+    // allowing fire would create kitchen_tickets rows for them and
+    // (downstream) surprise the kitchen module. The auto-fire path in
+    // PaymentsService is gated the same way.
+    const storeIndustries = await this.prisma.stores.findUnique({
+      where: { id: store_id },
+      select: { industries: true },
+    });
+    if (!storeIsRestaurant(storeIndustries?.industries)) {
+      throw new VendixHttpException(ErrorCodes.RESTAURANT_NOT_ENABLED);
     }
 
     // 1. Load the order header + the requested items, scope-safe.
@@ -266,130 +307,26 @@ export class KitchenFireService {
 
     // 4. ATOMIC TRANSACTION — for each item: per-leaf stock consumption +
     //    flag flip. Then create the kitchen_ticket + items.
-    const result = await this.prisma.$transaction(async (tx) => {
-      const firedItemSnapshots: Array<{
-        orderItemId: number;
-        productId: number;
-        productName: string;
-        quantity: number;
-      }> = [];
-
-      let cogsTotal = 0;
-      let consumedLineCount = 0;
-
-      for (const ctxItem of preparedItems) {
-        const { orderItem, bomLines } = ctxItem;
-        const orderQty = Number(orderItem.quantity || 0);
-        if (!Number.isFinite(orderQty) || orderQty <= 0) {
-          // Defensive — should never happen at this point.
-          continue;
-        }
-
-        // Per-leaf consumption: stock × orderQty × bomMultiplier.
-        for (const line of bomLines) {
-          const consumedQty = Math.round(line.quantity * orderQty);
-          if (!Number.isFinite(consumedQty) || consumedQty <= 0) continue;
-
-          const locationId = locationByProduct.get(
-            line.component_product_id,
-          );
-          if (!locationId) continue;
-
-          const result = await this.stockLevelManager.updateStock(
-            {
-              product_id: line.component_product_id,
-              location_id: locationId,
-              quantity_change: -Math.abs(consumedQty),
-              movement_type: 'consumption',
-              reason: `Fire-to-kitchen (order #${order.id} – item #${orderItem.id})`,
-              source_module: 'kitchen_fire',
-              user_id,
-              order_item_id: orderItem.id,
-              create_movement: true,
-              validate_availability: false,
-            },
-            tx,
-          );
-
-          if (result?.cost_snapshot) {
-            cogsTotal += Number(result.cost_snapshot.total_cost || 0);
-            consumedLineCount += 1;
-          }
-        }
-
-        // Flip the idempotency flag.
-        await tx.order_items.update({
-          where: { id: orderItem.id },
-          data: { inventory_consumed_at_fire: true },
-        });
-
-        firedItemSnapshots.push({
-          orderItemId: orderItem.id,
-          productId: orderItem.product_id!,
-          productName: orderItem.product_name,
-          quantity: orderQty,
-        });
-      }
-
-      // Recipe-less items: same ticket, no stock movement, no COGS.
-      // We still flip `inventory_consumed_at_fire=true` so the payment
-      // path skips them and the anti-double-discount invariant holds
-      // (the kitchen will track the cook manually, the POS won't
-      // double-deduct the product's own stock).
-      for (const item of recipeLessItems) {
-        const orderQty = Number(item.quantity || 0);
-        if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
-        await tx.order_items.update({
-          where: { id: item.id },
-          data: { inventory_consumed_at_fire: true },
-        });
-        firedItemSnapshots.push({
-          orderItemId: item.id,
-          productId: item.product_id!,
-          productName: item.product_name,
-          quantity: orderQty,
-        });
-      }
-
-      // Serialize the daily correlative per (store, business_date) with a
-      // transaction-scoped advisory lock so concurrent fires can't collide
-      // on the same daily_number. The lock auto-releases at commit/rollback.
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate})::int)`;
-      const sameDayCount = await tx.kitchen_tickets.count({
-        where: { store_id, business_date: new Date(`${businessDate}T00:00:00.000Z`) },
-      });
-      const dailyNumber = sameDayCount + 1;
-
-      // Create the kitchen_ticket + items (one ticket per fire call, one
-      // item per fired order_item). Status defaults to 'pending'; Fase F
-      // owns the KDS SSE controller that mutates these later.
-      const ticket = await tx.kitchen_tickets.create({
-        data: {
-          store_id,
-          order_id: order.id,
-          status: 'pending',
-          daily_number: dailyNumber,
-          business_date: new Date(`${businessDate}T00:00:00.000Z`),
-          fired_at: new Date(),
-          items: {
-            create: firedItemSnapshots.map((snap) => ({
-              order_item_id: snap.orderItemId,
-              product_id: snap.productId,
-              quantity: snap.quantity,
-              status: 'pending',
-            })),
-          },
-        },
-        include: { items: true },
-      });
-
-      return {
-        ticketId: ticket.id,
-        firedItemSnapshots,
-        cogsTotal,
-        consumedLineCount,
-      };
-    });
+    //
+    // Plan KDS fire-flows (B2): the tx body lives in `fireOrderItemsInTx` so
+    // the auto-fire paths (POS payment, table close, split) can run the SAME
+    // atomic body inside THEIR OWN $transaction (which also writes the order /
+    // payment / sub-orders). The caller provides a pre-exploded context
+    // (recipes, BOM, default locations, business date) so this method
+    // executes only the tx-bound work; it never opens a new $transaction.
+    const preComputed: PreExplodedFireContext = {
+      order: { id: order.id, order_number: order.order_number },
+      firedItemIds,
+      skippedItemIds,
+      preparedItems,
+      recipeLessItems,
+      locationByProduct,
+      businessDate,
+      user_id,
+    };
+    const result = await this.prisma.$transaction(async (tx) =>
+      this.fireOrderItemsInTx(tx, store_id, preComputed),
+    );
 
     // 5. Emit `kitchen.fired` AFTER the transaction commits. A failure
     //    here MUST NOT roll back the fire.
@@ -440,6 +377,425 @@ export class KitchenFireService {
       order_id: order.id,
       fired_item_ids: result.firedItemSnapshots.map((s) => s.orderItemId),
       skipped_item_ids: skippedItemIds,
+      cogs_total: Number(result.cogsTotal.toFixed(4)),
+      consumed_line_count: result.consumedLineCount,
+    };
+  }
+
+  // ------------------------------------------------------- fire-in-tx core
+  /**
+   * Plan KDS fire-flows (B2): the transaction-bound core of the fire flow.
+   * Receives an EXTERNAL `tx` (the caller's open $transaction) and a
+   * pre-exploded context (recipes, BOM, default locations, business date).
+   *
+   * Why a separate method:
+   *  - The public `fireOrderItems` runs its own $transaction because the
+   *    manual fire is a standalone operation.
+   *  - The auto-fire paths (POS payment, table close, split) already run a
+   *    larger $transaction that writes the order / payment / sub-orders.
+   *    Re-running the fire inside its own $transaction would either:
+   *      (a) create a savepoint boundary and lose atomicity, or
+   *      (b) require duplicating the entire payment / split flow.
+   *    Passing the caller's `tx` in keeps the WHOLE flow atomic: if any
+   *    step in the larger transaction fails, the fire rolls back too.
+   *
+   * Atomicity contract — must be respected by callers:
+   *  - All `tx.*` writes (stock consume, flag flip, ticket create) run on
+   *    the passed-in `tx`. No nested $transaction.
+   *  - The `pg_advisory_xact_lock` + daily counter run inside this same
+   *    `tx` so concurrent fires serialize on the same daily_number.
+   *  - Event emission (`kitchen.fired`) and SSE push happen AFTER the
+   *    caller's $transaction commits, never from inside this method.
+   *
+   * Pre-condition (caller responsibility): the preComputed must already be
+   * partitioned into `preparedItems` and `recipeLessItems` against the
+   * SAME order whose items carry `skip_kds=false` (or that the caller
+   * already filtered those out). Items with `skip_kds=true` must NOT be
+   * included in either list.
+   *
+   * Returns the same shape `fireOrderItems` always returned (ticketId +
+   * firedItemSnapshots + cogsTotal + consumedLineCount) so the wrapper
+   * can build the public response without branching.
+   */
+  async fireOrderItemsInTx(
+    tx: Prisma.TransactionClient,
+    store_id: number,
+    preComputed: PreExplodedFireContext,
+  ): Promise<{
+    ticketId: number;
+    firedItemSnapshots: Array<{
+      orderItemId: number;
+      productId: number;
+      productName: string;
+      quantity: number;
+    }>;
+    cogsTotal: number;
+    consumedLineCount: number;
+  }> {
+    const { order, preparedItems, recipeLessItems, locationByProduct, businessDate, user_id } =
+      preComputed;
+
+    const firedItemSnapshots: Array<{
+      orderItemId: number;
+      productId: number;
+      productName: string;
+      quantity: number;
+    }> = [];
+
+    let cogsTotal = 0;
+    let consumedLineCount = 0;
+
+    for (const ctxItem of preparedItems) {
+      const { orderItem, bomLines } = ctxItem;
+      const orderQty = Number(orderItem.quantity || 0);
+      if (!Number.isFinite(orderQty) || orderQty <= 0) {
+        // Defensive — should never happen at this point.
+        continue;
+      }
+
+      // Per-leaf consumption: stock × orderQty × bomMultiplier.
+      for (const line of bomLines) {
+        const consumedQty = Math.round(line.quantity * orderQty);
+        if (!Number.isFinite(consumedQty) || consumedQty <= 0) continue;
+
+        const locationId = locationByProduct.get(
+          line.component_product_id,
+        );
+        if (!locationId) continue;
+
+        const result = await this.stockLevelManager.updateStock(
+          {
+            product_id: line.component_product_id,
+            location_id: locationId,
+            quantity_change: -Math.abs(consumedQty),
+            movement_type: 'consumption',
+            reason: `Fire-to-kitchen (order #${order.id} – item #${orderItem.id})`,
+            source_module: 'kitchen_fire',
+            user_id,
+            order_item_id: orderItem.id,
+            create_movement: true,
+            validate_availability: false,
+          },
+          tx,
+        );
+
+        if (result?.cost_snapshot) {
+          cogsTotal += Number(result.cost_snapshot.total_cost || 0);
+          consumedLineCount += 1;
+        }
+      }
+
+      // Flip the idempotency flag.
+      await tx.order_items.update({
+        where: { id: orderItem.id },
+        data: { inventory_consumed_at_fire: true },
+      });
+
+      firedItemSnapshots.push({
+        orderItemId: orderItem.id,
+        productId: orderItem.product_id!,
+        productName: orderItem.product_name,
+        quantity: orderQty,
+      });
+    }
+
+    // Recipe-less items: same ticket, no stock movement, no COGS.
+    // We still flip `inventory_consumed_at_fire=true` so the payment
+    // path skips them and the anti-double-discount invariant holds
+    // (the kitchen will track the cook manually, the POS won't
+    // double-deduct the product's own stock).
+    for (const item of recipeLessItems) {
+      const orderQty = Number(item.quantity || 0);
+      if (!Number.isFinite(orderQty) || orderQty <= 0) continue;
+      await tx.order_items.update({
+        where: { id: item.id },
+        data: { inventory_consumed_at_fire: true },
+      });
+      firedItemSnapshots.push({
+        orderItemId: item.id,
+        productId: item.product_id!,
+        productName: item.product_name,
+        quantity: orderQty,
+      });
+    }
+
+    // Serialize the daily correlative per (store, business_date) with a
+    // transaction-scoped advisory lock so concurrent fires can't collide
+    // on the same daily_number. The lock auto-releases at commit/rollback.
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${store_id}::int, hashtext(${businessDate})::int)`;
+    const sameDayCount = await tx.kitchen_tickets.count({
+      where: {
+        store_id,
+        business_date: new Date(`${businessDate}T00:00:00.000Z`),
+      },
+    });
+    const dailyNumber = sameDayCount + 1;
+
+    // Create the kitchen_ticket + items (one ticket per fire call, one
+    // item per fired order_item). Status defaults to 'pending'; Fase F
+    // owns the KDS SSE controller that mutates these later.
+    const ticket = await tx.kitchen_tickets.create({
+      data: {
+        store_id,
+        order_id: order.id,
+        status: 'pending',
+        daily_number: dailyNumber,
+        business_date: new Date(`${businessDate}T00:00:00.000Z`),
+        fired_at: new Date(),
+        items: {
+          create: firedItemSnapshots.map((snap) => ({
+            order_item_id: snap.orderItemId,
+            product_id: snap.productId,
+            quantity: snap.quantity,
+            status: 'pending',
+          })),
+        },
+      },
+      include: { items: true },
+    });
+
+    return {
+      ticketId: ticket.id,
+      firedItemSnapshots,
+      cogsTotal,
+      consumedLineCount,
+    };
+  }
+
+  // ----------------------------------------------------- prepareFireContext
+  /**
+   * Plan KDS fire-flows (B2): build the pre-exploded context the auto-fire
+   * paths need to call `fireOrderItemsInTx` from inside THEIR $transaction.
+   *
+   * The auto-fire callers (POS payment, table close, split) have already
+   * persisted the `order_items` and have a candidate list of
+   * `order_item_ids` they want to fire (typically the `prepared` lines with
+   * `skip_kds=false`). This method:
+   *   1. Loads the order header + the requested items (scope-safe).
+   *   2. Partitions into `firedItemIds` / `skippedItemIds` (same rules as
+   *      the public `fireOrderItems`: skip already-consumed, non-prepared,
+   *      and recipe-less-as-no-recipe — but the caller can opt to include
+   *      recipe-less items by leaving them in the candidate list).
+   *   3. Resolves recipes + explodes BOM for each prepared item.
+   *   4. Pre-loads default `location_id` per leaf product (outside the
+   *      final $transaction because the resolver uses the scoped client).
+   *   5. Resolves the store business date (tz + cutoff-aware).
+   *
+   * Returns `null` when there is nothing to fire (empty partition) so the
+   * caller can short-circuit without extra branches.
+   *
+   * Caller contract:
+   *   - The resulting `preComputed` must be passed VERBATIM into
+   *     `fireOrderItemsInTx` from within the caller's $transaction.
+   *   - The caller's $transaction must commit BEFORE the caller emits
+   *     `kitchen.fired` (the helper does not emit; see
+   *     `emitKitchenFiredAfterCommit`).
+   *   - If the caller is in a non-restaurant industry, the helper still
+   *     works (returns null if no recipes) but the caller should
+   *     short-circuit with `storeIsRestaurant` for clarity.
+   */
+  async prepareFireContext(
+    orderId: number,
+    candidateOrderItemIds: number[],
+    /**
+     * Optional Prisma transaction client. When provided, the catalog
+     * reads (recipes, BOM, default locations) run inside the caller's
+     * $transaction. This is REQUIRED when the caller has just
+     * persisted the `order_items` in the same transaction (e.g. the
+     * auto-fire path in PaymentsService.processPosPayment) — otherwise
+     the read would happen on a separate connection that cannot see
+     the just-inserted rows. When omitted, the scoped client is used
+     (the public fireOrderItems path).
+     */
+    tx?: Prisma.TransactionClient,
+  ): Promise<PreExplodedFireContext | null> {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+    const user_id = context?.user_id;
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const client = (tx ?? this.prisma) as any;
+    const order = await client.orders.findFirst({
+      where: { id: orderId, store_id },
+      select: {
+        id: true,
+        store_id: true,
+        order_number: true,
+        order_items: {
+          where: { id: { in: candidateOrderItemIds } },
+          include: {
+            products: {
+              select: {
+                id: true,
+                name: true,
+                product_type: true,
+                track_inventory: true,
+                store_id: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_ORDER_NOT_FOUND);
+    }
+    if (!order.order_items || order.order_items.length === 0) {
+      throw new VendixHttpException(ErrorCodes.KITCHEN_FIRE_ITEM_NOT_FOUND);
+    }
+
+    // Partition
+    const firedItemIds: number[] = [];
+    const skippedItemIds: number[] = [];
+    for (const item of order.order_items) {
+      if (item.inventory_consumed_at_fire) {
+        skippedItemIds.push(item.id);
+        continue;
+      }
+      if (
+        !item.product_id ||
+        !item.products ||
+        item.products.product_type !== 'prepared'
+      ) {
+        // Not a `prepared` — no recipe to explode. The payment path will
+        // still consume it (retail / non-prepared flow). The auto-fire
+        // path ignores it.
+        skippedItemIds.push(item.id);
+        continue;
+      }
+      firedItemIds.push(item.id);
+    }
+    if (firedItemIds.length === 0) {
+      return null;
+    }
+
+    // Resolve recipes + BOM for fired items
+    type PreparedItemContext = {
+      orderItem: (typeof order.order_items)[number];
+      recipeId: number;
+      bomLines: BomExplosionLine[];
+    };
+    const preparedItems: PreparedItemContext[] = [];
+    const recipeLessItems: Array<(typeof order.order_items)[number]> = [];
+    for (const itemId of firedItemIds) {
+      const item = order.order_items.find((oi) => oi.id === itemId)!;
+      const recipe = await this.prisma.recipes.findFirst({
+        where: { product_id: item.product_id!, is_active: true },
+        select: { id: true, product_id: true, is_active: true },
+      });
+      if (!recipe || !recipe.is_active) {
+        recipeLessItems.push(item);
+        continue;
+      }
+      const bomLines = await this.recipesService.explodeBom(recipe.id, {
+        [recipe.id]: 1,
+      });
+      preparedItems.push({ orderItem: item, recipeId: recipe.id, bomLines });
+    }
+
+    // Pre-resolve default location per leaf product
+    const locationByProduct = new Map<number, number>();
+    const allLeafProductIds = new Set<number>();
+    for (const ctx of preparedItems) {
+      for (const line of ctx.bomLines) {
+        allLeafProductIds.add(line.component_product_id);
+      }
+    }
+    for (const pid of allLeafProductIds) {
+      const loc = await this.stockLevelManager.getDefaultLocationForProduct(
+        pid,
+      );
+      locationByProduct.set(pid, loc);
+    }
+
+    const businessDate = await this.getBusinessDate(store_id);
+
+    return {
+      order: { id: order.id, order_number: order.order_number },
+      firedItemIds,
+      skippedItemIds,
+      preparedItems,
+      recipeLessItems,
+      locationByProduct,
+      businessDate,
+      user_id,
+    };
+  }
+
+  // ------------------------------------------------ emitKitchenFiredAfterCommit
+  /**
+   * Plan KDS fire-flows (B2 / B9): emit `kitchen.fired` AND push the KDS SSE
+   * snapshot AFTER the caller's $transaction has committed. The caller
+   * (POS payment, table close, split) MUST call this from outside the
+   * transaction; if the transaction later rolls back, the event was
+   * already on the wire (best-effort, matches the public `fireOrderItems`
+   * behavior).
+   *
+   * Returns the same `FireOrderItemsResult` shape the public endpoint
+   * returns so the auto-fire callers can attach it to their response.
+   */
+  async emitKitchenFiredAfterCommit(
+    store_id: number,
+    organization_id: number | undefined,
+    result: {
+      ticketId: number;
+      firedItemSnapshots: Array<{
+        orderItemId: number;
+        productId: number;
+        productName: string;
+        quantity: number;
+      }>;
+      cogsTotal: number;
+      consumedLineCount: number;
+    },
+    orderId: number,
+  ): Promise<FireOrderItemsResult> {
+    const fired_item_ids = result.firedItemSnapshots.map(
+      (s) => s.orderItemId,
+    );
+    try {
+      this.eventEmitter.emit('kitchen.fired', {
+        kitchen_ticket_id: result.ticketId,
+        order_id: orderId,
+        organization_id,
+        store_id,
+        total_cost: result.cogsTotal,
+        consumed_line_count: result.consumedLineCount,
+        user_id: RequestContextService.getContext()?.user_id,
+      });
+    } catch (err) {
+      this.logger.error(
+        `Failed to emit kitchen.fired for ticket #${result.ticketId}: ${
+          (err as Error).message
+        }`,
+        (err as Error).stack,
+      );
+    }
+    try {
+      const fullTicket = await this.prisma.kitchen_tickets.findFirst({
+        where: { id: result.ticketId, store_id },
+        include: KITCHEN_TICKET_INCLUDE,
+      });
+      if (fullTicket) {
+        this.pushKitchenEvent(store_id, {
+          type: 'ticket.created',
+          ticket: fullTicket,
+          ts: Date.now(),
+        });
+      }
+    } catch (err) {
+      this.logger.warn(
+        `Failed to build SSE payload for ticket #${result.ticketId}: ${
+          (err as Error).message
+        }`,
+      );
+    }
+    return {
+      kitchen_ticket_id: result.ticketId,
+      order_id: orderId,
+      fired_item_ids,
+      skipped_item_ids: [],
       cogs_total: Number(result.cogsTotal.toFixed(4)),
       consumed_line_count: result.consumedLineCount,
     };

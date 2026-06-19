@@ -1,4 +1,5 @@
 import { Module, OnModuleInit, forwardRef } from '@nestjs/common';
+import { KitchenFireModule } from '../kitchen-fire/kitchen-fire.module';
 import { PaymentsController } from './payments.controller';
 import { WebhookController } from './webhook.controller';
 import { SystemPaymentMethodsController } from './controllers/system-payment-methods.controller';
@@ -63,6 +64,7 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
     forwardRef(() => OrdersModule),
     forwardRef(() => OrderFlowModule),
     forwardRef(() => PaymentLinksModule),
+    KitchenFireModule,
     TaxesModule,
     SettingsModule,
     PromotionsModule,

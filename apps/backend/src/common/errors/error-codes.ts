@@ -2609,6 +2609,14 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'La receta asociada al producto está inactiva',
   },
+  // Plan KDS fire-flows: el endpoint de fire selectivo (POST /store/kitchen-fire)
+  // se gatea a tiendas con industria 'restaurant'. Esta tienda no la tiene.
+  RESTAURANT_NOT_ENABLED: {
+    code: 'RESTAURANT_NOT_ENABLED',
+    httpStatus: 422,
+    devMessage:
+      'Esta tienda no tiene habilitada la industria restaurant; el envio a cocina (KDS) no esta disponible',
+  },
   // ── Tables & Table Sessions (Restaurant Suite Fase E) ─────────
   TABLE_NOT_FOUND: {
     code: 'TABLE_NOT_FOUND',
@@ -2725,6 +2733,18 @@ export const ErrorCodes = {
     code: 'KITCHEN_TICKET_STREAM_NO_CONTEXT',
     httpStatus: 400,
     devMessage: 'No hay contexto de tienda para abrir el stream KDS',
+  },
+  // Restaurant Suite — F2-guard: una orden NUNCA puede pasar a `finished`
+  // si tiene `kitchen_ticket_items` sin entregar (status NOT IN
+  // ('delivered','cancelled')). Se lanza solo en el cierre MANUAL
+  // (`confirmDelivery`); los flujos automáticos (pago a crédito, perdón de
+  // cuota, pago POS, job de auto-finish) NO lanzan: simplemente no
+  // finalizan la orden y la dejan para cuando la cocina entregue.
+  ORDER_HAS_PENDING_KITCHEN_ITEMS: {
+    code: 'ORDER_HAS_PENDING_KITCHEN_ITEMS',
+    httpStatus: 422,
+    devMessage:
+      'No se puede finalizar la orden: tiene platos en cocina sin entregar.',
   },
   // ── Menus / Carta (Restaurant Suite Fase G) ────────────────────────────
   MENU_NOT_FOUND: {
