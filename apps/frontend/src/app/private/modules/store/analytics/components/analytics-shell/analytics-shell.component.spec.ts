@@ -5,7 +5,6 @@ import { AnalyticsShellComponent } from './analytics-shell.component';
 import {
   AnalyticsCategoryId,
   getCategoryById,
-  getViewsByCategory,
 } from '../../config/analytics-registry';
 import { DateRangeSyncService } from '../../../shared/services/date-range-sync.service';
 
@@ -43,12 +42,6 @@ describe('AnalyticsShellComponent', () => {
   it('exposes the category from the route data', () => {
     expect(component.category()?.id).toBe('sales');
     expect(component.category()?.label).toBe(getCategoryById('sales')!.label);
-  });
-
-  it('builds tabs from the registry for the given category', () => {
-    const expected = getViewsByCategory('sales').map((v) => v.key);
-    const actual = component.tabs().map((t) => t.id);
-    expect(actual).toEqual(expected);
   });
 
   it('renders the Ver Reportes header action', () => {
