@@ -29,6 +29,10 @@ import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { WeeklyReportBannerComponent } from '../../modules/store/weekly-report/components/weekly-report-banner/weekly-report-banner.component';
+import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/components/weekly-report-stories/weekly-report-stories.component';
+import { WeeklyReportSnapshot } from '../../modules/store/weekly-report/interfaces/weekly-report.interface';
+import { WeeklyReportService } from '../../modules/store/weekly-report/services/weekly-report.service';
 import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 import { combineLatest } from 'rxjs';
 import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
@@ -46,6 +50,8 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     SubscriptionBannerComponent,
     FiscalObligationBannerComponent,
     PaywallOutletComponent,
+    WeeklyReportBannerComponent,
+    WeeklyReportStoriesComponent,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -176,6 +182,15 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
       ></app-onboarding-modal>
     }
 
+    <!-- Weekly Report Takeover (Tu Semana en Vendix) -->
+    @if (showWeeklyReportTakeover() && weeklyReportSnapshot(); as wr) {
+      <app-weekly-report-stories
+        [report]="wr"
+        (closed)="onCloseWeeklyReport()"
+        (viewed)="onCloseWeeklyReport()"
+      ></app-weekly-report-stories>
+    }
+
     <!-- Tour Modal -->
     <app-tour-modal [(isOpen)]="showTourModal" [tourConfig]="posTourConfig">
     </app-tour-modal>
@@ -202,6 +217,30 @@ export class StoreAdminLayoutComponent {
   readonly needsOnboarding = signal(false);
   readonly showTourModal = signal(false);
   readonly sidebarShimmer = signal(false);
+
+  // ─── Weekly Report (Tu Semana en Vendix) ───────────────────────────────
+  private readonly weeklyReportService = inject(WeeklyReportService);
+  /** Store actual para condicionar la inyección al contexto STORE_ADMIN. */
+  readonly currentStoreId = computed<number | null>(
+    () => (this.storeSignal() as any)?.id ?? null,
+  );
+  /** Snapshot visible actualmente en el takeover (signal). */
+  readonly weeklyReportSnapshot = signal<WeeklyReportSnapshot | null>(null);
+  /** Toggle del modal takeover. */
+  readonly showWeeklyReportTakeover = signal<boolean>(false);
+
+  /** Abre el takeover con el snapshot emitido por el banner. */
+  onOpenWeeklyReport(snapshot: WeeklyReportSnapshot): void {
+    this.weeklyReportSnapshot.set(snapshot);
+    this.showWeeklyReportTakeover.set(true);
+  }
+
+  /** Cierra el takeover. */
+  onCloseWeeklyReport(): void {
+    this.showWeeklyReportTakeover.set(false);
+    // Refresca para reflejar el nuevo viewed_at.
+    this.weeklyReportService.refresh().subscribe();
+  }
 
   // --- Facade data as signals ---
   readonly storeName = toSignal(this.authFacade.userStoreName$, {

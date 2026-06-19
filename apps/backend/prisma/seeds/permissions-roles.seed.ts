@@ -2138,6 +2138,12 @@ export async function seedPermissionsAndRoles(
       method: 'GET',
     },
     {
+      name: 'store:weekly_report:read',
+      description: 'Leer el reporte semanal (Tu Semana en Vendix)',
+      path: '/api/store/weekly-report',
+      method: 'GET',
+    },
+    {
       name: 'store:reports:read',
       description: 'Ver reportes generales',
       path: '/api/store/reports',

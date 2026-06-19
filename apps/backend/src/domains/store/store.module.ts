@@ -61,6 +61,7 @@ import { KitchenFireModule } from './kitchen-fire/kitchen-fire.module';
 import { TablesModule } from './tables/tables.module';
 import { MenusModule } from './menus/menus.module';
 import { UomModule } from './uom/uom.module';
+import { WeeklyReportModule } from './weekly-report/weekly-report.module';
 
 @Module({
   imports: [
@@ -124,6 +125,7 @@ import { UomModule } from './uom/uom.module';
     TablesModule,
     MenusModule,
     UomModule,
+    WeeklyReportModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

@@ -667,6 +667,7 @@ model stores {
   shipping_methods            shipping_methods[]
   expenses                    expenses[]
   notifications               notifications[]
+  store_weekly_reports       store_weekly_reports[]
   suppliers                   suppliers[]
   notification_subscriptions  notification_subscriptions[]
   push_subscriptions          push_subscriptions[]
@@ -2710,6 +2711,7 @@ enum notification_type_enum {
   subscription_promo_applied
   subscription_renewal_upcoming
   partner_commission_available
+  weekly_report
 }
 
 model notifications {
@@ -2729,6 +2731,25 @@ model notifications {
   @@index([store_id, is_read])
   @@index([store_id, created_at(sort: Desc)])
   @@index([store_id, severity, is_read])
+}
+
+model store_weekly_reports {
+  id                Int       @id @default(autoincrement())
+  store_id          Int
+  week_start_date   DateTime  @db.Date
+  week_end_date     DateTime  @db.Date
+  tier              String    @db.VarChar(20)
+  metrics           Json
+  slides            Json
+  tips              Json
+  rolling_avg       Json?
+  generated_at      DateTime  @default(now()) @db.Timestamp(6)
+  viewed_at         DateTime? @db.Timestamp(6)
+  stores            stores    @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  @@unique([store_id, week_start_date])
+  @@index([store_id, week_start_date(sort: Desc)])
+  @@index([store_id, generated_at(sort: Desc)])
 }
 
 model notification_subscriptions {

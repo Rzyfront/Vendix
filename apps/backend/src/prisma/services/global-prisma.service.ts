@@ -675,4 +675,9 @@ export class GlobalPrismaService extends BasePrismaService {
   get vendor_support_documents() {
     return this.baseClient.vendor_support_documents;
   }
+
+  // Weekly report snapshots (Tu Semana en Vendix / cron)
+  get store_weekly_reports() {
+    return this.baseClient.store_weekly_reports;
+  }
 }
