@@ -6,8 +6,9 @@
 --   * Adds vehicles, dispatch_routes, dispatch_route_stops, dispatch_route_stop_history
 --   * Adds enums dispatch_route_status_enum, dispatch_route_stop_status_enum,
 --     dispatch_route_stop_result_enum, vehicle_type_enum
---   * dispatch_route_stops has UNIQUE(dispatch_note_id) to enforce 1 planilla per
---     remisión (1-a-1 exclusivo)
+--   * dispatch_route_stops has PARTIAL UNIQUE(dispatch_note_id) WHERE status != 'released'
+--     to enforce 1 planilla active per remisión (1-a-1 exclusivo para paradas activas);
+--     paradas en status='released' quedan fuera del índice y permiten reasignación.
 -- =============================================================================
 
 -- ─── ENUMS ────────────────────────────────────────────────────────────────────
@@ -137,10 +138,13 @@ CREATE TABLE IF NOT EXISTS dispatch_route_stops (
   updated_at              TIMESTAMP(6) DEFAULT CURRENT_TIMESTAMP
 );
 
-DO $$ BEGIN
-  ALTER TABLE dispatch_route_stops
-    ADD CONSTRAINT dispatch_route_stops_dispatch_note_id_key UNIQUE (dispatch_note_id);
-EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+-- Partial unique index: enforces 1-a-1 exclusivo solo para paradas ACTIVAS.
+-- Una parada con status='released' queda fuera del índice y permite que la misma
+-- dispatch_note_id sea reusada en una nueva planilla (reasignación de remisión).
+DROP INDEX IF EXISTS dispatch_route_stops_dispatch_note_id_key;
+CREATE UNIQUE INDEX IF NOT EXISTS dispatch_route_stops_dispatch_note_id_active_idx
+  ON dispatch_route_stops (dispatch_note_id)
+  WHERE status <> 'released'::dispatch_route_stop_status_enum;
 
 CREATE INDEX IF NOT EXISTS dispatch_route_stops_route_id_stop_sequence_idx
   ON dispatch_route_stops (route_id, stop_sequence);

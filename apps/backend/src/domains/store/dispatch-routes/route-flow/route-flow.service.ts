@@ -88,6 +88,20 @@ export class RouteFlowService {
       throw new BadRequestException('La planilla no tiene paradas');
     }
 
+    // Conductor obligatorio al despachar (regla del plan: si interno, driver_user_id;
+    // si externo, external_driver_name + external_driver_id_number).
+    if (route.is_primary_driver_external) {
+      if (!route.external_driver_name || !route.external_driver_id_number) {
+        throw new BadRequestException(
+          'Conductor externo requiere nombre y cédula antes de despachar',
+        );
+      }
+    } else if (!route.driver_user_id) {
+      throw new BadRequestException(
+        'Conductor interno requiere driver_user_id antes de despachar',
+      );
+    }
+
     const updated = await this.prisma.dispatch_routes.update({
       where: { id },
       data: {

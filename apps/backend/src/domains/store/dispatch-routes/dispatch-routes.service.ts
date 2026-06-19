@@ -75,14 +75,25 @@ export class DispatchRoutesService {
     const store_id = this.getStoreId();
     const user_id = RequestContextService.getContext()?.user_id;
 
-    // Validate driver
-    if (!dto.driver_user_id && !dto.external_driver_name) {
+    // Validate driver: si es externo, requiere nombre + cédula; si es interno, FK users.
+    // Es mutuamente excluyente: no se permite mandar ambos (driver_user_id y external_*).
+    if (dto.driver_user_id && (dto.external_driver_name || dto.external_driver_id_number)) {
       throw new BadRequestException(
-        'Debe especificar un conductor: driver_user_id o external_driver_name',
+        'Conductor interno y externo son mutuamente excluyentes',
       );
     }
-    if (dto.driver_user_id && dto.external_driver_name) {
-      // Both allowed, but mark which is primary
+    if (dto.is_primary_driver_external) {
+      if (!dto.external_driver_name || !dto.external_driver_id_number) {
+        throw new BadRequestException(
+          'Conductor externo requiere external_driver_name y external_driver_id_number',
+        );
+      }
+    } else {
+      if (!dto.driver_user_id) {
+        throw new BadRequestException(
+          'Conductor interno requiere driver_user_id',
+        );
+      }
     }
 
     // Validate that all dispatch_notes exist, belong to this store, and are not already in another route

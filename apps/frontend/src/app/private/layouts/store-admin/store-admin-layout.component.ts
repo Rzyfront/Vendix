@@ -337,7 +337,7 @@ export class StoreAdminLayoutComponent {
         },
         {
           label: 'Planillas de Ruta',
-          icon: 'route',
+          icon: 'truck',
           route: '/admin/orders/planillas',
         },
         {

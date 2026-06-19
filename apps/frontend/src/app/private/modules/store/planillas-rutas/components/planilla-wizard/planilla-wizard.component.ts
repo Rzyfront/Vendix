@@ -60,31 +60,61 @@ interface AvailableNote {
               />
             </div>
             <div>
-              <label class="block text-sm font-medium mb-1">Conductor (ID de usuario)</label>
-              <input
-                type="number"
-                class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                [(ngModel)]="driverUserId"
-                placeholder="2"
-              />
+              <label class="block text-sm font-medium mb-2">Tipo de conductor</label>
+              <div class="flex gap-2">
+                <button
+                  type="button"
+                  class="flex-1 rounded-md border px-3 py-2 text-sm"
+                  [class.bg-primary]="!driverIsExternal()"
+                  [class.text-primary-foreground]="!driverIsExternal()"
+                  [class.bg-background]="driverIsExternal()"
+                  (click)="setDriverExternal(false)"
+                >Interno (usuario)</button>
+                <button
+                  type="button"
+                  class="flex-1 rounded-md border px-3 py-2 text-sm"
+                  [class.bg-primary]="driverIsExternal()"
+                  [class.text-primary-foreground]="driverIsExternal()"
+                  [class.bg-background]="!driverIsExternal()"
+                  (click)="setDriverExternal(true)"
+                >Externo (agente)</button>
+              </div>
             </div>
-            <div class="text-xs text-muted-foreground">
-              O conductor externo:
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <input
-                type="text"
-                class="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                [(ngModel)]="extName"
-                placeholder="Nombre externo"
-              />
-              <input
-                type="text"
-                class="rounded-md border border-input bg-background px-3 py-2 text-sm"
-                [(ngModel)]="extId"
-                placeholder="Cédula"
-              />
-            </div>
+            @if (!driverIsExternal()) {
+              <div>
+                <label class="block text-sm font-medium mb-1">Conductor (ID de usuario)</label>
+                <input
+                  type="number"
+                  class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  [ngModel]="driverUserId()"
+                  (ngModelChange)="driverUserId.set($event)"
+                  placeholder="2"
+                />
+              </div>
+            } @else {
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="block text-sm font-medium mb-1">Nombre externo</label>
+                  <input
+                    type="text"
+                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    [ngModel]="extName()"
+                    (ngModelChange)="extName.set($event)"
+                    placeholder="Nombre completo"
+                  />
+                </div>
+                <div>
+                  <label class="block text-sm font-medium mb-1">Cédula</label>
+                  <input
+                    type="text"
+                    class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    [ngModel]="extId()"
+                    (ngModelChange)="extId.set($event)"
+                    placeholder="1234567890"
+                  />
+                </div>
+              </div>
+            }
           </div>
 
           <!-- Step 2: Paradas -->
@@ -156,9 +186,20 @@ export class PlanillaWizardComponent {
 
   routeCode = '';
   plannedDate = new Date().toISOString().slice(0, 16);
-  driverUserId = 2;
-  extName = '';
-  extId = '';
+  readonly driverIsExternal = signal(false);
+  readonly driverUserId = signal<number | null>(2);
+  readonly extName = signal('');
+  readonly extId = signal('');
+
+  setDriverExternal(value: boolean): void {
+    this.driverIsExternal.set(value);
+    if (value) {
+      this.driverUserId.set(null);
+    } else {
+      this.extName.set('');
+      this.extId.set('');
+    }
+  }
 
   readonly stops = signal<CreateStopDto[]>([]);
   readonly availableNotes = signal<AvailableNote[]>([]);
@@ -194,7 +235,12 @@ export class PlanillaWizardComponent {
   }
 
   canSubmit(): boolean {
-    return this.stops().length > 0 && this.stops().every((s) => s.dispatch_note_id > 0);
+    if (this.stops().length === 0) return false;
+    if (!this.stops().every((s) => s.dispatch_note_id > 0)) return false;
+    if (this.driverIsExternal()) {
+      return !!(this.extName() && this.extId());
+    }
+    return this.driverUserId() !== null && this.driverUserId()! > 0;
   }
 
   submit() {
@@ -203,9 +249,10 @@ export class PlanillaWizardComponent {
     const dto: CreateDispatchRouteDto = {
       route_code: this.routeCode || undefined,
       planned_date: new Date(this.plannedDate).toISOString(),
-      driver_user_id: this.driverUserId || undefined,
-      external_driver_name: this.extName || undefined,
-      external_driver_id_number: this.extId || undefined,
+      driver_user_id: this.driverIsExternal() ? undefined : this.driverUserId() || undefined,
+      external_driver_name: this.driverIsExternal() ? this.extName() || undefined : undefined,
+      external_driver_id_number: this.driverIsExternal() ? this.extId() || undefined : undefined,
+      is_primary_driver_external: this.driverIsExternal(),
       currency: 'COP',
       stops: this.stops(),
     };

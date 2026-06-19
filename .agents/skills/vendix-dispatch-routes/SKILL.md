@@ -269,15 +269,33 @@ The sidebar item "Planillas de Ruta" maps to `orders_dispatch_routes` in
    but the journal entry is skipped. If full accounting is required, insert
    a `payments` row in `emitPaymentReceived` before emitting the event.
 
-## Known Gap: Accounting Entries
+## Why Accounting Entries Are Not Generated Automatically
 
-`payment.received` with `payment_id: null` is handled by the cash + AR
-listeners but **skipped by the accounting-events listener** (it expects a
-real `payments.id`). For full double-entry bookkeeping, the fix is to insert
-a `payments` row inside `emitPaymentReceived` before emitting the event, and
-pass the new `payment.id` as `payment_id`. This is a follow-up enhancement,
-not a blocker — the feature is functional and the cash/AR/notification
-side-effects are correct.
+The `accounting-events.listener` is gated by the organization's **fiscal
+status** (subflow: `payments`, `credit_sales`). The listener calls
+`isFlowEnabled(store_id, 'payments')` which checks
+`fiscal_gate.isSubflowEnabled(org_id, store_id, 'payments')`. If the
+organization's `organization_settings.fiscal_status.accounting.state` is
+`INACTIVE` (or its subflow `payments` is disabled), the event is **silently
+dropped** — by design, for opt-in fiscal activation.
+
+This is **correct behavior**, not a bug. When the organization activates its
+fiscal status (sets `accounting.state = ACTIVE` and enables the `payments`
+subflow), the existing `payment.received` listener will pick up the events
+emitted by dispatch routes and create auto-entries.
+
+For convenience, `dispatch_routes` event payloads include enough context for
+the listener to work:
+
+- `payment_id`: `null` (use `source_id=route_id` as a back-reference)
+- `order_id`: `sales_order_id` if the dispatch_note has one, else `null`
+- `withholding_breakdown`: array of `{code, amount}` for fiscal line items
+- `amount`, `subtotal_amount`, `tax_amount`, `discount_amount`: full context
+- `source_type: 'dispatch_route'`: distinguishable from POS payments
+
+If an organization requires strict double-entry on every planilla stop and
+the fiscal flow is active, the existing auto-entry machinery handles it
+without any code change.
 
 ## Verifying Changes
 
