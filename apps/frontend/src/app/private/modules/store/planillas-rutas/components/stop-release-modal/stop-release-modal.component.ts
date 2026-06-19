@@ -1,54 +1,64 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DispatchRouteStop, ReleaseStopDto } from '../../interfaces/planilla.interface';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import {
+  DispatchRouteStop,
+  ReleaseStopDto,
+} from '../../interfaces/planilla.interface';
 
 @Component({
   selector: 'app-stop-release-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule, ModalComponent],
   template: `
-    <div
-      class="fixed inset-0 z-50 bg-black/50 flex items-end md:items-center justify-center"
-      (click)="close.emit()"
+    <app-modal
+      [isOpen]="true"
+      title="Liberar Parada"
+      size="md"
+      (cancel)="close.emit()"
     >
-      <div
-        class="bg-background rounded-t-2xl md:rounded-2xl w-full md:max-w-md p-4 space-y-3"
-        (click)="$event.stopPropagation()"
-      >
-        <h2 class="text-lg font-semibold">Liberar Parada</h2>
-        <p class="text-sm text-muted-foreground">
-          Vas a liberar <strong>{{ stop.dispatch_note?.dispatch_number }}</strong>
-          ({{ stop.dispatch_note?.customer_name }}) para que pueda asignarse a otra planilla.
+      <div class="space-y-3">
+        <p class="text-sm text-text-secondary">
+          Vas a liberar
+          <strong>{{ stop().dispatch_note?.dispatch_number }}</strong>
+          ({{ stop().dispatch_note?.customer_name }}) para que pueda asignarse a
+          otra planilla.
         </p>
         <div>
           <label class="block text-sm font-medium mb-1">Motivo</label>
           <textarea
-            class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            class="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
             rows="3"
             [(ngModel)]="reason"
             placeholder="Ej: Cliente no se encontraba en la dirección"
           ></textarea>
         </div>
-        <div class="flex gap-2 pt-2">
-          <button
-            (click)="close.emit()"
-            class="flex-1 rounded-md border border-input bg-background px-4 py-2 text-sm"
-          >Cancelar</button>
-          <button
-            (click)="submit()"
-            [disabled]="!reason || reason.length < 3"
-            class="flex-1 rounded-md bg-red-500 text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
-          >Liberar</button>
-        </div>
       </div>
-    </div>
+
+      <div slot="footer" class="flex gap-2">
+        <button
+          type="button"
+          (click)="close.emit()"
+          class="flex-1 rounded-md border border-border bg-surface px-4 py-2 text-sm"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          (click)="submit()"
+          [disabled]="!reason || reason.length < 3"
+          class="flex-1 rounded-md bg-red-500 text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          Liberar
+        </button>
+      </div>
+    </app-modal>
   `,
 })
 export class StopReleaseModalComponent {
-  @Input({ required: true }) stop!: DispatchRouteStop;
-  @Output() close = new EventEmitter<void>();
-  @Output() submitted = new EventEmitter<ReleaseStopDto>();
+  readonly stop = input.required<DispatchRouteStop>();
+  readonly close = output<void>();
+  readonly submitted = output<ReleaseStopDto>();
 
   reason = '';
 

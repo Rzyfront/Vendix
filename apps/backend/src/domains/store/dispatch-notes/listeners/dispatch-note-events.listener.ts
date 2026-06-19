@@ -8,6 +8,7 @@ interface DispatchNoteEvent {
   dispatch_number: string;
   store_id: number;
   sales_order_id?: number | null;
+  order_id?: number | null;
 }
 
 interface DispatchNoteVoidedEvent extends DispatchNoteEvent {
@@ -41,9 +42,11 @@ export class DispatchNoteEventsListener {
         return;
       }
 
-      // Only reserve stock for standalone dispatch notes (no sales order).
-      // When linked to a sales order, stock was already reserved during SO confirmation.
-      if (!dispatch_note.sales_order_id) {
+      // Only reserve stock for standalone dispatch notes (no sales order and
+      // no order). When linked to a sales order OR an order, stock was already
+      // reserved during that order's confirmation — reserving again here would
+      // double-count the reservation.
+      if (!dispatch_note.sales_order_id && !dispatch_note.order_id) {
         for (const item of dispatch_note.dispatch_note_items) {
           const location_id =
             item.location_id || dispatch_note.dispatch_location_id;
@@ -75,7 +78,9 @@ export class DispatchNoteEventsListener {
         `[confirmed] Dispatch note #${event.dispatch_number} processed` +
           (dispatch_note.sales_order_id
             ? ` (linked to SO #${dispatch_note.sales_order_id})`
-            : ' (standalone — stock reserved)'),
+            : dispatch_note.order_id
+              ? ` (linked to order #${dispatch_note.order_id})`
+              : ' (standalone — stock reserved)'),
       );
     } catch (error) {
       this.logger.error(
@@ -148,6 +153,31 @@ export class DispatchNoteEventsListener {
             `[delivered] Failed to update sales order #${dispatch_note.sales_order_id}: ${err.message}`,
           );
         }
+      } else if (dispatch_note.order_id) {
+        try {
+          // Release stock reservations made by the order. The dispatch note
+          // already decremented on-hand above (step 1), so we MUST pass
+          // decrementOnHand:false here to avoid deducting the same stock twice.
+          await this.stockLevelManager.releaseReservationsByReference(
+            'order',
+            dispatch_note.order_id,
+            'consumed',
+            undefined,
+            { decrementOnHand: false },
+          );
+
+          // Sync the order state (processing -> shipped) once all its items
+          // have been fully dispatched. Idempotent: it only advances a
+          // 'processing' order and never re-fires order-flow side effects.
+          await this.checkAndUpdateOrderStatus(
+            dispatch_note.order_id,
+            'shipped',
+          );
+        } catch (err) {
+          this.logger.error(
+            `[delivered] Failed to update order #${dispatch_note.order_id}: ${err.message}`,
+          );
+        }
       } else {
         // Standalone dispatch: release reservations we made on confirm
         try {
@@ -200,7 +230,7 @@ export class DispatchNoteEventsListener {
         dispatch_note.delivered_at == null;
 
       if (was_confirmed) {
-        if (!dispatch_note.sales_order_id) {
+        if (!dispatch_note.sales_order_id && !dispatch_note.order_id) {
           // Standalone dispatch: cancel the reservations we made on confirm
           try {
             await this.stockLevelManager.releaseReservationsByReference(
@@ -214,7 +244,8 @@ export class DispatchNoteEventsListener {
             );
           }
         }
-        // If linked to SO, we do NOT release SO reservations — they belong to the SO lifecycle
+        // If linked to a sales order OR an order, we do NOT release their
+        // reservations — they belong to that order's own lifecycle.
       }
 
       if (dispatch_note.delivered_at != null) {
@@ -373,6 +404,60 @@ export class DispatchNoteEventsListener {
 
         this.logger.log(
           `[checkSOStatus] Sales order #${sales_order_id} marked as invoiced`,
+        );
+      }
+    }
+  }
+
+  /**
+   * Order ⇄ dispatch-note bridge. Mirrors {@link checkAndUpdateSalesOrderStatus}
+   * for the `orders` table. When every non-voided dispatch note linked to the
+   * order has been delivered, advances the order `processing -> shipped`.
+   *
+   * It writes `orders.state` directly (instead of calling OrderFlowService) so
+   * it stays idempotent and never re-fires order-flow side effects (shipping
+   * validations, `order.shipped` auto-fulfillment, etc.). The guard
+   * `state === 'processing'` makes late/duplicate events a no-op, and the
+   * `processing -> shipped` transition is valid in the order state machine.
+   */
+  private async checkAndUpdateOrderStatus(
+    order_id: number,
+    target_status: 'shipped',
+  ): Promise<void> {
+    const order = await this.prisma.orders.findFirst({
+      where: { id: order_id },
+      include: {
+        dispatch_notes: {
+          where: { status: { not: 'voided' } },
+          select: { id: true, status: true },
+        },
+      },
+    });
+
+    if (!order) {
+      this.logger.warn(`[checkOrderStatus] Order #${order_id} not found`);
+      return;
+    }
+
+    if (target_status === 'shipped') {
+      const dispatch_notes = order.dispatch_notes;
+      const all_dispatched =
+        dispatch_notes.length > 0 &&
+        dispatch_notes.every(
+          (dn) => dn.status === 'delivered' || dn.status === 'invoiced',
+        );
+
+      if (all_dispatched && order.state === 'processing') {
+        await this.prisma.orders.update({
+          where: { id: order_id },
+          data: {
+            state: 'shipped',
+            updated_at: new Date(),
+          },
+        });
+
+        this.logger.log(
+          `[checkOrderStatus] Order #${order_id} marked as shipped`,
         );
       }
     }

@@ -1185,6 +1185,9 @@ model orders {
   table_sessions  table_sessions[]
   kitchen_tickets kitchen_tickets[]
 
+  // Dispatch (remisión) back-relation
+  dispatch_notes dispatch_notes[] @relation("orders_dispatch_notes")
+
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
   @@index([store_id, channel])
@@ -6403,6 +6406,8 @@ model dispatch_notes {
   customer_address     Json?
   sales_order_id       Int?
   invoice_id           Int?
+  order_id             Int?
+  needs_collection     Boolean?                  @default(false)
   emission_date        DateTime                  @default(now()) @db.Timestamp(6)
   agreed_delivery_date DateTime?                 @db.Timestamp(6)
   actual_delivery_date DateTime?                 @db.Timestamp(6)
@@ -6430,6 +6435,7 @@ model dispatch_notes {
   customer             users                  @relation("dispatch_notes_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   sales_order          sales_orders?          @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   invoice              invoices?              @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order                orders?                @relation("orders_dispatch_notes", fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   dispatch_location    inventory_locations?   @relation("dispatch_notes_location", fields: [dispatch_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   created_by_user      users?                 @relation("dispatch_notes_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   confirmed_by_user    users?                 @relation("dispatch_notes_confirmed_by", fields: [confirmed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -6442,6 +6448,7 @@ model dispatch_notes {
   @@index([customer_id])
   @@index([sales_order_id])
   @@index([invoice_id])
+  @@index([store_id, order_id])
 }
 
 model dispatch_note_items {
@@ -8163,6 +8170,10 @@ model dispatch_routes {
   declared_cash              Decimal?                   @db.Decimal(14, 2)
   cash_variance              Decimal?                   @db.Decimal(14, 2)
   currency                   String?                    @db.VarChar(10)
+  planilla_pdf_key           String?                    @db.Text
+  planilla_scanned_at        DateTime?                  @db.Timestamp(6)
+  scan_result                Json?
+  scan_confidence            Decimal?                   @db.Decimal(5, 4)
   notes                      String?                    @db.Text
   void_reason                String?                    @db.Text
   dispatched_by_user_id      Int?

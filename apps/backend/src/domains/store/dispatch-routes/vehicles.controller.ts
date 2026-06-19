@@ -25,7 +25,7 @@ export class VehiclesController {
   ) {}
 
   @Get()
-  @Permissions('store:dispatch_routes:read')
+  @Permissions('store:dispatch_fleet:read')
   async findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -42,21 +42,21 @@ export class VehiclesController {
   }
 
   @Get(':id')
-  @Permissions('store:dispatch_routes:read')
+  @Permissions('store:dispatch_fleet:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const result = await this.vehiclesService.findOne(id);
     return this.responseService.success(result, 'Vehículo obtenido');
   }
 
   @Post()
-  @Permissions('store:dispatch_routes:create')
+  @Permissions('store:dispatch_fleet:create')
   async create(@Body() dto: CreateVehicleDto) {
     const result = await this.vehiclesService.create(dto);
     return this.responseService.created(result, 'Vehículo creado');
   }
 
   @Patch(':id')
-  @Permissions('store:dispatch_routes:update')
+  @Permissions('store:dispatch_fleet:update')
   async update(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: Partial<CreateVehicleDto>,
@@ -66,7 +66,7 @@ export class VehiclesController {
   }
 
   @Delete(':id')
-  @Permissions('store:dispatch_routes:delete')
+  @Permissions('store:dispatch_fleet:delete')
   async remove(@Param('id', ParseIntPipe) id: number) {
     const result = await this.vehiclesService.remove(id);
     return this.responseService.success(result, 'Vehículo eliminado');

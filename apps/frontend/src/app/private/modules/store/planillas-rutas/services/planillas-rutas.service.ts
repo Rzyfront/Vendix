@@ -5,12 +5,18 @@ import { catchError, map, shareReplay, tap } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
   CloseDispatchRouteDto,
+  ConfirmRouteSheetDto,
+  ConfirmRouteSheetResult,
   CreateDispatchRouteDto,
+  CreateStopDto,
   DispatchRoute,
   DispatchRouteQuery,
   DispatchRouteStats,
+  DispatchRouteStop,
   PaginatedDispatchRoutesResponse,
   ReleaseStopDto,
+  RouteSheetMatchResult,
+  RouteSheetScanResult,
   SettleStopDto,
   VoidDispatchRouteDto,
 } from '../interfaces/planilla.interface';
@@ -74,6 +80,45 @@ export class PlanillasRutasService {
       .pipe(
         map((r) => r.data as DispatchRoute),
         tap(() => this.invalidateStatsCache()),
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
+  }
+
+  /**
+   * Append stops (dispatch notes) to an existing route.
+   * `POST /store/dispatch-routes/:id/stops`.
+   * Used by the "Generar Remisión" wizard when assigning a freshly-created
+   * dispatch note to an already-existing route. The backend de-duplicates and
+   * appends to the tail of the stop sequence.
+   */
+  addStops(routeId: number, dto: { stops: CreateStopDto[] }): Observable<DispatchRouteStop[]> {
+    return this.http
+      .post<any>(`${this.apiUrl}/store/dispatch-routes/${routeId}/stops`, dto)
+      .pipe(
+        map((r) => r.data as DispatchRouteStop[]),
+        tap(() => this.invalidateStatsCache()),
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
+  }
+
+  /**
+   * Lightweight route list for the "Ruta existente" selector in the wizard.
+   * Only routes that can still receive new stops are useful, i.e. `draft` and
+   * `dispatched`. Pass a comma-separated `status` (default `'draft,dispatched'`).
+   * Returns the flat array of routes (unwrapped pagination).
+   */
+  listRoutes(query: { status?: string } = {}): Observable<DispatchRoute[]> {
+    const status = query.status ?? 'draft,dispatched';
+    const params = new URLSearchParams();
+    params.append('status', status);
+    params.append('limit', '100');
+    return this.http
+      .get<any>(`${this.apiUrl}/store/dispatch-routes?${params.toString()}`)
+      .pipe(
+        map((r) => {
+          const payload = r.data as PaginatedDispatchRoutesResponse | DispatchRoute[];
+          return Array.isArray(payload) ? payload : (payload?.data ?? []);
+        }),
         catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
       );
   }
@@ -143,12 +188,94 @@ export class PlanillasRutasService {
       );
   }
 
-  getPdfBlob(id: number): Observable<Blob> {
+  /**
+   * Download the route-sheet PDF as a Blob.
+   * `POST /store/dispatch-routes/:id/pdf` (the backend streams an
+   * `application/pdf` buffer; we read it as a blob for download/preview).
+   */
+  downloadPdf(routeId: number): Observable<Blob> {
     return this.http
-      .post(`${this.apiUrl}/store/dispatch-routes/${id}/pdf`, {}, {
+      .post(`${this.apiUrl}/store/dispatch-routes/${routeId}/pdf`, {}, {
         responseType: 'blob',
       })
       .pipe(
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
+  }
+
+  /**
+   * @deprecated Use {@link downloadPdf}. Kept for the existing PDF viewer.
+   */
+  getPdfBlob(id: number): Observable<Blob> {
+    return this.downloadPdf(id);
+  }
+
+  // ===== Route-sheet AI scanner =====
+
+  /**
+   * Upload a scanned route sheet (image/PDF) for AI extraction.
+   * `POST /store/dispatch-routes/:id/scan` (multipart `file`).
+   */
+  scanSheet(routeId: number, file: File): Observable<RouteSheetScanResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    return this.http
+      .post<any>(
+        `${this.apiUrl}/store/dispatch-routes/${routeId}/scan`,
+        formData,
+      )
+      .pipe(
+        map((r) => r.data as RouteSheetScanResult),
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
+  }
+
+  /**
+   * Match the extracted rows against the route's real stops.
+   * `POST /store/dispatch-routes/:id/scan/match` (JSON body: the scan result).
+   * Returns a proposal — nothing is persisted.
+   */
+  matchStops(
+    routeId: number,
+    scan: RouteSheetScanResult,
+  ): Observable<RouteSheetMatchResult> {
+    return this.http
+      .post<any>(
+        `${this.apiUrl}/store/dispatch-routes/${routeId}/scan/match`,
+        scan,
+      )
+      .pipe(
+        map((r) => r.data as RouteSheetMatchResult),
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
+  }
+
+  /**
+   * Confirm the human-reviewed decisions and settle the route from the scan.
+   * `POST /store/dispatch-routes/:id/scan/confirm` (multipart `file` + the
+   * confirm DTO). The nested `stops` array and `scan_result` are sent as
+   * JSON-string fields so they survive multipart transport. Returns the
+   * settlement summary; callers should reload the route afterwards.
+   */
+  confirmScan(
+    routeId: number,
+    file: File,
+    dto: ConfirmRouteSheetDto,
+  ): Observable<ConfirmRouteSheetResult> {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('stops', JSON.stringify(dto.stops));
+    if (dto.scan_result) {
+      formData.append('scan_result', JSON.stringify(dto.scan_result));
+    }
+    return this.http
+      .post<any>(
+        `${this.apiUrl}/store/dispatch-routes/${routeId}/scan/confirm`,
+        formData,
+      )
+      .pipe(
+        map((r) => r.data as ConfirmRouteSheetResult),
+        tap(() => this.invalidateStatsCache()),
         catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
       );
   }

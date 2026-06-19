@@ -189,6 +189,19 @@
                 <span class="text-[var(--color-text-primary)] font-medium">{{ dispatch_note().sales_order?.order_number || '-' }}</span>
               </div>
             }
+            @if (dispatch_note().order_id) {
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-[var(--color-text-secondary)]">Orden</span>
+                <button
+                  type="button"
+                  (click)="goToOrder(dispatch_note().order_id!)"
+                  class="inline-flex items-center gap-1 font-medium text-primary-600 hover:text-primary-700 hover:underline"
+                >
+                  Ver orden #{{ dispatch_note().order_id }}
+                  <app-icon name="external-link" [size]="14"></app-icon>
+                </button>
+              </div>
+            }
             @if (dispatch_note().invoice) {
               <div class="flex justify-between text-sm">
                 <span class="text-[var(--color-text-secondary)]">Factura</span>

@@ -1851,6 +1851,14 @@
       </div>
     </app-modal>
 
+    <!-- GENERATE DISPATCH NOTE WIZARD (Items → Datos/Estado → Ruta) -->
+    <app-generate-dispatch-wizard
+      [isOpen]="showDispatchModal()"
+      [order]="order()"
+      (generated)="onDispatchGenerated($event)"
+      (closed)="showDispatchModal.set(false)"
+    ></app-generate-dispatch-wizard>
+
     <!-- DELIVER MODAL -->
     <app-modal
       [isOpen]="showDeliverModal()"

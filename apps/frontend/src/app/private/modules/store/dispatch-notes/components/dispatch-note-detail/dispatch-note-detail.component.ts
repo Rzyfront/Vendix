@@ -5,6 +5,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { Router } from '@angular/router';
 
 import {
   StickyHeaderComponent,
@@ -55,6 +56,7 @@ const BADGE_COLOR_MAP: Record<DispatchNoteStatus, StickyHeaderBadgeColor> = {
 })
 export class DispatchNoteDetailComponent {
   private currencyService = inject(CurrencyFormatService);
+  private router = inject(Router);
 
   // ── Inputs ──────────────────────────────────────────
   readonly dispatch_note = input.required<DispatchNote>();
@@ -209,6 +211,11 @@ export class DispatchNoteDetailComponent {
       case 'print': this.printAction.emit(dn); break;
       case 'void': this.voidAction.emit(dn); break;
     }
+  }
+
+  // ── Navigation ──────────────────────────────────────
+  goToOrder(orderId: number): void {
+    this.router.navigate(['/admin/orders', orderId]);
   }
 
   // ── Utility methods ─────────────────────────────────

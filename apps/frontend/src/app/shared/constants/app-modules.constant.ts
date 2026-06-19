@@ -190,10 +190,35 @@ export const APP_MODULES: {
           label: 'Reservas',
           description: 'Gesti\u00f3n de reservas y agendamiento de servicios',
         },
+      ],
+    },
+
+    // Despacho (padre con hijos)
+    {
+      key: 'dispatch',
+      label: 'Despacho',
+      description: 'Gesti\u00f3n de despacho, rutas, env\u00edos y flota',
+      isParent: true,
+      children: [
         {
           key: 'orders_dispatch_notes',
           label: 'Remisiones',
           description: 'Notas de despacho / remisiones',
+        },
+        {
+          key: 'orders_dispatch_routes',
+          label: 'Planillas de Ruta',
+          description: 'Rutas de despacho DSD con recaudo en ruta',
+        },
+        {
+          key: 'settings_shipping',
+          label: 'M\u00e9todos de Env\u00edo',
+          description: 'Configuraci\u00f3n de m\u00e9todos y zonas de env\u00edo',
+        },
+        {
+          key: 'dispatch_fleet',
+          label: 'Flota',
+          description: 'Veh\u00edculos y conductores de la flota',
         },
       ],
     },
@@ -604,12 +629,6 @@ export const APP_MODULES: {
           key: 'settings_domains',
           label: 'Dominios',
           description: 'Dominios de la tienda online',
-        },
-        {
-          key: 'settings_shipping',
-          label: 'M\u00e9todos de Env\u00edo',
-          description:
-            'Configuraci\u00f3n de m\u00e9todos de env\u00edo y zonas',
         },
         {
           key: 'settings_legal_documents',

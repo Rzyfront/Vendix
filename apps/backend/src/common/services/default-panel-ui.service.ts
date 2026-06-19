@@ -82,6 +82,19 @@ export class DefaultPanelUIService {
         orders_layaway: true,
         orders_reservations: true,
         orders_dispatch_notes: true,
+        orders_dispatch_routes: true,
+        // Despacho (módulo padre agrupador) + Flota.
+        // Plan decisions: `default_visible_for_privileged_users=true`
+        // (owner/admin/super_admin ven el padre "Despacho" y el submódulo
+        // "Flota" en el próximo login sin backfill), `show_new_badge=yes`
+        // (el banner del dropdown de usuario y Settings → "Módulos del Panel"
+        // los muestran como nuevos hasta que el usuario los active/toque).
+        // `dispatch` es key de PADRE: MenuFilterService Case 2 oculta el padre
+        // si su key no está en visibleModules, por eso debe ser `true` aquí.
+        // Las keys hijas reubicadas (orders_dispatch_notes,
+        // orders_dispatch_routes, settings_shipping) se conservan intactas.
+        dispatch: true,
+        dispatch_fleet: true,
         inventory: true,
         inventory_pop: true,
         inventory_adjustments: true,

@@ -6,6 +6,7 @@ import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin, firstValueFrom } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
+import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import {
   Order,
   OrderItem,
@@ -79,6 +80,7 @@ interface PaymentReceiptPreview {
     OrderPaymentModalComponent,
     OrderRefundModalComponent,
     TimelineComponent,
+    GenerateDispatchWizardComponent,
     NgClass,
   ],
   templateUrl: './order-details-page.component.html',
@@ -144,6 +146,7 @@ export class OrderDetailsPageComponent {
   showReactivateModal = signal(false);
   showRefundModal = signal(false);
   showPaymentReceiptModal = signal(false);
+  showDispatchModal = signal(false);
 
   // Processing state
   isProcessingAction = signal(false);
@@ -551,6 +554,19 @@ export class OrderDetailsPageComponent {
           });
         }
 
+        // COD (contra-entrega): allow generating a dispatch note BEFORE the
+        // payment is confirmed, so the route can carry the order and collect
+        // on delivery. Same gating as `processing`: needs a physical dispatch
+        // document (not a kitchen order, not a direct counter handover).
+        if (!this.isKitchenOrder() && delivery !== 'direct_delivery') {
+          actions.push({
+            id: 'generate-dispatch',
+            label: 'Generar Remision',
+            icon: 'file-text',
+            variant: 'info',
+          });
+        }
+
         actions.push({ id: 'cancel', label: 'Cancelar Orden', icon: 'x-circle', variant: 'danger' });
 
         // Si es crédito, reemplazar "Confirmar Pago" por "Registrar Pago"
@@ -584,6 +600,16 @@ export class OrderDetailsPageComponent {
           });
         } else {
           actions.push({ id: 'ship', label: 'Despachar Orden', icon: 'package', variant: 'primary' });
+        }
+        // Generar Remision: only when the order needs a physical dispatch
+        // document (not a direct counter handover) and is not a kitchen order.
+        if (!this.isKitchenOrder() && delivery !== 'direct_delivery') {
+          actions.push({
+            id: 'generate-dispatch',
+            label: 'Generar Remision',
+            icon: 'file-text',
+            variant: 'info',
+          });
         }
         if (this.isPrivilegedUser()) {
           actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
@@ -1113,6 +1139,9 @@ export class OrderDetailsPageComponent {
       case 'credit-payment':
         this.openPayModal();
         break;
+      case 'generate-dispatch':
+        this.openDispatchModal();
+        break;
     }
   }
 
@@ -1193,6 +1222,40 @@ export class OrderDetailsPageComponent {
         this.toastService.error(err.message || 'Error al enviar la orden');
       },
     });
+  }
+
+  // ── Generar Remision (dispatch note from order) ────────────
+
+  openDispatchModal(): void {
+    this.showDispatchModal.set(true);
+  }
+
+  /**
+   * Called by the generate-dispatch wizard once the dispatch note (and, if
+   * requested, its route) is created in a single backend transaction. The
+   * wizard already toasts success; here we close it and offer navigation.
+   */
+  onDispatchGenerated(dispatchNoteId: number): void {
+    this.showDispatchModal.set(false);
+    this.promptViewDispatchNote(dispatchNoteId);
+  }
+
+  private promptViewDispatchNote(dispatchNoteId: number): void {
+    this.dialogService
+      .confirm({
+        title: 'Remision generada',
+        message: 'La remision se creo correctamente. Deseas verla ahora?',
+        confirmText: 'Ver remision',
+        cancelText: 'Seguir aqui',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed: boolean) => {
+        if (confirmed) {
+          this.router.navigate(['/admin/orders/dispatch-notes', dispatchNoteId]);
+        } else {
+          this.loadData();
+        }
+      });
   }
 
   openDeliverModal(): void {
