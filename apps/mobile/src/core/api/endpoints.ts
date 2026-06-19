@@ -238,6 +238,9 @@ export const Endpoints = {
       STATS: '/organization/users/stats',
       ASSIGN_TO_USER: '/organization/users/assign-to-user',
       REMOVE_FROM_USER: '/organization/users/remove-from-user',
+      CONFIGURATION: '/organization/users/:id/configuration',
+      ARCHIVE: '/organization/users/:id/archive',
+      REACTIVATE: '/organization/users/:id/reactivate',
     },
     ROLES: {
       LIST: '/organization/roles',
