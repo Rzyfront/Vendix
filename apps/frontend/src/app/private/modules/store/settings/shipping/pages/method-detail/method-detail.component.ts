@@ -11,7 +11,10 @@ import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { forkJoin, of } from 'rxjs';
 import { switchMap, map } from 'rxjs/operators';
 import { ShippingMethodsService } from '../../services/shipping-methods.service';
-import { StoreShippingMethod } from '../../interfaces/shipping-methods.interface';
+import {
+  StoreShippingMethod,
+  ShippingMethodType,
+} from '../../interfaces/shipping-methods.interface';
 import {
   ShippingZone,
   ShippingRate,
@@ -106,6 +109,40 @@ import { AddRateWizardModalComponent } from '../../components/index';
           />
         </div>
       </div>
+
+      <!-- Dispatch route shortcut (only own_fleet / custom methods) -->
+      @if (supports_dispatch_routes()) {
+        <div class="mx-4 md:mx-0 mb-4">
+          <div
+            class="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-xl border border-border bg-surface p-4"
+          >
+            <div class="flex items-start gap-3">
+              <div
+                class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-50"
+              >
+                <app-icon name="truck" [size]="20" class="text-primary-600" />
+              </div>
+              <div>
+                <h3 class="text-sm md:text-base font-semibold text-text-primary">
+                  Despacho con flota propia
+                </h3>
+                <p class="text-xs md:text-sm text-text-secondary">
+                  Crea una planilla de ruta (DSD) para agrupar remisiones y
+                  recaudar en ruta con este método.
+                </p>
+              </div>
+            </div>
+            <app-button
+              size="sm"
+              variant="primary"
+              (clicked)="goToCreateRoute()"
+            >
+              <app-icon slot="icon" name="clipboard-list" [size]="16" />
+              Crear planilla de ruta
+            </app-button>
+          </div>
+        </div>
+      }
 
       <!-- Zones Table Card -->
       <div class="mx-4 md:mx-0 mb-6">
@@ -215,10 +252,16 @@ export class MethodDetailComponent implements OnInit {
     () => this.zones_with_rates().filter((zr) => zr.rate.is_active).length,
   );
 
+  // Shortcut: own_fleet / custom methods are dispatched via route planillas (DSD)
+  supports_dispatch_routes = computed<boolean>(() => {
+    const t = this.method()?.type;
+    return t === ShippingMethodType.OWN_FLEET || t === ShippingMethodType.CUSTOM;
+  });
+
   header_actions = computed<StickyHeaderActionButton[]>(() => {
     const m = this.method();
     if (!m) return [];
-    return [
+    const actions: StickyHeaderActionButton[] = [
       {
         id: 'configure',
         label: 'Configurar',
@@ -230,6 +273,14 @@ export class MethodDetailComponent implements OnInit {
         variant: (m.is_active ? 'outline-danger' : 'primary') as any,
         icon: m.is_active ? 'pause' : 'play'},
     ];
+    if (this.supports_dispatch_routes()) {
+      actions.unshift({
+        id: 'create_route',
+        label: 'Crear planilla de ruta',
+        variant: 'primary' as const,
+        icon: 'clipboard-list'});
+    }
+    return actions;
   });
 
   table_data = computed(() => {
@@ -366,7 +417,23 @@ export class MethodDetailComponent implements OnInit {
   onHeaderAction(actionId: string): void {
     if (actionId === 'toggle') {
       this.toggleMethod();
+    } else if (actionId === 'create_route') {
+      this.goToCreateRoute();
     }
+  }
+
+  /**
+   * Shortcut método → planilla. Navega al módulo de planillas de ruta con el
+   * método preasignado vía queryParams; el wizard abre en modo creación y
+   * precarga el contexto del método (ver planillas-rutas.component / wizard).
+   * El módulo de planillas sigue siendo configurable de forma independiente.
+   */
+  goToCreateRoute(): void {
+    const m = this.method();
+    if (!m) return;
+    this.router.navigate(['/admin/orders/planillas'], {
+      queryParams: { shipping_method_id: m.id, prefill: 1 },
+    });
   }
 
   async toggleMethod(): Promise<void> {

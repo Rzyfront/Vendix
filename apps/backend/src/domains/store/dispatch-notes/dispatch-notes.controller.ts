@@ -17,6 +17,7 @@ import {
   UpdateDispatchNoteDto,
   DispatchNoteQueryDto,
   CreateFromSalesOrderDto,
+  CreateFromOrderDto,
   VoidDispatchNoteDto,
   DeliverDispatchNoteDto,
 } from './dto';
@@ -86,6 +87,32 @@ export class DispatchNotesController {
     return this.responseService.created(
       result,
       'Remisión creada desde orden de venta exitosamente',
+    );
+  }
+
+  @Get('by-order/:orderId')
+  @Permissions('store:dispatch_notes:read')
+  async getByOrder(@Param('orderId', ParseIntPipe) order_id: number) {
+    const result = await this.dispatchNotesService.getByOrder(order_id);
+    return this.responseService.success(
+      result,
+      'Remisiones por orden obtenidas exitosamente',
+    );
+  }
+
+  @Post('from-order/:orderId')
+  @Permissions('store:dispatch_notes:create')
+  async createFromOrder(
+    @Param('orderId', ParseIntPipe) order_id: number,
+    @Body() dto: CreateFromOrderDto,
+  ) {
+    const result = await this.dispatchNotesService.createFromOrder(
+      order_id,
+      dto,
+    );
+    return this.responseService.created(
+      result,
+      'Remisión creada desde orden exitosamente',
     );
   }
 

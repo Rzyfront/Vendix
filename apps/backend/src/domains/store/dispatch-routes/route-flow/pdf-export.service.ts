@@ -176,26 +176,55 @@ export class PdfExportService {
   }
 
   private drawStopsTable(doc: PDFKit.PDFDocument, route: RouteForPdf) {
+    const isClosed = this.isClosedRoute(route);
+
     doc.moveDown(0.3);
     doc.font('Helvetica-Bold').fontSize(11).text('Paradas');
+    doc.fontSize(8).font('Helvetica').fillColor('#666');
+    doc.text(
+      isClosed
+        ? 'Snapshot del cierre: casillas reflejan el estado real de cada parada.'
+        : 'Llene en campo: marque las casillas y escriba el monto recaudado.',
+    );
+    doc.fillColor('black');
     doc.moveDown(0.2);
 
-    const col_widths = [22, 70, 90, 60, 50, 50, 50, 50]; // 8 cols
-    const headers = ['#', 'Remisión', 'Cliente', 'Neto', 'Anticipo', 'Recaudado', 'Cambio', 'Retención'];
+    // Column layout (sums to the printable width = PAGE_WIDTH - 2*MARGIN = 532).
+    // [#, Remisión, Cliente/Dirección, A cobrar, Entrega, Recaudo, Recaudado $]
+    const col_widths = [20, 70, 132, 70, 50, 50, 140];
+    const aligns: Array<'left' | 'right' | 'center'> = [
+      'center',
+      'left',
+      'left',
+      'right',
+      'center',
+      'center',
+      'left',
+    ];
+    const headers = [
+      '#',
+      'Remisión',
+      'Cliente / Dirección',
+      'A cobrar',
+      'Entrega',
+      'Recaudo',
+      'Recaudado',
+    ];
 
     const startX = MARGIN;
+    const ROW_H = 22;
     let y = doc.y;
 
     // Header row
     doc.font('Helvetica-Bold').fontSize(9);
     let x = startX;
     headers.forEach((h, i) => {
-      doc.text(h, x, y, { width: col_widths[i], align: i === 0 ? 'center' : 'right' });
+      doc.text(h, x, y, { width: col_widths[i], align: aligns[i] });
       x += col_widths[i];
     });
-    y += 14;
+    y += 16;
     this.hr(doc, y - 4, MARGIN, PAGE_WIDTH - MARGIN * 2);
-    y += 2;
+    y += 4;
 
     // Rows
     doc.font('Helvetica').fontSize(9);
@@ -204,30 +233,154 @@ export class PdfExportService {
         doc.addPage();
         y = MARGIN;
       }
-      const dn = stop.dispatch_note;
-      const is_released = stop.result === 'released' || stop.status === 'released';
-      const is_rejected = stop.result === 'rejected' || stop.status === 'rejected';
-      const customer = is_released ? '(Liberada)' : is_rejected ? '(Rechazada)' : dn?.customer_name || '—';
-      const row = [
-        String(stop.stop_sequence),
-        dn?.dispatch_number || '—',
-        customer,
-        dn ? COP.format(Number(dn.grand_total)) : '—',
-        COP.format(Number(stop.anticipo_amount || 0)),
-        stop.is_prepaid ? 'PREPAGADO' : COP.format(Number(stop.collected_amount || 0)),
-        COP.format(Number(stop.change_amount || 0)),
-        COP.format(Number(stop.withholding_amount || 0)),
-      ];
-      x = startX;
-      row.forEach((val, i) => {
-        doc.text(val, x, y, { width: col_widths[i], align: i === 0 ? 'center' : 'right' });
-        x += col_widths[i];
-      });
-      y += 14;
+      this.drawStopRow(doc, stop, isClosed, startX, y, col_widths, aligns);
+      y += ROW_H;
+      this.hr(doc, y - 6, MARGIN, PAGE_WIDTH - MARGIN * 2);
     }
 
     doc.y = y + 4;
     this.hr(doc);
+  }
+
+  /**
+   * Draws a single stop row. The same layout serves both purposes:
+   * - Operative (route not closed): empty checkboxes + a blank write-in line
+   *   for the collected amount.
+   * - Snapshot (route closed): checkboxes reflect the real settlement state and
+   *   the collected amount is printed.
+   */
+  private drawStopRow(
+    doc: PDFKit.PDFDocument,
+    stop: RouteForPdf['stops'][number],
+    isClosed: boolean,
+    startX: number,
+    y: number,
+    col_widths: number[],
+    aligns: Array<'left' | 'right' | 'center'>,
+  ) {
+    const dn = stop.dispatch_note;
+    const is_released = stop.result === 'released' || stop.status === 'released';
+    const is_rejected = stop.result === 'rejected' || stop.status === 'rejected';
+    const customer = is_released
+      ? '(Liberada)'
+      : is_rejected
+        ? '(Rechazada)'
+        : dn?.customer_name || '—';
+
+    // A cobrar: COD/no-prepaid grand_total. Prepaid stops have nothing to collect.
+    const toCollect = stop.is_prepaid
+      ? 'PREPAGADO'
+      : dn
+        ? COP.format(Number(dn.grand_total))
+        : '—';
+
+    // Real state for closed routes.
+    const delivered = stop.result === 'delivered' || stop.result === 'partial';
+    const collectedReal = !stop.is_prepaid && (delivered || Number(stop.collected_amount || 0) > 0);
+
+    let x = startX;
+    // Col 0: sequence
+    doc.font('Helvetica').fontSize(9);
+    doc.text(String(stop.stop_sequence), x, y + 4, { width: col_widths[0], align: aligns[0] });
+    x += col_widths[0];
+
+    // Col 1: remisión number
+    doc.text(dn?.dispatch_number || '—', x, y + 4, { width: col_widths[1], align: aligns[1] });
+    x += col_widths[1];
+
+    // Col 2: customer / address
+    doc.text(customer, x, y + 4, { width: col_widths[2], align: aligns[2] });
+    x += col_widths[2];
+
+    // Col 3: A cobrar
+    doc.text(toCollect, x, y + 4, { width: col_widths[3], align: aligns[3] });
+    x += col_widths[3];
+
+    // Col 4: Entrega checkbox (centered in its column)
+    this.drawCheckbox(doc, x + col_widths[4] / 2 - 6, y + 2, isClosed && delivered);
+    x += col_widths[4];
+
+    // Col 5: Recaudo checkbox — N/A for prepaid stops.
+    if (stop.is_prepaid) {
+      doc.font('Helvetica-Bold').fontSize(8).text('N/A', x, y + 5, {
+        width: col_widths[5],
+        align: 'center',
+      });
+      doc.font('Helvetica').fontSize(9);
+    } else {
+      this.drawCheckbox(doc, x + col_widths[5] / 2 - 6, y + 2, isClosed && collectedReal);
+    }
+    x += col_widths[5];
+
+    // Col 6: Recaudado $ — blank write-in line (operative) or real amount (closed).
+    this.drawMoneyField(
+      doc,
+      x,
+      y,
+      col_widths[6],
+      stop.is_prepaid ? '—' : isClosed ? COP.format(Number(stop.collected_amount || 0)) : null,
+    );
+  }
+
+  /**
+   * Draws a scanner-friendly checkbox: a bold square outline, plus a thick
+   * check-mark stroke when `checked`. Drawn with vector primitives so it is
+   * crisp at any zoom for the downstream AI scanner.
+   */
+  private drawCheckbox(doc: PDFKit.PDFDocument, x: number, y: number, checked: boolean) {
+    const size = 12;
+    doc.save();
+    doc.lineWidth(1.2).strokeColor('#222');
+    doc.rect(x, y, size, size).stroke();
+    if (checked) {
+      doc.lineWidth(2).strokeColor('#000');
+      doc
+        .moveTo(x + 2.5, y + size / 2)
+        .lineTo(x + size / 2 - 1, y + size - 2.5)
+        .lineTo(x + size - 1.5, y + 2)
+        .stroke();
+    }
+    doc.restore();
+    doc.strokeColor('black').lineWidth(1);
+  }
+
+  /**
+   * Draws the "Recaudado $____" field. When `value` is null it renders the
+   * "$" prefix plus a write-in underline for manual entry in the field; when a
+   * value is given (closed snapshot) it prints the real collected amount over
+   * the same baseline.
+   */
+  private drawMoneyField(
+    doc: PDFKit.PDFDocument,
+    x: number,
+    y: number,
+    width: number,
+    value: string | null,
+  ) {
+    const pad = 4;
+    const lineY = y + 14;
+    // Underline baseline always present so the field reads the same in both modes.
+    doc.save();
+    doc.lineWidth(0.8).strokeColor('#444');
+    doc.moveTo(x + pad, lineY).lineTo(x + width - pad, lineY).stroke();
+    doc.restore();
+    doc.strokeColor('black').lineWidth(1);
+
+    if (value === null) {
+      doc.font('Helvetica').fontSize(9).fillColor('#444').text('$', x + pad, y + 4);
+      doc.fillColor('black');
+    } else {
+      doc.font('Helvetica-Bold').fontSize(9).text(value, x + pad, y + 4, {
+        width: width - pad * 2,
+        align: 'left',
+      });
+      doc.font('Helvetica');
+    }
+  }
+
+  /** A route shows real state only once it is closed; otherwise it is a blank field form. */
+  private isClosedRoute(route: RouteForPdf): boolean {
+    return route.status === 'closed';
   }
 
   private drawTotals(doc: PDFKit.PDFDocument, route: RouteForPdf) {

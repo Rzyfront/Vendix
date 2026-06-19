@@ -1,0 +1,90 @@
+<app-modal
+  [isOpen]="is_open()"
+  [title]="is_edit_mode() ? 'Editar Vehículo' : 'Nuevo Vehículo'"
+  size="lg"
+  (closed)="handleClose()"
+>
+  <form [formGroup]="form" class="space-y-6">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- Placa -->
+      <div>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Placa *</label>
+        <input type="text" formControlName="plate" placeholder="ABC123" maxlength="20"
+          class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm uppercase focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+        @if (form.get('plate')?.touched && form.get('plate')?.invalid) {
+          <p class="mt-1 text-xs text-red-500">La placa es obligatoria (máx. 20 caracteres).</p>
+        }
+      </div>
+
+      <!-- Tipo -->
+      <div>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Tipo</label>
+        <select formControlName="type"
+          class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
+          @for (opt of type_options; track opt.value) {
+            <option [value]="opt.value">{{ opt.label }}</option>
+          }
+        </select>
+      </div>
+
+      <!-- Marca -->
+      <div>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Marca</label>
+        <input type="text" formControlName="brand" placeholder="Chevrolet" maxlength="80"
+          class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+      </div>
+
+      <!-- Modelo -->
+      <div>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Modelo</label>
+        <input type="text" formControlName="model_name" placeholder="NHR / 2022" maxlength="80"
+          class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+      </div>
+
+      <!-- Capacidad kg -->
+      <div>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Capacidad (kg)</label>
+        <input type="number" formControlName="capacity_kg" min="0" step="0.01" placeholder="0"
+          class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+      </div>
+
+      <!-- Capacidad unidades -->
+      <div>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Capacidad (unidades)</label>
+        <input type="number" formControlName="capacity_units" min="0" step="1" placeholder="0"
+          class="w-full px-3 py-2 min-h-[44px] rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary" />
+      </div>
+
+      <!-- Conductor principal -->
+      <div>
+        <label class="block text-sm font-medium text-text-secondary mb-1">Conductor principal</label>
+        <app-store-user-select
+          formControlName="primary_driver_id"
+          placeholder="Buscar conductor..."
+        />
+      </div>
+
+      <!-- Estado activo -->
+      <div class="flex items-center gap-3 pt-6">
+        <app-toggle formControlName="is_active" label="Vehículo activo"></app-toggle>
+      </div>
+    </div>
+
+    <!-- Notas -->
+    <div>
+      <label class="block text-sm font-medium text-text-secondary mb-1">Notas</label>
+      <textarea formControlName="notes" rows="3" placeholder="Observaciones del vehículo..."
+        class="w-full px-3 py-2 rounded-lg border border-border bg-surface text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary resize-none"></textarea>
+    </div>
+  </form>
+
+  <div slot="footer" class="flex justify-end gap-3">
+    <app-button variant="outline" size="md" (clicked)="handleClose()">
+      Cancelar
+    </app-button>
+    <app-button variant="primary" size="md" (clicked)="handleSubmit()"
+      [disabled]="form.invalid || saving()">
+      {{ is_edit_mode() ? 'Guardar Cambios' : 'Crear Vehículo' }}
+    </app-button>
+  </div>
+</app-modal>

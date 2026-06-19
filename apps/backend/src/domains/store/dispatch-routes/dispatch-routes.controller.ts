@@ -15,6 +15,7 @@ import {
   CreateDispatchRouteDto,
   UpdateDispatchRouteDto,
   DispatchRouteQueryDto,
+  AddStopsDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -70,6 +71,16 @@ export class DispatchRoutesController {
   ) {
     const result = await this.dispatchRoutesService.update(id, dto);
     return this.responseService.success(result, 'Planilla actualizada');
+  }
+
+  @Post(':id/stops')
+  @Permissions('store:dispatch_routes:update')
+  async addStops(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddStopsDto,
+  ) {
+    const result = await this.dispatchRoutesService.addStops(id, dto);
+    return this.responseService.success(result, 'Paradas agregadas a la planilla');
   }
 
   @Delete(':id')

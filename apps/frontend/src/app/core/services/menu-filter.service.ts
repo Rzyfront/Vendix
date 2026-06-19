@@ -67,10 +67,14 @@ export class MenuFilterService {
     'Ordenes de Venta': 'orders_sales',
     'Ordenes de Compra': 'orders_purchase_orders',
     Cotizaciones: 'orders_quotations',
-    Remisiones: 'orders_dispatch_notes',
-    'Planillas de Ruta': 'orders_dispatch_routes',
     'Plan Separe': 'orders_layaway',
     Reservas: 'orders_reservations',
+
+    // STORE_ADMIN - Despacho (padre + submódulos)
+    Despacho: 'dispatch',
+    Remisiones: 'orders_dispatch_notes',
+    'Planillas de Ruta': 'orders_dispatch_routes',
+    Flota: 'dispatch_fleet',
 
     // ORG_ADMIN - Compras (consolidado) + analytics_purchases (Analiticas > Compras)
     Compras: ['analytics_purchases', 'purchase_orders', 'orders_purchase_orders', 'orders'],

@@ -1,105 +1,110 @@
-import { Component, EventEmitter, Input, Output, computed, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, computed, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { CloseDispatchRouteDto, DispatchRoute } from '../../interfaces/planilla.interface';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import {
+  CloseDispatchRouteDto,
+  DispatchRoute,
+} from '../../interfaces/planilla.interface';
 
 @Component({
   selector: 'app-planilla-close-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule, CurrencyPipe, ModalComponent, InputComponent],
   template: `
-    <div
-      class="fixed inset-0 z-50 bg-black/50 flex items-end md:items-center justify-center"
-      (click)="close.emit()"
+    <app-modal
+      [isOpen]="true"
+      title="Cerrar y Cuadrar Planilla"
+      size="md"
+      (cancel)="close.emit()"
     >
-      <div
-        class="bg-background rounded-t-2xl md:rounded-2xl w-full md:max-w-md p-4 space-y-3"
-        (click)="$event.stopPropagation()"
-      >
-        <h2 class="text-lg font-semibold">Cerrar y Cuadrar Planilla</h2>
-
+      <div class="space-y-3">
         <div class="rounded-md border border-border bg-muted/30 p-3 text-sm space-y-1">
           <div class="flex justify-between">
             <span>Total a recaudar:</span>
-            <strong>{{ route.total_to_collect | currency: 'COP' : 'symbol' : '1.0-0' }}</strong>
+            <strong>{{ +route().total_to_collect | currency }}</strong>
           </div>
           <div class="flex justify-between">
             <span>Total recaudado:</span>
             <strong class="text-green-600">
-              {{ route.total_collected | currency: 'COP' : 'symbol' : '1.0-0' }}
+              {{ +route().total_collected | currency }}
             </strong>
           </div>
           <div class="flex justify-between">
             <span>Total retenciones:</span>
-            <strong>{{ route.total_withholdings | currency: 'COP' : 'symbol' : '1.0-0' }}</strong>
+            <strong>{{ +route().total_withholdings | currency }}</strong>
           </div>
           <div class="flex justify-between">
             <span>Total a crédito:</span>
             <strong class="text-yellow-600">
-              {{ route.total_credit | currency: 'COP' : 'symbol' : '1.0-0' }}
+              {{ +route().total_credit | currency }}
             </strong>
           </div>
           <div class="flex justify-between">
             <span>Total cambios/devoluciones:</span>
-            <strong>{{ route.total_changes | currency: 'COP' : 'symbol' : '1.0-0' }}</strong>
+            <strong>{{ +route().total_changes | currency }}</strong>
           </div>
         </div>
 
-        <div>
-          <label class="block text-sm font-medium mb-1">Efectivo declarado por el conductor</label>
-          <input
-            type="number"
-            class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-lg font-bold"
-            [(ngModel)]="declaredCash"
-            (input)="recalcVariance()"
-            min="0"
-          />
-        </div>
+        <app-input
+          label="Efectivo declarado por el conductor"
+          [currency]="true"
+          [(ngModel)]="declaredCash"
+          (inputChange)="recalcVariance()"
+        ></app-input>
 
-        <div
-          class="p-3 rounded-md text-sm font-semibold"
-          [ngClass]="varianceClass()"
-        >
+        <div class="p-3 rounded-md text-sm font-semibold" [class]="varianceClass()">
           Diferencia de caja:
-          {{ variance() | currency: 'COP' : 'symbol' : '1.0-0' }}
-          @if (variance() === 0) { (CUADRA) }
-          @else if (variance() > 0) { (SOBRA) }
-          @else { (FALTA) }
+          {{ variance() | currency }}
+          @if (variance() === 0) {
+            (CUADRA)
+          } @else if (variance() > 0) {
+            (SOBRA)
+          } @else {
+            (FALTA)
+          }
         </div>
 
         <div>
           <label class="block text-sm font-medium mb-1">Notas (opcional)</label>
           <textarea
-            class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            class="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm"
             rows="2"
             [(ngModel)]="notes"
           ></textarea>
         </div>
-
-        <div class="flex gap-2 pt-2">
-          <button
-            (click)="close.emit()"
-            class="flex-1 rounded-md border border-input bg-background px-4 py-2 text-sm"
-          >Cancelar</button>
-          <button
-            (click)="submit()"
-            [disabled]="!canSubmit()"
-            class="flex-1 rounded-md bg-green-600 text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
-          >Cerrar Planilla</button>
-        </div>
       </div>
-    </div>
+
+      <div slot="footer" class="flex gap-2">
+        <button
+          type="button"
+          (click)="close.emit()"
+          class="flex-1 rounded-md border border-border bg-surface px-4 py-2 text-sm"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          (click)="submit()"
+          [disabled]="!canSubmit()"
+          class="flex-1 rounded-md bg-green-600 text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
+        >
+          Cerrar Planilla
+        </button>
+      </div>
+    </app-modal>
   `,
 })
 export class PlanillaCloseModalComponent {
-  @Input({ required: true }) route!: DispatchRoute;
-  @Output() close = new EventEmitter<void>();
-  @Output() submitted = new EventEmitter<CloseDispatchRouteDto>();
+  readonly route = input.required<DispatchRoute>();
+  readonly close = output<void>();
+  readonly submitted = output<CloseDispatchRouteDto>();
 
   declaredCash = 0;
   notes = '';
 
-  variance = signal(0);
+  readonly variance = signal(0);
 
   readonly varianceClass = computed(() => {
     const v = this.variance();
@@ -110,7 +115,7 @@ export class PlanillaCloseModalComponent {
 
   recalcVariance() {
     // variance = declared - cash collected (assuming all collected is cash)
-    const cashCollected = Number(this.route.total_collected) || 0;
+    const cashCollected = Number(this.route().total_collected) || 0;
     this.variance.set(Number(this.declaredCash) - cashCollected);
   }
 

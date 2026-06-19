@@ -136,6 +136,7 @@ export class DispatchNoteFlowService {
       dispatch_number: updated.dispatch_number,
       store_id: updated.store_id,
       sales_order_id: updated.sales_order_id,
+      order_id: updated.order_id,
     });
 
     this.logger.log(`Dispatch note #${id} confirmed`);
@@ -172,6 +173,7 @@ export class DispatchNoteFlowService {
       dispatch_number: updated.dispatch_number,
       store_id: updated.store_id,
       sales_order_id: updated.sales_order_id,
+      order_id: updated.order_id,
     });
 
     this.logger.log(`Dispatch note #${id} delivered`);
@@ -205,6 +207,7 @@ export class DispatchNoteFlowService {
       dispatch_number: updated.dispatch_number,
       store_id: updated.store_id,
       sales_order_id: updated.sales_order_id,
+      order_id: updated.order_id,
       void_reason: dto.void_reason,
     });
 
@@ -234,6 +237,7 @@ export class DispatchNoteFlowService {
       dispatch_number: updated.dispatch_number,
       store_id: updated.store_id,
       sales_order_id: updated.sales_order_id,
+      order_id: updated.order_id,
     });
 
     this.logger.log(`Dispatch note #${id} invoiced`);

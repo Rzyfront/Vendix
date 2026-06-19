@@ -383,6 +383,22 @@ export class StoreAdminLayoutComponent {
           route: '/admin/orders/quotations',
         },
         {
+          label: 'Plan Separe',
+          icon: 'circle',
+          route: '/admin/orders/layaway',
+        },
+        {
+          label: 'Reservas',
+          icon: 'calendar-clock',
+          route: '/admin/reservations',
+        },
+      ],
+    },
+    {
+      label: 'Despacho',
+      icon: 'truck',
+      children: [
+        {
           label: 'Remisiones',
           icon: 'circle',
           route: '/admin/orders/dispatch-notes',
@@ -393,14 +409,14 @@ export class StoreAdminLayoutComponent {
           route: '/admin/orders/planillas',
         },
         {
-          label: 'Plan Separe',
+          label: 'Métodos de Envío',
           icon: 'circle',
-          route: '/admin/orders/layaway',
+          route: '/admin/settings/shipping',
         },
         {
-          label: 'Reservas',
-          icon: 'calendar-clock',
-          route: '/admin/reservations',
+          label: 'Flota',
+          icon: 'circle',
+          route: '/admin/orders/fleet',
         },
       ],
     },
@@ -751,11 +767,6 @@ export class StoreAdminLayoutComponent {
           label: 'Precios y Tarifas',
           icon: 'circle',
           route: '/admin/price-tiers',
-        },
-        {
-          label: 'Métodos de Envío',
-          icon: 'circle',
-          route: '/admin/settings/shipping',
         },
         {
           label: 'Apariencia',

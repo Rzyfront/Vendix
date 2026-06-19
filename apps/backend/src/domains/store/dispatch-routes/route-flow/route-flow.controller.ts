@@ -5,18 +5,26 @@ import {
   Param,
   Res,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   ParseIntPipe,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { RouteFlowService } from './route-flow.service';
+import { RouteSheetScannerService } from './route-sheet-scanner.service';
 import {
   CloseDispatchRouteDto,
   ReleaseStopDto,
   SettleStopDto,
   VoidDispatchRouteDto,
 } from '../dto';
+import {
+  ConfirmRouteSheetDto,
+  RouteSheetScanResult,
+} from './dto/scan-route-sheet.dto';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -26,6 +34,7 @@ import { ResponseService } from '@common/responses/response.service';
 export class RouteFlowController {
   constructor(
     private readonly routeFlowService: RouteFlowService,
+    private readonly routeSheetScanner: RouteSheetScannerService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -111,5 +120,49 @@ export class RouteFlowController {
       'Content-Length': buffer.length.toString(),
     });
     res.end(buffer);
+  }
+
+  // ===== Route-sheet AI scanner =====
+
+  @Post(':id/scan')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:dispatch_routes:update')
+  @UseInterceptors(FileInterceptor('file'))
+  async scanRouteSheet(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    const result = await this.routeSheetScanner.scanRouteSheet(id, file);
+    return this.responseService.success(result, 'Planilla escaneada');
+  }
+
+  @Post(':id/scan/match')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:dispatch_routes:update')
+  async matchRouteSheet(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() scan: RouteSheetScanResult,
+  ) {
+    const result = await this.routeSheetScanner.matchStops(id, scan);
+    return this.responseService.success(
+      result,
+      'Coincidencias de paradas encontradas',
+    );
+  }
+
+  @Post(':id/scan/confirm')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:dispatch_routes:update')
+  @UseInterceptors(FileInterceptor('file'))
+  async confirmRouteSheet(
+    @Param('id', ParseIntPipe) id: number,
+    @UploadedFile() file: Express.Multer.File,
+    @Body() dto: ConfirmRouteSheetDto,
+  ) {
+    const result = await this.routeSheetScanner.confirmAndSettle(id, file, dto);
+    return this.responseService.success(
+      result,
+      'Planilla liquidada desde escaneo',
+    );
   }
 }

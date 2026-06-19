@@ -200,6 +200,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Authentication validation failed',
   },
+  AUTH_ACCOUNT_LOCKED_001: {
+    code: 'AUTH_ACCOUNT_LOCKED_001',
+    httpStatus: 423,
+    devMessage:
+      'Account temporarily locked due to repeated failed login attempts',
+  },
   AUTH_DUP_001: {
     code: 'AUTH_DUP_001',
     httpStatus: 409,
@@ -1895,6 +1901,49 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Dispatched quantity exceeds remaining ordered quantity',
   },
+  DSP_ORDER_FIND_001: {
+    code: 'DSP_ORDER_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Order not found for dispatch note creation',
+  },
+  DSP_ORDER_STATE_001: {
+    code: 'DSP_ORDER_STATE_001',
+    httpStatus: 400,
+    devMessage:
+      'Order is not in a state that allows generating a dispatch note',
+  },
+  DSP_ORDER_DELIVERY_001: {
+    code: 'DSP_ORDER_DELIVERY_001',
+    httpStatus: 400,
+    devMessage:
+      'Direct-delivery orders do not require a dispatch note (remisión)',
+  },
+  DSP_ORDER_ITEM_001: {
+    code: 'DSP_ORDER_ITEM_001',
+    httpStatus: 400,
+    devMessage: 'Order item not found for dispatch note creation',
+  },
+  DSP_ORDER_TARGET_STATUS_001: {
+    code: 'DSP_ORDER_TARGET_STATUS_001',
+    httpStatus: 400,
+    devMessage: 'Invalid dispatch note target_status',
+  },
+  DSP_ROUTE_ASSIGN_001: {
+    code: 'DSP_ROUTE_ASSIGN_001',
+    httpStatus: 400,
+    devMessage:
+      'Inconsistent route assignment configuration (e.g. mode=existing without route_id)',
+  },
+  DSP_ROUTE_NOT_EDITABLE_001: {
+    code: 'DSP_ROUTE_NOT_EDITABLE_001',
+    httpStatus: 409,
+    devMessage: 'Route does not allow adding stops in its current state',
+  },
+  DSP_ROUTE_STOP_CONFLICT_001: {
+    code: 'DSP_ROUTE_STOP_CONFLICT_001',
+    httpStatus: 409,
+    devMessage: 'Dispatch note is already assigned to this route',
+  },
 
   // MCP (Model Context Protocol)
   AI_MCP_001: {
@@ -1998,6 +2047,33 @@ export const ErrorCodes = {
     code: 'INV_SCAN_INVALID_FILE',
     httpStatus: 400,
     devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
+
+  // Route Sheet Scanner (planilla de ruta extraction)
+  RTSCAN_AI_FAIL: {
+    code: 'RTSCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI route sheet processing failed',
+  },
+  RTSCAN_PARSE_FAIL: {
+    code: 'RTSCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI route sheet response',
+  },
+  RTSCAN_NO_FILE: {
+    code: 'RTSCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No route sheet file provided',
+  },
+  RTSCAN_INVALID_FILE: {
+    code: 'RTSCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only PDFs and images are accepted',
+  },
+  RTSCAN_MATCH_001: {
+    code: 'RTSCAN_MATCH_001',
+    httpStatus: 400,
+    devMessage: 'Could not match a scanned row to a route stop',
   },
 
   // RUT Scanner (fiscal identity extraction)

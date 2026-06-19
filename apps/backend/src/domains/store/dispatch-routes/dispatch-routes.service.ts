@@ -11,10 +11,20 @@ import {
   CreateDispatchRouteDto,
   UpdateDispatchRouteDto,
   DispatchRouteQueryDto,
+  AddStopsDto,
 } from './dto';
 import { RouteNumberGenerator } from './utils/route-number-generator';
 import { RequestContextService } from '@common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import {
+  buildStopsData,
+  computeRouteTotals,
+  buildRouteReconciliation,
+  RouteReconciliation,
+  ReconciliationStopInput,
+  RouteStopNoteInput,
+  RouteStopSequenceInput,
+} from './utils/route-stop-calc';
 
 const DISPATCH_ROUTE_INCLUDE = {
   vehicle: true,
@@ -113,6 +123,7 @@ export class DispatchRoutesService {
         status: true,
         sales_order_id: true,
         grand_total: true,
+        needs_collection: true,
         invoice: { select: { id: true, status: true, payment_date: true } },
       },
     });
@@ -153,38 +164,16 @@ export class DispatchRoutesService {
     while (true) {
       try {
         route_number = await this.routeNumberGenerator.generateNextNumber(store_id);
-        // Calculate totals from stops
-        const stops_data = dto.stops.map((stop, idx) => {
-          const note = existing_notes.find((n) => n.id === stop.dispatch_note_id)!;
-          const is_prepaid = !!(note.invoice && note.invoice.payment_date);
-          return {
-            dispatch_note_id: stop.dispatch_note_id,
-            stop_sequence: stop.stop_sequence ?? idx + 1,
-            is_extra_route: stop.is_extra_route ?? false,
-            is_prepaid,
-            // Prepaid stops do NOT contribute to total_to_collect
-            collected_amount: 0,
-            anticipo_amount: 0,
-            change_amount: 0,
-            withholding_amount: 0,
-            credit_amount: 0,
-            notes: null,
-          };
-        });
-
-        const total_to_collect = stops_data
-          .filter((s) => !s.is_prepaid)
-          .reduce(
-            (sum, s) => sum + Number(existing_notes.find((n) => n.id === s.dispatch_note_id)?.grand_total || 0),
-            0,
-          );
-
-        const total_prepaid = stops_data
-          .filter((s) => s.is_prepaid)
-          .reduce(
-            (sum, s) => sum + Number(existing_notes.find((n) => n.id === s.dispatch_note_id)?.grand_total || 0),
-            0,
-          );
+        // Calculate totals from stops using the pure route-stop calculators.
+        // needs_collection wins when present; fallback to invoice.payment_date.
+        const notes_by_id: ReadonlyMap<number, RouteStopNoteInput> = new Map(
+          existing_notes.map((n) => [n.id, n]),
+        );
+        const stops_data = buildStopsData(dto.stops, notes_by_id);
+        const { total_to_collect, total_prepaid } = computeRouteTotals(
+          stops_data,
+          notes_by_id,
+        );
 
         const created = await this.prisma.dispatch_routes.create({
           data: {
@@ -307,7 +296,201 @@ export class DispatchRoutesService {
       include: DISPATCH_ROUTE_INCLUDE,
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
-    return route;
+
+    const reconciliation = this.buildReconciliation(route);
+    return { ...route, reconciliation };
+  }
+
+  /**
+   * Derive the structured reconciliation summary (por recaudar vs recaudado,
+   * faltante/sobrante, por parada) from the data already loaded on the route.
+   * Computed on read — NOT a DB column. For a closed route the persisted close
+   * totals (`total_collected`, `cash_variance`) are reused; for an open route a
+   * projection is computed from the live stops via the pure helper.
+   */
+  private buildReconciliation(
+    route: Prisma.dispatch_routesGetPayload<{
+      include: typeof DISPATCH_ROUTE_INCLUDE;
+    }>,
+  ): RouteReconciliation {
+    const stops: ReconciliationStopInput[] = route.stops.map((stop) => ({
+      stop_sequence: stop.stop_sequence,
+      dispatch_note_id: stop.dispatch_note_id,
+      is_prepaid: stop.is_prepaid,
+      result: stop.result,
+      collected_amount: Number(stop.collected_amount ?? 0),
+      anticipo_amount: Number(stop.anticipo_amount ?? 0),
+      dispatch_note_grand_total: Number(stop.dispatch_note?.grand_total ?? 0),
+    }));
+
+    return buildRouteReconciliation(stops, {
+      is_closed: route.status === 'closed',
+      persisted: {
+        total_collected:
+          route.total_collected != null
+            ? Number(route.total_collected)
+            : null,
+        cash_variance:
+          route.cash_variance != null ? Number(route.cash_variance) : null,
+      },
+    });
+  }
+
+  /**
+   * Add one or more dispatch notes as new stops to a "hot" route.
+   *
+   * Only routes in `draft` or `dispatched` admit new stops; any other state
+   * (in_transit / settling / closed / voided) is rejected. Notes already
+   * present on the route raise a conflict. After inserting the new stops the
+   * route totals are recomputed over the COMPLETE set (existing + new) using
+   * the same pure calculators as create() so is_prepaid semantics stay aligned.
+   */
+  async addStops(id: number, dto: AddStopsDto) {
+    const store_id = this.getStoreId();
+
+    const route = await this.prisma.dispatch_routes.findFirst({
+      where: { id, store_id },
+      include: {
+        stops: {
+          select: {
+            dispatch_note_id: true,
+            stop_sequence: true,
+            is_prepaid: true,
+          },
+        },
+      },
+    });
+    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+
+    // State gate: only "hot" routes (draft / dispatched) accept new stops.
+    const EDITABLE_STATES: dispatch_route_status_enum[] = ['draft', 'dispatched'];
+    if (!EDITABLE_STATES.includes(route.status)) {
+      throw new VendixHttpException(ErrorCodes.DSP_ROUTE_NOT_EDITABLE_001);
+    }
+
+    // No duplicate dispatch_note_id within the incoming payload.
+    const new_note_ids = dto.stops.map((s) => s.dispatch_note_id);
+    const unique_new_ids = Array.from(new Set(new_note_ids));
+    if (unique_new_ids.length !== new_note_ids.length) {
+      throw new BadRequestException(
+        'Hay dispatch_note_id duplicados en la solicitud',
+      );
+    }
+
+    // Conflict: a note already present on this route cannot be re-added.
+    const existing_note_ids = new Set(
+      route.stops.map((s) => s.dispatch_note_id),
+    );
+    const conflicting = unique_new_ids.filter((nid) =>
+      existing_note_ids.has(nid),
+    );
+    if (conflicting.length > 0) {
+      throw new VendixHttpException(ErrorCodes.DSP_ROUTE_STOP_CONFLICT_001);
+    }
+
+    // Load the new dispatch notes with the SAME select shape as create().
+    const new_notes = await this.prisma.dispatch_notes.findMany({
+      where: { id: { in: unique_new_ids }, store_id },
+      select: {
+        id: true,
+        store_id: true,
+        status: true,
+        sales_order_id: true,
+        grand_total: true,
+        needs_collection: true,
+        invoice: { select: { id: true, status: true, payment_date: true } },
+      },
+    });
+    if (new_notes.length !== unique_new_ids.length) {
+      throw new BadRequestException(
+        'Una o más remisiones no existen o no pertenecen a la tienda',
+      );
+    }
+
+    // Assignability: a note already sitting on an active (non-released) stop of
+    // another non-draft route cannot be assigned. Mirrors create()'s rule.
+    const other_stops = await this.prisma.dispatch_route_stops.findMany({
+      where: {
+        dispatch_note_id: { in: unique_new_ids },
+        route_id: { not: id },
+      },
+      include: { route: { select: { status: true } } },
+    });
+    const blocking = other_stops.filter(
+      (s) => s.status !== 'released' && s.route.status !== 'draft',
+    );
+    if (blocking.length > 0) {
+      throw new BadRequestException(
+        `Las remisiones ${blocking
+          .map((s) => s.dispatch_note_id)
+          .join(', ')} ya pertenecen a una planilla activa o cerrada`,
+      );
+    }
+
+    // Compute the starting sequence for stops that omit stop_sequence:
+    // continue after the current max sequence on the route.
+    const current_max_sequence = route.stops.reduce(
+      (max, s) => Math.max(max, s.stop_sequence ?? 0),
+      0,
+    );
+    const new_stop_inputs: RouteStopSequenceInput[] = dto.stops.map(
+      (stop, idx) => ({
+        dispatch_note_id: stop.dispatch_note_id,
+        stop_sequence: stop.stop_sequence ?? current_max_sequence + idx + 1,
+      }),
+    );
+
+    const new_notes_by_id: ReadonlyMap<number, RouteStopNoteInput> = new Map(
+      new_notes.map((n) => [n.id, n]),
+    );
+    const new_stops_data = buildStopsData(new_stop_inputs, new_notes_by_id);
+
+    // Recompute route totals over the COMPLETE set (existing + new). Existing
+    // stops contribute their persisted is_prepaid + the note's grand_total.
+    const existing_note_ids_list = route.stops.map((s) => s.dispatch_note_id);
+    const existing_notes_full = await this.prisma.dispatch_notes.findMany({
+      where: { id: { in: existing_note_ids_list }, store_id },
+      select: { id: true, grand_total: true, needs_collection: true },
+    });
+    const all_notes_by_id = new Map<number, RouteStopNoteInput>(
+      new_notes.map((n) => [n.id, n]),
+    );
+    for (const n of existing_notes_full) all_notes_by_id.set(n.id, n);
+
+    const all_stops_data = [
+      ...route.stops.map((s) => ({
+        dispatch_note_id: s.dispatch_note_id,
+        stop_sequence: s.stop_sequence,
+        is_extra_route: false,
+        is_prepaid: s.is_prepaid,
+        collected_amount: 0,
+        anticipo_amount: 0,
+        change_amount: 0,
+        withholding_amount: 0,
+        credit_amount: 0,
+        notes: null,
+      })),
+      ...new_stops_data,
+    ];
+    const { total_to_collect, total_prepaid } = computeRouteTotals(
+      all_stops_data,
+      all_notes_by_id,
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      await tx.dispatch_route_stops.createMany({
+        data: new_stops_data.map((s) => ({ ...s, route_id: id })),
+      });
+      return tx.dispatch_routes.update({
+        where: { id },
+        data: {
+          total_to_collect,
+          total_prepaid,
+          updated_at: new Date(),
+        },
+        include: DISPATCH_ROUTE_INCLUDE,
+      });
+    });
   }
 
   async update(id: number, dto: UpdateDispatchRouteDto) {

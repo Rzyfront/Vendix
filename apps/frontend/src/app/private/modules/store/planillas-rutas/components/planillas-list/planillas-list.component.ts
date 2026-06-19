@@ -1,194 +1,334 @@
 import {
   Component,
   DestroyRef,
-  EventEmitter,
-  Output,
   inject,
+  output,
   signal,
   OnInit,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+import {
+  TableColumn,
+  TableAction,
+  ResponsiveDataViewComponent,
+  ItemListCardConfig,
+  InputsearchComponent,
+  OptionsDropdownComponent,
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
+  PaginationComponent,
+  EmptyStateComponent,
+  CardComponent,
+} from '../../../../../../shared/components/index';
+
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
-import { DispatchRoute, DispatchRouteStatus } from '../../interfaces/planilla.interface';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
+import {
+  DispatchRoute,
+  DispatchRouteStatus,
+} from '../../interfaces/planilla.interface';
+
+const STATUS_LABELS: Record<DispatchRouteStatus, string> = {
+  draft: 'Borrador',
+  dispatched: 'Despachada',
+  in_transit: 'En ruta',
+  settling: 'Cuadrando',
+  closed: 'Cerrada',
+  voided: 'Anulada',
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  draft: 'bg-gray-100 text-gray-800',
+  dispatched: 'bg-blue-100 text-blue-800',
+  in_transit: 'bg-blue-100 text-blue-900',
+  settling: 'bg-amber-100 text-amber-800',
+  closed: 'bg-emerald-100 text-emerald-800',
+  voided: 'bg-red-100 text-red-800',
+};
 
 @Component({
   selector: 'app-planillas-list',
   standalone: true,
-  imports: [CommonModule],
+  imports: [
+    FormsModule,
+    ResponsiveDataViewComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
+    PaginationComponent,
+    EmptyStateComponent,
+    CardComponent,
+  ],
   template: `
-    <div class="p-3 md:p-4 space-y-3">
-      <!-- Search + filters (mobile-friendly) -->
-      <div class="flex flex-col sm:flex-row gap-2">
-        <input
-          type="text"
-          placeholder="Buscar por número, ruta o conductor..."
-          class="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-          [value]="search()"
-          (input)="onSearch($event)"
-        />
-        <select
-          class="rounded-md border border-input bg-background px-3 py-2 text-sm"
-          [value]="statusFilter()"
-          (change)="onStatusChange($event)"
+    <div class="md:space-y-4">
+      <app-card
+        [responsive]="true"
+        [padding]="false"
+        overflow="visible"
+        customClasses="md:min-h-[600px]"
+      >
+        <!-- Search Section -->
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
         >
-          <option value="">Todos los estados</option>
-          <option value="draft">Borrador</option>
-          <option value="dispatched">Despachada</option>
-          <option value="in_transit">En ruta</option>
-          <option value="settling">Cuadrando</option>
-          <option value="closed">Cerrada</option>
-          <option value="voided">Anulada</option>
-        </select>
-        <button
-          (click)="create.emit()"
-          class="rounded-md bg-primary text-primary-foreground px-4 py-2 text-sm font-medium hover:bg-primary/90"
-        >
-          + Nueva Planilla
-        </button>
-      </div>
-
-      <!-- Mobile-first: cards on small, table on md+ -->
-      <div class="block md:hidden space-y-2">
-        @for (route of routes(); track route.id) {
-          <button
-            (click)="viewDetail.emit(route)"
-            class="w-full text-left rounded-lg border border-border bg-card p-3 active:scale-[0.98] transition"
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
-            <div class="flex justify-between items-start">
-              <div>
-                <div class="font-semibold">{{ route.route_number }}</div>
-                @if (route.route_code) {
-                  <div class="text-xs text-muted-foreground">Ruta {{ route.route_code }}</div>
-                }
-              </div>
-              <span
-                class="text-xs px-2 py-1 rounded-full"
-                [ngClass]="statusClass(route.status)"
-              >{{ statusLabel(route.status) }}</span>
-            </div>
-            <div class="mt-2 text-sm">
-              <span class="text-muted-foreground">Conductor:</span>
-              {{ route.driver_user?.first_name }} {{ route.driver_user?.last_name }}
-              @if (route.external_driver_name) {
-                ({{ route.external_driver_name }})
-              }
-            </div>
-            @if (route.vehicle) {
-              <div class="text-sm">
-                <span class="text-muted-foreground">Vehículo:</span>
-                {{ route.vehicle.plate }}
-              </div>
-            }
-            <div class="mt-2 flex justify-between text-sm">
-              <span>{{ route._count?.stops ?? route.stops?.length ?? 0 }} paradas</span>
-              <span class="font-semibold">
-                {{ route.total_to_collect | currency: 'COP' : 'symbol' : '1.0-0' }}
-              </span>
-            </div>
-            <div class="text-xs text-muted-foreground mt-1">
-              {{ route.planned_date | date: 'dd MMM, HH:mm' }}
-            </div>
-          </button>
-        } @empty {
-          <div class="text-center py-8 text-muted-foreground">No hay planillas</div>
-        }
-      </div>
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+            >
+              Planillas ({{ totalItems() }})
+            </h2>
 
-      <!-- Desktop: table -->
-      <div class="hidden md:block rounded-lg border border-border overflow-hidden">
-        <table class="w-full">
-          <thead class="bg-muted">
-            <tr>
-              <th class="text-left p-3 text-sm">Planilla</th>
-              <th class="text-left p-3 text-sm">Ruta</th>
-              <th class="text-left p-3 text-sm">Estado</th>
-              <th class="text-left p-3 text-sm">Conductor</th>
-              <th class="text-left p-3 text-sm">Vehículo</th>
-              <th class="text-right p-3 text-sm">Paradas</th>
-              <th class="text-right p-3 text-sm">A recaudar</th>
-              <th class="text-left p-3 text-sm">Fecha</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (route of routes(); track route.id) {
-              <tr
-                (click)="viewDetail.emit(route)"
-                class="border-t border-border hover:bg-muted/50 cursor-pointer"
-              >
-                <td class="p-3 font-mono text-sm">{{ route.route_number }}</td>
-                <td class="p-3 text-sm">{{ route.route_code || '—' }}</td>
-                <td class="p-3 text-sm">
-                  <span class="text-xs px-2 py-1 rounded-full" [ngClass]="statusClass(route.status)">
-                    {{ statusLabel(route.status) }}
-                  </span>
-                </td>
-                <td class="p-3 text-sm">
-                  {{ route.driver_user?.first_name }} {{ route.driver_user?.last_name }}
-                  @if (route.external_driver_name) {
-                    <span class="text-xs text-muted-foreground">(ext. {{ route.external_driver_name }})</span>
-                  }
-                </td>
-                <td class="p-3 text-sm">{{ route.vehicle?.plate || '—' }}</td>
-                <td class="p-3 text-sm text-right">{{ route._count?.stops ?? route.stops?.length ?? 0 }}</td>
-                <td class="p-3 text-sm text-right font-semibold">
-                  {{ route.total_to_collect | currency: 'COP' : 'symbol' : '1.0-0' }}
-                </td>
-                <td class="p-3 text-sm text-muted-foreground">
-                  {{ route.planned_date | date: 'dd MMM, HH:mm' }}
-                </td>
-              </tr>
-            } @empty {
-              <tr>
-                <td colspan="8" class="p-8 text-center text-muted-foreground">No hay planillas</td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
+            <div class="flex items-center gap-2 w-full md:w-auto">
+              <app-inputsearch
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                size="sm"
+                placeholder="Buscar por número, ruta o conductor..."
+                [debounceTime]="1000"
+                [ngModel]="search()"
+                (ngModelChange)="onSearchChange($event)"
+              ></app-inputsearch>
 
-      <!-- Pagination -->
-      @if (totalPages() > 1) {
-        <div class="flex justify-center gap-2 pt-2">
-          <button
-            [disabled]="page() === 1"
-            (click)="goToPage(page() - 1)"
-            class="px-3 py-1 rounded border border-input disabled:opacity-50"
-          >←</button>
-          <span class="px-3 py-1 text-sm">Página {{ page() }} de {{ totalPages() }}</span>
-          <button
-            [disabled]="page() === totalPages()"
-            (click)="goToPage(page() + 1)"
-            class="px-3 py-1 rounded border border-input disabled:opacity-50"
-          >→</button>
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs"
+                [filterValues]="filterValues()"
+                [actions]="dropdownActions"
+                [isLoading]="loading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
+            </div>
+          </div>
         </div>
-      }
+
+        <!-- Loading State -->
+        @if (loading()) {
+          <div class="p-4 md:p-6 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando planillas...</p>
+          </div>
+        }
+
+        <!-- Empty State -->
+        @if (!loading() && routes().length === 0) {
+          <app-empty-state
+            icon="truck"
+            [title]="emptyStateTitle()"
+            [description]="emptyStateDescription()"
+            actionButtonText="Nueva Planilla"
+            [showActionButton]="!hasFilters()"
+            [showClearFilters]="hasFilters()"
+            (actionClick)="create.emit()"
+            (clearFiltersClick)="clearFilters()"
+          ></app-empty-state>
+        }
+
+        <!-- Routes List -->
+        @if (!loading() && routes().length > 0) {
+          <div class="px-2 pb-2 pt-3 md:p-4">
+            <app-responsive-data-view
+              [data]="routes()"
+              [columns]="tableColumns"
+              [actions]="tableActions"
+              [cardConfig]="cardConfig"
+              [loading]="loading()"
+              [sortable]="true"
+              (rowClick)="viewDetail.emit($event)"
+            ></app-responsive-data-view>
+
+            <app-pagination
+              [currentPage]="page()"
+              [totalPages]="totalPages()"
+              [total]="totalItems()"
+              [limit]="limit"
+              (pageChange)="goToPage($event)"
+            ></app-pagination>
+          </div>
+        }
+      </app-card>
     </div>
   `,
 })
 export class PlanillasListComponent implements OnInit {
   private readonly service = inject(PlanillasRutasService);
+  private readonly currencyService = inject(CurrencyFormatService);
   private readonly destroyRef = inject(DestroyRef);
 
-  @Output() viewDetail = new EventEmitter<DispatchRoute>();
-  @Output() create = new EventEmitter<void>();
-  @Output() refresh = new EventEmitter<void>();
+  readonly viewDetail = output<DispatchRoute>();
+  readonly create = output<void>();
+  readonly refresh = output<void>();
 
   readonly routes = signal<DispatchRoute[]>([]);
+  readonly loading = signal(false);
   readonly page = signal(1);
   readonly totalPages = signal(1);
+  readonly totalItems = signal(0);
   readonly search = signal('');
   readonly statusFilter = signal<DispatchRouteStatus | ''>('');
+  readonly filterValues = signal<FilterValues>({});
+
+  readonly limit = 20;
+
+  readonly filterConfigs: FilterConfig[] = [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos los Estados' },
+        { value: 'draft', label: 'Borrador' },
+        { value: 'dispatched', label: 'Despachada' },
+        { value: 'in_transit', label: 'En ruta' },
+        { value: 'settling', label: 'Cuadrando' },
+        { value: 'closed', label: 'Cerrada' },
+        { value: 'voided', label: 'Anulada' },
+      ],
+    },
+  ];
+
+  readonly dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva Planilla',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
+
+  readonly tableColumns: TableColumn[] = [
+    {
+      key: 'route_number',
+      label: 'Planilla',
+      sortable: true,
+      width: '140px',
+      priority: 1,
+    },
+    {
+      key: 'route_code',
+      label: 'Ruta',
+      defaultValue: '—',
+      priority: 3,
+    },
+    {
+      key: 'status',
+      label: 'Estado',
+      badge: true,
+      priority: 1,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: STATUS_COLORS,
+      },
+      transform: (value: DispatchRouteStatus) => this.getStatusLabel(value),
+    },
+    {
+      key: 'driver_user',
+      label: 'Conductor',
+      priority: 2,
+      transform: (_: any, row?: DispatchRoute) =>
+        row ? this.getDriverName(row) : '—',
+    },
+    {
+      key: 'vehicle',
+      label: 'Vehículo',
+      priority: 3,
+      transform: (value: DispatchRoute['vehicle']) => value?.plate || '—',
+    },
+    {
+      key: '_count',
+      label: 'Paradas',
+      align: 'right',
+      priority: 3,
+      transform: (_: any, row?: DispatchRoute) =>
+        String(row?._count?.stops ?? row?.stops?.length ?? 0),
+    },
+    {
+      key: 'total_to_collect',
+      label: 'A recaudar',
+      align: 'right',
+      priority: 1,
+      transform: (value: any) => this.formatCurrency(value),
+    },
+    {
+      key: 'planned_date',
+      label: 'Fecha',
+      sortable: true,
+      priority: 2,
+      transform: (value: string) => (value ? formatDateOnlyUTC(value) : '—'),
+    },
+  ];
+
+  readonly tableActions: TableAction[] = [
+    {
+      label: 'Ver Detalle',
+      icon: 'eye',
+      action: (route: DispatchRoute) => this.viewDetail.emit(route),
+      variant: 'secondary',
+    },
+  ];
+
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'route_number',
+    titleTransform: (item: DispatchRoute) => item.route_number,
+    subtitleTransform: (item: DispatchRoute) =>
+      item.route_code ? `Ruta ${item.route_code}` : this.getDriverName(item),
+    avatarFallbackIcon: 'truck',
+    avatarShape: 'square',
+    badgeKey: 'status',
+    badgeConfig: {
+      type: 'custom',
+      size: 'sm',
+      colorMap: STATUS_COLORS,
+    },
+    badgeTransform: (val: any) => this.getStatusLabel(val),
+    footerKey: 'total_to_collect',
+    footerLabel: 'A recaudar',
+    footerStyle: 'prominent',
+    footerTransform: (val: any) => this.formatCurrency(val),
+    detailKeys: [
+      {
+        key: 'driver_user',
+        label: 'Conductor',
+        transform: (_: any, row?: DispatchRoute) =>
+          row ? this.getDriverName(row) : '—',
+      },
+      {
+        key: 'vehicle',
+        label: 'Vehículo',
+        transform: (val: DispatchRoute['vehicle']) => val?.plate || '—',
+      },
+      {
+        key: '_count',
+        label: 'Paradas',
+        transform: (_: any, row?: DispatchRoute) =>
+          String(row?._count?.stops ?? row?.stops?.length ?? 0),
+      },
+      {
+        key: 'planned_date',
+        label: 'Fecha',
+        transform: (val: any) => (val ? formatDateOnlyUTC(val) : '—'),
+      },
+    ],
+  };
 
   ngOnInit() {
     this.load();
   }
 
   load() {
+    this.loading.set(true);
     this.service
       .list({
         page: this.page(),
-        limit: 20,
+        limit: this.limit,
         search: this.search() || undefined,
         status: (this.statusFilter() || undefined) as DispatchRouteStatus,
       })
@@ -197,20 +337,40 @@ export class PlanillasListComponent implements OnInit {
         next: (res) => {
           this.routes.set(res.data);
           this.totalPages.set(res.pagination.totalPages);
+          this.totalItems.set(res.pagination.total);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.loading.set(false);
         },
       });
   }
 
-  onSearch(e: Event) {
-    this.search.set((e.target as HTMLInputElement).value);
+  onSearchChange(term: string) {
+    this.search.set(term);
     this.page.set(1);
     this.load();
   }
 
-  onStatusChange(e: Event) {
-    this.statusFilter.set((e.target as HTMLSelectElement).value as any);
+  onFilterChange(values: FilterValues) {
+    this.filterValues.set(values);
+    this.statusFilter.set((values['status'] as DispatchRouteStatus) || '');
     this.page.set(1);
     this.load();
+  }
+
+  clearFilters() {
+    this.search.set('');
+    this.statusFilter.set('');
+    this.filterValues.set({});
+    this.page.set(1);
+    this.load();
+  }
+
+  onActionClick(action: string) {
+    if (action === 'create') {
+      this.create.emit();
+    }
   }
 
   goToPage(p: number) {
@@ -219,27 +379,40 @@ export class PlanillasListComponent implements OnInit {
     this.load();
   }
 
-  statusLabel(s: DispatchRouteStatus): string {
-    const map: Record<DispatchRouteStatus, string> = {
-      draft: 'Borrador',
-      dispatched: 'Despachada',
-      in_transit: 'En ruta',
-      settling: 'Cuadrando',
-      closed: 'Cerrada',
-      voided: 'Anulada',
-    };
-    return map[s] || s;
+  hasFilters(): boolean {
+    return !!(this.search() || this.statusFilter());
   }
 
-  statusClass(s: DispatchRouteStatus): string {
-    const map: Record<DispatchRouteStatus, string> = {
-      draft: 'bg-gray-200 text-gray-800',
-      dispatched: 'bg-blue-100 text-blue-800',
-      in_transit: 'bg-blue-200 text-blue-900',
-      settling: 'bg-yellow-100 text-yellow-800',
-      closed: 'bg-green-100 text-green-800',
-      voided: 'bg-red-100 text-red-800',
-    };
-    return map[s] || 'bg-gray-100 text-gray-700';
+  emptyStateTitle(): string {
+    return this.hasFilters()
+      ? 'No se encontraron planillas'
+      : 'No hay planillas';
+  }
+
+  emptyStateDescription(): string {
+    return this.hasFilters()
+      ? 'Intenta ajustar tus filtros para ver más resultados'
+      : 'Comienza creando tu primera planilla de despacho.';
+  }
+
+  getDriverName(route: DispatchRoute): string {
+    if (route.driver_user) {
+      const name = `${route.driver_user.first_name ?? ''} ${route.driver_user.last_name ?? ''}`.trim();
+      return name || '—';
+    }
+    if (route.external_driver_name) {
+      return `${route.external_driver_name} (ext.)`;
+    }
+    return '—';
+  }
+
+  getStatusLabel(status: DispatchRouteStatus): string {
+    return STATUS_LABELS[status] || status;
+  }
+
+  formatCurrency(value: any): string {
+    const num_value =
+      typeof value === 'string' ? parseFloat(value) : value || 0;
+    return this.currencyService.format(num_value);
   }
 }
