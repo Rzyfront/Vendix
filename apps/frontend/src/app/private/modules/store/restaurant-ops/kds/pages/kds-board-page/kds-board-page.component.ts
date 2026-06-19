@@ -11,6 +11,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Router } from '@angular/router';
 import {
   DialogService,
   StickyHeaderComponent,
@@ -27,6 +28,7 @@ import {
 import {
   KdsConnectionState,
   KdsSseService,
+  KitchenMutationError,
   KitchenTicketsService,
 } from '../../services';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
@@ -74,6 +76,7 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly storeSettings = inject(StoreSettingsFacade);
+  private readonly router = inject(Router);
 
   readonly columns = KDS_COLUMNS;
   /** Raw ticket set from the SSE/snapshot service (unfiltered by day). */
@@ -551,10 +554,55 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         },
         error: (err: unknown) => {
           this.finishMutation(ticketId);
-          this.toastService.error(
-            typeof err === 'string' ? err : 'Error al actualizar el ticket',
-          );
+          this.onMutationError(err);
         },
+      });
+  }
+
+  /**
+   * Surfaces a failed ticket mutation. Most errors become a toast, but the
+   * backend's `KITCHEN_TICKET_NO_RECIPE` (422) — raised when "Cocinarlo" is
+   * pressed on a dish without an active recipe — gets an actionable dialog
+   * (CTA a Recetas) instead of failing silently. Falls back to a plain
+   * string for any non-structured error.
+   */
+  private onMutationError(err: unknown): void {
+    const structured =
+      typeof err === 'object' && err !== null
+        ? (err as Partial<KitchenMutationError>)
+        : null;
+    if (structured?.code === 'KITCHEN_TICKET_NO_RECIPE') {
+      this.showNoRecipeDialog();
+      return;
+    }
+    const message =
+      typeof err === 'string'
+        ? err
+        : (structured?.message ?? 'Error al actualizar el ticket');
+    this.toastService.error(message);
+  }
+
+  /**
+   * Diálogo para `KITCHEN_TICKET_NO_RECIPE`: explica por qué el plato no se
+   * puede enviar a preparación y ofrece un CTA al módulo de Recetas para que
+   * el operador adjunte una receta activa y reintente.
+   */
+  private showNoRecipeDialog(): void {
+    this.dialogService
+      .confirm({
+        title: 'Falta la receta',
+        message:
+          'Este plato no tiene una receta activa, por eso no se puede enviar ' +
+          'a preparación: la cocina no sabría qué preparar ni qué insumos ' +
+          'descontar. Crea o activa una receta para el plato y vuelve a ' +
+          'intentarlo.',
+        confirmText: 'Ir a recetas',
+        cancelText: 'Cerrar',
+        confirmVariant: 'primary',
+      })
+      .then((confirmed) => {
+        if (!confirmed) return;
+        void this.router.navigate(['/admin/restaurant-ops/recipes']);
       });
   }
 

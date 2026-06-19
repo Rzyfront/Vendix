@@ -50,13 +50,9 @@
   }
 
   @if (isManualMode()) {
-    <div class="kds-board__manual-banner" role="status">
-      <app-icon name="wifi-off" [size]="16" />
-      <span>
-        Modo manual: el stream en vivo no está disponible. Los datos se actualizan
-        cada 10s automáticamente. Usa <strong>Refrescar</strong> para forzar la sincronización
-        o <strong>Reconectar</strong> para intentar volver al modo en vivo.
-      </span>
+    <div class="kds-board__manual-pill" role="status">
+      <app-icon name="wifi-off" [size]="14" aria-hidden="true" />
+      <span>Modo manual · sincronizando cada 10s</span>
     </div>
   }
 

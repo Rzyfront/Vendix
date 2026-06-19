@@ -32,6 +32,30 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Modo manual: pill compacto, no un banner intrusivo. El detalle/acciones
+   viven en el header ("Reconectar"). */
+.kds-board__manual-pill {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0 0.5rem;
+  padding: 0.25rem 0.625rem;
+  border-radius: 999px;
+  background: rgba(245, 158, 11, 0.1);
+  color: var(--color-warning-700, #b45309);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.kds-board__manual-pill app-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
 .kds-board__columns {
   display: grid;
   grid-template-columns: 1fr;
