@@ -1093,6 +1093,19 @@ export class ProductsBulkService {
       throw new BadRequestException('No se pudo determinar la tienda actual');
     }
 
+    // [DEBUG-TEMP] Log de auditoría para diagnosticar data leak multi-tenant.
+    // Imprime el contexto (user, store, org) y un sample de productos.
+    // QUITAR después de diagnosticar.
+    const dbgProducts = await this.prisma.products.findMany({
+      where: { store_id: storeId },
+      select: { id: true, name: true, sku: true, store_id: true },
+      take: 5,
+      orderBy: { id: 'asc' },
+    });
+    this.logger.warn(
+      `[EXPORT-AUDIT] user_id=${context?.user_id} organization_id=${context?.organization_id} store_id=${storeId} returned=${dbgProducts.length} samples=[${dbgProducts.map((p) => `(${p.id}/${p.name}/${p.store_id})`).join(', ')}]`,
+    );
+
     // Wrap TODO el export en try-catch para que el cliente NUNCA vea un error
     // de Prisma crudo. Errores legítimos (empty state) se re-lanzan tal cual;
     // cualquier otro fallo (Prisma, red, permisos) se convierte en un
