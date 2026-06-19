@@ -266,6 +266,13 @@ export const storeAdminRoutes: Routes = [
               ),
           },
           {
+            path: 'fleet',
+            loadComponent: () =>
+              import('../../private/modules/store/fleet/fleet.component').then(
+                (c) => c.FleetComponent,
+              ),
+          },
+          {
             path: ':id',
             loadComponent: () =>
               import('../../private/modules/store/orders/pages/order-details/order-details-page.component').then(

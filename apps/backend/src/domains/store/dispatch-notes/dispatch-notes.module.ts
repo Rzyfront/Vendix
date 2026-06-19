@@ -3,6 +3,7 @@ import { DispatchNotesService } from './dispatch-notes.service';
 import { DispatchNotesController } from './dispatch-notes.controller';
 import { DispatchNoteFlowService } from './dispatch-note-flow/dispatch-note-flow.service';
 import { DispatchNumberGenerator } from './utils/dispatch-number-generator';
+import { RouteNumberGenerator } from '../dispatch-routes/utils/route-number-generator';
 import { DispatchNoteEventsListener } from './listeners/dispatch-note-events.listener';
 import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -15,6 +16,7 @@ import { InventoryModule } from '../inventory/inventory.module';
     DispatchNotesService,
     DispatchNoteFlowService,
     DispatchNumberGenerator,
+    RouteNumberGenerator,
     DispatchNoteEventsListener,
   ],
   exports: [DispatchNotesService],

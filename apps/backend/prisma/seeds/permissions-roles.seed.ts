@@ -846,6 +846,32 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Flota (Vehículos de despacho)
+    {
+      name: 'store:dispatch_fleet:create',
+      description: 'Crear vehículo de flota',
+      path: '/api/store/vehicles',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_fleet:read',
+      description: 'Leer vehículos de flota',
+      path: '/api/store/vehicles',
+      method: 'GET',
+    },
+    {
+      name: 'store:dispatch_fleet:update',
+      description: 'Actualizar vehículo de flota',
+      path: '/api/store/vehicles/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:dispatch_fleet:delete',
+      description: 'Eliminar vehículo de flota',
+      path: '/api/store/vehicles/:id',
+      method: 'DELETE',
+    },
+
     // Categorías
     {
       name: 'store:categories:create',
@@ -2135,6 +2161,12 @@ export async function seedPermissionsAndRoles(
       name: 'store:analytics:read',
       description: 'Leer análisis',
       path: '/api/store/analytics',
+      method: 'GET',
+    },
+    {
+      name: 'store:weekly_report:read',
+      description: 'Leer el reporte semanal (Tu Semana en Vendix)',
+      path: '/api/store/weekly-report',
       method: 'GET',
     },
     {

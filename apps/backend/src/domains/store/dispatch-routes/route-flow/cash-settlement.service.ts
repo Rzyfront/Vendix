@@ -38,6 +38,19 @@ interface RefundInput {
   reason: string;
 }
 
+interface WithholdingInput {
+  store_id: number;
+  organization_id?: number;
+  route_id: number;
+  stop_id: number;
+  dispatch_note_id: number;
+  customer_id: number;
+  sales_order_id: number | null;
+  net_amount: number;
+  breakdown: { retefuente?: number; reteiva?: number; reteica?: number };
+  user_id: number | undefined;
+}
+
 /**
  * Emits domain events that are already handled by existing listeners
  * (accounting, accounts-receivable, notifications). Reusing them means
@@ -105,6 +118,11 @@ export class CashSettlementService {
     }
 
     // Emit payment.received so existing listeners create auto-entries, AR, notifications
+    // NOTE: `order_id` is intentionally null for dispatch_route. The legacy
+    // sales_orders id is carried separately as `sales_order_id` to avoid being
+    // mistaken for the COD `orders.id`. The COD payment bridge
+    // (PaymentFromDispatchRouteListener) resolves the real orders.id from
+    // dispatch_notes.order_id via `dispatch_note_id`, never from this field.
     this.eventEmitter.emit('payment.received', {
       payment_id: null,
       source_type: 'dispatch_route',
@@ -112,7 +130,8 @@ export class CashSettlementService {
       stop_id: input.stop_id,
       store_id: input.store_id,
       organization_id,
-      order_id: input.sales_order_id,
+      order_id: null,
+      sales_order_id: input.sales_order_id,
       dispatch_note_id: input.dispatch_note_id,
       amount: input.amount,
       subtotal_amount: input.amount,
@@ -244,6 +263,102 @@ export class CashSettlementService {
       });
     }
     return null;
+  }
+
+  /**
+   * Persists withholding SUFFERED by the store when a withholding-agent customer
+   * retains part of the payment in the route. Role is 'suffered' (an asset/credit
+   * the store can offset against its own tax, NOT an expense).
+   *
+   * IMPORTANT: We deliberately do NOT emit 'withholding.applied' here. That event's
+   * accounting listener books a withholding-PAYABLE expense entry, which is correct
+   * only for withholding PRACTICED on purchases (role='practiced'). For suffered
+   * withholding the store is the retained party, so we only persist the calculation
+   * row; the figure does not represent a cash shortfall in the route settlement.
+   *
+   * Concept resolution is defensive: if the organization has no active
+   * withholding_concepts for a given type, we skip that row and warn instead of
+   * failing the route closure — incomplete fiscal config must not block logistics.
+   */
+  async emitWithholding(input: WithholdingInput) {
+    let organization_id = input.organization_id;
+    if (!organization_id) {
+      const store = await this.prisma.stores.findUnique({
+        where: { id: input.store_id },
+        select: { organization_id: true },
+      });
+      organization_id = store?.organization_id;
+    }
+    if (!organization_id) {
+      this.logger.warn(
+        `[emitWithholding] No organization_id for store ${input.store_id} — withholding not persisted`,
+      );
+      return [];
+    }
+
+    const base = Number(input.net_amount);
+    if (!(base > 0)) {
+      this.logger.warn(
+        `[emitWithholding] Non-positive net_amount (${base}) for stop ${input.stop_id} — skipped`,
+      );
+      return [];
+    }
+
+    const year = new Date().getFullYear();
+    const types: Array<'retefuente' | 'reteiva' | 'reteica'> = [
+      'retefuente',
+      'reteiva',
+      'reteica',
+    ];
+    const created: Array<{ id: number; withholding_type: string; amount: number }> = [];
+
+    for (const type of types) {
+      const amount = Number(input.breakdown?.[type] || 0);
+      if (!(amount > 0)) continue;
+
+      // Resolve an active concept for this org + withholding_type (FK is NOT NULL).
+      const concept = await this.prisma.withholding_concepts.findFirst({
+        where: {
+          organization_id,
+          withholding_type: type,
+          is_active: true,
+        },
+        orderBy: { id: 'asc' },
+      });
+      if (!concept) {
+        this.logger.warn(
+          `[emitWithholding] No active withholding_concepts for org ${organization_id} type '${type}' — row skipped (stop ${input.stop_id}, amount ${amount})`,
+        );
+        continue;
+      }
+
+      const row = await this.prisma.withholding_calculations.create({
+        data: {
+          organization_id,
+          store_id: input.store_id,
+          customer_id: input.customer_id,
+          concept_id: concept.id,
+          role: 'suffered',
+          counterparty_type: 'customer',
+          withholding_type: type,
+          base_amount: base,
+          withholding_rate: amount / base,
+          withholding_amount: amount,
+          uvt_value_used: 0,
+          year,
+        },
+      });
+      created.push({ id: row.id, withholding_type: type, amount });
+    }
+
+    if (created.length) {
+      this.logger.log(
+        `[emitWithholding] Persisted ${created.length} suffered withholding row(s) for stop ${input.stop_id}: ${created
+          .map((c) => `${c.withholding_type}=${c.amount}`)
+          .join(', ')}`,
+      );
+    }
+    return created;
   }
 
   private async findOpenCashSession(store_id: number, opened_by: number) {

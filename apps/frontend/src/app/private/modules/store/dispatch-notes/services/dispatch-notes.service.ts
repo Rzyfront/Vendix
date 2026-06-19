@@ -9,6 +9,7 @@ import {
   PaginatedDispatchNotesResponse,
   DispatchNoteStats,
   CreateDispatchNoteDto,
+  CreateDispatchFromOrderDto,
 } from '../interfaces/dispatch-note.interface';
 
 let dispatchNoteStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
@@ -137,6 +138,23 @@ export class DispatchNotesService {
 
   getBySalesOrder(sales_order_id: number): Observable<DispatchNote[]> {
     const url = `${this.apiUrl}/store/dispatch-notes/by-sales-order/${sales_order_id}`;
+    return this.http.get<any>(url).pipe(
+      map((r) => r.data || r),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
+  }
+
+  createFromOrder(order_id: number, dto: CreateDispatchFromOrderDto): Observable<DispatchNote> {
+    const url = `${this.apiUrl}/store/dispatch-notes/from-order/${order_id}`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      tap(() => this.invalidateCache()),
+      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+    );
+  }
+
+  getByOrder(order_id: number): Observable<DispatchNote[]> {
+    const url = `${this.apiUrl}/store/dispatch-notes/by-order/${order_id}`;
     return this.http.get<any>(url).pipe(
       map((r) => r.data || r),
       catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),

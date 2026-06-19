@@ -4,7 +4,11 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { Prisma, dispatch_route_status_enum } from '@prisma/client';
+import {
+  Prisma,
+  dispatch_route_status_enum,
+  order_state_enum,
+} from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -36,6 +40,8 @@ const ROUTE_INCLUDE = {
           grand_total: true,
           status: true,
           sales_order_id: true,
+          // COD link: the real orders.id whose state/balance the route drives.
+          order_id: true,
           sales_order: { select: { id: true, order_number: true, status: true } },
         },
       },
@@ -71,6 +77,76 @@ export class RouteFlowService {
   }
 
   /**
+   * COD order-state machine helpers.
+   *
+   * The route drives the non-linear COD lifecycle of the linked `orders` row:
+   *   processing → shipped   (on route dispatch)
+   *   shipped → delivered → finished  (on route close, once delivered+collected)
+   *
+   * These mirror the source-of-truth `VALID_TRANSITIONS` in
+   * `OrderFlowService` (shipped:['delivered'], delivered:['finished',...]).
+   * We write the state directly inside the route transaction instead of
+   * re-dispatching order-flow events, to avoid side effects (stock, cash,
+   * notifications) that the route already orchestrates. All writes are
+   * store-scoped via `updateMany` and are idempotent (no-op when the order is
+   * already at/past the target state).
+   */
+  private async advanceOrderToShipped(
+    tx: Prisma.TransactionClient,
+    store_id: number,
+    order_id: number,
+  ): Promise<void> {
+    const order = await tx.orders.findFirst({
+      where: { id: order_id, store_id },
+      select: { id: true, state: true },
+    });
+    if (!order) return;
+    // Only `processing → shipped` is a valid transition. If the order is in any
+    // other state (already shipped/delivered/finished, or not yet processing),
+    // this is a no-op so re-dispatch never throws.
+    if (order.state !== 'processing') return;
+    await tx.orders.updateMany({
+      where: { id: order_id, store_id, state: 'processing' },
+      data: { state: 'shipped', updated_at: new Date() },
+    });
+  }
+
+  private async advanceOrderToFinished(
+    tx: Prisma.TransactionClient,
+    store_id: number,
+    order_id: number,
+  ): Promise<void> {
+    const order = await tx.orders.findFirst({
+      where: { id: order_id, store_id },
+      select: { id: true, state: true },
+    });
+    if (!order) return;
+    let state = order.state as order_state_enum;
+    if (state === 'finished') return;
+    // Walk the valid path shipped → delivered → finished. Each step is a no-op
+    // if the order is already past it, keeping the close idempotent.
+    if (state === 'shipped') {
+      await tx.orders.updateMany({
+        where: { id: order_id, store_id, state: 'shipped' },
+        data: { state: 'delivered', updated_at: new Date() },
+      });
+      state = 'delivered';
+    }
+    if (state === 'delivered') {
+      await tx.orders.updateMany({
+        where: { id: order_id, store_id, state: 'delivered' },
+        data: {
+          state: 'finished',
+          completed_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
+    }
+    // Any other state (processing/created/cancelled/refunded) is left untouched:
+    // there is no valid direct path to finished from there in this flow.
+  }
+
+  /**
    * Transition a route: draft → dispatched.
    * Locks the stops (no more add/remove) and sets dispatch_started_at.
    */
@@ -102,15 +178,27 @@ export class RouteFlowService {
       );
     }
 
-    const updated = await this.prisma.dispatch_routes.update({
-      where: { id },
-      data: {
-        status: 'dispatched',
-        dispatch_started_at: new Date(),
-        dispatched_by_user_id: user_id,
-        updated_at: new Date(),
-      },
-      include: ROUTE_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updated_route = await tx.dispatch_routes.update({
+        where: { id },
+        data: {
+          status: 'dispatched',
+          dispatch_started_at: new Date(),
+          dispatched_by_user_id: user_id,
+          updated_at: new Date(),
+        },
+        include: ROUTE_INCLUDE,
+      });
+
+      // COD: advance each linked order processing → shipped (idempotent).
+      for (const stop of updated_route.stops) {
+        const order_id = stop.dispatch_note?.order_id;
+        if (order_id) {
+          await this.advanceOrderToShipped(tx, store_id, order_id);
+        }
+      }
+
+      return updated_route;
     });
 
     this.eventEmitter.emit('dispatch_route.dispatched', {
@@ -316,6 +404,33 @@ export class RouteFlowService {
           reason: 'Cambio/devolución en ruta',
         });
       }
+      if (withholding > 0) {
+        // Withholding suffered by the store: persist withholding_calculations
+        // (role='suffered'). Fall back to retefuente if the breakdown is absent.
+        const breakdown =
+          (dto.withholding_breakdown as {
+            retefuente?: number;
+            reteiva?: number;
+            reteica?: number;
+          }) || {};
+        const hasBreakdown =
+          Number(breakdown.retefuente || 0) +
+            Number(breakdown.reteiva || 0) +
+            Number(breakdown.reteica || 0) >
+          0;
+        await this.cashSettlement.emitWithholding({
+          store_id,
+          organization_id: undefined, // resolved in cashSettlement
+          route_id: id,
+          stop_id: stopId,
+          dispatch_note_id: stop.dispatch_note_id,
+          customer_id: stop.dispatch_note.customer_id,
+          sales_order_id: stop.dispatch_note.sales_order_id,
+          net_amount: net,
+          breakdown: hasBreakdown ? breakdown : { retefuente: withholding },
+          user_id,
+        });
+      }
     }
 
     this.logger.log(
@@ -429,22 +544,51 @@ export class RouteFlowService {
       );
     const cash_variance = declared_cash - cash_collected;
 
-    const updated = await this.prisma.dispatch_routes.update({
-      where: { id },
-      data: {
-        status: 'closed',
-        closed_at: new Date(),
-        closed_by_user_id: user_id,
-        total_collected,
-        total_changes,
-        total_withholdings,
-        total_credit,
-        declared_cash,
-        cash_variance,
-        notes: dto.notes ?? route.notes,
-        updated_at: new Date(),
-      },
-      include: ROUTE_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const updated_route = await tx.dispatch_routes.update({
+        where: { id },
+        data: {
+          status: 'closed',
+          closed_at: new Date(),
+          closed_by_user_id: user_id,
+          total_collected,
+          total_changes,
+          total_withholdings,
+          total_credit,
+          declared_cash,
+          cash_variance,
+          notes: dto.notes ?? route.notes,
+          updated_at: new Date(),
+        },
+        include: ROUTE_INCLUDE,
+      });
+
+      // COD: finish each linked order that was DELIVERED and fully COLLECTED.
+      // Delivered = stop result in {delivered, partial}. Collected = the COD
+      // order has no outstanding balance (settled via paso 7) OR the stop is
+      // prepaid. remaining_balance is read live from the order (the COD payment
+      // listener already decremented it on settleStop). Idempotent + scoped.
+      for (const stop of updated_route.stops) {
+        const order_id = stop.dispatch_note?.order_id;
+        if (!order_id) continue;
+        const delivered =
+          stop.result === 'delivered' || stop.result === 'partial';
+        if (!delivered) continue;
+
+        let collected = stop.is_prepaid === true;
+        if (!collected) {
+          const order = await tx.orders.findFirst({
+            where: { id: order_id, store_id },
+            select: { remaining_balance: true },
+          });
+          collected = order ? Number(order.remaining_balance) <= 0 : false;
+        }
+        if (!collected) continue;
+
+        await this.advanceOrderToFinished(tx, store_id, order_id);
+      }
+
+      return updated_route;
     });
 
     // Emit route.closed event

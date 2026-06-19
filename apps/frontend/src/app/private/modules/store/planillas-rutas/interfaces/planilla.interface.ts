@@ -35,6 +35,12 @@ export interface DriverUser {
   document_number?: string;
 }
 
+export interface DispatchNoteSalesOrderSummary {
+  id: number;
+  order_number?: string;
+  status?: string;
+}
+
 export interface DispatchNoteSummary {
   id: number;
   dispatch_number: string;
@@ -43,6 +49,13 @@ export interface DispatchNoteSummary {
   grand_total: string | number;
   status: string;
   sales_order_id?: number | null;
+  /**
+   * Linked sales order summary (`{ id, order_number, status }`) returned by the
+   * backend `DISPATCH_ROUTE_INCLUDE`. Present only when the dispatch note was
+   * generated from a sales order (COD flow). Used to surface the
+   * "Orden pendiente de pago" chip on the planilla detail.
+   */
+  sales_order?: DispatchNoteSalesOrderSummary | null;
 }
 
 export interface DispatchRouteStop {
@@ -54,6 +67,14 @@ export interface DispatchRouteStop {
   result?: DispatchRouteStopResult | null;
   is_extra_route: boolean;
   is_prepaid: boolean;
+  /**
+   * Optional flag indicating the stop still requires cash collection (COD).
+   * Not a persisted backend column today — the detail page derives it from
+   * `is_prepaid`, the stop `status`/`result`, and `collected_amount`. Kept
+   * optional so a future backend summary can populate it without breaking the
+   * derived fallback.
+   */
+  needs_collection?: boolean;
   collected_amount: string | number;
   anticipo_amount: string | number;
   change_amount: string | number;
@@ -174,4 +195,81 @@ export interface VoidDispatchRouteDto {
 
 export interface ReleaseStopDto {
   reason: string;
+}
+
+// ============================================================================
+// Route-sheet AI scanner (mirror of backend `scan-route-sheet.dto.ts`)
+// ============================================================================
+
+/** One extracted row from the AI scan of a physical/photo route sheet. */
+export interface RouteSheetScanStop {
+  stop_sequence: number;
+  remision_number: string | null;
+  delivered: boolean;
+  collected_amount: number | null;
+  payment_method: string | null;
+  notes: string | null;
+}
+
+/** `POST /scan` → normalized AI extraction. */
+export interface RouteSheetScanResult {
+  stops: RouteSheetScanStop[];
+  confidence: number;
+}
+
+/** How an extracted row was resolved to a real stop. */
+export type RouteSheetMatchMethod = 'remision' | 'sequence' | 'none';
+
+/** Current persisted state of the resolved stop (actual side of the diff). */
+export interface RouteSheetCurrentStop {
+  status: string;
+  result: string | null;
+  grand_total: number;
+  collected_amount: number;
+}
+
+/** One proposed match: extracted row + resolved real stop + suggested result. */
+export interface RouteSheetMatchedStop {
+  extracted: RouteSheetScanStop;
+  stop_id: number | null;
+  stop_sequence: number | null;
+  remision_number: string | null;
+  match_method: RouteSheetMatchMethod;
+  current: RouteSheetCurrentStop | null;
+  suggested_result: DispatchRouteStopResult;
+}
+
+/** `POST /scan/match` → proposal (no persistence). */
+export interface RouteSheetMatchResult {
+  stops: RouteSheetMatchedStop[];
+  confidence: number;
+  warnings: string[];
+}
+
+/** Human-confirmed decision for a single stop. */
+export interface ConfirmRouteSheetStopDto {
+  stop_id: number;
+  delivered: boolean;
+  collected_amount?: number;
+  payment_method?: string;
+  result?: DispatchRouteStopResult;
+  withholding_breakdown?: {
+    retefuente?: number;
+    reteiva?: number;
+    reteica?: number;
+  };
+  notes?: string;
+}
+
+/** `POST /scan/confirm` body (human-confirmed decisions to settle). */
+export interface ConfirmRouteSheetDto {
+  stops: ConfirmRouteSheetStopDto[];
+  scan_result?: RouteSheetScanResult;
+}
+
+/** `POST /scan/confirm` → settlement summary returned by the backend. */
+export interface ConfirmRouteSheetResult {
+  route_id: number;
+  planilla_pdf_key: string;
+  settled: Array<{ stop_id: number; result: string }>;
 }

@@ -31,6 +31,8 @@ export interface DispatchNote {
   customer_tax_id?: string;
   customer_address?: any;
   sales_order_id?: number;
+  order_id?: number | null;
+  needs_collection?: boolean;
   invoice_id?: number;
   emission_date: string;
   agreed_delivery_date?: string;
@@ -119,4 +121,63 @@ export interface CreateDispatchNoteDto {
   internal_notes?: string;
   currency?: string;
   items: CreateDispatchNoteItemDto[];
+}
+
+/**
+ * Mirror of backend `CreateFromOrderItemDto` (apps/backend/.../dto/create-from-order.dto.ts).
+ * Items are keyed by `order_item_id` + the quantity to dispatch.
+ */
+export interface CreateDispatchFromOrderItemDto {
+  order_item_id: number;
+  dispatched_quantity: number;
+  location_id?: number;
+  lot_serial?: string;
+}
+
+/**
+ * Mirror of backend `NewRouteDto` (apps/backend/.../dto/create-from-order.dto.ts).
+ * Subset of CreateDispatchRouteDto used when creating a brand-new route inline
+ * from the dispatch-note creation flow. Stops are derived from the dispatch
+ * note; assistants are passed as a flat list of user ids (`assistant_ids`).
+ */
+export interface CreateDispatchFromOrderNewRouteDto {
+  driver_user_id: number;
+  planned_date: string;
+  vehicle_id?: number;
+  assistant_ids?: number[];
+  route_code?: string;
+  external_driver_name?: string;
+  external_driver_id_number?: string;
+  is_primary_driver_external?: boolean;
+  origin_location_id?: number;
+  currency?: string;
+  notes?: string;
+}
+
+/**
+ * Mirror of backend `RouteAssignmentDto`. Determines whether the created
+ * dispatch note is left unassigned (`none`), attached to an existing route
+ * (`existing` + `route_id`), or attached to a brand-new route created in the
+ * same transaction (`new` + `new_route`).
+ */
+export interface CreateDispatchFromOrderRouteAssignmentDto {
+  mode: 'none' | 'existing' | 'new';
+  /** Required ONLY when mode === 'existing'. */
+  route_id?: number;
+  /** Required ONLY when mode === 'new'. */
+  new_route?: CreateDispatchFromOrderNewRouteDto;
+}
+
+/**
+ * Mirror of backend `CreateFromOrderDto`. Body for
+ * `POST /store/dispatch-notes/from-order/:orderId`.
+ */
+export interface CreateDispatchFromOrderDto {
+  /** Target status of the created dispatch note. Defaults to `draft`. */
+  target_status?: 'draft' | 'confirmed';
+  dispatch_location_id?: number;
+  agreed_delivery_date?: string;
+  notes?: string;
+  route_assignment?: CreateDispatchFromOrderRouteAssignmentDto;
+  items: CreateDispatchFromOrderItemDto[];
 }
