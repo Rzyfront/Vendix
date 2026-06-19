@@ -216,6 +216,14 @@
       "sessions": 2,
       "memories": 4,
       "prompts": 0
+    },
+    {
+      "id": "e838cd74",
+      "created_by": "yoner",
+      "created_at": "2026-06-19T23:54:22Z",
+      "sessions": 1,
+      "memories": 2,
+      "prompts": 0
     }
   ]
 }
