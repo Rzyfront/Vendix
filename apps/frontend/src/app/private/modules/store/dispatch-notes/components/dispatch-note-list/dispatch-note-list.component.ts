@@ -4,6 +4,7 @@ import {
   inject,
   output,
   signal,
+  computed,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -73,7 +74,7 @@ export class DispatchNoteListComponent {
   total_items = signal(0);
 
   // Pagination
-  filters = { page: 1, limit: 10 };
+  readonly filters = signal<{ page: number; limit: number }>({ page: 1, limit: 10 });
 
   // Filter state
   search_term = signal('');
@@ -251,8 +252,8 @@ export class DispatchNoteListComponent {
     this.loading.set(true);
 
     const query: any = {
-      page: this.filters.page,
-      limit: this.filters.limit,
+      page: this.filters().page,
+      limit: this.filters().limit,
     };
     if (this.selected_status) {
       query.status = this.selected_status;
@@ -288,25 +289,33 @@ export class DispatchNoteListComponent {
   }
 
   // Pagination
-  get totalPages(): number {
-    return Math.ceil(this.total_items() / (this.filters.limit || 10));
-  }
+  readonly totalPages = computed(
+    () => Math.ceil(this.total_items() / (this.filters().limit || 10)),
+  );
 
   onPageChange(page: number): void {
-    this.filters.page = page;
+    this.filters.update((f) => ({ ...f, page }));
+    this.loadDispatchNotes();
+  }
+
+  /**
+   * Change the page size and reload from page 1.
+   */
+  onLimitChange(limit: number): void {
+    this.filters.update((f) => ({ ...f, page: 1, limit }));
     this.loadDispatchNotes();
   }
 
   onSearchChange(term: string): void {
     this.search_term.set(term);
-    this.filters.page = 1;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadDispatchNotes();
   }
 
   onFilterChange(values: FilterValues): void {
     this.filter_values.set(values);
     this.selected_status = (values['status'] as string) || '';
-    this.filters.page = 1;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadDispatchNotes();
   }
 
@@ -314,7 +323,7 @@ export class DispatchNoteListComponent {
     this.search_term.set('');
     this.selected_status = '';
     this.filter_values.set({});
-    this.filters.page = 1;
+    this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadDispatchNotes();
   }
 

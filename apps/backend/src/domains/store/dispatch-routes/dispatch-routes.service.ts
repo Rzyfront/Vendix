@@ -268,7 +268,11 @@ export class DispatchRoutesService {
           { external_driver_name: { contains: search, mode: 'insensitive' as any } },
         ],
       }),
-      ...(status && { status }),
+      // `status` may be a single value or an array (DTO accepts
+      // `?status=draft,dispatched`); Prisma's `in` filter handles both
+      // shapes for the enum column.
+      ...(status &&
+        (Array.isArray(status) ? { status: { in: status } } : { status })),
       ...(vehicle_id && { vehicle_id }),
       ...(driver_user_id && { driver_user_id }),
       ...(date_from && date_to && {
