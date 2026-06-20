@@ -15,13 +15,12 @@ import { OrgAuditService } from '@/features/org/services/org-audit.service';
 import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
 import { OrgResponsiveCard, type OrgCardAction } from '@/shared/components/org-responsive-card';
 import { OrgOptionsDropdown, type OrgOptionsAction } from '@/shared/components/org-options-dropdown';
+import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
-import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Icon } from '@/shared/components/icon/icon';
 import {
   AuditLogDetailModal,
   PaginationBar,
-  SelectableFilterSheet,
 } from '@/features/org/components/audit-shared';
 import {
   AUDIT_ACTION_OPTIONS,
@@ -46,18 +45,17 @@ import { toastError, toastSuccess } from '@/shared/components/toast/toast.store'
 /**
  * Auditoría · Registros de auditoría (paridad visual con web).
  *
- * Layout mobile (espejo de `logs.component.html`):
- *   ┌──────────────────────────────────────────┐
- *   │ [stats grid sticky-top, scroll horiz.]   │
- *   ├──────────────────────────────────────────┤
- *   │ Registros de auditoría    [Acciones▾]    │ ← OrgOptionsDropdown
+ * Layout mobile (espejo de `logs.component.html` + `md:static md:bg-transparent`):
+ *   ┌──────────────────────────────────────────┐ ← sticky top-0 z-20
+ *   │ [stats grid scroll horiz.]               │
+ *   ├──────────────────────────────────────────┤ ← sticky top-[99px] z-10
+ *   │ Registros de auditoría    [Acciones▾]    │
  *   │ 142 eventos                [Filtros 0▾]  │
- *   │ [🔎 SearchBar ───────────────────]       │
  *   ├──────────────────────────────────────────┤
- *   │ [OrgResponsiveCard × N]                  │
- *   │  - avatar + title-group + badge          │
- *   │  - details-grid 2-col                    │
- *   │  - footer con acciones + dropdown ⋮      │
+ *   │ [OrgResponsiveCard × N]                  │ ← scroll
+ *   │  - avatar (square 80x80) + title-group   │
+ *   │  - details-grid 3-col                    │
+ *   │  - footer: 👁 [⋮]                        │
  *   ├──────────────────────────────────────────┤
  *   │ [PaginationBar]                          │
  *   └──────────────────────────────────────────┘
@@ -137,15 +135,9 @@ function auditStatsItems(stats: AuditStats | null | undefined) {
 export default function AuditLogsScreen() {
   const queryClient = useQueryClient();
 
-  // Filtros / paginación
-  const [search, setSearch] = useState('');
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [page, setPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
-
-  // Modales
-  const [resourceSheetOpen, setResourceSheetOpen] = useState(false);
-  const [actionSheetOpen, setActionSheetOpen] = useState(false);
   const [selected, setSelected] = useState<AuditLog | null>(null);
 
   // ───── Queries ───────────────────────────────────────────────────────────
@@ -157,9 +149,8 @@ export default function AuditLogsScreen() {
       ...(filters.action ? { action: filters.action } : {}),
       ...(filters.from ? { from_date: filters.from } : {}),
       ...(filters.to ? { to_date: filters.to } : {}),
-      ...(search ? { search } : {}),
     }),
-    [page, filters, search],
+    [page, filters],
   );
 
   const { data, isLoading, refetch } = useQuery({
@@ -178,7 +169,7 @@ export default function AuditLogsScreen() {
   const totalPages = data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const hasFilters =
-    !!filters.resource || !!filters.action || !!filters.from || !!filters.to || !!search;
+    !!filters.resource || !!filters.action || !!filters.from || !!filters.to;
   const activeFiltersCount = [
     filters.resource,
     filters.action,
@@ -221,7 +212,6 @@ export default function AuditLogsScreen() {
     onError: () => toastError('No se pudo exportar el CSV'),
   });
 
-  // ───── Handlers ──────────────────────────────────────────────────────────
   const onRefresh = async () => {
     setRefreshing(true);
     await Promise.all([
@@ -233,17 +223,11 @@ export default function AuditLogsScreen() {
 
   const clearFilters = () => {
     setFilters(DEFAULT_FILTERS);
-    setSearch('');
     setPage(1);
   };
 
   const actions: OrgOptionsAction[] = [
-    {
-      key: 'refresh',
-      label: 'Actualizar',
-      icon: 'refresh-cw',
-      onPress: onRefresh,
-    },
+    { key: 'refresh', label: 'Actualizar', icon: 'refresh-cw', onPress: onRefresh },
     {
       key: 'export',
       label: exportMutation.isPending ? 'Exportando…' : 'Exportar CSV',
@@ -254,29 +238,65 @@ export default function AuditLogsScreen() {
     },
   ];
 
-  // ───── Render ────────────────────────────────────────────────────────────
   return (
     <View style={styles.root}>
+      {/* Sticky top: stats grid (web: `stats-container sticky top-0 z-20`) */}
+      <View style={styles.stickyStats}>
+        <OrgStatsGrid stats={auditStatsItems(stats)} />
+      </View>
+
+      {/* Sticky below: title row + options dropdown (web: `sticky top-[99px] z-10`) */}
+      <View style={styles.stickyTitleRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.titleMain}>
+            Registros de auditoría{' '}
+            <Text style={styles.titleCount}>({total})</Text>
+          </Text>
+        </View>
+        <OrgOptionsDropdown
+          actions={actions}
+          activeFiltersCount={activeFiltersCount}
+          renderFiltersContent={({ onClose }) => (
+            <View>
+              <FilterSection
+                label="Recurso"
+                value={filters.resource ? formatResource(filters.resource) : 'Todos los recursos'}
+                onPress={() => {
+                  onClose();
+                }}
+                onClear={() => {
+                  setFilters({ ...filters, resource: null });
+                  setPage(1);
+                }}
+                hasValue={!!filters.resource}
+              />
+              <FilterSection
+                label="Acción"
+                value={filters.action ? formatAction(filters.action) : 'Todas las acciones'}
+                onPress={() => {
+                  onClose();
+                }}
+                onClear={() => {
+                  setFilters({ ...filters, action: null });
+                  setPage(1);
+                }}
+                hasValue={!!filters.action}
+              />
+              {activeFiltersCount > 0 ? (
+                <Pressable onPress={clearFilters} style={styles.clearAllRow}>
+                  <Icon name="x" size={14} color={colors.error} />
+                  <Text style={styles.clearAllText}>Limpiar todos los filtros</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+        />
+      </View>
+
+      {/* Scrollable list */}
       <FlatList<AuditLog>
         data={logs}
         keyExtractor={(l) => String(l.id)}
-        ListHeaderComponent={
-          <ListHeader
-            stats={stats ?? null}
-            count={total}
-            search={search}
-            onSearchChange={(v) => {
-              setSearch(v);
-              setPage(1);
-            }}
-            actions={actions}
-            activeFiltersCount={activeFiltersCount}
-            filters={filters}
-            onOpenResource={() => setResourceSheetOpen(true)}
-            onOpenAction={() => setActionSheetOpen(true)}
-            onClearFilters={clearFilters}
-          />
-        }
         ListEmptyComponent={
           isLoading ? (
             <View style={styles.loading}>
@@ -336,11 +356,6 @@ export default function AuditLogsScreen() {
                   icon: 'globe',
                   monospace: true,
                 },
-                {
-                  label: 'Recurso',
-                  value: formatResource(item.resource),
-                  icon: getResourceIcon(item.resource),
-                },
               ]}
               footerLabel="Detalle"
               footerValue={formatAction(item.action)}
@@ -368,40 +383,7 @@ export default function AuditLogsScreen() {
           />
         }
         contentContainerStyle={styles.listContent}
-      />
-
-      {/* Sheets / modales */}
-      <SelectableFilterSheet
-        visible={resourceSheetOpen}
-        title="Filtrar por recurso"
-        options={AUDIT_RESOURCE_OPTIONS.map((opt) => ({
-          value: opt.value,
-          label: opt.label,
-          icon: getResourceIcon(opt.value),
-        }))}
-        selected={filters.resource}
-        onSelect={(v) => {
-          setFilters({ ...filters, resource: (v as AuditLogResource | null) ?? null });
-          setPage(1);
-        }}
-        onClose={() => setResourceSheetOpen(false)}
-      />
-
-      <SelectableFilterSheet
-        visible={actionSheetOpen}
-        title="Filtrar por acción"
-        options={AUDIT_ACTION_OPTIONS.map((opt) => ({
-          value: opt.value,
-          label: opt.label,
-          icon: getActionIcon(opt.value),
-          color: getActionColor(opt.value),
-        }))}
-        selected={filters.action}
-        onSelect={(v) => {
-          setFilters({ ...filters, action: (v as AuditLogAction | null) ?? null });
-          setPage(1);
-        }}
-        onClose={() => setActionSheetOpen(false)}
+        style={styles.flatList}
       />
 
       <AuditLogDetailModal
@@ -418,161 +400,97 @@ export default function AuditLogsScreen() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Header
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface ListHeaderProps {
-  stats: AuditStats | null;
-  count: number;
-  search: string;
-  onSearchChange: (v: string) => void;
-  actions: OrgOptionsAction[];
-  activeFiltersCount: number;
-  filters: typeof DEFAULT_FILTERS;
-  onOpenResource: () => void;
-  onOpenAction: () => void;
-  onClearFilters: () => void;
-}
-
-function ListHeader({
-  stats,
-  count,
-  search,
-  onSearchChange,
-  actions,
-  activeFiltersCount,
-  filters,
-  onOpenResource,
-  onOpenAction,
-  onClearFilters,
-}: ListHeaderProps) {
-  return (
-    <View>
-      {/* Stats grid sticky-top (mirror of <app-stats> in web) */}
-      <View style={styles.statsWrap}>
-        <OrgStatsGrid stats={auditStatsItems(stats)} />
-      </View>
-
-      {/* Title row + Acciones/Filtros dropdown (mirror of <app-options-dropdown>) */}
-      <View style={styles.titleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.titleMain}>Registros de auditoría</Text>
-          <Text style={styles.titleCount}>
-            {count} {count === 1 ? 'evento' : 'eventos'}
-          </Text>
-        </View>
-        <OrgOptionsDropdown
-          actions={actions}
-          activeFiltersCount={activeFiltersCount}
-          renderFiltersContent={({ onClose }) => (
-            <View>
-              <FilterSection
-                label="Recurso"
-                value={filters.resource ? formatResource(filters.resource) : 'Todos los recursos'}
-                onPress={() => {
-                  onClose();
-                  setTimeout(onOpenResource, 200);
-                }}
-              />
-              <FilterSection
-                label="Acción"
-                value={filters.action ? formatAction(filters.action) : 'Todas las acciones'}
-                onPress={() => {
-                  onClose();
-                  setTimeout(onOpenAction, 200);
-                }}
-              />
-              {activeFiltersCount > 0 ? (
-                <Pressable onPress={onClearFilters} style={styles.clearAllRow}>
-                  <Icon name="x" size={14} color={colors.error} />
-                  <Text style={styles.clearAllText}>Limpiar todos los filtros</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          )}
-        />
-      </View>
-
-      {/* Search bar */}
-      <View style={styles.searchRow}>
-        <SearchBar
-          value={search}
-          onChangeText={onSearchChange}
-          placeholder="Buscar registros…"
-        />
-      </View>
-    </View>
-  );
-}
-
 function FilterSection({
   label,
   value,
   onPress,
+  onClear,
+  hasValue,
 }: {
   label: string;
   value: string;
   onPress: () => void;
+  onClear?: () => void;
+  hasValue?: boolean;
 }) {
   return (
-    <Pressable style={styles.filterSection} onPress={onPress}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.filterLabel}>{label}</Text>
-        <Text style={styles.filterValue} numberOfLines={1}>
-          {value}
-        </Text>
-      </View>
-      <Icon name="chevron-right" size={16} color={colorScales.gray[400]} />
-    </Pressable>
+    <View style={styles.filterSection}>
+      <Pressable style={styles.filterSectionMain} onPress={onPress}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.filterLabel}>{label}</Text>
+          <Text style={styles.filterValue} numberOfLines={1}>
+            {value}
+          </Text>
+        </View>
+        <Icon name="chevron-right" size={16} color={colorScales.gray[400]} />
+      </Pressable>
+      {hasValue && onClear ? (
+        <Pressable onPress={onClear} hitSlop={6} style={styles.filterClearBtn}>
+          <Icon name="x" size={12} color={colors.error} />
+        </Pressable>
+      ) : null}
+    </View>
   );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Estilos
-// ─────────────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colorScales.gray[50] },
   loading: { paddingVertical: spacing[12], alignItems: 'center' },
-  statsWrap: {
-    marginHorizontal: -spacing[4],
-    marginBottom: spacing[3],
+  // Sticky stats: scroll horizontal, NO flex: 1 (altura fija al contenido)
+  stickyStats: {
+    backgroundColor: colorScales.gray[50],
+    paddingBottom: spacing[2],
   },
-  titleRow: {
+  // Sticky title row: justo debajo de stats
+  stickyTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[3],
-    paddingHorizontal: spacing[1],
-    marginBottom: spacing[3],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
   },
   titleMain: {
-    fontSize: typography.fontSize.lg,
+    fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[900],
   },
   titleCount: {
-    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.normal,
     color: colorScales.gray[500],
-    marginTop: 2,
   },
-  searchRow: {
-    marginBottom: spacing[3],
+  flatList: {
+    flex: 1,
   },
-  separator: { height: spacing[1] },
+  separator: { height: spacing[3] },
   listContent: {
     paddingHorizontal: spacing[4],
-    paddingTop: spacing[2],
+    paddingTop: spacing[3],
     paddingBottom: spacing[24],
   },
   filterSection: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  filterSectionMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing[3],
     paddingVertical: spacing[3],
     paddingHorizontal: spacing[2],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
+  },
+  filterClearBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing[2],
+    borderRadius: borderRadius.md,
   },
   filterLabel: {
     fontSize: 10,

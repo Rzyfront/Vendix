@@ -3,6 +3,7 @@ import {
   FlatList,
   Pressable,
   Text,
+  TextInput,
   View,
   StyleSheet,
   RefreshControl,
@@ -19,11 +20,10 @@ import {
   OrgOptionsDropdown,
   type OrgOptionsAction,
 } from '@/shared/components/org-options-dropdown';
+import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
-import { Modal } from '@/shared/components/modal/modal';
 import { OrgDetailRow } from '@/shared/components/org-detail-row';
 import { PaginationBar } from '@/features/org/components/audit-shared';
-import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Icon } from '@/shared/components/icon/icon';
 import {
   getLoginAttemptStatusColor,
@@ -36,21 +36,20 @@ import { borderRadius, colorScales, colors, spacing, typography } from '@/shared
 /**
  * Auditoría · Intentos de Login (paridad visual con web).
  *
- * Layout:
- *   ┌──────────────────────────────────────────┐
- *   │ [stats grid scroll horiz.]               │ ← sticky-top
- *   ├──────────────────────────────────────────┤
+ * Layout mobile (espejo de logs.component.html):
+ *   ┌──────────────────────────────────────────┐ ← sticky top-0 z-20
+ *   │ [stats grid scroll horiz.]               │
+ *   ├──────────────────────────────────────────┤ ← sticky top-[99px] z-10
  *   │ Intentos de inicio       [Acciones▾]     │
- *   │ 142 registros            [Filtros 0▾]    │
- *   │ [🔎 SearchBar ───────────────────]       │
+ *   │ 142 registros            [Filtros 1▾]    │
  *   ├──────────────────────────────────────────┤
- *   │ [OrgResponsiveCard × N]                  │
- *   │  - avatar + email + badge status         │
- *   │  - details grid                          │
- *   │  - footer: 👁 Ver                        │
+ *   │ [OrgResponsiveCard × N]                  │ ← scroll
  *   ├──────────────────────────────────────────┤
  *   │ [PaginationBar]                          │
  *   └──────────────────────────────────────────┘
+ *
+ * El SearchBar (email) ahora vive dentro del OptionsDropdown → Filtros
+ * (no como barra standalone), igual que en la web.
  */
 
 const PAGE_SIZE = 10;
@@ -93,8 +92,17 @@ export default function LoginAttemptsScreen() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refetch();
+    await Promise.all([
+      refetch(),
+      // stats query not invalidated on purpose (kept fresh in 60s window)
+    ]);
     setRefreshing(false);
+  };
+
+  const clearFilters = () => {
+    setSearch('');
+    setFilter('all');
+    setPage(1);
   };
 
   const actions: OrgOptionsAction[] = [
@@ -108,28 +116,126 @@ export default function LoginAttemptsScreen() {
 
   return (
     <View style={styles.root}>
+      {/* Sticky top: stats grid (web: `stats-container sticky top-0 z-20`) */}
+      <View style={styles.stickyStats}>
+        <OrgStatsGrid
+          stats={[
+            {
+              label: 'Total Intentos',
+              value: stats?.total_attempts ?? total,
+              icon: 'log-in',
+              color: colorScales.blue[600],
+              subText: 'intentos de login',
+            },
+            {
+              label: 'Exitosos',
+              value: stats?.successful_attempts ?? 0,
+              icon: 'check-circle',
+              color: colorScales.green[600],
+              subText: 'inicios exitosos',
+            },
+            {
+              label: 'Fallidos',
+              value: stats?.failed_attempts ?? 0,
+              icon: 'x-circle',
+              color: colorScales.red[600],
+              subText: 'intentos fallidos',
+            },
+            {
+              label: 'Tasa de éxito',
+              value: `${Math.round(stats?.success_rate ?? 0)}%`,
+              icon: 'trending-up',
+              color: colorScales.blue[700],
+              subText: '% exitosos',
+            },
+          ]}
+        />
+      </View>
+
+      {/* Sticky below: title row + options dropdown (web: `sticky top-[99px] z-10`) */}
+      <View style={styles.stickyTitleRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.titleMain}>
+            Intentos de inicio{' '}
+            <Text style={styles.titleCount}>({total})</Text>
+          </Text>
+        </View>
+        <OrgOptionsDropdown
+          actions={actions}
+          activeFiltersCount={activeFiltersCount}
+          renderFiltersContent={() => (
+            <View>
+              {/* Email search dentro del OptionsDropdown (web: filterConfigs.email) */}
+              <View style={styles.filterSearchWrap}>
+                <Icon name="search" size={14} color={colorScales.gray[500]} />
+                <TextInput
+                  style={styles.filterSearchInput}
+                  value={search}
+                  onChangeText={(v) => {
+                    setSearch(v);
+                    setPage(1);
+                  }}
+                  placeholder="Buscar por email…"
+                  placeholderTextColor={colorScales.gray[400]}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  returnKeyType="search"
+                />
+                {search ? (
+                  <Pressable onPress={() => setSearch('')} hitSlop={8}>
+                    <Icon name="x" size={14} color={colorScales.gray[500]} />
+                  </Pressable>
+                ) : null}
+              </View>
+
+              <FilterSection
+                label="Todos"
+                value="Mostrar todos los intentos"
+                active={filter === 'all'}
+                onPress={() => {
+                  setFilter('all');
+                  setPage(1);
+                }}
+              />
+              <FilterSection
+                label="Exitosos"
+                value="Sólo intentos con success=true"
+                active={filter === 'success'}
+                icon="check-circle"
+                iconColor={colorScales.green[600]}
+                onPress={() => {
+                  setFilter('success');
+                  setPage(1);
+                }}
+              />
+              <FilterSection
+                label="Fallidos"
+                value="Sólo intentos con success=false"
+                active={filter === 'failed'}
+                icon="x-circle"
+                iconColor={colorScales.red[600]}
+                onPress={() => {
+                  setFilter('failed');
+                  setPage(1);
+                }}
+              />
+
+              {hasFilters ? (
+                <Pressable onPress={clearFilters} style={styles.clearAllRow}>
+                  <Icon name="x" size={14} color={colors.error} />
+                  <Text style={styles.clearAllText}>Limpiar todos los filtros</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          )}
+        />
+      </View>
+
+      {/* Scrollable list */}
       <FlatList<LoginAttempt>
         data={attempts}
         keyExtractor={(a) => String(a.id)}
-        ListHeaderComponent={
-          <ListHeader
-            stats={stats ?? null}
-            total={total}
-            search={search}
-            onSearchChange={(v) => {
-              setSearch(v);
-              setPage(1);
-            }}
-            filter={filter}
-            onFilterChange={(f) => {
-              setFilter(f);
-              setPage(1);
-            }}
-            actions={actions}
-            activeFiltersCount={activeFiltersCount}
-            onRefresh={onRefresh}
-          />
-        }
         ListEmptyComponent={
           isLoading ? (
             <View style={styles.loading}>
@@ -141,11 +247,7 @@ export default function LoginAttemptsScreen() {
               title="Sin intentos con este filtro"
               description="Ajusta la búsqueda o cambia el filtro para revisar más eventos."
               actionLabel="Limpiar filtros"
-              onAction={() => {
-                setSearch('');
-                setFilter('all');
-                setPage(1);
-              }}
+              onAction={clearFilters}
             />
           ) : (
             <EmptyState
@@ -238,12 +340,26 @@ export default function LoginAttemptsScreen() {
           />
         }
         contentContainerStyle={styles.listContent}
+        style={styles.flatList}
       />
 
-      <Modal
+      {/* Detail modal — centered (espejo de app-modal web) */}
+      <OrgCenteredModal
         visible={!!selected}
         onClose={() => setSelected(null)}
         title="Detalle de intento"
+        subtitle={selected?.email}
+        size="md"
+        footer={
+          <View style={styles.modalActions}>
+            <Pressable
+              style={[styles.modalBtn, styles.modalBtnSecondary]}
+              onPress={() => setSelected(null)}
+            >
+              <Text style={styles.modalBtnSecondaryText}>Cerrar</Text>
+            </Pressable>
+          </View>
+        }
       >
         {selected ? (
           <View>
@@ -310,121 +426,7 @@ export default function LoginAttemptsScreen() {
             </View>
           </View>
         ) : null}
-      </Modal>
-    </View>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Header
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface ListHeaderProps {
-  stats: LoginAttemptsStats | null;
-  total: number;
-  search: string;
-  onSearchChange: (v: string) => void;
-  filter: SuccessFilter;
-  onFilterChange: (f: SuccessFilter) => void;
-  actions: OrgOptionsAction[];
-  activeFiltersCount: number;
-  onRefresh: () => void;
-}
-
-function ListHeader({
-  stats,
-  total,
-  search,
-  onSearchChange,
-  filter,
-  onFilterChange,
-  actions,
-  activeFiltersCount,
-  onRefresh,
-}: ListHeaderProps) {
-  return (
-    <View>
-      <View style={styles.statsWrap}>
-        <OrgStatsGrid
-          stats={[
-            {
-              label: 'Total Intentos',
-              value: stats?.total_attempts ?? total,
-              icon: 'log-in',
-              color: colorScales.blue[600],
-              subText: 'intentos de login',
-            },
-            {
-              label: 'Exitosos',
-              value: stats?.successful_attempts ?? 0,
-              icon: 'check-circle',
-              color: colorScales.green[600],
-              subText: 'inicios exitosos',
-            },
-            {
-              label: 'Fallidos',
-              value: stats?.failed_attempts ?? 0,
-              icon: 'x-circle',
-              color: colorScales.red[600],
-              subText: 'intentos fallidos',
-            },
-            {
-              label: 'Tasa de éxito',
-              value: `${Math.round(stats?.success_rate ?? 0)}%`,
-              icon: 'trending-up',
-              color: colorScales.blue[700],
-              subText: '% exitosos',
-            },
-          ]}
-        />
-      </View>
-
-      <View style={styles.titleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.titleMain}>Intentos de inicio de sesión</Text>
-          <Text style={styles.titleCount}>
-            {total} {total === 1 ? 'registro' : 'registros'}
-          </Text>
-        </View>
-        <OrgOptionsDropdown
-          actions={actions}
-          activeFiltersCount={activeFiltersCount}
-          renderFiltersContent={() => (
-            <View>
-              <FilterSection
-                label="Todos"
-                value="Mostrar todos los intentos"
-                active={filter === 'all'}
-                onPress={() => onFilterChange('all')}
-              />
-              <FilterSection
-                label="Exitosos"
-                value="Sólo intentos con success=true"
-                active={filter === 'success'}
-                icon="check-circle"
-                iconColor={colorScales.green[600]}
-                onPress={() => onFilterChange('success')}
-              />
-              <FilterSection
-                label="Fallidos"
-                value="Sólo intentos con success=false"
-                active={filter === 'failed'}
-                icon="x-circle"
-                iconColor={colorScales.red[600]}
-                onPress={() => onFilterChange('failed')}
-              />
-            </View>
-          )}
-        />
-      </View>
-
-      <View style={styles.searchRow}>
-        <SearchBar
-          value={search}
-          onChangeText={onSearchChange}
-          placeholder="Buscar por email…"
-        />
-      </View>
+      </OrgCenteredModal>
     </View>
   );
 }
@@ -474,42 +476,56 @@ function FilterSection({
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Estilos
-// ─────────────────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colorScales.gray[50] },
   loading: { paddingVertical: spacing[12], alignItems: 'center' },
-  statsWrap: {
-    marginHorizontal: -spacing[4],
-    marginBottom: spacing[3],
+  stickyStats: {
+    backgroundColor: colorScales.gray[50],
+    paddingBottom: spacing[2],
   },
-  titleRow: {
+  stickyTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[3],
-    paddingHorizontal: spacing[1],
-    marginBottom: spacing[3],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    backgroundColor: colors.background,
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
   },
   titleMain: {
-    fontSize: typography.fontSize.lg,
+    fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[900],
   },
   titleCount: {
-    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.normal,
     color: colorScales.gray[500],
-    marginTop: 2,
   },
-  searchRow: {
-    marginBottom: spacing[3],
-  },
-  separator: { height: spacing[1] },
+  flatList: { flex: 1 },
+  separator: { height: spacing[3] },
   listContent: {
     paddingHorizontal: spacing[4],
-    paddingTop: spacing[2],
+    paddingTop: spacing[3],
     paddingBottom: spacing[24],
+  },
+  filterSearchWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    backgroundColor: colorScales.gray[100],
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing[3],
+    height: 38,
+    marginHorizontal: spacing[2],
+    marginTop: spacing[2],
+    marginBottom: spacing[1],
+  },
+  filterSearchInput: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[900],
+    paddingVertical: 0,
   },
   detailHero: {
     flexDirection: 'row',
@@ -541,6 +557,20 @@ const styles = StyleSheet.create({
     borderColor: colorScales.gray[100],
     paddingHorizontal: spacing[3],
   },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    justifyContent: 'flex-end',
+  },
+  modalBtn: {
+    height: 40,
+    paddingHorizontal: spacing[4],
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBtnSecondary: { backgroundColor: colorScales.gray[100] },
+  modalBtnSecondaryText: { color: colorScales.gray[700], fontWeight: typography.fontWeight.semibold },
   filterSection: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -572,5 +602,17 @@ const styles = StyleSheet.create({
     color: colorScales.gray[900],
     marginTop: 2,
     fontWeight: typography.fontWeight.medium,
+  },
+  clearAllRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[2],
+  },
+  clearAllText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.error,
   },
 });

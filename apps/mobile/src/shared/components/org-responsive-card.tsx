@@ -396,11 +396,11 @@ const styles = StyleSheet.create({
   detailsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: spacing[3],
+    marginTop: spacing[2],
     rowGap: spacing[2],
   },
   detailItem: {
-    width: '50%',
+    width: '33.333%',
     paddingRight: spacing[2],
   },
   detailLabel: {

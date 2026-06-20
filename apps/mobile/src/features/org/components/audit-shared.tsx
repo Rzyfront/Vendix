@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
 import { Modal } from '@/shared/components/modal/modal';
+import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { OrgDetailRow } from '@/shared/components/org-detail-row';
 import { Icon } from '@/shared/components/icon/icon';
-import { borderRadius, colorScales, spacing, typography } from '@/shared/theme';
+import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
 
 /**
  * Visor de diff antiguo → nuevo para los `old_values` / `new_values` de
@@ -115,11 +116,22 @@ export function AuditLogDetailModal({
   if (!log) return null;
   const diffRows = extractDiffRows(log.old_values, log.new_values);
   return (
-    <Modal
+    <OrgCenteredModal
       visible={visible}
       onClose={onClose}
-      title="Detalle del registro"
-      showCloseButton
+      title="Detalle de Auditoría"
+      subtitle={log.id ? `Evento ID: ${log.id}` : undefined}
+      size="lg"
+      footer={
+        <View style={styles.modalActions}>
+          <Pressable
+            style={[styles.modalBtn, styles.modalBtnSecondary]}
+            onPress={onClose}
+          >
+            <Text style={styles.modalBtnSecondaryText}>Cerrar</Text>
+          </Pressable>
+        </View>
+      }
     >
       <View style={styles.detailHero}>
         <View
@@ -169,7 +181,7 @@ export function AuditLogDetailModal({
           <DiffViewer rows={diffRows} />
         </View>
       ) : null}
-    </Modal>
+    </OrgCenteredModal>
   );
 }
 
@@ -395,6 +407,20 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: spacing[4],
   },
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    justifyContent: 'flex-end',
+  },
+  modalBtn: {
+    height: 40,
+    paddingHorizontal: spacing[4],
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBtnSecondary: { backgroundColor: colorScales.gray[100] },
+  modalBtnSecondaryText: { color: colorScales.gray[700], fontWeight: typography.fontWeight.semibold },
   opt: {
     flexDirection: 'row',
     alignItems: 'center',
