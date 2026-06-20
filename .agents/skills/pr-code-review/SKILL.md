@@ -7,18 +7,17 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.2"
   scope: [root]
   auto_invoke:
-    [
-      "revisar PR",
-      "review PR",
-      "analizar PR",
-      "code review",
-      "revisar pull request",
-      "Running the 80% pass gate before merging a PR (git-workflow RULE 8)",
-      "Re-developing solutions identified by a code review below 80%",
-    ]
+    - "revisar PR"
+    - "review PR"
+    - "analizar PR"
+    - "code review"
+    - "revisar pull request"
+    - "Running the 80% pass gate before merging a PR (git-workflow RULE 8)"
+    - "Re-developing solutions identified by a code review below 80%"
+    - "Updating a Linear issue to In Review after merging a PR to dev"
 ---
 
 ## When to Use
@@ -302,8 +301,17 @@ Did the user ask to review PRs?
 │  ├─ User says "next" → Go to the next PR
 │  └─ User asks for a fix plan → Create a detailed correction plan
 │
-└─ Are there PRs from the same author in both frontend AND backend?
-   └─ YES → Mention possible relationship between PRs (complete front+back feature)
+├─ Are there PRs from the same author in both frontend AND backend?
+│  └─ YES → Mention possible relationship between PRs (complete front+back feature)
+│
+└─ Did the user just MERGE a PR to dev?  (Post-Merge — suggested)
+   └─ Suggest updating the Linear issue:
+       → Find it: PR body reference (## Linear / QUI-XXX) → else linear-issues
+         (search) → else ask the user.
+       → Update via linear-issues: state → In Review + add 'dev' label
+         (union). NEVER to any other state.
+       → If the issue is terminal (Done/Canceled/Duplicate) → ask extra
+         confirmation before reverting it.
 ```
 
 ---
@@ -502,8 +510,31 @@ When the review posts a score **below 80%** or REQUEST CHANGES for any reason, t
 
 ---
 
+## Post-Merge: Update Linear Issue Status (SUGGESTED — ask, don't block)
+
+**At the end of the review flow, when the user merges a PR to `dev`,** suggest moving the related Linear issue to **In Review** and tagging it **dev**. This is a suggestion with confirmation — never silent, never blocking.
+
+**Scope rule (hard):** the only target state is **In Review**. From ANY source state → In Review. **Never move the issue to any other state** (not Done, not In Progress, not Backlog). The merge to `dev` means "the change is now on the dev environment, ready to be reviewed there" — that is exactly `In Review`.
+
+**Flow (after `gh pr merge <N>` to `dev`):**
+
+1. **Find the related Linear issue:**
+   - **First**, parse the PR body for a Linear reference (the `## Linear` section / `QUI-XXX` / `linear.app/quickss/issue/QUI-XXX` URL that `git-workflow` RULE 9 leaves). If found, use that identifier.
+   - **Else**, invoke the **`linear-issues`** skill (`search` action) with the PR title / branch keywords; show candidates and confirm with the user.
+   - **Else** (nothing found), ask the user for the `QUI-XXX`, or skip if there is no issue. Never invent one.
+2. **Update via the `linear-issues` skill (`update` action / `issueUpdate`):**
+   - `stateId` → **In Review** (`d123e233-1f17-422e-b7c0-06f463e798df`).
+   - Add the **dev** label (`a9523fa5-931b-40ce-99b1-320831d46e58`) — pass the **union** of existing + `dev` labels (Linear's `labelIds` replaces the whole set).
+   - IDs live in `linear-issues/references/states.md` and `labels.md` — that skill owns the actual API call; do not call Linear directly from here.
+3. **Terminal-state guard:** if the issue is currently in a terminal state (`Done` / `Canceled` / `Duplicate`), **ask for extra confirmation** before reverting it to In Review — moving a closed issue back is unusual and may be a closed-by-mistake reference. Only proceed on explicit yes.
+
+**Why:** keeps Linear in sync with the real state of the code without manual bookkeeping. The single allowed transition (→ In Review + dev) prevents the agent from accidentally closing or regressing an issue's state on a routine dev merge.
+
+---
+
 ## Resources
 
 - **GitHub CLI**: `gh` — locally authenticated via `gh auth login`
 - **OWASP Top 10**: Reference for web security analysis
 - **Angular Style Guide**: For Angular conventions (signals, standalone components)
+- **`linear-issues` skill**: owns all Linear API calls (search + issueUpdate). This skill never calls Linear directly.

@@ -1,22 +1,25 @@
 ---
 name: linear-issues
 description: |
-  Create and list issues in the Vendix project on the Quickss Linear workspace.
-  Use when the user asks to "crear issue en Linear", "crear ticket", "listar
-  issues de Vendix", "crear bug en Vendix", or describes a task that should
-  become a Vendix issue. Operates ONLY against the Quickss workspace, team
-  "Quickss" (key QUI), and project "Vendix" — hardcoded, not configurable.
-  Do NOT use for editing the workspace, managing teams/projects, or working
-  with a different Linear workspace.
+  Create, search, and list issues in the Vendix project on the Quickss Linear
+  workspace. Use when the user asks to "crear issue en Linear", "crear ticket",
+  "buscar issue", "¿existe un issue de...?", "listar issues de Vendix", "crear
+  bug en Vendix", or describes a task that should become a Vendix issue.
+  Operates ONLY against the Quickss workspace, team "Quickss" (key QUI), and
+  project "Vendix" — hardcoded, not configurable. Do NOT use for editing the
+  workspace, managing teams/projects, or working with a different Linear
+  workspace.
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.2"
   scope: [root]
   auto_invoke:
     - "Creating an issue in Linear"
     - "Creating a ticket in Linear"
     - "Creating a bug in Linear for Vendix"
+    - "Searching for an existing Vendix issue in Linear"
+    - "Checking if a Vendix Linear issue already exists"
     - "Listing Vendix issues in Linear"
     - "Updating the status of a Vendix Linear issue"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
@@ -107,9 +110,26 @@ For non-bug issues the agent collects a lighter set:
 - **Filter** — open vs. all. State name (e.g. "In Progress", "Todo"). If
   the user says "abiertos", filter `state.type != "completed"`.
 
+### Action-specific: `search`
+
+Use when the user wants to **find** an existing issue by meaning/topic, not
+create one and not just list — e.g. "buscá el issue de X", "¿hay un ticket
+sobre Y?", "¿existe un bug de Z?".
+
+- **Term** (required) — the free-text the user is looking for. If the user
+  only gives a vague topic, ask once for the key words. Do not invent terms.
+- **Scope** — always the Vendix project (filter results client-side by
+  `project.id`).
+- **State filter** (optional) — if the user says "abiertos" / "cerrados",
+  apply the same `state.type` filter as `list` after searching.
+
+`search` differs from `list`: `list` is a structured filter (by state),
+`search` is a relevance match by text/meaning via `searchIssues`.
+
 ### General inputs (all actions)
 
-- **Action**: `create` (default if the user says "crear") or `list`
+- **Action**: `create` (default if the user says "crear"), `list`, or
+  `search` (if the user says "buscar", "existe", "hay un issue/ticket de")
 - **State** (optional, for `create`): defaults to "Todo"; must be one of
   the seven existing states (see `references/states.md`)
 
@@ -145,22 +165,51 @@ Rules:
    - `.linear/config.json` at repo root must exist. If not → trigger
      `linear-connect`.
 
-2. **Classify the request**
-   - If the user said "bug", "error", "roto", "no funciona", "FIX" → bug
-     workflow (see above).
-   - Otherwise → feature/task workflow.
-   - If ambiguous, ask once: "¿Es un bug que querés reportar o una
-     feature/tarea nueva?"
+2. **Classify the action, then the request**
+   - First pick the action:
+     - "buscar", "existe", "hay un issue/ticket de", "encontrá" → `search`
+       (jump to step 4b below; skip create/dedup).
+     - "listá", "mostrá los issues", "abiertos" → `list`.
+     - "crear", "reportar", "nuevo" (or a described problem/task) → `create`.
+   - For `create`, classify the request type:
+     - "bug", "error", "roto", "no funciona", "FIX" → bug workflow.
+     - Otherwise → feature/task workflow.
+     - If ambiguous, ask once: "¿Es un bug que querés reportar o una
+       feature/tarea nueva?"
 
 3. **Collect required info (bug workflow)**
    - Walk the 12 questions in the order above, one at a time.
    - Build the description body from `references/issue-template-bug.md`
      using the user's answers.
    - Validate the title format. Propose a correction if it does not match.
-   - Show the full assembled issue (title + description + metadata) and
-     ask for confirmation before creating.
 
-4. **Resolve IDs from cache**
+4. **Deduplication check (create only — run BEFORE creating)**
+   - This step is MANDATORY for `create` and runs right after the title +
+     purpose are assembled, before the final create. See the dedicated
+     section "Deduplication check (before create)" below for the full rules.
+   - Run `searchIssues` (see `references/graphql-mutations.md`) with the
+     salient keywords of the new issue.
+   - Judge each candidate for purpose overlap (same purpose, or ~70%+
+     coincidence/relation). Filter to the Vendix project.
+   - **If one or more likely duplicates are found:** STOP, show them to the
+     user, and offer the four options (update / comment / create anyway /
+     cancel). Do not create until the user picks.
+   - **If none are found (or the search fails):** show the full assembled
+     issue (title + description + metadata), ask for confirmation, and
+     continue to create.
+
+   **4b. Search action (`search` only — terminal path)**
+   - Build a `term` from the user's words (key nouns; drop filler).
+   - Call `searchIssues(term, teamId)` (see `references/graphql-mutations.md`)
+     and filter the nodes client-side to `project.id` == Vendix.
+   - Apply the optional `state.type` filter if the user asked for
+     open/closed.
+   - Surface the matches as a compact list (see Output contract); for each,
+     add a one-line "por qué coincide". If nothing matches, say so and offer
+     to create one (route to `create`). This path does NOT create or modify
+     anything — skip steps 5–7 and go straight to surfacing the result.
+
+5. **Resolve IDs from cache**
    - Read `.linear/config.json` (it lives at the repo root, not inside
      `.harness/`).
    - Look up label names → UUIDs using the `labels` map.
@@ -169,16 +218,24 @@ Rules:
      assigneeId via a `viewer { id }` query (cache it in `user_id` next
      time).
 
-5. **Build the GraphQL request**
+6. **Build the GraphQL request**
    - For `create`: use the `issueCreate` mutation. Payload shape in
      `references/graphql-mutations.md`. The required IDs are baked into
      the skill and should be passed as variables, not interpolated into
      the query string.
+   - For `update` (user chose to update a duplicate): use the `issueUpdate`
+     mutation with the existing issue's UUID and only the fields that
+     change. Merge — do not blindly overwrite the description; pass the
+     union of labels.
+   - For `comment` (user chose to append to a duplicate): use the
+     `commentCreate` mutation with the existing issue's UUID and the new
+     info as the comment body.
    - For `list`: use the `IssuesByProject` query in
      `references/graphql-mutations.md`, filtering by `project.id` (Vendix).
+   - For `search`: use the `searchIssues` query (handled in step 4b).
    - Construct the request body as `{"query": "...", "variables": {...}}`.
 
-6. **Send the request**
+7. **Send the request**
    ```bash
    curl -sS https://api.linear.app/graphql \
      -H "Authorization: $LINEAR_API_KEY" \
@@ -191,12 +248,92 @@ Rules:
    - Never print or log the API key. If debugging auth, print only the
      first 4 characters.
 
-7. **Surface the result**
+8. **Surface the result**
    - On success: show the identifier (e.g. `QUI-12`), title, URL
-     (`https://linear.app/quickss/issue/QUI-12`), and what changed.
+     (`https://linear.app/quickss/issue/QUI-12`), and what changed
+     (created / updated / commented).
    - On failure: show the Linear error message verbatim, then a one-line
      hint about the likely cause (auth, validation, rate limit, label not
      found).
+
+## Deduplication check (before create)
+
+**Goal:** never create a second issue for a problem/feature that already has
+one. Before every `create`, the agent MUST search existing Vendix issues and,
+if a likely duplicate exists, surface it and let the user decide — never
+create silently on top of a duplicate, and never auto-update without asking.
+
+### When it runs
+
+- `create` action only (both bug and feature/task workflows).
+- After the title + purpose are assembled, before the final create.
+- Skip only if the user explicitly says "ya sé que no existe, créalo igual" —
+  and even then, note that the check was skipped.
+
+### How to search
+
+1. Build a `term` from the salient keywords of the new issue: the title minus
+   its `FIX/`/`FEAT/`/`DEV/`/`CHORE/` prefix, the module tag, and the key
+   nouns from the "what is broken" / purpose answer. Do not send the full
+   template body.
+2. Call `searchIssues(term, teamId)` (see `references/graphql-mutations.md`).
+   It uses full-text + vector ranking, so it matches by meaning, not just
+   exact substring.
+3. Filter the returned nodes client-side to `project.id` == Vendix
+   (`0b7c9c45-7fc1-4915-ac77-8e1cb56d7c59`).
+4. Keep the top candidates (≈ first 5 after filtering).
+
+### How to judge a match (purpose / ~70% coincidence or relation)
+
+This is a **semantic** judgment, not a string-similarity number. Treat a
+candidate as a likely duplicate or strong relation when it shares the
+**purpose** with the new issue — i.e. roughly 70%+ overlap of intent. Strong
+signals:
+
+- **Same module/area** (`[admin]`, `[ecommerce]`, …) AND same feature or
+  broken behavior.
+- Describes the **same underlying problem or feature**, even if worded
+  differently (synonyms, different store, different repro path).
+- Same error message / symptom / endpoint.
+
+Weaker signals (mention as "related", not "duplicate"): same module but a
+different concern, or same feature but a clearly different sub-task.
+
+Consider `state.type`:
+
+- A match in an **open** state → true duplicate; updating it is usually best.
+- A match in **completed/canceled** → possible **regression**; offer to
+  reopen/update it or create a new issue that references it.
+
+### What to present
+
+If one or more matches are found, STOP and show a compact list:
+
+```
+Encontré issue(s) que podrían ser el mismo o estar muy relacionados:
+
+1. QUI-418 — FIX/ Error al aprobar reseña [ecommerce] — In Progress
+   https://linear.app/quickss/issue/QUI-418
+   Por qué: mismo módulo (ecommerce) y mismo flujo de aprobación de reseña.
+```
+
+Then offer **exactly these four options** and wait for the user's choice:
+
+| Option | Action | When it fits |
+| --- | --- | --- |
+| **1. Actualizar el existente** | `issueUpdate` on the matched issue UUID with the new data (merge description, union labels, bump priority if higher). | Same issue, still open, new info refines it. |
+| **2. Comentar en el existente** | `commentCreate` on the matched issue UUID with the new repro/context as a comment. | Want to add detail/repro without changing the issue's fields. |
+| **3. Crear uno nuevo igual** | Proceed with `issueCreate` as originally planned. | Genuinely distinct, or a regression you want tracked separately. |
+| **4. Cancelar** | Do nothing. | User wants to rethink. |
+
+### Rules
+
+- Never auto-pick an option. The user decides every time.
+- If `searchIssues` fails, is rate-limited, or returns nothing, do **not**
+  block: tell the user "no se pudo verificar duplicados" (or "no encontré
+  duplicados") and continue to the normal create confirmation.
+- For option 1, never blindly overwrite the description — merge, and pass the
+  union of old + new labels (Linear's `labelIds` replaces the whole set).
 
 ## Output contract
 
@@ -207,6 +344,9 @@ A short user-facing message containing:
 - A summary of what changed
 - For `list` actions: a compact bullet list of `identifier — title —
   state — assignee`
+- For `search` actions: a compact bullet list of `identifier — title —
+  state — url`, ordered by relevance, each with a one-line "por qué
+  coincide". If nothing matches, say so and offer to create one.
 
 Do NOT dump raw GraphQL responses. The user wants a confirmation, not JSON.
 
@@ -227,6 +367,9 @@ Do NOT dump raw GraphQL responses. The user wants a confirmation, not JSON.
   `.linear/config.json.bak` and trigger `linear-connect` to rebuild.
 - **Title does not match the `FIX/` format** → do NOT auto-correct;
   propose a correction and wait for confirmation.
+- **`searchIssues` fails / rate-limited / empty (dedup)** → never block
+  creation. Tell the user dedup could not run (or found nothing) and
+  continue to the normal create confirmation. See "Deduplication check".
 - **Missing required bug fields** → do NOT silently fill with `n/a`;
   either ask once more or create with `priority: 0` and explicit
   `n/a` markers, and tell the user what was missing.
@@ -253,9 +396,11 @@ Agent behavior:
 11. Assignee: "asignármelo" → resolves to `viewer.id`.
 12. Labels: "prod" → resolves to `d6a4fc5c-7350-4cbf-b820-2fed8e6f131b`.
 13. Builds title: `FIX/ Error al aprobar reseña [ecommerce]`. Confirms.
-14. Sends `issueCreate` with the assembled description body from
+14. **Deduplication check**: runs `searchIssues`, finds no Vendix match,
+    shows the assembled issue, and asks for confirmation.
+15. Sends `issueCreate` with the assembled description body from
     `references/issue-template-bug.md`.
-15. Returns: `Created QUI-424 — FIX/ Error al aprobar reseña [ecommerce]
+16. Returns: `Created QUI-424 — FIX/ Error al aprobar reseña [ecommerce]
     — https://linear.app/quickss/issue/QUI-424`.
 
 ### Example 2 — List open Vendix issues
@@ -265,6 +410,39 @@ Input: "Lista los issues abiertos de Vendix"
 - Sends `IssuesByProject` with state filter
   `{ type: { neq: "completed" } }`
 - Returns a bullet list of `identifier — title — state — assignee`
+
+### Example 3 — Duplicate detected before create
+
+Input: "Crear bug: al aprobar una reseña en ecommerce el server tira 500"
+
+Agent behavior:
+
+1. Classifies as bug, collects the required fields, assembles the title
+   `FIX/ Error al aprobar reseña [ecommerce]`.
+2. **Deduplication check**: calls `searchIssues` with
+   `term: "error aprobar reseña ecommerce 500"`, filters to Vendix.
+3. Finds `QUI-418 — FIX/ Error al aprobar reseña [ecommerce] — In Progress`,
+   judges it the same purpose (same module + same approval flow).
+4. STOPS and shows the match, then asks:
+   "¿Actualizar QUI-418, comentar en él, crear uno nuevo igual, o cancelar?"
+5. User picks "comentar" → agent sends `commentCreate` on QUI-418's UUID
+   with the new repro + 500 trace as the comment body.
+6. Returns: `Comenté en QUI-418 — FIX/ Error al aprobar reseña [ecommerce]
+   — https://linear.app/quickss/issue/QUI-418` (no new issue created).
+
+### Example 4 — Search for an existing issue
+
+Input: "¿Hay algún issue sobre el checkout de ecommerce?"
+
+- Classifies the action as `search` (keyword "hay algún issue").
+- Builds `term: "checkout ecommerce"` and calls `searchIssues`, filtering to
+  the Vendix project.
+- Returns a relevance-ordered bullet list, e.g.:
+  - `QUI-402 — FIX/ Error al finalizar compra [ecommerce] — In Progress —
+    https://linear.app/quickss/issue/QUI-402` · por qué: mismo flujo de
+    checkout en ecommerce.
+- If nothing matches: "No encontré issues sobre eso. ¿Querés que cree uno?"
+  (routes to `create`). Nothing is created or modified in this path.
 
 ## Reference
 
