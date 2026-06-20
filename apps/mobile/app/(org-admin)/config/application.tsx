@@ -7,6 +7,7 @@ import {
   Pressable,
   RefreshControl,
   Image,
+  ActivityIndicator,
   type LayoutChangeEvent,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -16,7 +17,6 @@ import { Input } from '@/shared/components/input/input';
 import { Button } from '@/shared/components/button/button';
 import { Icon } from '@/shared/components/icon/icon';
 import { ScrollableTabs } from '@/shared/components/scrollable-tabs';
-import { OrgBadge } from '@/shared/components/org-badge';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { useAuthStore } from '@/core/store/auth.store';
 import { ApiError } from '@/core/api/errors';
@@ -61,7 +61,6 @@ export default function ConfigApplicationScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeSection, setActiveSection] = useState<SectionId>('preview');
   const [form, setForm] = useState<OrganizationBranding>(BRANDING_DEFAULTS);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [errors, setErrors] = useState<{
     name?: string;
     primary_color?: string;
@@ -127,7 +126,6 @@ export default function ConfigApplicationScreen() {
     mutationFn: (branding: OrganizationBranding) => OrgConfigService.saveBranding(branding),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['org-config-application'] });
-      setLastSaved(new Date());
       toastSuccess('Configuración guardada correctamente.');
     },
     onError: (err) => {
@@ -170,10 +168,15 @@ export default function ConfigApplicationScreen() {
     setTimeout(() => {
       ref.measureInWindow((x, y) => {
         // Scroll to position - 88px (web scroll-margin-top equivalente).
-        scrollYRef.current?.scrollTo({ y: Math.max(0, y - 88), animated: true });
+        scrollYRef.current?.scrollTo({ y: Math.max(0, y - TAB_SCROLL_OFFSET), animated: true });
       });
     }, 50);
   }, []);
+
+  // Update tab offset when sticky header height changes (web scroll-margin-top).
+  // En web: scroll-margin-top 88px (sticky header altura). En mobile: sticky
+  // header incluye tabs row + title row → ~120px.
+  const TAB_SCROLL_OFFSET = 120;
 
   // ── Organization labels ───────────────────────────────────────────────────
   const accountTypeLabel = (() => {
@@ -201,75 +204,86 @@ export default function ConfigApplicationScreen() {
 
   return (
     <OrgPageContainer refreshing={refreshing} onRefresh={onRefresh} padding={false}>
+      {/* ── Sticky sub-header — espejo mobile del app-sticky-header web ──
+          Estructura: tabs (top) + title row (back + title/subtitle + actions) */}
       <View style={styles.stickySubHeader}>
-        <View style={styles.subHeaderRow}>
-          <Pressable
-            onPress={() => {
-              // No back button in mobile AdminShell; sin router.back() para evitar loops.
-              // Mantener el pressable para paridad visual pero sin acción destructiva.
-            }}
-            hitSlop={8}
-            style={styles.backBtn}
-            accessibilityLabel="Volver"
-          >
-            <Icon name="chevron-left" size={18} color={colorScales.gray[500]} />
-          </Pressable>
+        {/* Tabs — fila superior (paridad con web sticky-header-tabs-row) */}
+        <View style={styles.tabsRow}>
+          <ScrollableTabs
+            tabs={SECTIONS}
+            activeTab={activeSection}
+            onTabChange={(id) => scrollToSection(id)}
+          />
+        </View>
 
-          <View style={styles.subHeaderText}>
-            <Text style={styles.subHeaderTitle} numberOfLines={1}>
-              Configuración de la aplicación
-            </Text>
-            <Text style={styles.subHeaderSubtitle} numberOfLines={1}>
-              Identidad visual de la organización
-            </Text>
+        {/* Title row (paridad con web max-w-[1600px] mx-auto flex flex-row p-1.5) */}
+        <View style={styles.titleRow}>
+          <View style={styles.titleLeft}>
+            <Pressable
+              onPress={() => {
+                // Pressable decorativo para paridad visual — AdminShell mobile
+                // no tiene back button propio; la X del drawer lo suple.
+              }}
+              hitSlop={8}
+              style={styles.backBtn}
+              accessibilityLabel="Volver"
+            >
+              <Icon name="arrow-left" size={16} color={colorScales.gray[500]} />
+            </Pressable>
+
+            <View style={styles.titleText}>
+              <View style={styles.titleLine}>
+                <Text style={styles.title} numberOfLines={1}>
+                  Configuración de la aplicación
+                </Text>
+                {/* Badge: oculto en mobile (web usa `hidden md:flex`) */}
+              </View>
+              <Text style={styles.subtitle} numberOfLines={1}>
+                Identidad visual de la organización
+              </Text>
+            </View>
           </View>
 
-          <OrgBadge
-            label={dirty ? 'Pendiente' : 'Sincronizado'}
-            variant={dirty ? 'warning' : 'success'}
-            style={dirty ? styles.badgePulse : undefined}
-          />
+          <View style={styles.titleRight}>
+            {/* Metadata: oculto en mobile (web usa `hidden md:block`) */}
+
+            {/* Actions: icon-only square 36×36 en mobile (web iconOnlyMobile) */}
+            <View style={styles.actionsRow}>
+              <Pressable
+                onPress={onDiscard}
+                disabled={!dirty || saveMutation.isPending}
+                hitSlop={6}
+                style={({ pressed }) => [
+                  styles.iconAction,
+                  pressed && styles.iconActionPressed,
+                  (!dirty || saveMutation.isPending) && styles.iconActionDisabled,
+                ]}
+                accessibilityLabel="Descartar cambios"
+              >
+                <Icon name="rotate-ccw" size={14} color={colorScales.red[600]} />
+              </Pressable>
+
+              <Pressable
+                onPress={onSave}
+                disabled={!dirty || saveMutation.isPending}
+                hitSlop={6}
+                style={({ pressed }) => [
+                  styles.iconAction,
+                  styles.iconActionPrimary,
+                  pressed && styles.iconActionPressed,
+                  (!dirty || saveMutation.isPending) && styles.iconActionDisabled,
+                ]}
+                accessibilityLabel="Guardar configuración"
+              >
+                {saveMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Icon name="save" size={14} color="#ffffff" />
+                )}
+              </Pressable>
+            </View>
+          </View>
         </View>
-
-        {/* Metadata */}
-        {lastSaved ? (
-          <Text style={styles.metadata}>
-            Último guardado: {formatSavedTime(lastSaved)}
-          </Text>
-        ) : null}
-
-        {/* Actions row */}
-        <View style={styles.subHeaderActions}>
-          <Button
-            title="Descartar"
-            variant="outline"
-            size="sm"
-            leftIcon={<Icon name="rotate-ccw" size={14} color={colorScales.red[600]} />}
-            onPress={onDiscard}
-            disabled={!dirty || saveMutation.isPending}
-            style={{ flex: 1, borderColor: colorScales.red[300] }}
-          />
-          <View style={{ width: spacing[2] }} />
-          <Button
-            title="Guardar"
-            variant="primary"
-            size="sm"
-            leftIcon={<Icon name="save" size={14} color="#ffffff" />}
-            onPress={onSave}
-            loading={saveMutation.isPending}
-            disabled={!dirty}
-            style={{ flex: 1 }}
-          />
-        </View>
-      </View>
-
-      {/* Scrollable tabs — sticky sub-bar */}
-      <View style={styles.tabsBar}>
-        <ScrollableTabs
-          tabs={SECTIONS}
-          activeTab={activeSection}
-          onTabChange={(id) => scrollToSection(id)}
-        />
       </View>
 
       <ScrollView
@@ -646,81 +660,115 @@ function ColorField({
 
 // ----------------------------------------------------------------------------
 // Time formatter
-// ----------------------------------------------------------------------------
-
-function formatSavedTime(date: Date): string {
-  try {
-    return new Intl.DateTimeFormat('es-CO', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    }).format(date);
-  } catch {
-    return date.toLocaleTimeString();
-  }
-}
-
 // ============================================================================
 // Styles
 // ============================================================================
 
 const styles = StyleSheet.create({
-  // ── Sticky sub-header ───────────────────────────────────────────────────
+  // ── Sticky sub-header — espejo mobile de app-sticky-header web ─────────
   stickySubHeader: {
     backgroundColor: colors.card,
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[200],
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    gap: spacing[2],
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 2,
+    elevation: 1,
   },
-  subHeaderRow: {
+
+  // Tabs row (paridad con .sticky-header-tabs-row)
+  tabsRow: {
+    paddingHorizontal: spacing[1.5],
+    paddingTop: spacing[1],
+  },
+
+  // Title row (paridad con max-w-[1600px] mx-auto flex flex-row p-1.5)
+  titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[3],
+    justifyContent: 'space-between',
+    gap: spacing[2],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1.5],
   },
-  backBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: borderRadius.md,
+  titleLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colorScales.gray[100],
-  },
-  subHeaderText: {
+    gap: spacing[2],
     flex: 1,
     minWidth: 0,
   },
-  subHeaderTitle: {
+  backBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'transparent',
+    flexShrink: 0,
+  },
+  titleText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  titleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  title: {
     fontSize: typography.fontSize.base,
     fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[900],
-    lineHeight: typography.lineHeight.tight * typography.fontSize.base,
+    lineHeight: 18,
   },
-  subHeaderSubtitle: {
+  subtitle: {
     fontSize: typography.fontSize.xs,
     color: colorScales.gray[500],
+    fontWeight: typography.fontWeight.medium,
     marginTop: 2,
-  },
-  metadata: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[500],
-    marginLeft: spacing[10], // align under subtitle (back button + gap)
-  },
-  badgePulse: {
-    // La animación pulse no se replica en RN — basta con variant warning.
-  },
-  subHeaderActions: {
-    flexDirection: 'row',
-    marginTop: spacing[2],
+    lineHeight: 13,
   },
 
-  // ── Tabs bar ────────────────────────────────────────────────────────────
-  tabsBar: {
+  titleRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    flexShrink: 0,
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1.5],
+  },
+
+  // Action buttons (icon-only square 36×36 en mobile — paridad con web iconOnlyMobile)
+  iconAction: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[200],
-    paddingVertical: spacing[1],
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+  },
+  iconActionPrimary: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  iconActionPressed: {
+    transform: [{ scale: 0.95 }],
+  },
+  iconActionDisabled: {
+    opacity: 0.5,
   },
 
   // ── Scroll content ──────────────────────────────────────────────────────
