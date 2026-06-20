@@ -147,6 +147,16 @@ model users {
   dispatch_notes_delivered_by dispatch_notes[] @relation("dispatch_notes_delivered_by")
   dispatch_notes_voided_by    dispatch_notes[] @relation("dispatch_notes_voided_by")
 
+  // Dispatch Routes (Planillas de Despacho)
+  dispatch_routes_as_driver       dispatch_routes[]             @relation("dispatch_routes_driver")
+  dispatch_routes_as_dispatcher   dispatch_routes[]             @relation("dispatch_routes_dispatcher")
+  dispatch_routes_as_voided_by    dispatch_routes[]             @relation("dispatch_routes_voided_by")
+  dispatch_routes_as_closed_by    dispatch_routes[]             @relation("dispatch_routes_closed_by")
+  dispatch_routes_as_released_by  dispatch_route_stop_history[] @relation("dispatch_route_stop_history_released_by")
+  vehicles_as_primary_driver      vehicles[]                    @relation("vehicles_primary_driver")
+  vehicles_as_created_by          vehicles[]                    @relation("vehicles_created_by")
+  dispatch_route_stops_settled_by dispatch_route_stops[]        @relation("dispatch_route_stops_settled_by")
+
   // Accounts Receivable
   accounts_receivable_as_customer accounts_receivable[] @relation("ar_customer")
 
@@ -657,6 +667,7 @@ model stores {
   shipping_methods            shipping_methods[]
   expenses                    expenses[]
   notifications               notifications[]
+  store_weekly_reports       store_weekly_reports[]
   suppliers                   suppliers[]
   notification_subscriptions  notification_subscriptions[]
   push_subscriptions          push_subscriptions[]
@@ -766,6 +777,10 @@ model stores {
   menus                     menus[]
   menu_sections             menu_sections[]
   menu_availability_windows menu_availability_windows[]
+
+  // Dispatch Routes & Vehicles
+  dispatch_routes dispatch_routes[]
+  vehicles        vehicles[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -1169,6 +1184,9 @@ model orders {
   // Restaurant Suite Foundation (Fase A) — back-relations
   table_sessions  table_sessions[]
   kitchen_tickets kitchen_tickets[]
+
+  // Dispatch (remisión) back-relation
+  dispatch_notes dispatch_notes[] @relation("orders_dispatch_notes")
 
   @@unique([store_id, order_number])
   @@index([store_id, order_number])
@@ -1755,6 +1773,9 @@ model inventory_locations {
   cash_registers                cash_registers[]
   // Note: unique constraint "inventory_locations_one_central_per_org" enforced at DB-level (partial index WHERE is_central_warehouse = TRUE).
   // CHECK constraint "inventory_locations_central_no_store_chk" also at DB-level (NOT is_central_warehouse OR store_id IS NULL).
+
+  // Dispatch Routes
+  dispatch_routes_origin_location dispatch_routes[] @relation("dispatch_routes_origin_location")
 
   @@unique([store_id, code])
   @@index([organization_id, store_id])
@@ -2693,6 +2714,7 @@ enum notification_type_enum {
   subscription_promo_applied
   subscription_renewal_upcoming
   partner_commission_available
+  weekly_report
 }
 
 model notifications {
@@ -2712,6 +2734,25 @@ model notifications {
   @@index([store_id, is_read])
   @@index([store_id, created_at(sort: Desc)])
   @@index([store_id, severity, is_read])
+}
+
+model store_weekly_reports {
+  id                Int       @id @default(autoincrement())
+  store_id          Int
+  week_start_date   DateTime  @db.Date
+  week_end_date     DateTime  @db.Date
+  tier              String    @db.VarChar(20)
+  metrics           Json
+  slides            Json
+  tips              Json
+  rolling_avg       Json?
+  generated_at      DateTime  @default(now()) @db.Timestamp(6)
+  viewed_at         DateTime? @db.Timestamp(6)
+  stores            stores    @relation(fields: [store_id], references: [id], onDelete: Cascade)
+
+  @@unique([store_id, week_start_date])
+  @@index([store_id, week_start_date(sort: Desc)])
+  @@index([store_id, generated_at(sort: Desc)])
 }
 
 model notification_subscriptions {
@@ -6365,6 +6406,8 @@ model dispatch_notes {
   customer_address     Json?
   sales_order_id       Int?
   invoice_id           Int?
+  order_id             Int?
+  needs_collection     Boolean?                  @default(false)
   emission_date        DateTime                  @default(now()) @db.Timestamp(6)
   agreed_delivery_date DateTime?                 @db.Timestamp(6)
   actual_delivery_date DateTime?                 @db.Timestamp(6)
@@ -6387,22 +6430,25 @@ model dispatch_notes {
   created_at           DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at           DateTime?                 @default(now()) @db.Timestamp(6)
 
-  dispatch_note_items dispatch_note_items[]
-  store               stores                @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  customer            users                 @relation("dispatch_notes_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  sales_order         sales_orders?         @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  invoice             invoices?             @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  dispatch_location   inventory_locations?  @relation("dispatch_notes_location", fields: [dispatch_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  created_by_user     users?                @relation("dispatch_notes_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  confirmed_by_user   users?                @relation("dispatch_notes_confirmed_by", fields: [confirmed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  delivered_by_user   users?                @relation("dispatch_notes_delivered_by", fields: [delivered_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  voided_by_user      users?                @relation("dispatch_notes_voided_by", fields: [voided_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  dispatch_note_items  dispatch_note_items[]
+  store                stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  customer             users                  @relation("dispatch_notes_customer", fields: [customer_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  sales_order          sales_orders?          @relation(fields: [sales_order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  invoice              invoices?              @relation(fields: [invoice_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  order                orders?                @relation("orders_dispatch_notes", fields: [order_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  dispatch_location    inventory_locations?   @relation("dispatch_notes_location", fields: [dispatch_location_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  created_by_user      users?                 @relation("dispatch_notes_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  confirmed_by_user    users?                 @relation("dispatch_notes_confirmed_by", fields: [confirmed_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  delivered_by_user    users?                 @relation("dispatch_notes_delivered_by", fields: [delivered_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  voided_by_user       users?                 @relation("dispatch_notes_voided_by", fields: [voided_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  dispatch_route_stops dispatch_route_stops[]
 
   @@unique([store_id, dispatch_number])
   @@index([store_id, status])
   @@index([customer_id])
   @@index([sales_order_id])
   @@index([invoice_id])
+  @@index([store_id, order_id])
 }
 
 model dispatch_note_items {
@@ -8034,4 +8080,171 @@ model menu_availability_windows {
   @@index([store_id, day_of_week])
   @@index([menu_id])
   @@index([menu_section_id])
+}
+
+// ===== DISPATCH ROUTES SYSTEM (Planillas de Despacho / Rutas DSD) =====
+
+enum dispatch_route_status_enum {
+  draft
+  dispatched
+  in_transit
+  settling
+  closed
+  voided
+}
+
+enum dispatch_route_stop_status_enum {
+  pending
+  in_progress
+  delivered
+  partial
+  rejected
+  released
+}
+
+enum dispatch_route_stop_result_enum {
+  delivered
+  partial
+  rejected
+  released
+}
+
+enum vehicle_type_enum {
+  motorcycle
+  car
+  truck
+  van
+  bicycle
+  other
+}
+
+model vehicles {
+  id                 Int               @id @default(autoincrement())
+  store_id           Int
+  plate              String            @db.VarChar(20)
+  type               vehicle_type_enum @default(truck)
+  brand              String?           @db.VarChar(80)
+  model_name         String?           @db.VarChar(80)
+  capacity_kg        Decimal?          @db.Decimal(10, 2)
+  capacity_units     Int?
+  primary_driver_id  Int?
+  is_active          Boolean           @default(true)
+  notes              String?           @db.Text
+  created_by_user_id Int?
+  created_at         DateTime?         @default(now()) @db.Timestamp(6)
+  updated_at         DateTime?         @default(now()) @db.Timestamp(6)
+
+  store           stores            @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  primary_driver  users?            @relation("vehicles_primary_driver", fields: [primary_driver_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  created_by_user users?            @relation("vehicles_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  dispatch_routes dispatch_routes[]
+
+  @@unique([store_id, plate])
+  @@index([store_id, is_active])
+  @@index([primary_driver_id])
+}
+
+model dispatch_routes {
+  id                         Int                        @id @default(autoincrement())
+  store_id                   Int
+  route_number               String                     @db.VarChar(50)
+  route_code                 String?                    @db.VarChar(20)
+  status                     dispatch_route_status_enum @default(draft)
+  vehicle_id                 Int?
+  driver_user_id             Int?
+  external_driver_name       String?                    @db.VarChar(255)
+  external_driver_id_number  String?                    @db.VarChar(50)
+  is_primary_driver_external Boolean                    @default(false)
+  assistants                 Json?
+  origin_location_id         Int?
+  planned_date               DateTime                   @db.Timestamp(6)
+  dispatch_started_at        DateTime?                  @db.Timestamp(6)
+  closed_at                  DateTime?                  @db.Timestamp(6)
+  voided_at                  DateTime?                  @db.Timestamp(6)
+  total_to_collect           Decimal                    @default(0) @db.Decimal(14, 2)
+  total_collected            Decimal                    @default(0) @db.Decimal(14, 2)
+  total_prepaid              Decimal                    @default(0) @db.Decimal(14, 2)
+  total_changes              Decimal                    @default(0) @db.Decimal(14, 2)
+  total_withholdings         Decimal                    @default(0) @db.Decimal(14, 2)
+  total_credit               Decimal                    @default(0) @db.Decimal(14, 2)
+  declared_cash              Decimal?                   @db.Decimal(14, 2)
+  cash_variance              Decimal?                   @db.Decimal(14, 2)
+  currency                   String?                    @db.VarChar(10)
+  planilla_pdf_key           String?                    @db.Text
+  planilla_scanned_at        DateTime?                  @db.Timestamp(6)
+  scan_result                Json?
+  scan_confidence            Decimal?                   @db.Decimal(5, 4)
+  notes                      String?                    @db.Text
+  void_reason                String?                    @db.Text
+  dispatched_by_user_id      Int?
+  closed_by_user_id          Int?
+  voided_by_user_id          Int?
+  created_by_user_id         Int?
+  created_at                 DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime?                  @default(now()) @db.Timestamp(6)
+
+  store              stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vehicle            vehicles?              @relation(fields: [vehicle_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  driver_user        users?                 @relation("dispatch_routes_driver", fields: [driver_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  dispatched_by_user users?                 @relation("dispatch_routes_dispatcher", fields: [dispatched_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  closed_by_user     users?                 @relation("dispatch_routes_closed_by", fields: [closed_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  voided_by_user     users?                 @relation("dispatch_routes_voided_by", fields: [voided_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  origin_location    inventory_locations?   @relation("dispatch_routes_origin_location", fields: [origin_location_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  stops              dispatch_route_stops[]
+
+  @@unique([store_id, route_number])
+  @@index([store_id, status])
+  @@index([store_id, planned_date])
+  @@index([vehicle_id])
+  @@index([driver_user_id])
+}
+
+model dispatch_route_stops {
+  id                    Int                              @id @default(autoincrement())
+  route_id              Int
+  dispatch_note_id      Int                              @unique
+  stop_sequence         Int
+  status                dispatch_route_stop_status_enum  @default(pending)
+  result                dispatch_route_stop_result_enum?
+  is_extra_route        Boolean                          @default(false)
+  is_prepaid            Boolean                          @default(false)
+  collected_amount      Decimal                          @default(0) @db.Decimal(14, 2)
+  anticipo_amount       Decimal                          @default(0) @db.Decimal(14, 2)
+  change_amount         Decimal                          @default(0) @db.Decimal(14, 2)
+  withholding_amount    Decimal                          @default(0) @db.Decimal(14, 2)
+  withholding_breakdown Json?
+  credit_amount         Decimal                          @default(0) @db.Decimal(14, 2)
+  payment_method        String?                          @db.VarChar(40)
+  notes                 String?                          @db.Text
+  settled_at            DateTime?                        @db.Timestamp(6)
+  released_at           DateTime?                        @db.Timestamp(6)
+  settled_by_user_id    Int?
+  created_at            DateTime?                        @default(now()) @db.Timestamp(6)
+  updated_at            DateTime?                        @default(now()) @db.Timestamp(6)
+
+  route           dispatch_routes               @relation(fields: [route_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  dispatch_note   dispatch_notes                @relation(fields: [dispatch_note_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  settled_by_user users?                        @relation("dispatch_route_stops_settled_by", fields: [settled_by_user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  history         dispatch_route_stop_history[]
+
+  @@index([route_id, stop_sequence])
+  @@index([status])
+}
+
+model dispatch_route_stop_history {
+  id          Int       @id @default(autoincrement())
+  stop_id     Int
+  action      String    @db.VarChar(40)
+  from_status String?   @db.VarChar(40)
+  to_status   String?   @db.VarChar(40)
+  reason      String?   @db.Text
+  released_by Int?
+  metadata    Json?
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+
+  stop             dispatch_route_stops @relation(fields: [stop_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  released_by_user users?               @relation("dispatch_route_stop_history_released_by", fields: [released_by], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([stop_id, created_at])
+  @@index([action])
 }

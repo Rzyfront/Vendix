@@ -1,0 +1,366 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (closed)="close()"
+  title="Generar Remisión"
+  size="lg"
+>
+  <!-- Step indicator -->
+  <div slot="header-end" class="hidden sm:flex items-center gap-1.5 text-xs">
+    <span
+      class="px-2 py-0.5 rounded-full font-medium"
+      [class.bg-primary-600]="step() === 1"
+      [class.text-white]="step() === 1"
+      [class.bg-gray-100]="step() !== 1"
+      [class.text-gray-500]="step() !== 1"
+      >1 Items</span
+    >
+    <app-icon name="arrow-right" [size]="12" class="text-gray-400"></app-icon>
+    <span
+      class="px-2 py-0.5 rounded-full font-medium"
+      [class.bg-primary-600]="step() === 2"
+      [class.text-white]="step() === 2"
+      [class.bg-gray-100]="step() !== 2"
+      [class.text-gray-500]="step() !== 2"
+      >2 Datos</span
+    >
+    <app-icon name="arrow-right" [size]="12" class="text-gray-400"></app-icon>
+    <span
+      class="px-2 py-0.5 rounded-full font-medium"
+      [class.bg-primary-600]="step() === 3"
+      [class.text-white]="step() === 3"
+      [class.bg-gray-100]="step() !== 3"
+      [class.text-gray-500]="step() !== 3"
+      >3 Ruta</span
+    >
+  </div>
+
+  <div class="p-4 space-y-4">
+    <!-- Order summary -->
+    @if (order(); as ord) {
+      <div class="bg-gray-50 rounded-lg p-3 flex items-center gap-2">
+        <app-icon name="file-text" [size]="18" class="text-primary-600"></app-icon>
+        <span class="text-sm font-bold text-gray-800">
+          Orden #{{ ord.order_number }}
+        </span>
+      </div>
+    }
+
+    <!-- ───────── STEP 1: ITEMS ───────── -->
+    @if (step() === 1) {
+      <div>
+        <h4 class="text-sm font-bold text-gray-700 mb-2">Items a despachar</h4>
+        <div class="border border-gray-200 rounded-lg divide-y divide-gray-100">
+          @for (row of itemRows(); track row.order_item_id) {
+            <div class="flex items-center justify-between gap-3 px-3 py-2.5">
+              <div class="min-w-0">
+                <p class="text-sm text-gray-900 truncate">{{ row.product_name }}</p>
+                <p class="text-xs text-gray-500">
+                  Pendiente: {{ row.pending_quantity }} ·
+                  {{ row.unit_price | currency }} c/u
+                </p>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <input
+                  type="number"
+                  min="0"
+                  [max]="row.pending_quantity"
+                  [value]="quantityOf(row)"
+                  (input)="onQuantityChange(row, $any($event.target).value); $any($event.target).value = quantityOf(row)"
+                  class="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-sm text-right focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+            </div>
+          } @empty {
+            <div class="px-3 py-4 text-sm text-gray-500 text-center">
+              Esta orden no tiene items despachables.
+            </div>
+          }
+        </div>
+
+        @if (itemRows().length > 0) {
+          <div class="flex items-center justify-between mt-3 px-1 text-sm">
+            <span class="text-gray-500">Total a despachar</span>
+            <span class="font-bold text-gray-900">{{ totalToDispatch() | currency }}</span>
+          </div>
+        }
+      </div>
+    }
+
+    <!-- ───────── STEP 2: DATOS + ESTADO DESTINO ───────── -->
+    @if (step() === 2) {
+      <div class="space-y-4" [formGroup]="dataForm">
+        <app-selector
+          label="Ubicación de despacho"
+          placeholder="Selecciona una bodega (opcional)"
+          [searchable]="true"
+          [options]="locationOptions()"
+          formControlName="dispatch_location_id"
+        ></app-selector>
+
+        <div>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5">
+            Fecha de entrega acordada
+          </label>
+          <input
+            type="date"
+            formControlName="agreed_delivery_date"
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+          />
+        </div>
+
+        <div>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5">Notas</label>
+          <textarea
+            formControlName="notes"
+            rows="2"
+            placeholder="Notas para la remisión..."
+            class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+          ></textarea>
+        </div>
+
+        <!-- Estado destino -->
+        <div>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5">
+            Estado de la remisión
+          </label>
+          <div class="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              (click)="dataForm.controls.target_status.setValue('draft')"
+              class="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors"
+              [class.border-primary-600]="dataForm.controls.target_status.value === 'draft'"
+              [class.bg-primary-50]="dataForm.controls.target_status.value === 'draft'"
+              [class.text-primary-700]="dataForm.controls.target_status.value === 'draft'"
+              [class.border-gray-300]="dataForm.controls.target_status.value !== 'draft'"
+              [class.text-gray-600]="dataForm.controls.target_status.value !== 'draft'"
+            >
+              <app-icon name="file-text" [size]="16"></app-icon>
+              Borrador
+            </button>
+            <button
+              type="button"
+              (click)="dataForm.controls.target_status.setValue('confirmed')"
+              class="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors"
+              [class.border-primary-600]="dataForm.controls.target_status.value === 'confirmed'"
+              [class.bg-primary-50]="dataForm.controls.target_status.value === 'confirmed'"
+              [class.text-primary-700]="dataForm.controls.target_status.value === 'confirmed'"
+              [class.border-gray-300]="dataForm.controls.target_status.value !== 'confirmed'"
+              [class.text-gray-600]="dataForm.controls.target_status.value !== 'confirmed'"
+            >
+              <app-icon name="check" [size]="16"></app-icon>
+              Confirmada
+            </button>
+          </div>
+        </div>
+      </div>
+    }
+
+    <!-- ───────── STEP 3: RUTA ───────── -->
+    @if (step() === 3) {
+      <div class="space-y-4">
+        <!-- Mode radios -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <button
+            type="button"
+            (click)="setRouteMode('none')"
+            class="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors"
+            [class.border-primary-600]="routeMode() === 'none'"
+            [class.bg-primary-50]="routeMode() === 'none'"
+            [class.text-primary-700]="routeMode() === 'none'"
+            [class.border-gray-300]="routeMode() !== 'none'"
+            [class.text-gray-600]="routeMode() !== 'none'"
+          >
+            <app-icon name="x" [size]="16"></app-icon>
+            Sin ruta
+          </button>
+          <button
+            type="button"
+            (click)="setRouteMode('existing')"
+            class="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors"
+            [class.border-primary-600]="routeMode() === 'existing'"
+            [class.bg-primary-50]="routeMode() === 'existing'"
+            [class.text-primary-700]="routeMode() === 'existing'"
+            [class.border-gray-300]="routeMode() !== 'existing'"
+            [class.text-gray-600]="routeMode() !== 'existing'"
+          >
+            <app-icon name="navigation" [size]="16"></app-icon>
+            Ruta existente
+          </button>
+          <button
+            type="button"
+            (click)="setRouteMode('new')"
+            class="flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm font-medium transition-colors"
+            [class.border-primary-600]="routeMode() === 'new'"
+            [class.bg-primary-50]="routeMode() === 'new'"
+            [class.text-primary-700]="routeMode() === 'new'"
+            [class.border-gray-300]="routeMode() !== 'new'"
+            [class.text-gray-600]="routeMode() !== 'new'"
+          >
+            <app-icon name="plus" [size]="16"></app-icon>
+            Nueva ruta
+          </button>
+        </div>
+
+        <!-- existing -->
+        @if (routeMode() === 'existing') {
+          <div [formGroup]="routeForm">
+            <app-selector
+              label="Ruta"
+              placeholder="Selecciona una ruta (borrador o despachada)"
+              [searchable]="true"
+              [options]="routeOptions()"
+              formControlName="route_id"
+            ></app-selector>
+            @if (routeOptions().length === 0) {
+              <p class="text-xs text-gray-500 mt-1.5">
+                No hay rutas en borrador o despachadas disponibles.
+              </p>
+            }
+          </div>
+        }
+
+        <!-- new -->
+        @if (routeMode() === 'new') {
+          <div class="space-y-4" [formGroup]="routeForm">
+            <div>
+              <label class="block text-sm font-bold text-gray-700 mb-1.5">
+                Conductor <span class="text-[var(--color-destructive)]">*</span>
+              </label>
+              <app-store-user-select
+                formControlName="driver_user_id"
+                placeholder="Buscar conductor..."
+              ></app-store-user-select>
+            </div>
+
+            <div>
+              <label class="block text-sm font-bold text-gray-700 mb-1.5">
+                Auxiliares
+              </label>
+              <app-store-user-multi-select
+                formControlName="assistant_ids"
+                [excludeIds]="driverExcludeIds()"
+                placeholder="Buscar auxiliares..."
+              ></app-store-user-multi-select>
+            </div>
+
+            <div>
+              <label class="block text-sm font-bold text-gray-700 mb-1.5">
+                Vehículo
+              </label>
+              <div class="flex items-center gap-2">
+                <div class="flex-1 min-w-0">
+                  <app-selector
+                    placeholder="Selecciona un vehículo (opcional)"
+                    [searchable]="true"
+                    [options]="vehicleOptions()"
+                    formControlName="vehicle_id"
+                  ></app-selector>
+                </div>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="openVehicleModal()"
+                >
+                  <app-icon name="plus" [size]="16"></app-icon>
+                  <span class="hidden sm:inline ml-1">Crear vehículo</span>
+                </app-button>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-sm font-bold text-gray-700 mb-1.5">
+                Fecha planeada <span class="text-[var(--color-destructive)]">*</span>
+              </label>
+              <input
+                type="date"
+                formControlName="planned_date"
+                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              />
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-sm font-bold text-gray-700 mb-1.5">
+                  Código de ruta
+                </label>
+                <input
+                  type="text"
+                  formControlName="route_code"
+                  placeholder="RI02"
+                  class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+              <div>
+                <label class="block text-sm font-bold text-gray-700 mb-1.5">
+                  Moneda
+                </label>
+                <input
+                  type="text"
+                  formControlName="currency"
+                  placeholder="COP"
+                  class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-sm font-bold text-gray-700 mb-1.5">
+                Notas de la ruta
+              </label>
+              <textarea
+                formControlName="notes"
+                rows="2"
+                placeholder="Notas para la ruta..."
+                class="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-primary-500 focus:border-primary-500 resize-none"
+              ></textarea>
+            </div>
+          </div>
+        }
+      </div>
+    }
+  </div>
+
+  <!-- Footer -->
+  <div
+    slot="footer"
+    class="flex items-center justify-between gap-2 p-4 border-t border-border"
+  >
+    <div>
+      @if (step() > 1) {
+        <app-button variant="outline" (clicked)="back()" [disabled]="submitting()">
+          <app-icon name="arrow-left" [size]="16"></app-icon>
+          <span class="ml-1">Atrás</span>
+        </app-button>
+      }
+    </div>
+
+    <div class="flex items-center gap-2">
+      <app-button variant="outline" (clicked)="close()" [disabled]="submitting()">
+        Cancelar
+      </app-button>
+
+      @if (step() < 3) {
+        <app-button variant="primary" (clicked)="next()">
+          Siguiente
+          <app-icon name="arrow-right" [size]="16" class="ml-1"></app-icon>
+        </app-button>
+      } @else {
+        <app-button
+          variant="primary"
+          (clicked)="submit()"
+          [disabled]="submitting()"
+        >
+          {{ submitting() ? "Generando..." : "Generar Remisión" }}
+        </app-button>
+      }
+    </div>
+  </div>
+</app-modal>
+
+<!-- Inline vehicle creation -->
+<app-vehicle-form-modal
+  [is_open]="showVehicleModal()"
+  [saving]="savingVehicle()"
+  (save)="onVehicleSaved($event)"
+  (closed)="showVehicleModal.set(false)"
+></app-vehicle-form-modal>

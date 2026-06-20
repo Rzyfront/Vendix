@@ -60,12 +60,19 @@ export { AiPaywallModalComponent } from './ai-paywall-modal/ai-paywall-modal.com
 export { DateRangePickerComponent } from './date-range-picker/date-range-picker.component';
 export { DiffViewerComponent } from './diff-viewer/diff-viewer.component';
 export { StoreFiscalIdentityFormComponent } from './store-fiscal-identity-form/store-fiscal-identity-form.component';
+export { StoreUserSelectComponent } from './store-user-select/store-user-select.component';
+export { StoreUserMultiSelectComponent } from './store-user-multi-select/store-user-multi-select.component';
 
 // Services
 export { TourService } from './tour/services/tour.service';
+export { StoreUserLookupService } from '../services/store-user-lookup.service';
 
 // Types
 export type { TourConfig, TourStep } from './tour/services/tour.service';
+export type {
+  StoreUserOption,
+  StoreUserSearchOptions,
+} from '../services/store-user-lookup.service';
 
 // Types
 export type { AlertBannerVariant } from './alert-banner/alert-banner.component';

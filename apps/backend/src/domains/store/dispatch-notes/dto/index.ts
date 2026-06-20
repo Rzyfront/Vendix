@@ -8,5 +8,9 @@ export {
   CreateFromSalesOrderDto,
   CreateFromSalesOrderItemDto,
 } from './create-from-sales-order.dto';
+export {
+  CreateFromOrderDto,
+  CreateFromOrderItemDto,
+} from './create-from-order.dto';
 export { VoidDispatchNoteDto } from './void-dispatch-note.dto';
 export { DeliverDispatchNoteDto } from './deliver-dispatch-note.dto';

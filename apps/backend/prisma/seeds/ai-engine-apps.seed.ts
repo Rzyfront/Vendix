@@ -189,6 +189,53 @@ RULES:
       prompt_template: null,
     },
     {
+      key: 'route_sheet_ocr',
+      name: 'Escaner de Planilla de Ruta (Recaudo DSD)',
+      description:
+        'Extrae las entregas y recaudos por parada de una planilla de ruta de despacho llenada a mano (imagen o PDF) usando vision AI',
+      output_format: 'json',
+      // Vision OCR returns JSON from an image/PDF input; the underlying model
+      // is a text-output (vision-capable) model — same family as invoice_ocr /
+      // rut_scanner (MiniMax-VL).
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 3000,
+      is_active: true,
+      system_prompt: `You are a dispatch route sheet (planilla de ruta DSD) data extraction system. You analyze hand-filled route sheets used by Colombian distributors to record deliveries and cash collection per stop, and return structured JSON.
+
+A route sheet lists one row per stop. Each row has a sequence number, the remision (dispatch note) number, whether it was delivered, how much cash was collected, the payment method, and optional handwritten notes. The driver fills these by hand.
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "stops": [
+    {
+      "stop_sequence": number,
+      "remision_number": "string or null — the dispatch note / remision number printed or written on the row",
+      "delivered": boolean,
+      "collected_amount": number or null,
+      "payment_method": "string or null — e.g. cash, transfer, card, credit",
+      "notes": "string or null — any handwritten observation on the row"
+    }
+  ],
+  "confidence": number
+}
+
+RULES:
+1. Use EXACTLY these field names. Do NOT translate, rename, or add fields not in the schema.
+2. "stop_sequence": the row/stop order number (1, 2, 3...). Required for every row. Infer from row order if no explicit number is printed.
+3. "remision_number": the remision / nota de despacho number on the row, verbatim as written. Use null if not legible or absent.
+4. "delivered": true if the row is marked as delivered/entregado (a check, an X, "SI", "OK", or a collected amount present); false if marked not delivered / rechazado / devuelto. If genuinely ambiguous, use false.
+5. "collected_amount": the cash amount collected for that stop, as a plain number. Convert Colombian number formats (1.234.567,89) to standard (1234567.89). Use null when no amount is written.
+6. "payment_method": normalize handwritten hints to one of: "cash", "transfer", "card", "credit". Map "efectivo"→"cash", "transferencia"/"transf"→"transfer", "tarjeta"→"card", "credito"/"fiado"→"credit". Use null if not indicated.
+7. "notes": copy any handwritten observation on the row verbatim. Use null if none.
+8. Extract ALL visible rows, including partially filled ones. Never invent rows or amounts.
+9. "confidence": 0-100. 90-100 clear scan, 70-89 partially unclear handwriting, below 70 poor quality.`,
+      // prompt_template is null — for vision apps, text instructions must be
+      // in the same message as the document (handled by scanRouteSheet()).
+      prompt_template: null,
+    },
+    {
       key: 'cash_register_closing_summary',
       name: 'Resumen IA de Cierre de Caja',
       description:
@@ -679,7 +726,7 @@ Devuelve SOLO este JSON:
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner']) {
+    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner', 'route_sheet_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -798,7 +845,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner', 'route_sheet_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);

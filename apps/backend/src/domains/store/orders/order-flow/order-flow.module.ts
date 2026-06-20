@@ -16,6 +16,7 @@ import { OrderEtaService } from '../services/order-eta.service';
 import { OrderAutoFulfillmentListener } from './listeners/order-auto-fulfillment.listener';
 import { KitchenOrderDeliveredListener } from './listeners/kitchen-order-delivered.listener';
 import { KitchenOrderDeliveryRevertedListener } from './listeners/kitchen-order-delivery-reverted.listener';
+import { PaymentFromDispatchRouteListener } from './listeners/payment-from-dispatch-route.listener';
 
 @Module({
   imports: [PrismaModule, ResponseModule, CashRegistersModule, SettingsModule],
@@ -33,6 +34,8 @@ import { KitchenOrderDeliveryRevertedListener } from './listeners/kitchen-order-
     KitchenOrderDeliveredListener,
     // Restaurant: KDS reversa -> order delivered->processing bridge.
     KitchenOrderDeliveryRevertedListener,
+    // COD: dispatch route settlement -> COD order balance bridge (paso 7).
+    PaymentFromDispatchRouteListener,
   ],
   exports: [OrderFlowService, RefundFlowService, OrderEtaService],
 })

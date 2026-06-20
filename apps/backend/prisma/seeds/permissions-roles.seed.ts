@@ -778,6 +778,100 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
+    // Planillas de Despacho (Rutas DSD)
+    {
+      name: 'store:dispatch_routes:create',
+      description: 'Crear planilla de despacho',
+      path: '/api/store/dispatch-routes',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_routes:read',
+      description: 'Leer planillas de despacho',
+      path: '/api/store/dispatch-routes',
+      method: 'GET',
+    },
+    {
+      name: 'store:dispatch_routes:read:one',
+      description: 'Leer planilla específica',
+      path: '/api/store/dispatch-routes/:id',
+      method: 'GET',
+    },
+    {
+      name: 'store:dispatch_routes:update',
+      description: 'Actualizar planilla',
+      path: '/api/store/dispatch-routes/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:dispatch_routes:delete',
+      description: 'Eliminar planilla',
+      path: '/api/store/dispatch-routes/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:dispatch_routes:dispatch',
+      description: 'Despachar planilla',
+      path: '/api/store/dispatch-routes/:id/dispatch',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_routes:settle',
+      description: 'Liquidar/iniciar parada de planilla',
+      path: '/api/store/dispatch-routes/:id/stops/:stopId/settle',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_routes:release_stop',
+      description: 'Liberar parada para reasignación',
+      path: '/api/store/dispatch-routes/:id/stops/:stopId/release',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_routes:close',
+      description: 'Cerrar planilla y cuadrar recaudo',
+      path: '/api/store/dispatch-routes/:id/close',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_routes:void',
+      description: 'Anular planilla',
+      path: '/api/store/dispatch-routes/:id/void',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_routes:print',
+      description: 'Imprimir PDF de planilla',
+      path: '/api/store/dispatch-routes/:id/pdf',
+      method: 'POST',
+    },
+
+    // Flota (Vehículos de despacho)
+    {
+      name: 'store:dispatch_fleet:create',
+      description: 'Crear vehículo de flota',
+      path: '/api/store/vehicles',
+      method: 'POST',
+    },
+    {
+      name: 'store:dispatch_fleet:read',
+      description: 'Leer vehículos de flota',
+      path: '/api/store/vehicles',
+      method: 'GET',
+    },
+    {
+      name: 'store:dispatch_fleet:update',
+      description: 'Actualizar vehículo de flota',
+      path: '/api/store/vehicles/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:dispatch_fleet:delete',
+      description: 'Eliminar vehículo de flota',
+      path: '/api/store/vehicles/:id',
+      method: 'DELETE',
+    },
+
     // Categorías
     {
       name: 'store:categories:create',
@@ -2067,6 +2161,12 @@ export async function seedPermissionsAndRoles(
       name: 'store:analytics:read',
       description: 'Leer análisis',
       path: '/api/store/analytics',
+      method: 'GET',
+    },
+    {
+      name: 'store:weekly_report:read',
+      description: 'Leer el reporte semanal (Tu Semana en Vendix)',
+      path: '/api/store/weekly-report',
       method: 'GET',
     },
     {

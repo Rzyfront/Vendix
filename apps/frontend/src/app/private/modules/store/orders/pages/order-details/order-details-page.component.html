@@ -1851,6 +1851,21 @@
       </div>
     </app-modal>
 
+    <!-- DISPATCH METHOD CHOOSER (con remisión vs sin remisión) -->
+    <app-dispatch-method-selector-modal
+      [isOpen]="showDispatchSelector()"
+      (selected)="onDispatchMethodSelected($event)"
+      (closed)="showDispatchSelector.set(false)"
+    ></app-dispatch-method-selector-modal>
+
+    <!-- GENERATE DISPATCH NOTE WIZARD (Items → Datos/Estado → Ruta) -->
+    <app-generate-dispatch-wizard
+      [isOpen]="showDispatchModal()"
+      [order]="order()"
+      (generated)="onDispatchGenerated($event)"
+      (closed)="showDispatchModal.set(false)"
+    ></app-generate-dispatch-wizard>
+
     <!-- DELIVER MODAL -->
     <app-modal
       [isOpen]="showDeliverModal()"

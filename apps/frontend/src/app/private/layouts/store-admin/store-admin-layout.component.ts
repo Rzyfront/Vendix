@@ -6,6 +6,7 @@ import {
   computed,
   DestroyRef,
   afterNextRender,
+  effect,
 } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import {
@@ -29,6 +30,10 @@ import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { WeeklyReportBannerComponent } from '../../modules/store/weekly-report/components/weekly-report-banner/weekly-report-banner.component';
+import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/components/weekly-report-stories/weekly-report-stories.component';
+import { WeeklyReportSnapshot } from '../../modules/store/weekly-report/interfaces/weekly-report.interface';
+import { WeeklyReportService } from '../../modules/store/weekly-report/services/weekly-report.service';
 import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 import { combineLatest } from 'rxjs';
 import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
@@ -46,6 +51,8 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     SubscriptionBannerComponent,
     FiscalObligationBannerComponent,
     PaywallOutletComponent,
+    WeeklyReportBannerComponent,
+    WeeklyReportStoriesComponent,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -156,6 +163,13 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
         <app-subscription-banner />
         <app-fiscal-obligation-banner />
 
+        <!-- Weekly Report banner (Tu Semana en Vendix) -->
+        @if (currentStoreId()) {
+          <app-weekly-report-banner
+            (openTakeover)="onOpenWeeklyReport($event)"
+          ></app-weekly-report-banner>
+        }
+
         <!-- Page Content -->
         <main
           class="flex-1 flex flex-col overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
@@ -174,6 +188,15 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
         [(isOpen)]="showOnboardingModal"
         (completed)="onOnboardingCompleted($event)"
       ></app-onboarding-modal>
+    }
+
+    <!-- Weekly Report Takeover (Tu Semana en Vendix) -->
+    @if (showWeeklyReportTakeover() && weeklyReportSnapshot(); as wr) {
+      <app-weekly-report-stories
+        [report]="wr"
+        (closed)="onCloseWeeklyReport()"
+        (viewed)="onCloseWeeklyReport()"
+      ></app-weekly-report-stories>
     }
 
     <!-- Tour Modal -->
@@ -202,6 +225,35 @@ export class StoreAdminLayoutComponent {
   readonly needsOnboarding = signal(false);
   readonly showTourModal = signal(false);
   readonly sidebarShimmer = signal(false);
+
+  // ─── Weekly Report (Tu Semana en Vendix) ───────────────────────────────
+  private readonly weeklyReportService = inject(WeeklyReportService);
+  /** Store actual para condicionar la inyección al contexto STORE_ADMIN. */
+  readonly currentStoreId = computed<number | null>(
+    () => (this.storeSignal() as any)?.id ?? null,
+  );
+
+
+  /** Snapshot visible actualmente en el takeover (signal). */
+  readonly weeklyReportSnapshot = signal<WeeklyReportSnapshot | null>(null);
+  /** Toggle del modal takeover. */
+  readonly showWeeklyReportTakeover = signal<boolean>(false);
+
+  /** Abre el takeover con el snapshot emitido por el banner. */
+  onOpenWeeklyReport(snapshot: WeeklyReportSnapshot): void {
+    this.weeklyReportSnapshot.set(snapshot);
+    this.showWeeklyReportTakeover.set(true);
+  }
+
+  /** Cierra el takeover. */
+  onCloseWeeklyReport(): void {
+    this.showWeeklyReportTakeover.set(false);
+    // Refresca para reflejar el nuevo viewed_at.
+    this.weeklyReportService
+      .refresh()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
+  }
 
   // --- Facade data as signals ---
   readonly storeName = toSignal(this.authFacade.userStoreName$, {
@@ -331,11 +383,6 @@ export class StoreAdminLayoutComponent {
           route: '/admin/orders/quotations',
         },
         {
-          label: 'Remisiones',
-          icon: 'circle',
-          route: '/admin/orders/dispatch-notes',
-        },
-        {
           label: 'Plan Separe',
           icon: 'circle',
           route: '/admin/orders/layaway',
@@ -344,6 +391,32 @@ export class StoreAdminLayoutComponent {
           label: 'Reservas',
           icon: 'calendar-clock',
           route: '/admin/reservations',
+        },
+      ],
+    },
+    {
+      label: 'Despacho',
+      icon: 'truck',
+      children: [
+        {
+          label: 'Remisiones',
+          icon: 'circle',
+          route: '/admin/orders/dispatch-notes',
+        },
+        {
+          label: 'Planillas de Ruta',
+          icon: 'truck',
+          route: '/admin/orders/planillas',
+        },
+        {
+          label: 'Métodos de Envío',
+          icon: 'circle',
+          route: '/admin/settings/shipping',
+        },
+        {
+          label: 'Flota',
+          icon: 'circle',
+          route: '/admin/orders/fleet',
         },
       ],
     },
@@ -696,11 +769,6 @@ export class StoreAdminLayoutComponent {
           route: '/admin/price-tiers',
         },
         {
-          label: 'Métodos de Envío',
-          icon: 'circle',
-          route: '/admin/settings/shipping',
-        },
-        {
           label: 'Apariencia',
           icon: 'circle',
           route: '/admin/settings/appearance',
@@ -809,6 +877,37 @@ export class StoreAdminLayoutComponent {
   };
 
   constructor() {
+    // ─── Weekly Report: fetch inicial cuando el store está disponible ───
+    // Se ejecuta desde el layout (no desde el banner) para garantizar que
+    // el reporte se cargue apenas el usuario llega al dashboard, sin
+    // depender del ciclo de vida del banner (que puede no montarse si
+    // currentStoreId() es null en algún edge case). El banner re-usa el
+    // signal del servicio y se renderiza reactivamente cuando _latest
+    // cambia.
+    effect(() => {
+      const storeId = this.currentStoreId();
+      const report = this.weeklyReportService.latestReport();
+      // Si no hay reporte todavía, cargarlo.
+      if (storeId && !report) {
+        this.weeklyReportService
+          .getLatest()
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe();
+        return;
+      }
+      // Si hay un reporte no visto y el takeover no está abierto, abrirlo
+      // automáticamente la primera vez.
+      if (
+        report &&
+        !report.viewed_at &&
+        !this.showWeeklyReportTakeover() &&
+        !this.weeklyReportSnapshot()
+      ) {
+        this.weeklyReportSnapshot.set(report);
+        this.showWeeklyReportTakeover.set(true);
+      }
+    });
+
     // Mark sidebar as ready after first render
     afterNextRender(() => {
       this.sidebarReady.set(true);
