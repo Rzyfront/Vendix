@@ -1,5 +1,6 @@
 import {
   Component,
+  effect,
   inject,
   input,
   output,
@@ -75,10 +76,17 @@ export class PlanillaPdfViewerComponent {
     this.destroyRef.onDestroy(() => {
       if (this.blobUrl) URL.revokeObjectURL(this.blobUrl);
     });
-    this.load();
+    // Re-fetch PDF whenever routeId changes (e.g. wizard advances to a
+    // different planilla without unmounting the viewer). Without this effect,
+    // a modal that stays mounted would keep showing the first PDF.
+    effect(() => {
+      if (this.routeId() !== null && this.routeId() !== undefined) {
+        this.load();
+      }
+    });
   }
 
-  load() {
+  private load() {
     this.loading.set(true);
     this.service
       .getPdfBlob(this.routeId())
