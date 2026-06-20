@@ -240,6 +240,14 @@
       "sessions": 0,
       "memories": 2,
       "prompts": 0
+    },
+    {
+      "id": "d6157cbd",
+      "created_by": "yoner",
+      "created_at": "2026-06-20T02:46:32Z",
+      "sessions": 1,
+      "memories": 3,
+      "prompts": 0
     }
   ]
 }
