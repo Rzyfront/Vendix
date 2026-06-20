@@ -200,16 +200,27 @@ export function buildRouteReconciliation(
 /**
  * Resolve whether a dispatch note is prepaid (i.e. does NOT need collection).
  *
- * Rule: if the note declares `needs_collection`, that wins (prepaid = !needs);
- * otherwise fall back to the legacy heuristic of having a paid invoice.
+ * Rule (safe default = COD):
+ *   1. If the note explicitly declares `needs_collection === true` → COD, NOT prepaid.
+ *   2. If the note has a paid invoice (legacy heuristic) → prepaid.
+ *   3. Otherwise (no explicit flag, no paid invoice) → COD, NOT prepaid.
+ *
+ * This avoids the previous bug where a `null` needs_collection would fall into
+ * the invoice fallback and (correctly) mark a note without an invoice as COD, but
+ * a stray explicit `false` would silently mark it as prepaid. Now the invoice is
+ * authoritative for the prepaid classification: only an actually paid invoice
+ * makes a stop prepaid. An explicit `needs_collection: true` short-circuits any
+ * invoice fallback to force the COD path.
  */
 export function resolveIsPrepaid(note: {
   needs_collection?: boolean | null;
   invoice?: { payment_date?: Date | string | null } | null;
 }): boolean {
-  return note.needs_collection != null
-    ? !note.needs_collection
-    : !!(note.invoice && note.invoice.payment_date);
+  // Explicit COD wins: even if the note somehow has a paid invoice, the operator
+  // asked for cash-on-route collection.
+  if (note.needs_collection === true) return false;
+  // Legacy/invoice-based heuristic: only a paid invoice classifies as prepaid.
+  return !!(note.invoice && note.invoice.payment_date);
 }
 
 /**
@@ -266,5 +277,80 @@ export function computeRouteTotals(
   return {
     total_to_collect: sumGrandTotal((s) => !s.is_prepaid),
     total_prepaid: sumGrandTotal((s) => s.is_prepaid),
+  };
+}
+
+/**
+ * Aggregated route totals for live UI updates (NOT just close-time).
+ *
+ * Mirrors the sum logic in `RouteFlowService.close()` so that the per-stop
+ * settle flow can keep the parent `dispatch_routes.total_*` columns in sync
+ * after every `settle`/`release` call. This powers the live "Recaudado" /
+ * "A cobrar" header on the detail page during the route.
+ */
+export interface RouteLiveTotals {
+  total_collected: number;
+  total_changes: number;
+  total_withholdings: number;
+  total_credit: number;
+  total_prepaid: number;
+  /** Sum of grand_total of non-prepaid stops (the COD target). */
+  total_to_collect: number;
+}
+
+/**
+ * Compute live aggregated totals from a list of stops.
+ *
+ * - Prepaid stops contribute their grand_total to `total_prepaid` and to
+ *   nothing else (they don't add to `total_to_collect`, `total_collected`, etc.).
+ * - `total_collected` = sum(collected_amount + anticipo_amount) over non-prepaid.
+ * - `total_credit` / `total_withholdings` / `total_changes` mirror `close()`.
+ * - `total_to_collect` = sum(grand_total) over non-prepaid stops.
+ *
+ * Pure function: stops in, totals out. No Prisma. Safe to call from any layer.
+ */
+export function aggregateRouteTotals<
+  T extends {
+    is_prepaid: boolean;
+    collected_amount?: number | string | null;
+    anticipo_amount?: number | string | null;
+    change_amount?: number | string | null;
+    withholding_amount?: number | string | null;
+    credit_amount?: number | string | null;
+    dispatch_note_grand_total?: number | string | null;
+  },
+>(stops: ReadonlyArray<T>): RouteLiveTotals {
+  const sum = (
+    pred: (s: T) => boolean,
+    pick: (s: T) => number | string | null | undefined,
+  ): number =>
+    stops.filter(pred).reduce((acc, s) => acc + Number(pick(s) || 0), 0);
+
+  const total_prepaid = sum(
+    (s) => s.is_prepaid,
+    (s) => s.dispatch_note_grand_total,
+  );
+  const total_to_collect = sum(
+    (s) => !s.is_prepaid,
+    (s) => s.dispatch_note_grand_total,
+  );
+  const total_collected = sum(
+    (s) => !s.is_prepaid,
+    (s) => Number(s.collected_amount || 0) + Number(s.anticipo_amount || 0),
+  );
+  const total_changes = sum((s) => !s.is_prepaid, (s) => s.change_amount);
+  const total_withholdings = sum(
+    (s) => !s.is_prepaid,
+    (s) => s.withholding_amount,
+  );
+  const total_credit = sum((s) => !s.is_prepaid, (s) => s.credit_amount);
+
+  return {
+    total_collected,
+    total_changes,
+    total_withholdings,
+    total_credit,
+    total_prepaid,
+    total_to_collect,
   };
 }

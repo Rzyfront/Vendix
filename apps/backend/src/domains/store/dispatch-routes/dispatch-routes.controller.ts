@@ -49,6 +49,27 @@ export class DispatchRoutesController {
     );
   }
 
+  /**
+   * Lists dispatch notes that are eligible to be added to a new planilla
+   * stop. Excludes notes that are already attached to a non-released stop
+   * of a non-draft route, voided, or have been hard-deleted. This is the
+   * canonical source for the wizard's stop picker — the legacy
+   * `/dispatch-notes?status=confirmed` endpoint returns ALL confirmed
+   * notes (including those already locked in active routes) and triggers
+   * 500 errors when the operator tries to assign them.
+   */
+  @Get('available-notes')
+  @Permissions('store:dispatch_routes:read')
+  async listAvailableNotes(@Query('search') search?: string) {
+    const result = await this.dispatchRoutesService.listAvailableNotes(
+      search,
+    );
+    return this.responseService.success(
+      result,
+      'Remisiones disponibles para planilla',
+    );
+  }
+
   @Get(':id')
   @Permissions('store:dispatch_routes:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {

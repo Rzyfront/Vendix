@@ -148,9 +148,24 @@ const STATUS_COLORS: Record<string, string> = {
               [currentPage]="page()"
               [totalPages]="totalPages()"
               [total]="totalItems()"
-              [limit]="limit"
+              [limit]="limit()"
               (pageChange)="goToPage($event)"
             ></app-pagination>
+
+            <!-- Page-size selector (mirrors other Vendix lists) -->
+            <div class="flex items-center justify-end gap-2 mt-2 text-xs text-text-secondary">
+              <label for="planillas-limit">Por página:</label>
+              <select
+                id="planillas-limit"
+                class="rounded-md border border-border bg-surface px-2 py-1 text-xs"
+                [ngModel]="limit()"
+                (ngModelChange)="onLimitChange($event)"
+              >
+                @for (n of limitOptions; track n) {
+                  <option [ngValue]="n">{{ n }}</option>
+                }
+              </select>
+            </div>
           </div>
         }
       </app-card>
@@ -175,7 +190,8 @@ export class PlanillasListComponent implements OnInit {
   readonly statusFilter = signal<DispatchRouteStatus | ''>('');
   readonly filterValues = signal<FilterValues>({});
 
-  readonly limit = 20;
+  readonly limit = signal(20);
+  readonly limitOptions = [10, 20, 50, 100];
 
   readonly filterConfigs: FilterConfig[] = [
     {
@@ -200,6 +216,12 @@ export class PlanillasListComponent implements OnInit {
       icon: 'plus',
       action: 'create',
       variant: 'primary',
+    },
+    {
+      label: 'Refrescar',
+      icon: 'refresh-cw',
+      action: 'refresh',
+      variant: 'outline',
     },
   ];
 
@@ -328,7 +350,7 @@ export class PlanillasListComponent implements OnInit {
     this.service
       .list({
         page: this.page(),
-        limit: this.limit,
+        limit: this.limit(),
         search: this.search() || undefined,
         status: (this.statusFilter() || undefined) as DispatchRouteStatus,
       })
@@ -370,7 +392,18 @@ export class PlanillasListComponent implements OnInit {
   onActionClick(action: string) {
     if (action === 'create') {
       this.create.emit();
+    } else if (action === 'refresh') {
+      this.refresh.emit();
     }
+  }
+
+  /**
+   * Change the page size (limit) and reload the list from page 1.
+   */
+  onLimitChange(limit: number): void {
+    this.limit.set(limit);
+    this.page.set(1);
+    this.load();
   }
 
   goToPage(p: number) {

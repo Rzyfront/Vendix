@@ -21,6 +21,7 @@ import {
   SettleStopDto,
   VoidDispatchRouteDto,
 } from '../dto';
+import { aggregateRouteTotals } from '../utils/route-stop-calc';
 
 const ROUTE_INCLUDE = {
   vehicle: true,
@@ -359,6 +360,9 @@ export class RouteFlowService {
         },
       });
 
+      // Keep parent totals in sync so the detail page reflects live "Recaudado".
+      await this.refreshRouteTotals(tx, id);
+
       return updated_stop;
     });
 
@@ -482,11 +486,92 @@ export class RouteFlowService {
           released_by: user_id,
         },
       });
+
+      // Released stops drop out of pending; refresh aggregates so the detail
+      // page re-computes the "A cobrar" / variance projections live.
+      await this.refreshRouteTotals(tx, id);
+
       return updated_stop;
     });
 
     this.logger.log(`Parada #${stopId} liberada para reasignación: ${dto.reason}`);
     return updated;
+  }
+
+
+  /**
+   * Recompute and persist the parent `dispatch_routes` aggregate columns
+   * (total_collected, total_to_collect, total_prepaid, total_credit,
+   * total_withholdings, total_changes) from the current stop set.
+   *
+   * Called from `settleStop`, `releaseStop` and `close` so the parent stays in
+   * sync with the live stop data, enabling the detail page to render real
+   * "Recaudado / A cobrar" totals during the route.
+   *
+   * No-op when the route is closed/voided (its totals are final).
+   */
+  /**
+   * Recompute and persist the parent `dispatch_routes` aggregate columns
+   * (total_collected, total_to_collect, total_prepaid, total_credit,
+   * total_withholdings, total_changes) from the current stop set.
+   *
+   * Accepts either a Prisma `TransactionClient` (so it composes with the
+   * settle/release transaction) or the regular `StorePrismaService` (so
+   * unit tests can pass a jest mock without mocking the tx). Internally it
+   * only uses the `dispatch_routes` and `dispatch_route_stops` clients; both
+   * Prisma clients expose the same shape for those models.
+   */
+  private async refreshRouteTotals(
+    prismaClient: Prisma.TransactionClient | StorePrismaService,
+    route_id: number,
+  ): Promise<void> {
+    const route = await prismaClient.dispatch_routes.findFirst({
+      where: { id: route_id },
+      select: { status: true },
+    });
+    if (!route) return;
+    if (route.status === 'closed' || route.status === 'voided') return;
+
+    const stops = await prismaClient.dispatch_route_stops.findMany({
+      where: { route_id },
+      select: {
+        is_prepaid: true,
+        collected_amount: true,
+        anticipo_amount: true,
+        change_amount: true,
+        withholding_amount: true,
+        credit_amount: true,
+        dispatch_note: { select: { grand_total: true } },
+      },
+    });
+
+    // Prisma returns Decimal columns — normalise to number so the pure helper
+    // (which expects number | string | null) accepts them.
+    const totals = aggregateRouteTotals(
+      stops.map((s) => ({
+        is_prepaid: s.is_prepaid,
+        collected_amount: s.collected_amount == null ? 0 : Number(s.collected_amount),
+        anticipo_amount: s.anticipo_amount == null ? 0 : Number(s.anticipo_amount),
+        change_amount: s.change_amount == null ? 0 : Number(s.change_amount),
+        withholding_amount: s.withholding_amount == null ? 0 : Number(s.withholding_amount),
+        credit_amount: s.credit_amount == null ? 0 : Number(s.credit_amount),
+        dispatch_note_grand_total:
+          s.dispatch_note?.grand_total == null ? 0 : Number(s.dispatch_note.grand_total),
+      })),
+    );
+
+    await prismaClient.dispatch_routes.update({
+      where: { id: route_id },
+      data: {
+        total_collected: totals.total_collected,
+        total_to_collect: totals.total_to_collect,
+        total_prepaid: totals.total_prepaid,
+        total_credit: totals.total_credit,
+        total_withholdings: totals.total_withholdings,
+        total_changes: totals.total_changes,
+        updated_at: new Date(),
+      },
+    });
   }
 
   /**
@@ -514,27 +599,18 @@ export class RouteFlowService {
       );
     }
 
-    // Compute totals
-    const total_collected = route.stops
-      .filter((s) => !s.is_prepaid)
-      .reduce(
-        (sum, s) => sum + Number(s.collected_amount || 0) + Number(s.anticipo_amount || 0),
-        0,
-      );
-    const total_changes = route.stops
-      .filter((s) => !s.is_prepaid)
-      .reduce((sum, s) => sum + Number(s.change_amount || 0), 0);
-    const total_withholdings = route.stops
-      .filter((s) => !s.is_prepaid)
-      .reduce((sum, s) => sum + Number(s.withholding_amount || 0), 0);
-    const total_credit = route.stops
-      .filter((s) => !s.is_prepaid)
-      .reduce((sum, s) => sum + Number(s.credit_amount || 0), 0);
+    // Use the same pure aggregator the live-updates use, so close-time totals
+    // match the per-stop refresh in `settleStop`/`releaseStop` byte-for-byte.
+    const total_collected = aggregateRouteTotals(route.stops).total_collected;
+    const total_changes = aggregateRouteTotals(route.stops).total_changes;
+    const total_withholdings = aggregateRouteTotals(route.stops).total_withholdings;
+    const total_credit = aggregateRouteTotals(route.stops).total_credit;
 
     const declared_cash = Number(dto.declared_cash);
-    // cash_variance = declared_cash - cash collected
-    // cash collected = collected_amount in cash (we assume all collected_amount is cash
-    // unless payment_method indicates otherwise; conservative: subtract non-cash).
+    // cash_variance = declared_cash - cash collected.
+    // We treat as cash any collected_amount on a non-prepaid stop whose
+    // payment_method is null/'cash' (the conservative default for COD DSD).
+    // Stops paid via transfer/card are excluded from the cash reconciliation.
     const cash_collected = route.stops
       .filter((s) => !s.is_prepaid)
       .filter((s) => !s.payment_method || s.payment_method === 'cash')
@@ -611,7 +687,11 @@ export class RouteFlowService {
   }
 
   /**
-   * Void a route. Reverses movements if any, frees dispatch_notes.
+   * Void a route. Frees dispatch_notes (so they can be reassigned to another
+   * planilla) by releasing any stops that are not yet in a terminal state.
+   * Settled stops are NOT auto-released because the cash movements /
+   * withholding calculations linked to them have already hit the ledger and
+   * a manual adjustment is required to reverse them.
    */
   async void(id: number, dto: VoidDispatchRouteDto) {
     const store_id = this.getStoreId();
@@ -623,16 +703,53 @@ export class RouteFlowService {
       );
     }
 
-    const updated = await this.prisma.dispatch_routes.update({
-      where: { id },
-      data: {
-        status: 'voided',
-        voided_at: new Date(),
-        voided_by_user_id: user_id,
-        void_reason: dto.reason,
-        updated_at: new Date(),
-      },
-      include: ROUTE_INCLUDE,
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // Auto-release stops that are still in non-terminal states (pending or
+      // in_progress) so their dispatch_notes can be reassigned. Settled stops
+      // stay as-is because reversing their cash/AR impact requires manual
+      // accounting entries outside the scope of an "anular".
+      const releasable = route.stops.filter(
+        (s) => s.status === 'pending' || s.status === 'in_progress',
+      );
+      for (const stop of releasable) {
+        await tx.dispatch_route_stops.update({
+          where: { id: stop.id },
+          data: {
+            status: 'released',
+            result: 'released',
+            released_at: new Date(),
+            notes: dto.notes
+              ? `Anulada planilla: ${dto.reason}. ${dto.notes}`
+              : `Anulada planilla: ${dto.reason}`,
+            updated_at: new Date(),
+          },
+        });
+        await tx.dispatch_route_stop_history.create({
+          data: {
+            stop_id: stop.id,
+            action: 'void',
+            from_status: stop.status,
+            to_status: 'released',
+            reason: dto.reason,
+            released_by: user_id,
+          },
+        });
+      }
+
+      const updated_route = await tx.dispatch_routes.update({
+        where: { id },
+        data: {
+          status: 'voided',
+          voided_at: new Date(),
+          voided_by_user_id: user_id,
+          void_reason: dto.reason,
+          notes: dto.notes ?? route.notes,
+          updated_at: new Date(),
+        },
+        include: ROUTE_INCLUDE,
+      });
+
+      return updated_route;
     });
 
     this.eventEmitter.emit('dispatch_route.voided', {

@@ -128,6 +128,7 @@ export class PlanillasRutasService {
       .post<any>(`${this.apiUrl}/store/dispatch-routes/${id}/dispatch`, {})
       .pipe(
         map((r) => r.data as DispatchRoute),
+        tap(() => this.invalidateStatsCache()),
         catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
       );
   }
@@ -201,13 +202,6 @@ export class PlanillasRutasService {
       .pipe(
         catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
       );
-  }
-
-  /**
-   * @deprecated Use {@link downloadPdf}. Kept for the existing PDF viewer.
-   */
-  getPdfBlob(id: number): Observable<Blob> {
-    return this.downloadPdf(id);
   }
 
   // ===== Route-sheet AI scanner =====
@@ -297,10 +291,27 @@ export class PlanillasRutasService {
   }
 
   // Dispatch notes (for wizard)
-  listAvailableDispatchNotes(): Observable<{ data: any[]; pagination: any }> {
+  /**
+   * Lists dispatch notes that the operator can still pick when creating a
+   * planilla. Uses the backend `GET /store/dispatch-routes/available-notes`
+   * endpoint, which already filters out notes that are locked by an active
+   * (non-draft, non-released) stop. The legacy
+   * `/dispatch-notes?status=confirmed` query returns ALL confirmed notes
+   * and triggered 500 errors when the wizard tried to assign locked ones.
+   */
+  listAvailableDispatchNotes(search?: string): Observable<{ data: any[]; pagination: any }> {
+    const params = new URLSearchParams();
+    if (search) params.append('search', search);
+    const qs = params.toString();
     return this.http
-      .get<any>(`${this.apiUrl}/store/dispatch-notes?limit=100&status=confirmed`)
-      .pipe(map((r) => r.data));
+      .get<any>(`${this.apiUrl}/store/dispatch-routes/available-notes${qs ? '?' + qs : ''}`)
+      .pipe(
+        map((r) => ({
+          data: r.data ?? [],
+          pagination: { total: (r.data ?? []).length, page: 1, limit: (r.data ?? []).length || 1, totalPages: 1 },
+        })),
+        catchError((e) => throwError(() => new Error(this.extractMessage(e)))),
+      );
   }
 
   private extractMessage(error: any): string {

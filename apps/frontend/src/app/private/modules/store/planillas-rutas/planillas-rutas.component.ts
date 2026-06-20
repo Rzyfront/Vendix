@@ -1,9 +1,9 @@
 import {
   Component,
   DestroyRef,
-  ViewChild,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -60,7 +60,7 @@ export class PlanillasRutasComponent {
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
-  @ViewChild(PlanillasListComponent) planillasList!: PlanillasListComponent;
+  readonly planillasList = viewChild<PlanillasListComponent>(PlanillasListComponent);
 
   readonly stats = signal<DispatchRouteStats | null>(null);
   readonly statsLoading = signal(false);
@@ -111,7 +111,7 @@ export class PlanillasRutasComponent {
   refresh() {
     this.service.invalidateStatsCache();
     this.refreshStats();
-    this.planillasList?.load();
+    this.planillasList()?.load();
   }
 
   refreshStats() {

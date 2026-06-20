@@ -1,11 +1,13 @@
 import {
   Component,
   DestroyRef,
+  ElementRef,
   computed,
   inject,
   input,
   output,
   signal,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
@@ -406,6 +408,15 @@ export class RouteSheetScannerModalComponent {
   readonly closed = output<void>();
   readonly confirmed = output<void>();
 
+  /**
+   * ViewChild refs for the hidden file inputs. Using `viewChild()` (zoneless
+   * signal-based) instead of `document.querySelector` keeps the scanner
+   * robust to multiple instances on the same page and aligns with the
+   * `vendix-zoneless-signals` CORE rule.
+   */
+  readonly fileInputRef = viewChild<ElementRef<HTMLInputElement>>('fileInput');
+  readonly cameraInputRef = viewChild<ElementRef<HTMLInputElement>>('cameraInput');
+
   // Wizard state
   readonly currentStep = signal<1 | 2 | 3>(1);
   readonly selectedFile = signal<File | null>(null);
@@ -461,17 +472,11 @@ export class RouteSheetScannerModalComponent {
   // ============================================================
 
   triggerFileInput(): void {
-    const input = document.querySelector(
-      'app-route-sheet-scanner-modal input[type="file"]:not([capture])',
-    ) as HTMLInputElement | null;
-    input?.click();
+    this.fileInputRef()?.nativeElement.click();
   }
 
   triggerCamera(): void {
-    const input = document.querySelector(
-      'app-route-sheet-scanner-modal input[capture]',
-    ) as HTMLInputElement | null;
-    input?.click();
+    this.cameraInputRef()?.nativeElement.click();
   }
 
   onFileSelected(event: Event): void {
@@ -567,8 +572,16 @@ export class RouteSheetScannerModalComponent {
           this.scanResult.set(scan);
           return this.service.matchStops(this.routeId(), scan);
         }),
-        catchError((err: Error) => {
-          this.toast.error(err?.message || 'Error al procesar la planilla');
+        catchError((err: any) => {
+          // Distinguish the most common operator-facing failure: no AI provider
+          // configured for the org. Show a clear, actionable message instead of
+          // the raw error string.
+          const code = err?.error?.error_code || err?.error_code;
+          const msg =
+            code === 'AI_PROVIDER_002'
+              ? 'No hay un proveedor de IA configurado para tu organización. Pide al administrador que configure uno (OpenAI, Anthropic, etc.) antes de usar el escaneo de planillas.'
+              : err?.message || 'Error al procesar la planilla';
+          this.toast.error(msg);
           this.currentStep.set(1);
           this.isScanning.set(false);
           return of(null);

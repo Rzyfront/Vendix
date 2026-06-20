@@ -1,4 +1,13 @@
-import PDFDocument from 'pdfkit';
+// pdfkit's CJS module exports the PDFDocument class directly, not under a
+// `default` property. The default-style import `import X from 'pdfkit'`
+// transpiles to `new (require('pdfkit').default)(...)` which throws
+// `pdfkit_1.default is not a constructor`. Use namespace import + the
+// `.default` / module-object fallback to cover both CJS and ESM-bridge
+// environments (ts-node-watch, swc, tsc, esbuild).
+import * as PDFKitNs from 'pdfkit';
+const PDFDocument: typeof import('pdfkit') =
+  ((PDFKitNs as unknown as { default?: typeof import('pdfkit') }).default ??
+    PDFKitNs) as typeof import('pdfkit');
 
 interface RouteForPdf {
   id: number;

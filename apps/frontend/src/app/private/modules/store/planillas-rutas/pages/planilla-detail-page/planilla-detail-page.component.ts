@@ -25,6 +25,7 @@ import { StopSettleModalComponent } from '../../components/stop-settle-modal/sto
 import { StopReleaseModalComponent } from '../../components/stop-release-modal/stop-release-modal.component';
 import { PlanillaCloseModalComponent } from '../../components/planilla-close-modal/planilla-close-modal.component';
 import { PlanillaPdfViewerComponent } from '../../components/planilla-pdf-viewer/planilla-pdf-viewer.component';
+import { VoidDispatchRouteModalComponent } from '../../components/void-dispatch-route-modal/void-dispatch-route-modal.component';
 import { RouteSheetScannerModalComponent } from '../../components/route-sheet-scanner-modal/route-sheet-scanner-modal.component';
 import {
   CloseDispatchRouteDto,
@@ -60,6 +61,7 @@ interface RouteStepperNode {
     PlanillaCloseModalComponent,
     PlanillaPdfViewerComponent,
     RouteSheetScannerModalComponent,
+    VoidDispatchRouteModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -141,8 +143,13 @@ interface RouteStepperNode {
               <div>
                 <div class="text-xs text-text-secondary">Recaudado</div>
                 <div class="font-bold text-lg text-green-600">
-                  {{ +r.total_collected | currency }}
+                  {{ totalCollectedLive(r) | currency }}
                 </div>
+                @if (pendingCollectionLive(r) > 0) {
+                  <div class="text-xs text-amber-700">
+                    A cobrar: {{ pendingCollectionLive(r) | currency }}
+                  </div>
+                }
               </div>
             </div>
 
@@ -167,7 +174,7 @@ interface RouteStepperNode {
                 <div>
                   <div class="text-xs text-text-secondary">Total recaudado</div>
                   <div class="font-bold text-green-600">
-                    {{ +r.total_collected | currency }}
+                    {{ totalCollectedLive(r) | currency }}
                   </div>
                 </div>
                 <div>
@@ -353,6 +360,14 @@ interface RouteStepperNode {
       ></app-planilla-close-modal>
     }
 
+    @if (showVoidModal() && route()) {
+      <app-void-dispatch-route-modal
+        [route]="route()!"
+        (close)="showVoidModal.set(false)"
+        (submitted)="onVoid($event)"
+      ></app-void-dispatch-route-modal>
+    }
+
     @if (showPdfViewer() && route()) {
       <app-planilla-pdf-viewer
         [routeId]="route()!.id"
@@ -485,14 +500,24 @@ export class PlanillaDetailPageComponent {
 
     // The scanned-sheet closure shortcut only makes sense while the route is
     // active (dispatched / in_transit / settling): a closed/draft/voided route
-    // has nothing to settle from a scan.
+    // has nothing to settle from a scan. Additionally, we require at least
+    // one PENDING/IN_PROGRESS stop to be settled from the scan — otherwise
+    // the modal would open for an already-settled route.
     if (['dispatched', 'in_transit', 'settling'].includes(r.status)) {
+      const hasOpenStop = r.stops?.some(
+        (s: any) => s.status === 'pending' || s.status === 'in_progress',
+      );
       actions.push({
         id: 'scan-sheet',
         label: 'Cargar planilla escaneada',
         variant: 'outline',
         icon: 'scan-line',
-        disabled: busy,
+        // Disabled when the route is empty (no stops at all) or fully settled
+        // (no pending/in_progress stops) — the scan would be a no-op.
+        disabled: busy || !hasOpenStop,
+        title: !hasOpenStop
+          ? 'Todas las paradas ya están liquidadas o liberadas.'
+          : undefined,
       });
     }
 
@@ -550,6 +575,35 @@ export class PlanillaDetailPageComponent {
 
   ngOnDestroy() {
     this.routeIdEffect?.destroy();
+  }
+
+  /**
+   * Returns the live collected total for the route. Prefers the backend-provided
+   * `reconciliation.total_collected` (which is recomputed server-side on every
+   * settle/release) and falls back to the persisted `total_collected` column.
+   * This is what powers the header chip so the operator sees real money coming
+   * in during the route.
+   */
+  totalCollectedLive(route: DispatchRoute): number {
+    const rec = (route as any).reconciliation;
+    if (rec && typeof rec.total_collected === 'number') {
+      return Number(rec.total_collected);
+    }
+    return Number(route.total_collected || 0);
+  }
+
+  /**
+   * Returns the projected pending collection for OPEN routes. For closed/voided
+   * routes the value is 0. Uses the reconciliation projection so the operator
+   * knows how much is still pending.
+   */
+  pendingCollectionLive(route: DispatchRoute): number {
+    if (route.status === 'closed' || route.status === 'voided') return 0;
+    const rec = (route as any).reconciliation;
+    if (rec && typeof rec.pending_collection === 'number') {
+      return Number(rec.pending_collection);
+    }
+    return 0;
   }
 
   onHeaderAction(actionId: string): void {
@@ -623,23 +677,7 @@ export class PlanillaDetailPageComponent {
   }
 
   openVoid() {
-    const reason = prompt('¿Por qué anulas la planilla?');
-    if (!reason || reason.length < 3) return;
-    this.actionLoading.set(true);
-    this.service
-      .void(this.routeId(), { reason })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (r) => {
-          this.actionLoading.set(false);
-          this.route.set(r);
-          this.toast.success('Planilla anulada');
-        },
-        error: (e) => {
-          this.actionLoading.set(false);
-          this.toast.error(e.message);
-        },
-      });
+    this.showVoidModal.set(true);
   }
 
   print() {
@@ -746,6 +784,31 @@ export class PlanillaDetailPageComponent {
         error: (e) => {
           this.actionLoading.set(false);
           this.toast.error(e?.error?.message || e?.message || 'Error al cerrar la planilla');
+        },
+      });
+  }
+
+  /**
+   * Handles the void modal submit. The backend auto-releases any stops that are
+   * still in non-terminal states (pending/in_progress) so the linked dispatch
+   * notes can be reassigned to another planilla. Settled stops stay as-is
+   * because their cash/AR movements have already hit the ledger.
+   */
+  onVoid(event: { reason: string; notes?: string }) {
+    this.actionLoading.set(true);
+    this.service
+      .void(this.routeId(), event)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (r) => {
+          this.actionLoading.set(false);
+          this.showVoidModal.set(false);
+          this.route.set(r);
+          this.toast.success(`Planilla ${r.route_number} anulada`);
+        },
+        error: (e) => {
+          this.actionLoading.set(false);
+          this.toast.error(e?.error?.message || e?.message || 'Error al anular la planilla');
         },
       });
   }

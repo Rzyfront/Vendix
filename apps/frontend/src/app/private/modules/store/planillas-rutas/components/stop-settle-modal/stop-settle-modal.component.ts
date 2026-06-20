@@ -1,4 +1,4 @@
-import { Component, computed, input, output, signal } from '@angular/core';
+import { Component, computed, effect, input, output, signal } from "@angular/core";
 import { FormsModule } from '@angular/forms';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -129,6 +129,16 @@ export class StopSettleModalComponent {
   readonly submitting = signal(false);
 
   readonly computedCredit = signal(0);
+
+  constructor() {
+    // Recalculate the credit projection whenever the modal opens or the
+    // grand-total input changes. Without this, the operator would see a
+    // stale `0` until they edited the collected/withholding fields.
+    effect(() => {
+      this.grandTotal();
+      this.recalcCredit();
+    });
+  }
 
   recalcCredit() {
     const net = Number(this.grandTotal()) || 0;

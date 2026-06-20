@@ -191,6 +191,8 @@ export interface CloseDispatchRouteDto {
 
 export interface VoidDispatchRouteDto {
   reason: string;
+  /** Optional free-form notes (mirrors CloseDispatchRouteDto.notes). */
+  notes?: string;
 }
 
 export interface ReleaseStopDto {
