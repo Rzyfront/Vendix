@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ScrollView, ActivityIndicator, Keyboard } from 'react-native';
-import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { OrgStoreService } from '@/features/org/services/org-store.service';
 import type { StoreListItem } from '@/core/models/org-admin/store.types';
 import type { DomainOwnership, DomainStatus } from '@/core/models/org-admin/domains.types';
 import {
-  APP_TYPE_OPTIONS,
   DOMAIN_OWNERSHIP_OPTIONS,
   DOMAIN_STATUS_OPTIONS,
 } from './domain-formatters';
@@ -24,8 +23,12 @@ interface DomainFiltersModalProps {
 /**
  * Modal de filtros para la lista de dominios.
  *
- * Espejo del `OptionsDropdownComponent` que usa la web en `domains.component.ts`.
- * Combina en un solo BottomSheet los 3 selects:
+ * Espejo del `<app-options-dropdown>` que usa la web en `domains.component.ts`,
+ * pero en versión **modal centrado** (overlay + tarjeta) usando
+ * `OrgCenteredModal` — NO BottomSheet, porque la web abre el filtro como
+ * popover flotante, no como sheet full-screen.
+ *
+ * Combina en un solo modal los 3 selects:
  *   - Estado: 16 statuses (PENDING, ACTIVE, FAILED, …)
  *   - Tipo (Ownership): VENDIX_SUBDOMAIN / CUSTOM_DOMAIN / CUSTOM_SUBDOMAIN / THIRD_PARTY_SUBDOMAIN
  *   - Tienda: Todas / Organización (sentinel) / tiendas reales del OrgStoreService
@@ -71,141 +74,126 @@ export function DomainFiltersModal({ visible, initial, onClose, onApply }: Domai
       ? 'Organización'
       : stores.find((s) => String(s.id) === draft.storeId)?.name ?? 'Tienda';
 
+  const subtitle = hasActiveFilters(draft)
+    ? 'Filtros activos'
+    : 'Mostrando todos los dominios';
+
   return (
-    <BottomSheet visible={visible} onClose={onClose} snapPoint="full">
-      <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <View style={styles.headerIcon}>
-            <Icon name="filter" size={20} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Filtros</Text>
-            <Text style={styles.subtitle}>
-              {hasActiveFilters(draft) ? 'Filtros activos' : 'Mostrando todos los dominios'}
-            </Text>
-          </View>
+    <OrgCenteredModal
+      visible={visible}
+      onClose={onClose}
+      title="Filtros"
+      subtitle={subtitle}
+      size="sm"
+      footer={
+        <View style={styles.footer}>
+          <Pressable style={styles.clearBtn} onPress={handleClear}>
+            <Icon name="rotate-ccw" size={14} color={colorScales.gray[600]} />
+            <Text style={styles.clearText}>Limpiar</Text>
+          </Pressable>
+          <Pressable style={styles.applyBtn} onPress={handleApply}>
+            <Icon name="check" size={16} color="#FFFFFF" />
+            <Text style={styles.applyText}>Aplicar</Text>
+          </Pressable>
         </View>
-        <Pressable onPress={onClose} style={styles.closeBtn}>
-          <Icon name="x" size={24} color={colorScales.gray[500]} />
-        </Pressable>
-      </View>
-
-      <ScrollView
-        style={styles.body}
-        contentContainerStyle={styles.bodyContent}
-        keyboardShouldPersistTaps="handled"
+      }
+    >
+      {/* Status */}
+      <FilterSection
+        label="Estado"
+        value={statusLabel}
+        active={!!draft.status}
+        open={openSelect === 'status'}
+        onToggle={() =>
+          setOpenSelect(openSelect === 'status' ? null : 'status')
+        }
       >
-        {/* Status */}
-        <FilterSection
-          label="Estado"
-          value={statusLabel}
-          active={!!draft.status}
-          open={openSelect === 'status'}
-          onToggle={() => {
-            Keyboard.dismiss();
-            setOpenSelect(openSelect === 'status' ? null : 'status');
-          }}
-        >
-          {DOMAIN_STATUS_OPTIONS.map((o) => (
-            <OptionRow
-              key={o.value}
-              label={o.label}
-              active={draft.status === o.value}
-              onPress={() => {
-                setDraft((d) => ({ ...d, status: d.status === o.value ? '' : (o.value as DomainStatus) }));
-                setOpenSelect(null);
-              }}
-            />
-          ))}
-        </FilterSection>
-
-        {/* Ownership */}
-        <FilterSection
-          label="Tipo"
-          value={ownershipLabel}
-          active={!!draft.ownership}
-          open={openSelect === 'ownership'}
-          onToggle={() => {
-            Keyboard.dismiss();
-            setOpenSelect(openSelect === 'ownership' ? null : 'ownership');
-          }}
-        >
-          {DOMAIN_OWNERSHIP_OPTIONS.map((o) => (
-            <OptionRow
-              key={o.value}
-              label={o.label}
-              active={draft.ownership === o.value}
-              onPress={() => {
-                setDraft((d) => ({ ...d, ownership: d.ownership === o.value ? '' : (o.value as DomainOwnership) }));
-                setOpenSelect(null);
-              }}
-            />
-          ))}
-        </FilterSection>
-
-        {/* Store */}
-        <FilterSection
-          label="Tienda"
-          value={storeLabel}
-          active={!!draft.storeId}
-          open={openSelect === 'store'}
-          onToggle={() => {
-            Keyboard.dismiss();
-            setOpenSelect(openSelect === 'store' ? null : 'store');
-          }}
-        >
+        {DOMAIN_STATUS_OPTIONS.map((o) => (
           <OptionRow
-            label="Todas"
-            active={draft.storeId === ''}
+            key={o.value}
+            label={o.label}
+            active={draft.status === o.value}
             onPress={() => {
-              setDraft((d) => ({ ...d, storeId: '' }));
+              setDraft((d) => ({ ...d, status: d.status === o.value ? '' : (o.value as DomainStatus) }));
               setOpenSelect(null);
             }}
           />
+        ))}
+      </FilterSection>
+
+      {/* Ownership */}
+      <FilterSection
+        label="Tipo"
+        value={ownershipLabel}
+        active={!!draft.ownership}
+        open={openSelect === 'ownership'}
+        onToggle={() =>
+          setOpenSelect(openSelect === 'ownership' ? null : 'ownership')
+        }
+      >
+        {DOMAIN_OWNERSHIP_OPTIONS.map((o) => (
           <OptionRow
-            label="Organización"
-            active={draft.storeId === '__organization__'}
+            key={o.value}
+            label={o.label}
+            active={draft.ownership === o.value}
             onPress={() => {
-              setDraft((d) => ({ ...d, storeId: d.storeId === '__organization__' ? '' : '__organization__' }));
+              setDraft((d) => ({ ...d, ownership: d.ownership === o.value ? '' : (o.value as DomainOwnership) }));
               setOpenSelect(null);
             }}
           />
-          {storesLoading ? (
-            <View style={styles.optionRow}>
-              <ActivityIndicator size="small" color={colors.primary} />
-            </View>
-          ) : stores.length === 0 ? (
-            <Text style={styles.helperText}>No hay tiendas registradas</Text>
-          ) : (
-            stores.map((s) => {
-              const id = String(s.id);
-              return (
-                <OptionRow
-                  key={id}
-                  label={s.name}
-                  active={draft.storeId === id}
-                  onPress={() => {
-                    setDraft((d) => ({ ...d, storeId: d.storeId === id ? '' : id }));
-                    setOpenSelect(null);
-                  }}
-                />
-              );
-            })
-          )}
-        </FilterSection>
-      </ScrollView>
+        ))}
+      </FilterSection>
 
-      <View style={styles.footer}>
-        <Pressable style={styles.clearBtn} onPress={handleClear}>
-          <Icon name="rotate-ccw" size={14} color={colorScales.gray[600]} />
-          <Text style={styles.clearText}>Limpiar</Text>
-        </Pressable>
-        <Pressable style={styles.applyBtn} onPress={handleApply}>
-          <Icon name="check" size={16} color="#FFFFFF" />
-          <Text style={styles.applyText}>Aplicar</Text>
-        </Pressable>
-      </View>
-    </BottomSheet>
+      {/* Store */}
+      <FilterSection
+        label="Tienda"
+        value={storeLabel}
+        active={!!draft.storeId}
+        open={openSelect === 'store'}
+        onToggle={() =>
+          setOpenSelect(openSelect === 'store' ? null : 'store')
+        }
+      >
+        <OptionRow
+          label="Todas"
+          active={draft.storeId === ''}
+          onPress={() => {
+            setDraft((d) => ({ ...d, storeId: '' }));
+            setOpenSelect(null);
+          }}
+        />
+        <OptionRow
+          label="Organización"
+          active={draft.storeId === '__organization__'}
+          onPress={() => {
+            setDraft((d) => ({ ...d, storeId: d.storeId === '__organization__' ? '' : '__organization__' }));
+            setOpenSelect(null);
+          }}
+        />
+        {storesLoading ? (
+          <View style={styles.optionRow}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : stores.length === 0 ? (
+          <Text style={styles.helperText}>No hay tiendas registradas</Text>
+        ) : (
+          stores.map((s) => {
+            const id = String(s.id);
+            return (
+              <OptionRow
+                key={id}
+                label={s.name}
+                active={draft.storeId === id}
+                onPress={() => {
+                  setDraft((d) => ({ ...d, storeId: d.storeId === id ? '' : id }));
+                  setOpenSelect(null);
+                }}
+              />
+            );
+          })
+        )}
+      </FilterSection>
+    </OrgCenteredModal>
   );
 }
 
@@ -265,34 +253,7 @@ function OptionRow({ label, active, onPress }: { label: string; active: boolean;
 // ─────────────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[200],
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing[3], flex: 1, minWidth: 0 },
-  headerIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colorScales.green[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.gray[900],
-  },
-  subtitle: { fontSize: typography.fontSize.xs, color: colorScales.gray[500], marginTop: 2 },
-  closeBtn: { padding: spacing[1] },
-  body: { flex: 1 },
-  bodyContent: { padding: spacing[4], gap: spacing[4] },
-  section: { gap: spacing[2] },
+  section: { gap: spacing[2], marginBottom: spacing[4] },
   label: {
     fontSize: typography.fontSize.xs,
     fontWeight: typography.fontWeight.semibold,
@@ -338,9 +299,6 @@ const styles = StyleSheet.create({
   footer: {
     flexDirection: 'row',
     gap: spacing[3],
-    padding: spacing[4],
-    borderTopWidth: 1,
-    borderTopColor: colorScales.gray[200],
   },
   clearBtn: {
     flex: 1,

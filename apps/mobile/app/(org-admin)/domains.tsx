@@ -390,9 +390,9 @@ function ListHeader({
       {/* Title row */}
       <View style={styles.titleRow}>
         <View style={{ flex: 1 }}>
-          <Text style={styles.titleMain}>Dominios</Text>
-          <Text style={styles.titleCount}>
-            {count} {count === 1 ? 'registrado' : 'registrados'}
+          <Text style={styles.titleMain}>
+            Dominios{' '}
+            <Text style={styles.titleCountInline}>({count})</Text>
           </Text>
         </View>
         <RowActionsMenu
@@ -480,17 +480,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing[3],
     paddingHorizontal: spacing[1],
-    marginBottom: spacing[3],
+    marginBottom: spacing[2],
   },
+  // Espejo del `<h2 class="text-[13px] font-bold text-gray-600 tracking-wide">`
+  // que usa la web en su bloque sticky `top-[99px]`.
   titleMain: {
-    fontSize: typography.fontSize.lg,
+    fontSize: 13,
     fontWeight: typography.fontWeight.bold,
-    color: colorScales.gray[900],
+    color: colorScales.gray[600],
+    letterSpacing: 1.5,
   },
-  titleCount: {
-    fontSize: typography.fontSize.xs,
+  titleCountInline: {
+    fontSize: 13,
+    fontWeight: typography.fontWeight.normal,
     color: colorScales.gray[500],
-    marginTop: 2,
   },
   searchRow: {
     flexDirection: 'row',
