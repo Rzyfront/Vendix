@@ -12,6 +12,7 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 
 // Mock para slugify
@@ -683,6 +684,62 @@ describe('ProductsBulkService', () => {
           where: expect.objectContaining(expectedArchiveFilter),
         }),
       );
+    });
+
+    // Regression: previously when count() failed (e.g. schema drift in prod),
+    // the service silently set productCount=0 and threw NotFoundException
+    // with 'No hay productos en su tienda' — misleading the user into
+    // thinking they had no products. The fix differentiates the two cases.
+    it('should throw InternalServerErrorException (not NotFoundException) when count() fails', async () => {
+      mockPrismaService.products.count.mockReset();
+      mockPrismaService.products.count.mockRejectedValueOnce(
+        new Error('relation "products" does not exist'),
+      );
+
+      await expect(service.exportCurrentProductsAsTemplate()).rejects.toThrow(
+        InternalServerErrorException,
+      );
+      await expect(service.exportCurrentProductsAsTemplate()).rejects.not.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should retry findMany with minimal query when the rich include fails (schema drift fallback)', async () => {
+      // First chunk: rich include fails -> fallback to minimal
+      mockPrismaService.products.findMany
+        .mockRejectedValueOnce(new Error('relation "stock_levels" does not exist'))
+        .mockResolvedValueOnce([
+          {
+            id: 1,
+            name: 'Drifted product',
+            sku: 'DRF-1',
+            product_type: 'physical',
+            state: 'active',
+            track_inventory: true,
+            base_price: 10,
+            description: '',
+            product_tax_assignments: [],
+            pricing_type: 'unit',
+            available_for_ecommerce: false,
+            is_featured: false,
+            allow_pos_price_override: false,
+            has_multiple_price_tiers: false,
+            is_on_sale: false,
+            sale_price: 0,
+            cost_price: 0,
+          },
+        ]);
+
+      const buffer = await service.exportCurrentProductsAsTemplate();
+      expect(buffer).toBeInstanceOf(Buffer);
+
+      // Should have called findMany twice: once rich (failed), once minimal (succeeded)
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(2);
+
+      // Second call must NOT include the rich include (fallback path).
+      const fallbackCall =
+        mockPrismaService.products.findMany.mock.calls[1][0];
+      expect(fallbackCall.include).toBeUndefined();
     });
   });
 });
