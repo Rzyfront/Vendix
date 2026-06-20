@@ -22,8 +22,21 @@ export class ArEventsListener {
     organization_id: number;
     store_id: number;
     due_date?: Date;
+    /**
+     * Source discriminator. The dispatch-route settlement flow emits
+     * `credit_sale.created` with `source_type='dispatch_route'` AFTER it
+     * has already created the AR row in the dispatch route's own service.
+     * Without this guard, the listener would create a SECOND AR with
+     * `source_id=null` (because dispatch notes have no order_id), leading
+     * to phantom receivables.
+     */
+    source_type?: string;
   }) {
     try {
+      // The dispatch-route flow has its own CashSettlementService that
+      // creates the AR row directly. Skip the duplicate here.
+      if (event.source_type === 'dispatch_route') return;
+
       const ar = await this.ar_service.createFromEvent({
         customer_id: event.customer_id,
         source_type: 'credit_sale',
