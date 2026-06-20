@@ -15,6 +15,10 @@ const routeTitles: Record<string, string> = {
   'operating-scope': 'Modo operativo',
   application: 'General',
   'payment-methods': 'Métodos de pago',
+  domains: 'Dominios',
+  logs: 'Registros de auditoría',
+  sessions: 'Sesiones',
+  'login-attempts': 'Intentos de inicio de sesión',
 };
 
 /**
@@ -39,6 +43,10 @@ const routeBreadcrumbParent: Record<string, { label: string; icon?: string }> = 
   'operating-scope': { label: 'Panel Administrativo', icon: 'layout-dashboard' },
   application: { label: 'Configuración', icon: 'settings' },
   'payment-methods': { label: 'Configuración', icon: 'settings' },
+  domains: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
+  logs: { label: 'Auditoría y Cumplimiento', icon: 'shield' },
+  sessions: { label: 'Auditoría y Cumplimiento', icon: 'shield' },
+  'login-attempts': { label: 'Auditoría y Cumplimiento', icon: 'shield' },
 };
 
 /**
@@ -59,6 +67,10 @@ const routeBreadcrumbCurrent: Record<string, string> = {
   'operating-scope': 'Modo operativo',
   application: 'General',
   'payment-methods': 'Métodos de pago',
+  domains: 'Dominios',
+  logs: 'Registros de auditoría',
+  sessions: 'Sesiones',
+  'login-attempts': 'Intentos de inicio de sesión',
 };
 
 export default function OrgAdminLayout() {
