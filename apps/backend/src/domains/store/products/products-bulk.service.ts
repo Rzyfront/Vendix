@@ -1099,42 +1099,35 @@ export class ProductsBulkService {
     // cualquier otro fallo (Prisma, red, permisos) se convierte en un
     // mensaje amigable y se loguea para debugging.
     try {
-      // Validar que la tienda tenga al menos un producto antes de generar el
-      // archivo. Si el count() falla (e.g. schema drift en prod), se loguea
-      // y se trata como 0 productos para que el cliente vea el mensaje
-      // amigable en vez de un Prisma error crudo.
-      //
       // Filtramos `state: { not: ProductState.ARCHIVED }` para excluir
-      // productos archivados que el cliente NO ve en la UI. Sin este filter,
-      // el export traería 120+ productos "viejos" que parecen estar en la
-      // tienda pero en realidad están archivados.
-      //
-      // Usamos la constante `ProductState.ARCHIVED` (en vez del string
-      // literal) para que el compilador verifique que el valor del enum
-      // sigue existiendo si alguien renombra o elimina el miembro del enum
-      // en `./dto`. Defensa contra typos silenciosos.
+      // productos archivados que el cliente NO ve en la UI. Usamos la constante
+      // (no string literal) para que el compilador verifique el enum.
+      const archivedFilter = { state: { not: ProductState.ARCHIVED } };
+      const baseWhere = { store_id: storeId, ...archivedFilter };
+
+      // Validar que la tienda tenga al menos un producto antes de generar el
+      // archivo. Si count() falla (e.g. schema drift), NO fingimos que la
+      // tienda está vacía — propagamos un mensaje distinto al del empty state
+      // para que el usuario no crea falsamente que no tiene productos.
       let productCount = 0;
+      let countSucceeded = true;
       try {
-        productCount = await this.prisma.products.count({
-          where: {
-            store_id: storeId,
-            state: { not: ProductState.ARCHIVED },
-          },
-        });
+        productCount = await this.prisma.products.count({ where: baseWhere });
       } catch (err) {
-        // Schema drift probable (columna o tabla faltante en prod). Logueamos
-        // el error real para el equipo técnico y mostramos el mensaje de
-        // "no hay productos" al cliente. Es la única forma de evitar que el
-        // cliente vea jerga de Prisma.
+        countSucceeded = false;
         this.logger.error(
           `[exportCurrentProductsAsTemplate] count() failed for store ${storeId} — probable schema drift`,
           err instanceof Error ? err.stack : String(err),
         );
-        productCount = 0;
       }
-      if (productCount === 0) {
+      if (countSucceeded && productCount === 0) {
         throw new NotFoundException(
           'No hay productos en su tienda. Agrega productos antes de descargar la plantilla.',
+        );
+      }
+      if (!countSucceeded) {
+        throw new InternalServerErrorException(
+          'No se pudo verificar el catálogo de productos. Por favor intenta de nuevo en unos minutos.',
         );
       }
 
@@ -1146,47 +1139,80 @@ export class ProductsBulkService {
       const CHUNK_SIZE = 500;
       let cursor: number | undefined = undefined;
 
-      // Iteración con cursor por `id` para evitar drift en catálogos grandes.
-      // Query simplificada (SIN include de tablas relacionadas) para que el
-      // export funcione en producción aunque falten tablas como `brands`,
-      // `product_images`, `stock_levels`, etc. — common cuando el dev DB
-      // tiene el schema completo pero prod está detrás en migrations.
+      // Try the rich query (con stock_levels + product_images + brands + ...)
+      // primero. Si falla por schema drift (común cuando prod está detrás en
+      // migrations vs el dev DB completo), caemos a un fallback mínimo que
+      // solo trae los campos del producto. De esta forma la mayoría de tiendas
+      // recibe el export enriquecido, y solo las que tienen schema drift ven
+      // un export reducido + un log de warning en backend.
+      let useRichInclude = true;
+
       // eslint-disable-next-line no-constant-condition
-    while (true) {
-      // El findMany también puede fallar (e.g. columna `id` del orderBy no
-      // existe en prod por schema drift). Lo envolvemos en try-catch con la
-      // misma estrategia: log + tratar como "no hay productos" para que el
-      // cliente vea el mensaje amigable en vez del Prisma error.
-      //
-      // Mismo filter `state: { not: ProductState.ARCHIVED }` que en el
-      // count para excluir archivados y matchear la UI. Usar la constante
-      // del enum (no string literal) previene drift si el enum cambia.
-      let products: any[] = [];
-      try {
-        products = await this.prisma.products.findMany({
-          where: {
-            store_id: storeId,
-            state: { not: ProductState.ARCHIVED },
-          },
-          orderBy: { id: 'asc' },
-          take: CHUNK_SIZE,
-          ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
-        });
-      } catch (err) {
-        this.logger.error(
-          `[exportCurrentProductsAsTemplate] findMany() failed for store ${storeId} — probable schema drift`,
-          err instanceof Error ? err.stack : String(err),
-        );
-        break; // Salir del while — generamos Excel vacío
-      }
+      while (true) {
+        let products: any[] = [];
+        try {
+          const findArgs: any = {
+            where: baseWhere,
+            orderBy: { id: 'asc' },
+            take: CHUNK_SIZE,
+            ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
+          };
+          if (useRichInclude) {
+            findArgs.include = {
+              brands: { select: { name: true } },
+              product_categories: {
+                include: { categories: { select: { name: true } } },
+              },
+              product_tax_assignments: { select: { tax_category_id: true } },
+              product_images: { where: { is_main: true }, take: 1 },
+              product_variants: { select: { id: true } },
+              stock_levels: {
+                select: {
+                  product_variant_id: true,
+                  quantity_available: true,
+                },
+              },
+            };
+          }
+          products = await this.prisma.products.findMany(findArgs);
+        } catch (err) {
+          if (useRichInclude) {
+            // Schema drift probable — fallback al query mínimo sin includes.
+            // No incrementamos cursor porque este chunk no devolvió nada.
+            this.logger.warn(
+              `[exportCurrentProductsAsTemplate] rich findMany failed for store ${storeId} — falling back to minimal query (no stock/image columns)`,
+              err instanceof Error ? err.stack : String(err),
+            );
+            useRichInclude = false;
+            continue;
+          }
+          this.logger.error(
+            `[exportCurrentProductsAsTemplate] minimal findMany failed for store ${storeId}`,
+            err instanceof Error ? err.stack : String(err),
+          );
+          break;
+        }
 
-      if (products.length === 0) break;
+        if (products.length === 0) break;
 
-      for (const p of products) {
-        const totalStock = 0; // No consultamos stock_levels (puede no existir en prod)
-        const hasImage = false; // No consultamos product_images (puede no existir en prod)
+        for (const p of products) {
+          const hasVariants = (p.product_variants?.length ?? 0) > 0;
+          const stockLevelsForTotals = hasVariants
+            ? (p.stock_levels ?? []).filter(
+                (sl) => sl.product_variant_id !== null,
+              )
+            : p.stock_levels ?? [];
+          const totalStock = useRichInclude
+            ? stockLevelsForTotals.reduce(
+                (sum, sl) => sum + (sl.quantity_available ?? 0),
+                0,
+              )
+            : 0;
+          const hasImage = useRichInclude
+            ? (p.product_images?.length ?? 0) > 0
+            : false;
 
-        rows.push({
+          rows.push({
           Nombre: p.name,
           SKU: p.sku ?? '',
           Tipo: p.product_type === 'service' ? 'servicio' : 'físico',
@@ -1228,13 +1254,18 @@ export class ProductsBulkService {
       cursor = products[products.length - 1].id;
     }
 
-    // Si no se recolectaron filas (tienda vacía, o findMany() falló por
-    // schema drift), lanzar NotFoundException con el mismo mensaje que usa
-    // el count() check. Esto evita que el cliente descargue un Excel vacío
-    // con solo headers — un archivo inútil.
+    // Si no se recolectaron filas (tienda vacía según el count, o findMany()
+    // mínimo falló por schema drift), lanzar el error correspondiente. Esto
+    // evita que el cliente descargue un Excel vacío con solo headers — un
+    // archivo inútil.
     if (rows.length === 0) {
-      throw new NotFoundException(
-        'No hay productos en su tienda. Agrega productos antes de descargar la plantilla.',
+      if (countSucceeded) {
+        throw new NotFoundException(
+          'No hay productos en su tienda. Agrega productos antes de descargar la plantilla.',
+        );
+      }
+      throw new InternalServerErrorException(
+        'No se pudo generar la plantilla en este momento. Por favor intenta de nuevo en unos minutos.',
       );
     }
 
@@ -1259,7 +1290,8 @@ export class ProductsBulkService {
       // y el frontend los muestra tal cual.
       if (
         err instanceof NotFoundException ||
-        err instanceof BadRequestException
+        err instanceof BadRequestException ||
+        err instanceof InternalServerErrorException
       ) {
         throw err;
       }
