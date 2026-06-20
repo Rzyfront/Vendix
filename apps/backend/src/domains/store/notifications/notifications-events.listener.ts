@@ -622,6 +622,82 @@ export class NotificationsEventsListener {
     );
   }
 
+  /**
+   * "Your turn is now" alert.
+   *
+   * Emitted by `reservations.service.ts → start()` when a cashier or admin
+   * marks a booking as `in_progress`. Resolves the provider's `user_id`
+   * (provider → employee.user_id) and sends a TARGETED notification only to
+   * that user — other users in the store do NOT receive this event.
+   *
+   * Falls back to store-wide broadcast if the provider has no `user_id`
+   * linked (e.g. the employee record was created without a login) — better
+   * to over-notify the bell than to silently swallow.
+   *
+   * Uses the existing `booking_check_in` enum value plus `data.kind =
+   * 'provider_turn'` so the frontend can play a distinctive sound and route
+   * to the booking detail page. (Booking check-in is the closest existing
+   * enum that semantically matches "attend-now" without a DB migration.)
+   */
+  @OnEvent('booking.started')
+  async handleBookingStarted(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    provider_id?: number;
+    date: string;
+    start_time: string;
+  }) {
+    let provider_user_id: number | null = null;
+
+    if (event.provider_id) {
+      try {
+        const provider =
+          await this.global_prisma.service_providers.findUnique({
+            where: { id: event.provider_id },
+            include: { employee: { select: { user_id: true } } },
+          });
+        provider_user_id =
+          (provider as any)?.employee?.user_id ?? null;
+      } catch (err: any) {
+        console.error(
+          `[handleBookingStarted] Failed to resolve provider user: ${err.message}`,
+        );
+      }
+    }
+
+    const title = `Tu turno: ${event.customer_name}`;
+    const body = `${event.service_name} — ${event.start_time} (${event.booking_number})`;
+    const data = {
+      booking_id: event.booking_id,
+      booking_number: event.booking_number,
+      kind: 'provider_turn',
+      start_time: event.start_time,
+    };
+
+    if (provider_user_id) {
+      await this.notifications_service.sendToUser(
+        event.store_id,
+        provider_user_id,
+        'booking_check_in',
+        title,
+        body,
+        data,
+      );
+    } else {
+      // Fallback: broadcast to the store (provider mapping missing).
+      await this.notifications_service.createAndBroadcast(
+        event.store_id,
+        'booking_check_in',
+        title,
+        body,
+        data,
+      );
+    }
+  }
+
   @OnEvent('booking.completed')
   async handleBookingCompleted(event: {
     store_id: number;
