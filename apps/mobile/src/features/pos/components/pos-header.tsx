@@ -252,13 +252,16 @@ const styles = StyleSheet.create({
     color: colorScales.gray[900],
   },
   title: {
-    fontSize: typography.fontSize.xl,
+    // Paridad con web HeaderComponent: <h1 class="text-sm sm:text-xl ...">.
+    // En mobile (≤sm) el h1 es text-sm = 14px, NO xl (20px). El bold +
+    // tracking-tight mantienen la jerarquía visual pese al tamaño menor.
+    fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
-    letterSpacing: -0.3,
-    lineHeight: 26,
-    marginTop: 1,
+    letterSpacing: -0.2,
+    lineHeight: 20,
+    marginTop: 0,
   },
   headerRight: {
     flexDirection: 'row',
