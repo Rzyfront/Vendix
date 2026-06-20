@@ -2,6 +2,7 @@ import {
   Component,
   DestroyRef,
   OnDestroy,
+  OnInit,
   ElementRef,
   inject,
   input,
@@ -68,7 +69,7 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
     </div>
   `,
 })
-export class PlanillaPdfViewerComponent implements OnDestroy {
+export class PlanillaPdfViewerComponent implements OnInit, OnDestroy {
   readonly routeId = input.required<number>();
   readonly close = output<void>();
 
@@ -84,7 +85,10 @@ export class PlanillaPdfViewerComponent implements OnDestroy {
 
   private blobUrl: string | null = null;
 
-  constructor() {
+  ngOnInit(): void {
+    // Read the required `routeId` input here (not in the constructor): signal
+    // inputs are only bound after construction, so reading it earlier throws
+    // NG0950 ("Input required but no value available yet").
     this.load();
   }
 

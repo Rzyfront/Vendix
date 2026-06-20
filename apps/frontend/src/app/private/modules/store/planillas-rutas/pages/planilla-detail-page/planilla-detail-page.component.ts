@@ -1,15 +1,12 @@
 import {
   Component,
   DestroyRef,
-  EffectRef,
   computed,
-  effect,
   inject,
-  input,
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -388,12 +385,10 @@ interface RouteStepperNode {
   `,
 })
 export class PlanillaDetailPageComponent {
-  /** Route param `id`, bound via withComponentInputBinding (zoneless signal input). */
-  readonly id = input.required<string>();
-
   private readonly service = inject(PlanillasRutasService);
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
+  private readonly activatedRoute = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly routeId = signal<number>(0);
@@ -560,22 +555,17 @@ export class PlanillaDetailPageComponent {
     return '(FALTA)';
   });
 
-  private routeIdEffect: EffectRef;
-
-  constructor() {
-    // Bridge the route-param signal input into the numeric routeId signal.
-    effect(() => {
-      const parsed = parseInt(this.id(), 10);
-      if (!isNaN(parsed)) this.routeId.set(parsed);
-    });
-    this.routeIdEffect = effect(() => {
-      const id = this.routeId();
-      if (id > 0) this.load();
-    });
-  }
-
-  ngOnDestroy() {
-    this.routeIdEffect?.destroy();
+  ngOnInit() {
+    // The router is configured WITHOUT withComponentInputBinding(), so route
+    // params are read from ActivatedRoute (repo convention — see
+    // dispatch-note-detail-page / order-details-page). Reading the param in
+    // ngOnInit (not in an effect) avoids NG0950 (required input never bound)
+    // and NG0100 (signal writes during the first change-detection pass).
+    const id = Number(this.activatedRoute.snapshot.paramMap.get('id'));
+    if (id > 0) {
+      this.routeId.set(id);
+      this.load();
+    }
   }
 
   /**
