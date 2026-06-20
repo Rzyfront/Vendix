@@ -56,6 +56,13 @@ export interface DispatchNoteSummary {
    * "Orden pendiente de pago" chip on the planilla detail.
    */
   sales_order?: DispatchNoteSalesOrderSummary | null;
+  /**
+   * True when the customer is a `customers.is_withholding_agent`. The settle
+   * flow uses this flag to mandate a populated `withholding_breakdown` and
+   * a non-zero `withholding_amount`. The backend re-validates the rule; this
+   * is a UI affordance only.
+   */
+  customer_is_withholding_agent?: boolean;
 }
 
 export interface DispatchRouteStop {

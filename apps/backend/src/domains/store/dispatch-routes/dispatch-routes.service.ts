@@ -56,6 +56,9 @@ const DISPATCH_ROUTE_INCLUDE = {
           status: true,
           sales_order_id: true,
           sales_order: { select: { id: true, order_number: true, status: true } },
+          // Withholding-agent flag drives the UI banner + the backend
+          // re-validation in route-flow.service.settleStop().
+          customer: { select: { is_withholding_agent: true } },
         },
       },
       settled_by_user: {

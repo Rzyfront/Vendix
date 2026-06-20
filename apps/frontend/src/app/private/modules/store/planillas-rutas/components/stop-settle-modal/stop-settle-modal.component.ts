@@ -38,6 +38,17 @@ import {
           Total: <strong>{{ grandTotal() | currency }}</strong>
         </div>
 
+        @if (isPrepaid()) {
+          <div
+            class="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900"
+          >
+            <strong>Parada prepagada.</strong> El recaudo se hizo antes del
+            despacho; al liquidar se registrará como <em>entregada</em> con
+            <code>collected_amount = 0</code> y método de pago
+            <code>prepaid</code>. El sistema no generará movimiento de caja.
+          </div>
+        }
+
         <app-selector
           label="Resultado"
           [options]="resultOptions"
@@ -50,6 +61,7 @@ import {
             [currency]="true"
             [(ngModel)]="collectedAmount"
             (inputChange)="recalcCredit()"
+            [disabled]="isPrepaid()"
           ></app-input>
           <app-input
             label="Retención"
@@ -66,6 +78,7 @@ import {
             label="Método"
             [options]="paymentMethodOptions"
             [(ngModel)]="paymentMethod"
+            [disabled]="isPrepaid()"
           ></app-selector>
         </div>
 
@@ -105,6 +118,13 @@ import {
 export class StopSettleModalComponent {
   readonly stop = input.required<DispatchRouteStop>();
   readonly grandTotal = input.required<number>();
+  /**
+   * True when the stop's dispatch note was already paid before dispatch.
+   * The backend forces collected_amount=0 and payment_method='prepaid' in
+   * that case; the modal surfaces a banner and disables the collected/method
+   * fields so the operator does not enter a value that will be discarded.
+   */
+  readonly isPrepaid = input<boolean>(false);
 
   readonly close = output<void>();
   readonly submitted = output<SettleStopDto>();
@@ -152,11 +172,14 @@ export class StopSettleModalComponent {
   submit() {
     this.submitting.set(true);
     const dto: SettleStopDto = {
-      result: this.result,
-      collected_amount: Number(this.collectedAmount) || 0,
+      // Prepaid stops are always reported as fully delivered with no
+      // cash collection; the result dropdown is hidden in that case but
+      // we keep the same field for safety.
+      result: this.isPrepaid() ? 'delivered' : this.result,
+      collected_amount: this.isPrepaid() ? 0 : Number(this.collectedAmount) || 0,
       withholding_amount: Number(this.withholdingAmount) || 0,
       change_amount: Number(this.changeAmount) || 0,
-      payment_method: this.paymentMethod,
+      payment_method: this.isPrepaid() ? 'prepaid' : this.paymentMethod,
     };
     if (this.withholdingAmount > 0) {
       dto.withholding_breakdown = { retefuente: Number(this.withholdingAmount) };

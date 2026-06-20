@@ -288,6 +288,12 @@ export class RouteFlowService {
             customer_id: true,
             sales_order_id: true,
             sales_order: { select: { id: true, order_number: true, status: true } },
+            // For withholding-agent validation: a retenedor cliente must
+            // arrive at 'delivered' or 'partial' WITH a populated
+            // withholding_breakdown, otherwise the fiscal accounting will
+            // not balance. We surface a 400 here instead of accepting a
+            // malformed stop that downstream listeners can't reconcile.
+            customer: { select: { is_withholding_agent: true } },
           },
         },
       },
@@ -296,6 +302,36 @@ export class RouteFlowService {
 
     if (stop.status === 'released' || stop.status === 'delivered') {
       throw new BadRequestException(`La parada ya está '${stop.status}'`);
+    }
+
+    // Withholding-agent guard: if the customer is a retenedor, the operator
+    // must register the breakdown (retefuente / reteiva / reteica) and the
+    // withholding_amount must match the sum of the breakdown. The frontend
+    // also enforces this in the settle modal but the backend is the source
+    // of truth — a retenedor with no withholding line item would leave the
+    // fiscal accounting unbalanced.
+    const isWithholdingAgent = !!stop.dispatch_note.customer?.is_withholding_agent;
+    const withholdingAmount = Number(dto.withholding_amount || 0);
+    const breakdown = dto.withholding_breakdown as
+      | { retefuente?: number; reteiva?: number; reteica?: number }
+      | undefined;
+    const breakdownSum =
+      Number(breakdown?.retefuente || 0) +
+      Number(breakdown?.reteiva || 0) +
+      Number(breakdown?.reteica || 0);
+    if (isWithholdingAgent && (dto.result === 'delivered' || dto.result === 'partial')) {
+      if (withholdingAmount <= 0 || !breakdown || breakdownSum <= 0) {
+        throw new BadRequestException(
+          `El cliente es agente retenedor: la liquidación requiere un desglose de retención (retefuente / reteiva / reteica) con suma > 0.`,
+        );
+      }
+      // Allow a 1-cent rounding tolerance on the breakdown sum vs the
+      // declared withholding_amount.
+      if (Math.abs(breakdownSum - withholdingAmount) > 0.01) {
+        throw new BadRequestException(
+          `El desglose de retención (${breakdownSum}) no coincide con el monto retenido (${withholdingAmount}).`,
+        );
+      }
     }
 
     // Validate amounts

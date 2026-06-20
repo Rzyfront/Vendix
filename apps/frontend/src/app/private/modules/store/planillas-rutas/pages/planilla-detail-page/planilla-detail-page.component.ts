@@ -339,6 +339,7 @@ interface RouteStepperNode {
       <app-stop-settle-modal
         [stop]="settleStop()!"
         [grandTotal]="+(settleStop()!.dispatch_note?.grand_total || 0)"
+        [isPrepaid]="!!settleStop()!.is_prepaid"
         (close)="settleStop.set(null)"
         (submitted)="onSettle($event)"
       ></app-stop-settle-modal>
