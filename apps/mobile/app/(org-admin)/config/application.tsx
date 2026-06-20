@@ -174,9 +174,10 @@ export default function ConfigApplicationScreen() {
   }, []);
 
   // Update tab offset when sticky header height changes (web scroll-margin-top).
-  // En web: scroll-margin-top 88px (sticky header altura). En mobile: sticky
-  // header incluye tabs row + title row → ~120px.
-  const TAB_SCROLL_OFFSET = 120;
+  // En web: scroll-margin-top 88px (sticky header altura). En mobile el header
+  // está partido en DOS filas sticky: title row (~50px) + tabs row (~32px) →
+  // ~82px.
+  const TAB_SCROLL_OFFSET = 82;
 
   // ── Organization labels ───────────────────────────────────────────────────
   const accountTypeLabel = (() => {
@@ -205,17 +206,10 @@ export default function ConfigApplicationScreen() {
   return (
     <OrgPageContainer refreshing={refreshing} onRefresh={onRefresh} padding={false}>
       {/* ── Sticky sub-header — espejo mobile del app-sticky-header web ──
-          Estructura: tabs (top) + title row (back + title/subtitle + actions) */}
+          Estructura web: <app-sticky-header> (título + acciones) y luego
+          <div class="sticky top-[41px]"><app-scrollable-tabs ... /></div>.
+          Es decir: título ARRIBA, tabs ABAJO en una fila sticky separada. */}
       <View style={styles.stickySubHeader}>
-        {/* Tabs — fila superior (paridad con web sticky-header-tabs-row) */}
-        <View style={styles.tabsRow}>
-          <ScrollableTabs
-            tabs={SECTIONS}
-            activeTab={activeSection}
-            onTabChange={(id) => scrollToSection(id)}
-          />
-        </View>
-
         {/* Title row (paridad con web max-w-[1600px] mx-auto flex flex-row p-1.5) */}
         <View style={styles.titleRow}>
           <View style={styles.titleLeft}>
@@ -284,6 +278,16 @@ export default function ConfigApplicationScreen() {
             </View>
           </View>
         </View>
+      </View>
+
+      {/* Tabs row — sticky separada DEBAJO del sticky-header (paridad con web
+          <div class="sticky top-[41px]">). borderTop sutil + borderBottom. */}
+      <View style={styles.tabsRow}>
+        <ScrollableTabs
+          tabs={SECTIONS}
+          activeTab={activeSection}
+          onTabChange={(id) => scrollToSection(id)}
+        />
       </View>
 
       <ScrollView
@@ -677,10 +681,14 @@ const styles = StyleSheet.create({
     elevation: 1,
   },
 
-  // Tabs row (paridad con .sticky-header-tabs-row)
+  // Tabs row — sticky separada DEBAJO del sticky-header (paridad con web
+  // <div class="sticky top-[41px]">).
   tabsRow: {
+    backgroundColor: colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[200],
+    paddingVertical: spacing[1.5],
     paddingHorizontal: spacing[1.5],
-    paddingTop: spacing[1],
   },
 
   // Title row (paridad con max-w-[1600px] mx-auto flex flex-row p-1.5)
