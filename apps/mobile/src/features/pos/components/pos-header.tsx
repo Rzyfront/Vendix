@@ -20,20 +20,28 @@ interface PosHeaderProps {
   /**
    * Etiqueta del segmento padre en el breadcrumb (categoría/sección).
    * Paridad con web `HeaderComponent` (breadcrumb.service):
-   *   parent.label  +  separator  +  [home-icon blue]  +  current.label
+   *   [parentIcon] parent.label  /  [currentIcon blue] currentLabel
    *
-   * Ejemplo: "Panel administrativo" en ORG_ADMIN, "Tienda" en STORE_ADMIN,
+   * Ejemplo: "Panel Administrativo" en ORG_ADMIN, "Tienda" en STORE_ADMIN,
    * "Super admin" en SUPER_ADMIN.
    */
   parentLabel?: string;
   /**
-   * Ícono opcional para el segmento padre del breadcrumb (opacity-70 en web).
+   * Ícono opcional para el segmento padre del breadcrumb (gray-600 en mobile).
    * Si no se provee, no se renderiza ícono — sólo texto + separator.
    */
   parentIcon?: string;
   /**
+   * Etiqueta del segmento current del breadcrumb (al lado del ícono current).
+   * INDEPENDIENTE del title — el breadcrumb puede decir "panel principal"
+   * mientras el h1 dice "Dashboard".
+   *
+   * Si no se provee, se usa `title` como fallback (retro-compat).
+   */
+  currentLabel?: string;
+  /**
    * Ícono del segmento current del breadcrumb (default: 'home').
-   * En web siempre es azul (text-blue-600) cuando es home del dashboard.
+   * Siempre azul (colors.primary) para paridad con web text-blue-600.
    */
   currentIcon?: string;
   /**
@@ -55,16 +63,17 @@ export function PosHeader({
   breadcrumb,
   parentLabel,
   parentIcon,
+  currentLabel,
   currentIcon = 'home',
   extraActions,
 }: PosHeaderProps) {
   const insets = useSafeAreaInsets();
 
   // Resolución de breadcrumb (3 niveles de prioridad):
-  //   1) parentLabel + parentIcon (nuevo contrato — preferido)
+  //   1) parentLabel + parentIcon + currentLabel (nuevo contrato — preferido)
   //   2) breadcrumb string con formato "Parent / Current" (legacy store-admin)
   //   3) breadcrumb string simple (legacy sin estructura)
-  const resolved = resolveBreadcrumb(parentLabel, parentIcon, breadcrumb);
+  const resolved = resolveBreadcrumb(parentLabel, parentIcon, currentLabel ?? title, breadcrumb);
 
   return (
     <View style={[styles.header, { paddingTop: insets.top + spacing[2] }]}>
@@ -154,17 +163,21 @@ export function PosHeader({
 /**
  * Resuelve el breadcrumb en la estructura { parent, parentIcon, current }.
  * Soporta:
- *   - parentLabel explícito (contrato nuevo) — siempre wins
+ *   - parentLabel + currentLabel explícitos (contrato nuevo) — siempre wins
  *   - string legacy con formato "Parent / Current" — se parsea
  *   - string legacy simple — se trata como current sin parent
+ *
+ * Si parentLabel/parentIcon están presentes pero currentLabel no, se usa
+ * `fallbackCurrent` (típicamente `title`) como texto current.
  */
 function resolveBreadcrumb(
   parentLabel: string | undefined,
   parentIcon: string | undefined,
+  fallbackCurrent: string,
   breadcrumb: string | undefined,
 ): { parent?: string; parentIcon?: string; current?: string } | null {
   if (parentLabel || parentIcon) {
-    return { parent: parentLabel, parentIcon };
+    return { parent: parentLabel, parentIcon, current: fallbackCurrent };
   }
   if (breadcrumb) {
     const parts = breadcrumb.split('/').map((s) => s.trim()).filter(Boolean);

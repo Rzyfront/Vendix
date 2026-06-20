@@ -29,8 +29,11 @@ const routeTitles: Record<string, string> = {
   help: 'Ayuda',
 };
 
-// Breadcrumb = sección padre. Paridad con web `BreadcrumbService.routes`.
-// El current se renderiza implícitamente con el ícono home + `title` actual.
+// Breadcrumb = sección padre + segmento current + ícono current (azul).
+// Paridad con web `BreadcrumbService.routes` + `HeaderComponent`:
+//   [icon parent] parent.label  /  [home blue] currentLabel
+//
+// El current label es independiente del h1 `title`.
 const routeBreadcrumbParent: Record<string, { label: string; icon?: string }> = {
   dashboard: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
   pos: { label: 'Tienda', icon: 'store' },
@@ -53,6 +56,35 @@ const routeBreadcrumbParent: Record<string, { label: string; icon?: string }> = 
   marketing: { label: 'Tienda', icon: 'store' },
   settings: { label: 'Tienda', icon: 'store' },
   help: { label: 'Tienda', icon: 'store' },
+};
+
+/**
+ * Etiqueta del segmento current del breadcrumb (final del path). Aparece
+ * al lado del ícono home (azul). En STORE_ADMIN coincide con el segmento
+ * de ruta activo (ej. "Productos", "Inventario") — independiente del h1.
+ */
+const routeBreadcrumbCurrent: Record<string, string> = {
+  dashboard: 'Panel Principal',
+  pos: 'Punto de Venta',
+  products: 'Productos',
+  orders: 'Órdenes',
+  inventory: 'Inventario',
+  pop: 'Punto de Compra',
+  purchase: 'Comprar Inventario',
+  adjustments: 'Ajustes de Stock',
+  transfers: 'Transferencias',
+  movements: 'Movimientos',
+  suppliers: 'Proveedores',
+  locations: 'Ubicaciones',
+  customers: 'Clientes',
+  invoicing: 'Facturación',
+  accounting: 'Contabilidad',
+  expenses: 'Gastos',
+  analytics: 'Analíticas',
+  settings: 'Configuración',
+  online_store: 'Tienda en línea',
+  marketing: 'Marketing',
+  help: 'Ayuda',
 };
 
 export default function StoreAdminLayout() {
@@ -78,12 +110,14 @@ export default function StoreAdminLayout() {
   const currentSegment = pathname.split('/').pop() || 'dashboard';
   const title = routeTitles[currentSegment] || 'Vendix';
   const parent = routeBreadcrumbParent[currentSegment];
+  const currentLabel = routeBreadcrumbCurrent[currentSegment];
 
   return (
     <AdminShell
       title={title}
       parentLabel={parent?.label}
       parentIcon={parent?.icon}
+      currentLabel={currentLabel}
       currentIcon="home"
       variant="store"
     >

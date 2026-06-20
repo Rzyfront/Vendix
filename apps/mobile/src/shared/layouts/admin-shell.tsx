@@ -34,6 +34,13 @@ interface AdminShellProps {
    */
   parentIcon?: string;
   /**
+   * Etiqueta del segmento current del breadcrumb (al lado del ícono current).
+   * INDEPENDIENTE del title — el breadcrumb puede decir "panel principal"
+   * mientras el h1 dice "Dashboard". Si no se provee, PosHeader usa `title`
+   * como fallback.
+   */
+  currentLabel?: string;
+  /**
    * Ícono del segmento current (default 'home'). En web siempre azul.
    */
   currentIcon?: string;
@@ -46,6 +53,7 @@ export function AdminShell({
   breadcrumb,
   parentLabel,
   parentIcon,
+  currentLabel,
   currentIcon,
   variant = 'store',
 }: AdminShellProps) {
@@ -134,6 +142,7 @@ export function AdminShell({
         breadcrumb={breadcrumb}
         parentLabel={parentLabel}
         parentIcon={parentIcon}
+        currentLabel={currentLabel}
         currentIcon={currentIcon}
         extraActions={
           showScopeChip ? <ScopeChip scope={operatingScope} /> : undefined
