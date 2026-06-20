@@ -18,16 +18,17 @@ import { OrgStoreService } from '@/features/org/services/org-store.service';
 import { useAuthStore } from '@/core/store/auth.store';
 import { colors, colorScales, spacing, typography, borderRadius, interFonts } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { formatCurrency } from '@/shared/utils/currency';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type DashboardPeriod = '6m' | '1y' | 'all';
 type Tone = 'primary' | 'secondary' | 'success' | 'warning' | 'error' | 'accent';
 
-const PERIOD_OPTIONS: { value: DashboardPeriod; label: string }[] = [
-  { value: '6m', label: '6M' },
-  { value: '1y', label: '1A' },
-  { value: 'all', label: 'Todo' },
+const PERIOD_OPTIONS: { value: DashboardPeriod; label: string; sublabel: string }[] = [
+  { value: '6m', label: '6M', sublabel: 'Últimos 6 meses' },
+  { value: '1y', label: '1A', sublabel: 'Último año' },
+  { value: 'all', label: 'Todo', sublabel: 'Histórico (24 meses)' },
 ];
 
 const DISTRIBUTION_COLORS = [
@@ -332,110 +333,7 @@ function RosePieChart({
   );
 }
 
-// ─── Stat Card ───────────────────────────────────────────────────────────────
-function StatCard({
-  title,
-  value,
-  smallText,
-  icon,
-  iconBg,
-  iconColor,
-  loading,
-}: {
-  title: string;
-  value: string | number;
-  smallText: string;
-  icon: string;
-  iconBg: string;
-  iconColor: string;
-  loading?: boolean;
-}) {
-  if (loading) {
-    return (
-      <View style={statStyles.card}>
-        <View style={statStyles.content}>
-          <View style={[statStyles.skeleton, { height: 10, width: '50%' }]} />
-          <View style={[statStyles.skeleton, { height: 20, width: '75%', marginTop: 4 }]} />
-          <View style={[statStyles.skeleton, { height: 10, width: '40%', marginTop: 4 }]} />
-        </View>
-      </View>
-    );
-  }
-
-  const isNegative = smallText.startsWith('-');
-  const smallTextColor = isNegative ? '#dc2626' : '#10b981';
-
-  return (
-    <View style={statStyles.card}>
-      <View style={statStyles.iconWrap}>
-        <Icon name={icon} size={15} color={iconColor} />
-      </View>
-      <View style={statStyles.content}>
-        <Text style={statStyles.title} numberOfLines={1}>
-          {title}
-        </Text>
-        <Text style={statStyles.value} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
-          {value}
-        </Text>
-        <Text style={[statStyles.subText, { color: smallTextColor }]} numberOfLines={1}>
-          {smallText}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-const statStyles = StyleSheet.create({
-  card: {
-    width: 160,
-    height: 90,
-    backgroundColor: '#fff',
-    borderRadius: borderRadius.xl,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    padding: 12,
-    position: 'relative',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  content: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  iconWrap: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    zIndex: 1,
-  },
-  value: {
-    fontSize: 20,
-    fontFamily: interFonts.bold,
-    color: colorScales.gray[900],
-    lineHeight: 24,
-    marginTop: 2,
-  },
-  title: {
-    fontSize: 10,
-    fontFamily: interFonts.bold,
-    color: colorScales.gray[400],
-    textTransform: 'uppercase',
-  },
-  subText: {
-    fontSize: 10,
-    fontFamily: interFonts.medium,
-    marginTop: 2,
-  },
-  skeleton: {
-    backgroundColor: colorScales.gray[100],
-    borderRadius: 4,
-  },
-});
-
+// ─── Chart styles (stat card usa StatsGrid shared) ──────────────────────────
 const chartStyles = StyleSheet.create({
   emptyWrap: {
     alignItems: 'center',
@@ -704,21 +602,18 @@ export default function OrgDashboard() {
 
   const orgId = user?.organizations?.id || user?.organization_id;
 
-  const statsQuery = useQuery({
-    queryKey: ['org-dashboard-stats', orgId],
-    queryFn: () => OrgDashboardService.getStats(String(orgId)),
-    enabled: !!orgId,
-  });
-
   const storePerformanceQuery = useQuery({
     queryKey: ['org-store-performance'],
     queryFn: () => OrgDashboardService.getStorePerformance(),
   });
 
-  // The web fetches full dashboard stats (profit_trend, store_distribution,
-  // recent_audit, store_activity) from a single endpoint with period param.
-  const dashboardFullQuery = useQuery({
-    queryKey: ['org-dashboard-full', orgId, period],
+  // Single source of truth for /stats: el period se incluye en el queryKey
+  // para que el cache cambie al cambiar 6M/1A/Todo. Antes había 2 queries
+  // idénticas (statsQuery + dashboardFullQuery) pegando al mismo endpoint —
+  // consolidado para evitar refetch doble y mantener los 4 KPI cards y el
+  // chart de tendencia en sincronía.
+  const statsQuery = useQuery({
+    queryKey: ['org-dashboard-stats', orgId, period],
     queryFn: () => OrgDashboardService.getStats(String(orgId), period),
     enabled: !!orgId,
   });
@@ -727,15 +622,14 @@ export default function OrgDashboard() {
     setRefreshing(true);
     await Promise.all([
       statsQuery.refetch(),
-      dashboardFullQuery.refetch(),
       storePerformanceQuery.refetch(),
     ]);
     setRefreshing(false);
-  }, [statsQuery, dashboardFullQuery, storePerformanceQuery]);
+  }, [statsQuery, storePerformanceQuery]);
 
   const stats = statsQuery.data;
   const storePerf = (storePerformanceQuery.data as any[]) ?? [];
-  const fullData: any = dashboardFullQuery.data || stats || null;
+  const fullData: any = stats || null;
 
   // ── Profit trend (from full endpoint or fallback empty) ──────────────────
   const profitTrend: any[] = useMemo(() => fullData?.profit_trend ?? [], [fullData]);
@@ -820,38 +714,38 @@ export default function OrgDashboard() {
 
   const statCards = [
     {
-      title: 'Total de Tiendas',
+      label: 'Total de Tiendas',
       value: stats?.stats?.total_stores?.value ?? 0,
-      smallText: `${stats?.stats?.total_stores?.sub_value ?? 0} nuevas este mes`,
+      description: `${stats?.stats?.total_stores?.sub_value ?? 0} nuevas este mes`,
       icon: 'store',
       iconBg: 'rgba(22,163,74,0.10)',
       iconColor: colors.primary,
     },
     {
-      title: 'Usuarios Activos',
+      label: 'Usuarios Activos',
       value: stats?.stats?.active_users?.value ?? 0,
-      smallText: `${stats?.stats?.active_users?.sub_value ?? 0} en línea ahora`,
+      description: `${stats?.stats?.active_users?.sub_value ?? 0} en línea ahora`,
       icon: 'users',
       iconBg: 'rgba(59,130,246,0.10)',
       iconColor: '#3b82f6',
     },
     {
-      title: 'Pedidos Mensuales',
+      label: 'Pedidos Mensuales',
       value: stats?.stats?.monthly_orders?.value ?? 0,
-      smallText: `${stats?.stats?.monthly_orders?.sub_value ?? 0} pedidos hoy`,
+      description: `${stats?.stats?.monthly_orders?.sub_value ?? 0} pedidos hoy`,
       icon: 'shopping-cart',
       iconBg: 'rgba(251,146,60,0.10)',
       iconColor: '#fb923c',
     },
     {
-      title: 'Ganancia',
+      label: 'Ganancia',
       value: formatCurrency(stats?.stats?.revenue?.value ?? 0),
-      smallText: `${formatSignedCurrency(revenueDiff)} vs mes anterior`,
+      description: `${formatSignedCurrency(revenueDiff)} vs mes anterior`,
       icon: 'dollar-sign',
       iconBg: revenueDiff >= 0 ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
       iconColor: revenueDiff >= 0 ? '#16a34a' : '#dc2626',
     },
-  ];
+  ].map((s) => ({ ...s, loading: statsLoading }));
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
@@ -870,26 +764,22 @@ export default function OrgDashboard() {
 
 
         {/* ── Stats row (horizontal scroll like web) ─────────────────────────── */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.statsScroll}
-          contentContainerStyle={styles.statsRow}
-        >
-          {statCards.map((s) => (
-            <StatCard key={s.title} {...s} loading={statsLoading} />
-          ))}
-        </ScrollView>
+        <StatsGrid items={statCards} style={styles.statsGrid} />
 
         {/* ── Resumen de ganancias ──────────────────────────────────────────── */}
         <SectionCard
           title="Resumen de ganancias"
-          subtitle="Ingresos, costos y ganancia neta por período"
+          subtitle={`Ingresos, costos y ganancia neta — ${
+            PERIOD_OPTIONS.find((p) => p.value === period)?.sublabel ?? 'Últimos 6 meses'
+          }`}
           headerRight={
             <View style={styles.periodPicker}>
               {PERIOD_OPTIONS.map((p) => (
                 <Pressable
                   key={p.value}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Cambiar período a ${p.sublabel}`}
+                  accessibilityState={{ selected: period === p.value }}
                   style={({ pressed }) => [
                     styles.periodBtn,
                     period === p.value && styles.periodBtnActive,
@@ -910,7 +800,7 @@ export default function OrgDashboard() {
             </View>
           }
         >
-          {statsLoading ? (
+          {statsLoading || statsQuery.isFetching ? (
             <View style={{ gap: 8 }}>
               <SkeletonBlock h={16} w="60%" mb={4} />
               <SkeletonBlock h={180} />
@@ -1055,13 +945,7 @@ const styles = StyleSheet.create({
   },
 
   // Stats
-  statsScroll: { marginHorizontal: -spacing[4] },
-  statsRow: {
-    flexDirection: 'row',
-    gap: spacing[3],
-    paddingHorizontal: spacing[4],
-    paddingBottom: spacing[1],
-  },
+  statsGrid: { marginHorizontal: -spacing[4] },
   // Period picker
   periodPicker: {
     flexDirection: 'row',
