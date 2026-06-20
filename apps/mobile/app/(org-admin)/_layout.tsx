@@ -26,14 +26,14 @@ const routeTitles: Record<string, string> = {
  * aparece en el side menu del web.
  */
 const routeBreadcrumbParent: Record<string, { label: string; icon?: string }> = {
-  dashboard: { label: 'Panel administrativo', icon: 'layout-dashboard' },
-  stores: { label: 'Panel administrativo', icon: 'layout-dashboard' },
-  users: { label: 'Panel administrativo', icon: 'layout-dashboard' },
-  roles: { label: 'Panel administrativo', icon: 'layout-dashboard' },
-  orders: { label: 'Panel administrativo', icon: 'layout-dashboard' },
-  subscriptions: { label: 'Panel administrativo', icon: 'layout-dashboard' },
-  settings: { label: 'Panel administrativo', icon: 'layout-dashboard' },
-  'operating-scope': { label: 'Panel administrativo', icon: 'layout-dashboard' },
+  dashboard: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
+  stores: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
+  users: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
+  roles: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
+  orders: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
+  subscriptions: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
+  settings: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
+  'operating-scope': { label: 'Panel Administrativo', icon: 'layout-dashboard' },
   application: { label: 'Configuración', icon: 'settings' },
   'payment-methods': { label: 'Configuración', icon: 'settings' },
 };

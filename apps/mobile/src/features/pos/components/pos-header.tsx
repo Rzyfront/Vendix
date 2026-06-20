@@ -84,8 +84,8 @@ export function PosHeader({
               {resolved.parentIcon ? (
                 <Icon
                   name={resolved.parentIcon}
-                  size={12}
-                  color={colorScales.gray[500]}
+                  size={14}
+                  color={colorScales.gray[600]}
                   style={styles.breadcrumbIcon}
                 />
               ) : null}
@@ -101,7 +101,7 @@ export function PosHeader({
               ) : null}
               <Icon
                 name={currentIcon}
-                size={12}
+                size={14}
                 color={colors.primary}
                 style={styles.breadcrumbIcon}
               />
@@ -216,34 +216,36 @@ const styles = StyleSheet.create({
   breadcrumbRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 5,
     minWidth: 0,
   },
   breadcrumbIcon: {
     marginTop: -1, // visual baseline alignment con texto
   },
   breadcrumbParent: {
-    fontSize: 11,
+    fontSize: 12,
     fontFamily: interFonts.medium,
-    color: colorScales.gray[500],
-    maxWidth: 120,
+    color: colorScales.gray[600],
+    maxWidth: 140,
   },
   breadcrumbSep: {
-    fontSize: 11,
+    fontSize: 12,
     color: colorScales.gray[400],
-    marginHorizontal: 1,
+    marginHorizontal: 2,
   },
   breadcrumbCurrent: {
-    fontSize: 11,
+    fontSize: 12,
     fontFamily: interFonts.semibold,
     color: colorScales.gray[900],
   },
   title: {
-    fontSize: typography.fontSize.lg,
+    fontSize: typography.fontSize.xl,
     fontWeight: typography.fontWeight.bold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
+    lineHeight: 26,
+    marginTop: 1,
   },
   headerRight: {
     flexDirection: 'row',
