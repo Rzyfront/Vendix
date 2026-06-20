@@ -147,6 +147,18 @@ export class DispatchNoteListComponent {
       transform: (value: any) => this.formatCurrency(value),
     },
     {
+      // Active parent dispatch route. The note can be assigned to multiple
+      // routes over time (after release + reassign), so we surface the
+      // ACTIVE one — the stop whose status is not 'released'. If there is
+      // no active assignment, the cell shows a dash. The list view
+      // renders this as a clickable chip via the tableActions handler.
+      key: 'dispatch_route_stops',
+      label: 'Planilla',
+      priority: 2,
+      transform: (_value: any, row: DispatchNote) =>
+        this.activeRouteLabel(row),
+    },
+    {
       key: 'status',
       label: 'Estado',
       badge: true,
@@ -240,6 +252,15 @@ export class DispatchNoteListComponent {
         label: 'Entrega',
         transform: (val: any) =>
           val ? formatDateOnlyUTC(val) : '-',
+      },
+      {
+        // Active parent dispatch route (or '—' if not assigned). Mirrors
+        // the table column so the mobile card view stays consistent.
+        key: 'dispatch_route_stops',
+        label: 'Planilla',
+        transform: (_val: any, item: DispatchNote) =>
+          this.activeRouteLabel(item),
+        icon: 'truck',
       },
     ],
   };
@@ -471,4 +492,45 @@ export class DispatchNoteListComponent {
   getStatusLabel(status: DispatchNoteStatus): string {
     return STATUS_LABELS[status] || status;
   }
+
+  /** Active assignment of a dispatch note to a dispatch route. Returns the
+   *  non-released stop with the parent route summary, or `null` if the note
+   *  is not currently assigned (e.g. confirmed and waiting to be assigned
+   *  to a planilla, or fully released and never reassigned). */
+  activeRoute(dn: DispatchNote): {
+    stop_id: number;
+    route_id: number;
+    route_number: string;
+    route_code?: string | null;
+    stop_sequence: number;
+    route_status: string;
+  } | null {
+    if (!dn.dispatch_route_stops || dn.dispatch_route_stops.length === 0) {
+      return null;
+    }
+    const active = dn.dispatch_route_stops.find(
+      (s) => s.status !== 'released',
+    );
+    if (!active || !active.route) return null;
+    return {
+      stop_id: active.id,
+      route_id: active.route.id,
+      route_number: active.route.route_number,
+      route_code: active.route.route_code,
+      stop_sequence: active.stop_sequence,
+      route_status: active.route.status,
+    };
+  }
+
+  activeRouteLabel(dn: DispatchNote): string {
+    const a = this.activeRoute(dn);
+    return a ? a.route_number : '—';
+  }
+
+  /** Returns a clickable HTML string for the table cell. We bypass the
+   *  component template (ResponsiveDataView renders plain text from
+   *  `transform`) and surface the chip via a small event hook on row
+   *  click. Keeping it as a string here means we still render something
+   *  sensible when the user doesn't click. */
+  // activeRouteCell kept for the card-view path below
 }

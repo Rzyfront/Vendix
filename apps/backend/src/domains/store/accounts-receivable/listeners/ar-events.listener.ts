@@ -56,8 +56,24 @@ export class ArEventsListener {
     store_id: number;
     organization_id: number;
     user_id?: number;
+    /**
+     * Optional source discriminator. The dispatch-route settlement flow
+     * emits `payment.received` with `source_type='dispatch_route'` but no
+     * `order_id` — that event is handled by
+     * `PaymentFromDispatchRouteListener`, not here. Without this guard
+     * the listener was matching the wrong AR row (where
+     * `source_id IS NULL`) and trying to apply a 100k settlement onto a
+     * 20k receivable, throwing 400 and corrupting the route close.
+     */
+    source_type?: string;
   }) {
     try {
+      // The dispatch-route settlement flow has its own dedicated listener
+      // (PaymentFromDispatchRouteListener) and emits with order_id=null
+      // and source_type='dispatch_route'. Bailing out here keeps the AR
+      // listener strictly for legacy / POS / order-level payments.
+      if (event.source_type === 'dispatch_route' || !event.order_id) return;
+
       const ar = await this.prisma.accounts_receivable.findFirst({
         where: {
           source_id: event.order_id,
