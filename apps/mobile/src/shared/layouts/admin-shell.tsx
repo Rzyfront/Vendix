@@ -11,6 +11,7 @@ import { NotificationsModal } from '@/features/notifications/notifications-modal
 import { UserDropdownModal } from '@/features/user/user-dropdown-modal';
 import { NotificationsService } from '@/features/notifications/notifications.service';
 import { useAuthStore } from '@/core/store/auth.store';
+import { ScopeChip } from '@/features/org/components/scope-chip';
 import { ToastContainer } from '@/shared/components/toast/toast';
 
 interface AdminShellProps {
@@ -88,6 +89,11 @@ export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = '
     refetchInterval: 30000,
   });
 
+  // Scope chip — paridad con web `app-header` (sólo en ORG_ADMIN).
+  // NO se muestra el icono fiscal — sólo el modo operativo.
+  const operatingScope = user?.organizations?.operating_scope ?? user?.store?.organizations?.operating_scope ?? null;
+  const showScopeChip = variant === 'org' && operatingScope != null;
+
   return (
     <View style={styles.container}>
       <PosHeader
@@ -99,6 +105,9 @@ export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = '
         userInitials={userInitials}
         title={title}
         breadcrumb={breadcrumb}
+        extraActions={
+          showScopeChip ? <ScopeChip scope={operatingScope} /> : undefined
+        }
       />
 
       <View style={styles.flex}>

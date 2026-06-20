@@ -431,6 +431,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing[2],
     flex: 1,
+    minWidth: 0,
   },
   backBtn: {
     width: 32,

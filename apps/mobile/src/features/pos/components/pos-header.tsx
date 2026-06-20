@@ -13,6 +13,12 @@ interface PosHeaderProps {
   userInitials: string;
   title?: string;
   breadcrumb?: string;
+  /**
+   * Slot opcional para acciones extra que se renderizan en la zona derecha
+   * del header, ANTES del botón de búsqueda. Se usa para inyectar el
+   * scope chip (org/store) en ORG_ADMIN — paridad con el web HeaderComponent.
+   */
+  extraActions?: React.ReactNode;
 }
 
 export function PosHeader({
@@ -24,6 +30,7 @@ export function PosHeader({
   userInitials,
   title = 'Punto de venta',
   breadcrumb,
+  extraActions,
 }: PosHeaderProps) {
   const insets = useSafeAreaInsets();
   return (
@@ -44,8 +51,9 @@ export function PosHeader({
         </View>
       </View>
 
-      {/* Right: Search + Notifications + User */}
+      {/* Right: Extra actions (e.g. scope chip) + Search + Notifications + User */}
       <View style={styles.headerRight}>
+        {extraActions}
         <Pressable
           onPress={onOpenSearch || (() => {})}
           hitSlop={8}
