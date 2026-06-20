@@ -49,6 +49,18 @@ import {
           </div>
         }
 
+        @if (isWithholdingAgent()) {
+          <div
+            class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+          >
+            <strong>Cliente agente retenedor.</strong> Para liquidações
+            <em>delivered</em> o <em>partial</em> debes registrar un
+            desglose de retención (retefuente / reteiva / reteica) cuyo
+            total coincida con el monto retenido. El backend rechaza la
+            liquidación si la suma no coincide.
+          </div>
+        }
+
         <app-selector
           label="Resultado"
           [options]="resultOptions"
@@ -125,6 +137,14 @@ export class StopSettleModalComponent {
    * fields so the operator does not enter a value that will be discarded.
    */
   readonly isPrepaid = input<boolean>(false);
+
+  /**
+   * True when the dispatch note's customer is a `users.is_withholding_agent`.
+   * Backend re-validates the rule on settle; this is a UI affordance.
+   */
+  readonly isWithholdingAgent = computed(
+    () => !!this.stop()?.dispatch_note?.customer?.is_withholding_agent,
+  );
 
   readonly close = output<void>();
   readonly submitted = output<SettleStopDto>();

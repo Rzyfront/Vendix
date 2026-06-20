@@ -57,10 +57,17 @@ export interface DispatchNoteSummary {
    */
   sales_order?: DispatchNoteSalesOrderSummary | null;
   /**
-   * True when the customer is a `customers.is_withholding_agent`. The settle
-   * flow uses this flag to mandate a populated `withholding_breakdown` and
-   * a non-zero `withholding_amount`. The backend re-validates the rule; this
-   * is a UI affordance only.
+   * Customer summary (subset of the parent `customer` user) — used by the
+   * settle modal to surface the withholding-agent banner and by the
+   * backend to re-validate the rule.
+   */
+  customer?: {
+    is_withholding_agent?: boolean;
+  } | null;
+  /**
+   * Convenience top-level alias of `customer.is_withholding_agent`,
+   * mirrored on the response for legacy code paths. Prefer the nested
+   * `customer` accessor in new code.
    */
   customer_is_withholding_agent?: boolean;
 }

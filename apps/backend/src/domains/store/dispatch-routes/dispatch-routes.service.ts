@@ -326,8 +326,28 @@ export class DispatchRoutesService {
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
 
-    const reconciliation = this.buildReconciliation(route);
-    return { ...route, reconciliation };
+    // Surface `customer.is_withholding_agent` as a top-level
+    // `customer_is_withholding_agent` on each stop's dispatch_note for
+    // legacy UI consumers. The nested `customer` object remains the
+    // source of truth.
+    const stops_with_alias = (route.stops ?? []).map((stop: any) => {
+      const dn = stop.dispatch_note ?? null;
+      if (!dn) return stop;
+      return {
+        ...stop,
+        dispatch_note: {
+          ...dn,
+          customer_is_withholding_agent:
+            dn.customer?.is_withholding_agent ?? false,
+        },
+      };
+    });
+
+    const reconciliation = this.buildReconciliation({
+      ...route,
+      stops: stops_with_alias,
+    });
+    return { ...route, stops: stops_with_alias, reconciliation };
   }
 
   /**
