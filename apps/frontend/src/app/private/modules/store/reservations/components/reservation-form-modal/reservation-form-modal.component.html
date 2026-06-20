@@ -310,39 +310,28 @@
               <app-spinner size="sm" color="primary"></app-spinner>
               <span class="loading-text">Cargando horarios disponibles...</span>
             </div>
-          } @else if (availableSlots().length === 0) {
-            <div class="empty-state" style="padding: 24px 16px">
-              <div
-                class="empty-icon-wrapper"
-                style="width: 40px; height: 40px; border-radius: 10px"
-              >
-                <app-icon name="calendar" [size]="20"></app-icon>
-              </div>
-              <p class="empty-description">
-                No hay horarios disponibles para esta fecha. Intenta con otra
-                fecha o ingresa manualmente.
-              </p>
-            </div>
           } @else {
-            <div class="slot-grid">
-              @for (slot of availableSlots(); track slot.start_time) {
-                <button
-                  type="button"
-                  class="slot-card"
-                  [class.selected]="selectedSlot() === slot"
-                  (click)="selectSlot(slot)"
-                >
-                  <div class="slot-time">
-                    {{ slot.start_time.substring(0, 5) }}
-                  </div>
-                  <div class="slot-availability">
-                    {{ slot.total_available }} disponible{{
-                      slot.total_available > 1 ? "s" : ""
-                    }}
-                  </div>
-                </button>
-              }
+            <div class="availability-calendar-wrapper">
+              <app-calendar-week-view
+                [bookingsByDate]="bookingsByDate()"
+                [freeSlotsByDate]="freeSlotsByDate()"
+                [currentDate]="selectedDate() ? parseAsDate(selectedDate()) : today"
+                (slotClicked)="onCalendarSlotPicked($event)"
+              />
             </div>
+
+            @if (selectedSlot(); as picked) {
+              <div class="slot-picked-summary">
+                <app-icon name="check-circle" [size]="14"></app-icon>
+                <span>
+                  Slot seleccionado:
+                  <strong
+                    >{{ picked.date }} ·
+                    {{ picked.start_time.substring(0, 5) }}</strong
+                  >
+                </span>
+              </div>
+            }
           }
         </div>
       }
