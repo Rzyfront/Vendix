@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet, Image } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
+import { colors, colorScales, spacing, typography, borderRadius, interFonts } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 
 interface PosHeaderProps {
@@ -12,7 +12,30 @@ interface PosHeaderProps {
   notificationCount?: number;
   userInitials: string;
   title?: string;
+  /**
+   * @deprecated Usa `parentLabel` + `parentIcon` en su lugar.
+   * Se conserva como fallback para layouts que aún pasan breadcrumb como string.
+   */
   breadcrumb?: string;
+  /**
+   * Etiqueta del segmento padre en el breadcrumb (categoría/sección).
+   * Paridad con web `HeaderComponent` (breadcrumb.service):
+   *   parent.label  +  separator  +  [home-icon blue]  +  current.label
+   *
+   * Ejemplo: "Panel administrativo" en ORG_ADMIN, "Tienda" en STORE_ADMIN,
+   * "Super admin" en SUPER_ADMIN.
+   */
+  parentLabel?: string;
+  /**
+   * Ícono opcional para el segmento padre del breadcrumb (opacity-70 en web).
+   * Si no se provee, no se renderiza ícono — sólo texto + separator.
+   */
+  parentIcon?: string;
+  /**
+   * Ícono del segmento current del breadcrumb (default: 'home').
+   * En web siempre es azul (text-blue-600) cuando es home del dashboard.
+   */
+  currentIcon?: string;
   /**
    * Slot opcional para acciones extra que se renderizan en la zona derecha
    * del header, ANTES del botón de búsqueda. Se usa para inyectar el
@@ -30,9 +53,19 @@ export function PosHeader({
   userInitials,
   title = 'Punto de venta',
   breadcrumb,
+  parentLabel,
+  parentIcon,
+  currentIcon = 'home',
   extraActions,
 }: PosHeaderProps) {
   const insets = useSafeAreaInsets();
+
+  // Resolución de breadcrumb (3 niveles de prioridad):
+  //   1) parentLabel + parentIcon (nuevo contrato — preferido)
+  //   2) breadcrumb string con formato "Parent / Current" (legacy store-admin)
+  //   3) breadcrumb string simple (legacy sin estructura)
+  const resolved = resolveBreadcrumb(parentLabel, parentIcon, breadcrumb);
+
   return (
     <View style={[styles.header, { paddingTop: insets.top + spacing[2] }]}>
       {/* Left: Logo + Chevron + (Breadcrumb / Title) */}
@@ -46,8 +79,42 @@ export function PosHeader({
         </Pressable>
         <Icon name="chevron-right" size={16} color={colorScales.gray[300]} style={styles.separator} />
         <View style={styles.titleContainer}>
-          {breadcrumb ? <Text style={styles.breadcrumb} numberOfLines={1}>{breadcrumb}</Text> : null}
-          <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          {resolved ? (
+            <View style={styles.breadcrumbRow}>
+              {resolved.parentIcon ? (
+                <Icon
+                  name={resolved.parentIcon}
+                  size={12}
+                  color={colorScales.gray[500]}
+                  style={styles.breadcrumbIcon}
+                />
+              ) : null}
+              {resolved.parent ? (
+                <Text style={styles.breadcrumbParent} numberOfLines={1}>
+                  {resolved.parent}
+                </Text>
+              ) : null}
+              {resolved.parent && resolved.current ? (
+                <Text style={styles.breadcrumbSep} numberOfLines={1}>
+                  /
+                </Text>
+              ) : null}
+              <Icon
+                name={currentIcon}
+                size={12}
+                color={colors.primary}
+                style={styles.breadcrumbIcon}
+              />
+              {resolved.current ? (
+                <Text style={styles.breadcrumbCurrent} numberOfLines={1}>
+                  {resolved.current}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
+          <Text style={styles.title} numberOfLines={1}>
+            {title}
+          </Text>
         </View>
       </View>
 
@@ -82,6 +149,30 @@ export function PosHeader({
       </View>
     </View>
   );
+}
+
+/**
+ * Resuelve el breadcrumb en la estructura { parent, parentIcon, current }.
+ * Soporta:
+ *   - parentLabel explícito (contrato nuevo) — siempre wins
+ *   - string legacy con formato "Parent / Current" — se parsea
+ *   - string legacy simple — se trata como current sin parent
+ */
+function resolveBreadcrumb(
+  parentLabel: string | undefined,
+  parentIcon: string | undefined,
+  breadcrumb: string | undefined,
+): { parent?: string; parentIcon?: string; current?: string } | null {
+  if (parentLabel || parentIcon) {
+    return { parent: parentLabel, parentIcon };
+  }
+  if (breadcrumb) {
+    const parts = breadcrumb.split('/').map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0) return null;
+    if (parts.length === 1) return { current: parts[0] };
+    return { parent: parts[0], current: parts.slice(1).join(' / ') };
+  }
+  return null;
 }
 
 const styles = StyleSheet.create({
@@ -121,16 +212,38 @@ const styles = StyleSheet.create({
     flex: 1,
     minWidth: 0,
   },
-  breadcrumb: {
-    fontSize: typography.fontSize.xs,
+  // ── Breadcrumb (espejo del web HeaderComponent) ────────────────────────
+  breadcrumbRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    minWidth: 0,
+  },
+  breadcrumbIcon: {
+    marginTop: -1, // visual baseline alignment con texto
+  },
+  breadcrumbParent: {
+    fontSize: 11,
+    fontFamily: interFonts.medium,
     color: colorScales.gray[500],
-    fontWeight: typography.fontWeight.normal,
+    maxWidth: 120,
+  },
+  breadcrumbSep: {
+    fontSize: 11,
+    color: colorScales.gray[400],
+    marginHorizontal: 1,
+  },
+  breadcrumbCurrent: {
+    fontSize: 11,
+    fontFamily: interFonts.semibold,
+    color: colorScales.gray[900],
   },
   title: {
-    fontSize: typography.fontSize.base,
+    fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
+    letterSpacing: -0.2,
   },
   headerRight: {
     flexDirection: 'row',

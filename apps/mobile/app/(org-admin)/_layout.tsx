@@ -17,8 +17,26 @@ const routeTitles: Record<string, string> = {
   'payment-methods': 'Métodos de pago',
 };
 
-// Breadcrumb = sección padre (sin rutas hijas con padre en org-admin actualmente, pero se deja para futuro)
-const routeBreadcrumbs: Record<string, string> = {};
+/**
+ * Breadcrumb = sección padre. Paridad con web `BreadcrumbService.routes`
+ * (parent + icon). El current se renderiza implícitamente con `currentIcon`
+ * desde el `title` actual + ícono home (default).
+ *
+ * "Panel administrativo" es la sección padre del ORG_ADMIN — mismo label que
+ * aparece en el side menu del web.
+ */
+const routeBreadcrumbParent: Record<string, { label: string; icon?: string }> = {
+  dashboard: { label: 'Panel administrativo', icon: 'layout-dashboard' },
+  stores: { label: 'Panel administrativo', icon: 'layout-dashboard' },
+  users: { label: 'Panel administrativo', icon: 'layout-dashboard' },
+  roles: { label: 'Panel administrativo', icon: 'layout-dashboard' },
+  orders: { label: 'Panel administrativo', icon: 'layout-dashboard' },
+  subscriptions: { label: 'Panel administrativo', icon: 'layout-dashboard' },
+  settings: { label: 'Panel administrativo', icon: 'layout-dashboard' },
+  'operating-scope': { label: 'Panel administrativo', icon: 'layout-dashboard' },
+  application: { label: 'Configuración', icon: 'settings' },
+  'payment-methods': { label: 'Configuración', icon: 'settings' },
+};
 
 export default function OrgAdminLayout() {
   const router = useRouter();
@@ -42,10 +60,16 @@ export default function OrgAdminLayout() {
 
   const currentSegment = pathname.split('/').pop() || 'dashboard';
   const title = routeTitles[currentSegment] || 'Vendix';
-  const breadcrumb = routeBreadcrumbs[currentSegment];
+  const parent = routeBreadcrumbParent[currentSegment];
 
   return (
-    <AdminShell title={title} breadcrumb={breadcrumb} variant="org">
+    <AdminShell
+      title={title}
+      parentLabel={parent?.label}
+      parentIcon={parent?.icon}
+      currentIcon="home"
+      variant="org"
+    >
       <Slot />
     </AdminShell>
   );

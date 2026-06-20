@@ -15,8 +15,17 @@ const routeTitles: Record<string, string> = {
   settings: 'Configuración',
 };
 
-// Breadcrumb = sección padre (sin rutas hijas con padre en super-admin actualmente)
-const routeBreadcrumbs: Record<string, string> = {};
+// Breadcrumb = sección padre. Paridad con web `BreadcrumbService.routes`.
+const routeBreadcrumbParent: Record<string, { label: string; icon?: string }> = {
+  dashboard: { label: 'Super admin', icon: 'shield' },
+  organizations: { label: 'Super admin', icon: 'shield' },
+  stores: { label: 'Super admin', icon: 'shield' },
+  users: { label: 'Super admin', icon: 'shield' },
+  subscriptions: { label: 'Super admin', icon: 'shield' },
+  'ai-engine': { label: 'Super admin', icon: 'shield' },
+  monitoring: { label: 'Super admin', icon: 'shield' },
+  settings: { label: 'Super admin', icon: 'shield' },
+};
 
 export default function SuperAdminLayout() {
   const router = useRouter();
@@ -40,10 +49,16 @@ export default function SuperAdminLayout() {
 
   const currentSegment = pathname.split('/').pop() || 'dashboard';
   const title = routeTitles[currentSegment] || 'Vendix';
-  const breadcrumb = routeBreadcrumbs[currentSegment];
+  const parent = routeBreadcrumbParent[currentSegment];
 
   return (
-    <AdminShell title={title} breadcrumb={breadcrumb} variant="super">
+    <AdminShell
+      title={title}
+      parentLabel={parent?.label}
+      parentIcon={parent?.icon}
+      currentIcon="home"
+      variant="super"
+    >
       <Slot />
     </AdminShell>
   );

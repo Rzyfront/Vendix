@@ -17,11 +17,38 @@ import { ToastContainer } from '@/shared/components/toast/toast';
 interface AdminShellProps {
   children: ReactNode;
   title?: string;
+  /**
+   * @deprecated Usa `parentLabel` + `parentIcon` para paridad con web.
+   * Se mantiene como fallback para callers que aún pasan breadcrumb como
+   * string formateado "Parent / Current".
+   */
   breadcrumb?: string;
+  /**
+   * Etiqueta del segmento padre del breadcrumb (categoría/sección).
+   * Paridad con web `HeaderComponent` + `BreadcrumbService.routes`.
+   * Ej: "Panel administrativo" (ORG_ADMIN), "Tienda" (STORE_ADMIN).
+   */
+  parentLabel?: string;
+  /**
+   * Ícono opcional para el segmento padre del breadcrumb.
+   */
+  parentIcon?: string;
+  /**
+   * Ícono del segmento current (default 'home'). En web siempre azul.
+   */
+  currentIcon?: string;
   variant?: 'store' | 'org' | 'super';
 }
 
-export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = 'store' }: AdminShellProps) {
+export function AdminShell({
+  children,
+  title = 'Vendix',
+  breadcrumb,
+  parentLabel,
+  parentIcon,
+  currentIcon,
+  variant = 'store',
+}: AdminShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -105,6 +132,9 @@ export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = '
         userInitials={userInitials}
         title={title}
         breadcrumb={breadcrumb}
+        parentLabel={parentLabel}
+        parentIcon={parentIcon}
+        currentIcon={currentIcon}
         extraActions={
           showScopeChip ? <ScopeChip scope={operatingScope} /> : undefined
         }

@@ -29,29 +29,30 @@ const routeTitles: Record<string, string> = {
   help: 'Ayuda',
 };
 
-// Categoría padre para el breadcrumb (se renderiza como "Categoría / Título" encima del título)
-const routeBreadcrumbCategory: Record<string, string> = {
-  dashboard: 'Panel Administrativo',
-  pos: 'Tienda',
-  products: 'Tienda',
-  orders: 'Tienda',
-  inventory: 'Tienda',
-  pop: 'Inventario',
-  purchase: 'Inventario',
-  adjustments: 'Inventario',
-  transfers: 'Inventario',
-  movements: 'Inventario',
-  suppliers: 'Inventario',
-  locations: 'Inventario',
-  customers: 'Tienda',
-  invoicing: 'Tienda',
-  accounting: 'Tienda',
-  expenses: 'Tienda',
-  analytics: 'Tienda',
-  online_store: 'Tienda',
-  marketing: 'Tienda',
-  settings: 'Tienda',
-  help: 'Tienda',
+// Breadcrumb = sección padre. Paridad con web `BreadcrumbService.routes`.
+// El current se renderiza implícitamente con el ícono home + `title` actual.
+const routeBreadcrumbParent: Record<string, { label: string; icon?: string }> = {
+  dashboard: { label: 'Panel Administrativo', icon: 'layout-dashboard' },
+  pos: { label: 'Tienda', icon: 'store' },
+  products: { label: 'Tienda', icon: 'store' },
+  orders: { label: 'Tienda', icon: 'store' },
+  inventory: { label: 'Tienda', icon: 'store' },
+  pop: { label: 'Inventario', icon: 'package' },
+  purchase: { label: 'Inventario', icon: 'package' },
+  adjustments: { label: 'Inventario', icon: 'package' },
+  transfers: { label: 'Inventario', icon: 'package' },
+  movements: { label: 'Inventario', icon: 'package' },
+  suppliers: { label: 'Inventario', icon: 'package' },
+  locations: { label: 'Inventario', icon: 'package' },
+  customers: { label: 'Tienda', icon: 'store' },
+  invoicing: { label: 'Tienda', icon: 'store' },
+  accounting: { label: 'Tienda', icon: 'store' },
+  expenses: { label: 'Tienda', icon: 'store' },
+  analytics: { label: 'Tienda', icon: 'store' },
+  online_store: { label: 'Tienda', icon: 'store' },
+  marketing: { label: 'Tienda', icon: 'store' },
+  settings: { label: 'Tienda', icon: 'store' },
+  help: { label: 'Tienda', icon: 'store' },
 };
 
 export default function StoreAdminLayout() {
@@ -76,11 +77,16 @@ export default function StoreAdminLayout() {
 
   const currentSegment = pathname.split('/').pop() || 'dashboard';
   const title = routeTitles[currentSegment] || 'Vendix';
-  const category = routeBreadcrumbCategory[currentSegment];
-  const breadcrumb = category ? `${category} / ${title}` : undefined;
+  const parent = routeBreadcrumbParent[currentSegment];
 
   return (
-    <AdminShell title={title} breadcrumb={breadcrumb} variant="store">
+    <AdminShell
+      title={title}
+      parentLabel={parent?.label}
+      parentIcon={parent?.icon}
+      currentIcon="home"
+      variant="store"
+    >
       <Slot />
     </AdminShell>
   );
