@@ -16,6 +16,7 @@ export interface StoreSettings {
   receipts: ReceiptsSettings;
   app: AppSettings;
   operations?: OperationsSettings;
+  dispatch?: DispatchSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
 }
@@ -77,6 +78,21 @@ export interface OperationsSettings {
    * Mirrors backend `operations.ticket_closing_hour`. Default 3 (3 AM).
    */
   ticket_closing_hour?: number;
+}
+
+/**
+ * When an order is dispatched on a route, controls when its state advances to
+ * "delivered".
+ * - `live`: the order is marked delivered as soon as each route stop is settled.
+ * - `on_close`: the order only advances when the route sheet is closed/settled
+ *   (current behavior).
+ * Mirrors backend `store_settings.settings.dispatch.order_state_update_mode`.
+ * Default `on_close`.
+ */
+export type OrderStateUpdateMode = 'live' | 'on_close';
+
+export interface DispatchSettings {
+  order_state_update_mode: OrderStateUpdateMode;
 }
 
 export interface CheckoutSettings {

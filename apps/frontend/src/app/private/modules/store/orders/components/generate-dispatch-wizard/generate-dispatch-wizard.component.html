@@ -261,7 +261,7 @@
                   size="sm"
                   (clicked)="openVehicleModal()"
                 >
-                  <app-icon name="plus" [size]="16"></app-icon>
+                  <app-icon slot="icon" name="plus" [size]="16"></app-icon>
                   <span class="hidden sm:inline ml-1">Crear vehículo</span>
                 </app-button>
               </div>
@@ -328,7 +328,7 @@
     <div>
       @if (step() > 1) {
         <app-button variant="outline" (clicked)="back()" [disabled]="submitting()">
-          <app-icon name="arrow-left" [size]="16"></app-icon>
+          <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
           <span class="ml-1">Atrás</span>
         </app-button>
       }
@@ -342,7 +342,7 @@
       @if (step() < 3) {
         <app-button variant="primary" (clicked)="next()">
           Siguiente
-          <app-icon name="arrow-right" [size]="16" class="ml-1"></app-icon>
+          <app-icon slot="icon" name="arrow-right" [size]="16" class="ml-1"></app-icon>
         </app-button>
       } @else {
         <app-button

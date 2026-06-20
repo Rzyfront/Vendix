@@ -344,6 +344,13 @@ export function getDefaultStoreSettings(): StoreSettings {
       ticket_closing_hour: 3,
     },
 
+    // Dispatch - DSD route behavior. `on_close` preserves the legacy flow where
+    // the linked COD order only advances to delivered/finished when the route
+    // is closed. Set to `live` to reflect delivery in real time on each settle.
+    dispatch: {
+      order_state_update_mode: 'on_close',
+    },
+
     // Legacy: Mantener por compatibilidad (redundante con branding)
     app: {
       name: 'Vendix',

@@ -22,6 +22,7 @@ import {
   VoidDispatchRouteDto,
 } from '../dto';
 import { aggregateRouteTotals } from '../utils/route-stop-calc';
+import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 
 const ROUTE_INCLUDE = {
   vehicle: true,
@@ -68,6 +69,30 @@ export class RouteFlowService {
     return store_id;
   }
 
+  /**
+   * Read the store's `dispatch.order_state_update_mode` setting in a
+   * tenant-safe way. Uses `findFirst({ where: { store_id } })` (never
+   * `findUnique`, whose WhereUniqueInput breaks under the scope merge) and
+   * merges with defaults so a missing JSON key falls back to `'on_close'`
+   * (the legacy behavior). Read once per settle, not per stop.
+   */
+  private async getOrderStateUpdateMode(
+    store_id: number,
+  ): Promise<'live' | 'on_close'> {
+    try {
+      const row = await this.prisma.store_settings.findFirst({
+        where: { store_id },
+        select: { settings: true },
+      });
+      const settings = mergeStoreSettingsWithDefaults(row?.settings);
+      return settings.dispatch?.order_state_update_mode ?? 'on_close';
+    } catch {
+      // A settings read failure must NEVER break route settlement. Fall back to
+      // the legacy behavior (advance the order state only at route close).
+      return 'on_close';
+    }
+  }
+
   private async getRoute(id: number, store_id: number) {
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id },
@@ -109,6 +134,34 @@ export class RouteFlowService {
     await tx.orders.updateMany({
       where: { id: order_id, store_id, state: 'processing' },
       data: { state: 'shipped', updated_at: new Date() },
+    });
+  }
+
+  /**
+   * Advance a linked COD order `shipped → delivered` ONLY. Used for the
+   * `dispatch.order_state_update_mode = 'live'` setting so the order reflects
+   * "entregada" the moment a stop is settled, instead of waiting for the route
+   * close. Idempotent and store-scoped: if the order is not in `shipped`
+   * (not yet shipped, already delivered/finished, cancelled, etc.) this is a
+   * no-op. The route close (`advanceOrderToFinished`) still walks
+   * delivered → finished afterwards, so it composes with the live update.
+   */
+  private async advanceOrderToDelivered(
+    tx: Prisma.TransactionClient,
+    store_id: number,
+    order_id: number,
+  ): Promise<void> {
+    const order = await tx.orders.findFirst({
+      where: { id: order_id, store_id },
+      select: { id: true, state: true },
+    });
+    if (!order) return;
+    // Only `shipped → delivered` is valid here. Any other state is a no-op so
+    // re-settling never throws and never skips ahead to finished.
+    if (order.state !== 'shipped') return;
+    await tx.orders.updateMany({
+      where: { id: order_id, store_id, state: 'shipped' },
+      data: { state: 'delivered', updated_at: new Date() },
     });
   }
 
@@ -277,6 +330,9 @@ export class RouteFlowService {
       );
     }
 
+    // Read the COD order-state update mode once per settle (not per stop).
+    const orderStateUpdateMode = await this.getOrderStateUpdateMode(store_id);
+
     const stop = await this.prisma.dispatch_route_stops.findFirst({
       where: { id: stopId, route_id: id },
       include: {
@@ -287,6 +343,9 @@ export class RouteFlowService {
             grand_total: true,
             customer_id: true,
             sales_order_id: true,
+            // COD link: the real orders.id whose state the route drives. Needed
+            // for the `live` order_state_update_mode (advance to delivered here).
+            order_id: true,
             sales_order: { select: { id: true, order_number: true, status: true } },
             // For withholding-agent validation: a retenedor cliente must
             // arrive at 'delivered' or 'partial' WITH a populated
@@ -398,6 +457,20 @@ export class RouteFlowService {
 
       // Keep parent totals in sync so the detail page reflects live "Recaudado".
       await this.refreshRouteTotals(tx, id);
+
+      // Live order-state mode: reflect the COD order as "delivered" the moment
+      // the stop is settled as delivered/partial. `rejected` is intentionally
+      // excluded (a refused delivery does not deliver the order). The walk to
+      // `finished` still happens at route close. No-op for `on_close` mode.
+      if (orderStateUpdateMode === 'live') {
+        const order_id = stop.dispatch_note?.order_id;
+        if (
+          order_id &&
+          (dto.result === 'delivered' || dto.result === 'partial')
+        ) {
+          await this.advanceOrderToDelivered(tx, store_id, order_id);
+        }
+      }
 
       return updated_stop;
     });

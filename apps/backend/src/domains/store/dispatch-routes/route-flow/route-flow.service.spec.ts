@@ -68,6 +68,16 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       dispatch_route_stop_history: {
         create: jest.fn(),
       },
+      // store_settings drives the `dispatch.order_state_update_mode` lookup at
+      // the top of settleStop. Default: no row → merge defaults → 'on_close'.
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      // orders is only touched by advanceOrderToDelivered (live mode).
+      orders: {
+        findFirst: jest.fn(),
+        updateMany: jest.fn(),
+      },
       // $transaction executes the callback with the same mock acting as `tx`.
       $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
     };
@@ -257,5 +267,58 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
         data: expect.objectContaining({ status: 'delivered' }),
       }),
     );
+  });
+
+  // ── e) LIVE order-state mode ───────────────────────────────────────
+  it('e) live mode + linked COD order (shipped): advances order shipped→delivered on settle', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
+      buildStop({
+        dispatch_note: { ...buildStop().dispatch_note, order_id: 7777 },
+      }),
+    );
+    prismaMock.store_settings.findFirst.mockResolvedValue({
+      settings: { dispatch: { order_state_update_mode: 'live' } },
+    });
+    prismaMock.orders.findFirst.mockResolvedValue({ id: 7777, state: 'shipped' });
+
+    await service.settleStop(ROUTE_ID, STOP_ID, {
+      result: 'delivered',
+      collected_amount: 200,
+      payment_method: 'cash',
+    } as any);
+
+    // The COD order is advanced shipped → delivered inside the settle tx.
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 7777,
+          store_id: STORE_ID,
+          state: 'shipped',
+        }),
+        data: expect.objectContaining({ state: 'delivered' }),
+      }),
+    );
+  });
+
+  // ── f) ON_CLOSE mode (default): order state untouched at settle ─────
+  it('f) on_close mode (default) + linked COD order: does NOT advance order state on settle', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
+      buildStop({
+        dispatch_note: { ...buildStop().dispatch_note, order_id: 7777 },
+      }),
+    );
+    // store_settings default mock → null → 'on_close'.
+    prismaMock.orders.findFirst.mockResolvedValue({ id: 7777, state: 'shipped' });
+
+    await service.settleStop(ROUTE_ID, STOP_ID, {
+      result: 'delivered',
+      collected_amount: 200,
+      payment_method: 'cash',
+    } as any);
+
+    // Legacy behavior: order state advances only at route close, not at settle.
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
   });
 });
