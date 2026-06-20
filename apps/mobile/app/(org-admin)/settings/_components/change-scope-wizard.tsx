@@ -22,6 +22,7 @@ import {
   isForceReasonValid,
   type BlockerLike,
 } from '@/features/org/components/operating-scope-formatters';
+import { hasOperatingScopeWritePermission } from '@/features/org/components/operating-scope-permissions';
 import type {
   OperatingScopeValue,
   OperatingScopePreview,
@@ -130,11 +131,17 @@ export function ChangeScopeWizard({
   });
 
   // ── gates ──
+  // Paridad con web `canShowForceOption`:
+  //   - preview con blockers
+  //   - direction === 'DOWN' (server ignora force en UP)
+  //   - ningún blocker es PARTNER_LOCKED (rail de seguridad — nunca bypassable)
+  //   - el usuario tiene el permiso de escritura a nivel user (no solo org)
   const canShowForceOption =
     !!preview &&
     preview.blockers.length > 0 &&
     preview.direction === 'DOWN' &&
-    !preview.blockers.some((b) => b.code === 'PARTNER_LOCKED');
+    !preview.blockers.some((b) => b.code === 'PARTNER_LOCKED') &&
+    hasOperatingScopeWritePermission();
 
   const canApply = !!preview && preview.can_apply && preview.blockers.length === 0;
 

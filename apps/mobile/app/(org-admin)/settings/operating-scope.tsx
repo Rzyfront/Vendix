@@ -23,6 +23,8 @@ import {
   formatAuditDate,
 } from '@/features/org/components/operating-scope-formatters';
 import { ChangeScopeWizard } from './_components/change-scope-wizard';
+import { AuthService } from '@/core/auth/auth.service';
+import { useAuthStore } from '@/core/store/auth.store';
 import type {
   OperatingScopeValue,
   OperatingScopeAuditLogEntry,
@@ -91,8 +93,23 @@ export default function OperatingScopeScreen() {
     setWizardOpen(true);
   };
 
-  const onApplied = (_result: OperatingScopeApplyResult) => {
+  const onApplied = async (_result: OperatingScopeApplyResult) => {
+    // 1) Refetch del estado de la organización (paridad con web loadCurrent()).
     queryClient.invalidateQueries({ queryKey: ['org-operating-scope'] });
+
+    // 2) Refetch del user para que:
+    //    - el scope chip del header global (building/store) se actualice
+    //    - el tenant context (useTenantStore) refleje el nuevo operating_scope
+    //    - cualquier cache key que dependa del scope se invalide
+    // Paridad con web authFacade.refreshUser().
+    try {
+      const user = await AuthService.getMe();
+      useAuthStore.getState().setUser(user);
+    } catch (e) {
+      // No bloqueamos el flujo si el refresh falla — el pull-to-refresh
+      // lo recuperará. Logueamos para visibilidad.
+      console.warn('[operating-scope] failed to refresh user after apply:', e);
+    }
   };
 
   // ── Loading state (paridad con web <app-spinner text="Cargando...">) ──
@@ -106,7 +123,10 @@ export default function OperatingScopeScreen() {
 
   const current = data?.current ?? 'STORE';
   const isPartner = !!data?.is_partner;
-  const editable = !!data?.editable && !isLoading && !isFetching;
+  // Paridad con web `editable = state?.editable === true && !loading()`.
+  // No añadimos !isFetching — durante un pull-to-refresh el toggle debe
+  // seguir disponible si el servidor ya dijo que es editable.
+  const editable = !!data?.editable && !isLoading;
   const auditLog = data?.audit_log_recent ?? [];
 
   const targetForWizard: OperatingScopeValue =
@@ -338,7 +358,12 @@ function ScopeCardButton({ value, active, disabled, onPress }: ScopeCardButtonPr
 
   return (
     <Pressable
-      onPress={onPress}
+      onPress={() => {
+        // Paridad con web `selectScope()`: si la card ya está activa,
+        // no abrimos el wizard (sería un NOOP).
+        if (active) return;
+        onPress();
+      }}
       disabled={disabled}
       style={({ pressed }) => [
         styles.scopeCard,
