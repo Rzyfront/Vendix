@@ -232,6 +232,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "7c50e883",
+      "created_by": "yoner",
+      "created_at": "2026-06-20T01:37:35Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
     }
   ]
 }
