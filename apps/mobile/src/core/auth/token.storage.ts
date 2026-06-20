@@ -1,5 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
-import { getItem, setItem, deleteItem } from '@/core/storage/secure-storage';
+import { getItem, setItem, deleteItem, whenUnlockedThisDeviceOnly } from '@/core/storage/secure-storage';
 
 const TOKEN_KEY = 'vendix_auth_token';
 const REFRESH_TOKEN_KEY = 'vendix_refresh_token';
@@ -10,7 +9,7 @@ export async function getToken(): Promise<string | null> {
 
 export async function setToken(token: string): Promise<void> {
   await setItem(TOKEN_KEY, token, {
-    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    keychainAccessible: whenUnlockedThisDeviceOnly(),
   });
 }
 
@@ -20,7 +19,7 @@ export async function getRefreshToken(): Promise<string | null> {
 
 export async function setRefreshToken(token: string): Promise<void> {
   await setItem(REFRESH_TOKEN_KEY, token, {
-    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+    keychainAccessible: whenUnlockedThisDeviceOnly(),
   });
 }
 
