@@ -18,6 +18,16 @@ interface SettingTile {
 
 const SETTINGS_TILES: SettingTile[] = [
   {
+    key: 'application',
+    title: 'General',
+    description:
+      'Personaliza el nombre visible y la paleta principal de tu organización.',
+    icon: 'palette',
+    iconColor: colorScales.blue[600],
+    iconBg: colorScales.blue[100],
+    href: '/(org-admin)/config/application',
+  },
+  {
     key: 'operating-scope',
     title: 'Modo operativo',
     description:
@@ -27,14 +37,24 @@ const SETTINGS_TILES: SettingTile[] = [
     iconBg: colorScales.green[100],
     href: '/(org-admin)/settings/operating-scope',
   },
+  {
+    key: 'payment-methods',
+    title: 'Métodos de pago',
+    description:
+      'Habilita y configura los medios de pago disponibles para tus tiendas.',
+    icon: 'credit-card',
+    iconColor: colorScales.amber[700],
+    iconBg: colorScales.amber[100],
+    href: '/(org-admin)/config/payment-methods',
+  },
 ];
 
 /**
  * Hub de Configuración (paridad con la sección Configuración del sidebar web).
  *
  * Lista las sub-secciones operativas disponibles a nivel de organización.
- * Por ahora solo se expone "Modo Operativo" — el resto del módulo fiscal
- * (modo fiscal, datos fiscales, wizard DIAN) se omite por alcance mobile v1.
+ * Implementa 3 de los 4 sub-módulos web (General, Modo Operativo, Métodos de Pago).
+ * El módulo fiscal (modo fiscal, datos fiscales, wizard DIAN) se omite por alcance mobile v1.
  */
 export default function SettingsHubScreen() {
   const router = useRouter();

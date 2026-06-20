@@ -147,6 +147,18 @@ export const Endpoints = {
       ROLE_UPDATE: '/store/settings/roles/:id',
       ROLE_DELETE: '/store/settings/roles/:id',
     },
+    STORE_PAYMENT_METHODS: {
+      LIST: '/store/payment-methods',
+      AVAILABLE: '/store/payment-methods/available',
+      STATS: '/store/payment-methods/stats',
+      GET: '/store/payment-methods/:id',
+      ENABLE_SYSTEM: '/store/payment-methods/enable/:systemMethodId',
+      UPDATE: '/store/payment-methods/:id',
+      DISABLE: '/store/payment-methods/:id/disable',
+      ENABLE: '/store/payment-methods/:id/enable',
+      DELETE: '/store/payment-methods/:id',
+      REORDER: '/store/payment-methods/reorder',
+    },
     INVENTORY: {
       STATS: '/store/inventory/stats',
       ADJUSTMENTS: {

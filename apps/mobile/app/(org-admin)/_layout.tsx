@@ -13,6 +13,8 @@ const routeTitles: Record<string, string> = {
   subscriptions: 'Suscripciones',
   settings: 'Configuración',
   'operating-scope': 'Modo operativo',
+  application: 'General',
+  'payment-methods': 'Métodos de pago',
 };
 
 // Breadcrumb = sección padre (sin rutas hijas con padre en org-admin actualmente, pero se deja para futuro)

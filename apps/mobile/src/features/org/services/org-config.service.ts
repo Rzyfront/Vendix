@@ -2,6 +2,8 @@ import { apiGet, apiPost, apiPut, ListParams } from '@/core/api/http';
 import { Endpoints } from '@/core/api/endpoints';
 import type {
   OrganizationSettings,
+  OrganizationSettingsFull,
+  OrganizationBranding,
   PaymentMethod,
   FiscalScopeInfo,
   FiscalManagementStatus,
@@ -13,11 +15,19 @@ import type {
 } from '@/core/models/org-admin/config.types';
 
 export const OrgConfigService = {
-  // Application (general settings)
+  // Application / General (branding + appearance)
   getSettings: async () =>
     apiGet<OrganizationSettings>(Endpoints.ORGANIZATION.SETTINGS.GET),
   updateSettings: async (body: Partial<OrganizationSettings>) =>
     apiPut<OrganizationSettings>(Endpoints.ORGANIZATION.SETTINGS.UPDATE, body),
+
+  // Full settings (branding + inventory + fonts + panel_ui + payroll)
+  getFullSettings: async () =>
+    apiGet<OrganizationSettingsFull>(Endpoints.ORGANIZATION.SETTINGS.GET),
+  saveBranding: async (branding: OrganizationBranding) =>
+    apiPut<OrganizationSettingsFull>(Endpoints.ORGANIZATION.SETTINGS.UPDATE, {
+      settings: { branding },
+    }),
 
   // Operating scope (paridad visual con web)
   getOperatingScope: async () =>
@@ -53,7 +63,7 @@ export const OrgConfigService = {
   getFiscalStatus: async () =>
     apiGet<FiscalManagementStatus>(Endpoints.ORGANIZATION.SETTINGS.FISCAL_STATUS),
 
-  // Payment methods
+  // Payment methods (legacy — via /organization/payment-policies)
   listPaymentMethods: async (params?: ListParams) =>
     apiGet<PaymentMethod[]>(Endpoints.ORGANIZATION.SETTINGS.PAYMENT_POLICIES, params),
 

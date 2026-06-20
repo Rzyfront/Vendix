@@ -163,7 +163,11 @@ const baseOrgMenuItems: MenuItem[] = [
   {
     label: 'Configuración',
     icon: 'settings',
-    href: '/(org-admin)/settings',
+    children: [
+      { label: 'General', icon: 'palette', href: '/(org-admin)/config/application' },
+      { label: 'Modo operativo', icon: 'building-2', href: '/(org-admin)/settings/operating-scope' },
+      { label: 'Métodos de pago', icon: 'credit-card', href: '/(org-admin)/config/payment-methods' },
+    ],
   },
 ];
 
