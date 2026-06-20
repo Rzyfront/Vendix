@@ -3,9 +3,13 @@ import { Endpoints } from '@/core/api/endpoints';
 import type {
   OrganizationSettings,
   PaymentMethod,
-  OperatingScopeInfo,
   FiscalScopeInfo,
   FiscalManagementStatus,
+  OperatingScopeCurrentState,
+  OperatingScopePreview,
+  OperatingScopeApplyResult,
+  ApplyOperatingScopeDto,
+  OperatingScopeValue,
 } from '@/core/models/org-admin/config.types';
 
 export const OrgConfigService = {
@@ -14,9 +18,31 @@ export const OrgConfigService = {
     apiGet<OrganizationSettings>(Endpoints.ORGANIZATION.SETTINGS.GET),
   updateSettings: async (body: Partial<OrganizationSettings>) =>
     apiPut<OrganizationSettings>(Endpoints.ORGANIZATION.SETTINGS.UPDATE, body),
-  // Operating scope
+
+  // Operating scope (paridad visual con web)
   getOperatingScope: async () =>
-    apiGet<OperatingScopeInfo>(Endpoints.ORGANIZATION.SETTINGS.OPERATING_SCOPE),
+    apiGet<OperatingScopeCurrentState>(Endpoints.ORGANIZATION.SETTINGS.OPERATING_SCOPE),
+  previewOperatingScope: async (targetScope: OperatingScopeValue, reason?: string) =>
+    apiPost<OperatingScopePreview>(Endpoints.ORGANIZATION.SETTINGS.OPERATING_SCOPE_PREVIEW, {
+      target_scope: targetScope,
+      reason: reason?.trim() || undefined,
+    } as ApplyOperatingScopeDto),
+  applyOperatingScope: async (
+    targetScope: OperatingScopeValue,
+    reason?: string,
+    force = false,
+  ) => {
+    const body: ApplyOperatingScopeDto = {
+      target_scope: targetScope,
+      reason: reason?.trim() || undefined,
+    };
+    if (force === true) body.force = true;
+    return apiPost<OperatingScopeApplyResult>(
+      Endpoints.ORGANIZATION.SETTINGS.OPERATING_SCOPE_APPLY,
+      body,
+    );
+  },
+
   // Fiscal scope
   getFiscalScope: async () =>
     apiGet<FiscalScopeInfo>(Endpoints.ORGANIZATION.SETTINGS.FISCAL_SCOPE),
@@ -26,9 +52,11 @@ export const OrgConfigService = {
     apiPut(Endpoints.ORGANIZATION.SETTINGS.FISCAL_DATA, body),
   getFiscalStatus: async () =>
     apiGet<FiscalManagementStatus>(Endpoints.ORGANIZATION.SETTINGS.FISCAL_STATUS),
+
   // Payment methods
   listPaymentMethods: async (params?: ListParams) =>
     apiGet<PaymentMethod[]>(Endpoints.ORGANIZATION.SETTINGS.PAYMENT_POLICIES, params),
+
   // Fiscal management wizard
   startWizard: async (area: string) =>
     apiPost(Endpoints.ORGANIZATION.FISCAL.WIZARD_START.replace(':area', area)),
@@ -40,7 +68,7 @@ export const OrgConfigService = {
     apiPost(Endpoints.ORGANIZATION.FISCAL.WIZARD_FINALIZE.replace(':area', area)),
   checkIrreversibility: async (area: string) =>
     apiGet<{ irreversible: boolean; reason?: string }>(
-      Endpoints.ORGANIZATION.FISCAL.WIZARD_IRREVERSIBILITY.replace(':area', area)
+      Endpoints.ORGANIZATION.FISCAL.WIZARD_IRREVERSIBILITY.replace(':area', area),
     ),
   getWizardPrefill: async () =>
     apiGet<unknown>(Endpoints.ORGANIZATION.FISCAL.WIZARD_PREFLL),

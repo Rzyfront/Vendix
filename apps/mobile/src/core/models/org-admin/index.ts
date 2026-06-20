@@ -13,7 +13,6 @@ export * from './profile.types';
 export * from './purchase-orders.types';
 export * from './reports.types';
 export * from './roles.types';
-export * from './settings.types';
 export * from './store.types';
 export * from './subscriptions.types';
 export * from './users.types';

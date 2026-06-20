@@ -12,6 +12,7 @@ const routeTitles: Record<string, string> = {
   orders: 'Órdenes',
   subscriptions: 'Suscripciones',
   settings: 'Configuración',
+  'operating-scope': 'Modo operativo',
 };
 
 // Breadcrumb = sección padre (sin rutas hijas con padre en org-admin actualmente, pero se deja para futuro)

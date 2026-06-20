@@ -31,14 +31,6 @@ export interface PaymentMethod {
   updated_at?: ISODateString;
 }
 
-export interface OperatingScopeInfo {
-  current_scope: 'STORE' | 'ORGANIZATION';
-  is_locked: boolean;
-  can_switch: boolean;
-  reason?: string;
-  available_scopes: Array<'STORE' | 'ORGANIZATION'>;
-}
-
 export interface FiscalScopeInfo {
   current_scope: 'STORE' | 'ORGANIZATION';
   is_locked: boolean;
@@ -60,4 +52,78 @@ export interface FiscalManagementStatus {
   started_at?: ISODateString;
   completed_at?: ISODateString;
   progress_percent: number;
+}
+
+// ============================================================================
+// Operating Scope (paridad visual web → mobile)
+// Espejo 1:1 de apps/frontend/.../operating-scope/services/operating-scope.service.ts
+// ============================================================================
+
+export type OperatingScopeValue = 'STORE' | 'ORGANIZATION';
+export type OperatingScopeDirection = 'NOOP' | 'UP' | 'DOWN';
+
+export interface OperatingScopeAuditLogEntry {
+  id: number;
+  previous_value: OperatingScopeValue | null;
+  new_value: OperatingScopeValue;
+  changed_by_user_id: number | null;
+  changed_at: string;
+  reason: string | null;
+}
+
+export interface OperatingScopeCurrentState {
+  current: OperatingScopeValue;
+  is_partner: boolean;
+  account_type: string | null;
+  audit_log_recent: OperatingScopeAuditLogEntry[];
+  editable: boolean;
+}
+
+export type OperatingScopeBlockerCode =
+  | 'PARTNER_LOCKED'
+  | 'NOT_ENOUGH_STORES'
+  | 'NO_ACTIVE_STORES'
+  | 'OPEN_POS_TO_CENTRAL'
+  | 'OPEN_PURCHASE_ORDERS'
+  | 'OPEN_CROSS_STORE_TRANSFERS'
+  | 'STOCK_AT_CENTRAL'
+  | 'ACTIVE_RESERVATIONS_AT_CENTRAL'
+  | (string & {});
+
+export interface OperatingScopeBlockerDetails {
+  count?: number;
+  remediation_link?: string | null;
+  [extra: string]: unknown;
+}
+
+export interface OperatingScopeBlocker {
+  code: OperatingScopeBlockerCode;
+  message: string;
+  details?: OperatingScopeBlockerDetails;
+}
+
+export interface OperatingScopePreview {
+  organization_id: number;
+  current_scope: OperatingScopeValue;
+  target_scope: OperatingScopeValue;
+  is_partner: boolean;
+  direction: OperatingScopeDirection;
+  can_apply: boolean;
+  warnings: string[];
+  blockers: OperatingScopeBlocker[];
+}
+
+export interface OperatingScopeApplyResult {
+  organization_id: number;
+  previous_scope: OperatingScopeValue;
+  new_scope: OperatingScopeValue;
+  audit_log_id: number;
+  applied_at: string;
+  forced?: boolean;
+}
+
+export interface ApplyOperatingScopeDto {
+  target_scope: OperatingScopeValue;
+  reason?: string;
+  force?: boolean;
 }
