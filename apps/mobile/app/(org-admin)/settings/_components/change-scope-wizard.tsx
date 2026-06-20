@@ -1,16 +1,23 @@
 import { useState } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator, StyleSheet, TextInput } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  TextInput,
+  ActivityIndicator,
+} from 'react-native';
 import { useMutation } from '@tanstack/react-query';
 import { OrgConfigService } from '@/features/org/services/org-config.service';
-import {
-  OrgCenteredModal,
-} from '@/shared/components/org-centered-modal';
+import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
+import { Button } from '@/shared/components/button/button';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import {
+  scopeLabel,
   scopeShortLabel,
   blockerTitle,
-  directionArrow,
   forceReasonRemaining,
   isForceReasonValid,
   type BlockerLike,
@@ -24,14 +31,17 @@ import type {
 import { toastSuccess } from '@/shared/components/toast/toast.store';
 
 /**
- * Wizard de cambio de modo operativo (paridad visual con web).
+ * Wizard de cambio de modo operativo (paridad visual 1:1 con web).
  * 4 pasos:
- *   1 — Confirmar intención (current vs target + razón opcional).
- *   2 — Preview (blockers + warnings).
- *   3 — Force-confirm (solo cuando hay blockers DOWN y no son PARTNER_LOCKED).
- *   4 — Result (success o error).
+ *   1 — Confirmar intención (current vs target en grid 2-col + razón opcional).
+ *   2 — Preview (blockers como cards + warnings como cards + force option banner).
+ *   3 — Force-confirm (lista de blockers ignorados + checkbox + textarea + char counter).
+ *   4 — Result (icon rounded-full + h3 + párrafo + summary con audit_log_id).
+ *
+ * Espejo de `apps/frontend/.../operating-scope/components/change-scope-wizard.component.html`.
  */
 type WizardStep = 1 | 2 | 3 | 4;
+const STEP_NUMBERS = [1, 2, 3, 4] as const;
 
 interface ChangeScopeWizardProps {
   visible: boolean;
@@ -73,7 +83,7 @@ export function ChangeScopeWizard({
     setTimeout(reset, 250);
   };
 
-  // ---------- preview mutation ----------
+  // ── preview mutation ──
   const previewMutation = useMutation({
     mutationFn: async () => {
       return OrgConfigService.previewOperatingScope(targetScope, reason);
@@ -87,7 +97,7 @@ export function ChangeScopeWizard({
     },
   });
 
-  // ---------- apply mutation ----------
+  // ── apply mutation ──
   const applyMutation = useMutation({
     mutationFn: async ({ force }: { force: boolean }) => {
       const reasonToSend = force ? forceReason.trim() : reason;
@@ -106,8 +116,7 @@ export function ChangeScopeWizard({
     onError: (err: any) => {
       setApplyError(extractErrorMessage(err, 'No se pudo aplicar el cambio.'));
 
-      // 409 with blockers → refresh preview and return to step 2
-      const status = err?.status ?? err?.response?.status;
+      const status = err?.statusCode ?? err?.status ?? err?.response?.status;
       const blockers = err?.error?.blockers ?? err?.response?.data?.blockers;
       if (status === 409 && Array.isArray(blockers) && preview) {
         setPreview({
@@ -120,7 +129,7 @@ export function ChangeScopeWizard({
     },
   });
 
-  // ---------- gates ----------
+  // ── gates ──
   const canShowForceOption =
     !!preview &&
     preview.blockers.length > 0 &&
@@ -133,7 +142,7 @@ export function ChangeScopeWizard({
 
   const reasonRemaining = forceReasonRemaining(forceReason);
 
-  // ---------- handlers ----------
+  // ── handlers ──
   const goToPreview = () => {
     setPreviewError(null);
     setPreview(null);
@@ -160,70 +169,80 @@ export function ChangeScopeWizard({
     applyMutation.mutate({ force: true });
   };
 
-  // ---------- render helpers ----------
-  const renderStepDots = () => (
-    <View style={styles.stepDotsRow}>
-      {[1, 2, 3, 4].map((n) => {
-        const isActive = n === step;
-        const isPast = n < step;
+  const goBackToStep1 = () => {
+    setStep(1);
+    setPreviewError(null);
+  };
+
+  const goBackToPreview = () => {
+    setApplyError(null);
+    setStep(2);
+  };
+
+  // ── step indicator (paridad con web — numbered circles + connectors) ──
+  const renderStepIndicator = () => (
+    <View style={styles.stepIndicator}>
+      {STEP_NUMBERS.map((n, idx) => {
+        const isPast = step > n;
+        const isActive = step === n;
         return (
-          <View
-            key={n}
-            style={[
-              styles.stepDot,
-              isActive && styles.stepDotActive,
-              isPast && styles.stepDotPast,
-            ]}
-          />
+          <View key={n} style={styles.stepItem}>
+            <View
+              style={[
+                styles.stepCircle,
+                isPast && styles.stepCirclePast,
+                isActive && styles.stepCircleActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.stepCircleText,
+                  (isPast || isActive) && styles.stepCircleTextActive,
+                ]}
+              >
+                {n}
+              </Text>
+            </View>
+            {idx < STEP_NUMBERS.length - 1 ? (
+              <View
+                style={[
+                  styles.stepConnector,
+                  isPast && styles.stepConnectorPast,
+                ]}
+              />
+            ) : null}
+          </View>
         );
       })}
     </View>
   );
 
-  const renderStepLabel = () => {
-    switch (step) {
-      case 1:
-        return 'Paso 1 de 4 · Confirmar intención';
-      case 2:
-        return 'Paso 2 de 4 · Vista previa';
-      case 3:
-        return 'Paso 3 de 4 · Confirmación forzada';
-      case 4:
-        return 'Paso 4 de 4 · Resultado';
-    }
-  };
-
-  // ---------- step content ----------
+  // ── step 1: confirm intent ──
   const renderStep1 = () => (
     <View>
       <Text style={styles.bodyText}>
-        Vas a cambiar el modo operativo de la organización. Esta acción afecta cómo se gestiona el inventario, la contabilidad, las compras y los reportes.
+        Vas a cambiar el modo operativo de la organización. Este cambio modifica
+        cómo se consultan, agregan y consolidan los datos en inventario,
+        contabilidad, compras y reportes.
       </Text>
 
       <View style={styles.summaryCard}>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Modo actual</Text>
-          <View style={styles.summaryValueWrap}>
-            <Icon name="store" size={14} color={colorScales.gray[500]} />
-            <Text style={styles.summaryValue}>{scopeShortLabel(currentScope)}</Text>
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryCol}>
+            <Text style={styles.summaryLabel}>Actual</Text>
+            <Text style={styles.summaryValue}>{scopeLabel(currentScope)}</Text>
           </View>
-        </View>
-        <View style={styles.summaryArrow}>
-          <Icon name="arrow-down" size={16} color={colors.primary} />
-        </View>
-        <View style={styles.summaryRow}>
-          <Text style={styles.summaryLabel}>Modo destino</Text>
-          <View style={styles.summaryValueWrap}>
-            <Icon name="building-2" size={14} color={colors.primary} />
-            <Text style={styles.summaryValueStrong}>{scopeShortLabel(targetScope)}</Text>
+          <View style={styles.summaryCol}>
+            <Text style={styles.summaryLabel}>Destino</Text>
+            <Text style={styles.summaryValueStrong}>{scopeLabel(targetScope)}</Text>
           </View>
         </View>
       </View>
 
-      <Text style={styles.label}>Razón (opcional)</Text>
+      <Text style={styles.label}>Razón del cambio (opcional)</Text>
       <TextInput
         style={styles.textarea}
-        placeholder="Describe brevemente por qué necesitas cambiar el modo operativo…"
+        placeholder="Ej: la organización pasa a operar de forma consolidada por requisitos contables."
         placeholderTextColor={colorScales.gray[400]}
         value={reason}
         onChangeText={setReason}
@@ -231,290 +250,342 @@ export function ChangeScopeWizard({
         numberOfLines={3}
       />
 
-      {previewError ? (
-        <View style={styles.errorBox}>
-          <Icon name="alert-circle" size={16} color={colorScales.red[600]} />
-          <Text style={styles.errorText}>{previewError}</Text>
-        </View>
-      ) : null}
+      {previewError ? <AlertBox variant="danger" icon="alert-circle" text={previewError} /> : null}
     </View>
   );
 
+  // ── step 2: preview blockers/warnings ──
   const renderStep2 = () => {
     if (!preview) return null;
-
     const blockerList = preview.blockers ?? [];
     const warningList = preview.warnings ?? [];
-    const hasBlockers = blockerList.length > 0;
+
+    if (previewMutation.isPending) {
+      return (
+        <View style={styles.previewLoading}>
+          <ActivityIndicator size="large" color={colors.primary} />
+          <Text style={styles.loadingText}>Validando...</Text>
+        </View>
+      );
+    }
 
     return (
       <View>
-        <View style={styles.previewHeader}>
-          <Text style={styles.previewDirection}>{directionArrow(currentScope, targetScope)}</Text>
-          <View style={[styles.directionPill, preview.direction === 'DOWN' ? styles.directionPillDown : styles.directionPillUp]}>
-            <Text style={styles.directionPillText}>
-              {preview.direction === 'UP' ? 'UPGRADE' : preview.direction === 'DOWN' ? 'DOWNGRADE' : 'NOOP'}
+        <Text style={styles.bodyText}>
+          Resultado de la validación previa al cambio{' '}
+          <Text style={styles.bodyTextStrong}>
+            {scopeShortLabel(currentScope)} → {scopeShortLabel(targetScope)}
+          </Text>
+          .
+        </Text>
+
+        {blockerList.length > 0 ? (
+          <View>
+            <Text style={styles.sectionTitle}>
+              Bloqueadores ({blockerList.length})
             </Text>
+            <View style={styles.cardsStack}>
+              {blockerList.map((b: OperatingScopeBlocker, i: number) => {
+                const count = blockerCount(b);
+                const remediationLink = blockerRemediationLink(b);
+                return (
+                  <View key={`${b.code}-${i}`} style={styles.blockerCard}>
+                    <View style={styles.cardRow}>
+                      <Icon name="alert-circle" size={16} color={colorScales.red[600]} style={styles.cardIconTop} />
+                      <View style={styles.cardBody}>
+                        <View style={styles.cardHeaderRow}>
+                          <Text style={styles.blockerTitle}>
+                            {blockerTitle(b as BlockerLike)}
+                          </Text>
+                          {count !== null ? (
+                            <View style={styles.countPill}>
+                              <Text style={styles.countPillText}>{count}</Text>
+                            </View>
+                          ) : null}
+                        </View>
+                        <Text style={styles.blockerMessage}>{b.message}</Text>
+                        {remediationLink ? (
+                          <Pressable
+                            onPress={handleClose}
+                            hitSlop={4}
+                            style={styles.remediationLink}
+                          >
+                            <Text style={styles.remediationLinkText}>Resolver</Text>
+                            <Icon name="arrow-right" size={12} color={colorScales.red[700]} />
+                          </Pressable>
+                        ) : null}
+                      </View>
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
           </View>
-        </View>
+        ) : null}
 
         {warningList.length > 0 ? (
-          <View style={styles.warningsBox}>
-            <View style={styles.warningsHeader}>
-              <Icon name="alert-triangle" size={14} color={colorScales.amber[700]} />
-              <Text style={styles.warningsHeaderText}>Advertencias ({warningList.length})</Text>
+          <View style={styles.warningsBlock}>
+            <Text style={styles.warningsSectionTitle}>
+              Advertencias ({warningList.length})
+            </Text>
+            <View style={styles.cardsStack}>
+              {warningList.map((w, i) => (
+                <View key={i} style={styles.warningCard}>
+                  <View style={styles.cardRow}>
+                    <Icon name="alert-triangle" size={16} color={colorScales.amber[600]} style={styles.cardIconTop} />
+                    <Text style={styles.warningMessage}>{w}</Text>
+                  </View>
+                </View>
+              ))}
             </View>
-            {warningList.map((w, i) => (
-              <Text key={i} style={styles.warningText}>• {w}</Text>
-            ))}
           </View>
         ) : null}
 
-        {hasBlockers ? (
-          <View style={styles.blockersBox}>
-            <View style={styles.blockersHeader}>
-              <Icon name="x-circle" size={14} color={colorScales.red[600]} />
-              <Text style={styles.blockersHeaderText}>
-                Bloqueos ({blockerList.length})
-              </Text>
-            </View>
-            {blockerList.map((b: OperatingScopeBlocker, i: number) => (
-              <View key={i} style={styles.blockerRow}>
-                <Text style={styles.blockerTitle}>{blockerTitle(b as BlockerLike)}</Text>
-                <Text style={styles.blockerMessage}>{b.message}</Text>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <View style={styles.canApplyBox}>
+        {blockerList.length === 0 && warningList.length === 0 ? (
+          <View style={styles.successBanner}>
             <Icon name="check-circle" size={16} color={colorScales.green[600]} />
-            <Text style={styles.canApplyText}>No hay bloqueos — el cambio puede aplicarse.</Text>
-          </View>
-        )}
-
-        {applyError ? (
-          <View style={styles.errorBox}>
-            <Icon name="alert-circle" size={16} color={colorScales.red[600]} />
-            <Text style={styles.errorText}>{applyError}</Text>
+            <Text style={styles.successBannerText}>
+              La organización está lista para aplicar el cambio sin restricciones.
+            </Text>
           </View>
         ) : null}
+
+        {canShowForceOption ? (
+          <View style={styles.warningBanner}>
+            <Icon name="alert-triangle" size={16} color={colorScales.amber[700]} />
+            <Text style={styles.warningBannerText}>
+              <Text style={styles.warningBannerStrong}>¿No puedes resolver los bloqueadores?</Text>{' '}
+              Puedes forzar el downgrade para ignorarlos. Esta acción queda
+              registrada en el historial de auditoría con tu usuario y razón.
+            </Text>
+          </View>
+        ) : null}
+
+        {applyError ? <AlertBox variant="danger" icon="alert-circle" text={applyError} /> : null}
       </View>
     );
   };
 
-  const renderStep3 = () => (
-    <View>
-      <View style={styles.warningBanner}>
-        <Icon name="alert-triangle" size={16} color={colorScales.amber[700]} />
-        <Text style={styles.warningBannerText}>
-          Estás a punto de forzar la migración ignorando los bloqueos del servidor. Esta acción queda registrada en el log de auditoría con tu razón.
-        </Text>
-      </View>
+  // ── step 3: force confirmation ──
+  const renderStep3 = () => {
+    if (!preview) return null;
+    const blockerList = preview.blockers ?? [];
 
-      <View style={styles.checkboxRow}>
-        <Pressable
-          style={[styles.checkbox, understandsConsequences && styles.checkboxChecked]}
-          onPress={() => setUnderstandsConsequences(!understandsConsequences)}
-          hitSlop={8}
-        >
-          {understandsConsequences ? (
-            <Icon name="check" size={12} color="#fff" />
-          ) : null}
-        </Pressable>
-        <Text style={styles.checkboxLabel}>
-          Entiendo las consecuencias y autorizo el cambio forzado.
-        </Text>
-      </View>
-
-      <Text style={styles.label}>
-        Razón (mínimo {forceReasonRemaining('') === 0 ? 10 : 10} caracteres){' '}
-        <Text style={styles.labelRequired}>obligatoria</Text>
-      </Text>
-      <TextInput
-        style={styles.textarea}
-        placeholder="Mínimo 10 caracteres. Ej: migración por cierre de bodega central…"
-        placeholderTextColor={colorScales.gray[400]}
-        value={forceReason}
-        onChangeText={setForceReason}
-        multiline
-        numberOfLines={3}
-      />
-      <Text
-        style={[
-          styles.charCounter,
-          reasonRemaining > 0 && styles.charCounterWarn,
-        ]}
-      >
-        {reasonRemaining > 0
-          ? `Faltan ${reasonRemaining} caracteres`
-          : '✓ Listo para forzar'}
-      </Text>
-
-      {applyError ? (
-        <View style={styles.errorBox}>
-          <Icon name="alert-circle" size={16} color={colorScales.red[600]} />
-          <Text style={styles.errorText}>{applyError}</Text>
-        </View>
-      ) : null}
-    </View>
-  );
-
-  const renderStep4 = () => {
-    if (applyError && !appliedResult) {
-      return (
-        <View style={styles.resultErrorBox}>
-          <Icon name="x-circle" size={32} color={colorScales.red[600]} />
-          <Text style={styles.resultErrorTitle}>No se pudo aplicar el cambio</Text>
-          <Text style={styles.resultErrorMessage}>{applyError}</Text>
-        </View>
-      );
-    }
-    if (appliedResult) {
-      return (
-        <View style={styles.resultSuccessBox}>
-          <Icon name="check-circle" size={32} color={colorScales.green[600]} />
-          <Text style={styles.resultSuccessTitle}>
-            Modo operativo actualizado
+    return (
+      <View>
+        <View style={styles.dangerBanner}>
+          <Icon name="alert-triangle" size={16} color={colorScales.red[600]} />
+          <Text style={styles.dangerBannerText}>
+            <Text style={styles.dangerBannerStrong}>Vas a forzar el downgrade.</Text>{' '}
+            Los siguientes bloqueadores serán ignorados. Asegúrate de entender las
+            consecuencias antes de continuar.
           </Text>
-          <View style={styles.resultSummary}>
-            <View style={styles.resultRow}>
-              <Text style={styles.resultLabel}>Anterior</Text>
-              <Text style={styles.resultValue}>{scopeShortLabel(appliedResult.previous_scope)}</Text>
-            </View>
-            <View style={styles.resultRow}>
-              <Text style={styles.resultLabel}>Nuevo</Text>
-              <Text style={styles.resultValueStrong}>{scopeShortLabel(appliedResult.new_scope)}</Text>
-            </View>
-            <View style={styles.resultRow}>
-              <Text style={styles.resultLabel}>Aplicado</Text>
-              <Text style={styles.resultValue}>
-                {new Date(appliedResult.applied_at).toLocaleString()}
-              </Text>
-            </View>
-            {appliedResult.forced ? (
-              <View style={styles.forcedBadge}>
-                <Icon name="zap" size={12} color={colorScales.amber[700]} />
-                <Text style={styles.forcedBadgeText}>Aplicado con force=true</Text>
+        </View>
+
+        <Text style={styles.sectionTitle}>
+          Bloqueadores que serán ignorados ({blockerList.length})
+        </Text>
+        <View style={styles.cardsStack}>
+          {blockerList.map((b: OperatingScopeBlocker, i: number) => {
+            const count = blockerCount(b);
+            return (
+              <View key={`${b.code}-${i}`} style={styles.blockerCard}>
+                <View style={styles.cardRow}>
+                  <Icon name="alert-circle" size={16} color={colorScales.red[600]} style={styles.cardIconTop} />
+                  <View style={styles.cardBody}>
+                    <View style={styles.cardHeaderRow}>
+                      <Text style={styles.blockerTitle}>{blockerTitle(b as BlockerLike)}</Text>
+                      {count !== null ? (
+                        <View style={styles.countPill}>
+                          <Text style={styles.countPillText}>{count}</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={styles.blockerMessage}>{b.message}</Text>
+                  </View>
+                </View>
               </View>
+            );
+          })}
+        </View>
+
+        <Pressable
+          onPress={() => setUnderstandsConsequences(!understandsConsequences)}
+          style={[
+            styles.checkboxCard,
+            understandsConsequences && styles.checkboxCardChecked,
+          ]}
+        >
+          <View
+            style={[
+              styles.checkbox,
+              understandsConsequences && styles.checkboxChecked,
+            ]}
+          >
+            {understandsConsequences ? (
+              <Icon name="check" size={12} color="#fff" />
             ) : null}
           </View>
-        </View>
-      );
-    }
-    return null;
+          <View style={styles.checkboxTextWrap}>
+            <Text style={styles.checkboxStrong}>
+              Entiendo las consecuencias.
+            </Text>
+            <Text style={styles.checkboxMuted}>
+              El stock, las órdenes y reservas en bodega central podrían quedar
+              inaccesibles desde scope STORE. La acción quedará registrada en
+              auditoría.
+            </Text>
+          </View>
+        </Pressable>
+
+        <Text style={styles.label}>
+          Razón del force (obligatorio, mínimo 10 caracteres)
+        </Text>
+        <TextInput
+          style={styles.textarea}
+          placeholder="Ej: cierre operativo de bodega central; las reservas se liberarán manualmente."
+          placeholderTextColor={colorScales.gray[400]}
+          value={forceReason}
+          onChangeText={setForceReason}
+          multiline
+          numberOfLines={3}
+        />
+        {reasonRemaining > 0 ? (
+          <Text style={styles.charCounter}>
+            Faltan {reasonRemaining} caracteres para alcanzar el mínimo requerido.
+          </Text>
+        ) : null}
+
+        {applyError ? <AlertBox variant="danger" icon="alert-circle" text={applyError} /> : null}
+      </View>
+    );
   };
 
-  // ---------- footer ----------
+  // ── step 4: result ──
+  const renderStep4 = () => {
+    if (!appliedResult) return null;
+    const forced = !!appliedResult.forced;
+
+    return (
+      <View style={styles.resultWrap}>
+        <View style={styles.resultHeader}>
+          <View
+            style={[
+              styles.resultIconCircle,
+              forced ? styles.resultIconWarn : styles.resultIconOk,
+            ]}
+          >
+            <Icon
+              name={forced ? 'alert-triangle' : 'check-circle'}
+              size={32}
+              color={forced ? colorScales.amber[600] : colorScales.green[600]}
+            />
+          </View>
+          <Text style={styles.resultTitle}>
+            {forced ? 'Modo operativo forzado' : 'Modo operativo actualizado'}
+          </Text>
+          <Text style={styles.resultParagraph}>
+            La organización ahora opera como{' '}
+            <Text style={styles.resultParagraphStrong}>
+              {scopeLabel(appliedResult.new_scope)}
+            </Text>
+            .
+            {forced ? '\n' : null}
+            {forced ? (
+              <Text style={styles.resultForcedText}>
+                {' '}Se ignoraron bloqueadores. Revisa el historial de auditoría.
+              </Text>
+            ) : null}
+          </Text>
+        </View>
+
+        <View style={styles.resultSummary}>
+          <Text style={styles.resultSummaryLine}>
+            Anterior: <Text style={styles.resultSummaryStrong}>{scopeLabel(appliedResult.previous_scope)}</Text>
+          </Text>
+          <Text style={styles.resultSummaryLine}>
+            Audit log ID: <Text style={styles.resultSummaryStrong}>#{appliedResult.audit_log_id}</Text>
+          </Text>
+          {forced ? (
+            <Text style={[styles.resultSummaryLine, styles.resultSummaryForced]}>
+              <Text style={styles.resultSummaryForcedStrong}>Forzado:</Text> sí (registrado en audit_logs)
+            </Text>
+          ) : null}
+        </View>
+      </View>
+    );
+  };
+
+  // ── footer ──
   const renderFooter = () => {
     const isLoading = previewMutation.isPending || applyMutation.isPending;
 
     if (step === 1) {
       return (
-        <View style={styles.modalActions}>
-          <Pressable
-            style={[styles.modalBtn, styles.modalBtnSecondary]}
-            onPress={handleClose}
-            disabled={isLoading}
-          >
-            <Text style={styles.modalBtnSecondaryText}>Cancelar</Text>
-          </Pressable>
-          <Pressable
-            style={[
-              styles.modalBtn,
-              styles.modalBtnPrimary,
-              isLoading && styles.modalBtnDisabled,
-            ]}
+        <View style={styles.footerRow}>
+          <Button title="Cancelar" variant="ghost" onPress={handleClose} disabled={isLoading} />
+          <Button
+            title="Continuar"
+            variant="primary"
             onPress={goToPreview}
+            loading={previewMutation.isPending}
             disabled={isLoading}
-          >
-            {previewMutation.isPending ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.modalBtnPrimaryText}>Vista previa</Text>
-            )}
-          </Pressable>
+          />
         </View>
       );
     }
 
     if (step === 2) {
-      const showForceBtn = canShowForceOption;
       return (
-        <View style={styles.modalActions}>
-          <Pressable
-            style={[styles.modalBtn, styles.modalBtnSecondary]}
-            onPress={() => setStep(1)}
+        <View style={styles.footerRow}>
+          <Button
+            title="Atrás"
+            variant="ghost"
+            onPress={goBackToStep1}
             disabled={isLoading}
-          >
-            <Text style={styles.modalBtnSecondaryText}>Atrás</Text>
-          </Pressable>
-          {showForceBtn ? (
-            <Pressable
-              style={[styles.modalBtn, styles.modalBtnDanger]}
+          />
+          {canShowForceOption ? (
+            <WarningButton
+              title="Forzar downgrade"
               onPress={goToForceConfirm}
               disabled={isLoading}
-            >
-              <Text style={styles.modalBtnDangerText}>Forzar cambio</Text>
-            </Pressable>
-          ) : (
-            <Pressable
-              style={[
-                styles.modalBtn,
-                styles.modalBtnPrimary,
-                (!canApply || isLoading) && styles.modalBtnDisabled,
-              ]}
-              onPress={applyStandard}
-              disabled={!canApply || isLoading}
-            >
-              {applyMutation.isPending ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Text style={styles.modalBtnPrimaryText}>Aplicar cambio</Text>
-              )}
-            </Pressable>
-          )}
+            />
+          ) : null}
+          <Button
+            title="Aplicar cambio"
+            variant="primary"
+            onPress={applyStandard}
+            loading={applyMutation.isPending}
+            disabled={!canApply || isLoading}
+          />
         </View>
       );
     }
 
     if (step === 3) {
       return (
-        <View style={styles.modalActions}>
-          <Pressable
-            style={[styles.modalBtn, styles.modalBtnSecondary]}
-            onPress={() => setStep(2)}
+        <View style={styles.footerRow}>
+          <Button
+            title="Cancelar"
+            variant="ghost"
+            onPress={goBackToPreview}
             disabled={isLoading}
-          >
-            <Text style={styles.modalBtnSecondaryText}>Atrás</Text>
-          </Pressable>
-          <Pressable
-            style={[
-              styles.modalBtn,
-              styles.modalBtnDanger,
-              (!canForceApply || isLoading) && styles.modalBtnDisabled,
-            ]}
+          />
+          <Button
+            title="Force downgrade"
+            variant="destructive"
             onPress={forceApply}
+            loading={applyMutation.isPending}
             disabled={!canForceApply || isLoading}
-          >
-            {applyMutation.isPending ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.modalBtnDangerText}>Confirmar forzado</Text>
-            )}
-          </Pressable>
+          />
         </View>
       );
     }
 
     // step 4
     return (
-      <View style={styles.modalActions}>
-        <Pressable
-          style={[styles.modalBtn, styles.modalBtnPrimary, { flex: 1 }]}
-          onPress={handleClose}
-        >
-          <Text style={styles.modalBtnPrimaryText}>Cerrar</Text>
-        </Pressable>
+      <View style={styles.footerRow}>
+        <Button title="Cerrar" variant="primary" onPress={handleClose} />
       </View>
     );
   };
@@ -524,12 +595,12 @@ export function ChangeScopeWizard({
       visible={visible}
       onClose={handleClose}
       title="Cambiar modo operativo"
-      subtitle={renderStepLabel()}
+      subtitle={`${scopeLabel(currentScope)} → ${scopeLabel(targetScope)}`}
       size="md"
       footer={renderFooter()}
     >
       <ScrollView showsVerticalScrollIndicator={false}>
-        {renderStepDots()}
+        {renderStepIndicator()}
         {step === 1 && renderStep1()}
         {step === 2 && renderStep2()}
         {step === 3 && renderStep3()}
@@ -539,9 +610,111 @@ export function ChangeScopeWizard({
   );
 }
 
-// ----------------------------------------------------------------------------
+// ───────────────────────────────────────────────────────────────────────
+// Sub-component: WarningButton (paridad con <app-button variant="outline-warning">)
+// ───────────────────────────────────────────────────────────────────────
+
+interface WarningButtonProps {
+  title: string;
+  onPress: () => void;
+  disabled?: boolean;
+}
+
+function WarningButton({ title, onPress, disabled }: WarningButtonProps) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [
+        warningButtonStyles.button,
+        pressed && warningButtonStyles.pressed,
+        disabled && warningButtonStyles.disabled,
+      ]}
+    >
+      <Text style={warningButtonStyles.text}>{title}</Text>
+    </Pressable>
+  );
+}
+
+const warningButtonStyles = StyleSheet.create({
+  button: {
+    height: 40,
+    paddingHorizontal: spacing[4],
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colorScales.amber[500],
+  },
+  pressed: {
+    backgroundColor: colorScales.amber[50],
+  },
+  disabled: {
+    opacity: 0.5,
+  },
+  text: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.amber[700],
+  },
+});
+
+// ───────────────────────────────────────────────────────────────────────
+// Sub-component: AlertBox (paridad con <app-alert-banner>)
+// ───────────────────────────────────────────────────────────────────────
+
+interface AlertBoxProps {
+  variant: 'danger' | 'warning' | 'success';
+  icon: string;
+  text: string;
+}
+
+function AlertBox({ variant, icon, text }: AlertBoxProps) {
+  const palette = {
+    danger: { bg: colorScales.red[50], fg: colorScales.red[600], text: colorScales.red[700] },
+    warning: { bg: colorScales.amber[50], fg: colorScales.amber[600], text: colorScales.amber[700] },
+    success: { bg: colorScales.green[50], fg: colorScales.green[600], text: colorScales.green[700] },
+  }[variant];
+
+  return (
+    <View style={[alertBoxStyles.box, { backgroundColor: palette.bg }]}>
+      <Icon name={icon} size={16} color={palette.fg} />
+      <Text style={[alertBoxStyles.text, { color: palette.text }]}>{text}</Text>
+    </View>
+  );
+}
+
+const alertBoxStyles = StyleSheet.create({
+  box: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[2],
+    borderRadius: borderRadius.md,
+    padding: spacing[3],
+  },
+  text: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    lineHeight: 18,
+  },
+});
+
+// ───────────────────────────────────────────────────────────────────────
 // Helpers
-// ----------------------------------------------------------------------------
+// ───────────────────────────────────────────────────────────────────────
+
+function blockerCount(b: OperatingScopeBlocker): number | null {
+  const c = b.details?.count;
+  if (typeof c === 'number' && Number.isFinite(c)) return c;
+  return null;
+}
+
+function blockerRemediationLink(b: OperatingScopeBlocker): string | null {
+  const link = b.details?.remediation_link;
+  if (typeof link === 'string' && link.trim()) return link;
+  return null;
+}
 
 function extractErrorMessage(err: any, fallback: string): string {
   const payload = err?.error ?? err?.response?.data;
@@ -560,7 +733,7 @@ function extractErrorMessage(err: any, fallback: string): string {
     }
   }
 
-  const status = err?.status ?? err?.response?.status;
+  const status = err?.statusCode ?? err?.status ?? err?.response?.status;
   if (status === 0 || status === undefined) {
     return 'No se pudo conectar con el servidor. Revisa tu conexión.';
   }
@@ -586,85 +759,113 @@ function extractErrorMessage(err: any, fallback: string): string {
   return fallback;
 }
 
-// ----------------------------------------------------------------------------
+// ───────────────────────────────────────────────────────────────────────
 // Styles
-// ----------------------------------------------------------------------------
+// ───────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  // step indicator
-  stepDotsRow: {
+  // ── Step indicator (numbered circles + connectors) ──
+  stepIndicator: {
     flexDirection: 'row',
-    gap: spacing[2],
+    alignItems: 'center',
     marginBottom: spacing[4],
+  },
+  stepItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  stepCircle: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colorScales.gray[200],
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  stepDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colorScales.gray[200],
+  stepCircleActive: {
+    backgroundColor: colors.primary,
   },
-  stepDotActive: { backgroundColor: colors.primary, width: 24 },
-  stepDotPast: { backgroundColor: colors.primary },
-
-  // body
-  bodyText: {
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[700],
-    lineHeight: typography.lineHeight.normal * typography.fontSize.sm,
-    marginBottom: spacing[4],
+  stepCirclePast: {
+    backgroundColor: colors.primary,
   },
-
-  // summary card (step 1)
-  summaryCard: {
-    backgroundColor: colorScales.gray[50],
-    borderRadius: borderRadius.lg,
-    padding: spacing[4],
-    marginBottom: spacing[4],
-    borderWidth: 1,
-    borderColor: colorScales.gray[100],
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: spacing[2],
-  },
-  summaryLabel: {
-    fontSize: typography.fontSize.sm,
+  stepCircleText: {
+    fontSize: 12,
+    fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[500],
   },
-  summaryValueWrap: {
+  stepCircleTextActive: {
+    color: '#FFFFFF',
+  },
+  stepConnector: {
+    width: 32,
+    height: 2,
+    backgroundColor: colorScales.gray[200],
+    marginHorizontal: 2,
+  },
+  stepConnectorPast: {
+    backgroundColor: colors.primary,
+  },
+
+  // ── Body ──
+  bodyText: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    lineHeight: 18,
+    marginBottom: spacing[4],
+  },
+  bodyTextStrong: {
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  loadingText: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    marginTop: spacing[2],
+  },
+
+  // ── Summary card (step 1) ──
+  summaryCard: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    padding: spacing[4],
+    marginBottom: spacing[4],
+  },
+  summaryGrid: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
+    gap: spacing[4],
+  },
+  summaryCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  summaryLabel: {
+    fontSize: 10,
+    fontWeight: '700' as const,
+    color: colorScales.gray[400],
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
   },
   summaryValue: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colorScales.gray[700],
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+    marginTop: spacing[1],
   },
   summaryValueStrong: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.bold,
+    fontWeight: typography.fontWeight.semibold,
     color: colors.primary,
-  },
-  summaryArrow: {
-    alignItems: 'center',
-    paddingVertical: spacing[1],
+    marginTop: spacing[1],
   },
 
-  // form
+  // ── Form ──
   label: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
     color: colorScales.gray[700],
     marginBottom: spacing[2],
-  },
-  labelRequired: {
-    color: colorScales.red[600],
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.normal,
   },
   textarea: {
     backgroundColor: colors.card,
@@ -681,277 +882,295 @@ const styles = StyleSheet.create({
   },
   charCounter: {
     fontSize: typography.fontSize.xs,
-    color: colorScales.green[600],
-    marginBottom: spacing[3],
-    textAlign: 'right',
-  },
-  charCounterWarn: {
-    color: colorScales.amber[600],
+    color: colorScales.gray[500],
+    marginBottom: spacing[2],
   },
 
-  // preview (step 2)
-  previewHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  // ── Preview loading ──
+  previewLoading: {
     alignItems: 'center',
-    marginBottom: spacing[4],
+    paddingVertical: spacing[10],
   },
-  previewDirection: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.gray[900],
+
+  // ── Section titles ──
+  sectionTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.red[700],
+    marginBottom: spacing[2],
   },
-  directionPill: {
-    paddingHorizontal: spacing[2],
-    paddingVertical: 4,
-    borderRadius: borderRadius.full,
+  warningsSectionTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.amber[700],
+    marginBottom: spacing[2],
   },
-  directionPillUp: { backgroundColor: colorScales.green[100] },
-  directionPillDown: { backgroundColor: colorScales.amber[100] },
-  directionPillText: {
-    fontSize: 10,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.gray[700],
-    letterSpacing: 0.5,
-  },
-  warningsBox: {
-    backgroundColor: colorScales.amber[50],
-    borderRadius: borderRadius.md,
-    padding: spacing[3],
+
+  // ── Cards stack ──
+  cardsStack: {
+    gap: spacing[2],
     marginBottom: spacing[3],
-    borderWidth: 1,
-    borderColor: colorScales.amber[200],
   },
-  warningsHeader: {
+  cardRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[2],
+  },
+  cardIconTop: {
+    marginTop: 2,
+  },
+  cardBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[2],
-    marginBottom: spacing[2],
+    flexWrap: 'wrap',
   },
-  warningsHeaderText: {
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.amber[700],
-    textTransform: 'uppercase',
-  },
-  warningText: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.amber[700],
-    marginLeft: spacing[2],
-    marginBottom: 2,
-  },
-  blockersBox: {
+
+  // blocker card
+  blockerCard: {
     backgroundColor: colorScales.red[50],
     borderRadius: borderRadius.md,
-    padding: spacing[3],
-    marginBottom: spacing[3],
     borderWidth: 1,
     borderColor: colorScales.red[200],
-  },
-  blockersHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    marginBottom: spacing[2],
-  },
-  blockersHeaderText: {
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.red[700],
-    textTransform: 'uppercase',
-  },
-  blockerRow: {
-    paddingVertical: spacing[2],
-    borderTopWidth: 1,
-    borderTopColor: colorScales.red[100],
+    padding: spacing[3],
   },
   blockerTitle: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
     color: colorScales.red[800],
-    marginBottom: 2,
   },
   blockerMessage: {
-    fontSize: typography.fontSize.xs,
+    fontSize: typography.fontSize.sm,
+    color: colorScales.red[700],
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  countPill: {
+    backgroundColor: colorScales.red[100],
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+  },
+  countPillText: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold,
     color: colorScales.red[700],
   },
-  canApplyBox: {
+  remediationLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+    marginTop: spacing[2],
+  },
+  remediationLinkText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.red[700],
+    textDecorationLine: 'underline',
+  },
+
+  // warning card
+  warningCard: {
+    backgroundColor: colorScales.amber[50],
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.amber[200],
+    padding: spacing[3],
+  },
+  warningMessage: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    color: colorScales.amber[800],
+    lineHeight: 18,
+  },
+
+  // success banner
+  successBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[2],
     backgroundColor: colorScales.green[50],
     borderRadius: borderRadius.md,
-    padding: spacing[3],
-    marginBottom: spacing[3],
     borderWidth: 1,
     borderColor: colorScales.green[200],
+    padding: spacing[3],
+    marginBottom: spacing[3],
   },
-  canApplyText: {
+  successBannerText: {
+    flex: 1,
     fontSize: typography.fontSize.sm,
     color: colorScales.green[700],
-    flex: 1,
   },
 
-  // force-confirm (step 3)
+  // warning banner (force option)
   warningBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing[2],
     backgroundColor: colorScales.amber[50],
     borderRadius: borderRadius.md,
-    padding: spacing[3],
-    marginBottom: spacing[4],
     borderWidth: 1,
     borderColor: colorScales.amber[200],
+    padding: spacing[3],
+    marginBottom: spacing[3],
   },
   warningBannerText: {
     flex: 1,
     fontSize: typography.fontSize.sm,
     color: colorScales.amber[700],
+    lineHeight: 18,
   },
-  checkboxRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    marginBottom: spacing[4],
+  warningBannerStrong: {
+    fontWeight: typography.fontWeight.bold,
   },
-  checkbox: {
-    width: 20,
-    height: 20,
-    borderWidth: 2,
-    borderColor: colorScales.gray[300],
-    borderRadius: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxChecked: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  checkboxLabel: {
-    flex: 1,
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[700],
+  warningsBlock: {
+    marginTop: spacing[1],
   },
 
-  // result (step 4)
-  resultErrorBox: {
-    alignItems: 'center',
-    paddingVertical: spacing[4],
-  },
-  resultErrorTitle: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.red[700],
-    marginTop: spacing[2],
-  },
-  resultErrorMessage: {
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[600],
-    textAlign: 'center',
-    marginTop: spacing[2],
-  },
-  resultSuccessBox: {
-    alignItems: 'center',
-    paddingVertical: spacing[2],
-  },
-  resultSuccessTitle: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.green[700],
-    marginTop: spacing[2],
-    marginBottom: spacing[4],
-  },
-  resultSummary: {
-    width: '100%',
-    backgroundColor: colorScales.gray[50],
-    borderRadius: borderRadius.lg,
-    padding: spacing[4],
-    borderWidth: 1,
-    borderColor: colorScales.gray[100],
-  },
-  resultRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing[2],
-  },
-  resultLabel: {
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[500],
-  },
-  resultValue: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colorScales.gray[700],
-  },
-  resultValueStrong: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.bold,
-    color: colors.primary,
-  },
-  forcedBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    alignSelf: 'center',
-    marginTop: spacing[3],
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[1],
-    backgroundColor: colorScales.amber[50],
-    borderRadius: borderRadius.full,
-  },
-  forcedBadgeText: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.amber[700],
-    fontWeight: typography.fontWeight.semibold,
-  },
-
-  // errors
-  errorBox: {
+  // danger banner (step 3)
+  dangerBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing[2],
     backgroundColor: colorScales.red[50],
     borderRadius: borderRadius.md,
-    padding: spacing[3],
-    marginTop: spacing[2],
     borderWidth: 1,
     borderColor: colorScales.red[200],
+    padding: spacing[3],
+    marginBottom: spacing[4],
   },
-  errorText: {
+  dangerBannerText: {
     flex: 1,
-    fontSize: typography.fontSize.xs,
+    fontSize: typography.fontSize.sm,
     color: colorScales.red[700],
+    lineHeight: 18,
+  },
+  dangerBannerStrong: {
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.red[800],
   },
 
-  // footer buttons
-  modalActions: {
+  // checkbox card
+  checkboxCard: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[3],
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    padding: spacing[3],
+    marginBottom: spacing[4],
+  },
+  checkboxCardChecked: {
+    borderColor: colors.primary,
+    backgroundColor: 'rgba(47, 111, 78, 0.03)',
+  },
+  checkbox: {
+    width: 18,
+    height: 18,
+    borderWidth: 2,
+    borderColor: colorScales.gray[300],
+    borderRadius: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkboxTextWrap: {
+    flex: 1,
+  },
+  checkboxStrong: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  checkboxMuted: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    marginTop: 2,
+    lineHeight: 18,
+  },
+
+  // ── Result (step 4) ──
+  resultWrap: {
+    paddingVertical: spacing[4],
+  },
+  resultHeader: {
+    alignItems: 'center',
+    gap: spacing[3],
+    marginBottom: spacing[4],
+  },
+  resultIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultIconOk: {
+    backgroundColor: colorScales.green[100],
+  },
+  resultIconWarn: {
+    backgroundColor: colorScales.amber[100],
+  },
+  resultTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+    textAlign: 'center',
+  },
+  resultParagraph: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  resultParagraphStrong: {
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  resultForcedText: {
+    color: colorScales.amber[700],
+  },
+  resultSummary: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    padding: spacing[3],
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+  },
+  resultSummaryLine: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginBottom: 2,
+  },
+  resultSummaryStrong: {
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  resultSummaryForced: {
+    marginTop: spacing[1],
+  },
+  resultSummaryForcedStrong: {
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.amber[700],
+  },
+
+  // ── Footer ──
+  footerRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing[2],
     justifyContent: 'flex-end',
   },
-  modalBtn: {
-    height: 40,
-    paddingHorizontal: spacing[4],
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 120,
-  },
-  modalBtnSecondary: { backgroundColor: colorScales.gray[100] },
-  modalBtnSecondaryText: {
-    color: colorScales.gray[700],
-    fontWeight: typography.fontWeight.semibold,
-  },
-  modalBtnPrimary: { backgroundColor: colors.primary },
-  modalBtnPrimaryText: {
-    color: '#FFFFFF',
-    fontWeight: typography.fontWeight.semibold,
-  },
-  modalBtnDanger: { backgroundColor: colorScales.red[600] },
-  modalBtnDangerText: {
-    color: '#FFFFFF',
-    fontWeight: typography.fontWeight.semibold,
-  },
-  modalBtnDisabled: { opacity: 0.6 },
 });
+
+// (end of file)
