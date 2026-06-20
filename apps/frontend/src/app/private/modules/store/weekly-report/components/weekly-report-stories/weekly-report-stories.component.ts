@@ -80,7 +80,7 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
  *   9. Closing
  *
  * Al cerrar, emite `viewed` (el padre marca `viewed_at` en backend).
- * Implementado zoneless: usa signals + toSignal, sin NgZone/ZoneJS.
+ * Implementado zoneless: usa signals + toSignal, sin zone.js.
  */
 @Component({
   selector: 'app-weekly-report-stories',
