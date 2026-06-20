@@ -295,10 +295,14 @@ export const Endpoints = {
     },
     AUDIT: {
       LOGS: '/organization/audit/logs',
-      LOGIN_ATTEMPTS: '/organization/audit/login-attempts',
-      SESSIONS: '/organization/audit/sessions',
-      SESSIONS_USER: '/organization/audit/sessions/user/:userId',
-      STATS: '/organization/audit/stats',
+      LOGS_EXPORT: '/organization/audit/export',
+      LOGS_STATS: '/organization/audit/stats',
+      LOGIN_ATTEMPTS: '/organization/login-attempts',
+      LOGIN_ATTEMPTS_STATS: '/organization/login-attempts/stats',
+      SESSIONS: '/organization/sessions',
+      SESSIONS_USER: '/organization/sessions/user/:userId',
+      SESSIONS_TERMINATE: '/organization/sessions/:id',
+      SESSIONS_TERMINATE_USER: '/organization/sessions/user/:userId',
     },
     ACCOUNTING: {
       CHART_OF_ACCOUNTS: {

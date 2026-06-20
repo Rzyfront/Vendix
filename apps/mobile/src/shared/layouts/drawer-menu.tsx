@@ -137,7 +137,7 @@ const baseOrgMenuItems: MenuItem[] = [
   {
     label: 'Auditoría y Cumplimiento',
     icon: 'eye',
-    href: '/(org-admin)/audit/logs',
+    href: '/(org-admin)/audit',
   },
   {
     label: 'Reportes',
