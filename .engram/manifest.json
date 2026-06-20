@@ -210,43 +210,11 @@
       "prompts": 0
     },
     {
-      "id": "f7d4dc53",
-      "created_by": "yoner",
-      "created_at": "2026-06-19T23:24:13Z",
-      "sessions": 2,
-      "memories": 4,
-      "prompts": 0
-    },
-    {
-      "id": "e838cd74",
-      "created_by": "yoner",
-      "created_at": "2026-06-19T23:54:22Z",
-      "sessions": 1,
-      "memories": 2,
-      "prompts": 0
-    },
-    {
-      "id": "40c3c964",
-      "created_by": "yoner",
-      "created_at": "2026-06-20T00:34:29Z",
-      "sessions": 0,
-      "memories": 1,
-      "prompts": 0
-    },
-    {
-      "id": "7c50e883",
-      "created_by": "yoner",
-      "created_at": "2026-06-20T01:37:35Z",
-      "sessions": 0,
-      "memories": 2,
-      "prompts": 0
-    },
-    {
-      "id": "d6157cbd",
-      "created_by": "yoner",
-      "created_at": "2026-06-20T02:46:32Z",
-      "sessions": 1,
-      "memories": 3,
+      "id": "6280c14e",
+      "created_by": "rzy",
+      "created_at": "2026-06-20T02:48:50Z",
+      "sessions": 4,
+      "memories": 7,
       "prompts": 0
     }
   ]

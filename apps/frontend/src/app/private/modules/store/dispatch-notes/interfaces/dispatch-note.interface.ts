@@ -64,6 +64,26 @@ export interface DispatchNote {
   confirmed_by_user?: any;
   delivered_by_user?: any;
   voided_by_user?: any;
+  /**
+   * Reverse relation: where the dispatch note is currently assigned. A
+   * note can be on multiple historical routes (after being released and
+   * reassigned), so the consumer should pick the non-released entry as the
+   * "active" assignment. Each item carries the route summary so the UI can
+   * render a clickable chip with `route_number` without a second query.
+   */
+  dispatch_route_stops?: Array<{
+    id: number;
+    route_id: number;
+    stop_sequence: number;
+    status: 'pending' | 'in_progress' | 'delivered' | 'partial' | 'released' | 'rejected';
+    result?: 'delivered' | 'partial' | 'released' | 'rejected' | null;
+    route?: {
+      id: number;
+      route_number: string;
+      route_code?: string | null;
+      status: string;
+    } | null;
+  }>;
 }
 
 export interface DispatchNoteStats {

@@ -30,6 +30,11 @@ export interface StickyHeaderActionButton {
   loading?: boolean;
   disabled?: boolean;
   visible?: boolean;
+  /**
+   * Optional native `title` attribute surfaced as a tooltip on hover. Useful to
+   * explain why an action is disabled without taking up screen space.
+   */
+  title?: string;
 }
 
 export interface StickyHeaderTab {

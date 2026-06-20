@@ -157,12 +157,46 @@ export class RouteFlowController {
   async confirmRouteSheet(
     @Param('id', ParseIntPipe) id: number,
     @UploadedFile() file: Express.Multer.File,
-    @Body() dto: ConfirmRouteSheetDto,
+    // Multipart transport: pull the JSON-encoded `stops` and `scan_result`
+    // fields off the raw request body and parse them here. @Body() with
+    // `ConfirmRouteSheetDto` would arrive as a flat object whose `stops`
+    // is a string (not yet parsed) and `class-validator`'s @Transform
+    // decorators only fire for JSON bodies, not multipart/form-data.
+    @Body() raw: Record<string, unknown>,
   ) {
-    const result = await this.routeSheetScanner.confirmAndSettle(id, file, dto);
+    const dto = this.parseConfirmDto(raw);
+    const result = await this.routeSheetScanner.confirmAndSettle(
+      id,
+      file,
+      dto,
+    );
     return this.responseService.success(
       result,
       'Planilla liquidada desde escaneo',
     );
+  }
+
+  /**
+   * Build a `ConfirmRouteSheetDto` from a multipart body. The frontend
+   * sends the `stops` array and the `scan_result` object as JSON-encoded
+   * strings (FormData cannot carry structured payloads natively).
+   */
+  private parseConfirmDto(raw: Record<string, unknown>): ConfirmRouteSheetDto {
+    const stopsRaw = raw['stops'];
+    const stops: ConfirmRouteSheetDto['stops'] = Array.isArray(stopsRaw)
+      ? (stopsRaw as ConfirmRouteSheetDto['stops'])
+      : typeof stopsRaw === 'string' && stopsRaw.length > 0
+        ? JSON.parse(stopsRaw)
+        : [];
+
+    const scanRaw = raw['scan_result'];
+    const scan_result: ConfirmRouteSheetDto['scan_result'] =
+      scanRaw == null
+        ? undefined
+        : typeof scanRaw === 'string' && scanRaw.length > 0
+          ? JSON.parse(scanRaw)
+          : (scanRaw as ConfirmRouteSheetDto['scan_result']);
+
+    return { stops, scan_result };
   }
 }

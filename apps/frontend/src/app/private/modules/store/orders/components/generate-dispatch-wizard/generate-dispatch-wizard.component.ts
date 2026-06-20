@@ -273,11 +273,18 @@ export class GenerateDispatchWizardComponent {
   }
 
   // ── Step 1 handlers ───────────────────────────────────────────────────
-  onQuantityChange(row: DispatchItemRow, raw: string | number): void {
+  /**
+   * Clamp the user input to [0, pending_quantity] and persist the clamped
+   * value. Returns the clamped value so the template can write it back
+   * into the DOM (otherwise the input keeps the raw invalid value the
+   * user typed until the next round-trip).
+   */
+  onQuantityChange(row: DispatchItemRow, raw: string | number): number {
     let value = Number(raw);
     if (!Number.isFinite(value) || value < 0) value = 0;
     if (value > row.pending_quantity) value = row.pending_quantity;
     this.quantities.update((q) => ({ ...q, [row.order_item_id]: value }));
+    return value;
   }
 
   quantityOf(row: DispatchItemRow): number {
@@ -287,10 +294,14 @@ export class GenerateDispatchWizardComponent {
   // ── Step 3 handlers ───────────────────────────────────────────────────
   setRouteMode(mode: RouteMode): void {
     this.routeMode.set(mode);
-    if (mode === 'existing' && this.routeOptions().length === 0) {
+    if (mode === 'existing') {
+      // Always reload on entry — the list may be stale (new routes were
+      // created in another tab, or the wizard was opened earlier in this
+      // session and the cache is from minutes ago).
       this.loadRoutes();
     }
-    if (mode === 'new' && this.vehicleOptions().length === 0) {
+    if (mode === 'new') {
+      // Same rationale as 'existing': always reload vehicles.
       this.loadVehicles();
     }
   }

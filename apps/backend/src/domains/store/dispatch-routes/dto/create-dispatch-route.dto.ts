@@ -3,9 +3,11 @@ import {
   IsString,
   IsOptional,
   IsArray,
+  ArrayMinSize,
   ValidateNested,
   IsDateString,
   IsBoolean,
+  IsObject,
   Min,
   MaxLength,
 } from 'class-validator';
@@ -23,6 +25,33 @@ export class CreateStopDto {
   @IsOptional()
   @IsBoolean()
   is_extra_route?: boolean;
+}
+
+/**
+ * One assistant slot. Either an internal store user (user_id) or an external
+ * agent (external_name + external_id_number). Exactly one of the two modes is
+ * required per slot.
+ */
+export class CreateAssistantDto {
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  user_id?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  external_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  external_id_number?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  role?: string;
 }
 
 export class CreateDispatchRouteDto {
@@ -55,14 +84,22 @@ export class CreateDispatchRouteDto {
   @IsBoolean()
   is_primary_driver_external?: boolean;
 
+  /**
+   * Optional list of assistants (helpers on the route alongside the driver).
+   * Each item must be a well-formed {@link CreateAssistantDto}. Empty arrays
+   * are stored as `[]` (NOT `[[]]`/artifacts).
+   *
+   * Defence in depth: the runtime service in `DispatchRoutesService.create()`
+   * re-sanitises and rejects any item missing both `user_id` and
+   * `external_*` (which used to slip through as `[]` and persist as a nested
+   * empty array on the JSONB column).
+   */
   @IsOptional()
   @IsArray()
-  assistants?: Array<{
-    user_id?: number;
-    external_name?: string;
-    external_id_number?: string;
-    role?: string;
-  }>;
+  @ArrayMinSize(0)
+  @ValidateNested({ each: true })
+  @Type(() => CreateAssistantDto)
+  assistants?: CreateAssistantDto[];
 
   @IsOptional()
   @IsInt()

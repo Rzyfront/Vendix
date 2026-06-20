@@ -59,6 +59,11 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       dispatch_route_stops: {
         findFirst: jest.fn(),
         update: jest.fn(),
+        // `findMany` is now called by `refreshRouteTotals` (added in the
+        // live-totals fix) to recompute the parent aggregates after each
+        // settle/release. Return an empty list by default; individual tests
+        // override the mock when they need to assert the recompute path.
+        findMany: jest.fn().mockResolvedValue([]),
       },
       dispatch_route_stop_history: {
         create: jest.fn(),

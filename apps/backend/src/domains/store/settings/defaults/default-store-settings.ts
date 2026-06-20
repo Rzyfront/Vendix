@@ -157,6 +157,10 @@ export function getDefaultStoreSettings(): StoreSettings {
         orders_layaway: true,
         orders_reservations: true,
         orders_dispatch_notes: true,
+        orders_dispatch_routes: true,
+
+        // Despacho (vehículos / flota)
+        dispatch_fleet: true,
 
         // Inventario
         inventory: true,

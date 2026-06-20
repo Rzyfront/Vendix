@@ -8,6 +8,10 @@ import { forkJoin, firstValueFrom } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
 import {
+  DispatchMethodSelectorModalComponent,
+  DispatchMethod,
+} from '../../components/dispatch-method-selector-modal/dispatch-method-selector-modal.component';
+import {
   Order,
   OrderItem,
   Payment,
@@ -81,6 +85,7 @@ interface PaymentReceiptPreview {
     OrderRefundModalComponent,
     TimelineComponent,
     GenerateDispatchWizardComponent,
+    DispatchMethodSelectorModalComponent,
     NgClass,
   ],
   templateUrl: './order-details-page.component.html',
@@ -147,6 +152,8 @@ export class OrderDetailsPageComponent {
   showRefundModal = signal(false);
   showPaymentReceiptModal = signal(false);
   showDispatchModal = signal(false);
+  /** Chooser modal: "con remisión" vs "sin remisión" (single dispatch entry). */
+  showDispatchSelector = signal(false);
 
   // Processing state
   isProcessingAction = signal(false);
@@ -493,6 +500,20 @@ export class OrderDetailsPageComponent {
     );
   });
 
+  /**
+   * Whether this order can produce a remisión (dispatch note). Mirrors the
+   * backend gate in `createFromOrder`: kitchen orders finalize directly and
+   * `direct_delivery` hands goods over at the counter — neither goes through
+   * the remisión + recaudo cycle. Drives whether the unified "Despachar orden"
+   * button opens the con/sin-remisión chooser or ships directly.
+   */
+  readonly canGenerateRemision = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    const delivery = order.delivery_type || 'direct_delivery';
+    return !this.isKitchenOrder() && delivery !== 'direct_delivery';
+  });
+
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
     if (!order) return [];
@@ -536,8 +557,19 @@ export class OrderDetailsPageComponent {
         actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
         actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
 
-        if (isShipping) {
-          // Shipping: can dispatch without payment (opens ship modal)
+        // COD (contra-entrega): dispatching is allowed BEFORE the payment is
+        // confirmed so the route can carry the order and collect on delivery.
+        if (this.canGenerateRemision()) {
+          // Unified entry: one button → con/sin-remisión chooser. Both paths
+          // ship the order without confirming payment (collect on delivery).
+          actions.push({
+            id: 'dispatch-order',
+            label: 'Despachar sin confirmar pago',
+            icon: 'truck',
+            variant: 'warning',
+          });
+        } else if (isShipping) {
+          // direct_delivery: no remisión; manual ship without confirming payment.
           actions.push({
             id: 'manual-ship',
             label: 'Despachar sin confirmar pago',
@@ -551,19 +583,6 @@ export class OrderDetailsPageComponent {
             label: 'Listo para Recoger',
             icon: 'package',
             variant: 'primary',
-          });
-        }
-
-        // COD (contra-entrega): allow generating a dispatch note BEFORE the
-        // payment is confirmed, so the route can carry the order and collect
-        // on delivery. Same gating as `processing`: needs a physical dispatch
-        // document (not a kitchen order, not a direct counter handover).
-        if (!this.isKitchenOrder() && delivery !== 'direct_delivery') {
-          actions.push({
-            id: 'generate-dispatch',
-            label: 'Generar Remision',
-            icon: 'file-text',
-            variant: 'info',
           });
         }
 
@@ -587,29 +606,26 @@ export class OrderDetailsPageComponent {
           // `finish` action config/handler as `delivered` (backend allows
           // `processing → finished`).
           actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        } else if (delivery === 'home_delivery') {
-          actions.push({ id: 'ship', label: 'Marcar como Enviado', icon: 'truck', variant: 'primary' });
-        } else if (isPickup) {
-          actions.push({ id: 'ship', label: 'Listo para Recoger', icon: 'package', variant: 'primary' });
-          // Pickup + paid: offer direct deliver (skip shipped → delivered → auto-finalize)
-          actions.push({
-            id: 'direct-deliver',
-            label: 'Entregar directamente',
-            icon: 'package-check',
-            variant: 'warning',
-          });
+        } else if (this.canGenerateRemision()) {
+          // Unified dispatch entry point: ONE button opens the con/sin-remisión
+          // chooser. "Con remisión" runs the wizard (document + optional route)
+          // then ships the order; "sin remisión" just marks it shipped. Both
+          // paths converge with the order in `shipped` — no more duplicate
+          // "Despachar Orden" + "Generar Remisión" buttons.
+          actions.push({ id: 'dispatch-order', label: 'Despachar Orden', icon: 'truck', variant: 'primary' });
+          if (isPickup) {
+            // Pickup + paid: keep the "hand over at the counter now" shortcut
+            // (skip shipped → delivered → auto-finalize).
+            actions.push({
+              id: 'direct-deliver',
+              label: 'Entregar directamente',
+              icon: 'package-check',
+              variant: 'warning',
+            });
+          }
         } else {
+          // direct_delivery: counter handover, no remisión cycle. Ship directly.
           actions.push({ id: 'ship', label: 'Despachar Orden', icon: 'package', variant: 'primary' });
-        }
-        // Generar Remision: only when the order needs a physical dispatch
-        // document (not a direct counter handover) and is not a kitchen order.
-        if (!this.isKitchenOrder() && delivery !== 'direct_delivery') {
-          actions.push({
-            id: 'generate-dispatch',
-            label: 'Generar Remision',
-            icon: 'file-text',
-            variant: 'info',
-          });
         }
         if (this.isPrivilegedUser()) {
           actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
@@ -1142,6 +1158,9 @@ export class OrderDetailsPageComponent {
       case 'generate-dispatch':
         this.openDispatchModal();
         break;
+      case 'dispatch-order':
+        this.openDispatchSelector();
+        break;
     }
   }
 
@@ -1230,14 +1249,100 @@ export class OrderDetailsPageComponent {
     this.showDispatchModal.set(true);
   }
 
+  // ── Unified dispatch entry (con/sin remisión) ──────────────
+
+  /**
+   * Single dispatch entry point. Orders that can produce a remisión open the
+   * con/sin-remisión chooser; `direct_delivery` (no remisión possible) ships
+   * straight away. This is what collapses the old two-button UX into one flow.
+   */
+  openDispatchSelector(): void {
+    if (!this.canGenerateRemision()) {
+      this.startShipWithoutNote();
+      return;
+    }
+    this.showDispatchSelector.set(true);
+  }
+
+  /** Route the chooser outcome to the wizard or the plain ship flow. */
+  onDispatchMethodSelected(method: DispatchMethod): void {
+    this.showDispatchSelector.set(false);
+    if (method === 'with-note') {
+      this.openDispatchModal();
+    } else {
+      this.startShipWithoutNote();
+    }
+  }
+
+  /**
+   * "Sin remisión" path: mark the order shipped without any dispatch document.
+   * For COD (`pending_payment`) we go through the manual ship mode, which
+   * advances the state without confirming payment (collect on delivery). For
+   * `processing` it's the regular flow ship. Both reuse the existing ship modal.
+   */
+  private startShipWithoutNote(): void {
+    const order = this.order();
+    if (!order) return;
+    if (order.state === 'pending_payment') {
+      this.isManualShipMode.set(true);
+    }
+    this.openShipModal();
+  }
+
   /**
    * Called by the generate-dispatch wizard once the dispatch note (and, if
    * requested, its route) is created in a single backend transaction. The
-   * wizard already toasts success; here we close it and offer navigation.
+   * remisión is the document; here we make the flow converge by advancing the
+   * order to `shipped`, then offer navigation to the new remisión.
    */
   onDispatchGenerated(dispatchNoteId: number): void {
     this.showDispatchModal.set(false);
-    this.promptViewDispatchNote(dispatchNoteId);
+    this.shipAfterDispatch(dispatchNoteId);
+  }
+
+  /**
+   * Advance the order to `shipped` after a remisión was generated, so the
+   * "con remisión" path converges with "sin remisión". Picks the right
+   * transition: `processing` → flow ship; COD `pending_payment` → manual
+   * state change (no payment confirmation). If the order is already past
+   * shipment we skip straight to the navigation prompt. A failed ship is
+   * non-fatal: the remisión already exists, so we surface a warning and still
+   * offer to view it.
+   */
+  private shipAfterDispatch(dispatchNoteId: number): void {
+    const order = this.order();
+    if (!order || !this.orderId) {
+      this.promptViewDispatchNote(dispatchNoteId);
+      return;
+    }
+
+    if (order.state !== 'processing' && order.state !== 'pending_payment') {
+      this.promptViewDispatchNote(dispatchNoteId);
+      return;
+    }
+
+    const ship$ =
+      order.state === 'processing'
+        ? this.ordersService.flowShipOrder(this.orderId, {})
+        : this.ordersService.updateOrderStatus(this.orderId, 'shipped');
+
+    this.isProcessingAction.set(true);
+    ship$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.isProcessingAction.set(false);
+        this.toastService.success('Orden despachada y marcada como enviada');
+        this.promptViewDispatchNote(dispatchNoteId);
+      },
+      error: (err) => {
+        this.isProcessingAction.set(false);
+        // The remisión was created; only the state advance failed.
+        this.toastService.warning(
+          err?.message ||
+            'Remisión creada. No se pudo marcar la orden como enviada automáticamente.',
+        );
+        this.promptViewDispatchNote(dispatchNoteId);
+      },
+    });
   }
 
   private promptViewDispatchNote(dispatchNoteId: number): void {

@@ -56,6 +56,20 @@ export interface DispatchNoteSummary {
    * "Orden pendiente de pago" chip on the planilla detail.
    */
   sales_order?: DispatchNoteSalesOrderSummary | null;
+  /**
+   * Customer summary (subset of the parent `customer` user) — used by the
+   * settle modal to surface the withholding-agent banner and by the
+   * backend to re-validate the rule.
+   */
+  customer?: {
+    is_withholding_agent?: boolean;
+  } | null;
+  /**
+   * Convenience top-level alias of `customer.is_withholding_agent`,
+   * mirrored on the response for legacy code paths. Prefer the nested
+   * `customer` accessor in new code.
+   */
+  customer_is_withholding_agent?: boolean;
 }
 
 export interface DispatchRouteStop {
@@ -191,6 +205,8 @@ export interface CloseDispatchRouteDto {
 
 export interface VoidDispatchRouteDto {
   reason: string;
+  /** Optional free-form notes (mirrors CloseDispatchRouteDto.notes). */
+  notes?: string;
 }
 
 export interface ReleaseStopDto {

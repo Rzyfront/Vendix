@@ -123,12 +123,19 @@ interface AvailableNote {
 
           @if (!driverIsExternal()) {
             <div>
-              <label class="block text-sm font-medium mb-1">Conductor</label>
+              <label class="block text-sm font-medium mb-1">
+                Conductor <span class="text-red-500" aria-label="obligatorio">*</span>
+              </label>
               <app-store-user-select
                 placeholder="Buscar conductor..."
                 [ngModel]="driverUserId()"
                 (ngModelChange)="driverUserId.set($event)"
               ></app-store-user-select>
+              @if (driverIsExternal() === false && driverUserId() == null) {
+                <p class="text-xs text-amber-700 mt-1">
+                  Selecciona un conductor de tu tienda.
+                </p>
+              }
             </div>
             <div>
               <label class="block text-sm font-medium mb-1">Auxiliares</label>
@@ -142,7 +149,9 @@ interface AvailableNote {
           } @else {
             <div class="grid grid-cols-2 gap-2">
               <div>
-                <label class="block text-sm font-medium mb-1">Nombre externo</label>
+                <label class="block text-sm font-medium mb-1">
+                  Nombre externo <span class="text-red-500" aria-label="obligatorio">*</span>
+                </label>
                 <input
                   type="text"
                   class="w-full rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm"
@@ -152,7 +161,9 @@ interface AvailableNote {
                 />
               </div>
               <div>
-                <label class="block text-sm font-medium mb-1">Cédula</label>
+                <label class="block text-sm font-medium mb-1">
+                  Cédula <span class="text-red-500" aria-label="obligatorio">*</span>
+                </label>
                 <input
                   type="text"
                   class="w-full rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 text-sm"
@@ -168,7 +179,12 @@ interface AvailableNote {
         <!-- Step 2: Paradas -->
         <div class="border-t border-border pt-4">
           <div class="flex justify-between items-center mb-2">
-            <h3 class="font-semibold">Paradas</h3>
+            <h3 class="font-semibold">
+              Paradas
+              <span class="text-xs font-normal text-text-secondary">
+                ({{ stops().length }} · total estimado: {{ stopsTotal() | currency }})
+              </span>
+            </h3>
             <button
               (click)="addStop()"
               type="button"
@@ -258,6 +274,21 @@ export class PlanillaWizardComponent {
     return driver != null ? [driver] : [];
   });
 
+  /**
+   * Suma el gran_total de las remisiones seleccionadas en el wizard. Útil como
+   * vista previa del monto total de la ruta antes de crear la planilla.
+   * Solo cuenta paradas con un dispatch_note_id válido (> 0).
+   */
+  readonly stopsTotal = computed<number>(() => {
+    const notesById = new Map(this.availableNotes().map((n) => [n.id, n]));
+    return this.stops().reduce((sum, s) => {
+      if (!s.dispatch_note_id || s.dispatch_note_id <= 0) return sum;
+      const note = notesById.get(s.dispatch_note_id);
+      if (!note) return sum;
+      return sum + Number(note.grand_total || 0);
+    }, 0);
+  });
+
   readonly stops = signal<CreateStopDto[]>([]);
   readonly availableNotes = signal<AvailableNote[]>([]);
   readonly vehicleOptions = signal<SelectorOption[]>([]);
@@ -279,12 +310,23 @@ export class PlanillaWizardComponent {
     }
   }
 
+  /**
+   * Loads the dispatch notes that the operator can pick when creating a
+   * planilla. We ask the backend for `status=confirmed` (the only notes that
+   * can be attached to a route). The backend enforces the additional
+   * "not already on a non-released stop of a non-draft route" rule at create
+   * time; if a chosen note is blocked, the API returns 400 and the wizard
+   * surfaces the error in a toast.
+   */
   private loadAvailableNotes(): void {
     this.service
       .listAvailableDispatchNotes()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => this.availableNotes.set(res.data as AvailableNote[]),
+        next: (res) => {
+          const notes = (res?.data ?? []) as AvailableNote[];
+          this.availableNotes.set(notes);
+        },
       });
   }
 
