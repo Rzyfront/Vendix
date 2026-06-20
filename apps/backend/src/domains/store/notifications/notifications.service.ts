@@ -78,6 +78,58 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * Create a notification and deliver it to ONE user (not the whole store).
+   * Uses `booking_check_in` enum + `data.kind = 'provider_turn'` to flag the
+   * provider-turn alert so the frontend can apply a distinctive sound + route.
+   *
+   * Mirrors `createAndBroadcast` but targets the user's SSE subject and pushes
+   * to that user's push subscriptions only — other users in the store do NOT
+   * see the bell or get the web push.
+   */
+  async sendToUser(
+    store_id: number,
+    user_id: number,
+    type: string | notification_type_enum,
+    title: string,
+    body: string,
+    data?: any,
+  ) {
+    try {
+      const notification = await this.global_prisma.notifications.create({
+        data: {
+          store_id,
+          type: type as notification_type_enum,
+          title,
+          body,
+          data: { ...data, target_user_id: user_id },
+        },
+      });
+
+      // Targeted SSE push — only the user subject emits.
+      this.sse_service.pushToUser(store_id, user_id, {
+        id: notification.id,
+        type: notification.type,
+        title: notification.title,
+        body: notification.body,
+        data: notification.data,
+        created_at: notification.created_at.toISOString(),
+      });
+
+      // Targeted web push — only that user's devices.
+      this.push_service
+        .sendToUser(store_id, user_id, type, title, body, data)
+        .catch(() => {});
+
+      return notification;
+    } catch (error) {
+      console.error(
+        `[NotificationsService.sendToUser] Failed: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
   async findAll(query_dto: NotificationQueryDto) {
     const { page = 1, limit = 20, type, is_read } = query_dto;
     const skip = (page - 1) * limit;
