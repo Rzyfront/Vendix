@@ -1,26 +1,40 @@
-import { View, Text, StyleSheet, type ViewStyle, type ViewProps } from 'react-native';
+import React from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  type ViewStyle,
+  type ViewProps,
+  type StyleProp,
+} from 'react-native';
 import { colors, spacing, borderRadius, shadows, colorScales, typography } from '@/shared/theme';
 
 interface CardProps extends ViewProps {
   children: React.ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
+  /** Si se pasa, la card se vuelve Pressable. */
+  onPress?: () => void;
+  /** Active opacity cuando es Pressable (default 0.7). */
+  activeOpacity?: number;
+  disabled?: boolean;
 }
 
 interface CardHeaderProps extends ViewProps {
   title: string;
   subtitle?: string;
   right?: React.ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }
 
 interface CardBodyProps extends ViewProps {
   children: React.ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }
 
 interface CardFooterProps extends ViewProps {
   children: React.ReactNode;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }
 
 const styles = StyleSheet.create({
@@ -69,9 +83,23 @@ const styles = StyleSheet.create({
   },
 });
 
-function Card({ children, style, ...props }: CardProps) {
+function Card({ children, style, onPress, activeOpacity = 0.7, disabled, ...props }: CardProps) {
+  const cardStyle = [styles.card, style];
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        activeOpacity={activeOpacity}
+        disabled={disabled}
+        style={cardStyle}
+        {...(props as any)}
+      >
+        {children}
+      </Pressable>
+    );
+  }
   return (
-    <View style={[styles.card, style]} {...props}>
+    <View style={cardStyle} {...props}>
       {children}
     </View>
   );

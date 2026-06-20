@@ -11,13 +11,19 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { OrgAuditService } from '@/features/org/services/org-audit.service';
 import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
-import { OrgListItem } from '@/shared/components/org-list-item';
+import {
+  OrgResponsiveCard,
+  type OrgCardAction,
+} from '@/shared/components/org-responsive-card';
+import {
+  OrgOptionsDropdown,
+  type OrgOptionsAction,
+} from '@/shared/components/org-options-dropdown';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Modal } from '@/shared/components/modal/modal';
 import { OrgDetailRow } from '@/shared/components/org-detail-row';
 import { PaginationBar } from '@/features/org/components/audit-shared';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
-import { RowActionsMenu } from '@/shared/components/row-actions-menu/row-actions-menu';
 import { Icon } from '@/shared/components/icon/icon';
 import {
   getLoginAttemptStatusColor,
@@ -28,16 +34,23 @@ import type { LoginAttempt, LoginAttemptsStats } from '@/core/models/org-admin/a
 import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
 
 /**
- * Auditoría · Intentos de Login.
+ * Auditoría · Intentos de Login (paridad visual con web).
  *
- * Paridad con `login-attempts.component.ts` (web):
- *   - 4-stat grid (Total / Exitosos / Fallidos / Tasa éxito %)
- *   - Búsqueda por email (debounced por SearchBar)
- *   - Filtro de status (Todos / Exitosos / Fallidos)
- *   - Cards con badge de estado (SUCCESS=success / FAILED=error),
- *     email, IP, fecha, tienda
- *   - Paginación manual
- *   - Modal de detalle (no en web — agregado para paridad funcional)
+ * Layout:
+ *   ┌──────────────────────────────────────────┐
+ *   │ [stats grid scroll horiz.]               │ ← sticky-top
+ *   ├──────────────────────────────────────────┤
+ *   │ Intentos de inicio       [Acciones▾]     │
+ *   │ 142 registros            [Filtros 0▾]    │
+ *   │ [🔎 SearchBar ───────────────────]       │
+ *   ├──────────────────────────────────────────┤
+ *   │ [OrgResponsiveCard × N]                  │
+ *   │  - avatar + email + badge status         │
+ *   │  - details grid                          │
+ *   │  - footer: 👁 Ver                        │
+ *   ├──────────────────────────────────────────┤
+ *   │ [PaginationBar]                          │
+ *   └──────────────────────────────────────────┘
  */
 
 const PAGE_SIZE = 10;
@@ -75,12 +88,23 @@ export default function LoginAttemptsScreen() {
   const attempts = data?.data ?? [];
   const total = data?.meta?.total ?? 0;
   const totalPages = data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const hasFilters = !!search || filter !== 'all';
+  const activeFiltersCount = (search ? 1 : 0) + (filter !== 'all' ? 1 : 0);
 
   const onRefresh = async () => {
     setRefreshing(true);
     await refetch();
     setRefreshing(false);
   };
+
+  const actions: OrgOptionsAction[] = [
+    {
+      key: 'refresh',
+      label: 'Actualizar',
+      icon: 'refresh-cw',
+      onPress: onRefresh,
+    },
+  ];
 
   return (
     <View style={styles.root}>
@@ -101,6 +125,8 @@ export default function LoginAttemptsScreen() {
               setFilter(f);
               setPage(1);
             }}
+            actions={actions}
+            activeFiltersCount={activeFiltersCount}
             onRefresh={onRefresh}
           />
         }
@@ -109,7 +135,7 @@ export default function LoginAttemptsScreen() {
             <View style={styles.loading}>
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
-          ) : search || filter !== 'all' ? (
+          ) : hasFilters ? (
             <EmptyState
               icon="filter"
               title="Sin intentos con este filtro"
@@ -131,8 +157,18 @@ export default function LoginAttemptsScreen() {
         }
         renderItem={({ item }) => {
           const status = item.status ?? (item.success ? 'SUCCESS' : 'FAILED');
+          const cardActions: OrgCardAction[] = [
+            {
+              key: 'view',
+              label: 'Ver detalle',
+              icon: 'eye',
+              variant: 'primary',
+              showInFooter: true,
+              onPress: () => setSelected(item),
+            },
+          ];
           return (
-            <OrgListItem
+            <OrgResponsiveCard
               title={item.email}
               subtitle={[
                 item.stores?.name ? `Tienda: ${item.stores.name}` : null,
@@ -140,10 +176,9 @@ export default function LoginAttemptsScreen() {
               ]
                 .filter(Boolean)
                 .join(' · ')}
-              description={item.failure_reason ?? `User agent: ${item.user_agent ?? 'N/A'}`}
               leftIcon={getLoginAttemptStatusIcon(status)}
               leftIconColor={getLoginAttemptStatusColor(status)}
-              rightBadge={{
+              badge={{
                 label: LOGIN_ATTEMPT_STATUS_LABELS[status] ?? status,
                 variant:
                   status === 'SUCCESS'
@@ -152,9 +187,34 @@ export default function LoginAttemptsScreen() {
                       ? 'error'
                       : 'warning',
               }}
-              rightMeta={new Date(
-                item.created_at ?? (item as any).attempted_at ?? new Date().toISOString(),
-              ).toLocaleString()}
+              details={[
+                {
+                  label: 'IP',
+                  value: item.ip_address ?? '—',
+                  icon: 'globe',
+                  monospace: true,
+                },
+                {
+                  label: 'Fecha',
+                  value: new Date(
+                    item.created_at ?? (item as any).attempted_at ?? new Date().toISOString(),
+                  ).toLocaleString(),
+                  icon: 'calendar',
+                },
+                {
+                  label: 'User agent',
+                  value: item.user_agent ?? '—',
+                  icon: 'monitor',
+                },
+                {
+                  label: 'Tienda',
+                  value: item.stores?.name ?? '—',
+                  icon: 'store',
+                },
+              ]}
+              footerLabel="Motivo"
+              footerValue={item.failure_reason ?? '—'}
+              actions={cardActions}
               onPress={() => setSelected(item)}
               chevron={false}
             />
@@ -193,8 +253,9 @@ export default function LoginAttemptsScreen() {
                   styles.detailHeroIcon,
                   {
                     backgroundColor:
-                      getLoginAttemptStatusColor(selected.status ?? (selected.success ? 'SUCCESS' : 'FAILED')) +
-                      '15',
+                      getLoginAttemptStatusColor(
+                        selected.status ?? (selected.success ? 'SUCCESS' : 'FAILED'),
+                      ) + '15',
                   },
                 ]}
               >
@@ -225,8 +286,17 @@ export default function LoginAttemptsScreen() {
                   selected.created_at ?? (selected as any).attempted_at ?? new Date().toISOString(),
                 ).toLocaleString()}
               />
-              <OrgDetailRow icon="globe" label="IP" value={selected.ip_address ?? 'N/A'} monospace />
-              <OrgDetailRow icon="monitor" label="User agent" value={selected.user_agent ?? 'N/A'} />
+              <OrgDetailRow
+                icon="globe"
+                label="IP"
+                value={selected.ip_address ?? 'N/A'}
+                monospace
+              />
+              <OrgDetailRow
+                icon="monitor"
+                label="User agent"
+                value={selected.user_agent ?? 'N/A'}
+              />
               {selected.stores?.name ? (
                 <OrgDetailRow icon="store" label="Tienda" value={selected.stores.name} />
               ) : null}
@@ -256,6 +326,8 @@ interface ListHeaderProps {
   onSearchChange: (v: string) => void;
   filter: SuccessFilter;
   onFilterChange: (f: SuccessFilter) => void;
+  actions: OrgOptionsAction[];
+  activeFiltersCount: number;
   onRefresh: () => void;
 }
 
@@ -266,13 +338,14 @@ function ListHeader({
   onSearchChange,
   filter,
   onFilterChange,
+  actions,
+  activeFiltersCount,
   onRefresh,
 }: ListHeaderProps) {
   return (
     <View>
       <View style={styles.statsWrap}>
         <OrgStatsGrid
-          columns={2}
           stats={[
             {
               label: 'Total Intentos',
@@ -309,61 +382,95 @@ function ListHeader({
       <View style={styles.titleRow}>
         <View style={{ flex: 1 }}>
           <Text style={styles.titleMain}>Intentos de inicio de sesión</Text>
-          <Text style={styles.titleCount}>{total} {total === 1 ? 'registro' : 'registros'}</Text>
+          <Text style={styles.titleCount}>
+            {total} {total === 1 ? 'registro' : 'registros'}
+          </Text>
         </View>
-        <RowActionsMenu
-          actions={[
-            {
-              key: 'refresh',
-              label: 'Actualizar',
-              icon: 'refresh-cw',
-              variant: 'default',
-              onPress: onRefresh,
-            },
-          ]}
-          accessibilityLabel="Acciones de intentos"
+        <OrgOptionsDropdown
+          actions={actions}
+          activeFiltersCount={activeFiltersCount}
+          renderFiltersContent={() => (
+            <View>
+              <FilterSection
+                label="Todos"
+                value="Mostrar todos los intentos"
+                active={filter === 'all'}
+                onPress={() => onFilterChange('all')}
+              />
+              <FilterSection
+                label="Exitosos"
+                value="Sólo intentos con success=true"
+                active={filter === 'success'}
+                icon="check-circle"
+                iconColor={colorScales.green[600]}
+                onPress={() => onFilterChange('success')}
+              />
+              <FilterSection
+                label="Fallidos"
+                value="Sólo intentos con success=false"
+                active={filter === 'failed'}
+                icon="x-circle"
+                iconColor={colorScales.red[600]}
+                onPress={() => onFilterChange('failed')}
+              />
+            </View>
+          )}
         />
       </View>
 
       <View style={styles.searchRow}>
-        <View style={{ flex: 1 }}>
-          <SearchBar
-            value={search}
-            onChangeText={onSearchChange}
-            placeholder="Buscar por email…"
-          />
-        </View>
-      </View>
-
-      <View style={styles.quickFilters}>
-        <Pressable
-          style={[styles.quickBtn, filter === 'all' && styles.quickBtnActive]}
-          onPress={() => onFilterChange('all')}
-        >
-          <Text style={[styles.quickBtnText, filter === 'all' && styles.quickBtnTextActive]}>
-            Todos
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.quickBtn, filter === 'success' && styles.quickBtnActive]}
-          onPress={() => onFilterChange('success')}
-        >
-          <Icon name="check-circle" size={14} color={filter === 'success' ? '#FFFFFF' : colorScales.green[600]} />
-          <Text style={[styles.quickBtnText, filter === 'success' && styles.quickBtnTextActive]}>
-            Exitosos
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.quickBtn, filter === 'failed' && styles.quickBtnActive]}
-          onPress={() => onFilterChange('failed')}
-        >
-          <Icon name="x-circle" size={14} color={filter === 'failed' ? '#FFFFFF' : colorScales.red[600]} />
-          <Text style={[styles.quickBtnText, filter === 'failed' && styles.quickBtnTextActive]}>
-            Fallidos
-          </Text>
-        </Pressable>
+        <SearchBar
+          value={search}
+          onChangeText={onSearchChange}
+          placeholder="Buscar por email…"
+        />
       </View>
     </View>
+  );
+}
+
+function FilterSection({
+  label,
+  value,
+  active,
+  icon,
+  iconColor,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  active: boolean;
+  icon?: string;
+  iconColor?: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={[styles.filterSection, active && styles.filterSectionActive]}
+      onPress={onPress}
+    >
+      {icon ? (
+        <View
+          style={[
+            styles.filterIcon,
+            { backgroundColor: (iconColor ?? colorScales.gray[500]) + '15' },
+          ]}
+        >
+          <Icon name={icon} size={14} color={iconColor ?? colorScales.gray[500]} />
+        </View>
+      ) : null}
+      <View style={{ flex: 1 }}>
+        <Text style={styles.filterLabel}>{label}</Text>
+        <Text style={styles.filterValue} numberOfLines={1}>
+          {value}
+        </Text>
+      </View>
+      {active ? (
+        <Icon name="check" size={16} color={colorScales.green[600]} />
+      ) : (
+        <Icon name="chevron-right" size={16} color={colorScales.gray[400]} />
+      )}
+    </Pressable>
   );
 }
 
@@ -374,7 +481,10 @@ function ListHeader({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colorScales.gray[50] },
   loading: { paddingVertical: spacing[12], alignItems: 'center' },
-  statsWrap: { marginBottom: spacing[3] },
+  statsWrap: {
+    marginHorizontal: -spacing[4],
+    marginBottom: spacing[3],
+  },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -393,46 +503,14 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   searchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
     marginBottom: spacing[3],
   },
-  quickFilters: {
-    flexDirection: 'row',
-    gap: spacing[2],
-    marginBottom: spacing[3],
-  },
-  quickBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[1],
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    backgroundColor: colors.background,
-  },
-  quickBtnActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  quickBtnText: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[700],
-    fontWeight: typography.fontWeight.medium,
-  },
-  quickBtnTextActive: {
-    color: '#FFFFFF',
-    fontWeight: typography.fontWeight.semibold,
-  },
+  separator: { height: spacing[1] },
   listContent: {
     paddingHorizontal: spacing[4],
     paddingTop: spacing[2],
     paddingBottom: spacing[24],
   },
-  separator: { height: spacing[1] },
   detailHero: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -462,5 +540,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colorScales.gray[100],
     paddingHorizontal: spacing[3],
+  },
+  filterSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  filterSectionActive: {
+    backgroundColor: colorScales.green[50],
+  },
+  filterIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filterLabel: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  filterValue: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[900],
+    marginTop: 2,
+    fontWeight: typography.fontWeight.medium,
   },
 });

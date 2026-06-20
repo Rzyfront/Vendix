@@ -11,43 +11,54 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { OrgAuditService } from '@/features/org/services/org-audit.service';
 import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
-import { OrgListItem } from '@/shared/components/org-list-item';
-import { OrgBadge } from '@/shared/components/org-badge';
+import {
+  OrgResponsiveCard,
+  type OrgCardAction,
+} from '@/shared/components/org-responsive-card';
+import {
+  OrgOptionsDropdown,
+  type OrgOptionsAction,
+} from '@/shared/components/org-options-dropdown';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Modal } from '@/shared/components/modal/modal';
 import { OrgDetailRow } from '@/shared/components/org-detail-row';
-import {
-  PaginationBar,
-  SelectableFilterSheet,
-} from '@/features/org/components/audit-shared';
-import {
-  RowActionsMenu,
-  type RowAction,
-} from '@/shared/components/row-actions-menu/row-actions-menu';
 import { Icon } from '@/shared/components/icon/icon';
-import { formatSessionUser, getDeviceIcon, isSessionActive } from '@/features/org/components/audit-formatters';
+import { PaginationBar } from '@/features/org/components/audit-shared';
+import {
+  formatSessionUser,
+  getDeviceIcon,
+  isSessionActive,
+} from '@/features/org/components/audit-formatters';
 import type { ActiveSession } from '@/core/models/org-admin/audit.types';
 import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 
 /**
- * Auditoría · Sesiones.
+ * Auditoría · Sesiones (paridad visual con web).
  *
- * Paridad con `sessions.component.ts` (web):
- *   - 3-stat grid (Total / Activas / Inactivas)
- *   - Filtro de estado (Todas / Activas / Inactivas)
- *   - Cards con badge de estado, dispositivo, IP, última actividad, expiración
- *   - Row action menu: Ver detalle / Terminar
- *   - Modal de detalle con Terminar Sesión (botón rojo)
- *   - Paginación manual
+ * Layout:
+ *   ┌──────────────────────────────────────────┐
+ *   │ [stats grid scroll horiz.]               │ ← sticky-top
+ *   ├──────────────────────────────────────────┤
+ *   │ Sesiones                  [Acciones▾]    │
+ *   │ 7 registradas              [Filtros 0▾]  │
+ *   ├──────────────────────────────────────────┤
+ *   │ [OrgResponsiveCard × N]                  │
+ *   │  - avatar + title + badge (Actual/...)   │
+ *   │  - details grid: IP / Dispositivo / etc  │
+ *   │  - footer: 👁 [Terminar]                 │
+ *   ├──────────────────────────────────────────┤
+ *   │ [PaginationBar]                          │
+ *   └──────────────────────────────────────────┘
  */
 
 const PAGE_SIZE = 10;
+type StatusFilter = 'all' | 'active' | 'inactive';
 
 export default function SessionsScreen() {
   const queryClient = useQueryClient();
 
-  const [status, setStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [status, setStatus] = useState<StatusFilter>('all');
   const [page, setPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<ActiveSession | null>(null);
@@ -71,6 +82,7 @@ export default function SessionsScreen() {
   const total = data?.meta?.total ?? 0;
   const totalPages = data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
   const activeCount = sessions.filter((s) => isSessionActive(s)).length;
+  const inactiveCount = Math.max(total - activeCount, 0);
 
   const terminateMutation = useMutation({
     mutationFn: (id: string | number) => OrgAuditService.terminateSession(id),
@@ -89,28 +101,15 @@ export default function SessionsScreen() {
     setRefreshing(false);
   };
 
-  const rowActionsFor = (session: ActiveSession): RowAction[] => {
-    const actions: RowAction[] = [
-      {
-        key: 'view',
-        label: 'Ver detalle',
-        icon: 'eye',
-        variant: 'info',
-        onPress: () => setSelected(session),
-      },
-    ];
-    if (isSessionActive(session)) {
-      actions.push({
-        key: 'terminate',
-        label: 'Terminar',
-        icon: 'x-circle',
-        variant: 'danger',
-        destructive: true,
-        onPress: () => setPendingTerminate(session),
-      });
-    }
-    return actions;
-  };
+  const activeFiltersCount = status === 'all' ? 0 : 1;
+  const actions: OrgOptionsAction[] = [
+    {
+      key: 'refresh',
+      label: 'Actualizar',
+      icon: 'refresh-cw',
+      onPress: onRefresh,
+    },
+  ];
 
   return (
     <View style={styles.root}>
@@ -121,11 +120,14 @@ export default function SessionsScreen() {
           <ListHeader
             total={total}
             activeCount={activeCount}
+            inactiveCount={inactiveCount}
             status={status}
             onStatusChange={(s) => {
               setStatus(s);
               setPage(1);
             }}
+            actions={actions}
+            activeFiltersCount={activeFiltersCount}
             onRefresh={onRefresh}
           />
         }
@@ -134,6 +136,17 @@ export default function SessionsScreen() {
             <View style={styles.loading}>
               <ActivityIndicator size="large" color={colors.primary} />
             </View>
+          ) : status !== 'all' ? (
+            <EmptyState
+              icon="filter"
+              title="Sin sesiones con este filtro"
+              description="Cambia el filtro de estado para ver más sesiones."
+              actionLabel="Mostrar todas"
+              onAction={() => {
+                setStatus('all');
+                setPage(1);
+              }}
+            />
           ) : (
             <EmptyState
               icon="monitor"
@@ -144,39 +157,83 @@ export default function SessionsScreen() {
         }
         renderItem={({ item }) => {
           const active = isSessionActive(item);
-          return (
-            <View style={styles.rowWrap}>
-              <OrgListItem
-                title={formatSessionUser(item)}
-                subtitle={[
-                  getDeviceIcon(item.device) === 'smartphone' ? 'Móvil' : 'Escritorio',
-                  item.location ?? item.ip_address,
+          const cardActions: OrgCardAction[] = [
+            {
+              key: 'view',
+              label: 'Ver detalle',
+              icon: 'eye',
+              variant: 'primary',
+              showInFooter: true,
+              onPress: () => setSelected(item),
+            },
+            ...(active
+              ? [
+                  {
+                    key: 'terminate',
+                    label: 'Terminar',
+                    icon: 'x-circle',
+                    variant: 'danger' as const,
+                    destructive: true,
+                    onPress: () => setPendingTerminate(item),
+                  },
                 ]
-                  .filter(Boolean)
-                  .join(' · ')}
-                description={`Activa: ${new Date(
-                  item.last_active_at ?? item.last_activity ?? item.created_at,
-                ).toLocaleString()}`}
-                leftIcon={getDeviceIcon(item.device)}
-                leftIconColor={active ? colorScales.green[500] : colorScales.gray[400]}
-                rightBadge={
-                  item.is_current
-                    ? { label: 'Actual', variant: 'primary' }
-                    : active
-                      ? { label: 'Activa', variant: 'success' }
-                      : { label: 'Inactiva', variant: 'muted' }
-                }
-                rightMeta={new Date(item.expires_at).toLocaleDateString()}
-                onPress={() => setSelected(item)}
-                chevron={false}
-              />
-              <View style={styles.rowActions}>
-                <RowActionsMenu
-                  actions={rowActionsFor(item)}
-                  accessibilityLabel={`Acciones de sesión ${formatSessionUser(item)}`}
-                />
-              </View>
-            </View>
+              : []),
+          ];
+          return (
+            <OrgResponsiveCard
+              title={formatSessionUser(item)}
+              subtitle={[
+                getDeviceIcon(item.device) === 'smartphone' ? 'Móvil' : 'Escritorio',
+                item.location ?? item.ip_address,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+              leftIcon={getDeviceIcon(item.device)}
+              leftIconColor={active ? colorScales.green[500] : colorScales.gray[400]}
+              badge={
+                item.is_current
+                  ? { label: 'Actual', variant: 'primary' }
+                  : active
+                    ? { label: 'Activa', variant: 'success' }
+                    : { label: 'Inactiva', variant: 'muted' }
+              }
+              details={[
+                {
+                  label: 'IP',
+                  value: item.ip_address ?? '—',
+                  icon: 'globe',
+                  monospace: true,
+                },
+                {
+                  label: 'Última actividad',
+                  value: new Date(
+                    item.last_active_at ?? item.last_activity ?? item.created_at,
+                  ).toLocaleString(),
+                  icon: 'clock',
+                },
+                {
+                  label: 'Creada',
+                  value: new Date(item.created_at).toLocaleString(),
+                  icon: 'calendar',
+                },
+                {
+                  label: 'Expira',
+                  value: new Date(item.expires_at).toLocaleString(),
+                  icon: 'hourglass',
+                },
+              ]}
+              footerLabel="Estado"
+              footerValue={
+                item.is_current
+                  ? 'Sesión actual'
+                  : active
+                    ? 'Sesión activa'
+                    : 'Sesión inactiva'
+              }
+              actions={cardActions}
+              onPress={() => setSelected(item)}
+              chevron={false}
+            />
           );
         }}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
@@ -204,25 +261,6 @@ export default function SessionsScreen() {
         visible={!!selected}
         onClose={() => setSelected(null)}
         title="Detalle de sesión"
-        showFooter={isSessionActive(selected ?? undefined as any)}
-        footer={
-          selected && isSessionActive(selected) ? (
-            <View style={styles.modalActions}>
-              <Pressable
-                style={[styles.modalBtn, styles.modalBtnSecondary]}
-                onPress={() => setSelected(null)}
-              >
-                <Text style={styles.modalBtnSecondaryText}>Cerrar</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.modalBtn, styles.modalBtnDanger]}
-                onPress={() => setPendingTerminate(selected)}
-              >
-                <Text style={styles.modalBtnDangerText}>Terminar sesión</Text>
-              </Pressable>
-            </View>
-          ) : null
-        }
       >
         {selected ? (
           <View>
@@ -231,37 +269,31 @@ export default function SessionsScreen() {
                 style={[
                   styles.detailHeroIcon,
                   {
-                    backgroundColor:
-                      (isSessionActive(selected) ? colorScales.green[100] : colorScales.gray[100]),
+                    backgroundColor: isSessionActive(selected)
+                      ? colorScales.green[100]
+                      : colorScales.gray[100],
                   },
                 ]}
               >
                 <Icon
                   name={getDeviceIcon(selected.device)}
                   size={22}
-                  color={isSessionActive(selected) ? colorScales.green[700] : colorScales.gray[500]}
+                  color={
+                    isSessionActive(selected)
+                      ? colorScales.green[700]
+                      : colorScales.gray[500]
+                  }
                 />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.detailHeroTitle}>{formatSessionUser(selected)}</Text>
-                <View style={{ marginTop: 4 }}>
-                  <OrgBadge
-                    label={
-                      selected.is_current
-                        ? 'Actual'
-                        : isSessionActive(selected)
-                          ? 'Activa'
-                          : 'Inactiva'
-                    }
-                    variant={
-                      selected.is_current
-                        ? 'primary'
-                        : isSessionActive(selected)
-                          ? 'success'
-                          : 'muted'
-                    }
-                  />
-                </View>
+                <Text style={styles.detailHeroSub}>
+                  {selected.is_current
+                    ? 'Sesión actual'
+                    : isSessionActive(selected)
+                      ? 'Sesión activa'
+                      : 'Sesión inactiva'}
+                </Text>
               </View>
             </View>
 
@@ -308,6 +340,23 @@ export default function SessionsScreen() {
                 value={new Date(selected.expires_at).toLocaleString()}
               />
             </View>
+
+            {isSessionActive(selected) ? (
+              <View style={styles.modalActions}>
+                <Pressable
+                  style={[styles.modalBtn, styles.modalBtnSecondary]}
+                  onPress={() => setSelected(null)}
+                >
+                  <Text style={styles.modalBtnSecondaryText}>Cerrar</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modalBtn, styles.modalBtnDanger]}
+                  onPress={() => setPendingTerminate(selected)}
+                >
+                  <Text style={styles.modalBtnDangerText}>Terminar sesión</Text>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
         ) : null}
       </Modal>
@@ -317,10 +366,10 @@ export default function SessionsScreen() {
         visible={!!pendingTerminate}
         onClose={() => !terminateMutation.isPending && setPendingTerminate(null)}
         title="Terminar sesión"
-        showFooter
       >
         <Text style={styles.confirmText}>
-          ¿Terminar la sesión de {pendingTerminate ? formatSessionUser(pendingTerminate) : ''}?
+          ¿Terminar la sesión de{' '}
+          {pendingTerminate ? formatSessionUser(pendingTerminate) : ''}?
         </Text>
         <Text style={styles.confirmHint}>
           El usuario será desconectado y deberá volver a iniciar sesión.
@@ -334,7 +383,11 @@ export default function SessionsScreen() {
             <Text style={styles.modalBtnSecondaryText}>Cancelar</Text>
           </Pressable>
           <Pressable
-            style={[styles.modalBtn, styles.modalBtnDanger, terminateMutation.isPending && styles.modalBtnDisabled]}
+            style={[
+              styles.modalBtn,
+              styles.modalBtnDanger,
+              terminateMutation.isPending && styles.modalBtnDisabled,
+            ]}
             disabled={terminateMutation.isPending}
             onPress={() => pendingTerminate && terminateMutation.mutate(pendingTerminate.id)}
           >
@@ -355,17 +408,28 @@ export default function SessionsScreen() {
 interface ListHeaderProps {
   total: number;
   activeCount: number;
-  status: 'all' | 'active' | 'inactive';
-  onStatusChange: (s: 'all' | 'active' | 'inactive') => void;
+  inactiveCount: number;
+  status: StatusFilter;
+  onStatusChange: (s: StatusFilter) => void;
+  actions: OrgOptionsAction[];
+  activeFiltersCount: number;
   onRefresh: () => void;
 }
 
-function ListHeader({ total, activeCount, status, onStatusChange, onRefresh }: ListHeaderProps) {
+function ListHeader({
+  total,
+  activeCount,
+  inactiveCount,
+  status,
+  onStatusChange,
+  actions,
+  activeFiltersCount,
+  onRefresh,
+}: ListHeaderProps) {
   return (
     <View>
       <View style={styles.statsWrap}>
         <OrgStatsGrid
-          columns={3}
           stats={[
             {
               label: 'Total Sesiones',
@@ -383,7 +447,7 @@ function ListHeader({ total, activeCount, status, onStatusChange, onRefresh }: L
             },
             {
               label: 'Inactivas',
-              value: Math.max(total - activeCount, 0),
+              value: inactiveCount,
               icon: 'x-circle',
               color: colorScales.red[600],
               subText: 'sesiones terminadas',
@@ -397,49 +461,65 @@ function ListHeader({ total, activeCount, status, onStatusChange, onRefresh }: L
           <Text style={styles.titleMain}>Sesiones</Text>
           <Text style={styles.titleCount}>{total} registradas</Text>
         </View>
-        <RowActionsMenu
-          actions={[
-            {
-              key: 'refresh',
-              label: 'Actualizar',
-              icon: 'refresh-cw',
-              variant: 'default',
-              onPress: onRefresh,
-            },
-          ]}
-          accessibilityLabel="Acciones de sesiones"
+        <OrgOptionsDropdown
+          actions={actions}
+          activeFiltersCount={activeFiltersCount}
+          renderFiltersContent={() => (
+            <View>
+              <FilterSection
+                label="Todas"
+                value="Mostrar todas las sesiones"
+                active={status === 'all'}
+                onPress={() => onStatusChange('all')}
+              />
+              <FilterSection
+                label="Activas"
+                value="Sólo sesiones con is_active=true"
+                active={status === 'active'}
+                onPress={() => onStatusChange('active')}
+              />
+              <FilterSection
+                label="Inactivas"
+                value="Sólo sesiones terminadas o expiradas"
+                active={status === 'inactive'}
+                onPress={() => onStatusChange('inactive')}
+              />
+            </View>
+          )}
         />
       </View>
-
-      <View style={styles.quickFilters}>
-        <Pressable
-          style={[styles.quickBtn, status === 'all' && styles.quickBtnActive]}
-          onPress={() => onStatusChange('all')}
-        >
-          <Text style={[styles.quickBtnText, status === 'all' && styles.quickBtnTextActive]}>
-            Todas
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.quickBtn, status === 'active' && styles.quickBtnActive]}
-          onPress={() => onStatusChange('active')}
-        >
-          <Icon name="check-circle" size={14} color={status === 'active' ? '#FFFFFF' : colorScales.green[600]} />
-          <Text style={[styles.quickBtnText, status === 'active' && styles.quickBtnTextActive]}>
-            Activas
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.quickBtn, status === 'inactive' && styles.quickBtnActive]}
-          onPress={() => onStatusChange('inactive')}
-        >
-          <Icon name="x-circle" size={14} color={status === 'inactive' ? '#FFFFFF' : colorScales.red[600]} />
-          <Text style={[styles.quickBtnText, status === 'inactive' && styles.quickBtnTextActive]}>
-            Inactivas
-          </Text>
-        </Pressable>
-      </View>
     </View>
+  );
+}
+
+function FilterSection({
+  label,
+  value,
+  active,
+  onPress,
+}: {
+  label: string;
+  value: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      style={[styles.filterSection, active && styles.filterSectionActive]}
+      onPress={onPress}
+    >
+      <View style={{ flex: 1 }}>
+        <Text style={styles.filterLabel}>{label}</Text>
+        <Text style={styles.filterValue} numberOfLines={1}>
+          {value}
+        </Text>
+      </View>
+      {active ? (
+        <Icon name="check" size={16} color={colorScales.green[600]} />
+      ) : (
+        <Icon name="chevron-right" size={16} color={colorScales.gray[400]} />
+      )}
+    </Pressable>
   );
 }
 
@@ -450,7 +530,10 @@ function ListHeader({ total, activeCount, status, onStatusChange, onRefresh }: L
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colorScales.gray[50] },
   loading: { paddingVertical: spacing[12], alignItems: 'center' },
-  statsWrap: { marginBottom: spacing[3] },
+  statsWrap: {
+    marginHorizontal: -spacing[4],
+    marginBottom: spacing[3],
+  },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -468,49 +551,12 @@ const styles = StyleSheet.create({
     color: colorScales.gray[500],
     marginTop: 2,
   },
-  quickFilters: {
-    flexDirection: 'row',
-    gap: spacing[2],
-    marginBottom: spacing[3],
-  },
-  quickBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[1],
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.full,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    backgroundColor: colors.background,
-  },
-  quickBtnActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  quickBtnText: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[700],
-    fontWeight: typography.fontWeight.medium,
-  },
-  quickBtnTextActive: {
-    color: '#FFFFFF',
-    fontWeight: typography.fontWeight.semibold,
-  },
-  rowWrap: {
-    position: 'relative',
-  },
-  rowActions: {
-    position: 'absolute',
-    right: spacing[4],
-    top: spacing[2],
-  },
+  separator: { height: spacing[1] },
   listContent: {
     paddingHorizontal: spacing[4],
     paddingTop: spacing[2],
     paddingBottom: spacing[24],
   },
-  separator: { height: spacing[1] },
   detailHero: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -528,6 +574,11 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[900],
+  },
+  detailHeroSub: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    marginTop: 2,
   },
   card: {
     backgroundColor: colorScales.gray[50],
@@ -548,8 +599,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  modalBtnPrimary: { backgroundColor: colors.primary },
-  modalBtnPrimaryText: { color: '#FFFFFF', fontWeight: typography.fontWeight.semibold },
   modalBtnSecondary: { backgroundColor: colorScales.gray[100] },
   modalBtnSecondaryText: { color: colorScales.gray[700], fontWeight: typography.fontWeight.semibold },
   modalBtnDanger: { backgroundColor: colorScales.red[600] },
@@ -564,5 +613,30 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: colorScales.gray[500],
     marginBottom: spacing[4],
+  },
+  filterSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  filterSectionActive: {
+    backgroundColor: colorScales.green[50],
+  },
+  filterLabel: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  filterValue: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[900],
+    marginTop: 2,
+    fontWeight: typography.fontWeight.medium,
   },
 });
