@@ -12,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
 import { OrgAuditService } from '@/features/org/services/org-audit.service';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { OrgResponsiveCard, type OrgCardAction } from '@/shared/components/org-responsive-card';
 import { OrgOptionsDropdown, type OrgOptionsAction } from '@/shared/components/org-options-dropdown';
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
@@ -101,15 +101,17 @@ function auditStatsItems(stats: AuditStats | null | undefined) {
       label: 'Eventos',
       value: stats?.total_logs ?? 0,
       icon: 'history',
-      color: colorScales.blue[600],
-      subText: 'registros de auditoría',
+      iconColor: colorScales.blue[600],
+      iconBg: colorScales.blue[600] + '15',
+      description: 'registros de auditoría',
     },
     {
       label: 'Seguridad',
       value: authAction,
       icon: 'shield-check',
-      color: colorScales.red[600],
-      subText: 'sesiones y alertas',
+      iconColor: colorScales.red[600],
+      iconBg: colorScales.red[600] + '15',
+      description: 'sesiones y alertas',
     },
     {
       label: 'Usuarios',
@@ -117,8 +119,9 @@ function auditStatsItems(stats: AuditStats | null | undefined) {
         sumCombined(['users', 'roles', 'permissions']) ||
         sum(byResource, ['users', 'roles', 'permissions']),
       icon: 'users',
-      color: colorScales.green[600],
-      subText: 'usuarios, roles y permisos',
+      iconColor: colorScales.green[600],
+      iconBg: colorScales.green[600] + '15',
+      description: 'usuarios, roles y permisos',
     },
     {
       label: 'Configuración',
@@ -126,8 +129,9 @@ function auditStatsItems(stats: AuditStats | null | undefined) {
         sumCombined(['settings', 'domain_settings', 'organizations', 'stores']) ||
         sum(byResource, ['settings', 'domain_settings', 'organizations', 'stores']),
       icon: 'settings',
-      color: colorScales.blue[700],
-      subText: 'ajustes críticos',
+      iconColor: colorScales.blue[700],
+      iconBg: colorScales.blue[700] + '15',
+      description: 'ajustes críticos',
     },
   ];
 }
@@ -242,7 +246,7 @@ export default function AuditLogsScreen() {
     <View style={styles.root}>
       {/* Sticky top: stats grid (web: `stats-container sticky top-0 z-20`) */}
       <View style={styles.stickyStats}>
-        <OrgStatsGrid stats={auditStatsItems(stats)} />
+        <StatsGrid items={auditStatsItems(stats)} />
       </View>
 
       {/* Sticky below: title row + options dropdown (web: `sticky top-[99px] z-10`) */}
@@ -329,9 +333,18 @@ export default function AuditLogsScreen() {
               onPress: () => setSelected(item),
             },
           ];
+          // Paridad con web `logs.component.ts cardConfig`:
+          //   title        = formatAuditAction(action)         — ej. "Crear usuario"
+          //   subtitle     = formatAuditResource(resource) + #id
+          //   badge        = formatAuditAction(action) con color
+          //   detail[0]    = Usuario (icon user)
+          //   detail[1]    = Fecha
+          //   detail[2]    = IP
+          // Antes: el title era el usuario y "Acción" aparecía como detail, lo que
+          // duplicaba info con el badge y enterraba lo más importante (la acción).
           return (
             <OrgResponsiveCard
-              title={formatUser(item)}
+              title={formatAction(item.action)}
               subtitle={`${formatResource(item.resource)}${
                 item.resource_id ? ` · #${item.resource_id}` : ''
               }`}
@@ -340,10 +353,9 @@ export default function AuditLogsScreen() {
               badge={{ label: formatAction(item.action), variant: 'primary' }}
               details={[
                 {
-                  label: 'Acción',
-                  value: formatAction(item.action),
-                  icon: getActionIcon(item.action),
-                  iconColor: getActionColor(item.action),
+                  label: 'Usuario',
+                  value: formatUser(item),
+                  icon: 'user',
                 },
                 {
                   label: 'Fecha',
