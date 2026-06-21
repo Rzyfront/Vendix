@@ -174,7 +174,7 @@ interface SelectedResourcePreview {
                           track resource.id
                         ) {
                           <div
-                            class="ai-selected-chip relative flex max-w-full items-center gap-1.5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-1 pr-2"
+                            class="ai-selected-chip relative flex max-w-full items-center gap-1.5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-1 pr-1.5"
                           >
                             <div
                               class="h-7 w-7 shrink-0 overflow-hidden rounded-md bg-[var(--color-surface-muted)]"
@@ -194,6 +194,17 @@ interface SelectedResourcePreview {
                             >
                               {{ resource.label }}
                             </span>
+                            <button
+                              type="button"
+                              class="ml-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-danger,#dc2626)]"
+                              aria-label="Quitar recurso"
+                              (click)="
+                                removeResourcePreview(resource);
+                                $event.stopPropagation()
+                              "
+                            >
+                              <app-icon name="x" [size]="12"></app-icon>
+                            </button>
                           </div>
                         }
                         @if (selectedQrCount()) {
@@ -578,7 +589,7 @@ interface SelectedResourcePreview {
                         track resource.id
                       ) {
                         <div
-                          class="ai-selected-chip relative flex max-w-full items-center gap-2 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-1 pr-2"
+                          class="ai-selected-chip relative flex max-w-full items-center gap-2 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-1 pr-1.5"
                         >
                           <div
                             class="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-[var(--color-surface-muted)]"
@@ -597,6 +608,17 @@ interface SelectedResourcePreview {
                           >
                             {{ resource.label }}
                           </span>
+                          <button
+                            type="button"
+                            class="ml-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-danger,#dc2626)]"
+                            aria-label="Quitar recurso"
+                            (click)="
+                              removeResourcePreview(resource);
+                              $event.stopPropagation()
+                            "
+                          >
+                            <app-icon name="x" [size]="12"></app-icon>
+                          </button>
                         </div>
                       }
                     </div>
@@ -2141,15 +2163,28 @@ export class AnuncioCreateWizardPageComponent {
 
   protected readonly selectedResourcePreviewItems = computed<
     SelectedResourcePreview[]
-  >(() => [
-    ...this.selectedReferenceResources().map((resource) => ({
-      id: resource.id,
-      label: resource.label,
-      preview_url: resource.preview_url,
-      source_type: resource.source_type || 'reference',
-    })),
-    ...this.selectedGalleryResourcePreviews(),
-  ]);
+  >(() => {
+    const items: SelectedResourcePreview[] = [
+      ...this.selectedReferenceResources().map((resource) => ({
+        id: resource.id,
+        label: resource.label,
+        preview_url: resource.preview_url,
+        source_type: resource.source_type || 'reference',
+      })),
+      ...this.selectedGalleryResourcePreviews(),
+    ];
+
+    // Dedup by stable visual-identity key: prefer preview_url, fall back to id.
+    // Two selected products can share an image (same image.id), producing
+    // duplicate `product-image-<id>` keys and breaking the @for track.
+    const seen = new Set<string>();
+    return items.filter((item) => {
+      const key = item.preview_url || item.id;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  });
 
   protected readonly selectedQrCount = computed(
     () =>
@@ -2278,6 +2313,15 @@ export class AnuncioCreateWizardPageComponent {
         ? selected.filter((id) => id !== resourceId)
         : [...selected, resourceId],
     );
+  }
+
+  protected removeResourcePreview(item: SelectedResourcePreview): void {
+    if (item.id.startsWith('product-image-')) {
+      const imageId = Number(item.id.slice('product-image-'.length));
+      if (!Number.isNaN(imageId)) this.toggleReferenceImage(imageId);
+      return;
+    }
+    this.toggleReferenceResource(item.id);
   }
 
   protected addCustomResources(images: string[]): void {
