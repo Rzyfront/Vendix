@@ -122,38 +122,41 @@ interface SelectedResourcePreview {
                 ></app-steps-line>
               </div>
 
-              <form class="space-y-5 p-4 md:p-6" [formGroup]="form">
+              <form class="space-y-3 p-4 md:p-5" [formGroup]="form">
                 @if (currentStep() === 0) {
-                  <section class="space-y-5">
-                    <div class="ai-hero-panel rounded-2xl p-4 md:p-5">
-                      <div class="flex items-start gap-3">
-                        <span
-                          class="ai-icon-glow flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--color-primary)]"
+                  <section class="space-y-3">
+                    <div class="ai-hero-strip flex items-center gap-2.5 rounded-xl px-3 py-2">
+                      <span
+                        class="ai-icon-glow flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-[var(--color-primary)]"
+                      >
+                        <app-icon name="sparkles" [size]="16"></app-icon>
+                      </span>
+                      <div class="min-w-0">
+                        <h2
+                          class="text-sm font-semibold leading-tight text-[var(--color-text-primary)]"
                         >
-                          <app-icon name="sparkles" [size]="20"></app-icon>
-                        </span>
-                        <div>
-                          <h2
-                            class="text-base font-semibold text-[var(--color-text-primary)]"
-                          >
-                            Que quieres comunicar?
-                          </h2>
-                          <p
-                            class="mt-1 text-sm leading-6 text-[var(--color-text-secondary)]"
-                          >
-                            Escribe una idea o instrucciones y elige el formato.
-                            Puede ser una tienda, un servicio, un producto, una
-                            novedad o un QR.
-                          </p>
-                        </div>
+                          Que quieres comunicar?
+                        </h2>
+                        <p
+                          class="truncate text-xs leading-tight text-[var(--color-text-secondary)]"
+                        >
+                          Elige el formato y describe la idea.
+                        </p>
                       </div>
                     </div>
+
+                    <app-input-buttons
+                      formControlName="format"
+                      label="Formato"
+                      [options]="formatOptions"
+                      [hideLabelsOnMobile]="false"
+                    ></app-input-buttons>
 
                     <app-textarea
                       formControlName="prompt"
                       label="Idea o instrucciones"
                       placeholder="Ejemplo: quiero destacar mi tienda y que las personas escaneen el QR para ver el catalogo. Puedes escribirlo o usar Sugerir anuncio."
-                      [rows]="5"
+                      [rows]="3"
                     ></app-textarea>
 
                     @if (suggestionNotes()) {
@@ -162,10 +165,109 @@ interface SelectedResourcePreview {
                       </app-alert-banner>
                     }
 
-                    <div class="flex justify-end">
+                    @if (
+                      selectedResourcePreviewItems().length || selectedQrCount()
+                    ) {
+                      <div class="flex flex-wrap items-center gap-2">
+                        @for (
+                          resource of selectedResourcePreviewItems();
+                          track resource.id
+                        ) {
+                          <div
+                            class="ai-selected-chip relative flex max-w-full items-center gap-1.5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-1 pr-2"
+                          >
+                            <div
+                              class="h-7 w-7 shrink-0 overflow-hidden rounded-md bg-[var(--color-surface-muted)]"
+                            >
+                              <img
+                                class="h-full w-full object-cover"
+                                [class.object-contain]="
+                                  resource.source_type.includes('qr')
+                                "
+                                [src]="resource.preview_url"
+                                [alt]="resource.label"
+                                (error)="hideBrokenImage($event)"
+                              />
+                            </div>
+                            <span
+                              class="max-w-28 truncate text-xs font-medium text-[var(--color-text-primary)]"
+                            >
+                              {{ resource.label }}
+                            </span>
+                          </div>
+                        }
+                        @if (selectedQrCount()) {
+                          <span
+                            class="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-xs font-medium text-[var(--color-primary)]"
+                          >
+                            <app-icon name="barcode" [size]="13"></app-icon>
+                            QR exacto
+                          </span>
+                        }
+                      </div>
+                    }
+
+                    @if (generationError()) {
+                      <app-alert-banner variant="danger" icon="triangle-alert">
+                        {{ generationError() }}
+                      </app-alert-banner>
+                    }
+
+                    <div
+                      class="ai-action-dock flex flex-wrap items-center gap-2 rounded-xl p-2"
+                    >
+                      <app-button
+                        variant="ghost"
+                        size="sm"
+                        type="button"
+                        (clicked)="goBack()"
+                      >
+                        <app-icon slot="icon" name="x" [size]="15"></app-icon>
+                        Cancelar
+                      </app-button>
                       <app-button
                         variant="outline"
-                        size="md"
+                        size="sm"
+                        type="button"
+                        (clicked)="galleryModalOpen.set(true)"
+                      >
+                        <app-icon
+                          slot="icon"
+                          name="images"
+                          [size]="15"
+                        ></app-icon>
+                        Galeria
+                        @if (
+                          selectedReferenceResources().length +
+                            selectedImageIds().length
+                        ) {
+                          <span class="ai-count-badge">{{
+                            selectedReferenceResources().length +
+                              selectedImageIds().length
+                          }}</span>
+                        }
+                      </app-button>
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        type="button"
+                        (clicked)="productsModalOpen.set(true)"
+                      >
+                        <app-icon
+                          slot="icon"
+                          name="package"
+                          [size]="15"
+                        ></app-icon>
+                        Productos
+                        @if (selectedProductIds().length) {
+                          <span class="ai-count-badge">{{
+                            selectedProductIds().length
+                          }}</span>
+                        }
+                      </app-button>
+                      <app-button
+                        variant="outline"
+                        size="sm"
                         type="button"
                         [loading]="suggestingPrompt()"
                         [disabled]="
@@ -176,147 +278,14 @@ interface SelectedResourcePreview {
                         <app-icon
                           slot="icon"
                           name="sparkles"
-                          [size]="16"
+                          [size]="15"
                         ></app-icon>
-                        Sugerir anuncio
+                        Sugerir
                       </app-button>
-                    </div>
-
-                    <app-input-buttons
-                      formControlName="format"
-                      label="Formato"
-                      [options]="formatOptions"
-                      [hideLabelsOnMobile]="false"
-                    ></app-input-buttons>
-
-                    <div class="grid items-start gap-5">
-                      <section
-                        class="ai-glow-panel overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm"
-                      >
-                        <div
-                          class="flex flex-col gap-4 border-b border-[var(--color-border)] px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-5"
-                        >
-                          <div class="flex min-w-0 items-start gap-3">
-                            <span
-                              class="ai-icon-glow flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--color-primary)]"
-                            >
-                              <app-icon name="images" [size]="20"></app-icon>
-                            </span>
-                            <div class="min-w-0">
-                              <h2
-                                class="text-base font-semibold leading-6 text-[var(--color-text-primary)]"
-                              >
-                                Recursos del anuncio
-                              </h2>
-                              <p
-                                class="mt-1 max-w-xl text-sm leading-5 text-[var(--color-text-secondary)]"
-                              >
-                                @if (
-                                  selectedReferenceResources().length ||
-                                    selectedImageIds().length ||
-                                    selectedProductIds().length
-                                ) {
-                                  {{
-                                    selectedReferenceResources().length +
-                                      selectedImageIds().length
-                                  }}
-                                  recursos &middot;
-                                  {{ selectedProductIds().length }} productos
-                                } @else {
-                                  Aun no agregaste recursos.
-                                }
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div class="space-y-4 p-4 md:p-5">
-                          <div class="flex flex-col gap-2 sm:flex-row">
-                            <app-button
-                              variant="outline"
-                              size="md"
-                              type="button"
-                              class="flex-1"
-                              (clicked)="productsModalOpen.set(true)"
-                            >
-                              <app-icon
-                                slot="icon"
-                                name="package"
-                                [size]="16"
-                              ></app-icon>
-                              Agregar productos
-                            </app-button>
-                            <app-button
-                              variant="outline"
-                              size="md"
-                              type="button"
-                              class="flex-1"
-                              (clicked)="galleryModalOpen.set(true)"
-                            >
-                              <app-icon
-                                slot="icon"
-                                name="images"
-                                [size]="16"
-                              ></app-icon>
-                              Galeria de recursos
-                            </app-button>
-                          </div>
-
-                          @if (selectedResourcePreviewItems().length) {
-                            <div class="flex flex-wrap gap-2">
-                              @for (
-                                resource of selectedResourcePreviewItems();
-                                track resource.id
-                              ) {
-                                <div
-                                  class="ai-selected-chip relative flex max-w-full items-center gap-2 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-1 pr-2"
-                                >
-                                  <div
-                                    class="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-[var(--color-surface-muted)]"
-                                  >
-                                    <img
-                                      class="h-full w-full object-cover"
-                                      [class.object-contain]="
-                                        resource.source_type.includes('qr')
-                                      "
-                                      [src]="resource.preview_url"
-                                      [alt]="resource.label"
-                                      (error)="hideBrokenImage($event)"
-                                    />
-                                  </div>
-                                  <span
-                                    class="max-w-32 truncate text-xs font-medium text-[var(--color-text-primary)]"
-                                  >
-                                    {{ resource.label }}
-                                  </span>
-                                </div>
-                              }
-                            </div>
-                          }
-
-                          @if (selectedQrCount()) {
-                            <app-alert-banner variant="info" icon="barcode">
-                              El QR seleccionado se insertara identico en la
-                              imagen final, con buen contraste y sin tapar el
-                              diseno.
-                            </app-alert-banner>
-                          }
-                        </div>
-                      </section>
-                    </div>
-
-                    @if (generationError()) {
-                      <app-alert-banner variant="danger" icon="triangle-alert">
-                        {{ generationError() }}
-                      </app-alert-banner>
-                    }
-
-                    <div
-                      class="ai-action-dock flex flex-col gap-2 rounded-2xl p-3 sm:flex-row sm:items-center sm:justify-end"
-                    >
                       <app-button
+                        class="ml-auto"
                         variant="primary"
-                        size="md"
+                        size="sm"
                         type="button"
                         [loading]="creating() || generating()"
                         [disabled]="submitDisabled()"
@@ -325,7 +294,7 @@ interface SelectedResourcePreview {
                         <app-icon
                           slot="icon"
                           name="image-plus"
-                          [size]="16"
+                          [size]="15"
                         ></app-icon>
                         Generar anuncio
                       </app-button>
@@ -534,21 +503,6 @@ interface SelectedResourcePreview {
                   </section>
                 }
               </form>
-
-              @if (currentStep() === 0) {
-                <div
-                  class="ai-bottom-bar flex flex-col-reverse gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-end md:px-6"
-                >
-                  <app-button
-                    variant="outline"
-                    size="md"
-                    type="button"
-                    (clicked)="goBack()"
-                  >
-                    Cancelar
-                  </app-button>
-                </div>
-              }
             </app-card>
           </div>
 
@@ -1303,6 +1257,35 @@ interface SelectedResourcePreview {
             rgba(56, 189, 248, 0.055),
             rgba(var(--color-primary-rgb), 0.04)
           );
+      }
+
+      .ai-hero-strip {
+        border: 1px solid rgba(var(--color-primary-rgb), 0.2);
+        background:
+          linear-gradient(
+            120deg,
+            rgba(var(--color-primary-rgb), 0.1),
+            transparent 55%,
+            rgba(56, 189, 248, 0.07)
+          ),
+          var(--color-surface);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+      }
+
+      .ai-count-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 1.1rem;
+        height: 1.1rem;
+        margin-left: 0.35rem;
+        padding: 0 0.3rem;
+        border-radius: 9999px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        line-height: 1;
+        color: var(--color-primary);
+        background: rgba(var(--color-primary-rgb), 0.14);
       }
 
       :host ::ng-deep .ai-choice-buttons {
