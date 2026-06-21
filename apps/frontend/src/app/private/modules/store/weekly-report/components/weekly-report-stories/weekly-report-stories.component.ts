@@ -165,7 +165,7 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
                 @case ('sales') {
                   <div class="metric-grid">
                     <div class="metric-grid__item">
-                      <div class="metric-grid__label">Ingresos</div>
+                      <div class="metric-grid__label">Ventas completadas</div>
                       <div class="metric-grid__value metric-grid__value--big">
                         {{ slide.payload?.['total_revenue'] | currency:'$':'symbol-narrow':'1.0-0':'es-CO' }}
                       </div>
