@@ -208,13 +208,13 @@ interface SelectedResourcePreview {
                               <h2
                                 class="text-base font-semibold leading-6 text-[var(--color-text-primary)]"
                               >
-                                Recursos de tienda
+                                Galeria de recursos disponibles
                               </h2>
                               <p
                                 class="mt-1 max-w-xl text-sm leading-5 text-[var(--color-text-secondary)]"
                               >
-                                Logo, QR, sliders y fotos propias para guiar la
-                                pieza visual.
+                                Logo, QR, sliders, fotos propias y las imagenes
+                                de tus productos para guiar la pieza visual.
                               </p>
                             </div>
                           </div>
@@ -223,7 +223,10 @@ interface SelectedResourcePreview {
                             <span
                               class="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
                             >
-                              {{ selectedReferenceResources().length }}
+                              {{
+                                selectedReferenceResources().length +
+                                  selectedImageIds().length
+                              }}
                               seleccionados
                             </span>
                             <app-button
@@ -243,7 +246,7 @@ interface SelectedResourcePreview {
                         </div>
 
                         <div class="p-4 md:p-5">
-                          @if (referenceResources().length) {
+                          @if (referenceResources().length || galleryImages().length) {
                             <div
                               class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
                             >
@@ -304,13 +307,67 @@ interface SelectedResourcePreview {
                                   }
                                 </button>
                               }
+
+                              @for (
+                                item of galleryImages();
+                                track item.image.id
+                              ) {
+                                <button
+                                  type="button"
+                                  class="ai-resource-card group relative overflow-hidden rounded-2xl border bg-[var(--color-background)] p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
+                                  [style.border-color]="
+                                    isReferenceImageSelected(item.image.id)
+                                      ? 'var(--color-primary)'
+                                      : 'var(--color-border)'
+                                  "
+                                  [style.box-shadow]="
+                                    isReferenceImageSelected(item.image.id)
+                                      ? '0 12px 30px rgba(var(--color-primary-rgb), 0.14)'
+                                      : null
+                                  "
+                                  (click)="toggleReferenceImage(item.image.id)"
+                                >
+                                  <div
+                                    class="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
+                                  >
+                                    <img
+                                      class="h-full w-full object-cover transition duration-200 group-hover:scale-105"
+                                      [src]="item.image.image_url"
+                                      [alt]="item.product.name"
+                                      (error)="hideBrokenImage($event)"
+                                    />
+                                  </div>
+                                  <div class="min-w-0 px-1 pt-2">
+                                    <p
+                                      class="truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                                    >
+                                      {{ item.product.name }}
+                                    </p>
+                                    <p
+                                      class="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]"
+                                    >
+                                      Foto de producto
+                                    </p>
+                                  </div>
+                                  @if (isReferenceImageSelected(item.image.id)) {
+                                    <span
+                                      class="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
+                                    >
+                                      <app-icon
+                                        name="check"
+                                        [size]="14"
+                                      ></app-icon>
+                                    </span>
+                                  }
+                                </button>
+                              }
                             </div>
                           } @else {
                             <app-empty-state
                               size="sm"
                               icon="images"
-                              title="Sin recursos de tienda"
-                              description="Puedes continuar sin imagenes o agregar una foto, QR o logo."
+                              title="Aun no hay recursos disponibles"
+                              description="Agrega productos o sube recursos para verlos aqui."
                               [showActionButton]="false"
                             ></app-empty-state>
                           }
@@ -345,15 +402,12 @@ interface SelectedResourcePreview {
                               >
                                 Productos
                               </h2>
-                              @if (
-                                selectedProductIds().length ||
-                                selectedImageIds().length
-                              ) {
+                              @if (selectedProductIds().length) {
                                 <p
                                   class="mt-1 text-sm leading-5 text-[var(--color-text-secondary)]"
                                 >
-                                  {{ selectedProductIds().length }} productos ·
-                                  {{ selectedImageIds().length }} imagenes
+                                  {{ selectedProductIds().length }} productos
+                                  seleccionados
                                 </p>
                               } @else {
                                 <p
@@ -379,28 +433,6 @@ interface SelectedResourcePreview {
                             Agregar productos
                           </app-button>
                         </div>
-
-                        @if (selectedGalleryResourcePreviews().length) {
-                          <div
-                            class="flex flex-wrap gap-2 border-t border-[var(--color-border)] px-4 py-3 md:px-5"
-                          >
-                            @for (
-                              preview of selectedGalleryResourcePreviews();
-                              track preview.id
-                            ) {
-                              <div
-                                class="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
-                              >
-                                <img
-                                  class="h-full w-full object-cover"
-                                  [src]="preview.preview_url"
-                                  [alt]="preview.label"
-                                  (error)="hideBrokenImage($event)"
-                                />
-                              </div>
-                            }
-                          </div>
-                        }
                       </section>
                     </div>
 
@@ -993,104 +1025,6 @@ interface SelectedResourcePreview {
                       @if (isProductSelected(product.id)) {
                         <span
                           class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
-                        >
-                          <app-icon name="check" [size]="14"></app-icon>
-                        </span>
-                      }
-                    </button>
-                  }
-                </div>
-              }
-            </div>
-          </section>
-
-          <section
-            class="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]"
-          >
-            <div
-              class="flex flex-col gap-3 border-b border-[var(--color-border)] px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-5"
-            >
-              <div class="min-w-0">
-                <h3
-                  class="text-base font-semibold leading-6 text-[var(--color-text-primary)]"
-                >
-                  Galeria de productos seleccionados
-                </h3>
-                <p
-                  class="mt-1 text-sm leading-5 text-[var(--color-text-secondary)]"
-                >
-                  Fotos disponibles de los productos y servicios elegidos.
-                </p>
-              </div>
-              <div class="flex shrink-0 gap-2">
-                <span
-                  class="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
-                >
-                  {{ selectedImageIds().length }} elegidas
-                </span>
-                <span
-                  class="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
-                >
-                  {{ galleryImages().length }} disponibles
-                </span>
-              </div>
-            </div>
-
-            <div class="p-4 md:p-5">
-              @if (!selectedProductIds().length) {
-                <app-empty-state
-                  size="sm"
-                  icon="package"
-                  title="Selecciona un producto o servicio"
-                  description="Sus imagenes apareceran aqui."
-                  [showActionButton]="false"
-                ></app-empty-state>
-              } @else if (!galleryImages().length) {
-                <app-empty-state
-                  size="sm"
-                  icon="image-off"
-                  title="Sin imagenes"
-                  description="Los productos seleccionados no tienen imagenes disponibles."
-                  [showActionButton]="false"
-                ></app-empty-state>
-              } @else {
-                <div
-                  class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4"
-                >
-                  @for (item of galleryImages(); track item.image.id) {
-                    <button
-                      type="button"
-                      class="ai-resource-card group relative overflow-hidden rounded-2xl border bg-[var(--color-background)] p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
-                      [style.border-color]="
-                        isReferenceImageSelected(item.image.id)
-                          ? 'var(--color-primary)'
-                          : 'var(--color-border)'
-                      "
-                      [style.box-shadow]="
-                        isReferenceImageSelected(item.image.id)
-                          ? '0 12px 30px rgba(var(--color-primary-rgb), 0.14)'
-                          : null
-                      "
-                      (click)="toggleReferenceImage(item.image.id)"
-                    >
-                      <div
-                        class="aspect-square overflow-hidden rounded-xl bg-[var(--color-surface-muted)]"
-                      >
-                        <img
-                          class="h-full w-full object-cover transition duration-200 group-hover:scale-105"
-                          [src]="item.image.image_url"
-                          [alt]="item.product.name"
-                          (error)="hideBrokenImage($event)"
-                        />
-                      </div>
-                      <p
-                        class="mt-2 truncate px-1 text-xs font-medium text-[var(--color-text-primary)]"
-                      >
-                        {{ item.product.name }}
-                      </p>
-                      @if (isReferenceImageSelected(item.image.id)) {
-                        <span
-                          class="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
                         >
                           <app-icon name="check" [size]="14"></app-icon>
                         </span>
