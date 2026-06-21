@@ -17,10 +17,12 @@ import {
   ButtonComponent,
   CardComponent,
   EmptyStateComponent,
+  ExpandableCardComponent,
   IconComponent,
   InputButtonOption,
   InputButtonsComponent,
   InputsearchComponent,
+  ModalComponent,
   StepsLineComponent,
   StickyHeaderComponent,
   TextareaComponent,
@@ -83,9 +85,11 @@ interface SelectedResourcePreview {
     ButtonComponent,
     CardComponent,
     EmptyStateComponent,
+    ExpandableCardComponent,
     IconComponent,
     InputButtonsComponent,
     InputsearchComponent,
+    ModalComponent,
     ProductImageSourceModalComponent,
     StepsLineComponent,
     StickyHeaderComponent,
@@ -106,7 +110,7 @@ interface SelectedResourcePreview {
       <div class="p-2 md:p-6">
         <div
           class="mx-auto grid max-w-7xl gap-4"
-          [ngClass]="currentStep() < 3 ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''"
+          [ngClass]="currentStep() === 0 ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''"
         >
           <div class="space-y-4">
             <app-card [responsive]="true" [padding]="false">
@@ -139,47 +143,54 @@ interface SelectedResourcePreview {
                           <p
                             class="mt-1 text-sm leading-6 text-[var(--color-text-secondary)]"
                           >
-                            Elige una intencion y escribe una idea corta. Puede
-                            ser una tienda, un servicio, un producto, una
+                            Escribe una idea o instrucciones y elige el formato.
+                            Puede ser una tienda, un servicio, un producto, una
                             novedad o un QR.
                           </p>
                         </div>
                       </div>
                     </div>
 
-                    <app-input-buttons
-                      class="min-w-0"
-                      formControlName="intent"
-                      label="Objetivo"
-                      [options]="intentOptions"
-                      [hideLabelsOnMobile]="false"
-                      [equalWidth]="false"
-                      customWrapperClass="ai-choice-buttons"
-                      customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
-                    ></app-input-buttons>
-
-                    <app-input-buttons
-                      class="min-w-0"
-                      formControlName="channel"
-                      label="Canal"
-                      [options]="channelOptions"
-                      [hideLabelsOnMobile]="false"
-                      [equalWidth]="false"
-                      customWrapperClass="ai-choice-buttons"
-                      customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
-                    ></app-input-buttons>
-
                     <app-textarea
-                      formControlName="brief"
-                      label="Idea rapida"
-                      placeholder="Ejemplo: quiero destacar mi tienda y que las personas escaneen el QR para ver el catalogo."
+                      formControlName="prompt"
+                      label="Idea o instrucciones"
+                      placeholder="Ejemplo: quiero destacar mi tienda y que las personas escaneen el QR para ver el catalogo. Puedes escribirlo o usar Sugerir anuncio."
                       [rows]="5"
                     ></app-textarea>
-                  </section>
-                }
 
-                @if (currentStep() === 1) {
-                  <section class="space-y-5">
+                    @if (suggestionNotes()) {
+                      <app-alert-banner variant="info" icon="sparkles">
+                        {{ suggestionNotes() }}
+                      </app-alert-banner>
+                    }
+
+                    <div class="flex justify-end">
+                      <app-button
+                        variant="outline"
+                        size="md"
+                        type="button"
+                        [loading]="suggestingPrompt()"
+                        [disabled]="
+                          suggestingPrompt() || generating() || creating()
+                        "
+                        (clicked)="suggestPrompt()"
+                      >
+                        <app-icon
+                          slot="icon"
+                          name="sparkles"
+                          [size]="16"
+                        ></app-icon>
+                        Sugerir anuncio
+                      </app-button>
+                    </div>
+
+                    <app-input-buttons
+                      formControlName="format"
+                      label="Formato"
+                      [options]="formatOptions"
+                      [hideLabelsOnMobile]="false"
+                    ></app-input-buttons>
+
                     <div
                       class="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]"
                     >
@@ -587,56 +598,71 @@ interface SelectedResourcePreview {
                         </div>
                       </section>
                     </div>
-                  </section>
-                }
 
-                @if (currentStep() === 2) {
-                  <section class="ai-create-panel space-y-5 rounded-2xl p-4 md:p-5">
-                    <app-input-buttons
-                      formControlName="format"
-                      label="Formato"
-                      [options]="formatOptions"
-                      [hideLabelsOnMobile]="false"
-                    ></app-input-buttons>
+                    <app-expandable-card [(expanded)]="advancedExpanded">
+                      <div slot="header" class="flex items-center gap-2">
+                        <app-icon
+                          name="sliders-horizontal"
+                          [size]="16"
+                          class="text-[var(--color-primary)]"
+                        ></app-icon>
+                        <span
+                          class="text-sm font-semibold text-[var(--color-text-primary)]"
+                        >
+                          Opciones avanzadas
+                        </span>
+                      </div>
 
-                    <div
-                      class="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
-                    >
-                      <app-input-buttons
-                        class="min-w-0"
-                        formControlName="visual_style"
-                        label="Estilo"
-                        [options]="styleOptions"
-                        [hideLabelsOnMobile]="false"
-                        [equalWidth]="false"
-                        customWrapperClass="ai-choice-buttons"
-                        customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
-                      ></app-input-buttons>
+                      <div class="space-y-5 p-4 md:p-5">
+                        <app-input-buttons
+                          class="min-w-0"
+                          formControlName="intent"
+                          label="Objetivo"
+                          [options]="intentOptions"
+                          [hideLabelsOnMobile]="false"
+                          [equalWidth]="false"
+                          customWrapperClass="ai-choice-buttons"
+                          customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
+                        ></app-input-buttons>
 
-                      <app-input-buttons
-                        class="min-w-0"
-                        formControlName="cta"
-                        label="Accion"
-                        [options]="ctaOptions"
-                        [hideLabelsOnMobile]="false"
-                        [equalWidth]="false"
-                        customWrapperClass="ai-choice-buttons"
-                        customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
-                      ></app-input-buttons>
-                    </div>
+                        <app-input-buttons
+                          class="min-w-0"
+                          formControlName="channel"
+                          label="Canal"
+                          [options]="channelOptions"
+                          [hideLabelsOnMobile]="false"
+                          [equalWidth]="false"
+                          customWrapperClass="ai-choice-buttons"
+                          customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
+                        ></app-input-buttons>
 
-                    <app-textarea
-                      formControlName="prompt"
-                      label="Prompt del anuncio"
-                      placeholder="Puedes escribirlo o usar Sugerir anuncio."
-                      [rows]="7"
-                    ></app-textarea>
+                        <div
+                          class="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+                        >
+                          <app-input-buttons
+                            class="min-w-0"
+                            formControlName="visual_style"
+                            label="Estilo"
+                            [options]="styleOptions"
+                            [hideLabelsOnMobile]="false"
+                            [equalWidth]="false"
+                            customWrapperClass="ai-choice-buttons"
+                            customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
+                          ></app-input-buttons>
 
-                    @if (suggestionNotes()) {
-                      <app-alert-banner variant="info" icon="sparkles">
-                        {{ suggestionNotes() }}
-                      </app-alert-banner>
-                    }
+                          <app-input-buttons
+                            class="min-w-0"
+                            formControlName="cta"
+                            label="Accion"
+                            [options]="ctaOptions"
+                            [hideLabelsOnMobile]="false"
+                            [equalWidth]="false"
+                            customWrapperClass="ai-choice-buttons"
+                            customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
+                          ></app-input-buttons>
+                        </div>
+                      </div>
+                    </app-expandable-card>
 
                     @if (generationError()) {
                       <app-alert-banner variant="danger" icon="triangle-alert">
@@ -647,23 +673,6 @@ interface SelectedResourcePreview {
                     <div
                       class="ai-action-dock flex flex-col gap-2 rounded-2xl p-3 sm:flex-row sm:items-center sm:justify-end"
                     >
-                      <app-button
-                        variant="outline"
-                        size="md"
-                        type="button"
-                        [loading]="suggestingPrompt()"
-                        [disabled]="
-                          suggestingPrompt() || generating() || creating()
-                        "
-                        (clicked)="suggestPrompt()"
-                      >
-                        <app-icon
-                          slot="icon"
-                          name="sparkles"
-                          [size]="16"
-                        ></app-icon>
-                        Sugerir anuncio
-                      </app-button>
                       <app-button
                         variant="primary"
                         size="md"
@@ -683,7 +692,7 @@ interface SelectedResourcePreview {
                   </section>
                 }
 
-                @if (currentStep() === 3) {
+                @if (currentStep() === 1) {
                   <section class="ai-result-step space-y-3 rounded-2xl p-3 md:p-4">
                     <header
                       class="ai-result-header flex items-center justify-between gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-background)] px-3 py-2"
@@ -854,6 +863,21 @@ interface SelectedResourcePreview {
                           ></app-icon>
                           Crear otro
                         </app-button>
+                        @if (generationResult()?.id) {
+                          <app-button
+                            variant="outline"
+                            size="md"
+                            type="button"
+                            (clicked)="openCorrectionModal()"
+                          >
+                            <app-icon
+                              slot="icon"
+                              name="refresh-cw"
+                              [size]="16"
+                            ></app-icon>
+                            Regenerar con correccion
+                          </app-button>
+                        }
                         @if (generationResult()?.image_url) {
                           <app-button
                             variant="primary"
@@ -870,9 +894,9 @@ interface SelectedResourcePreview {
                 }
               </form>
 
-              @if (currentStep() < 3) {
+              @if (currentStep() === 0) {
                 <div
-                  class="ai-bottom-bar flex flex-col-reverse gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-between md:px-6"
+                  class="ai-bottom-bar flex flex-col-reverse gap-2 px-4 py-4 sm:flex-row sm:items-center sm:justify-end md:px-6"
                 >
                   <app-button
                     variant="outline"
@@ -882,33 +906,12 @@ interface SelectedResourcePreview {
                   >
                     Cancelar
                   </app-button>
-                  <div class="flex gap-2">
-                    <app-button
-                      variant="ghost"
-                      size="md"
-                      type="button"
-                      [disabled]="currentStep() === 0"
-                      (clicked)="previousStep()"
-                    >
-                      Atras
-                    </app-button>
-                    @if (currentStep() < 2) {
-                      <app-button
-                        variant="primary"
-                        size="md"
-                        type="button"
-                        (clicked)="nextStep()"
-                      >
-                        Continuar
-                      </app-button>
-                    }
-                  </div>
                 </div>
               }
             </app-card>
           </div>
 
-          @if (currentStep() < 3) {
+          @if (currentStep() === 0) {
           <aside class="space-y-4">
             <app-card [responsive]="true" [padding]="false">
               <div class="ai-summary-panel space-y-4 p-4 md:p-5">
@@ -1117,6 +1120,44 @@ interface SelectedResourcePreview {
         [remainingSlots]="8"
         (imagesAdded)="addCustomResources($event)"
       ></app-product-image-source-modal>
+
+      <app-modal
+        [(isOpen)]="correctionModalOpen"
+        title="Regenerar con correccion"
+        subtitle="Describe que debe ajustar la IA y se generara sobre el mismo anuncio."
+        size="md"
+      >
+        <div class="space-y-3">
+          <app-textarea
+            [formControl]="correctionText"
+            label="Que quieres corregir?"
+            placeholder="Ej: el logo salio cortado, el texto no se lee..."
+            [rows]="5"
+          ></app-textarea>
+        </div>
+
+        <div slot="footer" class="flex justify-end gap-2">
+          <app-button
+            variant="outline"
+            size="md"
+            type="button"
+            (clicked)="correctionModalOpen.set(false)"
+          >
+            Cancelar
+          </app-button>
+          <app-button
+            variant="primary"
+            size="md"
+            type="button"
+            [loading]="generating()"
+            [disabled]="!correctionText.value.trim() || generating()"
+            (clicked)="confirmCorrection()"
+          >
+            <app-icon slot="icon" name="refresh-cw" [size]="16"></app-icon>
+            Regenerar
+          </app-button>
+        </div>
+      </app-modal>
     </div>
   `,
   styles: [
@@ -1945,8 +1986,6 @@ export class AnuncioCreateWizardPageComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   protected readonly wizardSteps = [
-    { label: 'Idea' },
-    { label: 'Recursos' },
     { label: 'Crear' },
     { label: 'Resultado' },
   ];
@@ -1980,6 +2019,12 @@ export class AnuncioCreateWizardPageComponent {
     null,
   );
   protected readonly generationError = signal<string | null>(null);
+  protected readonly advancedExpanded = signal(false);
+  protected readonly correctionModalOpen = signal(false);
+  protected readonly correctionText = new FormControl('', {
+    nonNullable: true,
+    validators: [Validators.maxLength(1000)],
+  });
   private readonly formVersion = signal(0);
 
   protected readonly intentOptions: InputButtonOption[] = [
@@ -2029,7 +2074,6 @@ export class AnuncioCreateWizardPageComponent {
     }),
     format: new FormControl<AdCreativeFormat>('story', {
       nonNullable: true,
-      validators: [Validators.required],
     }),
   });
 
@@ -2190,13 +2234,7 @@ export class AnuncioCreateWizardPageComponent {
 
   protected readonly submitDisabled = computed(() => {
     this.formVersion();
-    return (
-      this.form.invalid ||
-      this.creating() ||
-      this.generating() ||
-      this.productsLoading() ||
-      this.isLoadingSelectedProductImages()
-    );
+    return this.form.invalid || this.creating() || this.generating();
   });
 
   protected readonly activeResultImage = computed(
@@ -2212,7 +2250,7 @@ export class AnuncioCreateWizardPageComponent {
       !!this.generationResult()?.post_copy,
   );
 
-  protected readonly stepBadge = computed(() => `${this.currentStep() + 1}/4`);
+  protected readonly stepBadge = computed(() => `${this.currentStep() + 1}/2`);
 
   constructor() {
     this.form.valueChanges
@@ -2260,11 +2298,11 @@ export class AnuncioCreateWizardPageComponent {
   }
 
   protected goToStep(index: number): void {
-    this.currentStep.set(Math.max(0, Math.min(3, index)));
+    this.currentStep.set(Math.max(0, Math.min(1, index)));
   }
 
   protected nextStep(): void {
-    this.currentStep.update((step) => Math.min(3, step + 1));
+    this.currentStep.update((step) => Math.min(1, step + 1));
   }
 
   protected previousStep(): void {
@@ -2356,7 +2394,6 @@ export class AnuncioCreateWizardPageComponent {
       this.form.controls.prompt.setValue(suggestion.suggested_prompt || '');
       this.suggestedTitle.set(suggestion.suggested_title || '');
       this.suggestionNotes.set(suggestion.notes || '');
-      this.currentStep.set(2);
     } catch (error: any) {
       this.toastService.error(extractApiErrorMessage(error));
     } finally {
@@ -2372,7 +2409,7 @@ export class AnuncioCreateWizardPageComponent {
     this.generationResult.set(null);
     this.generationMessage.set('Preparando recursos...');
     this.generating.set(true);
-    this.currentStep.set(3);
+    this.currentStep.set(1);
 
     try {
       const raw = this.form.getRawValue();
@@ -2403,7 +2440,7 @@ export class AnuncioCreateWizardPageComponent {
     } catch (error: any) {
       this.generating.set(false);
       this.generationError.set(extractApiErrorMessage(error));
-      this.currentStep.set(2);
+      this.currentStep.set(1);
     } finally {
       this.creating.set(false);
     }
@@ -2415,6 +2452,27 @@ export class AnuncioCreateWizardPageComponent {
     this.generationError.set(null);
     this.generating.set(false);
     this.currentStep.set(0);
+  }
+
+  protected openCorrectionModal(): void {
+    if (!this.generationResult()?.id) return;
+    this.correctionText.reset('');
+    this.correctionModalOpen.set(true);
+  }
+
+  protected confirmCorrection(): void {
+    const creativeId = this.generationResult()?.id;
+    const correction = this.correctionText.value.trim();
+    if (!creativeId || !correction || this.generating()) return;
+
+    this.correctionModalOpen.set(false);
+    this.correctionText.reset('');
+    this.generationError.set(null);
+    this.generationPreview.set(null);
+    this.generationMessage.set('Preparando recursos...');
+    this.generating.set(true);
+    this.currentStep.set(1);
+    this.startGeneration(creativeId, correction);
   }
 
   protected async copyPostCopy(): Promise<void> {
@@ -2552,15 +2610,15 @@ export class AnuncioCreateWizardPageComponent {
     return this.selectedProductIds().some((id) => loadingIds.has(id));
   }
 
-  private startGeneration(id: number): void {
-    // `generating` is set to true in createAiAnuncio() before we get here, so
-    // we cannot guard on it. The wizard flow guarantees a single invocation
-    // per ad creation, gated by submitDisabled().
+  private startGeneration(id: number, correction?: string): void {
+    // `generating` is set to true in createAiAnuncio()/confirmCorrection()
+    // before we get here, so we cannot guard on it. The wizard flow guarantees
+    // a single invocation per ad creation, gated by submitDisabled().
     this.generating.set(true);
     this.generationMessage.set('Preparando recursos...');
 
     this.anunciosService
-      .streamGenerate(id)
+      .streamGenerate(id, correction)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (event) => {
@@ -2604,14 +2662,14 @@ export class AnuncioCreateWizardPageComponent {
             this.generationError.set(
               event.error || 'No se pudo generar la imagen.',
             );
-            this.currentStep.set(2);
+            this.currentStep.set(1);
           }
         },
         error: () => {
           this.generating.set(false);
           this.generatingPostCopy.set(false);
           this.generationError.set('No se pudo conectar con la generacion.');
-          this.currentStep.set(2);
+          this.currentStep.set(1);
         },
       });
   }
