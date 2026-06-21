@@ -11,7 +11,7 @@ import {
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import {
   DialogService,
   StickyHeaderComponent,
@@ -24,6 +24,7 @@ import {
   KDS_COLUMNS,
   KdsColumn,
   KitchenTicket,
+  KitchenTicketItem,
 } from '../../interfaces';
 import {
   KdsConnectionState,
@@ -77,6 +78,7 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   private readonly destroyRef = inject(DestroyRef);
   private readonly storeSettings = inject(StoreSettingsFacade);
   private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
 
   readonly columns = KDS_COLUMNS;
   /** Raw ticket set from the SSE/snapshot service (unfiltered by day). */
@@ -86,6 +88,8 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   readonly lastError = this.kdsSse.lastError;
   readonly mode = this.kdsSse.mode;
   readonly consecutiveFailures = this.kdsSse.consecutiveFailures;
+  /** True once a snapshot (REST eager o evento SSE) ya pobló el board. */
+  readonly hasSnapshot = this.kdsSse.hasSnapshot;
 
   /**
    * Restaurant Suite — business-day clearing of the KDS board.
@@ -194,6 +198,13 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   // ─── Restaurant Suite — Fase K Gap 4: detail modal state ───────
   /** id of the ticket currently shown in the detail modal (null = closed). */
   private readonly selectedTicketId = signal<number | null>(null);
+  /**
+   * Deep-link target (`?ticket=<kitchen_ticket_id>`) desde el detalle de
+   * orden. El ticket puede no estar aún en `tickets()` al cargar (snapshot
+   * en vuelo), así que guardamos el id y un effect abre el modal cuando ese
+   * ticket aparece. Se limpia tras abrir.
+   */
+  private readonly pendingDeepLinkTicketId = signal<number | null>(null);
   readonly detailOpen = computed(() => this.selectedTicketId() != null);
   /**
    * Live ticket from the SSE-fed `tickets()` signal. Re-evaluates on
@@ -219,6 +230,17 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
   /** Close the detail modal. */
   closeDetail(): void {
     this.selectedTicketId.set(null);
+  }
+
+  /**
+   * Deep-link a la creación de receta del plato exacto que bloquea el
+   * ticket (`recipes/new?product_id=…`). Emitido por la card y por el modal
+   * de detalle cuando el operador pulsa "Crear receta" en un item sin receta.
+   */
+  onCreateRecipe(item: KitchenTicketItem): void {
+    void this.router.navigate(['/admin/restaurant-ops/recipes/new'], {
+      queryParams: { product_id: item.product_id },
+    });
   }
 
   /**
@@ -287,7 +309,15 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
 
   readonly showInitialLoading = computed(() => {
     const s = this.connectionState();
-    return (s === 'idle' || s === 'connecting') && this.tickets().length === 0;
+    // Una vez que cualquier snapshot (REST eager o SSE) llegó, dejamos de
+    // mostrar el loader aunque el resultado sea 0 tickets — si no, un board
+    // legítimamente vacío con el SSE caído quedaría en "Conectando…" para
+    // siempre. `hasSnapshot` es la señal definitiva de "ya sé qué mostrar".
+    return (
+      (s === 'idle' || s === 'connecting') &&
+      this.tickets().length === 0 &&
+      !this.hasSnapshot()
+    );
   });
 
   constructor() {
@@ -348,11 +378,41 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         // Silencioso: el SSE/polling reconciliará en el siguiente evento.
       });
     });
+
+    // Deep-link desde el detalle de orden (`?ticket=<id>`): abre el modal de
+    // ese ticket en cuanto aparece en `tickets()` (cubre la carrera con el
+    // snapshot en vuelo). Se limpia el target tras abrir para no reabrir.
+    effect(() => {
+      const targetId = this.pendingDeepLinkTicketId();
+      if (targetId == null) return;
+      const found = this.tickets().find((t) => t.id === targetId);
+      if (!found) return;
+      untracked(() => {
+        this.openDetail(found);
+        this.pendingDeepLinkTicketId.set(null);
+      });
+    });
   }
 
   ngOnInit(): void {
+    // Pintura inicial inmediata vía REST `/snapshot` (la ruta que SÍ
+    // funciona aunque el handshake del SSE falle): el board no debe quedar
+    // vacío en "Conectando…" esperando el evento `snapshot` del stream. El
+    // `connect()` abre el SSE en paralelo y, cuando llega su propio
+    // snapshot/eventos, reconcilia por id. Catch silencioso: si el REST
+    // falla, el SSE (o el botón Refrescar) cubre la carga.
+    this.kdsSse.refreshSnapshot(120).catch(() => {
+      /* el SSE/polling reconciliará */
+    });
     this.kdsSse.connect(120);
     this.tickHandle = setInterval(() => this.now.set(Date.now()), 1000);
+
+    // Deep-link `?ticket=<kitchen_ticket_id>` desde el detalle de orden.
+    const rawTicket = this.route.snapshot.queryParamMap.get('ticket');
+    const ticketId = rawTicket ? Number(rawTicket) : NaN;
+    if (Number.isFinite(ticketId)) {
+      this.pendingDeepLinkTicketId.set(ticketId);
+    }
   }
 
   ngOnDestroy(): void {

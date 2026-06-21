@@ -5,8 +5,17 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin, firstValueFrom } from 'rxjs';
-import { StoreOrdersService } from '../../services/store-orders.service';
+import { switchMap } from 'rxjs/operators';
+import {
+  StoreOrdersService,
+  CreateAddressPayload,
+} from '../../services/store-orders.service';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
+import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
+import {
+  DispatchMethodSelectorModalComponent,
+  DispatchMethod,
+} from '../../components/dispatch-method-selector-modal/dispatch-method-selector-modal.component';
 import {
   Order,
   OrderItem,
@@ -81,6 +90,8 @@ interface PaymentReceiptPreview {
     OrderRefundModalComponent,
     TimelineComponent,
     GenerateDispatchWizardComponent,
+    DispatchMethodSelectorModalComponent,
+    ShippingAddressModalComponent,
     NgClass,
   ],
   templateUrl: './order-details-page.component.html',
@@ -147,6 +158,12 @@ export class OrderDetailsPageComponent {
   showRefundModal = signal(false);
   showPaymentReceiptModal = signal(false);
   showDispatchModal = signal(false);
+  /** Chooser modal: "con remisión" vs "sin remisión" (single dispatch entry). */
+  showDispatchSelector = signal(false);
+  /** A3-edit: modal de captura de dirección de envío en página. */
+  showShippingAddressModal = signal(false);
+  /** True mientras se persiste la dirección (POST address + PATCH order). */
+  savingShippingAddress = signal(false);
 
   // Processing state
   isProcessingAction = signal(false);
@@ -432,6 +449,35 @@ export class OrderDetailsPageComponent {
     return needsShipping && !o.shipping_method_id && !terminal;
   });
 
+  // ── Dirección de entrega obligatoria (gate de despacho) ────────
+  //
+  // A diferencia del retiro en tienda (pickup) o la entrega directa en
+  // mostrador (direct_delivery), un envío a domicilio (home_delivery) NO se
+  // puede despachar sin una dirección de entrega del cliente. Estos computed
+  // alimentan el alert visible en "Acciones" y el guard de `openDispatchSelector`.
+  readonly requiresShippingAddress = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    return (o.delivery_type || 'direct_delivery') === 'home_delivery';
+  });
+
+  readonly hasShippingAddress = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    return (
+      !!o.addresses_orders_shipping_address_idToaddresses ||
+      !!o.shipping_address_id ||
+      !!(o as { shipping_address_snapshot?: unknown }).shipping_address_snapshot
+    );
+  });
+
+  readonly blockedByMissingAddress = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    const terminal = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'].includes(o.state);
+    return this.requiresShippingAddress() && !this.hasShippingAddress() && !terminal;
+  });
+
   readonly canFastTrack = computed(() => {
     const o = this.order();
     if (!o) return false;
@@ -493,6 +539,20 @@ export class OrderDetailsPageComponent {
     );
   });
 
+  /**
+   * Whether this order can produce a remisión (dispatch note). Mirrors the
+   * backend gate in `createFromOrder`: kitchen orders finalize directly and
+   * `direct_delivery` hands goods over at the counter — neither goes through
+   * the remisión + recaudo cycle. Drives whether the unified "Despachar orden"
+   * button opens the con/sin-remisión chooser or ships directly.
+   */
+  readonly canGenerateRemision = computed<boolean>(() => {
+    const order = this.order();
+    if (!order) return false;
+    const delivery = order.delivery_type || 'direct_delivery';
+    return !this.isKitchenOrder() && delivery !== 'direct_delivery';
+  });
+
   readonly availableActions = computed<OrderActionConfig[]>(() => {
     const order = this.order();
     if (!order) return [];
@@ -518,6 +578,19 @@ export class OrderDetailsPageComponent {
     const hasPaid = this.hasSuccessfulPayment();
     const actions: OrderActionConfig[] = [];
 
+    // Gate de dirección: para envíos a domicilio sin dirección, mostrar un
+    // alert persistente. El botón de despacho sigue visible pero su handler
+    // (openDispatchSelector) bloquea con un toast hasta que haya dirección.
+    if (this.blockedByMissingAddress()) {
+      actions.push({
+        id: 'address-info',
+        type: 'alert',
+        color: 'warning',
+        icon: 'map-pin',
+        label: 'Esta orden no tiene dirección de entrega. Agrégala antes de despachar.',
+      } as OrderActionConfig);
+    }
+
     switch (state) {
       // `draft` (POS counter orders before confirmation) behaves exactly like
       // `created`: register payment, modify (privileged), cancel. Fall-through.
@@ -536,8 +609,19 @@ export class OrderDetailsPageComponent {
         actions.push({ id: 'confirm-payment', label: 'Confirmar Pago', icon: 'check-circle', variant: 'primary' });
         actions.push({ id: 'info', label: 'Esperando confirmacion de pago', icon: 'clock', type: 'alert', color: 'warning' });
 
-        if (isShipping) {
-          // Shipping: can dispatch without payment (opens ship modal)
+        // COD (contra-entrega): dispatching is allowed BEFORE the payment is
+        // confirmed so the route can carry the order and collect on delivery.
+        if (this.canGenerateRemision()) {
+          // Unified entry: one button → con/sin-remisión chooser. Both paths
+          // ship the order without confirming payment (collect on delivery).
+          actions.push({
+            id: 'dispatch-order',
+            label: 'Despachar sin confirmar pago',
+            icon: 'truck',
+            variant: 'warning',
+          });
+        } else if (isShipping) {
+          // direct_delivery: no remisión; manual ship without confirming payment.
           actions.push({
             id: 'manual-ship',
             label: 'Despachar sin confirmar pago',
@@ -551,19 +635,6 @@ export class OrderDetailsPageComponent {
             label: 'Listo para Recoger',
             icon: 'package',
             variant: 'primary',
-          });
-        }
-
-        // COD (contra-entrega): allow generating a dispatch note BEFORE the
-        // payment is confirmed, so the route can carry the order and collect
-        // on delivery. Same gating as `processing`: needs a physical dispatch
-        // document (not a kitchen order, not a direct counter handover).
-        if (!this.isKitchenOrder() && delivery !== 'direct_delivery') {
-          actions.push({
-            id: 'generate-dispatch',
-            label: 'Generar Remision',
-            icon: 'file-text',
-            variant: 'info',
           });
         }
 
@@ -587,29 +658,26 @@ export class OrderDetailsPageComponent {
           // `finish` action config/handler as `delivered` (backend allows
           // `processing → finished`).
           actions.push({ id: 'finish', label: 'Finalizar Orden', icon: 'check-circle', variant: 'success' });
-        } else if (delivery === 'home_delivery') {
-          actions.push({ id: 'ship', label: 'Marcar como Enviado', icon: 'truck', variant: 'primary' });
-        } else if (isPickup) {
-          actions.push({ id: 'ship', label: 'Listo para Recoger', icon: 'package', variant: 'primary' });
-          // Pickup + paid: offer direct deliver (skip shipped → delivered → auto-finalize)
-          actions.push({
-            id: 'direct-deliver',
-            label: 'Entregar directamente',
-            icon: 'package-check',
-            variant: 'warning',
-          });
+        } else if (this.canGenerateRemision()) {
+          // Unified dispatch entry point: ONE button opens the con/sin-remisión
+          // chooser. "Con remisión" runs the wizard (document + optional route)
+          // then ships the order; "sin remisión" just marks it shipped. Both
+          // paths converge with the order in `shipped` — no more duplicate
+          // "Despachar Orden" + "Generar Remisión" buttons.
+          actions.push({ id: 'dispatch-order', label: 'Despachar Orden', icon: 'truck', variant: 'primary' });
+          if (isPickup) {
+            // Pickup + paid: keep the "hand over at the counter now" shortcut
+            // (skip shipped → delivered → auto-finalize).
+            actions.push({
+              id: 'direct-deliver',
+              label: 'Entregar directamente',
+              icon: 'package-check',
+              variant: 'warning',
+            });
+          }
         } else {
+          // direct_delivery: counter handover, no remisión cycle. Ship directly.
           actions.push({ id: 'ship', label: 'Despachar Orden', icon: 'package', variant: 'primary' });
-        }
-        // Generar Remision: only when the order needs a physical dispatch
-        // document (not a direct counter handover) and is not a kitchen order.
-        if (!this.isKitchenOrder() && delivery !== 'direct_delivery') {
-          actions.push({
-            id: 'generate-dispatch',
-            label: 'Generar Remision',
-            icon: 'file-text',
-            variant: 'info',
-          });
         }
         if (this.isPrivilegedUser()) {
           actions.push({ id: 'cancel-payment', label: 'Cancelar Pago', icon: 'credit-card', variant: 'warning' });
@@ -1142,6 +1210,9 @@ export class OrderDetailsPageComponent {
       case 'generate-dispatch':
         this.openDispatchModal();
         break;
+      case 'dispatch-order':
+        this.openDispatchSelector();
+        break;
     }
   }
 
@@ -1230,14 +1301,176 @@ export class OrderDetailsPageComponent {
     this.showDispatchModal.set(true);
   }
 
+  // ── Unified dispatch entry (con/sin remisión) ──────────────
+
+  /**
+   * Single dispatch entry point. Orders that can produce a remisión open the
+   * con/sin-remisión chooser; `direct_delivery` (no remisión possible) ships
+   * straight away. This is what collapses the old two-button UX into one flow.
+   */
+  openDispatchSelector(): void {
+    // Gate obligatorio: un envío a domicilio sin dirección no se puede
+    // despachar. Avisar y ofrecer capturar la dirección antes de continuar.
+    if (this.blockedByMissingAddress()) {
+      this.toastService.warning(
+        'Esta orden no tiene dirección de entrega. Agrega una dirección antes de despachar.',
+      );
+      this.promptAddShippingAddress();
+      return;
+    }
+    if (!this.canGenerateRemision()) {
+      this.startShipWithoutNote();
+      return;
+    }
+    this.showDispatchSelector.set(true);
+  }
+
+  /** Nombre del cliente para el subtítulo del modal de dirección. */
+  readonly shippingAddressCustomerName = computed<string>(() => {
+    const o = this.order() as
+      | {
+          customer?: { name?: string; first_name?: string; last_name?: string };
+          customer_name?: string;
+        }
+      | null;
+    if (!o) return '';
+    return (
+      o.customer?.name ||
+      o.customer_name ||
+      [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') ||
+      ''
+    );
+  });
+
+  /**
+   * Captura de dirección de entrega en página para una orden sin dirección.
+   * Abre el modal de captura; al confirmar se crea la dirección vinculada al
+   * cliente (`POST /store/addresses`) y se asigna a la orden
+   * (`PATCH /store/orders/:id { shipping_address_id }`) en
+   * {@link onShippingAddressSubmit}. Reemplaza el antiguo redireccionamiento al
+   * POS (que sigue disponible vía {@link editOrderInPos}).
+   */
+  promptAddShippingAddress(): void {
+    if (!this.order()) return;
+    this.showShippingAddressModal.set(true);
+  }
+
+  /**
+   * Persiste la dirección capturada en el modal: crea la dirección del cliente
+   * y la asigna como destino de envío de la orden, refrescando el estado con la
+   * orden ya actualizada que devuelve el PATCH.
+   */
+  onShippingAddressSubmit(payload: CreateAddressPayload): void {
+    const order = this.order();
+    if (!order || this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.ordersService
+      .createCustomerAddress(payload)
+      .pipe(
+        switchMap((address) =>
+          this.ordersService.updateOrderShippingAddress(
+            String(order.id),
+            Number(address.id),
+          ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updated: any) => {
+          const data = updated?.data ?? updated;
+          if (data) this.order.set(data);
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.toastService.success('Dirección de entrega asignada a la orden');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          const message =
+            err instanceof Error ? err.message : 'No se pudo asignar la dirección';
+          this.toastService.error(message);
+        },
+      });
+  }
+
+  /** Route the chooser outcome to the wizard or the plain ship flow. */
+  onDispatchMethodSelected(method: DispatchMethod): void {
+    this.showDispatchSelector.set(false);
+    if (method === 'with-note') {
+      this.openDispatchModal();
+    } else {
+      this.startShipWithoutNote();
+    }
+  }
+
+  /**
+   * "Sin remisión" path: mark the order shipped without any dispatch document.
+   * For COD (`pending_payment`) we go through the manual ship mode, which
+   * advances the state without confirming payment (collect on delivery). For
+   * `processing` it's the regular flow ship. Both reuse the existing ship modal.
+   */
+  private startShipWithoutNote(): void {
+    const order = this.order();
+    if (!order) return;
+    if (order.state === 'pending_payment') {
+      this.isManualShipMode.set(true);
+    }
+    this.openShipModal();
+  }
+
   /**
    * Called by the generate-dispatch wizard once the dispatch note (and, if
    * requested, its route) is created in a single backend transaction. The
-   * wizard already toasts success; here we close it and offer navigation.
+   * remisión is the document; here we make the flow converge by advancing the
+   * order to `shipped`, then offer navigation to the new remisión.
    */
   onDispatchGenerated(dispatchNoteId: number): void {
     this.showDispatchModal.set(false);
-    this.promptViewDispatchNote(dispatchNoteId);
+    this.shipAfterDispatch(dispatchNoteId);
+  }
+
+  /**
+   * Advance the order to `shipped` after a remisión was generated, so the
+   * "con remisión" path converges with "sin remisión". Picks the right
+   * transition: `processing` → flow ship; COD `pending_payment` → manual
+   * state change (no payment confirmation). If the order is already past
+   * shipment we skip straight to the navigation prompt. A failed ship is
+   * non-fatal: the remisión already exists, so we surface a warning and still
+   * offer to view it.
+   */
+  private shipAfterDispatch(dispatchNoteId: number): void {
+    const order = this.order();
+    if (!order || !this.orderId) {
+      this.promptViewDispatchNote(dispatchNoteId);
+      return;
+    }
+
+    if (order.state !== 'processing' && order.state !== 'pending_payment') {
+      this.promptViewDispatchNote(dispatchNoteId);
+      return;
+    }
+
+    const ship$ =
+      order.state === 'processing'
+        ? this.ordersService.flowShipOrder(this.orderId, {})
+        : this.ordersService.updateOrderStatus(this.orderId, 'shipped');
+
+    this.isProcessingAction.set(true);
+    ship$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.isProcessingAction.set(false);
+        this.toastService.success('Orden despachada y marcada como enviada');
+        this.promptViewDispatchNote(dispatchNoteId);
+      },
+      error: (err) => {
+        this.isProcessingAction.set(false);
+        // The remisión was created; only the state advance failed.
+        this.toastService.warning(
+          err?.message ||
+            'Remisión creada. No se pudo marcar la orden como enviada automáticamente.',
+        );
+        this.promptViewDispatchNote(dispatchNoteId);
+      },
+    });
   }
 
   private promptViewDispatchNote(dispatchNoteId: number): void {
@@ -2142,6 +2375,18 @@ export class OrderDetailsPageComponent {
     );
     if (inFlight) return inFlight;
     return items[0]; // items are pre-sorted desc by the backend include
+  }
+
+  /**
+   * Restaurant Suite — KDS deep-link: navega al board del KDS abriendo el
+   * modal de ESTE ticket (`?ticket=<kitchen_ticket_id>`). Disparado al
+   * clickear el badge "Cocina: <estado>" de un plato disparado a cocina.
+   */
+  openKdsTicket(ks: { kitchen_ticket_id?: number } | null): void {
+    if (!ks?.kitchen_ticket_id) return;
+    void this.router.navigate(['/admin/restaurant-ops/kds'], {
+      queryParams: { ticket: ks.kitchen_ticket_id },
+    });
   }
 
   // ─── Plan KDS fire-flows (F3): per-plate selection ───────────

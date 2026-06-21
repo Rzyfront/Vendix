@@ -1,4 +1,4 @@
-import { Component, computed, input, output, signal } from '@angular/core';
+import { Component, computed, effect, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -105,6 +105,10 @@ export class PlanillaCloseModalComponent {
   notes = '';
 
   readonly variance = signal(0);
+  /** Cash actually collected so far (from the route's persisted totals). */
+  readonly cashCollected = computed(
+    () => Number(this.route()?.total_collected ?? 0) || 0,
+  );
 
   readonly varianceClass = computed(() => {
     const v = this.variance();
@@ -113,10 +117,19 @@ export class PlanillaCloseModalComponent {
     return 'bg-red-50 text-red-800 border border-red-200';
   });
 
+  constructor() {
+    // Recompute the variance every time the route() input changes AND once
+    // on init. Without this the operator would see `0 - total_collected`
+    // (a giant FALTA) until they touched the input.
+    effect(() => {
+      this.route();
+      this.recalcVariance();
+    });
+  }
+
   recalcVariance() {
     // variance = declared - cash collected (assuming all collected is cash)
-    const cashCollected = Number(this.route().total_collected) || 0;
-    this.variance.set(Number(this.declaredCash) - cashCollected);
+    this.variance.set(Number(this.declaredCash) - this.cashCollected());
   }
 
   canSubmit(): boolean {

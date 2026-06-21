@@ -22,6 +22,8 @@ import {
   PaginationComponent,
   EmptyStateComponent,
   CardComponent,
+  SelectorComponent,
+  SelectorOption,
 } from '../../../../../../shared/components/index';
 
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
@@ -41,13 +43,17 @@ const STATUS_LABELS: Record<DispatchRouteStatus, string> = {
   voided: 'Anulada',
 };
 
+// Custom-badge colorMap: TableComponent/ItemListComponent resolve these to
+// INLINE styles (soft background + solid text + faint border), so values MUST be
+// 7-char hex colors — Tailwind class strings produce invalid inline styles and
+// render colorless badges. Semantic, WCAG-AA-friendly status palette.
 const STATUS_COLORS: Record<string, string> = {
-  draft: 'bg-gray-100 text-gray-800',
-  dispatched: 'bg-blue-100 text-blue-800',
-  in_transit: 'bg-blue-100 text-blue-900',
-  settling: 'bg-amber-100 text-amber-800',
-  closed: 'bg-emerald-100 text-emerald-800',
-  voided: 'bg-red-100 text-red-800',
+  draft: '#6b7280', // gray-500 — sin despachar
+  dispatched: '#2563eb', // blue-600 — despachada
+  in_transit: '#4f46e5', // indigo-600 — en ruta
+  settling: '#d97706', // amber-600 — cuadrando
+  closed: '#059669', // emerald-600 — cerrada
+  voided: '#dc2626', // red-600 — anulada
 };
 
 @Component({
@@ -61,6 +67,7 @@ const STATUS_COLORS: Record<string, string> = {
     PaginationComponent,
     EmptyStateComponent,
     CardComponent,
+    SelectorComponent,
   ],
   template: `
     <div class="md:space-y-4">
@@ -68,7 +75,6 @@ const STATUS_COLORS: Record<string, string> = {
         [responsive]="true"
         [padding]="false"
         overflow="visible"
-        customClasses="md:min-h-[600px]"
       >
         <!-- Search Section -->
         <div
@@ -148,9 +154,23 @@ const STATUS_COLORS: Record<string, string> = {
               [currentPage]="page()"
               [totalPages]="totalPages()"
               [total]="totalItems()"
-              [limit]="limit"
+              [limit]="limit()"
+              infoStyle="range"
               (pageChange)="goToPage($event)"
             ></app-pagination>
+
+            <!-- Page-size selector (system app-selector) -->
+            <div class="flex items-center justify-end gap-2 mt-2 text-xs text-text-secondary">
+              <label for="planillas-limit" class="shrink-0">Por página:</label>
+              <app-selector
+                [id]="'planillas-limit'"
+                size="sm"
+                class="w-20"
+                [options]="limitSelectorOptions"
+                [ngModel]="limit()"
+                (ngModelChange)="onLimitChange($event)"
+              ></app-selector>
+            </div>
           </div>
         }
       </app-card>
@@ -175,7 +195,11 @@ export class PlanillasListComponent implements OnInit {
   readonly statusFilter = signal<DispatchRouteStatus | ''>('');
   readonly filterValues = signal<FilterValues>({});
 
-  readonly limit = 20;
+  readonly limit = signal(20);
+  readonly limitOptions = [10, 20, 50, 100];
+  readonly limitSelectorOptions: SelectorOption[] = this.limitOptions.map(
+    (n) => ({ value: n, label: String(n) }),
+  );
 
   readonly filterConfigs: FilterConfig[] = [
     {
@@ -200,6 +224,12 @@ export class PlanillasListComponent implements OnInit {
       icon: 'plus',
       action: 'create',
       variant: 'primary',
+    },
+    {
+      label: 'Refrescar',
+      icon: 'refresh-cw',
+      action: 'refresh',
+      variant: 'outline',
     },
   ];
 
@@ -328,7 +358,7 @@ export class PlanillasListComponent implements OnInit {
     this.service
       .list({
         page: this.page(),
-        limit: this.limit,
+        limit: this.limit(),
         search: this.search() || undefined,
         status: (this.statusFilter() || undefined) as DispatchRouteStatus,
       })
@@ -370,7 +400,18 @@ export class PlanillasListComponent implements OnInit {
   onActionClick(action: string) {
     if (action === 'create') {
       this.create.emit();
+    } else if (action === 'refresh') {
+      this.refresh.emit();
     }
+  }
+
+  /**
+   * Change the page size (limit) and reload the list from page 1.
+   */
+  onLimitChange(limit: number): void {
+    this.limit.set(limit);
+    this.page.set(1);
+    this.load();
   }
 
   goToPage(p: number) {

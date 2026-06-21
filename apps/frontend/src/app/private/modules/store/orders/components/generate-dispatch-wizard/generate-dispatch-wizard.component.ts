@@ -73,6 +73,7 @@ type RouteMode = 'none' | 'existing' | 'new';
     SelectorComponent,
     StoreUserSelectComponent,
     StoreUserMultiSelectComponent,
+    StepsLineComponent,
     CurrencyPipe,
     VehicleFormModalComponent,
   ],
@@ -98,6 +99,13 @@ export class GenerateDispatchWizardComponent {
   // ── Wizard navigation ─────────────────────────────────────────────────
   readonly step = signal<1 | 2 | 3>(1);
   readonly submitting = signal<boolean>(false);
+
+  /** Steps for the shared app-steps-line indicator (replaces the header pills). */
+  readonly stepperItems: StepsLineItem[] = [
+    { label: 'Items' },
+    { label: 'Datos' },
+    { label: 'Ruta' },
+  ];
 
   // ── Step 1: item rows ─────────────────────────────────────────────────
   readonly itemRows = signal<DispatchItemRow[]>([]);
@@ -131,6 +139,18 @@ export class GenerateDispatchWizardComponent {
 
   // ── Step 3: route assignment ──────────────────────────────────────────
   readonly routeMode = signal<RouteMode>('none');
+
+  /** Contextual guidance describing what the selected route mode does. */
+  readonly routeModeHint = computed<string>(() => {
+    switch (this.routeMode()) {
+      case 'existing':
+        return 'Asigna esta remisión a una planilla de despacho ya creada (en borrador o despachada).';
+      case 'new':
+        return 'Crea una nueva planilla de despacho (conductor, vehículo y fecha) y asígnale esta remisión.';
+      default:
+        return 'La remisión se genera y la orden se marca como enviada, sin asignarla a ninguna ruta de despacho. Podrás asignarla a una ruta más adelante.';
+    }
+  });
 
   readonly routeForm = this.fb.group({
     // existing
@@ -273,11 +293,18 @@ export class GenerateDispatchWizardComponent {
   }
 
   // ── Step 1 handlers ───────────────────────────────────────────────────
-  onQuantityChange(row: DispatchItemRow, raw: string | number): void {
+  /**
+   * Clamp the user input to [0, pending_quantity] and persist the clamped
+   * value. Returns the clamped value so the template can write it back
+   * into the DOM (otherwise the input keeps the raw invalid value the
+   * user typed until the next round-trip).
+   */
+  onQuantityChange(row: DispatchItemRow, raw: string | number): number {
     let value = Number(raw);
     if (!Number.isFinite(value) || value < 0) value = 0;
     if (value > row.pending_quantity) value = row.pending_quantity;
     this.quantities.update((q) => ({ ...q, [row.order_item_id]: value }));
+    return value;
   }
 
   quantityOf(row: DispatchItemRow): number {
@@ -287,10 +314,14 @@ export class GenerateDispatchWizardComponent {
   // ── Step 3 handlers ───────────────────────────────────────────────────
   setRouteMode(mode: RouteMode): void {
     this.routeMode.set(mode);
-    if (mode === 'existing' && this.routeOptions().length === 0) {
+    if (mode === 'existing') {
+      // Always reload on entry — the list may be stale (new routes were
+      // created in another tab, or the wizard was opened earlier in this
+      // session and the cache is from minutes ago).
       this.loadRoutes();
     }
-    if (mode === 'new' && this.vehicleOptions().length === 0) {
+    if (mode === 'new') {
+      // Same rationale as 'existing': always reload vehicles.
       this.loadVehicles();
     }
   }

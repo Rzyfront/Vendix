@@ -53,12 +53,28 @@
 
         <!-- Pagination -->
         <app-pagination
-          [currentPage]="filters.page || 1"
-          [totalPages]="totalPages"
+          [currentPage]="filters().page || 1"
+          [totalPages]="totalPages()"
           [total]="total_items()"
-          [limit]="filters.limit || 10"
+          [limit]="filters().limit || 10"
           (pageChange)="onPageChange($event)">
         </app-pagination>
+
+        <!-- Page-size selector (mirrors planillas-rutas) -->
+        <div class="flex items-center justify-end gap-2 mt-2 text-xs text-text-secondary">
+          <label for="dispatch-notes-limit">Por página:</label>
+          <select
+            id="dispatch-notes-limit"
+            class="rounded-md border border-border bg-surface px-2 py-1 text-xs"
+            [ngModel]="filters().limit"
+            (ngModelChange)="onLimitChange($event)"
+          >
+            <option [ngValue]="10">10</option>
+            <option [ngValue]="20">20</option>
+            <option [ngValue]="50">50</option>
+            <option [ngValue]="100">100</option>
+          </select>
+        </div>
       </div>
     }
   </app-card>

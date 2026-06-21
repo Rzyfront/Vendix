@@ -157,6 +157,10 @@ export function getDefaultStoreSettings(): StoreSettings {
         orders_layaway: true,
         orders_reservations: true,
         orders_dispatch_notes: true,
+        orders_dispatch_routes: true,
+
+        // Despacho (vehículos / flota)
+        dispatch_fleet: true,
 
         // Inventario
         inventory: true,
@@ -338,6 +342,13 @@ export function getDefaultStoreSettings(): StoreSettings {
     operations: {
       default_preparation_time_minutes: 15,
       ticket_closing_hour: 3,
+    },
+
+    // Dispatch - DSD route behavior. `on_close` preserves the legacy flow where
+    // the linked COD order only advances to delivered/finished when the route
+    // is closed. Set to `live` to reflect delivery in real time on each settle.
+    dispatch: {
+      order_state_update_mode: 'on_close',
     },
 
     // Legacy: Mantener por compatibilidad (redundante con branding)

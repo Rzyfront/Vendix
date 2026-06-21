@@ -29,6 +29,14 @@ export interface KitchenTicketProductRef {
    * (10 min).
    */
   preparation_time_minutes?: number | null;
+  /**
+   * Restaurant Suite — KDS recipe-readiness: the recipe for this product
+   * (TO-ONE optional relation; `recipes.product_id` is `@unique`, so at most
+   * one row) nested by the kitchen-fire service include. The KDS card/modal
+   * derive ACTIVE-recipe presence from `recipe.is_active` without an extra
+   * per-card fetch — see `itemHasActiveRecipe`.
+   */
+  recipe?: { id: number; is_active: boolean } | null;
 }
 
 export interface KitchenTicketItem {
@@ -40,6 +48,21 @@ export interface KitchenTicketItem {
   status: KitchenTicketItemStatus;
   notes?: string | null;
   product?: KitchenTicketProductRef;
+}
+
+/**
+ * Restaurant Suite — KDS recipe-readiness helper. O(1) derivation of
+ * "does this dish have an active recipe?" from the nested `product.recipe`
+ * relation carried in the ticket payload (snapshot + every `ticket.*` SSE
+ * event). Mirrors the backend guard exactly: a recipe row that exists AND is
+ * `is_active === true`. A recipe-less (or inactive-recipe) item blocks the
+ * ticket's `in_preparation` transition (backend guard
+ * `KITCHEN_TICKET_NO_RECIPE`), so the KDS surfaces it proactively on the card.
+ */
+export function itemHasActiveRecipe(item: KitchenTicketItem): boolean {
+  // `recipe` is a to-one optional relation; an "active" recipe is one that
+  // both exists and has `is_active === true` (mirrors the backend guard).
+  return item.product?.recipe?.is_active === true;
 }
 
 export interface KitchenTicket {

@@ -275,10 +275,25 @@
                       }
                     </div>
                   } @else {
-                    <div class="customer-address-empty">
-                      <app-icon name="map-pin" size="18"></app-icon>
-                      <span>No especificada</span>
-                    </div>
+                    <button
+                      type="button"
+                      (click)="promptAddShippingAddress()"
+                      class="customer-address-empty w-full text-left cursor-pointer hover:opacity-80 transition-opacity"
+                      [class.!text-amber-700]="blockedByMissingAddress()"
+                      title="Agregar dirección de entrega"
+                    >
+                      <app-icon
+                        [name]="blockedByMissingAddress() ? 'alert-triangle' : 'map-pin'"
+                        size="18"
+                      ></app-icon>
+                      <span>
+                        {{
+                          blockedByMissingAddress()
+                            ? "Dirección requerida — toca para agregar"
+                            : "No especificada — toca para agregar"
+                        }}
+                      </span>
+                    </button>
                   }
                 </section>
 
@@ -378,14 +393,22 @@
                            state badge. Renders only for items that were
                            actually fired to the kitchen. -->
                       @if (kitchenStateFor(item); as ks) {
-                        <span
-                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1"
+                        <button
+                          type="button"
+                          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold mt-1 cursor-pointer hover:opacity-80 transition-opacity"
                           [class]="kitchenBadgeClass(ks)"
-                          [title]="'Ticket #' + (ks.kitchen_ticket_id ?? '')"
+                          [attr.title]="
+                            (ks.kitchen_ticket_id
+                              ? 'Ver ticket #' + ks.kitchen_ticket_id + ' en el KDS'
+                              : 'Ver en el KDS')
+                          "
+                          [disabled]="!ks.kitchen_ticket_id"
+                          (click)="openKdsTicket(ks)"
                         >
                           <app-icon name="flame" [size]="10" />
                           Cocina: {{ kitchenStateLabel(ks) }}
-                        </span>
+                          <app-icon name="arrow-right" [size]="10" />
+                        </button>
                       } @else if (
                         canShowKitchenDispatch() &&
                         item.products?.product_type === 'prepared' &&
@@ -530,19 +553,158 @@
 	            }
 	          </app-card>
 
-          <!-- 3. SEGUIMIENTO DE ENVIO (con Informacion de Envio) -->
-          @if (showShipmentTracking() || shippingMethodInfo()) {
+          <!-- 3. GESTIÓN DE ENVÍO (asignación + info + seguimiento, integral) -->
+          @if (
+            showShippingAssignment() ||
+            showShippingMethodCard() ||
+            showShipmentTracking() ||
+            shippingMethodInfo()
+          ) {
             <app-card shadow="sm" [responsivePadding]="true">
               <h2
                 class="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2"
               >
                 <app-icon
-                  name="map-pin"
+                  name="truck"
                   size="16"
                   class="text-primary-600"
                 ></app-icon>
-                Seguimiento de Envio
+                Gestión de Envío
               </h2>
+
+              <!-- Bloque A: Asignar método de envío (movido desde el sidebar) -->
+              @if (showShippingAssignment() || showShippingMethodCard()) {
+                <div class="mb-4 bg-amber-50 rounded-xl border border-amber-200 p-4">
+                  <h3
+                    class="text-xs font-bold text-amber-800 uppercase tracking-wider mb-2 flex items-center gap-2"
+                  >
+                    <app-icon name="package" size="14" class="text-amber-600"></app-icon>
+                    Asignar Metodo de Envio
+                  </h3>
+
+                  @if (!showShippingMethodCard()) {
+                    <p class="text-xs text-amber-700 mb-3">
+                      Esta orden no tiene un metodo de envio asignado. Asigna uno para definir el tipo de entrega.
+                    </p>
+                    <app-button
+                      variant="primary"
+                      [fullWidth]="true"
+                      (clicked)="openShippingAssignCard()"
+                      customClasses="!bg-amber-600 hover:!bg-amber-700"
+                    >
+                      <app-icon slot="icon" name="package" size="16"></app-icon>
+                      Seleccionar Metodo
+                    </app-button>
+                  } @else {
+                    @if (isLoadingShippingMethods()) {
+                      <div class="flex justify-center py-4">
+                        <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-600"></div>
+                      </div>
+                    } @else if (shippingMethods().length === 0) {
+                      <p class="text-xs text-amber-600 italic py-2">
+                        No hay metodos de envio activos configurados.
+                      </p>
+                    } @else {
+                      <div class="space-y-1.5 mb-3 max-h-48 overflow-y-auto">
+                        @for (method of shippingMethods(); track method.id) {
+                          <button
+                            (click)="onShippingMethodSelect(method.id)"
+                            class="w-full text-left p-2.5 rounded-lg border transition-all text-sm flex items-center gap-2.5"
+                            [ngClass]="{
+                              'border-amber-400 bg-amber-100 ring-1 ring-amber-400':
+                                selectedShippingMethodId() === method.id,
+                              'border-amber-200 bg-white hover:bg-amber-50':
+                                selectedShippingMethodId() !== method.id,
+                            }"
+                          >
+                            <app-icon
+                              [name]="shippingMethodsService.getShippingMethodIcon(method.type)"
+                              size="16"
+                              class="text-amber-700 flex-shrink-0"
+                            ></app-icon>
+                            <div class="min-w-0 flex-1">
+                              <p class="font-semibold text-gray-900 truncate text-xs">
+                                {{ method.name }}
+                              </p>
+                              <p class="text-[10px] text-gray-500">
+                                {{ shippingMethodsService.getShippingMethodTypeLabel(method.type) }}
+                              </p>
+                            </div>
+                          </button>
+                        }
+                      </div>
+                    }
+
+                    @if (selectedShippingMethod()) {
+                      @if (isCalculatingRate()) {
+                        <div class="flex items-center gap-2 py-3 mb-3 text-xs text-amber-700">
+                          <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-amber-600"></div>
+                          Calculando tarifa para la direccion del cliente…
+                        </div>
+                      } @else if (calculatedRate(); as r) {
+                        <div class="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                          <div class="flex items-center justify-between">
+                            <div>
+                              <p class="text-xs font-bold text-emerald-800">Tarifa aplicable</p>
+                              <p class="text-sm text-emerald-900">
+                                {{ r.rate_name || 'Tarifa' }}@if (r.zone) { · {{ r.zone }} }
+                              </p>
+                            </div>
+                            <span class="text-sm font-bold text-emerald-900">{{ r.cost | currency }}</span>
+                          </div>
+                        </div>
+                      }
+
+                      <label class="flex items-start gap-2 mb-2 text-xs text-amber-800 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          [checked]="manualCostOverride()"
+                          (change)="toggleManualCost($any($event.target).checked)"
+                          class="mt-0.5"
+                        />
+                        <span>Editar costo manualmente</span>
+                      </label>
+
+                      @if (manualCostOverride()) {
+                        <div class="mb-3" [formGroup]="shippingAssignForm">
+                          <label class="block text-xs font-bold text-amber-800 mb-1">Costo de envio</label>
+                          <input
+                            type="number"
+                            formControlName="shipping_cost"
+                            min="0"
+                            step="0.01"
+                            class="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400 bg-white"
+                            placeholder="0.00"
+                          />
+                        </div>
+                      }
+                    }
+
+                    <div class="flex items-center gap-2">
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        [fullWidth]="true"
+                        (clicked)="skipShippingAssignment()"
+                      >
+                        Continuar sin metodo
+                      </app-button>
+                      @if (selectedShippingMethodId()) {
+                        <app-button
+                          variant="primary"
+                          size="sm"
+                          [fullWidth]="true"
+                          (clicked)="submitShippingAssignment()"
+                          [disabled]="isProcessingAction()"
+                          customClasses="!bg-amber-600 hover:!bg-amber-700"
+                        >
+                          {{ isProcessingAction() ? "Asignando..." : "Confirmar" }}
+                        </app-button>
+                      }
+                    </div>
+                  }
+                </div>
+              }
 
               <!-- Subseccion: Informacion de Envio -->
               @if (shippingMethodInfo(); as info) {
@@ -558,7 +720,7 @@
                       ></app-icon>
                       Informacion de Envio
                     </h3>
-                    @if (canEditShipping() && !showShippingAssignment()) {
+                    @if (canEditShipping() && !showShippingAssignment() && !showShippingMethodCard()) {
                       <button
                         class="text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
                         (click)="openShippingAssignCard()"
@@ -913,159 +1075,7 @@
 
         <!-- ═══ COLUMNA DERECHA (SIDEBAR) ═══ -->
         <div class="flex flex-col gap-3 lg:pt-0 pt-1">
-          <!-- SHIPPING METHOD ASSIGNMENT (universal) -->
-          @if (showShippingAssignment() || showShippingMethodCard()) {
-            <div
-              class="bg-amber-50 rounded-xl border border-amber-200 p-4 shadow-sm"
-            >
-              <h3
-                class="text-xs font-bold text-amber-800 uppercase tracking-wider mb-2 flex items-center gap-2"
-              >
-                <app-icon
-                  name="truck"
-                  size="14"
-                  class="text-amber-600"
-                ></app-icon>
-                Asignar Metodo de Envio
-              </h3>
-
-              @if (!showShippingMethodCard()) {
-                <p class="text-xs text-amber-700 mb-3">
-                  Esta orden no tiene un metodo de envio asignado. Asigna uno para definir el tipo de entrega.
-                </p>
-                <app-button
-                  variant="primary"
-                  [fullWidth]="true"
-                  (clicked)="openShippingAssignCard()"
-                  customClasses="!bg-amber-600 hover:!bg-amber-700"
-                >
-                  <app-icon slot="icon" name="package" size="16"></app-icon>
-                  Seleccionar Metodo
-                </app-button>
-              } @else {
-                @if (isLoadingShippingMethods()) {
-                  <div class="flex justify-center py-4">
-                    <div
-                      class="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-600"
-                    ></div>
-                  </div>
-                } @else if (shippingMethods().length === 0) {
-                  <p class="text-xs text-amber-600 italic py-2">
-                    No hay metodos de envio activos configurados.
-                  </p>
-                } @else {
-                  <div class="space-y-1.5 mb-3 max-h-48 overflow-y-auto">
-                    @for (method of shippingMethods(); track method.id) {
-                      <button
-                        (click)="onShippingMethodSelect(method.id)"
-                        class="w-full text-left p-2.5 rounded-lg border transition-all text-sm flex items-center gap-2.5"
-                        [ngClass]="{
-                          'border-amber-400 bg-amber-100 ring-1 ring-amber-400':
-                            selectedShippingMethodId() === method.id,
-                          'border-amber-200 bg-white hover:bg-amber-50':
-                            selectedShippingMethodId() !== method.id,
-                        }"
-                      >
-                        <app-icon
-                          [name]="
-                            shippingMethodsService.getShippingMethodIcon(
-                              method.type
-                            )
-                          "
-                          size="16"
-                          class="text-amber-700 flex-shrink-0"
-                        ></app-icon>
-                        <div class="min-w-0 flex-1">
-                          <p
-                            class="font-semibold text-gray-900 truncate text-xs"
-                          >
-                            {{ method.name }}
-                          </p>
-                          <p class="text-[10px] text-gray-500">
-                            {{
-                              shippingMethodsService.getShippingMethodTypeLabel(
-                                method.type
-                              )
-                            }}
-                          </p>
-                        </div>
-                      </button>
-                    }
-                  </div>
-                }
-
-                @if (selectedShippingMethod()) {
-                  @if (isCalculatingRate()) {
-                    <div class="flex items-center gap-2 py-3 mb-3 text-xs text-amber-700">
-                      <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-amber-600"></div>
-                      Calculando tarifa para la direccion del cliente…
-                    </div>
-                  } @else if (calculatedRate(); as r) {
-                    <div class="mb-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
-                      <div class="flex items-center justify-between">
-                        <div>
-                          <p class="text-xs font-bold text-emerald-800">Tarifa aplicable</p>
-                          <p class="text-sm text-emerald-900">
-                            {{ r.rate_name || 'Tarifa' }}@if (r.zone) { · {{ r.zone }} }
-                          </p>
-                        </div>
-                        <span class="text-sm font-bold text-emerald-900">{{ r.cost | currency }}</span>
-                      </div>
-                    </div>
-                  }
-
-                  <label class="flex items-start gap-2 mb-2 text-xs text-amber-800 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      [checked]="manualCostOverride()"
-                      (change)="toggleManualCost($any($event.target).checked)"
-                      class="mt-0.5"
-                    />
-                    <span>Editar costo manualmente</span>
-                  </label>
-
-                  @if (manualCostOverride()) {
-                    <div class="mb-3" [formGroup]="shippingAssignForm">
-                      <label class="block text-xs font-bold text-amber-800 mb-1"
-                        >Costo de envio</label
-                      >
-                      <input
-                        type="number"
-                        formControlName="shipping_cost"
-                        min="0"
-                        step="0.01"
-                        class="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400 bg-white"
-                        placeholder="0.00"
-                      />
-                    </div>
-                  }
-                }
-
-                <div class="flex items-center gap-2">
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    [fullWidth]="true"
-                    (clicked)="skipShippingAssignment()"
-                  >
-                    Continuar sin metodo
-                  </app-button>
-                  @if (selectedShippingMethodId()) {
-                    <app-button
-                      variant="primary"
-                      size="sm"
-                      [fullWidth]="true"
-                      (clicked)="submitShippingAssignment()"
-                      [disabled]="isProcessingAction()"
-                      customClasses="!bg-amber-600 hover:!bg-amber-700"
-                    >
-                      {{ isProcessingAction() ? "Asignando..." : "Confirmar" }}
-                    </app-button>
-                  }
-                </div>
-              }
-            </div>
-          }
+          <!-- Gestión de envío consolidada en la card "Gestión de Envío" (columna izquierda). -->
 
           <!-- 4. PROGRESO DE LA ORDEN -->
           <app-card shadow="sm" [responsivePadding]="true">
@@ -1851,6 +1861,13 @@
       </div>
     </app-modal>
 
+    <!-- DISPATCH METHOD CHOOSER (con remisión vs sin remisión) -->
+    <app-dispatch-method-selector-modal
+      [isOpen]="showDispatchSelector()"
+      (selected)="onDispatchMethodSelected($event)"
+      (closed)="showDispatchSelector.set(false)"
+    ></app-dispatch-method-selector-modal>
+
     <!-- GENERATE DISPATCH NOTE WIZARD (Items → Datos/Estado → Ruta) -->
     <app-generate-dispatch-wizard
       [isOpen]="showDispatchModal()"
@@ -1858,6 +1875,17 @@
       (generated)="onDispatchGenerated($event)"
       (closed)="showDispatchModal.set(false)"
     ></app-generate-dispatch-wizard>
+
+    <!-- A3-edit: CAPTURA DE DIRECCIÓN DE ENVÍO EN PÁGINA -->
+    @if (showShippingAddressModal()) {
+      <app-shipping-address-modal
+        [customerId]="order()?.customer_id ?? null"
+        [customerName]="shippingAddressCustomerName()"
+        [saving]="savingShippingAddress()"
+        (close)="showShippingAddressModal.set(false)"
+        (submitForm)="onShippingAddressSubmit($event)"
+      ></app-shipping-address-modal>
+    }
 
     <!-- DELIVER MODAL -->
     <app-modal

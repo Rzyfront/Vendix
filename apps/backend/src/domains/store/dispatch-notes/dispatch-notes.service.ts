@@ -87,6 +87,27 @@ const DISPATCH_NOTE_INCLUDE = {
   voided_by_user: {
     select: { id: true, first_name: true, last_name: true },
   },
+  // Reverse relation so the UI can show "asignada a planilla #N" on
+  // the dispatch note detail / list. Includes the full history (released
+  // stops from prior routes) plus the parent route summary.
+  dispatch_route_stops: {
+    orderBy: { id: 'desc' as const },
+    select: {
+      id: true,
+      route_id: true,
+      stop_sequence: true,
+      status: true,
+      result: true,
+      route: {
+        select: {
+          id: true,
+          route_number: true,
+          route_code: true,
+          status: true,
+        },
+      },
+    },
+  },
 };
 
 @Injectable()
@@ -847,6 +868,26 @@ export class DispatchNotesService {
               first_name: true,
               last_name: true,
               email: true,
+            },
+          },
+          // Reverse relation so the list view can show which planilla
+          // the remisión is currently assigned to (or '—' if unassigned).
+          dispatch_route_stops: {
+            orderBy: { id: 'desc' as const },
+            select: {
+              id: true,
+              route_id: true,
+              stop_sequence: true,
+              status: true,
+              result: true,
+              route: {
+                select: {
+                  id: true,
+                  route_number: true,
+                  route_code: true,
+                  status: true,
+                },
+              },
             },
           },
         },

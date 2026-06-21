@@ -1,23 +1,33 @@
 import {
   Component,
+  DestroyRef,
+  ElementRef,
+  OnDestroy,
   effect,
   inject,
   input,
   output,
   signal,
-  DestroyRef,
+  viewChild,
 } from '@angular/core';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 
+/**
+ * Modal viewer for a planilla PDF. Uses signal-based inputs/outputs (zoneless
+ * clean) and a `viewChild()` for the iframe (no `document.querySelector`).
+ *
+ * Replaces the legacy `@Input`/`@Output` decorators (which violated the
+ * `vendix-zoneless-signals` CORE rule) with signal inputs and signal outputs.
+ */
 @Component({
   selector: 'app-planilla-pdf-viewer',
   standalone: true,
   template: `
     <div
       class="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 md:p-4"
-      (click)="close.emit()"
+      (click)="onBackdropClick()"
     >
       <div
         class="bg-background rounded-2xl w-full max-w-4xl h-[95vh] flex flex-col"
@@ -26,7 +36,7 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
         <div class="p-3 border-b border-border flex justify-between items-center">
           <h2 class="text-lg font-semibold">Planilla PDF</h2>
           <div class="flex gap-2">
-            @if (pdfUrl(); as url) {
+@if (pdfUrl(); as url) {
               <a
                 [href]="url"
                 [download]="'planilla-' + routeId() + '.pdf'"
@@ -34,7 +44,7 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
               >Descargar</a>
             }
             <button
-              (click)="close.emit()"
+              (click)="onClose()"
               class="rounded-md border border-input bg-background px-3 py-1.5 text-sm"
             >Cerrar</button>
           </div>
@@ -44,6 +54,7 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
             <div class="flex items-center justify-center h-full">Cargando PDF...</div>
           } @else if (pdfUrl()) {
             <iframe
+              #pdfIframe
               [src]="pdfUrl()"
               class="w-full h-full"
               frameborder="0"
@@ -58,9 +69,11 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
     </div>
   `,
 })
-export class PlanillaPdfViewerComponent {
+export class PlanillaPdfViewerComponent implements OnDestroy {
   readonly routeId = input.required<number>();
   readonly close = output<void>();
+
+  readonly pdfIframe = viewChild<ElementRef<HTMLIFrameElement>>('pdfIframe');
 
   private readonly service = inject(PlanillasRutasService);
   private readonly sanitizer = inject(DomSanitizer);
@@ -72,13 +85,17 @@ export class PlanillaPdfViewerComponent {
 
   private blobUrl: string | null = null;
 
-  constructor() {
+constructor() {
     this.destroyRef.onDestroy(() => {
       if (this.blobUrl) URL.revokeObjectURL(this.blobUrl);
     });
     // Re-fetch PDF whenever routeId changes (e.g. wizard advances to a
     // different planilla without unmounting the viewer). Without this effect,
     // a modal that stays mounted would keep showing the first PDF.
+    //
+    // Note: `effect()` runs in a microtask AFTER Angular binds signal inputs,
+    // so reading `routeId()` here is safe — it does not throw NG0950 (which
+    // only fires when reading signal inputs synchronously in the constructor).
     effect(() => {
       if (this.routeId() !== null && this.routeId() !== undefined) {
         this.load();
@@ -88,11 +105,16 @@ export class PlanillaPdfViewerComponent {
 
   private load() {
     this.loading.set(true);
+    this.error.set(null);
     this.service
-      .getPdfBlob(this.routeId())
+      .downloadPdf(this.routeId())
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
+          // Revoke the previous blob URL if any, to avoid memory leaks.
+          if (this.blobUrl) {
+            URL.revokeObjectURL(this.blobUrl);
+          }
           this.blobUrl = URL.createObjectURL(blob);
           this.pdfUrl.set(
             this.sanitizer.bypassSecurityTrustResourceUrl(this.blobUrl),
@@ -100,9 +122,24 @@ export class PlanillaPdfViewerComponent {
           this.loading.set(false);
         },
         error: (e) => {
-          this.error.set(e.message);
+          this.error.set(e?.message || 'No se pudo cargar el PDF');
           this.loading.set(false);
         },
       });
+  }
+
+  onBackdropClick(): void {
+    this.close.emit();
+  }
+
+  onClose(): void {
+    this.close.emit();
+  }
+
+  ngOnDestroy(): void {
+    if (this.blobUrl) {
+      URL.revokeObjectURL(this.blobUrl);
+      this.blobUrl = null;
+    }
   }
 }

@@ -161,6 +161,19 @@ export class DispatchNotesService {
     );
   }
 
+  /**
+   * Download the dispatch-note (remision) PDF as a Blob.
+   * `POST /store/dispatch-notes/:id/pdf` (the backend streams an
+   * `application/pdf` buffer; we read it as a blob for download/preview).
+   */
+  downloadPdf(id: number): Observable<Blob> {
+    return this.http
+      .post(`${this.apiUrl}/store/dispatch-notes/${id}/pdf`, {}, { responseType: 'blob' })
+      .pipe(
+        catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      );
+  }
+
   invalidateCache(): void {
     dispatchNoteStatsCache = null;
   }

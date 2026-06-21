@@ -297,9 +297,14 @@ export class WeeklyReportService {
           take: 1,
         }),
         // 7. Inventory (purchase orders received)
+        // Atribución por UBICACIÓN de la tienda (location.store_id), no por el
+        // store del proveedor: una compra recibida en una ubicación de la
+        // tienda es suya, incluso si el proveedor es org-level. Las compras a
+        // bodega central (location.store_id NULL) NO se atribuyen a ninguna
+        // tienda (invariante de aislamiento: nada de datos org en el reporte).
         this.prisma.purchase_orders.aggregate({
           where: {
-            suppliers: { store_id },
+            location: { store_id },
             status: RECEIVED_PO_STATUS,
             order_date: { gte: start, lte: end },
           },
@@ -368,7 +373,7 @@ export class WeeklyReportService {
     const itemsReceivedAgg = await this.prisma.purchase_order_items.aggregate({
       where: {
         purchase_orders: {
-          suppliers: { store_id },
+          location: { store_id },
           status: RECEIVED_PO_STATUS,
           order_date: { gte: start, lte: end },
         },

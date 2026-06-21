@@ -44,6 +44,12 @@ describe('AnalyticsShellComponent', () => {
     expect(component.category()?.label).toBe(getCategoryById('sales')!.label);
   });
 
+// The previous `tabs()` API has been retired; analytics exposes its tabs
+// declaratively in the template, not as a public signal on the component.
+// The header now owns the primary 'Ver Reportes' action, asserted below.
+it('exposes the category id from the route data', () => {
+  expect(component.category()?.id).toBe('sales');
+});
   it('renders the Ver Reportes header action', () => {
     const actions = component.headerActions();
     expect(actions.length).toBe(1);

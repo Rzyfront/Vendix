@@ -67,6 +67,52 @@ Variables:
 `description` accepts Markdown. The mutation returns `success: false` (not an
 exception) if any ID is invalid — check this before reading `issue`.
 
+## Update issue (for the "update existing" dedup option)
+
+Used when the deduplication check finds a real duplicate and the user chooses
+to update it instead of creating a new one. The `id` is the issue **UUID**
+(not the `QUI-12` identifier) — resolve it from the `searchIssues` result
+(`id` field) or via `issues(filter: { identifier: { eq: "QUI-12" } })`.
+
+```graphql
+mutation IssueUpdate($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) {
+    success
+    issue {
+      id
+      identifier
+      title
+      url
+      priority
+      state { name }
+      labels { nodes { name } }
+    }
+  }
+}
+```
+
+Variables (only include the fields the user actually wants to change):
+
+```json
+{
+  "id": "<issue-uuid>",
+  "input": {
+    "title": "FIX/ Error al aprobar reseña [ecommerce]",
+    "description": "...merged markdown body...",
+    "priority": 2,
+    "labelIds": ["d6a4fc5c-7350-4cbf-b820-2fed8e6f131b"]
+  }
+}
+```
+
+- **Do not blindly overwrite** the existing `description`. Either merge the new
+  info into the existing body or prefer the **comment** option below to append
+  context without losing history.
+- `labelIds` **replaces** the full label set — pass the union of old + new
+  labels, not just the new one, or labels will be dropped.
+- Returns `success: false` (not an exception) if the `id` or any input ID is
+  invalid — check it before reading `issue`.
+
 ## End-to-end example — bug (FIX/) with full template
 
 This is what the agent sends for a fully-collected bug. The description
@@ -140,6 +186,62 @@ Variables for "everything":
 ```
 
 Skip pagination unless the user asks for more than 50.
+
+## Search issues (`search` action AND dedup before create)
+
+`searchIssues` runs Linear's full-text + vector search ranked by relevance.
+This is the right tool for both the user-facing `search` action ("¿hay un
+issue de X?") and the dedup check before create ("is there already an issue
+with the same purpose?") — it matches by meaning, not just exact title
+substring. It is **rate-limited to 30 requests/min** — one call per
+search/create is fine.
+
+```graphql
+query SearchIssues($term: String!, $teamId: String) {
+  searchIssues(term: $term, teamId: $teamId, first: 10) {
+    nodes {
+      id
+      identifier
+      title
+      url
+      priority
+      description
+      createdAt
+      updatedAt
+      state { name type }
+      assignee { name }
+      project { id name }
+      labels { nodes { name } }
+    }
+    totalCount
+  }
+}
+```
+
+Variables:
+
+```json
+{
+  "term": "error aprobar reseña ecommerce",
+  "teamId": "64581e80-05a2-40e8-8acb-1f091ad38168"
+}
+```
+
+**Notes for the agent:**
+
+- `term` should be the salient keywords of the new issue: the title minus its
+  `FIX/`/`FEAT/` prefix, plus the module tag and the key nouns from the "what
+  is broken" / purpose answer. Do **not** send the full template body.
+- `teamId` is the Quickss team — it **boosts** that team's results but does not
+  restrict to it. Since Vendix is the only project on this team, results are
+  effectively Vendix already.
+- Still **filter the returned `nodes` client-side** to `project.id ==
+  PROJECT_ID` (`0b7c9c45-7fc1-4915-ac77-8e1cb56d7c59`) before showing matches —
+  belt and suspenders.
+- `state.type` matters for judging: a match in `completed`/`canceled` is a
+  possible **regression** (offer to reopen/update or create-new-referencing),
+  not a plain duplicate.
+- `id` (UUID) from a node feeds `issueUpdate` / `commentCreate` directly.
 
 ## Resolve current user
 

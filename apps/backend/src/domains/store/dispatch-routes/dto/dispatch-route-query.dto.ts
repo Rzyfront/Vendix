@@ -26,9 +26,18 @@ export class DispatchRouteQueryDto {
   @IsString()
   search?: string;
 
+  /**
+   * Filter by status. Accepts a single value (`?status=draft`) or a
+   * comma-separated list (`?status=draft,dispatched`) — the wizard uses
+   * the latter to populate the "Existing route" picker with routes that
+   * can still accept new stops.
+   */
   @IsOptional()
-  @IsEnum(dispatch_route_status_enum)
-  status?: dispatch_route_status_enum;
+  @Transform(({ value }) =>
+    Array.isArray(value) ? value : String(value ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  )
+  @IsEnum(dispatch_route_status_enum, { each: true })
+  status?: dispatch_route_status_enum | dispatch_route_status_enum[];
 
   @IsOptional()
   @Transform(({ value }) => parseInt(value))

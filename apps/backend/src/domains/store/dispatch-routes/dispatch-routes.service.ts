@@ -56,6 +56,9 @@ const DISPATCH_ROUTE_INCLUDE = {
           status: true,
           sales_order_id: true,
           sales_order: { select: { id: true, order_number: true, status: true } },
+          // Withholding-agent flag drives the UI banner + the backend
+          // re-validation in route-flow.service.settleStop().
+          customer: { select: { is_withholding_agent: true } },
         },
       },
       settled_by_user: {
@@ -81,30 +84,102 @@ export class DispatchRoutesService {
     return store_id;
   }
 
-  async create(dto: CreateDispatchRouteDto) {
-    const store_id = this.getStoreId();
-    const user_id = RequestContextService.getContext()?.user_id;
-
-    // Validate driver: si es externo, requiere nombre + cédula; si es interno, FK users.
-    // Es mutuamente excluyente: no se permite mandar ambos (driver_user_id y external_*).
-    if (dto.driver_user_id && (dto.external_driver_name || dto.external_driver_id_number)) {
+  /**
+   * Validate the driver/assistant block and defensively sanitize `assistants`.
+   *
+   * Shared by `create()` and `update()` so both entry points enforce the same
+   * invariants (the frontend wizard already prevents these cases, but the
+   * backend must not trust the client). On success it MUTATES `dto.assistants`
+   * to the cleaned array (same behaviour create() relied on before).
+   *
+   * Rules enforced:
+   * 1. Internal (`driver_user_id`) and external (`external_driver_*`) driver are
+   *    mutually exclusive — they cannot both be present.
+   * 2. When `requireDriver` is true (create), a complete driver must be
+   *    provided: if `is_primary_driver_external` the external name + id_number
+   *    are required, otherwise `driver_user_id` is required. On a partial
+   *    update (`requireDriver = false`) this presence requirement is skipped so
+   *    a PATCH that doesn't touch driver fields stays valid.
+   * 3. The driver (`driver_user_id`) cannot also appear as an assistant
+   *    (`assistants[].user_id`) — checked AFTER sanitizing assistants.
+   *
+   * @param requireDriver when true (create) enforce that a driver is present.
+   */
+  private validateDriverAndAssistants(
+    dto: CreateDispatchRouteDto | UpdateDispatchRouteDto,
+    requireDriver: boolean,
+  ): void {
+    // (1) Internal vs external driver mutual exclusion.
+    if (
+      dto.driver_user_id &&
+      (dto.external_driver_name || dto.external_driver_id_number)
+    ) {
       throw new BadRequestException(
         'Conductor interno y externo son mutuamente excluyentes',
       );
     }
-    if (dto.is_primary_driver_external) {
-      if (!dto.external_driver_name || !dto.external_driver_id_number) {
-        throw new BadRequestException(
-          'Conductor externo requiere external_driver_name y external_driver_id_number',
-        );
+
+    // (2) On create, a complete driver must be provided.
+    if (requireDriver) {
+      if (dto.is_primary_driver_external) {
+        if (!dto.external_driver_name || !dto.external_driver_id_number) {
+          throw new BadRequestException(
+            'Conductor externo requiere external_driver_name y external_driver_id_number',
+          );
+        }
+      } else {
+        if (!dto.driver_user_id) {
+          throw new BadRequestException(
+            'Conductor interno requiere driver_user_id',
+          );
+        }
       }
-    } else {
-      if (!dto.driver_user_id) {
+    }
+
+    // Sanitize `assistants` defensive pass (DTO already validates shape with
+    // class-validator; this catches any item missing both user_id and external
+    // fields that would otherwise persist as `[]` on the JSONB column).
+    if (dto.assistants && Array.isArray(dto.assistants)) {
+      const cleaned: any[] = [];
+      for (const a of dto.assistants) {
+        if (!a || typeof a !== 'object') continue;
+        const obj = a as Record<string, unknown>;
+        const hasUser = typeof obj.user_id === 'number' && obj.user_id > 0;
+        const hasExt =
+          typeof obj.external_name === 'string' &&
+          obj.external_name.length > 0 &&
+          typeof obj.external_id_number === 'string' &&
+          obj.external_id_number.length > 0;
+        if (!hasUser && !hasExt) continue; // skip invalid items silently
+        cleaned.push(obj);
+      }
+      dto.assistants = cleaned;
+    }
+
+    // (3) The driver cannot also be listed as an assistant (checked after the
+    // sanitize pass so released/invalid items don't trigger a false positive).
+    if (dto.driver_user_id && Array.isArray(dto.assistants)) {
+      const driverIsAssistant = dto.assistants.some(
+        (a) =>
+          a &&
+          typeof a === 'object' &&
+          (a as Record<string, unknown>).user_id === dto.driver_user_id,
+      );
+      if (driverIsAssistant) {
         throw new BadRequestException(
-          'Conductor interno requiere driver_user_id',
+          'El conductor no puede figurar también como auxiliar',
         );
       }
     }
+  }
+
+  async create(dto: CreateDispatchRouteDto) {
+    const store_id = this.getStoreId();
+    const user_id = RequestContextService.getContext()?.user_id;
+
+    // Validate driver (mutual exclusion + required driver) and sanitize
+    // assistants (mutates dto.assistants). create() always requires a driver.
+    this.validateDriverAndAssistants(dto, true);
 
     // Validate that all dispatch_notes exist, belong to this store, and are not already in another route
     const note_ids = dto.stops.map((s) => s.dispatch_note_id);
@@ -134,17 +209,19 @@ export class DispatchRoutesService {
     }
 
     // Check whether the dispatch_notes are already in an active (non-released) stop.
-    // Allow reuse if the existing stop is 'released' OR the parent route is still 'draft'.
+    // A stop blocks reuse iff it is not yet 'released'. The previous carve-out
+    // that allowed `route.status === 'draft'` violated the partial unique
+    // index `dispatch_route_stops_dispatch_note_id_active_idx` (which uses
+    // `WHERE status <> 'released'`) and produced 500 errors when the wizard
+    // selected a note that was reserved by an unrelated draft route.
     const existing_stops = await this.prisma.dispatch_route_stops.findMany({
       where: { dispatch_note_id: { in: unique_note_ids } },
       include: { route: { select: { status: true } } },
     });
-    const blocking = existing_stops.filter(
-      (s) => s.status !== 'released' && s.route.status !== 'draft',
-    );
+    const blocking = existing_stops.filter((s) => s.status !== 'released');
     if (blocking.length > 0) {
       throw new BadRequestException(
-        `Las remisiones ${blocking.map((s) => s.dispatch_note_id).join(', ')} ya pertenecen a una planilla activa o cerrada`,
+        `Las remisiones ${blocking.map((s) => s.dispatch_note_id).join(', ')} ya pertenecen a una planilla activa (estado: ${blocking.map((s) => s.route.status).join(', ')})`,
       );
     }
 
@@ -246,7 +323,11 @@ export class DispatchRoutesService {
           { external_driver_name: { contains: search, mode: 'insensitive' as any } },
         ],
       }),
-      ...(status && { status }),
+      // `status` may be a single value or an array (DTO accepts
+      // `?status=draft,dispatched`); Prisma's `in` filter handles both
+      // shapes for the enum column.
+      ...(status &&
+        (Array.isArray(status) ? { status: { in: status } } : { status })),
       ...(vehicle_id && { vehicle_id }),
       ...(driver_user_id && { driver_user_id }),
       ...(date_from && date_to && {
@@ -297,8 +378,28 @@ export class DispatchRoutesService {
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
 
-    const reconciliation = this.buildReconciliation(route);
-    return { ...route, reconciliation };
+    // Surface `customer.is_withholding_agent` as a top-level
+    // `customer_is_withholding_agent` on each stop's dispatch_note for
+    // legacy UI consumers. The nested `customer` object remains the
+    // source of truth.
+    const stops_with_alias = (route.stops ?? []).map((stop: any) => {
+      const dn = stop.dispatch_note ?? null;
+      if (!dn) return stop;
+      return {
+        ...stop,
+        dispatch_note: {
+          ...dn,
+          customer_is_withholding_agent:
+            dn.customer?.is_withholding_agent ?? false,
+        },
+      };
+    });
+
+    const reconciliation = this.buildReconciliation({
+      ...route,
+      stops: stops_with_alias,
+    });
+    return { ...route, stops: stops_with_alias, reconciliation };
   }
 
   /**
@@ -407,8 +508,10 @@ export class DispatchRoutesService {
       );
     }
 
-    // Assignability: a note already sitting on an active (non-released) stop of
-    // another non-draft route cannot be assigned. Mirrors create()'s rule.
+    // Assignability: a note already sitting on an active (non-released) stop
+    // of any other route cannot be assigned. Mirrors create()'s rule and the
+    // partial unique index `dispatch_route_stops_dispatch_note_id_active_idx`
+    // (`WHERE status <> 'released'`).
     const other_stops = await this.prisma.dispatch_route_stops.findMany({
       where: {
         dispatch_note_id: { in: unique_new_ids },
@@ -416,14 +519,12 @@ export class DispatchRoutesService {
       },
       include: { route: { select: { status: true } } },
     });
-    const blocking = other_stops.filter(
-      (s) => s.status !== 'released' && s.route.status !== 'draft',
-    );
+    const blocking = other_stops.filter((s) => s.status !== 'released');
     if (blocking.length > 0) {
       throw new BadRequestException(
         `Las remisiones ${blocking
           .map((s) => s.dispatch_note_id)
-          .join(', ')} ya pertenecen a una planilla activa o cerrada`,
+          .join(', ')} ya pertenecen a una planilla activa`,
       );
     }
 
@@ -506,6 +607,11 @@ export class DispatchRoutesService {
       );
     }
 
+    // Validate driver block + sanitize assistants. Partial update: the
+    // mutual-exclusion and driver-vs-assistant checks only apply to the fields
+    // actually present, and a complete driver is NOT required (requireDriver=false).
+    this.validateDriverAndAssistants(dto, false);
+
     return this.prisma.$transaction(async (tx) => {
       // Update stops if provided
       if (dto.stops) {
@@ -582,5 +688,68 @@ export class DispatchRoutesService {
       total_collected: Number(totals._sum.total_collected || 0),
       total_cash_variance: Number(totals._sum.cash_variance || 0),
     };
+  }
+
+  /**
+   * Lists dispatch notes that the operator can still pick when creating or
+   * editing a planilla. A note is "available" iff:
+   * - it belongs to the current store
+   * - it is not voided
+   * - it is NOT attached to a non-released stop of a non-draft route
+   *   (draft routes "hold" their stops in a soft reservation; any other
+   *   active/closed route locks the note).
+   *
+   * Used by the wizard's stop picker — see
+   * `DispatchRoutesController.listAvailableNotes`. Without this filter the
+   * legacy `dispatch-notes?status=confirmed` endpoint returns notes that the
+   * backend then rejects with 500 on `create()`.
+   */
+  async listAvailableNotes(search?: string) {
+    const store_id = this.getStoreId();
+
+    // Find notes that are locked by an active (non-released) stop on ANY
+    // route. Matches the partial unique index
+    // `dispatch_route_stops_dispatch_note_id_active_idx` and the create()
+    // /addStops() blockers. We don't carve out parent=draft here because a
+    // draft route still holds its stops locked at the DB layer.
+    const lockedNoteIds = await this.prisma.dispatch_route_stops.findMany({
+      where: { status: { not: 'released' } },
+      select: { dispatch_note_id: true },
+    });
+    const lockedSet = new Set(lockedNoteIds.map((s) => s.dispatch_note_id));
+
+    const where: any = {
+      store_id,
+      status: { not: 'voided' },
+    };
+    if (search) {
+      where.OR = [
+        { dispatch_number: { contains: search, mode: 'insensitive' } },
+        { customer_name: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+    const notes = await this.prisma.dispatch_notes.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      take: 100,
+      select: {
+        id: true,
+        dispatch_number: true,
+        customer_name: true,
+        grand_total: true,
+        status: true,
+        needs_collection: true,
+      },
+    });
+    return notes
+      .filter((n) => !lockedSet.has(n.id))
+      .map((n) => ({
+        id: n.id,
+        dispatch_number: n.dispatch_number,
+        customer_name: n.customer_name,
+        grand_total: n.grand_total,
+        status: n.status,
+        needs_collection: n.needs_collection,
+      }));
   }
 }

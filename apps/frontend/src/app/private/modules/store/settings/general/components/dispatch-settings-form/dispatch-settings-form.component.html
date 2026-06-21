@@ -1,0 +1,11 @@
+<div class="dispatch-settings-form">
+  <div>
+    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Actualización de estado de la orden</h4>
+    <app-setting-toggle
+      [formControl]="liveStateUpdateControl"
+      label="Marcar la orden como entregada en vivo (al liquidar cada parada)"
+      description="Activado: la orden se marca «entregada» apenas se liquida cada parada de la ruta. Desactivado: la orden avanza sólo al cerrar/cuadrar la planilla."
+      (changed)="onFieldChange()"
+    ></app-setting-toggle>
+  </div>
+</div>

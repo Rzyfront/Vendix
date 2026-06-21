@@ -1,15 +1,12 @@
 import {
   Component,
   DestroyRef,
-  EffectRef,
   computed,
-  effect,
   inject,
-  input,
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -18,14 +15,26 @@ import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
   StickyHeaderBadgeColor,
+  OptionsDropdownComponent,
+  DropdownAction,
+  StepsLineComponent,
+  StepsLineItem,
+  ResponsiveDataViewComponent,
+  TableColumn,
+  TableAction,
+  ItemListCardConfig,
 } from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { StopSettleModalComponent } from '../../components/stop-settle-modal/stop-settle-modal.component';
 import { StopReleaseModalComponent } from '../../components/stop-release-modal/stop-release-modal.component';
 import { PlanillaCloseModalComponent } from '../../components/planilla-close-modal/planilla-close-modal.component';
 import { PlanillaPdfViewerComponent } from '../../components/planilla-pdf-viewer/planilla-pdf-viewer.component';
+import { VoidDispatchRouteModalComponent } from '../../components/void-dispatch-route-modal/void-dispatch-route-modal.component';
 import { RouteSheetScannerModalComponent } from '../../components/route-sheet-scanner-modal/route-sheet-scanner-modal.component';
+import { StopDetailModalComponent } from '../../components/stop-detail-modal/stop-detail-modal.component';
+import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
+import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
 import {
   CloseDispatchRouteDto,
   DispatchRoute,
@@ -38,14 +47,6 @@ import {
 /** Recaudo (collection) status surfaced per stop on the detail page. */
 type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
 
-/** One node in the route status mini-stepper. */
-interface RouteStepperNode {
-  status: DispatchRouteStatus;
-  label: string;
-  icon: string;
-  state: 'done' | 'current' | 'upcoming';
-}
-
 @Component({
   selector: 'app-planilla-detail-page',
   standalone: true,
@@ -55,11 +56,16 @@ interface RouteStepperNode {
     StickyHeaderComponent,
     IconComponent,
     CurrencyPipe,
+    OptionsDropdownComponent,
+    StepsLineComponent,
+    ResponsiveDataViewComponent,
     StopSettleModalComponent,
     StopReleaseModalComponent,
     PlanillaCloseModalComponent,
     PlanillaPdfViewerComponent,
     RouteSheetScannerModalComponent,
+    VoidDispatchRouteModalComponent,
+    StopDetailModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -81,248 +87,157 @@ interface RouteStepperNode {
         } @else if (route(); as r) {
           <!-- Route status stepper -->
           @if (r.status !== 'voided') {
-            <app-card [padding]="true">
-              <div class="flex items-center justify-between gap-1 overflow-x-auto">
-                @for (node of stepperNodes(); track node.status; let last = $last) {
-                  <div class="flex items-center gap-1 flex-shrink-0">
-                    <div class="flex flex-col items-center gap-1 min-w-[64px]">
-                      <div
-                        class="flex h-9 w-9 items-center justify-center rounded-full border-2"
-                        [class]="stepperNodeClass(node.state)"
-                      >
-                        <app-icon [name]="node.icon" [size]="16"></app-icon>
-                      </div>
-                      <span
-                        class="text-[10px] text-center leading-tight"
-                        [class.font-semibold]="node.state === 'current'"
-                        [class.text-text-secondary]="node.state === 'upcoming'"
-                      >
-                        {{ node.label }}
-                      </span>
-                    </div>
-                    @if (!last) {
-                      <div
-                        class="h-0.5 w-6 md:w-10 rounded-full"
-                        [class.bg-primary-600]="node.state === 'done'"
-                        [class.bg-border]="node.state !== 'done'"
-                      ></div>
-                    }
-                  </div>
-                }
+            <app-card [padding]="false" shadow="sm">
+              <div class="px-2 py-1">
+                <app-steps-line
+                  [steps]="stepperLineItems()"
+                  [currentStep]="stepperCurrentIndex()"
+                  size="md"
+                ></app-steps-line>
               </div>
             </app-card>
           }
 
           <!-- Summary -->
-          <app-card [padding]="true">
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-              <div>
-                <div class="text-xs text-text-secondary">Conductor</div>
-                <div class="font-medium">
+          <app-card shadow="sm" [responsivePadding]="true">
+            <h2
+              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
+            >
+              Resumen del despacho
+            </h2>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 items-start">
+              <div class="flex flex-col gap-1">
+                <span class="text-xs text-text-secondary uppercase tracking-wide">Conductor</span>
+                <span class="font-semibold text-gray-900">
                   @if (r.driver_user) {
                     {{ r.driver_user.first_name }} {{ r.driver_user.last_name }}
                   } @else if (r.external_driver_name) {
-                    {{ r.external_driver_name }} <span class="text-xs">(ext.)</span>
+                    {{ r.external_driver_name }} <span class="text-xs font-normal text-text-secondary">(ext.)</span>
                   } @else {
                     —
                   }
-                </div>
+                </span>
               </div>
-              <div>
-                <div class="text-xs text-text-secondary">Vehículo</div>
-                <div class="font-medium">{{ r.vehicle?.plate || '—' }}</div>
+              <div class="flex flex-col gap-1">
+                <span class="text-xs text-text-secondary uppercase tracking-wide">Vehículo</span>
+                <span class="font-semibold text-gray-900">{{ r.vehicle?.plate || '—' }}</span>
               </div>
-              <div>
-                <div class="text-xs text-text-secondary">Total a recaudar</div>
-                <div class="font-bold text-lg">
-                  {{ +r.total_to_collect | currency }}
-                </div>
+              <div class="flex flex-col gap-1">
+                <span class="text-xs text-text-secondary uppercase tracking-wide">Total a recaudar</span>
+                <span class="text-lg font-black text-gray-900">{{ +r.total_to_collect | currency }}</span>
               </div>
-              <div>
-                <div class="text-xs text-text-secondary">Recaudado</div>
-                <div class="font-bold text-lg text-green-600">
-                  {{ +r.total_collected | currency }}
-                </div>
+              <div class="flex flex-col gap-1">
+                <span class="text-xs text-text-secondary uppercase tracking-wide">Recaudado</span>
+                <span class="text-lg font-black text-green-600">{{ totalCollectedLive(r) | currency }}</span>
               </div>
             </div>
 
-            <div class="text-xs text-text-secondary mt-3">
+            @if (pendingCollectionLive(r) > 0) {
+              <div
+                class="mt-3 pt-3 border-t border-border flex justify-between items-center text-sm"
+              >
+                <span class="text-text-secondary">A cobrar</span>
+                <span class="font-semibold text-amber-700">{{ pendingCollectionLive(r) | currency }}</span>
+              </div>
+            }
+
+            <div class="mt-3 text-xs text-text-secondary">
               {{ r.planned_date | date: 'dd MMM yyyy, HH:mm' }}
             </div>
           </app-card>
 
           <!-- Closure analysis (only when route is closed) -->
           @if (r.status === 'closed') {
-            <app-card [padding]="true">
-              <div class="flex items-center gap-2 mb-3">
-                <app-icon name="check-circle" [size]="18" class="text-green-600"></app-icon>
-                <h2 class="text-lg font-semibold">Análisis de cierre</h2>
-              </div>
-
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                <div>
-                  <div class="text-xs text-text-secondary">Total por recaudar</div>
-                  <div class="font-bold">{{ +r.total_to_collect | currency }}</div>
-                </div>
-                <div>
-                  <div class="text-xs text-text-secondary">Total recaudado</div>
-                  <div class="font-bold text-green-600">
-                    {{ +r.total_collected | currency }}
-                  </div>
-                </div>
-                <div>
-                  <div class="text-xs text-text-secondary">A crédito</div>
-                  <div class="font-bold text-yellow-600">{{ +r.total_credit | currency }}</div>
-                </div>
-                <div>
-                  <div class="text-xs text-text-secondary">Retenciones</div>
-                  <div class="font-bold">{{ +r.total_withholdings | currency }}</div>
+            <app-card shadow="sm" [responsivePadding]="true" [showHeader]="true">
+              <div slot="header" class="flex items-center gap-3">
+                <span
+                  class="w-10 h-10 rounded-lg bg-green-50 border border-green-200 flex items-center justify-center text-green-600"
+                >
+                  <app-icon name="check-circle" size="18"></app-icon>
+                </span>
+                <div class="flex flex-col">
+                  <span class="text-sm font-bold text-gray-900">Análisis de cierre</span>
+                  <span class="text-xs text-text-secondary">Cuadre final de la ruta</span>
                 </div>
               </div>
 
-              @if (r.declared_cash != null) {
-                <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <div class="text-xs text-text-secondary">Efectivo declarado</div>
-                    <div class="font-bold">{{ +r.declared_cash | currency }}</div>
-                  </div>
-                  <div>
-                    <div class="text-xs text-text-secondary">Cambios/devoluciones</div>
-                    <div class="font-bold">{{ +r.total_changes | currency }}</div>
-                  </div>
+              <div class="space-y-2">
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Total por recaudar</span>
+                  <span class="font-semibold text-gray-900">{{ +r.total_to_collect | currency }}</span>
                 </div>
-              }
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Total recaudado</span>
+                  <span class="font-semibold text-green-600">{{ totalCollectedLive(r) | currency }}</span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">A crédito</span>
+                  <span class="font-semibold text-amber-600">{{ +r.total_credit | currency }}</span>
+                </div>
+                <div class="flex justify-between items-center text-sm">
+                  <span class="text-text-secondary">Retenciones</span>
+                  <span class="font-semibold text-gray-900">{{ +r.total_withholdings | currency }}</span>
+                </div>
+
+                @if (r.declared_cash != null) {
+                  <div class="pt-3 mt-1 border-t border-border space-y-2">
+                    <div class="flex justify-between items-center text-sm">
+                      <span class="text-text-secondary">Efectivo declarado</span>
+                      <span class="font-semibold text-gray-900">{{ +r.declared_cash | currency }}</span>
+                    </div>
+                    <div class="flex justify-between items-center text-sm">
+                      <span class="text-text-secondary">Cambios/devoluciones</span>
+                      <span class="font-semibold text-gray-900">{{ +r.total_changes | currency }}</span>
+                    </div>
+                  </div>
+                }
+              </div>
 
               @if (r.cash_variance != null) {
-                <div class="mt-3 p-3 rounded-md flex items-center gap-2" [class]="varianceClass()">
-                  <app-icon [name]="varianceIcon()" [size]="18"></app-icon>
-                  <div>
-                    <strong>Diferencia de caja:</strong>
-                    {{ +r.cash_variance | currency }}
-                    <span class="font-semibold">{{ varianceLabel() }}</span>
+                <div class="mt-4 p-4 rounded-lg flex items-center gap-3" [class]="varianceClass()">
+                  <app-icon [name]="varianceIcon()" [size]="22"></app-icon>
+                  <div class="flex flex-col">
+                    <span class="text-xs uppercase tracking-wide font-semibold opacity-80">
+                      Diferencia de caja {{ varianceLabel() }}
+                    </span>
+                    <span class="text-xl sm:text-2xl font-black leading-tight">
+                      {{ +r.cash_variance | currency }}
+                    </span>
                   </div>
                 </div>
               }
             </app-card>
           }
 
-          <!-- Stops -->
+          <!-- Stops (standard responsive data-display container) -->
           <app-card [padding]="true">
-            <h2 class="text-lg font-semibold mb-3">
-              Paradas ({{ r.stops?.length || 0 }})
-            </h2>
-            <div class="space-y-2">
-              @for (stop of r.stops; track stop.id) {
-                <div
-                  class="rounded-lg border border-border bg-card p-3"
-                  [class]="stopClass(stop)"
-                >
-                  <div class="flex justify-between items-start gap-2 flex-wrap">
-                    <div class="min-w-0 flex-1">
-                      <div class="flex items-center gap-2 flex-wrap">
-                        <span class="text-xs font-mono bg-muted px-2 py-0.5 rounded">#{{ stop.stop_sequence }}</span>
-                        <span class="font-mono text-sm">{{ stop.dispatch_note?.dispatch_number }}</span>
-                        <!-- Collection status badge -->
-                        @switch (collectionState(stop)) {
-                          @case ('prepaid') {
-                            <span class="inline-flex items-center gap-1 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full">
-                              <app-icon name="check-circle" [size]="12"></app-icon>
-                              PREPAGADO
-                            </span>
-                          }
-                          @case ('collected') {
-                            <span class="inline-flex items-center gap-1 text-xs bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
-                              <app-icon name="banknote" [size]="12"></app-icon>
-                              RECAUDADO
-                            </span>
-                          }
-                          @case ('pending_cod') {
-                            <span class="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
-                              <app-icon name="wallet" [size]="12"></app-icon>
-                              PENDIENTE COD
-                            </span>
-                          }
-                        }
-                        <!-- Pending-payment order chip -->
-                        @if (showPendingOrderChip(stop)) {
-                          <span class="inline-flex items-center gap-1 text-xs bg-orange-100 text-orange-800 px-2 py-0.5 rounded-full">
-                            <app-icon name="credit-card" [size]="12"></app-icon>
-                            Orden pendiente de pago
-                          </span>
-                        }
-                      </div>
-                      <div class="text-sm text-text-secondary mt-1">
-                        {{ stop.dispatch_note?.customer_name || '(Cliente)' }}
-                      </div>
-                      <div class="text-sm font-semibold mt-1">
-                        {{ +(stop.dispatch_note?.grand_total || 0) | currency }}
-                      </div>
-                      <!-- "A cobrar" amount when collection is pending -->
-                      @if (amountToCollect(stop); as toCollect) {
-                        @if (toCollect > 0) {
-                          <div class="text-sm mt-1">
-                            <span class="text-text-secondary">A cobrar:</span>
-                            <strong class="text-amber-700">{{ toCollect | currency }}</strong>
-                          </div>
-                        }
-                      }
-                    </div>
-                    <span class="text-xs px-2 py-1 rounded-full" [class]="stopStatusClass(stop.status)">
-                      {{ stopStatusLabel(stop.status) }}
-                    </span>
-                  </div>
+            <!-- Container header: title + secondary (documental/AI) actions dropdown -->
+            <div class="flex items-center justify-between gap-2 mb-3">
+              <h2 class="text-lg font-semibold">
+                Paradas ({{ r.stops?.length || 0 }})
+              </h2>
 
-                  @if (+stop.collected_amount || +stop.withholding_amount || +stop.credit_amount) {
-                    <div class="mt-2 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                      @if (+stop.collected_amount > 0) {
-                        <div>
-                          <span class="text-text-secondary">Recaudado:</span>
-                          <strong class="text-green-600">
-                            {{ +stop.collected_amount | currency }}
-                          </strong>
-                        </div>
-                      }
-                      @if (+stop.withholding_amount > 0) {
-                        <div>
-                          <span class="text-text-secondary">Retención:</span>
-                          <strong>{{ +stop.withholding_amount | currency }}</strong>
-                        </div>
-                      }
-                      @if (+stop.credit_amount > 0) {
-                        <div>
-                          <span class="text-text-secondary">A crédito:</span>
-                          <strong class="text-yellow-600">
-                            {{ +stop.credit_amount | currency }}
-                          </strong>
-                        </div>
-                      }
-                      @if (+stop.change_amount > 0) {
-                        <div>
-                          <span class="text-text-secondary">Cambio:</span>
-                          <strong>{{ +stop.change_amount | currency }}</strong>
-                        </div>
-                      }
-                    </div>
-                  }
-
-                  <!-- Actions per stop (only in active routes) -->
-                  @if (canActOnStop(r.status, stop.status)) {
-                    <div class="mt-3 flex gap-2 flex-wrap">
-                      <button
-                        type="button"
-                        (click)="openSettle(stop)"
-                        class="rounded-md bg-primary-600 text-white px-3 py-1.5 text-xs font-medium"
-                      >Liquidar</button>
-                      <button
-                        type="button"
-                        (click)="openRelease(stop)"
-                        class="rounded-md border border-border bg-surface px-3 py-1.5 text-xs"
-                      >Liberar</button>
-                    </div>
-                  }
-                </div>
-              }
+              <app-options-dropdown
+                [filters]="[]"
+                [actions]="documentalActions()"
+                [showActions]="true"
+                triggerLabel="Acciones"
+                triggerIcon="more-horizontal"
+                (actionClick)="onDocumentalAction($event)"
+              ></app-options-dropdown>
             </div>
+
+            <app-responsive-data-view
+              [data]="stopRows()"
+              [columns]="stopColumns"
+              [actions]="stopActions"
+              [cardConfig]="stopCardConfig"
+              actionsDisplay="buttons"
+              emptyMessage="Esta planilla no tiene paradas."
+              emptyIcon="map-pin"
+              (rowClick)="openStopDetail($event)"
+            ></app-responsive-data-view>
           </app-card>
         }
       </div>
@@ -332,6 +247,7 @@ interface RouteStepperNode {
       <app-stop-settle-modal
         [stop]="settleStop()!"
         [grandTotal]="+(settleStop()!.dispatch_note?.grand_total || 0)"
+        [isPrepaid]="!!settleStop()!.is_prepaid"
         (close)="settleStop.set(null)"
         (submitted)="onSettle($event)"
       ></app-stop-settle-modal>
@@ -353,6 +269,14 @@ interface RouteStepperNode {
       ></app-planilla-close-modal>
     }
 
+    @if (showVoidModal() && route()) {
+      <app-void-dispatch-route-modal
+        [route]="route()!"
+        (close)="showVoidModal.set(false)"
+        (submitted)="onVoid($event)"
+      ></app-void-dispatch-route-modal>
+    }
+
     @if (showPdfViewer() && route()) {
       <app-planilla-pdf-viewer
         [routeId]="route()!.id"
@@ -369,16 +293,26 @@ interface RouteStepperNode {
         (confirmed)="onScanConfirmed()"
       ></app-route-sheet-scanner-modal>
     }
+
+    @if (detailStop()) {
+      <app-stop-detail-modal
+        [stop]="detailStop()!"
+        [note]="detailNote()"
+        [loading]="detailLoading()"
+        (close)="closeStopDetail()"
+        (goToNote)="goToDispatchNote($event)"
+      ></app-stop-detail-modal>
+    }
   `,
 })
 export class PlanillaDetailPageComponent {
-  /** Route param `id`, bound via withComponentInputBinding (zoneless signal input). */
-  readonly id = input.required<string>();
-
   private readonly service = inject(PlanillasRutasService);
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
+  private readonly activatedRoute = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly currencyService = inject(CurrencyFormatService);
+  private readonly dispatchNotesService = inject(DispatchNotesService);
 
   readonly routeId = signal<number>(0);
   readonly route = signal<DispatchRoute | null>(null);
@@ -393,14 +327,48 @@ export class PlanillaDetailPageComponent {
   readonly showVoidModal = signal(false);
   readonly showScannerModal = signal(false);
 
+  // A1 — Quick-view del detalle de una remisión/parada.
+  readonly detailStop = signal<DispatchRouteStop | null>(null);
+  readonly detailNote = signal<DispatchNote | null>(null);
+  readonly detailLoading = signal(false);
+
   /** Linear status order for the route mini-stepper (voided is terminal/off-flow). */
-  private readonly STEPPER_FLOW: ReadonlyArray<{ status: DispatchRouteStatus; label: string; icon: string }> = [
-    { status: 'draft', label: 'Borrador', icon: 'package' },
-    { status: 'dispatched', label: 'Despachada', icon: 'truck' },
-    { status: 'in_transit', label: 'En ruta', icon: 'send' },
-    { status: 'settling', label: 'Cuadrando', icon: 'wallet' },
-    { status: 'closed', label: 'Cerrada', icon: 'check-circle' },
+  private readonly STEPPER_FLOW: ReadonlyArray<{ status: DispatchRouteStatus; label: string }> = [
+    { status: 'draft', label: 'Borrador' },
+    { status: 'dispatched', label: 'Despachada' },
+    { status: 'in_transit', label: 'En ruta' },
+    { status: 'settling', label: 'Cuadrando' },
+    { status: 'closed', label: 'Cerrada' },
   ];
+
+  /** Steps for the shared app-steps-line (labels only; symmetric horizontal layout). */
+  readonly stepperLineItems = computed<StepsLineItem[]>(() =>
+    this.STEPPER_FLOW.map((n) => ({ label: n.label })),
+  );
+
+  /** 0-based index of the route's current status within STEPPER_FLOW. */
+  readonly stepperCurrentIndex = computed<number>(() => {
+    const s = this.route()?.status;
+    const i = this.STEPPER_FLOW.findIndex((n) => n.status === s);
+    return i < 0 ? 0 : i;
+  });
+
+  /** Documental / AI actions surfaced in the Paradas options dropdown. */
+  readonly documentalActions = computed<DropdownAction[]>(() => [
+    { label: 'Imprimir planilla', icon: 'printer', action: 'print' },
+    {
+      label: this.downloadingPdf() ? 'Descargando…' : 'Descargar PDF',
+      icon: 'download',
+      action: 'download',
+      disabled: this.downloadingPdf(),
+    },
+    {
+      label: 'Cargar planilla escaneada (IA)',
+      icon: 'scan-line',
+      action: 'scan',
+      disabled: !this.canScanSheet(),
+    },
+  ]);
 
   readonly headerTitle = computed(() => this.route()?.route_number ?? 'Planilla');
 
@@ -466,51 +434,234 @@ export class PlanillaDetailPageComponent {
       });
     }
 
-    actions.push({
-      id: 'print',
-      label: 'Imprimir PDF',
-      variant: 'outline',
-      icon: 'printer',
-      disabled: busy,
-    });
-
-    actions.push({
-      id: 'download-pdf',
-      label: 'Descargar planilla (PDF)',
-      variant: 'outline',
-      icon: 'download',
-      loading: this.downloadingPdf(),
-      disabled: busy || this.downloadingPdf(),
-    });
-
-    // The scanned-sheet closure shortcut only makes sense while the route is
-    // active (dispatched / in_transit / settling): a closed/draft/voided route
-    // has nothing to settle from a scan.
-    if (['dispatched', 'in_transit', 'settling'].includes(r.status)) {
-      actions.push({
-        id: 'scan-sheet',
-        label: 'Cargar planilla escaneada',
-        variant: 'outline',
-        icon: 'scan-line',
-        disabled: busy,
-      });
-    }
-
+    // Documental/AI actions (print / download-pdf / scan-sheet) have been moved
+    // out of the sticky header into the Paradas container's secondary dropdown,
+    // keeping the sticky header focused on direct/immediate route actions.
     return actions;
   });
 
-  readonly stepperNodes = computed<RouteStepperNode[]>(() => {
-    const status = this.route()?.status;
-    if (!status) return [];
-    const currentIndex = this.STEPPER_FLOW.findIndex((n) => n.status === status);
-    return this.STEPPER_FLOW.map((node, index) => {
-      let state: RouteStepperNode['state'] = 'upcoming';
-      if (currentIndex >= 0) {
-        if (index < currentIndex) state = 'done';
-        else if (index === currentIndex) state = 'current';
-      }
-      return { ...node, state };
-    });
+  /**
+   * Whether the scanned-sheet closure shortcut is available. It only makes sense
+   * while the route is active (dispatched / in_transit / settling): a
+   * closed/draft/voided route has nothing to settle from a scan. Additionally,
+   * we require at least one PENDING/IN_PROGRESS stop — otherwise the scan would
+   * be a no-op on an already-settled route. Mirrors the original header gating.
+   */
+  readonly canScanSheet = computed<boolean>(() => {
+    const r = this.route();
+    if (!r) return false;
+    if (this.actionLoading()) return false;
+    if (!['dispatched', 'in_transit', 'settling'].includes(r.status)) {
+      return false;
+    }
+    return !!r.stops?.some(
+      (s: any) => s.status === 'pending' || s.status === 'in_progress',
+    );
+  });
+
+  /** Explanatory tooltip surfaced when the scan action is disabled. */
+  readonly scanSheetDisabledReason = computed<string | null>(() => {
+    if (this.canScanSheet()) return null;
+    const r = this.route();
+    if (!r || !['dispatched', 'in_transit', 'settling'].includes(r.status)) {
+      return 'Solo disponible en planillas despachadas, en ruta o cuadrando.';
+    }
+    return 'Todas las paradas ya están liquidadas o liberadas.';
+  });
+
+  // ---------------------------------------------------------------------------
+  // Paradas — responsive data-display (table desktop / cards mobile)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Stop status → CSS color (custom badge). Mirrors the semantics of
+   * `stopStatusClass` (Tailwind) but as raw colors, because the data-view custom
+   * badge resolves colorMap to inline CSS, not Tailwind classes.
+   */
+  private readonly STOP_STATUS_COLORS: Record<string, string> = {
+    pending: '#4b5563', // gray-600
+    in_progress: '#2563eb', // blue-600
+    delivered: '#16a34a', // green-600
+    partial: '#ca8a04', // yellow-600
+    rejected: '#dc2626', // red-600
+    released: '#9333ea', // purple-600
+  };
+
+  /** Collection (recaudo) state → CSS color for the custom badge. */
+  private readonly COLLECTION_STATE_COLORS: Record<string, string> = {
+    prepaid: '#16a34a', // green-600
+    collected: '#059669', // emerald-600
+    pending_cod: '#d97706', // amber-600
+    none: '#6b7280', // gray-500
+  };
+
+  readonly stopColumns: TableColumn[] = [
+    {
+      key: 'stop_sequence',
+      label: '#',
+      width: '48px',
+      align: 'center',
+      priority: 1,
+      transform: (value: any) => `#${value ?? ''}`,
+    },
+    {
+      key: 'dispatch_note.dispatch_number',
+      label: 'Remisión',
+      priority: 1,
+      transform: (_: any, row?: DispatchRouteStop) =>
+        row?.dispatch_note?.dispatch_number || '—',
+    },
+    {
+      key: 'dispatch_note.customer_name',
+      label: 'Cliente',
+      priority: 2,
+      transform: (_: any, row?: DispatchRouteStop) =>
+        row?.dispatch_note?.customer_name || '(Cliente)',
+    },
+    {
+      key: 'status',
+      label: 'Estado',
+      badge: true,
+      priority: 1,
+      badgeConfig: { type: 'custom', size: 'sm', colorMap: this.STOP_STATUS_COLORS },
+      transform: (value: any) => this.stopStatusLabel(String(value)),
+    },
+    {
+      key: '_collectionState',
+      label: 'Recaudo',
+      badge: true,
+      priority: 2,
+      badgeConfig: {
+        type: 'custom',
+        size: 'sm',
+        colorMap: this.COLLECTION_STATE_COLORS,
+      },
+      transform: (value: any) =>
+        this.collectionStateLabel(value as StopCollectionState),
+    },
+    {
+      key: 'dispatch_note.grand_total',
+      label: 'Total',
+      align: 'right',
+      priority: 1,
+      transform: (_: any, row?: DispatchRouteStop) => {
+        const toCollect = row ? this.amountToCollect(row) : 0;
+        const total = Number(row?.dispatch_note?.grand_total || 0);
+        // Pending COD stops show the amount still to collect; settled/prepaid
+        // stops show the document total.
+        return this.formatMoney(toCollect > 0 ? toCollect : total);
+      },
+    },
+  ];
+
+  readonly stopActions: TableAction[] = [
+    {
+      label: 'Ver detalle',
+      icon: 'eye',
+      variant: 'info',
+      action: (row: DispatchRouteStop) => this.openStopDetail(row),
+    },
+    {
+      label: 'Liquidar',
+      icon: 'wallet',
+      variant: 'primary',
+      action: (row: DispatchRouteStop) => this.openSettle(row),
+      show: (row: DispatchRouteStop) =>
+        !!this.route() && this.canActOnStop(this.route()!.status, row.status),
+    },
+    {
+      label: 'Liberar',
+      icon: 'x-circle',
+      variant: 'danger',
+      action: (row: DispatchRouteStop) => this.openRelease(row),
+      show: (row: DispatchRouteStop) =>
+        !!this.route() && this.canActOnStop(this.route()!.status, row.status),
+    },
+  ];
+
+  readonly stopCardConfig: ItemListCardConfig = {
+    titleKey: 'dispatch_note.dispatch_number',
+    titleTransform: (item: DispatchRouteStop) =>
+      `#${item.stop_sequence} · ${item.dispatch_note?.dispatch_number || '—'}`,
+    subtitleTransform: (item: DispatchRouteStop) =>
+      item.dispatch_note?.customer_name || '(Cliente)',
+    avatarFallbackIcon: 'map-pin',
+    avatarShape: 'square',
+    badgeKey: 'status',
+    badgeConfig: { type: 'custom', size: 'sm', colorMap: this.STOP_STATUS_COLORS },
+    badgeTransform: (value: any) => this.stopStatusLabel(String(value)),
+    footerKey: 'dispatch_note.grand_total',
+    footerLabel: 'Total',
+    footerStyle: 'prominent',
+    footerTransform: (_: any, item?: DispatchRouteStop) => {
+      const toCollect = item ? this.amountToCollect(item) : 0;
+      const total = Number(item?.dispatch_note?.grand_total || 0);
+      return this.formatMoney(toCollect > 0 ? toCollect : total);
+    },
+    detailKeys: [
+      {
+        key: '_collectionState',
+        label: 'Recaudo',
+        icon: 'banknote',
+        transform: (value: any) =>
+          this.collectionStateLabel(value as StopCollectionState),
+        // Surface the "orden pendiente de pago" signal as a warning info icon
+        // next to the recaudo value (replaces the old standalone chip), so a
+        // COD stop backed by an unpaid sales order is still flagged.
+        infoIconTransform: (_: any, item?: any) =>
+          item?._pendingOrder ? 'alert-circle' : undefined,
+        infoIconVariantTransform: (_: any, item?: any) =>
+          item?._pendingOrder ? 'warning' : undefined,
+      },
+      {
+        key: 'collected_amount',
+        label: 'Recaudado',
+        icon: 'banknote',
+        transform: (value: any) =>
+          Number(value) > 0 ? this.formatMoney(Number(value)) : '—',
+      },
+      {
+        key: 'withholding_amount',
+        label: 'Retención',
+        icon: 'percent',
+        transform: (value: any) =>
+          Number(value) > 0 ? this.formatMoney(Number(value)) : '—',
+      },
+      {
+        key: 'credit_amount',
+        label: 'A crédito',
+        icon: 'credit-card',
+        transform: (value: any) =>
+          Number(value) > 0 ? this.formatMoney(Number(value)) : '—',
+      },
+      {
+        key: 'change_amount',
+        label: 'Cambio',
+        icon: 'coins',
+        transform: (value: any) =>
+          Number(value) > 0 ? this.formatMoney(Number(value)) : '—',
+      },
+    ],
+  };
+
+  /**
+   * Stops enriched with derived display-only fields used by the data-view custom
+   * badges (which resolve colors off a flat key, not a method). The original
+   * stop fields are preserved so row actions still receive a full
+   * `DispatchRouteStop`.
+   */
+  readonly stopRows = computed<
+    (DispatchRouteStop & {
+      _collectionState: StopCollectionState;
+      _pendingOrder: boolean;
+    })[]
+  >(() => {
+    const stops = this.route()?.stops ?? [];
+    return stops.map((stop) => ({
+      ...stop,
+      _collectionState: this.collectionState(stop),
+      _pendingOrder: this.showPendingOrderChip(stop),
+    }));
   });
 
   readonly varianceClass = computed(() => {
@@ -534,25 +685,52 @@ export class PlanillaDetailPageComponent {
     return '(FALTA)';
   });
 
-  private routeIdEffect: EffectRef;
-
-  constructor() {
-    // Bridge the route-param signal input into the numeric routeId signal.
-    effect(() => {
-      const parsed = parseInt(this.id(), 10);
-      if (!isNaN(parsed)) this.routeId.set(parsed);
-    });
-    this.routeIdEffect = effect(() => {
-      const id = this.routeId();
-      if (id > 0) this.load();
-    });
+  ngOnInit() {
+    // The router is configured WITHOUT withComponentInputBinding(), so route
+    // params are read from ActivatedRoute (repo convention — see
+    // dispatch-note-detail-page / order-details-page). Reading the param in
+    // ngOnInit (not in an effect) avoids NG0950 (required input never bound)
+    // and NG0100 (signal writes during the first change-detection pass).
+    const id = Number(this.activatedRoute.snapshot.paramMap.get('id'));
+    if (id > 0) {
+      this.routeId.set(id);
+      this.load();
+    }
   }
 
-  ngOnDestroy() {
-    this.routeIdEffect?.destroy();
+  /**
+   * Returns the live collected total for the route. Prefers the backend-provided
+   * `reconciliation.total_collected` (which is recomputed server-side on every
+   * settle/release) and falls back to the persisted `total_collected` column.
+   * This is what powers the header chip so the operator sees real money coming
+   * in during the route.
+   */
+  totalCollectedLive(route: DispatchRoute): number {
+    const rec = (route as any).reconciliation;
+    if (rec && typeof rec.total_collected === 'number') {
+      return Number(rec.total_collected);
+    }
+    return Number(route.total_collected || 0);
+  }
+
+  /**
+   * Returns the projected pending collection for OPEN routes. For closed/voided
+   * routes the value is 0. Uses the reconciliation projection so the operator
+   * knows how much is still pending.
+   */
+  pendingCollectionLive(route: DispatchRoute): number {
+    if (route.status === 'closed' || route.status === 'voided') return 0;
+    const rec = (route as any).reconciliation;
+    if (rec && typeof rec.pending_collection === 'number') {
+      return Number(rec.pending_collection);
+    }
+    return 0;
   }
 
   onHeaderAction(actionId: string): void {
+    // Sticky header only carries direct/immediate route actions now; the
+    // documental/AI actions (print / download-pdf / scan-sheet) are triggered
+    // from the Paradas container dropdown.
     switch (actionId) {
       case 'dispatch':
         this.dispatch();
@@ -562,15 +740,6 @@ export class PlanillaDetailPageComponent {
         break;
       case 'void':
         this.openVoid();
-        break;
-      case 'print':
-        this.print();
-        break;
-      case 'download-pdf':
-        this.downloadPdf();
-        break;
-      case 'scan-sheet':
-        this.openScanner();
         break;
     }
   }
@@ -618,28 +787,49 @@ export class PlanillaDetailPageComponent {
     this.releaseStop.set(stop);
   }
 
+  /**
+   * A1 — Open the quick-view modal for a stop and fetch the full dispatch note
+   * (which carries the delivery address; the stop's nested summary does not).
+   * The modal renders the summary immediately and fills in the address once
+   * the fetch resolves; a failed fetch keeps the modal open with the summary.
+   */
+  openStopDetail(stop: DispatchRouteStop) {
+    this.detailStop.set(stop);
+    this.detailNote.set(null);
+    const id = stop.dispatch_note_id;
+    if (!id) return;
+    this.detailLoading.set(true);
+    this.dispatchNotesService
+      .getDispatchNote(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (note) => {
+          this.detailNote.set(note);
+          this.detailLoading.set(false);
+        },
+        error: () => {
+          this.detailLoading.set(false);
+        },
+      });
+  }
+
+  closeStopDetail() {
+    this.detailStop.set(null);
+    this.detailNote.set(null);
+    this.detailLoading.set(false);
+  }
+
+  goToDispatchNote(id: number) {
+    this.closeStopDetail();
+    this.router.navigate(['/admin/orders/dispatch-notes', id]);
+  }
+
   openClose() {
     this.showCloseModal.set(true);
   }
 
   openVoid() {
-    const reason = prompt('¿Por qué anulas la planilla?');
-    if (!reason || reason.length < 3) return;
-    this.actionLoading.set(true);
-    this.service
-      .void(this.routeId(), { reason })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (r) => {
-          this.actionLoading.set(false);
-          this.route.set(r);
-          this.toast.success('Planilla anulada');
-        },
-        error: (e) => {
-          this.actionLoading.set(false);
-          this.toast.error(e.message);
-        },
-      });
+    this.showVoidModal.set(true);
   }
 
   print() {
@@ -682,6 +872,21 @@ export class PlanillaDetailPageComponent {
   onScanConfirmed() {
     this.showScannerModal.set(false);
     this.load();
+  }
+
+  /** Routes the documental/AI options-dropdown actions to their handlers. */
+  onDocumentalAction(action: string): void {
+    switch (action) {
+      case 'print':
+        this.print();
+        break;
+      case 'download':
+        this.downloadPdf();
+        break;
+      case 'scan':
+        this.openScanner();
+        break;
+    }
   }
 
   back() {
@@ -750,6 +955,31 @@ export class PlanillaDetailPageComponent {
       });
   }
 
+  /**
+   * Handles the void modal submit. The backend auto-releases any stops that are
+   * still in non-terminal states (pending/in_progress) so the linked dispatch
+   * notes can be reassigned to another planilla. Settled stops stay as-is
+   * because their cash/AR movements have already hit the ledger.
+   */
+  onVoid(event: { reason: string; notes?: string }) {
+    this.actionLoading.set(true);
+    this.service
+      .void(this.routeId(), event)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (r) => {
+          this.actionLoading.set(false);
+          this.showVoidModal.set(false);
+          this.route.set(r);
+          this.toast.success(`Planilla ${r.route_number} anulada`);
+        },
+        error: (e) => {
+          this.actionLoading.set(false);
+          this.toast.error(e?.error?.message || e?.message || 'Error al anular la planilla');
+        },
+      });
+  }
+
   statusLabel(s: string): string {
     const map: Record<string, string> = {
       draft: 'Borrador',
@@ -792,17 +1022,6 @@ export class PlanillaDetailPageComponent {
     return '';
   }
 
-  stepperNodeClass(state: RouteStepperNode['state']): string {
-    switch (state) {
-      case 'done':
-        return 'bg-primary-600 border-primary-600 text-white';
-      case 'current':
-        return 'border-primary-600 text-primary-600 bg-primary-50';
-      default:
-        return 'border-border text-text-secondary bg-surface';
-    }
-  }
-
   /** A stop is settled (has a final result captured). */
   private isSettled(stop: DispatchRouteStop): boolean {
     return stop.result != null || stop.status === 'delivered' || stop.status === 'partial';
@@ -814,6 +1033,23 @@ export class PlanillaDetailPageComponent {
     if (this.isSettled(stop) && Number(stop.collected_amount) > 0) return 'collected';
     if (this.needsCollection(stop)) return 'pending_cod';
     return 'none';
+  }
+
+  /** Human-readable label for the recaudo badge. */
+  collectionStateLabel(state: StopCollectionState): string {
+    const map: Record<StopCollectionState, string> = {
+      prepaid: 'PREPAGADO',
+      collected: 'RECAUDADO',
+      pending_cod: 'PENDIENTE COD',
+      none: '—',
+    };
+    return map[state] ?? '—';
+  }
+
+  /** Currency formatter for data-view transforms (accepts string/number). */
+  formatMoney(value: any): string {
+    const num = typeof value === 'string' ? parseFloat(value) : value || 0;
+    return this.currencyService.format(Number(num) || 0);
   }
 
   /**
