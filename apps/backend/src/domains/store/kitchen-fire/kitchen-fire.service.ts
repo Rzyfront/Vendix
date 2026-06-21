@@ -28,6 +28,18 @@ const KITCHEN_TICKET_INCLUDE = {
           sku: true,
           stock_unit: true,
           preparation_time_minutes: true,
+          // Restaurant Suite — KDS recipe-readiness: nest the recipe so every
+          // ticket read path (snapshot + all `ticket.*` SSE events use this
+          // single include) carries whether the dish has an ACTIVE recipe.
+          // `recipe` is a TO-ONE optional relation on `products`
+          // (`recipes.product_id` is `@unique`), so we select its `id` +
+          // `is_active` and let the KDS card derive
+          // `has_active_recipe = product.recipe?.is_active === true` in O(1)
+          // without an extra per-card fetch. Mirrors the `startPreparation`
+          // guard (`recipes.findFirst({ product_id, is_active: true })`).
+          recipe: {
+            select: { id: true, is_active: true },
+          },
         },
       },
     },

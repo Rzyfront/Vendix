@@ -176,6 +176,17 @@ export class RecipeFormPageComponent implements OnInit {
       this.isEditMode.set(true);
       this.recipeId.set(Number(id));
       this.loadRecipe(this.recipeId());
+      return;
+    }
+
+    // Deep-link desde el KDS: `recipes/new?product_id=<id>` preselecciona el
+    // plato exacto que disparó el atajo "Crear receta" en un ticket sin
+    // receta. Solo aplica en modo creación (en edición el producto es
+    // inmutable y viene del recipe cargado).
+    const rawProductId = this.route.snapshot.queryParamMap.get('product_id');
+    const productId = rawProductId ? Number(rawProductId) : NaN;
+    if (Number.isFinite(productId)) {
+      this.form.controls.product_id.setValue(productId);
     }
   }
 

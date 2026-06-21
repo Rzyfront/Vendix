@@ -149,10 +149,20 @@ export class KitchenFireController {
   @Permissions('store:kitchen_fire:read')
   stream(@Req() req: Request): Observable<MessageEvent> {
     const context = RequestContextService.getContext();
-    const store_id = context?.store_id;
-    if (!store_id) {
+    if (!context?.store_id) {
       throw new ForbiddenException('Store context required');
     }
+    // Capture the full request context synchronously. The SSE snapshot below
+    // is resolved lazily (inside `defer`/`from`), which runs AFTER this
+    // handler returns — at which point the AsyncLocalStorage request context
+    // is already unwound. `StorePrismaService` (and `getActiveTicketsSnapshot`)
+    // read `RequestContextService.getContext()` to scope the query, so the
+    // deferred path would otherwise see no `store_id` and throw
+    // STORE_CONTEXT_001 ("Store context required") — surfacing as an empty
+    // snapshot on every KDS connection. We re-establish the captured context
+    // around the snapshot resolution via `RequestContextService.run(...)`.
+    const requestContext = context;
+    const store_id = context.store_id;
 
     const subject = this.sseService.getOrCreate(store_id);
 
@@ -177,8 +187,9 @@ export class KitchenFireController {
     //    error during the snapshot does not tear down the live stream).
     const snapshot$ = defer(() =>
       from(
-        this.kitchenFireService
-          .getActiveTicketsSnapshot(windowMinutes)
+        RequestContextService.run(requestContext, () =>
+          this.kitchenFireService.getActiveTicketsSnapshot(windowMinutes),
+        )
           .then(
             (snap) =>
               ({
