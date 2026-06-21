@@ -662,8 +662,9 @@ export class NotificationsEventsListener {
         provider_user_id =
           (provider as any)?.employee?.user_id ?? null;
       } catch (err: any) {
-        console.error(
+        this.logger.error(
           `[handleBookingStarted] Failed to resolve provider user: ${err.message}`,
+          err instanceof Error ? err.stack : String(err),
         );
       }
     }

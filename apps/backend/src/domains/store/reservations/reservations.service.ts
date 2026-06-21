@@ -704,6 +704,7 @@ export class ReservationsService {
     const booking = await this.transition(id, 'in_progress');
     this.eventEmitter.emit('booking.started', {
       store_id: booking.store_id,
+      provider_id: booking.provider_id,
       booking_id: booking.id,
       booking_number: booking.booking_number,
       customer_name:
