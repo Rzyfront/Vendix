@@ -17,12 +17,10 @@ import {
   ButtonComponent,
   IconComponent,
   SelectorComponent,
-  StoreUserSelectComponent,
-  StoreUserMultiSelectComponent,
-  StepsLineComponent,
-  StepsLineItem,
   ToastService,
 } from '../../../../../../shared/components';
+import { StoreUserSelectComponent } from '../../../../../../shared/components/store-user-select/store-user-select.component';
+import { StoreUserMultiSelectComponent } from '../../../../../../shared/components/store-user-multi-select/store-user-multi-select.component';
 import { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 

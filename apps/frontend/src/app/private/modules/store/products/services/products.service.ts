@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, catchError, throwError, map } from 'rxjs';
+import { Observable, catchError, throwError, from, map, switchMap } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -457,7 +457,40 @@ export class ProductsService {
       .get(`${this.apiUrl}/store/products/bulk/export`, {
         responseType: 'blob',
       })
-      .pipe(catchError(this.handleError));
+      .pipe(
+        catchError((err) => this.parseBlobError(err, 'exportCurrentProducts')),
+      );
+  }
+
+  /**
+   * Convierte el `error.error` (Blob) en un `Error` con el mensaje legible
+   * del backend. Necesario porque `responseType: 'blob'` hace que Angular
+   * NO parsee automáticamente el JSON de error, y `extractApiErrorMessage`
+   * no puede leer un Blob — termina mostrando "Error desconocido" al usuario.
+   */
+  private parseBlobError(err: any, context: string): Observable<never> {
+    return from(this.extractBlobMessage(err, context)).pipe(
+      switchMap((message) => throwError(() => new Error(message))),
+    );
+  }
+
+  private async extractBlobMessage(err: any, context: string): Promise<string> {
+    let backendMessage: string | undefined;
+    const blob = err?.error;
+    if (blob instanceof Blob) {
+      try {
+        const text = await blob.text();
+        const parsed = JSON.parse(text);
+        backendMessage =
+          parsed?.error?.message ?? parsed?.message ?? parsed?.error;
+      } catch {
+        // blob no es JSON parseable — dejamos `backendMessage` undefined
+      }
+    }
+    const message =
+      backendMessage ?? err?.message ?? 'Error al exportar la plantilla';
+    console.error(`[${context}]`, err, '→ mensaje final:', message);
+    return message;
   }
 
   uploadBulkProducts(file: File): Observable<any> {
