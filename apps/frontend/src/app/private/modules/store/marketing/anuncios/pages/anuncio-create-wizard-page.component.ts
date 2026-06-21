@@ -206,191 +206,100 @@ interface SelectedResourcePreview {
                               <h2
                                 class="text-base font-semibold leading-6 text-[var(--color-text-primary)]"
                               >
-                                Galeria de recursos disponibles
+                                Recursos del anuncio
                               </h2>
                               <p
                                 class="mt-1 max-w-xl text-sm leading-5 text-[var(--color-text-secondary)]"
                               >
-                                Logo, QR, sliders, fotos propias y las imagenes
-                                de tus productos para guiar la pieza visual.
+                                @if (
+                                  selectedReferenceResources().length ||
+                                    selectedImageIds().length ||
+                                    selectedProductIds().length
+                                ) {
+                                  {{
+                                    selectedReferenceResources().length +
+                                      selectedImageIds().length
+                                  }}
+                                  recursos &middot;
+                                  {{ selectedProductIds().length }} productos
+                                } @else {
+                                  Aun no agregaste recursos.
+                                }
                               </p>
                             </div>
                           </div>
+                        </div>
 
-                          <div class="flex shrink-0 items-center gap-2">
-                            <span
-                              class="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
-                            >
-                              {{
-                                selectedReferenceResources().length +
-                                  selectedImageIds().length
-                              }}
-                              seleccionados
-                            </span>
+                        <div class="space-y-4 p-4 md:p-5">
+                          <div class="flex flex-col gap-2 sm:flex-row">
                             <app-button
                               variant="outline"
-                              size="sm"
+                              size="md"
                               type="button"
-                              (clicked)="resourceModalOpen.set(true)"
-                            >
-                              <app-icon
-                                slot="icon"
-                                name="upload-cloud"
-                                [size]="15"
-                              ></app-icon>
-                              Agregar
-                            </app-button>
-                            <app-button
-                              variant="outline"
-                              size="sm"
-                              type="button"
+                              class="flex-1"
                               (clicked)="productsModalOpen.set(true)"
                             >
                               <app-icon
                                 slot="icon"
                                 name="package"
-                                [size]="15"
+                                [size]="16"
                               ></app-icon>
                               Agregar productos
                             </app-button>
-                          </div>
-                        </div>
-
-                        <div class="p-4 md:p-5">
-                          @if (referenceResources().length || galleryImages().length) {
-                            <div
-                              class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
+                            <app-button
+                              variant="outline"
+                              size="md"
+                              type="button"
+                              class="flex-1"
+                              (clicked)="galleryModalOpen.set(true)"
                             >
+                              <app-icon
+                                slot="icon"
+                                name="images"
+                                [size]="16"
+                              ></app-icon>
+                              Galeria de recursos
+                            </app-button>
+                          </div>
+
+                          @if (selectedResourcePreviewItems().length) {
+                            <div class="flex flex-wrap gap-2">
                               @for (
-                                resource of referenceResources();
+                                resource of selectedResourcePreviewItems();
                                 track resource.id
                               ) {
-                                <button
-                                type="button"
-                                  class="ai-resource-card group relative overflow-hidden rounded-2xl border bg-[var(--color-background)] p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
-                                  [style.border-color]="
-                                    isReferenceSelected(resource.id)
-                                      ? 'var(--color-primary)'
-                                      : 'var(--color-border)'
-                                  "
-                                  [style.box-shadow]="
-                                    isReferenceSelected(resource.id)
-                                      ? '0 12px 30px rgba(var(--color-primary-rgb), 0.14)'
-                                      : null
-                                  "
-                                  (click)="toggleReferenceResource(resource.id)"
+                                <div
+                                  class="ai-selected-chip relative flex max-w-full items-center gap-2 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-1 pr-2"
                                 >
                                   <div
-                                    class="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-background)]"
+                                    class="h-9 w-9 shrink-0 overflow-hidden rounded-md bg-[var(--color-surface-muted)]"
                                   >
                                     <img
-                                      class="h-full w-full object-contain p-3"
+                                      class="h-full w-full object-cover"
+                                      [class.object-contain]="
+                                        resource.source_type.includes('qr')
+                                      "
                                       [src]="resource.preview_url"
                                       [alt]="resource.label"
                                       (error)="hideBrokenImage($event)"
                                     />
                                   </div>
-                                  <div class="min-w-0 px-1 pt-2">
-                                    <p
-                                      class="truncate text-sm font-semibold text-[var(--color-text-primary)]"
-                                    >
-                                      {{ resource.label }}
-                                    </p>
-                                    <p
-                                      class="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]"
-                                    >
-                                      {{
-                                        resource.source_type?.includes('qr')
-                                          ? 'QR exacto'
-                                          : 'Referencia visual'
-                                      }}
-                                    </p>
-                                  </div>
-                                  @if (isReferenceSelected(resource.id)) {
-                                    <span
-                                      class="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
-                                    >
-                                      <app-icon
-                                        name="check"
-                                        [size]="14"
-                                      ></app-icon>
-                                    </span>
-                                  }
-                                </button>
-                              }
-
-                              @for (
-                                item of galleryImages();
-                                track item.image.id
-                              ) {
-                                <button
-                                  type="button"
-                                  class="ai-resource-card group relative overflow-hidden rounded-2xl border bg-[var(--color-background)] p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
-                                  [style.border-color]="
-                                    isReferenceImageSelected(item.image.id)
-                                      ? 'var(--color-primary)'
-                                      : 'var(--color-border)'
-                                  "
-                                  [style.box-shadow]="
-                                    isReferenceImageSelected(item.image.id)
-                                      ? '0 12px 30px rgba(var(--color-primary-rgb), 0.14)'
-                                      : null
-                                  "
-                                  (click)="toggleReferenceImage(item.image.id)"
-                                >
-                                  <div
-                                    class="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
+                                  <span
+                                    class="max-w-32 truncate text-xs font-medium text-[var(--color-text-primary)]"
                                   >
-                                    <img
-                                      class="h-full w-full object-cover transition duration-200 group-hover:scale-105"
-                                      [src]="item.image.image_url"
-                                      [alt]="item.product.name"
-                                      (error)="hideBrokenImage($event)"
-                                    />
-                                  </div>
-                                  <div class="min-w-0 px-1 pt-2">
-                                    <p
-                                      class="truncate text-sm font-semibold text-[var(--color-text-primary)]"
-                                    >
-                                      {{ item.product.name }}
-                                    </p>
-                                    <p
-                                      class="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]"
-                                    >
-                                      Foto de producto
-                                    </p>
-                                  </div>
-                                  @if (isReferenceImageSelected(item.image.id)) {
-                                    <span
-                                      class="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
-                                    >
-                                      <app-icon
-                                        name="check"
-                                        [size]="14"
-                                      ></app-icon>
-                                    </span>
-                                  }
-                                </button>
+                                    {{ resource.label }}
+                                  </span>
+                                </div>
                               }
                             </div>
-                          } @else {
-                            <app-empty-state
-                              size="sm"
-                              icon="images"
-                              title="Aun no hay recursos disponibles"
-                              description="Agrega productos o sube recursos para verlos aqui."
-                              [showActionButton]="false"
-                            ></app-empty-state>
                           }
 
                           @if (selectedQrCount()) {
-                            <div class="mt-4">
-                              <app-alert-banner variant="info" icon="barcode">
-                                El QR seleccionado se insertara identico en la
-                                imagen final, con buen contraste y sin tapar el
-                                diseno.
-                              </app-alert-banner>
-                            </div>
+                            <app-alert-banner variant="info" icon="barcode">
+                              El QR seleccionado se insertara identico en la
+                              imagen final, con buen contraste y sin tapar el
+                              diseno.
+                            </app-alert-banner>
                           }
                         </div>
                       </section>
@@ -845,20 +754,14 @@ interface SelectedResourcePreview {
           }
         </div>
       </div>
+    </div>
 
-      <app-product-image-source-modal
-        [isOpen]="resourceModalOpen()"
-        (isOpenChange)="resourceModalOpen.set($event)"
-        [remainingSlots]="8"
-        (imagesAdded)="addCustomResources($event)"
-      ></app-product-image-source-modal>
-
-      <app-modal
-        [(isOpen)]="productsModalOpen"
-        title="Agregar productos"
-        subtitle="Elige solo lo que debe influir en el anuncio."
-        size="lg"
-      >
+    <app-modal
+      [(isOpen)]="productsModalOpen"
+      title="Agregar productos"
+      subtitle="Elige solo lo que debe influir en el anuncio."
+      size="lg"
+    >
         <div class="space-y-5">
           <section
             class="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]"
@@ -1010,6 +913,176 @@ interface SelectedResourcePreview {
       </app-modal>
 
       <app-modal
+        [(isOpen)]="galleryModalOpen"
+        title="Galeria de recursos disponibles"
+        subtitle="Logo, QR, sliders, fotos propias y las imagenes de tus productos para guiar la pieza visual."
+        size="lg"
+      >
+        <div class="space-y-4">
+          <div class="flex items-center justify-between gap-3">
+            <span
+              class="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
+            >
+              {{
+                selectedReferenceResources().length + selectedImageIds().length
+              }}
+              seleccionados
+            </span>
+            <app-button
+              variant="outline"
+              size="sm"
+              type="button"
+              (clicked)="resourceModalOpen.set(true)"
+            >
+              <app-icon
+                slot="icon"
+                name="upload-cloud"
+                [size]="15"
+              ></app-icon>
+              Agregar
+            </app-button>
+          </div>
+
+          @if (referenceResources().length || galleryImages().length) {
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              @for (resource of referenceResources(); track resource.id) {
+                <button
+                  type="button"
+                  class="ai-resource-card group relative overflow-hidden rounded-2xl border bg-[var(--color-background)] p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
+                  [style.border-color]="
+                    isReferenceSelected(resource.id)
+                      ? 'var(--color-primary)'
+                      : 'var(--color-border)'
+                  "
+                  [style.box-shadow]="
+                    isReferenceSelected(resource.id)
+                      ? '0 12px 30px rgba(var(--color-primary-rgb), 0.14)'
+                      : null
+                  "
+                  (click)="toggleReferenceResource(resource.id)"
+                >
+                  <div
+                    class="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-background)]"
+                  >
+                    <img
+                      class="h-full w-full object-contain p-3"
+                      [src]="resource.preview_url"
+                      [alt]="resource.label"
+                      (error)="hideBrokenImage($event)"
+                    />
+                  </div>
+                  <div class="min-w-0 px-1 pt-2">
+                    <p
+                      class="truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                    >
+                      {{ resource.label }}
+                    </p>
+                    <p
+                      class="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]"
+                    >
+                      {{
+                        resource.source_type?.includes('qr')
+                          ? 'QR exacto'
+                          : 'Referencia visual'
+                      }}
+                    </p>
+                  </div>
+                  @if (isReferenceSelected(resource.id)) {
+                    <span
+                      class="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
+                    >
+                      <app-icon name="check" [size]="14"></app-icon>
+                    </span>
+                  }
+                </button>
+              }
+
+              @for (item of galleryImages(); track item.image.id) {
+                <button
+                  type="button"
+                  class="ai-resource-card group relative overflow-hidden rounded-2xl border bg-[var(--color-background)] p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
+                  [style.border-color]="
+                    isReferenceImageSelected(item.image.id)
+                      ? 'var(--color-primary)'
+                      : 'var(--color-border)'
+                  "
+                  [style.box-shadow]="
+                    isReferenceImageSelected(item.image.id)
+                      ? '0 12px 30px rgba(var(--color-primary-rgb), 0.14)'
+                      : null
+                  "
+                  (click)="toggleReferenceImage(item.image.id)"
+                >
+                  <div
+                    class="relative flex aspect-square items-center justify-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
+                  >
+                    <img
+                      class="h-full w-full object-cover transition duration-200 group-hover:scale-105"
+                      [src]="item.image.image_url"
+                      [alt]="item.product.name"
+                      (error)="hideBrokenImage($event)"
+                    />
+                  </div>
+                  <div class="min-w-0 px-1 pt-2">
+                    <p
+                      class="truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                    >
+                      {{ item.product.name }}
+                    </p>
+                    <p
+                      class="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]"
+                    >
+                      Foto de producto
+                    </p>
+                  </div>
+                  @if (isReferenceImageSelected(item.image.id)) {
+                    <span
+                      class="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
+                    >
+                      <app-icon name="check" [size]="14"></app-icon>
+                    </span>
+                  }
+                </button>
+              }
+            </div>
+          } @else {
+            <app-empty-state
+              size="sm"
+              icon="images"
+              title="Aun no hay recursos disponibles"
+              description="Agrega productos o sube recursos para verlos aqui."
+              [showActionButton]="false"
+            ></app-empty-state>
+          }
+
+          @if (selectedQrCount()) {
+            <app-alert-banner variant="info" icon="barcode">
+              El QR seleccionado se insertara identico en la imagen final, con
+              buen contraste y sin tapar el diseno.
+            </app-alert-banner>
+          }
+        </div>
+
+        <div slot="footer" class="flex justify-end">
+          <app-button
+            variant="primary"
+            size="md"
+            type="button"
+            (clicked)="galleryModalOpen.set(false)"
+          >
+            Listo
+          </app-button>
+        </div>
+      </app-modal>
+
+      <app-product-image-source-modal
+        [isOpen]="resourceModalOpen()"
+        (isOpenChange)="resourceModalOpen.set($event)"
+        [remainingSlots]="8"
+        (imagesAdded)="addCustomResources($event)"
+      ></app-product-image-source-modal>
+
+      <app-modal
         [(isOpen)]="correctionModalOpen"
         title="Regenerar con correccion"
         subtitle="Describe que debe ajustar la IA y se generara sobre el mismo anuncio."
@@ -1046,7 +1119,6 @@ interface SelectedResourcePreview {
           </app-button>
         </div>
       </app-modal>
-    </div>
   `,
   styles: [
     `
@@ -1908,6 +1980,7 @@ export class AnuncioCreateWizardPageComponent {
   );
   protected readonly generationError = signal<string | null>(null);
   protected readonly productsModalOpen = signal(false);
+  protected readonly galleryModalOpen = signal(false);
   protected readonly correctionModalOpen = signal(false);
   protected readonly correctionText = new FormControl('', {
     nonNullable: true,
