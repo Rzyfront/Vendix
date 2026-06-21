@@ -156,66 +156,13 @@ interface SelectedResourcePreview {
                       formControlName="prompt"
                       label="Idea o instrucciones"
                       placeholder="Ejemplo: quiero destacar mi tienda y que las personas escaneen el QR para ver el catalogo. Puedes escribirlo o usar Sugerir anuncio."
-                      [rows]="3"
+                      [rows]="5"
                     ></app-textarea>
 
                     @if (suggestionNotes()) {
                       <app-alert-banner variant="info" icon="sparkles">
                         {{ suggestionNotes() }}
                       </app-alert-banner>
-                    }
-
-                    @if (
-                      selectedResourcePreviewItems().length || selectedQrCount()
-                    ) {
-                      <div class="flex flex-wrap items-center gap-2">
-                        @for (
-                          resource of selectedResourcePreviewItems();
-                          track resource.id
-                        ) {
-                          <div
-                            class="ai-selected-chip relative flex max-w-full items-center gap-1.5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-1 pr-1.5"
-                          >
-                            <div
-                              class="h-7 w-7 shrink-0 overflow-hidden rounded-md bg-[var(--color-surface-muted)]"
-                            >
-                              <img
-                                class="h-full w-full object-cover"
-                                [class.object-contain]="
-                                  resource.source_type.includes('qr')
-                                "
-                                [src]="resource.preview_url"
-                                [alt]="resource.label"
-                                (error)="hideBrokenImage($event)"
-                              />
-                            </div>
-                            <span
-                              class="max-w-28 truncate text-xs font-medium text-[var(--color-text-primary)]"
-                            >
-                              {{ resource.label }}
-                            </span>
-                            <button
-                              type="button"
-                              class="ml-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-danger,#dc2626)]"
-                              aria-label="Quitar recurso"
-                              (click)="
-                                removeResourcePreview(resource);
-                                $event.stopPropagation()
-                              "
-                            >
-                              <app-icon name="x" [size]="12"></app-icon>
-                            </button>
-                          </div>
-                        }
-                        @if (selectedQrCount()) {
-                          <span
-                            class="inline-flex items-center gap-1 rounded-full bg-[var(--color-surface-muted)] px-2 py-0.5 text-xs font-medium text-[var(--color-primary)]"
-                          >
-                            <app-icon name="barcode" [size]="13"></app-icon>
-                            QR exacto
-                          </span>
-                        }
-                      </div>
                     }
 
                     @if (generationError()) {
@@ -564,6 +511,84 @@ interface SelectedResourcePreview {
                     >
                       <app-icon name="barcode" [size]="15"></app-icon>
                       QR exacto incluido
+                    </p>
+                  }
+                </div>
+
+                <div class="border-t border-[var(--color-border)] pt-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <p
+                      class="flex items-center gap-1.5 text-sm font-semibold text-[var(--color-text-primary)]"
+                    >
+                      <app-icon
+                        name="package"
+                        [size]="15"
+                        class="text-[var(--color-primary)]"
+                      ></app-icon>
+                      Productos
+                    </p>
+                    <span
+                      class="rounded-full bg-[var(--color-primary-light)] px-2 py-0.5 text-xs font-semibold text-[var(--color-primary)]"
+                    >
+                      {{ selectedProducts().length }}
+                    </span>
+                  </div>
+
+                  @if (selectedProducts().length) {
+                    <div class="mt-2 flex flex-col gap-2">
+                      @for (
+                        product of selectedProducts();
+                        track product.id
+                      ) {
+                        <div
+                          class="relative flex max-w-full items-center gap-2 overflow-hidden rounded-lg border border-[var(--color-primary)] bg-[var(--color-primary-light)] p-1 pr-1.5"
+                        >
+                          <div
+                            class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-[var(--color-surface-muted)] text-[var(--color-primary)]"
+                          >
+                            @if (productPreview(product); as productImage) {
+                              <img
+                                class="h-full w-full object-cover"
+                                [src]="productImage"
+                                [alt]="product.name"
+                                (error)="hideBrokenImage($event)"
+                              />
+                            } @else {
+                              <app-icon
+                                name="package"
+                                [size]="16"
+                              ></app-icon>
+                            }
+                          </div>
+                          <div class="flex min-w-0 flex-col">
+                            <span
+                              class="inline-flex w-fit items-center rounded-full bg-[var(--color-primary-light)] px-1.5 text-[10px] font-semibold uppercase leading-4 tracking-wide text-[var(--color-primary)]"
+                            >
+                              Producto
+                            </span>
+                            <span
+                              class="max-w-40 truncate text-xs font-medium text-[var(--color-text-primary)]"
+                            >
+                              {{ product.name }}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            class="ml-auto flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-danger,#dc2626)]"
+                            aria-label="Quitar producto"
+                            (click)="
+                              toggleProduct(product);
+                              $event.stopPropagation()
+                            "
+                          >
+                            <app-icon name="x" [size]="12"></app-icon>
+                          </button>
+                        </div>
+                      }
+                    </div>
+                  } @else {
+                    <p class="mt-2 text-xs text-[var(--color-text-secondary)]">
+                      Aún no has agregado productos.
                     </p>
                   }
                 </div>
