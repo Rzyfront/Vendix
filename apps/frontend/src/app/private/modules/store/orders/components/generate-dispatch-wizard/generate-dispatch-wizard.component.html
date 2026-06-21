@@ -4,44 +4,35 @@
   title="Generar Remisión"
   size="lg"
 >
-  <!-- Step indicator -->
-  <div slot="header-end" class="hidden sm:flex items-center gap-1.5 text-xs">
-    <span
-      class="px-2 py-0.5 rounded-full font-medium"
-      [class.bg-primary-600]="step() === 1"
-      [class.text-white]="step() === 1"
-      [class.bg-gray-100]="step() !== 1"
-      [class.text-gray-500]="step() !== 1"
-      >1 Items</span
-    >
-    <app-icon name="arrow-right" [size]="12" class="text-gray-400"></app-icon>
-    <span
-      class="px-2 py-0.5 rounded-full font-medium"
-      [class.bg-primary-600]="step() === 2"
-      [class.text-white]="step() === 2"
-      [class.bg-gray-100]="step() !== 2"
-      [class.text-gray-500]="step() !== 2"
-      >2 Datos</span
-    >
-    <app-icon name="arrow-right" [size]="12" class="text-gray-400"></app-icon>
-    <span
-      class="px-2 py-0.5 rounded-full font-medium"
-      [class.bg-primary-600]="step() === 3"
-      [class.text-white]="step() === 3"
-      [class.bg-gray-100]="step() !== 3"
-      [class.text-gray-500]="step() !== 3"
-      >3 Ruta</span
-    >
-  </div>
+  <div class="p-4 space-y-4 min-h-[400px]">
+    <!-- Step indicator (shared steps-line) -->
+    <app-steps-line
+      [steps]="stepperItems"
+      [currentStep]="step() - 1"
+      size="sm"
+    ></app-steps-line>
 
-  <div class="p-4 space-y-4">
     <!-- Order summary -->
     @if (order(); as ord) {
-      <div class="bg-gray-50 rounded-lg p-3 flex items-center gap-2">
-        <app-icon name="file-text" [size]="18" class="text-primary-600"></app-icon>
-        <span class="text-sm font-bold text-gray-800">
-          Orden #{{ ord.order_number }}
+      <div
+        class="rounded-xl border border-border bg-surface p-3 flex items-center gap-3"
+      >
+        <span
+          class="flex h-10 w-10 items-center justify-center rounded-[0.625rem] flex-shrink-0"
+          style="color: var(--color-primary); background: rgba(var(--color-primary-rgb, 126, 215, 165), 0.1); border: 1px solid rgba(var(--color-primary-rgb, 126, 215, 165), 0.18);"
+        >
+          <app-icon name="file-text" [size]="20"></app-icon>
         </span>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-bold text-text-primary truncate">
+            Orden #{{ ord.order_number }}
+          </div>
+          <div class="text-xs text-text-secondary">
+            {{ itemRows().length }}
+            {{ itemRows().length === 1 ? 'ítem' : 'ítems' }} · Total a despachar
+            {{ totalToDispatch() | currency }}
+          </div>
+        </div>
       </div>
     }
 
@@ -89,13 +80,19 @@
     <!-- ───────── STEP 2: DATOS + ESTADO DESTINO ───────── -->
     @if (step() === 2) {
       <div class="space-y-4" [formGroup]="dataForm">
-        <app-selector
-          label="Ubicación de despacho"
-          placeholder="Selecciona una bodega (opcional)"
-          [searchable]="true"
-          [options]="locationOptions()"
-          formControlName="dispatch_location_id"
-        ></app-selector>
+        <div>
+          <app-selector
+            label="Ubicación de despacho"
+            placeholder="Selecciona una bodega (opcional)"
+            [searchable]="true"
+            [options]="locationOptions()"
+            formControlName="dispatch_location_id"
+          ></app-selector>
+          <p class="flex items-center gap-1.5 text-xs text-text-secondary mt-1.5">
+            <app-icon name="info" [size]="13" class="shrink-0"></app-icon>
+            Opcional — bodega de origen del despacho.
+          </p>
+        </div>
 
         <div>
           <label class="block text-sm font-bold text-gray-700 mb-1.5">
@@ -316,6 +313,20 @@
             </div>
           </div>
         }
+
+        <!-- Route mode guidance (debajo del selector/formulario de ruta) -->
+        <div
+          class="flex items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2.5"
+        >
+          <app-icon
+            name="info"
+            [size]="15"
+            class="text-primary-600 shrink-0 mt-0.5"
+          ></app-icon>
+          <p class="text-xs text-text-secondary leading-relaxed">
+            {{ routeModeHint() }}
+          </p>
+        </div>
       </div>
     }
   </div>

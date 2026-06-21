@@ -5,8 +5,13 @@ import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin, firstValueFrom } from 'rxjs';
-import { StoreOrdersService } from '../../services/store-orders.service';
+import { switchMap } from 'rxjs/operators';
+import {
+  StoreOrdersService,
+  CreateAddressPayload,
+} from '../../services/store-orders.service';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
+import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
 import {
   DispatchMethodSelectorModalComponent,
   DispatchMethod,
@@ -86,6 +91,7 @@ interface PaymentReceiptPreview {
     TimelineComponent,
     GenerateDispatchWizardComponent,
     DispatchMethodSelectorModalComponent,
+    ShippingAddressModalComponent,
     NgClass,
   ],
   templateUrl: './order-details-page.component.html',
@@ -154,6 +160,10 @@ export class OrderDetailsPageComponent {
   showDispatchModal = signal(false);
   /** Chooser modal: "con remisión" vs "sin remisión" (single dispatch entry). */
   showDispatchSelector = signal(false);
+  /** A3-edit: modal de captura de dirección de envío en página. */
+  showShippingAddressModal = signal(false);
+  /** True mientras se persiste la dirección (POST address + PATCH order). */
+  savingShippingAddress = signal(false);
 
   // Processing state
   isProcessingAction = signal(false);
@@ -439,6 +449,35 @@ export class OrderDetailsPageComponent {
     return needsShipping && !o.shipping_method_id && !terminal;
   });
 
+  // ── Dirección de entrega obligatoria (gate de despacho) ────────
+  //
+  // A diferencia del retiro en tienda (pickup) o la entrega directa en
+  // mostrador (direct_delivery), un envío a domicilio (home_delivery) NO se
+  // puede despachar sin una dirección de entrega del cliente. Estos computed
+  // alimentan el alert visible en "Acciones" y el guard de `openDispatchSelector`.
+  readonly requiresShippingAddress = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    return (o.delivery_type || 'direct_delivery') === 'home_delivery';
+  });
+
+  readonly hasShippingAddress = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    return (
+      !!o.addresses_orders_shipping_address_idToaddresses ||
+      !!o.shipping_address_id ||
+      !!(o as { shipping_address_snapshot?: unknown }).shipping_address_snapshot
+    );
+  });
+
+  readonly blockedByMissingAddress = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    const terminal = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'].includes(o.state);
+    return this.requiresShippingAddress() && !this.hasShippingAddress() && !terminal;
+  });
+
   readonly canFastTrack = computed(() => {
     const o = this.order();
     if (!o) return false;
@@ -538,6 +577,19 @@ export class OrderDetailsPageComponent {
     const isPickup = delivery === 'pickup';
     const hasPaid = this.hasSuccessfulPayment();
     const actions: OrderActionConfig[] = [];
+
+    // Gate de dirección: para envíos a domicilio sin dirección, mostrar un
+    // alert persistente. El botón de despacho sigue visible pero su handler
+    // (openDispatchSelector) bloquea con un toast hasta que haya dirección.
+    if (this.blockedByMissingAddress()) {
+      actions.push({
+        id: 'address-info',
+        type: 'alert',
+        color: 'warning',
+        icon: 'map-pin',
+        label: 'Esta orden no tiene dirección de entrega. Agrégala antes de despachar.',
+      } as OrderActionConfig);
+    }
 
     switch (state) {
       // `draft` (POS counter orders before confirmation) behaves exactly like
@@ -1257,11 +1309,87 @@ export class OrderDetailsPageComponent {
    * straight away. This is what collapses the old two-button UX into one flow.
    */
   openDispatchSelector(): void {
+    // Gate obligatorio: un envío a domicilio sin dirección no se puede
+    // despachar. Avisar y ofrecer capturar la dirección antes de continuar.
+    if (this.blockedByMissingAddress()) {
+      this.toastService.warning(
+        'Esta orden no tiene dirección de entrega. Agrega una dirección antes de despachar.',
+      );
+      this.promptAddShippingAddress();
+      return;
+    }
     if (!this.canGenerateRemision()) {
       this.startShipWithoutNote();
       return;
     }
     this.showDispatchSelector.set(true);
+  }
+
+  /** Nombre del cliente para el subtítulo del modal de dirección. */
+  readonly shippingAddressCustomerName = computed<string>(() => {
+    const o = this.order() as
+      | {
+          customer?: { name?: string; first_name?: string; last_name?: string };
+          customer_name?: string;
+        }
+      | null;
+    if (!o) return '';
+    return (
+      o.customer?.name ||
+      o.customer_name ||
+      [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') ||
+      ''
+    );
+  });
+
+  /**
+   * Captura de dirección de entrega en página para una orden sin dirección.
+   * Abre el modal de captura; al confirmar se crea la dirección vinculada al
+   * cliente (`POST /store/addresses`) y se asigna a la orden
+   * (`PATCH /store/orders/:id { shipping_address_id }`) en
+   * {@link onShippingAddressSubmit}. Reemplaza el antiguo redireccionamiento al
+   * POS (que sigue disponible vía {@link editOrderInPos}).
+   */
+  promptAddShippingAddress(): void {
+    if (!this.order()) return;
+    this.showShippingAddressModal.set(true);
+  }
+
+  /**
+   * Persiste la dirección capturada en el modal: crea la dirección del cliente
+   * y la asigna como destino de envío de la orden, refrescando el estado con la
+   * orden ya actualizada que devuelve el PATCH.
+   */
+  onShippingAddressSubmit(payload: CreateAddressPayload): void {
+    const order = this.order();
+    if (!order || this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.ordersService
+      .createCustomerAddress(payload)
+      .pipe(
+        switchMap((address) =>
+          this.ordersService.updateOrderShippingAddress(
+            String(order.id),
+            Number(address.id),
+          ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updated: any) => {
+          const data = updated?.data ?? updated;
+          if (data) this.order.set(data);
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.toastService.success('Dirección de entrega asignada a la orden');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          const message =
+            err instanceof Error ? err.message : 'No se pudo asignar la dirección';
+          this.toastService.error(message);
+        },
+      });
   }
 
   /** Route the chooser outcome to the wizard or the plain ship flow. */
@@ -2247,6 +2375,18 @@ export class OrderDetailsPageComponent {
     );
     if (inFlight) return inFlight;
     return items[0]; // items are pre-sorted desc by the backend include
+  }
+
+  /**
+   * Restaurant Suite — KDS deep-link: navega al board del KDS abriendo el
+   * modal de ESTE ticket (`?ticket=<kitchen_ticket_id>`). Disparado al
+   * clickear el badge "Cocina: <estado>" de un plato disparado a cocina.
+   */
+  openKdsTicket(ks: { kitchen_ticket_id?: number } | null): void {
+    if (!ks?.kitchen_ticket_id) return;
+    void this.router.navigate(['/admin/restaurant-ops/kds'], {
+      queryParams: { ticket: ks.kitchen_ticket_id },
+    });
   }
 
   // ─── Plan KDS fire-flows (F3): per-plate selection ───────────

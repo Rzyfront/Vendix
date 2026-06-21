@@ -19,6 +19,8 @@ import {
   SelectorComponent,
   StoreUserSelectComponent,
   StoreUserMultiSelectComponent,
+  StepsLineComponent,
+  StepsLineItem,
   ToastService,
 } from '../../../../../../shared/components';
 import { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
@@ -73,6 +75,7 @@ type RouteMode = 'none' | 'existing' | 'new';
     SelectorComponent,
     StoreUserSelectComponent,
     StoreUserMultiSelectComponent,
+    StepsLineComponent,
     CurrencyPipe,
     VehicleFormModalComponent,
   ],
@@ -98,6 +101,13 @@ export class GenerateDispatchWizardComponent {
   // ── Wizard navigation ─────────────────────────────────────────────────
   readonly step = signal<1 | 2 | 3>(1);
   readonly submitting = signal<boolean>(false);
+
+  /** Steps for the shared app-steps-line indicator (replaces the header pills). */
+  readonly stepperItems: StepsLineItem[] = [
+    { label: 'Items' },
+    { label: 'Datos' },
+    { label: 'Ruta' },
+  ];
 
   // ── Step 1: item rows ─────────────────────────────────────────────────
   readonly itemRows = signal<DispatchItemRow[]>([]);
@@ -131,6 +141,18 @@ export class GenerateDispatchWizardComponent {
 
   // ── Step 3: route assignment ──────────────────────────────────────────
   readonly routeMode = signal<RouteMode>('none');
+
+  /** Contextual guidance describing what the selected route mode does. */
+  readonly routeModeHint = computed<string>(() => {
+    switch (this.routeMode()) {
+      case 'existing':
+        return 'Asigna esta remisión a una planilla de despacho ya creada (en borrador o despachada).';
+      case 'new':
+        return 'Crea una nueva planilla de despacho (conductor, vehículo y fecha) y asígnale esta remisión.';
+      default:
+        return 'La remisión se genera y la orden se marca como enviada, sin asignarla a ninguna ruta de despacho. Podrás asignarla a una ruta más adelante.';
+    }
+  });
 
   readonly routeForm = this.fb.group({
     // existing
