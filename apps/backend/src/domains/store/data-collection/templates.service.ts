@@ -165,8 +165,14 @@ export class TemplatesService {
   }
 
   async findAll(status?: string) {
-    const where: any = {};
-    if (status) where.status = status;
+    // Archived templates must not appear in admin list views. When the caller
+    // passes an explicit status, honour it as-is (e.g. internal "show
+    // archived" view in a future PR); when no filter is supplied, default to
+    // hiding archived rows. Mirrors the pattern used by products/brands/
+    // categories (`where: { state: { not: ARCHIVED } }`).
+    const where: any = status
+      ? { status }
+      : { status: { not: 'archived' } };
 
     return this.prisma.data_collection_templates.findMany({
       where,
