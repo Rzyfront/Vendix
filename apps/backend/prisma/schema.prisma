@@ -1139,6 +1139,8 @@ model orders {
   shipping_method_id                              Int?
   shipping_rate_id                                Int?
   internal_notes                                  String?
+  // Staff-only note (optional, set at creation only, never exposed to customer)
+  notes                                           String?                   @db.VarChar(500)
   created_at                                      DateTime?                 @default(now()) @db.Timestamp(6)
   updated_at                                      DateTime?                 @default(now()) @db.Timestamp(6)
   coupon_id                                       Int?

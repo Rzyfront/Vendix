@@ -59,6 +59,11 @@ export interface Order {
   billing_address_id?: number;
   shipping_address_id?: number;
   internal_notes?: string;
+  /**
+   * Staff-only note (optional, set at creation only).
+   * Never exposed to the customer.
+   */
+  notes?: string;
   created_at: string;
   updated_at: string;
   completed_at?: string;
