@@ -777,6 +777,12 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/dispatch-notes/:id/invoice',
       method: 'POST',
     },
+    {
+      name: 'store:dispatch_notes:print',
+      description: 'Imprimir PDF de remisión',
+      path: '/api/store/dispatch-notes/:id/pdf',
+      method: 'POST',
+    },
 
     // Planillas de Despacho (Rutas DSD)
     {
@@ -4110,6 +4116,7 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:dispatch_notes:deliver') ||
       p.name.includes('store:dispatch_notes:void') ||
       p.name.includes('store:dispatch_notes:invoice') ||
+      p.name.includes('store:dispatch_notes:print') ||
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:reviews:moderate') ||
       p.name === 'store:payroll:advances:read' ||
@@ -4163,6 +4170,7 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:dispatch_notes:create') ||
       p.name.includes('store:dispatch_notes:read') ||
       p.name.includes('store:dispatch_notes:read:one') ||
+      p.name.includes('store:dispatch_notes:print') ||
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:data_collection:submissions:read') ||
       p.name.includes('store:customers:history:read') ||
@@ -4280,6 +4288,7 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:dispatch_notes:read:one') ||
       p.name.includes('store:dispatch_notes:confirm') ||
       p.name.includes('store:dispatch_notes:deliver') ||
+      p.name.includes('store:dispatch_notes:print') ||
       // Reseñas - solo lectura
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:reviews:read:one') ||
