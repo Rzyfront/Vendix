@@ -1217,7 +1217,17 @@ export class MarketingAdCreativesService {
     const parsed = this.safeJsonParse(content);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const data = parsed as Record<string, any>;
-      return String(data.post_copy || data.copy || data.text || '').trim();
+      const post = String(data.post_copy || data.copy || data.text || '').trim();
+      // Unificamos el CTA dentro del post: la IA puede devolver el llamado a la
+      // accion como campo aparte, pero el usuario lo quiere pegado al final del
+      // post (una sola seccion, copiado junto), no como bloque separado.
+      const cta = String(
+        data.call_to_action || data.callToAction || data.cta || '',
+      ).trim();
+      if (cta && !post.includes(cta)) {
+        return post ? `${post}\n\n${cta}` : cta;
+      }
+      return post;
     }
 
     return content.trim();
