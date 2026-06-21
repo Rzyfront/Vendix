@@ -1,4 +1,4 @@
-import { Component, input, output, signal, computed, inject } from '@angular/core';
+import { Component, input, output, signal, computed, inject, DestroyRef } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -18,7 +18,7 @@ import { ReservationsService } from '../../services/reservations.service';
 import { AvailabilitySlot, Booking, CreateBookingDto } from '../../interfaces/reservation.interface';
 import { CalendarWeekViewComponent, FreeSlot } from '../calendar/calendar-week-view/calendar-week-view.component';
 import { environment } from '../../../../../../../environments/environment';
-import { debounceTime, Subject, switchMap, of } from 'rxjs';
+import { debounceTime, Subject, switchMap, of, forkJoin } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
@@ -44,6 +44,7 @@ export class ReservationFormModalComponent {
   private http = inject(HttpClient);
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   // Inputs / Outputs
   readonly isOpen = input<boolean>(false);
@@ -315,7 +316,6 @@ export class ReservationFormModalComponent {
     const date = this.selectedDate();
     if (!productId || !date) return;
 
-    this.loadingSlots.set(true);
     const providerId = this.selectedProvider()?.id;
     const variantId = this.selectedVariant()?.id;
 
@@ -324,30 +324,36 @@ export class ReservationFormModalComponent {
     // week-view gets a full grid even when the selected date is mid-week.
     const range = this.getWeekRange(date);
 
-    this.reservationsService
-      .getAvailability(productId, range.from, range.to, providerId, variantId)
+    this.loadingSlots.set(true);
+
+    // forkJoin fires once when both requests complete; `finalize` turns off the
+    // spinner reliably (success OR failure) without the brittle `setTimeout`.
+    // Both observables are scoped to the component's DestroyRef so they
+    // auto-unsubscribe if the modal closes mid-request.
+    forkJoin({
+      availability: this.reservationsService.getAvailability(
+        productId, range.from, range.to, providerId, variantId,
+      ),
+      calendar: this.reservationsService.getCalendar(range.from, range.to, productId),
+    })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loadingSlots.set(false)),
+      )
       .subscribe({
-        next: (slots) => {
-          this.availableSlots.set(slots.filter(s => s.total_available > 0));
-          this.freeSlotsByDate.set(this.groupAvailabilityByDate(slots));
+        next: ({ availability, calendar: byDate }) => {
+          this.availableSlots.set(
+            (availability ?? []).filter(s => s.total_available > 0),
+          );
+          this.freeSlotsByDate.set(this.groupAvailabilityByDate(availability ?? []));
+          this.bookingsByDate.set(byDate ?? {});
         },
         error: () => {
           this.availableSlots.set([]);
           this.freeSlotsByDate.set({});
+          this.bookingsByDate.set({});
         },
       });
-
-    this.reservationsService
-      .getCalendar(range.from, range.to, productId)
-      .pipe(takeUntilDestroyed())
-      .subscribe({
-        next: (byDate) => this.bookingsByDate.set(byDate),
-        error: () => this.bookingsByDate.set({}),
-      });
-
-    // Match the old single-date UX: show the spinner while either request is
-    // in flight. The bigger calendar UI handles its own loading affordance.
-    setTimeout(() => this.loadingSlots.set(false), 500);
   }
 
   /**
