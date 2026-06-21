@@ -1027,7 +1027,22 @@ export class MarketingAdCreativesService {
       );
     }
 
-    return postCopy.slice(0, 4000);
+    const withCta = await this.appendEcommerceCta(postCopy);
+    return withCta.slice(0, 4000);
+  }
+
+  /**
+   * Concatena un CTA fijo con el dominio ecommerce al final del post. El CTA NO
+   * lo genera la IA (el prompt tiene prohibido meter enlaces): se pega aqui de
+   * forma deterministica para garantizar el dominio correcto y evitar
+   * alucinaciones. Si la tienda no tiene dominio ecommerce activo, no anexa nada.
+   */
+  private async appendEcommerceCta(postCopy: string): Promise<string> {
+    const domain = await this.getEcommerceDomain();
+    const hostname = domain?.hostname?.trim();
+    if (!hostname) return postCopy;
+    if (postCopy.includes(hostname)) return postCopy;
+    return `${postCopy}\n\nConsigue esto y más en ${hostname}`;
   }
 
   private async buildMarketingTextVariables(
@@ -1217,17 +1232,7 @@ export class MarketingAdCreativesService {
     const parsed = this.safeJsonParse(content);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       const data = parsed as Record<string, any>;
-      const post = String(data.post_copy || data.copy || data.text || '').trim();
-      // Unificamos el CTA dentro del post: la IA puede devolver el llamado a la
-      // accion como campo aparte, pero el usuario lo quiere pegado al final del
-      // post (una sola seccion, copiado junto), no como bloque separado.
-      const cta = String(
-        data.call_to_action || data.callToAction || data.cta || '',
-      ).trim();
-      if (cta && !post.includes(cta)) {
-        return post ? `${post}\n\n${cta}` : cta;
-      }
-      return post;
+      return String(data.post_copy || data.copy || data.text || '').trim();
     }
 
     return content.trim();

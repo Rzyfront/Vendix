@@ -524,10 +524,6 @@ OTRAS REGLAS:
 
 Tienda: {{store_name}}
 Branding: {{store_branding}}
-Objetivo: {{intent}}
-Canal: {{channel}}
-CTA: {{cta}}
-Estilo visual: {{visual_style}}
 Formato: {{format_label}} ({{size}})
 Brief humano: {{brief}}
 
@@ -606,10 +602,6 @@ Responde SOLO con JSON valido.`,
 
 Tienda: {{store_name}}
 Branding: {{store_branding}}
-Objetivo: {{intent}}
-Canal: {{channel}}
-CTA: {{cta}}
-Estilo visual: {{visual_style}}
 Formato: {{format_label}} ({{size}})
 Brief humano: {{brief}}
 Prompt final de imagen: {{prompt}}
@@ -633,6 +625,7 @@ Reglas de salida:
 - Maximo 3 hashtags relevantes (cero esta bien si no encajan).
 - Sin aperturas genericas tipo "¡Descubre...!".
 - Sin SKUs, IDs ni codigos internos.
+- NO incluyas URLs, enlaces ni el dominio de la tienda: el sistema agrega el llamado a la accion final automaticamente.
 - Voz humana de copywriter senior, no de IA entusiasta.
 
 Devuelve SOLO este JSON:
