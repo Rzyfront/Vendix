@@ -24,6 +24,14 @@ export interface CartItem {
   variant_sku?: string;
   variant_attributes?: string;
   variant_display_name?: string;
+  /**
+   * Image URL of the selected variant, captured from `PosProductVariant.image_url`
+   * at add-to-cart time. Used by the POS cart templates as the primary image
+   * source before falling back to the parent product's image. Falls back to
+   * `product.image_url` when the variant has no own image (most seed variants
+   * have `image_id = null` in the DB).
+   */
+  variant_image_url?: string;
   // Weight product fields
   weight?: number;
   weight_unit?: 'kg' | 'g' | 'lb';

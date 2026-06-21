@@ -950,6 +950,10 @@ export class PosCartService {
           ?.map(a => `${a.attribute_name}: ${a.attribute_value}`).join(', '),
         variant_display_name: request.variant?.attributes
           ?.map(a => a.attribute_value).join(' / '),
+        // Capture the variant's own image so the cart renders the right
+        // thumbnail for colored/sized variants. Falls back to the product
+        // image in the template when this is undefined.
+        variant_image_url: request.variant?.image_url,
         // Weight product fields
         weight: isWeightProduct ? weight : undefined,
         weight_unit: isWeightProduct ? (request.weight_unit || 'kg') : undefined,
