@@ -189,9 +189,7 @@ interface SelectedResourcePreview {
                       [hideLabelsOnMobile]="false"
                     ></app-input-buttons>
 
-                    <div
-                      class="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_360px]"
-                    >
+                    <div class="grid items-start gap-5">
                       <section
                         class="ai-glow-panel overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm"
                       >
@@ -241,6 +239,19 @@ interface SelectedResourcePreview {
                                 [size]="15"
                               ></app-icon>
                               Agregar
+                            </app-button>
+                            <app-button
+                              variant="outline"
+                              size="sm"
+                              type="button"
+                              (clicked)="productsModalOpen.set(true)"
+                            >
+                              <app-icon
+                                slot="icon"
+                                name="package"
+                                [size]="15"
+                              ></app-icon>
+                              Agregar productos
                             </app-button>
                           </div>
                         </div>
@@ -381,57 +392,6 @@ interface SelectedResourcePreview {
                               </app-alert-banner>
                             </div>
                           }
-                        </div>
-                      </section>
-
-                      <section
-                        class="ai-glow-panel overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm"
-                      >
-                        <div
-                          class="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-5"
-                        >
-                          <div class="flex min-w-0 items-start gap-3">
-                            <span
-                              class="ai-icon-glow flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--color-primary)]"
-                            >
-                              <app-icon name="package" [size]="20"></app-icon>
-                            </span>
-                            <div class="min-w-0">
-                              <h2
-                                class="text-base font-semibold leading-6 text-[var(--color-text-primary)]"
-                              >
-                                Productos
-                              </h2>
-                              @if (selectedProductIds().length) {
-                                <p
-                                  class="mt-1 text-sm leading-5 text-[var(--color-text-secondary)]"
-                                >
-                                  {{ selectedProductIds().length }} productos
-                                  seleccionados
-                                </p>
-                              } @else {
-                                <p
-                                  class="mt-1 text-sm leading-5 text-[var(--color-text-tertiary,var(--color-text-secondary))]"
-                                >
-                                  Aun no agregaste productos.
-                                </p>
-                              }
-                            </div>
-                          </div>
-
-                          <app-button
-                            variant="outline"
-                            size="sm"
-                            type="button"
-                            (clicked)="productsModalOpen.set(true)"
-                          >
-                            <app-icon
-                              slot="icon"
-                              name="package"
-                              [size]="15"
-                            ></app-icon>
-                            Agregar productos
-                          </app-button>
                         </div>
                       </section>
                     </div>
