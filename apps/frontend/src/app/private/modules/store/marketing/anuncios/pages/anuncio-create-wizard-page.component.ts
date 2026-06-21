@@ -17,7 +17,6 @@ import {
   ButtonComponent,
   CardComponent,
   EmptyStateComponent,
-  ExpandableCardComponent,
   IconComponent,
   InputButtonOption,
   InputButtonsComponent,
@@ -85,7 +84,6 @@ interface SelectedResourcePreview {
     ButtonComponent,
     CardComponent,
     EmptyStateComponent,
-    ExpandableCardComponent,
     IconComponent,
     InputButtonsComponent,
     InputsearchComponent,
@@ -333,336 +331,78 @@ interface SelectedResourcePreview {
                         class="ai-glow-panel overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm"
                       >
                         <div
-                          class="border-b border-[var(--color-border)] px-4 py-4 md:px-5"
-                        >
-                          <div class="flex items-start justify-between gap-3">
-                            <div class="flex min-w-0 items-start gap-3">
-                              <span
-                                class="ai-icon-glow flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--color-primary)]"
-                              >
-                                <app-icon
-                                  name="package"
-                                  [size]="20"
-                                ></app-icon>
-                              </span>
-                              <div class="min-w-0">
-                                <h2
-                                  class="text-base font-semibold leading-6 text-[var(--color-text-primary)]"
-                                >
-                                  Productos y servicios
-                                </h2>
-                                <p
-                                  class="mt-1 text-sm leading-5 text-[var(--color-text-secondary)]"
-                                >
-                                  Elige solo lo que debe influir en el anuncio.
-                                </p>
-                              </div>
-                            </div>
-                            <span
-                              class="shrink-0 rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
-                            >
-                              {{ selectedProductIds().length }} elegidos
-                            </span>
-                          </div>
-
-                          <div class="mt-4">
-                            <app-inputsearch
-                              size="sm"
-                              placeholder="Buscar productos o servicios..."
-                              [debounceTime]="300"
-                              [formControl]="productSearchControl"
-                              (searchChange)="productSearch.set($event)"
-                            ></app-inputsearch>
-                          </div>
-                        </div>
-
-                        <div class="p-3 md:p-4">
-                          @if (productsLoading()) {
-                            <div
-                              class="flex min-h-36 items-center justify-center rounded-xl bg-[var(--color-surface-muted)] text-sm text-[var(--color-text-secondary)]"
-                            >
-                              <app-icon
-                                name="loader-2"
-                                [size]="18"
-                                [spin]="true"
-                              ></app-icon>
-                              <span class="ml-2">Cargando productos...</span>
-                            </div>
-                          } @else if (productsError()) {
-                            <app-empty-state
-                              size="sm"
-                              icon="triangle-alert"
-                              iconColor="error"
-                              title="No se pudieron cargar productos"
-                              [description]="productsError()!"
-                              [showActionButton]="false"
-                              [showRefreshButton]="true"
-                              (refreshClick)="loadProducts(true)"
-                            ></app-empty-state>
-                          } @else if (!filteredProducts().length) {
-                            <app-empty-state
-                              size="sm"
-                              icon="search-x"
-                              title="Sin resultados"
-                              description="Prueba con otro nombre o SKU."
-                              [showActionButton]="false"
-                            ></app-empty-state>
-                          } @else {
-                            <div class="max-h-[430px] space-y-2 overflow-y-auto pr-1">
-                              @for (
-                                product of filteredProducts();
-                                track product.id
-                              ) {
-                                <button
-                                  type="button"
-                                  class="ai-list-item group relative flex w-full items-center gap-3 overflow-hidden rounded-xl border bg-[var(--color-background)] px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
-                                  [style.border-color]="
-                                    isProductSelected(product.id)
-                                      ? 'var(--color-primary)'
-                                      : 'var(--color-border)'
-                                  "
-                                  [style.background]="
-                                    isProductSelected(product.id)
-                                      ? 'rgba(var(--color-primary-rgb), 0.07)'
-                                      : null
-                                  "
-                                  (click)="toggleProduct(product)"
-                                >
-                                  <div
-                                    class="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-[var(--color-surface-muted)]"
-                                  >
-                                    @if (productPreview(product)) {
-                                      <img
-                                        class="h-full w-full object-cover"
-                                        [src]="productPreview(product)"
-                                        [alt]="product.name"
-                                        (error)="hideBrokenImage($event)"
-                                      />
-                                    } @else {
-                                      <div
-                                        class="flex h-full w-full items-center justify-center text-[var(--color-text-secondary)]"
-                                      >
-                                        <app-icon
-                                          name="image"
-                                          [size]="17"
-                                        ></app-icon>
-                                      </div>
-                                    }
-                                  </div>
-                                  <div class="min-w-0 flex-1">
-                                    <p
-                                      class="truncate text-sm font-semibold text-[var(--color-text-primary)]"
-                                    >
-                                      {{ product.name }}
-                                    </p>
-                                    <p
-                                      class="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]"
-                                    >
-                                      {{
-                                        product.sku ||
-                                          (product.product_type === 'service'
-                                            ? 'Servicio'
-                                            : 'Producto')
-                                      }}
-                                    </p>
-                                  </div>
-
-                                  @if (isProductSelected(product.id)) {
-                                    <span
-                                      class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
-                                    >
-                                      <app-icon
-                                        name="check"
-                                        [size]="14"
-                                      ></app-icon>
-                                    </span>
-                                  }
-                                </button>
-                              }
-                            </div>
-                          }
-                        </div>
-                      </section>
-
-                      <section
-                        class="ai-glow-panel overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm xl:col-span-2"
-                      >
-                        <div
-                          class="flex flex-col gap-3 border-b border-[var(--color-border)] px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-5"
+                          class="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-5"
                         >
                           <div class="flex min-w-0 items-start gap-3">
                             <span
                               class="ai-icon-glow flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--color-primary)]"
                             >
-                              <app-icon name="image" [size]="20"></app-icon>
+                              <app-icon name="package" [size]="20"></app-icon>
                             </span>
                             <div class="min-w-0">
-                              <h3
+                              <h2
                                 class="text-base font-semibold leading-6 text-[var(--color-text-primary)]"
                               >
-                                Galeria de productos seleccionados
-                              </h3>
-                              <p
-                                class="mt-1 text-sm leading-5 text-[var(--color-text-secondary)]"
-                              >
-                                Fotos disponibles de los productos y servicios
-                                elegidos.
-                              </p>
-                            </div>
-                          </div>
-                          <div class="flex shrink-0 gap-2">
-                            <span
-                              class="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
-                            >
-                              {{ selectedImageIds().length }} elegidas
-                            </span>
-                            <span
-                              class="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
-                            >
-                              {{ galleryImages().length }} disponibles
-                            </span>
-                          </div>
-                        </div>
-
-                        <div class="p-4 md:p-5">
-                          @if (!selectedProductIds().length) {
-                            <app-empty-state
-                              size="sm"
-                              icon="package"
-                              title="Selecciona un producto o servicio"
-                              description="Sus imagenes apareceran aqui."
-                              [showActionButton]="false"
-                            ></app-empty-state>
-                          } @else if (!galleryImages().length) {
-                            <app-empty-state
-                              size="sm"
-                              icon="image-off"
-                              title="Sin imagenes"
-                              description="Los productos seleccionados no tienen imagenes disponibles."
-                              [showActionButton]="false"
-                            ></app-empty-state>
-                          } @else {
-                            <div
-                              class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6"
-                            >
-                              @for (
-                                item of galleryImages();
-                                track item.image.id
+                                Productos
+                              </h2>
+                              @if (
+                                selectedProductIds().length ||
+                                selectedImageIds().length
                               ) {
-                                <button
-                                  type="button"
-                                  class="ai-resource-card group relative overflow-hidden rounded-2xl border bg-[var(--color-background)] p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
-                                  [style.border-color]="
-                                    isReferenceImageSelected(item.image.id)
-                                      ? 'var(--color-primary)'
-                                      : 'var(--color-border)'
-                                  "
-                                  [style.box-shadow]="
-                                    isReferenceImageSelected(item.image.id)
-                                      ? '0 12px 30px rgba(var(--color-primary-rgb), 0.14)'
-                                      : null
-                                  "
-                                  (click)="toggleReferenceImage(item.image.id)"
+                                <p
+                                  class="mt-1 text-sm leading-5 text-[var(--color-text-secondary)]"
                                 >
-                                  <div
-                                    class="aspect-square overflow-hidden rounded-xl bg-[var(--color-surface-muted)]"
-                                  >
-                                    <img
-                                      class="h-full w-full object-cover transition duration-200 group-hover:scale-105"
-                                      [src]="item.image.image_url"
-                                      [alt]="item.product.name"
-                                      (error)="hideBrokenImage($event)"
-                                    />
-                                  </div>
-                                  <p
-                                    class="mt-2 truncate px-1 text-xs font-medium text-[var(--color-text-primary)]"
-                                  >
-                                    {{ item.product.name }}
-                                  </p>
-                                  @if (
-                                    isReferenceImageSelected(item.image.id)
-                                  ) {
-                                    <span
-                                      class="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
-                                    >
-                                      <app-icon
-                                        name="check"
-                                        [size]="14"
-                                      ></app-icon>
-                                    </span>
-                                  }
-                                </button>
+                                  {{ selectedProductIds().length }} productos ·
+                                  {{ selectedImageIds().length }} imagenes
+                                </p>
+                              } @else {
+                                <p
+                                  class="mt-1 text-sm leading-5 text-[var(--color-text-tertiary,var(--color-text-secondary))]"
+                                >
+                                  Aun no agregaste productos.
+                                </p>
                               }
                             </div>
-                          }
+                          </div>
+
+                          <app-button
+                            variant="outline"
+                            size="sm"
+                            type="button"
+                            (clicked)="productsModalOpen.set(true)"
+                          >
+                            <app-icon
+                              slot="icon"
+                              name="package"
+                              [size]="15"
+                            ></app-icon>
+                            Agregar productos
+                          </app-button>
                         </div>
+
+                        @if (selectedGalleryResourcePreviews().length) {
+                          <div
+                            class="flex flex-wrap gap-2 border-t border-[var(--color-border)] px-4 py-3 md:px-5"
+                          >
+                            @for (
+                              preview of selectedGalleryResourcePreviews();
+                              track preview.id
+                            ) {
+                              <div
+                                class="h-12 w-12 shrink-0 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)]"
+                              >
+                                <img
+                                  class="h-full w-full object-cover"
+                                  [src]="preview.preview_url"
+                                  [alt]="preview.label"
+                                  (error)="hideBrokenImage($event)"
+                                />
+                              </div>
+                            }
+                          </div>
+                        }
                       </section>
                     </div>
-
-                    <app-expandable-card [(expanded)]="advancedExpanded">
-                      <div slot="header" class="flex items-center gap-2">
-                        <app-icon
-                          name="sliders-horizontal"
-                          [size]="16"
-                          class="text-[var(--color-primary)]"
-                        ></app-icon>
-                        <span
-                          class="text-sm font-semibold text-[var(--color-text-primary)]"
-                        >
-                          Opciones avanzadas
-                        </span>
-                      </div>
-
-                      <div class="space-y-5 p-4 md:p-5">
-                        <app-input-buttons
-                          class="min-w-0"
-                          formControlName="intent"
-                          label="Objetivo"
-                          [options]="intentOptions"
-                          [hideLabelsOnMobile]="false"
-                          [equalWidth]="false"
-                          customWrapperClass="ai-choice-buttons"
-                          customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
-                        ></app-input-buttons>
-
-                        <app-input-buttons
-                          class="min-w-0"
-                          formControlName="channel"
-                          label="Canal"
-                          [options]="channelOptions"
-                          [hideLabelsOnMobile]="false"
-                          [equalWidth]="false"
-                          customWrapperClass="ai-choice-buttons"
-                          customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
-                        ></app-input-buttons>
-
-                        <div
-                          class="grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
-                        >
-                          <app-input-buttons
-                            class="min-w-0"
-                            formControlName="visual_style"
-                            label="Estilo"
-                            [options]="styleOptions"
-                            [hideLabelsOnMobile]="false"
-                            [equalWidth]="false"
-                            customWrapperClass="ai-choice-buttons"
-                            customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
-                          ></app-input-buttons>
-
-                          <app-input-buttons
-                            class="min-w-0"
-                            formControlName="cta"
-                            label="Accion"
-                            [options]="ctaOptions"
-                            [hideLabelsOnMobile]="false"
-                            [equalWidth]="false"
-                            customWrapperClass="ai-choice-buttons"
-                            customContainerClass="ai-choice-buttons__container flex-wrap h-auto"
-                          ></app-input-buttons>
-                        </div>
-                      </div>
-                    </app-expandable-card>
 
                     @if (generationError()) {
                       <app-alert-banner variant="danger" icon="triangle-alert">
@@ -1120,6 +860,260 @@ interface SelectedResourcePreview {
         [remainingSlots]="8"
         (imagesAdded)="addCustomResources($event)"
       ></app-product-image-source-modal>
+
+      <app-modal
+        [(isOpen)]="productsModalOpen"
+        title="Agregar productos"
+        subtitle="Elige solo lo que debe influir en el anuncio."
+        size="lg"
+      >
+        <div class="space-y-5">
+          <section
+            class="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]"
+          >
+            <div
+              class="border-b border-[var(--color-border)] px-4 py-4 md:px-5"
+            >
+              <div class="flex items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <h3
+                    class="text-base font-semibold leading-6 text-[var(--color-text-primary)]"
+                  >
+                    Productos y servicios
+                  </h3>
+                  <p
+                    class="mt-1 text-sm leading-5 text-[var(--color-text-secondary)]"
+                  >
+                    Elige solo lo que debe influir en el anuncio.
+                  </p>
+                </div>
+                <span
+                  class="shrink-0 rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
+                >
+                  {{ selectedProductIds().length }} elegidos
+                </span>
+              </div>
+
+              <div class="mt-4">
+                <app-inputsearch
+                  size="sm"
+                  placeholder="Buscar productos o servicios..."
+                  [debounceTime]="300"
+                  [formControl]="productSearchControl"
+                  (searchChange)="productSearch.set($event)"
+                ></app-inputsearch>
+              </div>
+            </div>
+
+            <div class="p-3 md:p-4">
+              @if (productsLoading()) {
+                <div
+                  class="flex min-h-36 items-center justify-center rounded-xl bg-[var(--color-surface-muted)] text-sm text-[var(--color-text-secondary)]"
+                >
+                  <app-icon
+                    name="loader-2"
+                    [size]="18"
+                    [spin]="true"
+                  ></app-icon>
+                  <span class="ml-2">Cargando productos...</span>
+                </div>
+              } @else if (productsError()) {
+                <app-empty-state
+                  size="sm"
+                  icon="triangle-alert"
+                  iconColor="error"
+                  title="No se pudieron cargar productos"
+                  [description]="productsError()!"
+                  [showActionButton]="false"
+                  [showRefreshButton]="true"
+                  (refreshClick)="loadProducts(true)"
+                ></app-empty-state>
+              } @else if (!filteredProducts().length) {
+                <app-empty-state
+                  size="sm"
+                  icon="search-x"
+                  title="Sin resultados"
+                  description="Prueba con otro nombre o SKU."
+                  [showActionButton]="false"
+                ></app-empty-state>
+              } @else {
+                <div class="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                  @for (product of filteredProducts(); track product.id) {
+                    <button
+                      type="button"
+                      class="ai-list-item group relative flex w-full items-center gap-3 overflow-hidden rounded-xl border bg-[var(--color-background)] px-3 py-2.5 text-left transition hover:-translate-y-0.5 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
+                      [style.border-color]="
+                        isProductSelected(product.id)
+                          ? 'var(--color-primary)'
+                          : 'var(--color-border)'
+                      "
+                      [style.background]="
+                        isProductSelected(product.id)
+                          ? 'rgba(var(--color-primary-rgb), 0.07)'
+                          : null
+                      "
+                      (click)="toggleProduct(product)"
+                    >
+                      <div
+                        class="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-[var(--color-surface-muted)]"
+                      >
+                        @if (productPreview(product)) {
+                          <img
+                            class="h-full w-full object-cover"
+                            [src]="productPreview(product)"
+                            [alt]="product.name"
+                            (error)="hideBrokenImage($event)"
+                          />
+                        } @else {
+                          <div
+                            class="flex h-full w-full items-center justify-center text-[var(--color-text-secondary)]"
+                          >
+                            <app-icon name="image" [size]="17"></app-icon>
+                          </div>
+                        }
+                      </div>
+                      <div class="min-w-0 flex-1">
+                        <p
+                          class="truncate text-sm font-semibold text-[var(--color-text-primary)]"
+                        >
+                          {{ product.name }}
+                        </p>
+                        <p
+                          class="mt-0.5 truncate text-xs text-[var(--color-text-secondary)]"
+                        >
+                          {{
+                            product.sku ||
+                              (product.product_type === 'service'
+                                ? 'Servicio'
+                                : 'Producto')
+                          }}
+                        </p>
+                      </div>
+
+                      @if (isProductSelected(product.id)) {
+                        <span
+                          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
+                        >
+                          <app-icon name="check" [size]="14"></app-icon>
+                        </span>
+                      }
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+          </section>
+
+          <section
+            class="overflow-hidden rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)]"
+          >
+            <div
+              class="flex flex-col gap-3 border-b border-[var(--color-border)] px-4 py-4 sm:flex-row sm:items-start sm:justify-between md:px-5"
+            >
+              <div class="min-w-0">
+                <h3
+                  class="text-base font-semibold leading-6 text-[var(--color-text-primary)]"
+                >
+                  Galeria de productos seleccionados
+                </h3>
+                <p
+                  class="mt-1 text-sm leading-5 text-[var(--color-text-secondary)]"
+                >
+                  Fotos disponibles de los productos y servicios elegidos.
+                </p>
+              </div>
+              <div class="flex shrink-0 gap-2">
+                <span
+                  class="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
+                >
+                  {{ selectedImageIds().length }} elegidas
+                </span>
+                <span
+                  class="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs font-semibold text-[var(--color-text-secondary)]"
+                >
+                  {{ galleryImages().length }} disponibles
+                </span>
+              </div>
+            </div>
+
+            <div class="p-4 md:p-5">
+              @if (!selectedProductIds().length) {
+                <app-empty-state
+                  size="sm"
+                  icon="package"
+                  title="Selecciona un producto o servicio"
+                  description="Sus imagenes apareceran aqui."
+                  [showActionButton]="false"
+                ></app-empty-state>
+              } @else if (!galleryImages().length) {
+                <app-empty-state
+                  size="sm"
+                  icon="image-off"
+                  title="Sin imagenes"
+                  description="Los productos seleccionados no tienen imagenes disponibles."
+                  [showActionButton]="false"
+                ></app-empty-state>
+              } @else {
+                <div
+                  class="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4"
+                >
+                  @for (item of galleryImages(); track item.image.id) {
+                    <button
+                      type="button"
+                      class="ai-resource-card group relative overflow-hidden rounded-2xl border bg-[var(--color-background)] p-2 text-left transition hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/35"
+                      [style.border-color]="
+                        isReferenceImageSelected(item.image.id)
+                          ? 'var(--color-primary)'
+                          : 'var(--color-border)'
+                      "
+                      [style.box-shadow]="
+                        isReferenceImageSelected(item.image.id)
+                          ? '0 12px 30px rgba(var(--color-primary-rgb), 0.14)'
+                          : null
+                      "
+                      (click)="toggleReferenceImage(item.image.id)"
+                    >
+                      <div
+                        class="aspect-square overflow-hidden rounded-xl bg-[var(--color-surface-muted)]"
+                      >
+                        <img
+                          class="h-full w-full object-cover transition duration-200 group-hover:scale-105"
+                          [src]="item.image.image_url"
+                          [alt]="item.product.name"
+                          (error)="hideBrokenImage($event)"
+                        />
+                      </div>
+                      <p
+                        class="mt-2 truncate px-1 text-xs font-medium text-[var(--color-text-primary)]"
+                      >
+                        {{ item.product.name }}
+                      </p>
+                      @if (isReferenceImageSelected(item.image.id)) {
+                        <span
+                          class="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--color-primary)] text-white shadow-sm"
+                        >
+                          <app-icon name="check" [size]="14"></app-icon>
+                        </span>
+                      }
+                    </button>
+                  }
+                </div>
+              }
+            </div>
+          </section>
+        </div>
+
+        <div slot="footer" class="flex justify-end">
+          <app-button
+            variant="primary"
+            size="md"
+            type="button"
+            (clicked)="productsModalOpen.set(false)"
+          >
+            Listo
+          </app-button>
+        </div>
+      </app-modal>
 
       <app-modal
         [(isOpen)]="correctionModalOpen"
@@ -2019,7 +2013,7 @@ export class AnuncioCreateWizardPageComponent {
     null,
   );
   protected readonly generationError = signal<string | null>(null);
-  protected readonly advancedExpanded = signal(false);
+  protected readonly productsModalOpen = signal(false);
   protected readonly correctionModalOpen = signal(false);
   protected readonly correctionText = new FormControl('', {
     nonNullable: true,
@@ -2034,24 +2028,6 @@ export class AnuncioCreateWizardPageComponent {
     { value: 'contact', label: 'Contacto', icon: 'message-square' },
     { value: 'promotion', label: 'Promocion', icon: 'tag' },
     { value: 'qr', label: 'QR', icon: 'barcode' },
-  ];
-  protected readonly channelOptions: InputButtonOption[] = [
-    { value: 'instagram_story', label: 'Historia', icon: 'smartphone' },
-    { value: 'instagram_feed', label: 'Feed', icon: 'instagram' },
-    { value: 'whatsapp', label: 'WhatsApp', icon: 'message-circle' },
-    { value: 'ecommerce_banner', label: 'Banner', icon: 'monitor' },
-  ];
-  protected readonly styleOptions: InputButtonOption[] = [
-    { value: 'profesional', label: 'Profesional', icon: 'briefcase' },
-    { value: 'moderno', label: 'Moderno', icon: 'sparkles' },
-    { value: 'minimalista', label: 'Minimalista', icon: 'layout' },
-    { value: 'colorido', label: 'Colorido', icon: 'palette' },
-  ];
-  protected readonly ctaOptions: InputButtonOption[] = [
-    { value: 'comprar', label: 'Comprar', icon: 'shopping-bag' },
-    { value: 'contactar', label: 'Contactar', icon: 'send' },
-    { value: 'visitar_tienda', label: 'Visitar tienda', icon: 'store' },
-    { value: 'escanear_qr', label: 'Escanear QR', icon: 'barcode' },
   ];
   protected readonly formatOptions: InputButtonOption[] = [
     { value: 'square', label: '1:1 Feed', icon: 'layout-grid' },
