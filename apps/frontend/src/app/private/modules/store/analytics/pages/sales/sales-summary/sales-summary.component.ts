@@ -27,6 +27,7 @@ import * as SalesSelectors from '../state/sales-summary.selectors';
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../../shared/utils/date-range-params.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../../shared/utils/chart-labels.util';
 import { AnalyticsCardComponent } from '../../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-registry';
 
@@ -174,7 +175,7 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
+          formatter: (value: number) => this.currencyService.formatChartAxis(value) },
         splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {

@@ -188,7 +188,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {

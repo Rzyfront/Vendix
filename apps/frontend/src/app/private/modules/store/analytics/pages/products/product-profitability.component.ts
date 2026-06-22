@@ -26,7 +26,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
-import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-product-profitability',
@@ -199,7 +199,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [{
