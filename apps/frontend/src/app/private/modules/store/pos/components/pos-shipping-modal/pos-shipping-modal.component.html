@@ -347,7 +347,7 @@
       }
     </section>
 
-    <!-- SECTION 3: Customer (Required) -->
+    <!-- SECTION 3: Customer + Shipping (drill-in) -->
     <section class="payment-section"
       #customerSection
       style="position: relative;"
@@ -364,265 +364,253 @@
         <h2 class="section-title">Cliente (obligatorio)</h2>
       </div>
 
-      <!-- Selected Customer Display -->
-      @if (cartState()?.customer) {
-        <div class="selected-customer">
-          <div class="customer-avatar">
-            <app-icon name="user-check" [size]="16"></app-icon>
-          </div>
-          <div class="customer-info">
-            <span class="customer-name">{{ customerDisplayName }}</span>
-            <span class="customer-email">{{ cartState()?.customer?.email }}</span>
-          </div>
-          <button type="button" class="change-customer-btn" (click)="openCustomerSelector()">
-            <app-icon name="edit-2" [size]="14"></app-icon>
+      <!-- Shared customer selector (inline panel, drill-in) -->
+      <app-pos-customer-selector
+        [selectedCustomer]="cartState()?.customer ?? null"
+        [allowAnonymous]="false"
+        (customerSelected)="selectCustomer($event)"
+        (customerCleared)="clearCustomer()"
+      ></app-pos-customer-selector>
+
+      <!-- ===== Shipping drill-in views ===== -->
+      @switch (shippingView()) {
+        <!-- OVERVIEW: tappable summary rows + cost + notes (total always visible) -->
+        @case ('overview') {
+          <!-- Método de envío row -->
+          <button
+            type="button"
+            class="drill-row"
+            #shippingMethodSection
+            (click)="goToMethod()"
+            [class.config-flash-warning]="validationWarningSection === 'shipping-method'"
+            style="position: relative;">
+            <app-tooltip
+              position="top"
+              color="warning"
+              size="sm"
+              [visible]="validationWarningSection === 'shipping-method'"
+              style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
+            >{{ validationWarningMessage }}</app-tooltip>
+            <div class="drill-row-icon">
+              <app-icon name="package" [size]="18"></app-icon>
+            </div>
+            <div class="drill-row-info">
+              <span class="drill-row-label">Método de envío</span>
+              <span class="drill-row-value">{{ selectedShippingMethod()?.name || 'Seleccionar' }}</span>
+            </div>
+            <app-icon name="chevron-right" [size]="18" class="drill-row-chevron"></app-icon>
           </button>
-        </div>
-      }
 
-      <!-- Select Customer Button -->
-      @if (!cartState()?.customer && !showCustomerSelector) {
-        <button
-          type="button"
-          class="select-customer-btn"
-          (click)="openCustomerSelector()"
-          >
-          <app-icon name="user-plus" [size]="18"></app-icon>
-          <span>Seleccionar Cliente</span>
-        </button>
-      }
-
-      <!-- Customer Selector Panel -->
-      @if (showCustomerSelector) {
-        <div class="customer-selector">
-          <div class="selector-header">
-            <span>Buscar Cliente</span>
-            <button type="button" (click)="closeCustomerSelector()">
-              <app-icon name="x" [size]="16"></app-icon>
+          <!-- Dirección row (only for non-pickup) -->
+          @if (selectedShippingMethod() && selectedShippingMethod()!.type !== 'pickup') {
+            <button
+              type="button"
+              class="drill-row"
+              #addressSection
+              (click)="goToAddress()"
+              [class.config-flash-warning]="validationWarningSection === 'address'"
+              style="position: relative;">
+              <app-tooltip
+                position="top"
+                color="warning"
+                size="sm"
+                [visible]="validationWarningSection === 'address'"
+                style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
+              >{{ validationWarningMessage }}</app-tooltip>
+              <div class="drill-row-icon">
+                <app-icon name="map-pin" [size]="18"></app-icon>
+              </div>
+              <div class="drill-row-info">
+                <span class="drill-row-label">Dirección</span>
+                <span class="drill-row-value">{{ addressLine1Control.value || 'Agregar dirección' }}{{ cityControl.value ? ', ' + cityControl.value : '' }}</span>
+              </div>
+              <app-icon name="chevron-right" [size]="18" class="drill-row-chevron"></app-icon>
             </button>
-          </div>
-          <app-input
-            [placeholder]="'Buscar por nombre, email o documento...'"
-            [size]="'sm'"
-            (inputChange)="onCustomerSearch($event)"
-          ></app-input>
-          <!-- Search Results -->
-          @if (!showCreateCustomerForm && customerSearchResults.length > 0) {
-            <div class="search-results">
-              @for (customer of customerSearchResults; track customer) {
-                <button
-                  type="button"
-                  class="customer-result"
-                  (click)="selectCustomer(customer)"
-                  >
-                  <span class="result-name">{{ customer.first_name }} {{ customer.last_name }}</span>
-                  <span class="result-email">{{ customer.email }}</span>
-                  @if (customer.addresses?.length) {
-                    <span style="font-size: 10px; color: var(--color-success); margin-top: 2px; display: flex; align-items: center; gap: 4px;">
-                      <app-icon name="map-pin" [size]="10"></app-icon>
-                      {{ customer.addresses![0].city }}
-                    </span>
+          }
+
+          <!-- Shipping Cost (stays visible in overview) -->
+          @if (selectedShippingMethod()) {
+            <div class="shipping-cost-section">
+              <div class="section-header">
+                <app-icon name="calculator" [size]="16" class="section-icon"></app-icon>
+                <h2 class="section-title">Costo de envío</h2>
+              </div>
+              @if (isCalculatingShipping()) {
+                <div class="calculating-indicator">
+                  <span class="spinner-sm"></span>
+                  <span>Calculando...</span>
+                </div>
+              }
+              @if (!isCalculatingShipping()) {
+                <div class="cost-display">
+                  @if (!manualCostOverride() && calculatedShippingCost() !== null) {
+                    <div class="calculated-cost">
+                      <span class="cost-label">Calculado:</span>
+                      <span class="cost-value">{{ calculatedShippingCost() | currency }}</span>
+                    </div>
                   }
-                </button>
+                  @if (calculatedShippingCost() !== null) {
+                    <div class="manual-toggle">
+                      <label class="toggle-label">
+                        <input
+                          type="checkbox"
+                          [checked]="manualCostOverride()"
+                          (change)="toggleManualCost()"
+                          />
+                        <span>Editar costo manualmente</span>
+                      </label>
+                    </div>
+                  }
+                  @if (manualCostOverride() || calculatedShippingCost() === null) {
+                    <div class="manual-cost-input">
+                      <div class="cash-input">
+                        <span class="currency">{{ currencySymbol() }}</span>
+                        <input
+                          appCurrencyInput
+                          [ngModel]="shippingCost()"
+                          (ngModelChange)="shippingCost.set($event); onShippingCostChange()"
+                          placeholder="0.00"
+                          />
+                      </div>
+                    </div>
+                  }
+                </div>
               }
             </div>
           }
-          <!-- Create Customer Button -->
-          @if (!showCreateCustomerForm) {
-            <div class="create-customer-action">
-              <button type="button" class="create-customer-btn" (click)="showCreateCustomerForm = true">
-                <app-icon name="user-plus" [size]="16"></app-icon>
-                <span>Crear nuevo cliente</span>
-              </button>
+
+          <!-- Delivery Notes (stays visible in overview) -->
+          @if (selectedShippingMethod()) {
+            <div class="delivery-notes">
+              <app-input
+                [formControl]="deliveryNotesControl"
+                [label]="'Notas de envío'"
+                [placeholder]="'Instrucciones especiales de entrega...'"
+                [size]="'sm'"
+              ></app-input>
             </div>
           }
-          <!-- Create Customer Form -->
-          @if (showCreateCustomerForm) {
-            <div class="create-customer-form">
-              <h5>Nuevo Cliente</h5>
-              <app-input [formControl]="customerEmailControl" [label]="'Email'" [placeholder]="'correo@ejemplo.com'" [size]="'sm'"></app-input>
-              <div class="form-row">
-                <app-input [formControl]="customerFirstNameControl" [label]="'Nombre'" [placeholder]="'Juan'" [size]="'sm'"></app-input>
-                <app-input [formControl]="customerLastNameControl" [label]="'Apellido'" [placeholder]="'Pérez'" [size]="'sm'"></app-input>
-              </div>
-              <app-input [formControl]="customerPhoneControl" [label]="'Teléfono'" [placeholder]="'+1 234 5678'" [size]="'sm'"></app-input>
-              <div class="form-actions">
-                <button type="button" class="btn-create" (click)="onCreateCustomer()">Crear</button>
-                <button type="button" class="btn-cancel" (click)="showCreateCustomerForm = false">Cancelar</button>
-              </div>
-            </div>
-          }
-        </div>
-      }
+        }
 
-      <!-- Método de envío -->
-      <div #shippingMethodSection
-        style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-border); position: relative; border-radius: 12px;"
-        [class.config-flash-warning]="validationWarningSection === 'shipping-method'">
-        <app-tooltip
-          position="top"
-          color="warning"
-          size="sm"
-          [visible]="validationWarningSection === 'shipping-method'"
-          style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
-        >{{ validationWarningMessage }}</app-tooltip>
-
-        <div class="section-header">
-          <app-icon name="package" [size]="16" class="section-icon"></app-icon>
-          <h2 class="section-title">Método de envío</h2>
-        </div>
-
-        @if (shippingMethods().length > 0) {
-          <div class="payment-methods-grid">
-            @for (method of shippingMethods(); track method.id) {
-              <button
-                type="button"
-                (click)="selectShippingMethod(method)"
-                class="payment-method-btn"
-                [class.selected]="selectedShippingMethod()?.id === method.id"
-                >
-                <app-icon [name]="getShippingIcon(method.type)" [size]="24"></app-icon>
-                <span class="method-name">{{ method.name }}</span>
+        <!-- METHOD: back button + methods grid -->
+        @case ('method') {
+          <div class="drill-view"
+            #shippingMethodSection
+            style="position: relative;"
+            [class.config-flash-warning]="validationWarningSection === 'shipping-method'">
+            <app-tooltip
+              position="top"
+              color="warning"
+              size="sm"
+              [visible]="validationWarningSection === 'shipping-method'"
+              style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
+            >{{ validationWarningMessage }}</app-tooltip>
+            <div class="drill-header">
+              <button type="button" class="drill-back-btn" (click)="backToShippingOverview()">
+                <app-icon name="arrow-left" [size]="16"></app-icon>
+                <span>Volver</span>
               </button>
+              <h2 class="section-title" style="margin: 0;">Método de envío</h2>
+            </div>
+
+            @if (shippingMethods().length > 0) {
+              <div class="payment-methods-grid">
+                @for (method of shippingMethods(); track method.id) {
+                  <button
+                    type="button"
+                    (click)="selectShippingMethod(method)"
+                    class="payment-method-btn"
+                    [class.selected]="selectedShippingMethod()?.id === method.id"
+                    >
+                    <app-icon [name]="getShippingIcon(method.type)" [size]="24"></app-icon>
+                    <span class="method-name">{{ method.name }}</span>
+                  </button>
+                }
+              </div>
+            } @else {
+              <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; background: rgba(var(--color-error-rgb, 220, 38, 38), 0.08); border: 1px solid rgba(var(--color-error-rgb, 220, 38, 38), 0.25); border-radius: 10px;">
+                <app-icon name="alert-triangle" [size]="18" style="color: var(--color-error); flex-shrink: 0; margin-top: 1px;"></app-icon>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-size: 13px; font-weight: 600; color: var(--color-error);">No hay métodos de envío configurados</span>
+                  <span style="font-size: 12px; color: var(--color-text-secondary);">Debes configurar al menos un método de envío para crear órdenes con envío.</span>
+                  <button type="button" (click)="navigateToShippingSettings()" style="background: none; border: none; padding: 0; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--color-primary); cursor: pointer; text-align: left; text-decoration: underline;">
+                    Ir a configuración de envíos
+                  </button>
+                </div>
+              </div>
             }
           </div>
-        } @else {
-          <div style="display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; background: rgba(var(--color-error-rgb, 220, 38, 38), 0.08); border: 1px solid rgba(var(--color-error-rgb, 220, 38, 38), 0.25); border-radius: 10px;">
-            <app-icon name="alert-triangle" [size]="18" style="color: var(--color-error); flex-shrink: 0; margin-top: 1px;"></app-icon>
-            <div style="display: flex; flex-direction: column; gap: 4px;">
-              <span style="font-size: 13px; font-weight: 600; color: var(--color-error);">No hay métodos de envío configurados</span>
-              <span style="font-size: 12px; color: var(--color-text-secondary);">Debes configurar al menos un método de envío para crear órdenes con envío.</span>
-              <button type="button" (click)="navigateToShippingSettings()" style="background: none; border: none; padding: 0; margin-top: 2px; font-size: 12px; font-weight: 600; color: var(--color-primary); cursor: pointer; text-align: left; text-decoration: underline;">
-                Ir a configuración de envíos
+        }
+
+        <!-- ADDRESS: back button + address form -->
+        @case ('address') {
+          <div class="drill-view"
+            #addressSection
+            style="position: relative;"
+            [class.config-flash-warning]="validationWarningSection === 'address'">
+            <app-tooltip
+              position="top"
+              color="warning"
+              size="sm"
+              [visible]="validationWarningSection === 'address'"
+              style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
+            >{{ validationWarningMessage }}</app-tooltip>
+            <div class="drill-header">
+              <button type="button" class="drill-back-btn" (click)="backToShippingOverview()">
+                <app-icon name="arrow-left" [size]="16"></app-icon>
+                <span>Volver</span>
+              </button>
+              <h2 class="section-title" style="margin: 0;">Dirección de envío</h2>
+            </div>
+            <!-- Auto-fill badge -->
+            @if (selectedCustomerAddressId()) {
+              <div style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(var(--color-success-rgb), 0.1); border: 1px solid rgba(var(--color-success-rgb), 0.3); border-radius: 8px; margin-bottom: 8px;">
+                <app-icon name="map-pin" [size]="14" style="color: var(--color-success);"></app-icon>
+                <span style="font-size: 12px; font-weight: 500; color: var(--color-success);">Dirección del cliente (editable)</span>
+              </div>
+            }
+            <!-- New address hint -->
+            @if (!selectedCustomerAddressId() && cartState()?.customer) {
+              <div style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(var(--color-primary-rgb), 0.05); border: 1px solid rgba(var(--color-primary-rgb), 0.2); border-radius: 8px; margin-bottom: 8px;">
+                <app-icon name="plus-circle" [size]="14" style="color: var(--color-primary);"></app-icon>
+                <span style="font-size: 12px; font-weight: 500; color: var(--color-text-secondary);">Nueva dirección (se guardará al cliente)</span>
+              </div>
+            }
+            <app-input
+              [formControl]="addressLine1Control"
+              [label]="'Dirección *'"
+              [placeholder]="'Calle, número, barrio...'"
+              [size]="'sm'"
+            ></app-input>
+            <div class="form-row">
+              <app-selector
+                label="Departamento"
+                placeholder="Seleccionar..."
+                [options]="departmentOptions()"
+                [required]="true"
+                [size]="'sm'"
+                [ngModel]="selectedDepartmentId()"
+                (valueChange)="onDepartmentChange(+($event || 0))"
+              ></app-selector>
+              <app-selector
+                label="Ciudad"
+                placeholder="Seleccionar..."
+                [options]="cityOptions()"
+                [required]="true"
+                [disabled]="!cities().length"
+                [size]="'sm'"
+                [ngModel]="selectedCityId()"
+                (valueChange)="onCityChange(+($event || 0))"
+              ></app-selector>
+            </div>
+            <div class="drill-footer">
+              <button type="button" class="drill-done-btn" (click)="backToShippingOverview()">
+                <app-icon name="check" [size]="16"></app-icon>
+                <span>Listo</span>
               </button>
             </div>
           </div>
         }
-
-      </div>
-
-      <!-- Address Form (hidden for pickup) -->
-      @if (selectedShippingMethod() && selectedShippingMethod()!.type !== 'pickup') {
-        <div class="address-form"
-          #addressSection
-          style="position: relative;"
-          [class.config-flash-warning]="validationWarningSection === 'address'">
-          <app-tooltip
-            position="top"
-            color="warning"
-            size="sm"
-            [visible]="validationWarningSection === 'address'"
-            style="position: absolute; left: 50%; transform: translateX(-50%); top: -4px; z-index: 10;"
-          >{{ validationWarningMessage }}</app-tooltip>
-          <div class="section-header">
-            <app-icon name="map-pin" [size]="16" class="section-icon"></app-icon>
-            <h2 class="section-title">Dirección de envío</h2>
-          </div>
-          <!-- Auto-fill badge -->
-          @if (selectedCustomerAddressId()) {
-            <div style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(var(--color-success-rgb), 0.1); border: 1px solid rgba(var(--color-success-rgb), 0.3); border-radius: 8px; margin-bottom: 8px;">
-              <app-icon name="map-pin" [size]="14" style="color: var(--color-success);"></app-icon>
-              <span style="font-size: 12px; font-weight: 500; color: var(--color-success);">Dirección del cliente (editable)</span>
-            </div>
-          }
-          <!-- New address hint -->
-          @if (!selectedCustomerAddressId() && cartState()?.customer) {
-            <div style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(var(--color-primary-rgb), 0.05); border: 1px solid rgba(var(--color-primary-rgb), 0.2); border-radius: 8px; margin-bottom: 8px;">
-              <app-icon name="plus-circle" [size]="14" style="color: var(--color-primary);"></app-icon>
-              <span style="font-size: 12px; font-weight: 500; color: var(--color-text-secondary);">Nueva dirección (se guardará al cliente)</span>
-            </div>
-          }
-          <app-input
-            [formControl]="addressLine1Control"
-            [label]="'Dirección *'"
-            [placeholder]="'Calle, número, barrio...'"
-            [size]="'sm'"
-          ></app-input>
-          <div class="form-row">
-            <app-selector
-              label="Departamento"
-              placeholder="Seleccionar..."
-              [options]="departmentOptions()"
-              [required]="true"
-              [size]="'sm'"
-              [ngModel]="selectedDepartmentId()"
-              (valueChange)="onDepartmentChange(+($event || 0))"
-            ></app-selector>
-            <app-selector
-              label="Ciudad"
-              placeholder="Seleccionar..."
-              [options]="cityOptions()"
-              [required]="true"
-              [disabled]="!cities().length"
-              [size]="'sm'"
-              [ngModel]="selectedCityId()"
-              (valueChange)="onCityChange(+($event || 0))"
-            ></app-selector>
-          </div>
-        </div>
-      }
-
-      <!-- Shipping Cost -->
-      @if (selectedShippingMethod()) {
-        <div class="shipping-cost-section">
-          <div class="section-header">
-            <app-icon name="calculator" [size]="16" class="section-icon"></app-icon>
-            <h2 class="section-title">Costo de envío</h2>
-          </div>
-          @if (isCalculatingShipping()) {
-            <div class="calculating-indicator">
-              <span class="spinner-sm"></span>
-              <span>Calculando...</span>
-            </div>
-          }
-          @if (!isCalculatingShipping()) {
-            <div class="cost-display">
-              @if (!manualCostOverride() && calculatedShippingCost() !== null) {
-                <div class="calculated-cost">
-                  <span class="cost-label">Calculado:</span>
-                  <span class="cost-value">{{ calculatedShippingCost() | currency }}</span>
-                </div>
-              }
-              @if (calculatedShippingCost() !== null) {
-                <div class="manual-toggle">
-                  <label class="toggle-label">
-                    <input
-                      type="checkbox"
-                      [checked]="manualCostOverride()"
-                      (change)="toggleManualCost()"
-                      />
-                    <span>Editar costo manualmente</span>
-                  </label>
-                </div>
-              }
-              @if (manualCostOverride() || calculatedShippingCost() === null) {
-                <div class="manual-cost-input">
-                  <div class="cash-input">
-                    <span class="currency">{{ currencySymbol() }}</span>
-                    <input
-                      appCurrencyInput
-                      [ngModel]="shippingCost()"
-                      (ngModelChange)="shippingCost.set($event); onShippingCostChange()"
-                      placeholder="0.00"
-                      />
-                  </div>
-                </div>
-              }
-            </div>
-          }
-        </div>
-      }
-
-      <!-- Delivery Notes -->
-      @if (selectedShippingMethod()) {
-        <div class="delivery-notes">
-          <app-input
-            [formControl]="deliveryNotesControl"
-            [label]="'Notas de envío'"
-            [placeholder]="'Instrucciones especiales de entrega...'"
-            [size]="'sm'"
-          ></app-input>
-        </div>
       }
     </section>
   </div>
