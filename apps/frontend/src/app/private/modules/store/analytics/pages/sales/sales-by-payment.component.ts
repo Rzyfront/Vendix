@@ -20,6 +20,7 @@ import {
   getDefaultStartDate,
   getDefaultEndDate} from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 import {
   SalesByPaymentMethod,
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
@@ -259,7 +260,7 @@ private updateChart(data: SalesByPaymentMethod[]): void {
         type: 'category',
         data: categories,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280', fontSize: 11 },
+        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
@@ -269,7 +270,7 @@ private updateChart(data: SalesByPaymentMethod[]): void {
         axisLine: { show: false },
         axisLabel: {
           color: '#6b7280',
-          formatter: (v: number) => this.formatCurrency(Math.round(v)),
+          formatter: (v: number) => this.currencyService.formatChartAxis(v),
         },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
