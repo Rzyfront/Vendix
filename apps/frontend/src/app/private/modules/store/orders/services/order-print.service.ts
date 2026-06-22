@@ -218,6 +218,12 @@ export class OrderPrintService {
       </div>
     </div>
 
+    ${order.notes ? `
+    <div style="background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+      <h3 style="margin: 0 0 6px; font-size: 11px; font-weight: 700; color: #92400e; text-transform: uppercase;">Nota del Staff (solo interno)</h3>
+      <p style="margin: 0; font-size: 13px; color: #374151; white-space: pre-wrap;">${order.notes}</p>
+    </div>` : ''}
+
     ${order.internal_notes ? `
     <div style="background: #f9fafb; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
       <h3 style="margin: 0 0 8px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;">Notas Internas</h3>

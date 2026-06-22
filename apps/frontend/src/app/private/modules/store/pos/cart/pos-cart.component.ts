@@ -236,6 +236,33 @@ import {
             }
           </div>
 
+          <!--
+            Staff-only note for this order. Set at creation only and never
+            visible to the customer. Bound directly to cartState().notes via
+            a single handler that delegates to PosCartService.updateNotes.
+          -->
+          <div class="px-3 pt-2">
+            <label
+              class="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 uppercase tracking-wide mb-1"
+            >
+              <app-icon name="sticky-note" [size]="12"></app-icon>
+              <span>Nota del staff (opcional)</span>
+            </label>
+            <textarea
+              [ngModel]="cartState().notes"
+              (ngModelChange)="onStaffNoteChange($event)"
+              maxlength="500"
+              rows="2"
+              placeholder="Instrucción interna para el equipo (no se envía al cliente)"
+              class="w-full px-2.5 py-1.5 text-xs border border-amber-200 bg-amber-50/40 rounded-md text-text-primary placeholder:text-amber-700/50 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400 resize-none"
+            ></textarea>
+            <div class="flex justify-end mt-0.5">
+              <span class="text-[10px] text-amber-700/70">
+                {{ (cartState().notes || '').length }}/500
+              </span>
+            </div>
+          </div>
+
           <!-- Checkout Actions -->
           <div class="cart-actions">
             @if (isQuotationMode()) {
@@ -1254,6 +1281,15 @@ private cartService = inject(PosCartService);
     }
   }
 
+
+  /**
+   * Update the staff-only note for the current cart.
+   * Delegates to PosCartService.updateNotes so the value flows through
+   * the same signal store used by PosOrderService.
+   */
+  onStaffNoteChange(notes: string): void {
+    this.cartService.updateNotes(notes ?? '').subscribe();
+  }
 
   proceedToPayment(): void {
     const currentState = this.cartService.getCurrentState();

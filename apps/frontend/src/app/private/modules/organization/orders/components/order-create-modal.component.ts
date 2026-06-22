@@ -577,6 +577,21 @@ import {
               placeholder="Enter any additional notes or special instructions..."
               [control]="orderForm.get('notes')"
             ></app-input>
+            <div>
+              <label
+                class="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 uppercase tracking-wide mb-1"
+              >
+                <app-icon name="sticky-note" [size]="12"></app-icon>
+                <span>Staff Note (opcional, solo interno)</span>
+              </label>
+              <textarea
+                formControlName="staff_notes"
+                maxlength="500"
+                rows="2"
+                placeholder="Instrucción interna para el equipo (no se envía al cliente)"
+                class="w-full px-2.5 py-1.5 text-sm border border-amber-200 bg-amber-50/40 rounded-md text-text-primary placeholder:text-amber-700/50 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400 resize-none"
+              ></textarea>
+            </div>
           </div>
         </div>
       </form>
@@ -761,6 +776,7 @@ export class OrderCreateModalComponent implements OnInit {
       ],
       notes: [''],
       internal_notes: [''],
+      staff_notes: [''],
       internal_reference: [''],
       customer_reference: [''],
 
@@ -968,6 +984,7 @@ export class OrderCreateModalComponent implements OnInit {
         currency: formValue.currency,
         notes: formValue.notes,
         internal_notes: formValue.internal_notes,
+        staff_notes: formValue.staff_notes,
         order_date: formValue.order_date,
         expected_delivery_date: formValue.expected_delivery_date,
       };
@@ -1138,6 +1155,7 @@ export class OrderCreateModalComponent implements OnInit {
       currency: this.currencyFormatService.currencyCode() || 'USD',
       notes: '',
       internal_notes: '',
+      staff_notes: '',
       internal_reference: '',
       customer_reference: '',
       shipping_address_id: '',

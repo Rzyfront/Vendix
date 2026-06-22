@@ -425,6 +425,15 @@ export class CreatePosPaymentDto {
   @MaxLength(500)
   internal_notes?: string;
 
+  /**
+   * Staff-only note (optional, max 500 chars).
+   * Set at creation only, never exposed to the customer.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+
   @IsOptional()
   metadata?: Record<string, any>;
 
@@ -520,6 +529,15 @@ export class UpdateOrderWithPaymentDto {
   @IsString()
   @MaxLength(500)
   internal_notes?: string;
+
+  /**
+   * Staff-only note (optional, max 500 chars).
+   * Set at creation only, never exposed to the customer.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
 }
 
 // DTO de respuesta para procesamiento POS

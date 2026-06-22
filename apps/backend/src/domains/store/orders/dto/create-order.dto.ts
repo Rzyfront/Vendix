@@ -191,6 +191,16 @@ export class CreateOrderDto {
   @IsString()
   internal_notes?: string;
 
+  /**
+   * Staff-only note (optional, max 500 chars).
+   * Set at creation only, never exposed to the customer.
+   * Not editable after the order is created.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
+
   @IsOptional()
   @IsDateString()
   estimated_delivery_date?: string;

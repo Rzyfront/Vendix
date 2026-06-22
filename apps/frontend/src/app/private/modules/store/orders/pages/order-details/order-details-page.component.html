@@ -340,6 +340,28 @@
             </div>
           </app-card>
 
+          <!-- 1.5. NOTA DEL STAFF (solo visible al equipo interno) -->
+          @if (orderData.notes) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <div slot="header" class="flex items-center gap-2">
+                <app-icon name="sticky-note" [size]="18" class="text-amber-500"></app-icon>
+                <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">
+                  Nota del staff
+                </h3>
+                <span
+                  class="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded"
+                >
+                  Solo interno
+                </span>
+              </div>
+              <p
+                class="text-sm text-[var(--color-text-primary)] whitespace-pre-line leading-relaxed"
+              >
+                {{ orderData.notes }}
+              </p>
+            </app-card>
+          }
+
           <!-- 2. ARTICULOS DEL PEDIDO -->
           <app-card shadow="sm" [responsivePadding]="true">
             <div slot="header" class="flex items-center justify-between w-full">

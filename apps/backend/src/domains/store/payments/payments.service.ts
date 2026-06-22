@@ -2792,6 +2792,7 @@ export class PaymentsService {
           billing_address_id: dto.billing_address_id,
           shipping_address_id: dto.shipping_address_id,
           internal_notes: dto.internal_notes,
+          notes: dto.notes,
           // Shipping fields (for delivery orders)
           delivery_type: dto.delivery_type || 'direct_delivery',
           payment_form: dto.is_draft

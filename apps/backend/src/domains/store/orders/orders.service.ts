@@ -123,6 +123,7 @@ export class OrdersService {
             billing_address_id: createOrderDto.billing_address_id,
             shipping_address_id: createOrderDto.shipping_address_id,
             internal_notes: createOrderDto.internal_notes,
+            notes: createOrderDto.notes,
             updated_at: new Date(),
             order_items: {
               create: await Promise.all(
