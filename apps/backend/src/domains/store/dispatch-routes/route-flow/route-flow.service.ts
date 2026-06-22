@@ -21,7 +21,10 @@ import {
   SettleStopDto,
   VoidDispatchRouteDto,
 } from '../dto';
-import { aggregateRouteTotals } from '../utils/route-stop-calc';
+import {
+  aggregateRouteTotals,
+  deriveStopIsPrepaid,
+} from '../utils/route-stop-calc';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 
 const ROUTE_INCLUDE = {
@@ -44,7 +47,36 @@ const ROUTE_INCLUDE = {
           sales_order_id: true,
           // COD link: the real orders.id whose state/balance the route drives.
           order_id: true,
+          // needs_collection + invoice.payment_date + order.remaining_balance
+          // feed the DERIVED is_prepaid (never trust the frozen stop boolean).
+          needs_collection: true,
+          // Delivery-address snapshot for the planilla per-stop address + the
+          // dispatch-time address gate.
+          customer_address: true,
           sales_order: { select: { id: true, order_number: true, status: true } },
+          invoice: { select: { payment_date: true } },
+          // Live payment status of a regular order (remaining_balance) drives
+          // the derived prepaid resolution; the snapshot is the address fallback.
+          order: {
+            select: {
+              id: true,
+              remaining_balance: true,
+              shipping_address_snapshot: true,
+              // Live shipping-address relation: 3rd fallback for the per-stop
+              // address (legacy remisiones created before the snapshot exist
+              // with customer_address = null).
+              addresses_orders_shipping_address_idToaddresses: {
+                select: {
+                  address_line1: true,
+                  address_line2: true,
+                  city: true,
+                  state_province: true,
+                  country_code: true,
+                  postal_code: true,
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -99,7 +131,68 @@ export class RouteFlowService {
       include: ROUTE_INCLUDE,
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
-    return route;
+    return this.withDerivedStopPrepaid(route);
+  }
+
+  /**
+   * Overwrite each stop's `is_prepaid` with the value DERIVED from the linked
+   * note/order live payment state. The persisted `dispatch_route_stops.is_prepaid`
+   * is frozen at stop creation and must NOT be trusted on read — a paid order
+   * keeps `false` and would be charged again. Every read path (totals, close
+   * cash filter, settle gate, PDF, route response) consumes the result of
+   * `getRoute`, so deriving here keeps all of them consistent.
+   */
+  private withDerivedStopPrepaid<
+    R extends {
+      stops: Array<{
+        is_prepaid: boolean;
+        dispatch_note?: {
+          needs_collection?: boolean | null;
+          invoice?: { payment_date: Date | null } | null;
+          order?: { remaining_balance: Prisma.Decimal | null } | null;
+        } | null;
+      }>;
+    },
+  >(route: R): R {
+    return {
+      ...route,
+      stops: route.stops.map((stop) => ({
+        ...stop,
+        is_prepaid: deriveStopIsPrepaid(stop),
+      })),
+    };
+  }
+
+  /**
+   * Whether a stop carries a usable delivery address. Checks, in order: the
+   * remisión's `customer_address` snapshot, the order's
+   * `shipping_address_snapshot` fallback, and the order's live shipping-address
+   * relation (3rd fallback for legacy remisiones created before the snapshot).
+   * This MUST mirror the PDF's address-resolution chain so the dispatch gate
+   * never blocks a stop whose address the planilla would happily render. A JSON
+   * blob (or the live address row) counts when it has a non-empty
+   * `address_line1` (or legacy `line1`/`address`) string.
+   */
+  private stopHasDeliveryAddress(
+    customerAddress: Prisma.JsonValue | null | undefined,
+    orderSnapshot: Prisma.JsonValue | null | undefined,
+    liveAddress?: Prisma.JsonValue | Record<string, unknown> | null,
+  ): boolean {
+    return (
+      this.jsonAddressHasLine(customerAddress) ||
+      this.jsonAddressHasLine(orderSnapshot) ||
+      this.jsonAddressHasLine(liveAddress as Prisma.JsonValue)
+    );
+  }
+
+  /** True when a JSON address blob carries a non-empty address line. */
+  private jsonAddressHasLine(value: Prisma.JsonValue | null | undefined): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+    const a = value as Record<string, unknown>;
+    const line1 = a.address_line1 ?? a.line1 ?? a.address;
+    return typeof line1 === 'string' && line1.trim().length > 0;
   }
 
   /**
@@ -300,6 +393,31 @@ export class RouteFlowService {
       );
     }
 
+    // Per-stop delivery-address gate (defense in depth): sub-task 2 already
+    // blocks createFromOrder/createFromSalesOrder when the order has no address,
+    // but legacy remisiones (created before this rule) may still lack one. We
+    // require every stop to carry a delivery address (customer_address snapshot
+    // or the order's shipping_address_snapshot fallback) before dispatching.
+    const stopsWithoutAddress = route.stops.filter(
+      (stop) =>
+        !this.stopHasDeliveryAddress(
+          stop.dispatch_note?.customer_address,
+          stop.dispatch_note?.order?.shipping_address_snapshot,
+          stop.dispatch_note?.order
+            ?.addresses_orders_shipping_address_idToaddresses,
+        ),
+    );
+    if (stopsWithoutAddress.length > 0) {
+      const numbers = stopsWithoutAddress
+        .map((s) => s.dispatch_note?.dispatch_number || `#${s.dispatch_note_id}`)
+        .join(', ');
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_STOP_NO_ADDRESS,
+        `Las siguientes remisiones no tienen dirección de entrega: ${numbers}`,
+        { dispatch_numbers: numbers },
+      );
+    }
+
     // Accumulate confirm-on-dispatch payloads so we can emit
     // `dispatch_note.confirmed` AFTER the transaction commits (the reservation
     // listener re-reads the note and must see status:'confirmed' persisted).
@@ -374,7 +492,7 @@ export class RouteFlowService {
     });
 
     this.logger.log(`Planilla #${id} despachada con ${updated.stops.length} paradas`);
-    return updated;
+    return this.withDerivedStopPrepaid(updated);
   }
 
   /**
@@ -460,7 +578,12 @@ export class RouteFlowService {
             // COD link: the real orders.id whose state the route drives. Needed
             // for the `live` order_state_update_mode (advance to delivered here).
             order_id: true,
+            // Live payment signals so the prepaid gate below is DERIVED (never
+            // the frozen stop.is_prepaid boolean).
+            needs_collection: true,
             sales_order: { select: { id: true, order_number: true, status: true } },
+            invoice: { select: { payment_date: true } },
+            order: { select: { remaining_balance: true } },
             // For withholding-agent validation: a retenedor cliente must
             // arrive at 'delivered' or 'partial' WITH a populated
             // withholding_breakdown, otherwise the fiscal accounting will
@@ -476,6 +599,10 @@ export class RouteFlowService {
     if (stop.status === 'released' || stop.status === 'delivered') {
       throw new BadRequestException(`La parada ya está '${stop.status}'`);
     }
+
+    // DERIVED prepaid for this stop from the live note/order payment state.
+    // Never trust the persisted (frozen) stop.is_prepaid for the COD logic.
+    const stopIsPrepaid = deriveStopIsPrepaid(stop);
 
     // Withholding-agent guard: if the customer is a retenedor, the operator
     // must register the breakdown (retefuente / reteiva / reteica) and the
@@ -516,8 +643,8 @@ export class RouteFlowService {
     const total_paid = collected + anticipo;
 
     if (dto.result === 'delivered') {
-      // Must cover full net (or be is_prepaid)
-      if (!stop.is_prepaid && total_paid + withholding < net) {
+      // Must cover full net (or be prepaid)
+      if (!stopIsPrepaid && total_paid + withholding < net) {
         throw new BadRequestException(
           `Suma de collected + anticipo + withholding (${total_paid + withholding}) es menor que el total de la remisión (${net})`,
         );
@@ -614,8 +741,8 @@ export class RouteFlowService {
     });
 
     // Emit domain events to drive accounting / AR / notifications.
-    // Only for non-prepaid stops with actual collection.
-    if (!stop.is_prepaid) {
+    // Only for non-prepaid stops with actual collection (DERIVED prepaid).
+    if (!stopIsPrepaid) {
       if (collected > 0 || anticipo > 0) {
         await this.cashSettlement.emitPaymentReceived({
           store_id,
@@ -795,7 +922,16 @@ export class RouteFlowService {
         change_amount: true,
         withholding_amount: true,
         credit_amount: true,
-        dispatch_note: { select: { grand_total: true } },
+        dispatch_note: {
+          select: {
+            grand_total: true,
+            // Live payment signals so is_prepaid is DERIVED, not the frozen
+            // persisted boolean (mirrors getRoute / withDerivedStopPrepaid).
+            needs_collection: true,
+            invoice: { select: { payment_date: true } },
+            order: { select: { remaining_balance: true } },
+          },
+        },
       },
     });
 
@@ -803,7 +939,7 @@ export class RouteFlowService {
     // (which expects number | string | null) accepts them.
     const totals = aggregateRouteTotals(
       stops.map((s) => ({
-        is_prepaid: s.is_prepaid,
+        is_prepaid: deriveStopIsPrepaid(s),
         collected_amount: s.collected_amount == null ? 0 : Number(s.collected_amount),
         anticipo_amount: s.anticipo_amount == null ? 0 : Number(s.anticipo_amount),
         change_amount: s.change_amount == null ? 0 : Number(s.change_amount),
@@ -937,7 +1073,7 @@ export class RouteFlowService {
     this.logger.log(
       `Planilla #${id} cerrada. Recaudado=${total_collected} Variance=${cash_variance}`,
     );
-    return updated;
+    return this.withDerivedStopPrepaid(updated);
   }
 
   /**
@@ -1015,7 +1151,7 @@ export class RouteFlowService {
     });
 
     this.logger.log(`Planilla #${id} anulada: ${dto.reason}`);
-    return updated;
+    return this.withDerivedStopPrepaid(updated);
   }
 
   async generatePdf(id: number): Promise<Buffer> {

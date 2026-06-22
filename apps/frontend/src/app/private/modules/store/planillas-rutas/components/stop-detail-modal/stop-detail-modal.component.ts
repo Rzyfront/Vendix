@@ -2,8 +2,14 @@ import { Component, computed, input, output } from '@angular/core';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-import { DispatchRouteStop } from '../../interfaces/planilla.interface';
+import {
+  DispatchDeliveryAddress,
+  DispatchRouteStop,
+} from '../../interfaces/planilla.interface';
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+
+/** Address blob may arrive as a JSON object or a pre-formatted string. */
+type AddressLike = DispatchDeliveryAddress | string;
 
 /**
  * Quick-view modal for a route stop / dispatch note. Surfaces the
@@ -168,24 +174,20 @@ export class StopDetailModalComponent {
     return so?.order_number || '';
   });
 
-  /** Formats the dispatch-note customer address whether it is a string or object. */
+  /**
+   * Formats the delivery address whether it is a string or object. Prefers the
+   * stop's own snapshot (present immediately from the route include:
+   * `dispatch_note.customer_address`, then the order's
+   * `shipping_address_snapshot` fallback) and only falls back to the fully
+   * fetched note's `customer_address` while the stop carries none — so the
+   * address shows up without waiting for the note fetch.
+   */
   readonly addressText = computed<string>(() => {
-    const a = this.note()?.customer_address as
-      | string
-      | {
-          address_line1?: string;
-          address_line2?: string;
-          city?: string;
-          state_province?: string;
-          postal_code?: string;
-          country_code?: string;
-        }
-      | null
-      | undefined;
+    const a = this.resolvedAddress();
     if (!a) return '';
     if (typeof a === 'string') return a;
     const parts = [
-      a.address_line1,
+      a.address_line1 ?? a.line1 ?? a.address,
       a.address_line2,
       a.city,
       a.state_province,
@@ -194,6 +196,16 @@ export class StopDetailModalComponent {
     ].filter(Boolean);
     return parts.join(', ');
   });
+
+  /** Picks the first usable address blob: stop snapshot → order snapshot → note. */
+  private resolvedAddress(): AddressLike | null | undefined {
+    const summary = this.stop().dispatch_note;
+    return (
+      (summary?.customer_address as AddressLike | null | undefined) ??
+      (summary?.order?.shipping_address_snapshot as AddressLike | null | undefined) ??
+      (this.note()?.customer_address as AddressLike | null | undefined)
+    );
+  }
 
   readonly statusLabel = computed<string>(() => {
     const map: Record<string, string> = {

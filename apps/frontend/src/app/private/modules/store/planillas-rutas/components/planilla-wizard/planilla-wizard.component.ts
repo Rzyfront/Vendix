@@ -16,6 +16,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import {
   CreateDispatchRouteDto,
   CreateStopDto,
+  DispatchDeliveryAddress,
   DispatchRoute,
   Vehicle,
 } from '../../interfaces/planilla.interface';
@@ -42,6 +43,15 @@ interface AvailableNote {
   customer_name?: string;
   grand_total: string | number;
   status: string;
+  /**
+   * Delivery-address snapshot of the dispatch note (and optional order
+   * fallback). Surfaced so the operator can see "¿dónde es?" and spot
+   * remisiones that cannot be dispatched (no address). Optional because the
+   * `available-notes` endpoint may not include it on every deploy — when
+   * absent the row simply shows no address line.
+   */
+  customer_address?: DispatchDeliveryAddress | null;
+  shipping_address_snapshot?: DispatchDeliveryAddress | null;
 }
 
 @Component({
@@ -228,6 +238,22 @@ interface AvailableNote {
                         <p class="text-xs text-[var(--color-text-secondary)]">
                           {{ +note.grand_total | currency }}
                         </p>
+                        <!-- Dirección de entrega (📍) o aviso de remisión no despachable -->
+                        @if (noteHasAddress(note)) {
+                          <p
+                            class="mt-0.5 text-xs text-[var(--color-text-secondary)] flex items-center gap-1 truncate"
+                          >
+                            <app-icon name="map-pin" [size]="12" class="shrink-0" />
+                            <span class="truncate">{{ noteAddressText(note) }}</span>
+                          </p>
+                        } @else if (noteAddressKnown(note)) {
+                          <p
+                            class="mt-0.5 text-xs text-amber-700 flex items-center gap-1"
+                          >
+                            <app-icon name="alert-triangle" [size]="12" class="shrink-0" />
+                            <span>Sin dirección — no podrá despacharse</span>
+                          </p>
+                        }
                       </div>
                       <button
                         type="button"
@@ -564,6 +590,51 @@ export class PlanillaWizardComponent {
   /** Busca la remisión disponible asociada a una parada (para mostrar datos). */
   stopNote(noteId: number): AvailableNote | undefined {
     return this.availableNotes().find((n) => n.id === noteId);
+  }
+
+  /**
+   * Resuelve la dirección de entrega de una remisión candidata: snapshot propio
+   * (`customer_address`) primero, luego el `shipping_address_snapshot` de la
+   * orden vinculada. Devuelve null si no hay ninguno.
+   */
+  private resolveNoteAddress(note: AvailableNote): DispatchDeliveryAddress | null {
+    return note.customer_address ?? note.shipping_address_snapshot ?? null;
+  }
+
+  /**
+   * Una remisión tiene dirección utilizable cuando su blob trae un
+   * `address_line1` no vacío (tolerando los alias legacy `line1`/`address`).
+   * Espeja el chequeo del backend que bloquea el despacho sin dirección.
+   */
+  noteHasAddress(note: AvailableNote): boolean {
+    const a = this.resolveNoteAddress(note);
+    if (!a) return false;
+    const line1 = a.address_line1 ?? a.line1 ?? a.address;
+    return typeof line1 === 'string' && line1.trim().length > 0;
+  }
+
+  /** Dirección de entrega formateada en una línea: `address_line1, city, state`. */
+  noteAddressText(note: AvailableNote): string {
+    const a = this.resolveNoteAddress(note);
+    if (!a) return '';
+    const parts = [a.address_line1 ?? a.line1 ?? a.address, a.city, a.state_province]
+      .map((p) => (typeof p === 'string' ? p.trim() : ''))
+      .filter((p) => p.length > 0);
+    return parts.join(', ');
+  }
+
+  /**
+   * Si el payload de la remisión candidata trae información de dirección (las
+   * claves existen, aunque sean null). El endpoint `available-notes` puede no
+   * incluir aún el snapshot; cuando NO viene, evitamos un falso "sin dirección"
+   * y simplemente no mostramos ni la dirección ni el aviso. El aviso solo
+   * aparece cuando sí sabemos que la dirección falta de verdad.
+   */
+  noteAddressKnown(note: AvailableNote): boolean {
+    return (
+      note.customer_address !== undefined ||
+      note.shipping_address_snapshot !== undefined
+    );
   }
 
   /** Agrega una remisión como nueva parada al final de la secuencia. */

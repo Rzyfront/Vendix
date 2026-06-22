@@ -1944,6 +1944,24 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Dispatch note is already assigned to this route',
   },
+  DISPATCH_NOTE_NO_SHIPPING_ADDRESS: {
+    code: 'DISPATCH_NOTE_NO_SHIPPING_ADDRESS',
+    httpStatus: 400,
+    devMessage:
+      'The order has no shipping address; a dispatch note (remisión) cannot be generated without a delivery address',
+  },
+  DISPATCH_NOTE_INSUFFICIENT_STOCK: {
+    code: 'DISPATCH_NOTE_INSUFFICIENT_STOCK',
+    httpStatus: 400,
+    devMessage:
+      'Insufficient stock at the resolved location for one or more dispatch note items',
+  },
+  DISPATCH_ROUTE_STOP_NO_ADDRESS: {
+    code: 'DISPATCH_ROUTE_STOP_NO_ADDRESS',
+    httpStatus: 400,
+    devMessage:
+      'One or more route stops have no delivery address; the route cannot be dispatched',
+  },
 
   // MCP (Model Context Protocol)
   AI_MCP_001: {

@@ -37,6 +37,7 @@ import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-
 import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
 import {
   CloseDispatchRouteDto,
+  DispatchDeliveryAddress,
   DispatchRoute,
   DispatchRouteStatus,
   DispatchRouteStop,
@@ -96,6 +97,27 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
                 ></app-steps-line>
               </div>
             </app-card>
+          }
+
+          <!-- Bug 6 — Dispatch blocked: stops without delivery address -->
+          @if (r.status === 'draft' && stopsWithoutAddress().length > 0) {
+            <div
+              class="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 flex items-start gap-3"
+            >
+              <app-icon
+                name="alert-triangle"
+                [size]="18"
+                class="text-amber-600 mt-0.5 shrink-0"
+              ></app-icon>
+              <div class="min-w-0 text-sm text-amber-800">
+                <p class="font-semibold">
+                  No se puede despachar: hay remisiones sin dirección de entrega
+                </p>
+                <p class="mt-0.5 text-amber-700">
+                  Agrega una dirección a {{ stopsWithoutAddressLabel() }} antes de despachar la planilla.
+                </p>
+              </div>
+            </div>
           }
 
           <!-- Summary -->
@@ -403,13 +425,17 @@ export class PlanillaDetailPageComponent {
     const actions: StickyHeaderActionButton[] = [];
 
     if (r.status === 'draft') {
+      const blocked = !this.canDispatch();
       actions.push({
         id: 'dispatch',
         label: 'Despachar',
         variant: 'primary',
         icon: 'truck',
         loading: busy,
-        disabled: busy,
+        disabled: busy || blocked,
+        title: blocked
+          ? `No se puede despachar: las siguientes remisiones no tienen dirección de entrega: ${this.stopsWithoutAddressLabel()}`
+          : undefined,
       });
     }
 
@@ -519,6 +545,13 @@ export class PlanillaDetailPageComponent {
         row?.dispatch_note?.customer_name || '(Cliente)',
     },
     {
+      key: 'dispatch_note.customer_address',
+      label: 'Dirección de entrega',
+      priority: 3,
+      transform: (_: any, row?: DispatchRouteStop) =>
+        row ? this.formatStopAddress(row) : '—',
+    },
+    {
       key: 'status',
       label: 'Estado',
       badge: true,
@@ -599,6 +632,13 @@ export class PlanillaDetailPageComponent {
       return this.formatMoney(toCollect > 0 ? toCollect : total);
     },
     detailKeys: [
+      {
+        key: 'dispatch_note.customer_address',
+        label: 'Dirección',
+        icon: 'map-pin',
+        transform: (_: any, item?: DispatchRouteStop) =>
+          item ? this.formatStopAddress(item) : '—',
+      },
       {
         key: '_collectionState',
         label: 'Recaudo',
@@ -762,6 +802,16 @@ export class PlanillaDetailPageComponent {
   }
 
   dispatch() {
+    // Frontend gate (mirrors the backend DISPATCH_ROUTE_STOP_NO_ADDRESS block):
+    // refuse to call the endpoint when a deliverable stop has no address, and
+    // tell the operator exactly which remisiones are missing one.
+    const missing = this.stopsWithoutAddress();
+    if (missing.length > 0) {
+      this.toast.error(
+        `No se puede despachar: las siguientes remisiones no tienen dirección de entrega: ${this.stopsWithoutAddressLabel()}`,
+      );
+      return;
+    }
     this.actionLoading.set(true);
     this.service
       .dispatch(this.routeId())
@@ -774,7 +824,11 @@ export class PlanillaDetailPageComponent {
         },
         error: (e) => {
           this.actionLoading.set(false);
-          this.toast.error(e.message);
+          // The service maps API errors to `Error(message)` and the backend
+          // ships a Spanish, remisión-listing message for
+          // DISPATCH_ROUTE_STOP_NO_ADDRESS, so surfacing `e.message` already
+          // gives a clear, actionable toast.
+          this.toast.error(e?.message || 'Error al despachar la planilla');
         },
       });
   }
@@ -1051,6 +1105,86 @@ export class PlanillaDetailPageComponent {
     const num = typeof value === 'string' ? parseFloat(value) : value || 0;
     return this.currencyService.format(Number(num) || 0);
   }
+
+  // ---------------------------------------------------------------------------
+  // Delivery address (Bug 3 + Bug 6)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Resolves the delivery-address JSON for a stop: the note's `customer_address`
+   * snapshot first, then the linked order's `shipping_address_snapshot`
+   * fallback (legacy remisiones). Returns null when neither is present.
+   */
+  private resolveStopAddress(stop: DispatchRouteStop): DispatchDeliveryAddress | null {
+    const note = stop.dispatch_note;
+    return note?.customer_address ?? note?.order?.shipping_address_snapshot ?? null;
+  }
+
+  /**
+   * A delivery address counts as present when its JSON blob carries a non-empty
+   * `address_line1` (tolerating the legacy `line1`/`address` aliases). Mirrors
+   * the backend `route-flow.service.jsonAddressHasLine` so the frontend gate and
+   * the backend `DISPATCH_ROUTE_STOP_NO_ADDRESS` block stay in sync.
+   */
+  stopHasAddress(stop: DispatchRouteStop): boolean {
+    const a = this.resolveStopAddress(stop);
+    if (!a) return false;
+    const line1 = a.address_line1 ?? a.line1 ?? a.address;
+    return typeof line1 === 'string' && line1.trim().length > 0;
+  }
+
+  /**
+   * Formats the resolved stop address into a single human-readable line:
+   * `address_line1, city, state_province` (empty parts omitted). Falls back to
+   * "—" when there is no usable address.
+   */
+  formatStopAddress(stop: DispatchRouteStop): string {
+    const a = this.resolveStopAddress(stop);
+    if (!a) return '—';
+    const parts = [
+      a.address_line1 ?? a.line1 ?? a.address,
+      a.city,
+      a.state_province,
+    ]
+      .map((p) => (typeof p === 'string' ? p.trim() : ''))
+      .filter((p) => p.length > 0);
+    return parts.length > 0 ? parts.join(', ') : '—';
+  }
+
+  /**
+   * Stops (in the order they appear) that have NO usable delivery address. The
+   * backend rejects the dispatch with `DISPATCH_ROUTE_STOP_NO_ADDRESS` when this
+   * list is non-empty, so the UI mirrors the rule: it disables the "Despachar"
+   * button and surfaces which remisiones are missing an address. Released /
+   * rejected stops are excluded — they won't be delivered, so they can't block.
+   */
+  readonly stopsWithoutAddress = computed<DispatchRouteStop[]>(() => {
+    const stops = this.route()?.stops ?? [];
+    return stops.filter(
+      (s) =>
+        s.status !== 'released' &&
+        s.status !== 'rejected' &&
+        !this.stopHasAddress(s),
+    );
+  });
+
+  /** Comma-joined remisión numbers of the stops missing a delivery address. */
+  readonly stopsWithoutAddressLabel = computed<string>(() =>
+    this.stopsWithoutAddress()
+      .map((s) => s.dispatch_note?.dispatch_number || `#${s.dispatch_note_id}`)
+      .join(', '),
+  );
+
+  /**
+   * Whether the route can be dispatched from the UI. Only blocks while the route
+   * is still in `draft` (the only state with a "Despachar" action) and at least
+   * one deliverable stop lacks an address — matching the backend gate.
+   */
+  readonly canDispatch = computed<boolean>(() => {
+    const r = this.route();
+    if (!r || r.status !== 'draft') return true;
+    return this.stopsWithoutAddress().length === 0;
+  });
 
   /**
    * Whether the stop still requires cash collection. Prefers a backend-provided
