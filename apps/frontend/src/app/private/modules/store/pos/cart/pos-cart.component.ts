@@ -371,15 +371,15 @@ import {
                 <div
                   class="row-span-1 w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
                 >
-                  @if (item.product.image_url || item.product.image) {
+                  @if (item.variant_image_url || item.product.image_url || item.product.image) {
                     <img
-                      [src]="item.product.image_url || item.product.image"
+                      [src]="item.variant_image_url || item.product.image_url || item.product.image"
                       [alt]="item.product.name"
                       class="absolute inset-0 w-full h-full object-cover"
                       (error)="handleImageError($event)"
                     />
                   }
-                  @if (!item.product.image_url && !item.product.image) {
+                  @if (!item.variant_image_url && !item.product.image_url && !item.product.image) {
                     <div
                       class="absolute inset-0 flex items-center justify-center text-text-secondary"
                     >

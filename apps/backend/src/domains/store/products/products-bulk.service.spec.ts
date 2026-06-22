@@ -12,6 +12,7 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 
 // Mock para slugify
@@ -609,6 +610,136 @@ describe('ProductsBulkService', () => {
       expectedFields.forEach((field) => {
         expect(result.headers).toContain(field);
       });
+    });
+  });
+
+  describe('exportCurrentProductsAsTemplate', () => {
+    it('should scope the query by store_id', async () => {
+      mockPrismaService.products.findMany.mockResolvedValueOnce([]);
+      await service.exportCurrentProductsAsTemplate();
+
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            store_id: expect.anything(),
+          }),
+        }),
+      );
+    });
+
+    it('should throw NotFoundException with a clear message when no products exist', async () => {
+      mockPrismaService.products.count.mockResolvedValueOnce(0);
+
+      await expect(service.exportCurrentProductsAsTemplate()).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(service.exportCurrentProductsAsTemplate()).rejects.toThrow(
+        /No hay productos para exportar/,
+      );
+    });
+
+    it('should not call findMany when no products exist', async () => {
+      mockPrismaService.products.count.mockResolvedValueOnce(0);
+      mockPrismaService.products.findMany.mockClear();
+
+      try {
+        await service.exportCurrentProductsAsTemplate();
+      } catch {
+        // expected
+      }
+
+      expect(mockPrismaService.products.findMany).not.toHaveBeenCalled();
+    });
+
+    // Regla de negocio: los productos archivados NUNCA deben salir en la
+    // descarga del template (mismo criterio que la UI usa para ocultarlos
+    // en el listado de productos). Verificamos que tanto el count() previo
+    // como el findMany() del chunk paginado filtren por `state: { not:
+    // ProductState.ARCHIVED }`. Si esto se rompe, el usuario descarga 120+
+    // productos "viejos" que aparecen como si estuvieran activos.
+    it('should exclude archived products from both count() and findMany()', async () => {
+      // Simular que hay productos no-archivados (count > 0) para que sí se
+      // llegue a llamar findMany. Devolver [] corta el loop inmediatamente.
+      mockPrismaService.products.count.mockResolvedValueOnce(5);
+      mockPrismaService.products.findMany.mockResolvedValueOnce([]);
+
+      try {
+        await service.exportCurrentProductsAsTemplate();
+      } catch {
+        // Puede lanzar NotFoundException porque rows queda vacío; no nos
+        // importa acá — lo que validamos son las llamadas a Prisma.
+      }
+
+      const expectedArchiveFilter = {
+        state: { not: ProductState.ARCHIVED },
+      };
+
+      expect(mockPrismaService.products.count).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining(expectedArchiveFilter),
+        }),
+      );
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining(expectedArchiveFilter),
+        }),
+      );
+    });
+
+    // Regression: previously when count() failed (e.g. schema drift in prod),
+    // the service silently set productCount=0 and threw NotFoundException
+    // with 'No hay productos en su tienda' — misleading the user into
+    // thinking they had no products. The fix differentiates the two cases.
+    it('should throw InternalServerErrorException (not NotFoundException) when count() fails', async () => {
+      mockPrismaService.products.count.mockReset();
+      mockPrismaService.products.count.mockRejectedValueOnce(
+        new Error('relation "products" does not exist'),
+      );
+
+      await expect(service.exportCurrentProductsAsTemplate()).rejects.toThrow(
+        InternalServerErrorException,
+      );
+      await expect(service.exportCurrentProductsAsTemplate()).rejects.not.toThrow(
+        NotFoundException,
+      );
+    });
+
+    it('should retry findMany with minimal query when the rich include fails (schema drift fallback)', async () => {
+      // First chunk: rich include fails -> fallback to minimal
+      mockPrismaService.products.findMany
+        .mockRejectedValueOnce(new Error('relation "stock_levels" does not exist'))
+        .mockResolvedValueOnce([
+          {
+            id: 1,
+            name: 'Drifted product',
+            sku: 'DRF-1',
+            product_type: 'physical',
+            state: 'active',
+            track_inventory: true,
+            base_price: 10,
+            description: '',
+            product_tax_assignments: [],
+            pricing_type: 'unit',
+            available_for_ecommerce: false,
+            is_featured: false,
+            allow_pos_price_override: false,
+            has_multiple_price_tiers: false,
+            is_on_sale: false,
+            sale_price: 0,
+            cost_price: 0,
+          },
+        ]);
+
+      const buffer = await service.exportCurrentProductsAsTemplate();
+      expect(buffer).toBeInstanceOf(Buffer);
+
+      // Should have called findMany twice: once rich (failed), once minimal (succeeded)
+      expect(mockPrismaService.products.findMany).toHaveBeenCalledTimes(2);
+
+      // Second call must NOT include the rich include (fallback path).
+      const fallbackCall =
+        mockPrismaService.products.findMany.mock.calls[1][0];
+      expect(fallbackCall.include).toBeUndefined();
     });
   });
 });

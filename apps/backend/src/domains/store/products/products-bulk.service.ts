@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, BadRequestException, InternalServerErrorException, NotFoundException, Logger } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ProductsService } from './products.service';
@@ -15,6 +15,7 @@ import {
   BulkUploadTemplateDto,
   BulkProductAnalysisResultDto,
   BulkProductAnalysisItemDto,
+  ProductState,
 } from './dto';
 import { generateSlug } from '@common/utils/slug.util';
 import { toTitleCase } from '@common/utils/format.util';
@@ -1093,57 +1094,125 @@ export class ProductsBulkService {
       throw new BadRequestException('No se pudo determinar la tienda actual');
     }
 
-    const baseHeaders = this.getProductTemplateHeaders();
-    const extraHeaders = ['Precio Compra', 'Cantidad Actual', 'Tiene Imagen'];
-    const headers = [...baseHeaders, ...extraHeaders];
+    // Wrap TODO el export en try-catch para que el cliente NUNCA vea un error
+    // de Prisma crudo. Errores legítimos (empty state) se re-lanzan tal cual;
+    // cualquier otro fallo (Prisma, red, permisos) se convierte en un
+    // mensaje amigable y se loguea para debugging.
+    try {
+      // Filtramos `state: { not: ProductState.ARCHIVED }` para excluir
+      // productos archivados que el cliente NO ve en la UI. Usamos la constante
+      // (no string literal) para que el compilador verifique el enum.
+      const archivedFilter = { state: { not: ProductState.ARCHIVED } };
+      const baseWhere = { store_id: storeId, ...archivedFilter };
 
-    const rows: Record<string, any>[] = [];
-    const CHUNK_SIZE = 500;
-    let cursor: number | undefined = undefined;
-
-    // Iteración con cursor por `id` para evitar drift en catálogos grandes
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const products = await this.prisma.products.findMany({
-        where: { store_id: storeId },
-        orderBy: { id: 'asc' },
-        take: CHUNK_SIZE,
-        ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
-        include: {
-          brands: { select: { name: true } },
-          product_categories: {
-            include: { categories: { select: { name: true } } },
-          },
-          product_tax_assignments: {
-            select: { tax_category_id: true },
-          },
-          product_images: { where: { is_main: true }, take: 1 },
-          product_variants: { select: { id: true } },
-          stock_levels: {
-            select: {
-              product_variant_id: true,
-              quantity_available: true,
-            },
-          },
-        },
-      });
-
-      if (products.length === 0) break;
-
-      for (const p of products) {
-        const hasVariants = (p.product_variants?.length ?? 0) > 0;
-        const stockLevelsForTotals = hasVariants
-          ? (p.stock_levels ?? []).filter(
-              (sl) => sl.product_variant_id !== null,
-            )
-          : p.stock_levels ?? [];
-        const totalStock = stockLevelsForTotals.reduce(
-          (sum, sl) => sum + (sl.quantity_available ?? 0),
-          0,
+      // Validar que la tienda tenga al menos un producto antes de generar el
+      // archivo. Si count() falla (e.g. schema drift), NO fingimos que la
+      // tienda está vacía — propagamos un mensaje distinto al del empty state
+      // para que el usuario no crea falsamente que no tiene productos.
+      let productCount = 0;
+      let countSucceeded = true;
+      try {
+        productCount = await this.prisma.products.count({ where: baseWhere });
+      } catch (err) {
+        countSucceeded = false;
+        this.logger.error(
+          `[exportCurrentProductsAsTemplate] count() failed for store ${storeId} — probable schema drift`,
+          err instanceof Error ? err.stack : String(err),
         );
-        const hasImage = (p.product_images?.length ?? 0) > 0;
+      }
+      if (countSucceeded && productCount === 0) {
+        throw new NotFoundException(
+          'No hay productos en su tienda. Agrega productos antes de descargar la plantilla.',
+        );
+      }
+      if (!countSucceeded) {
+        throw new InternalServerErrorException(
+          'No se pudo verificar el catálogo de productos. Por favor intenta de nuevo en unos minutos.',
+        );
+      }
 
-        rows.push({
+      const baseHeaders = this.getProductTemplateHeaders();
+      const extraHeaders = ['Precio Compra', 'Cantidad Actual', 'Tiene Imagen'];
+      const headers = [...baseHeaders, ...extraHeaders];
+
+      const rows: Record<string, any>[] = [];
+      const CHUNK_SIZE = 500;
+      let cursor: number | undefined = undefined;
+
+      // Try the rich query (con stock_levels + product_images + brands + ...)
+      // primero. Si falla por schema drift (común cuando prod está detrás en
+      // migrations vs el dev DB completo), caemos a un fallback mínimo que
+      // solo trae los campos del producto. De esta forma la mayoría de tiendas
+      // recibe el export enriquecido, y solo las que tienen schema drift ven
+      // un export reducido + un log de warning en backend.
+      let useRichInclude = true;
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        let products: any[] = [];
+        try {
+          const findArgs: any = {
+            where: baseWhere,
+            orderBy: { id: 'asc' },
+            take: CHUNK_SIZE,
+            ...(cursor !== undefined && { skip: 1, cursor: { id: cursor } }),
+          };
+          if (useRichInclude) {
+            findArgs.include = {
+              brands: { select: { name: true } },
+              product_categories: {
+                include: { categories: { select: { name: true } } },
+              },
+              product_tax_assignments: { select: { tax_category_id: true } },
+              product_images: { where: { is_main: true }, take: 1 },
+              product_variants: { select: { id: true } },
+              stock_levels: {
+                select: {
+                  product_variant_id: true,
+                  quantity_available: true,
+                },
+              },
+            };
+          }
+          products = await this.prisma.products.findMany(findArgs);
+        } catch (err) {
+          if (useRichInclude) {
+            // Schema drift probable — fallback al query mínimo sin includes.
+            // No incrementamos cursor porque este chunk no devolvió nada.
+            this.logger.warn(
+              `[exportCurrentProductsAsTemplate] rich findMany failed for store ${storeId} — falling back to minimal query (no stock/image columns)`,
+              err instanceof Error ? err.stack : String(err),
+            );
+            useRichInclude = false;
+            continue;
+          }
+          this.logger.error(
+            `[exportCurrentProductsAsTemplate] minimal findMany failed for store ${storeId}`,
+            err instanceof Error ? err.stack : String(err),
+          );
+          break;
+        }
+
+        if (products.length === 0) break;
+
+        for (const p of products) {
+          const hasVariants = (p.product_variants?.length ?? 0) > 0;
+          const stockLevelsForTotals = hasVariants
+            ? (p.stock_levels ?? []).filter(
+                (sl) => sl.product_variant_id !== null,
+              )
+            : p.stock_levels ?? [];
+          const totalStock = useRichInclude
+            ? stockLevelsForTotals.reduce(
+                (sum, sl) => sum + (sl.quantity_available ?? 0),
+                0,
+              )
+            : 0;
+          const hasImage = useRichInclude
+            ? (p.product_images?.length ?? 0) > 0
+            : false;
+
+          rows.push({
           Nombre: p.name,
           SKU: p.sku ?? '',
           Tipo: p.product_type === 'service' ? 'servicio' : 'físico',
@@ -1185,6 +1254,21 @@ export class ProductsBulkService {
       cursor = products[products.length - 1].id;
     }
 
+    // Si no se recolectaron filas (tienda vacía según el count, o findMany()
+    // mínimo falló por schema drift), lanzar el error correspondiente. Esto
+    // evita que el cliente descargue un Excel vacío con solo headers — un
+    // archivo inútil.
+    if (rows.length === 0) {
+      if (countSucceeded) {
+        throw new NotFoundException(
+          'No hay productos en su tienda. Agrega productos antes de descargar la plantilla.',
+        );
+      }
+      throw new InternalServerErrorException(
+        'No se pudo generar la plantilla en este momento. Por favor intenta de nuevo en unos minutos.',
+      );
+    }
+
     // Si la tienda no tiene productos, igual devolver una hoja con los headers
     // (fila vacía) para que el usuario vea la estructura esperada.
     const ws = XLSX.utils.json_to_sheet(rows.length > 0 ? rows : [], {
@@ -1200,6 +1284,87 @@ export class ProductsBulkService {
     XLSX.utils.book_append_sheet(wb, ws, 'Productos Actuales');
 
     return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    } catch (err) {
+      // Re-throw errores legítimos con mensaje ya-amigable (NotFoundException del
+      // empty state, BadRequestException del contexto, etc.) — son intencionales
+      // y el frontend los muestra tal cual.
+      if (
+        err instanceof NotFoundException ||
+        err instanceof BadRequestException ||
+        err instanceof InternalServerErrorException
+      ) {
+        throw err;
+      }
+
+      // Cualquier otro error (Prisma, timeout, permisos de DB, columna
+      // faltante, etc.) se loguea con contexto y se convierte a un mensaje
+      // legible para el cliente. NUNCA se propaga el error crudo de Prisma
+      // al frontend.
+      // Mapear errores de Prisma a mensajes amigables inline (sin helper
+      // module-level para evitar el bug "is not a function" que vimos en
+      // producción con un deploy parcial).
+      const prismaCode =
+        err && typeof err === 'object' && 'code' in err
+          ? String((err as { code: unknown }).code)
+          : '';
+      const prismaMessage =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: unknown }).message)
+          : '';
+
+      let userMessage =
+        'No se pudo generar la plantilla de productos. Por favor intenta de nuevo o contacta al soporte si el problema persiste.';
+
+      switch (prismaCode) {
+        case 'P1001':
+        case 'P1017':
+          userMessage =
+            'No se pudo conectar a la base de datos. Por favor intenta de nuevo en unos minutos.';
+          break;
+        case 'P1002':
+          userMessage =
+            'La conexión con la base de datos tardó demasiado. Por favor intenta de nuevo.';
+          break;
+        case 'P1003':
+          userMessage =
+            'La base de datos no está disponible. Por favor contacta al soporte si el problema persiste.';
+          break;
+        case 'P2010':
+          userMessage =
+            'La estructura de la base de datos no es la esperada. Por favor contacta al soporte técnico.';
+          break;
+        case 'P2025':
+          userMessage =
+            'No se encontraron los productos solicitados. Por favor actualiza la página e intenta de nuevo.';
+          break;
+        case 'P2002':
+          userMessage =
+            'Hay datos duplicados en tu tienda que impiden generar la plantilla. Por favor contacta al soporte.';
+          break;
+        case 'P2003':
+          userMessage =
+            'Hay datos relacionados que faltan en tu tienda. Por favor contacta al soporte.';
+          break;
+      }
+
+      // Heurísticas por mensaje (fallback cuando el código no es uno de los
+      // conocidos o el error viene de otra capa). Todos genéricos para
+      // NO exponer jerga técnica (DB, schema, etc.) al cliente.
+      if (prismaMessage.includes('does not exist in the current database')) {
+        userMessage =
+          'No se pudo generar la plantilla en este momento. Por favor intenta de nuevo en unos minutos.';
+      } else if (prismaMessage.includes('permission denied')) {
+        userMessage =
+          'No tienes permisos para acceder a estos datos. Por favor contacta al administrador de tu tienda.';
+      } else if (
+        prismaMessage.includes('timeout') ||
+        prismaMessage.includes('timed out')
+      ) {
+        userMessage = 'La operación tardó demasiado. Por favor intenta de nuevo.';
+      }
+
+      throw new InternalServerErrorException(userMessage);
+    }
   }
 
   /**
