@@ -25,6 +25,7 @@ import {
   getDefaultEndDate,
   formatChartPeriod} from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 import {
   SalesTrend,
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
@@ -341,7 +342,7 @@ onDateRangeChange(range: DateRangeFilter): void {
           min: 0,
           splitNumber: 5,
           axisLine: { show: false },
-          axisLabel: { color: '#6b7280' },
+          axisLabel: { color: '#6b7280', formatter: (v: number) => compactCountAxis(v) },
           splitLine: { show: false }},
       ],
       series: [
