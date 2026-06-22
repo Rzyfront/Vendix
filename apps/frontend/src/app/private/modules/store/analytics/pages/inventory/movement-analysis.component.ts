@@ -28,7 +28,7 @@ import {
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
-import { compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
+import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-movement-analysis',
@@ -329,7 +329,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',

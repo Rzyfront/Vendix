@@ -14,7 +14,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
-import { compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
+import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 
 import { AnalyticsService } from '../../services/analytics.service';
 import {
@@ -227,7 +227,7 @@ legend: {
         type: 'category',
         data: ['Agotados', 'Stock Bajo', 'En Stock'],
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',

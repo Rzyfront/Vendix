@@ -290,7 +290,7 @@ export class ProfitLossComponent implements OnInit {
         type: 'category',
         data: ['Ingresos', 'COGS', 'Reembolsos', 'Gastos Operativos'],
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
@@ -361,7 +361,7 @@ export class ProfitLossComponent implements OnInit {
         type: 'category',
         data: ['Ganancia Bruta', 'Reembolsos', 'Gastos', 'Ganancia Neta'],
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
