@@ -26,6 +26,7 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-customer-acquisition',
@@ -299,12 +300,13 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         axisLabel: {
           color: textSecondary,
           fontSize: 11,
-          rotate: 0 },
+          rotate: 0,
+          formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } } },
       series: [
         {

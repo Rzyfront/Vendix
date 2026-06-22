@@ -13,6 +13,7 @@ import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
 import {
   SalesByProduct,
@@ -264,7 +265,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: top10.map((p) => p.product_name),
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
@@ -273,7 +274,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (v: number) => this.formatCurrency(Math.round(v)),
+          formatter: (v: number) => this.currencyService.formatChartAxis(v),
         },
         splitLine: { lineStyle: { color: borderColor } },
       },

@@ -29,6 +29,7 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-product-performance',
@@ -194,7 +195,7 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [{
@@ -224,11 +225,7 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
 
     // Top 5 by units
     const top5 = topSellers.slice(0, 5);
-    const names = top5.map((p) =>
-      p.product_name.length > 25
-        ? p.product_name.substring(0, 25) + '...'
-        : p.product_name,
-    );
+    const names = top5.map((p) => p.product_name);
     const units = top5.map((p) => p.units_sold);
 
 this.topSellersChartOptions.set({
@@ -260,14 +257,14 @@ this.topSellersChartOptions.set({
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 10 },
+        axisLabel: { color: textSecondary, fontSize: 10, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [{

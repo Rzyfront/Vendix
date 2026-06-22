@@ -31,6 +31,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-abandoned-carts',
@@ -345,13 +346,14 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
           fontSize: 11,
           rotate: 0,
           interval: 0,
+          formatter: (val: string) => truncateLabel(val, 14),
         },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [

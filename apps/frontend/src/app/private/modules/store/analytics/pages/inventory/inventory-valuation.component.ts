@@ -19,6 +19,7 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
@@ -260,14 +261,14 @@ legend: {
         type: 'category',
         data: chartData.map((d: any) => d.name),
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280', fontSize: 11 },
+        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
         min: 0,
         splitNumber: 5,
         axisLine: { show: false },
-        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (v: number) => '$' + Math.round(v).toLocaleString('es-CO') },
+        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (v: number) => this.currencyService.formatChartAxis(v) },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: chartData.map((d: any, i: number) => ({
