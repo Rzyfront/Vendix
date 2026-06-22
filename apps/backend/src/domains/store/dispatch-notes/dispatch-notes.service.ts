@@ -25,10 +25,14 @@ import { RouteNumberGenerator } from '../dispatch-routes/utils/route-number-gene
 import {
   buildStopsData,
   computeRouteTotals,
+  resolveIsPrepaid,
   RouteStopNoteInput,
   RouteStopSequenceInput,
 } from '../dispatch-routes/utils/route-stop-calc';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { StockValidatorService } from '../inventory/shared/services/stock-validator.service';
+import { resolvePosStockScope } from '../inventory/shared/helpers/pos-stock-scope.helper';
+import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
 
 const DISPATCH_NOTE_INCLUDE = {
   dispatch_note_items: {
@@ -119,7 +123,189 @@ export class DispatchNotesService {
     private readonly dispatchNumberGenerator: DispatchNumberGenerator,
     private readonly routeNumberGenerator: RouteNumberGenerator,
     private readonly eventEmitter: EventEmitter2,
+    private readonly stockValidator: StockValidatorService,
   ) {}
+
+  /**
+   * Build the delivery-address snapshot persisted on `dispatch_notes.customer_address`
+   * (JSON). The PDF reads this blob in cascade (see
+   * `dispatch-note-pdf.service.formatJsonAddress`), so the keys MUST be the
+   * `addresses` TABLE column names (`address_line1`, `state_province`,
+   * `country_code`, ...), NOT the DTO vocabulary (address_line_1 / state / country).
+   *
+   * Priority:
+   *   1. A `shipping_address_snapshot` JSON already captured on the order — reused
+   *      verbatim (it is already in column-name shape from the order flow).
+   *   2. The populated shipping-address relation row — projected to the snapshot
+   *      shape.
+   * Returns `null` when neither source carries a non-empty address line.
+   */
+  private buildCustomerAddressSnapshot(
+    snapshot: Prisma.JsonValue | null | undefined,
+    relation:
+      | {
+          address_line1?: string | null;
+          address_line2?: string | null;
+          city?: string | null;
+          state_province?: string | null;
+          country_code?: string | null;
+          postal_code?: string | null;
+        }
+      | null
+      | undefined,
+  ): Prisma.InputJsonValue | null {
+    // (1) Prefer the order's own snapshot when it actually carries a line.
+    if (snapshot && typeof snapshot === 'object' && !Array.isArray(snapshot)) {
+      const s = snapshot as Record<string, unknown>;
+      const line1 = s.address_line1 ?? s.line1 ?? s.address;
+      if (typeof line1 === 'string' && line1.trim().length > 0) {
+        return snapshot as Prisma.InputJsonValue;
+      }
+    }
+
+    // (2) Fall back to the relation row, projected to column-name keys.
+    if (relation && relation.address_line1 && relation.address_line1.trim()) {
+      return {
+        address_line1: relation.address_line1,
+        address_line2: relation.address_line2 ?? null,
+        city: relation.city ?? null,
+        state_province: relation.state_province ?? null,
+        country_code: relation.country_code ?? null,
+        postal_code: relation.postal_code ?? null,
+      };
+    }
+
+    return null;
+  }
+
+  /** True when the order's snapshot JSON carries a usable address line. */
+  private snapshotHasAddress(
+    snapshot: Prisma.JsonValue | null | undefined,
+  ): boolean {
+    if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+      return false;
+    }
+    const s = snapshot as Record<string, unknown>;
+    const line1 = s.address_line1 ?? s.line1 ?? s.address;
+    return typeof line1 === 'string' && line1.trim().length > 0;
+  }
+
+  /**
+   * Resolve the default dispatch location for an order: the location of an
+   * ACTIVE stock reservation for the order, falling back to the store's
+   * `default_location_id` (via the POS stock scope helper). Returns null when
+   * neither is available (caller then keeps any per-item location_id as-is).
+   */
+  private async resolveDefaultDispatchLocation(
+    store_id: number,
+    order_id: number,
+  ): Promise<number | null> {
+    // stock_reservations is relationally scoped to the store via
+    // inventory_locations.store_id, so this query is already store-safe.
+    const reservation = await this.prisma.stock_reservations.findFirst({
+      where: {
+        reserved_for_type: 'order',
+        reserved_for_id: order_id,
+        status: 'active',
+      },
+      select: { location_id: true },
+      orderBy: { id: 'asc' },
+    });
+    if (reservation?.location_id) return reservation.location_id;
+
+    // Fallback: the store's default location via the POS stock scope helper.
+    // `stores` is NOT auto-scoped by StorePrismaService → filter store_id.
+    const store = await this.prisma.stores.findFirst({
+      where: { id: store_id },
+      select: { default_location_id: true },
+    });
+    if (!store) return null;
+    const settingsRow = await this.prisma.store_settings.findFirst({
+      where: { store_id },
+      select: { settings: true },
+    });
+    const settings = mergeStoreSettingsWithDefaults(settingsRow?.settings);
+    const scope = resolvePosStockScope(store, settings);
+    return scope.mainLocationId ?? null;
+  }
+
+  /**
+   * Validate that every dispatch item has enough stock at its resolved
+   * location. A remisión dispatches what is ALREADY RESERVED for this order, so
+   * the units reserved for THIS order count as available on top of the live
+   * `quantity_available`. Only a real shortfall (available + reserved-for-order
+   * < dispatched) raises `DISPATCH_NOTE_INSUFFICIENT_STOCK`.
+   */
+  private async validateDispatchItemsStock(
+    store_id: number,
+    order_id: number,
+    items: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      location_id: number | null;
+      dispatched_quantity: number;
+    }>,
+  ): Promise<void> {
+    const insufficient: Array<{
+      product_id: number;
+      product_variant_id: number | null;
+      requested: number;
+      available: number;
+    }> = [];
+
+    for (const item of items) {
+      if (item.location_id == null) continue; // no location → skip (no scope to check)
+      const qty = Number(item.dispatched_quantity || 0);
+      if (qty <= 0) continue;
+
+      // Skip products that do not track inventory.
+      const tracks = await this.stockValidator.doesProductTrackInventory(
+        item.product_id,
+        item.product_variant_id ?? undefined,
+      );
+      if (!tracks) continue;
+
+      const availability = await this.stockValidator.validateAvailability(
+        item.product_id,
+        item.product_variant_id ?? undefined,
+        qty,
+        item.location_id,
+      );
+
+      // Reserved-for-THIS-order units count as dispatchable: the remisión
+      // consumes the reservation, so they are not a real shortfall.
+      const reserved = await this.prisma.stock_reservations.aggregate({
+        where: {
+          reserved_for_type: 'order',
+          reserved_for_id: order_id,
+          status: 'active',
+          location_id: item.location_id,
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? null,
+        },
+        _sum: { quantity: true },
+      });
+      const reservedForOrder = Number(reserved._sum.quantity || 0);
+      const effectiveAvailable = availability.available + reservedForOrder;
+
+      if (effectiveAvailable < qty) {
+        insufficient.push({
+          product_id: item.product_id,
+          product_variant_id: item.product_variant_id ?? null,
+          requested: qty,
+          available: effectiveAvailable,
+        });
+      }
+    }
+
+    if (insufficient.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_INSUFFICIENT_STOCK,
+        undefined,
+        { items: insufficient },
+      );
+    }
+  }
 
   async create(dto: CreateDispatchNoteDto) {
     const context = RequestContextService.getContext();
@@ -244,7 +430,8 @@ export class DispatchNotesService {
     const store_id = context?.store_id;
     if (!store_id) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
 
-    // Fetch the sales order with items
+    // Fetch the sales order with items + shipping address relation (sales_orders
+    // have no snapshot JSON, the relation row is the only address source).
     const sales_order = await this.prisma.sales_orders.findFirst({
       where: { id: sales_order_id },
       include: {
@@ -262,11 +449,32 @@ export class DispatchNotesService {
             document_number: true,
           },
         },
+        addresses: {
+          select: {
+            address_line1: true,
+            address_line2: true,
+            city: true,
+            state_province: true,
+            country_code: true,
+            postal_code: true,
+          },
+        },
       },
     });
 
     if (!sales_order) {
       throw new NotFoundException('Orden de venta no encontrada');
+    }
+
+    // Delivery address gate + snapshot (same contract as createFromOrder).
+    const customer_address_snapshot = this.buildCustomerAddressSnapshot(
+      null,
+      sales_order.addresses,
+    );
+    if (!customer_address_snapshot) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_NO_SHIPPING_ADDRESS,
+      );
     }
 
     const customer_name =
@@ -331,6 +539,8 @@ export class DispatchNotesService {
         customer_id: sales_order.customer_id,
         customer_name,
         customer_tax_id: sales_order.customer?.document_number || null,
+        // Delivery-address snapshot read by the remisión PDF in cascade.
+        customer_address: customer_address_snapshot ?? Prisma.JsonNull,
         sales_order_id,
         dispatch_location_id: dto.dispatch_location_id,
         emission_date: new Date(),
@@ -392,6 +602,8 @@ export class DispatchNotesService {
     }
 
     // Fetch the order with items (store-scoped via StorePrismaService).
+    // Includes the shipping address (snapshot JSON + populated relation) so we
+    // can validate it exists and snapshot it on the remisión.
     const order = await this.prisma.orders.findFirst({
       where: { id: order_id },
       include: {
@@ -402,6 +614,16 @@ export class DispatchNotesService {
             first_name: true,
             last_name: true,
             document_number: true,
+          },
+        },
+        addresses_orders_shipping_address_idToaddresses: {
+          select: {
+            address_line1: true,
+            address_line2: true,
+            city: true,
+            state_province: true,
+            country_code: true,
+            postal_code: true,
           },
         },
       },
@@ -425,8 +647,34 @@ export class DispatchNotesService {
       throw new VendixHttpException(ErrorCodes.DSP_ORDER_DELIVERY_001);
     }
 
+    // Delivery address gate: a remisión needs a place to deliver. The address
+    // comes from the order's snapshot JSON or its populated shipping-address
+    // relation. Without either we cannot generate the remisión.
+    const orderShippingRelation =
+      order.addresses_orders_shipping_address_idToaddresses;
+    const customer_address_snapshot = this.buildCustomerAddressSnapshot(
+      order.shipping_address_snapshot,
+      orderShippingRelation,
+    );
+    if (
+      !this.snapshotHasAddress(order.shipping_address_snapshot) &&
+      !customer_address_snapshot
+    ) {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_NOTE_NO_SHIPPING_ADDRESS,
+      );
+    }
+
     const customer_name =
       `${order.users?.first_name || ''} ${order.users?.last_name || ''}`.trim();
+
+    // Resolve the default dispatch location: the active reservation's location
+    // for this order, falling back to the store default. Used when an item
+    // omits its own location_id.
+    const default_location_id = await this.resolveDefaultDispatchLocation(
+      store_id,
+      order_id,
+    );
 
     // Build items from order items
     const dispatch_items: any[] = [];
@@ -442,7 +690,9 @@ export class DispatchNotesService {
       dispatch_items.push({
         product_id: order_item.product_id,
         product_variant_id: order_item.product_variant_id,
-        location_id: dto_item.location_id,
+        // Default to the resolved warehouse (reservation/store default) when the
+        // item carries no explicit location_id.
+        location_id: dto_item.location_id ?? default_location_id,
         ordered_quantity: order_item.quantity,
         dispatched_quantity: dto_item.dispatched_quantity,
         unit_price: order_item.unit_price,
@@ -454,6 +704,11 @@ export class DispatchNotesService {
         lot_serial: dto_item.lot_serial,
       });
     }
+
+    // Stock gate: the remisión dispatches what is already reserved for this
+    // order, so reserved-for-this-order units count as available. Only a real
+    // shortfall raises DISPATCH_NOTE_INSUFFICIENT_STOCK.
+    await this.validateDispatchItemsStock(store_id, order_id, dispatch_items);
 
     const subtotal = dispatch_items.reduce(
       (sum, item) =>
@@ -494,9 +749,13 @@ export class DispatchNotesService {
           customer_id: order.customer_id,
           customer_name,
           customer_tax_id: order.users?.document_number || null,
+          // Delivery-address snapshot read by the remisión PDF in cascade.
+          customer_address: customer_address_snapshot ?? Prisma.JsonNull,
           order_id,
           needs_collection,
-          dispatch_location_id: dto.dispatch_location_id,
+          // Surface the resolved warehouse on the remisión so the frontend can
+          // display it (reservation location → store default fallback).
+          dispatch_location_id: dto.dispatch_location_id ?? default_location_id,
           emission_date: new Date(),
           agreed_delivery_date: dto.agreed_delivery_date
             ? new Date(dto.agreed_delivery_date)
@@ -567,12 +826,23 @@ export class DispatchNotesService {
     grand_total: Prisma.Decimal | number | string | null;
     needs_collection: boolean | null;
     invoice?: { payment_date: Date | null } | null;
+    order?: { remaining_balance: Prisma.Decimal | number | string | null } | null;
   }): RouteStopNoteInput {
     return {
       id: row.id,
       grand_total: row.grand_total == null ? null : Number(row.grand_total),
       needs_collection: row.needs_collection,
       invoice: row.invoice ?? null,
+      // Live payment state of a regular order → DERIVED prepaid resolution.
+      order:
+        row.order == null
+          ? null
+          : {
+              remaining_balance:
+                row.order.remaining_balance == null
+                  ? null
+                  : Number(row.order.remaining_balance),
+            },
     };
   }
 
@@ -627,6 +897,7 @@ export class DispatchNotesService {
     }
 
     // Load the new note with the SAME select shape the calculators expect.
+    // invoice.payment_date + order.remaining_balance feed the DERIVED prepaid.
     const new_note = await tx.dispatch_notes.findFirst({
       where: { id: dispatch_note_id, store_id },
       select: {
@@ -634,6 +905,7 @@ export class DispatchNotesService {
         grand_total: true,
         needs_collection: true,
         invoice: { select: { payment_date: true } },
+        order: { select: { remaining_balance: true } },
       },
     });
     if (!new_note) {
@@ -653,11 +925,19 @@ export class DispatchNotesService {
     ]);
     const [new_stop_data] = buildStopsData([new_stop_input], new_notes_by_id);
 
-    // Recompute totals over the COMPLETE set (existing + new).
+    // Recompute totals over the COMPLETE set (existing + new). is_prepaid is
+    // DERIVED from each note's live payment state, not the frozen persisted
+    // stop boolean — consistent with the read-path derivation.
     const existing_note_ids = route.stops.map((s) => s.dispatch_note_id);
     const existing_notes_full = await tx.dispatch_notes.findMany({
       where: { id: { in: existing_note_ids }, store_id },
-      select: { id: true, grand_total: true, needs_collection: true },
+      select: {
+        id: true,
+        grand_total: true,
+        needs_collection: true,
+        invoice: { select: { payment_date: true } },
+        order: { select: { remaining_balance: true } },
+      },
     });
     const all_notes_by_id = new Map<number, RouteStopNoteInput>([
       [new_note_input.id, new_note_input],
@@ -666,18 +946,21 @@ export class DispatchNotesService {
       all_notes_by_id.set(n.id, this.toRouteStopNoteInput(n));
 
     const all_stops_data = [
-      ...route.stops.map((s) => ({
-        dispatch_note_id: s.dispatch_note_id,
-        stop_sequence: s.stop_sequence,
-        is_extra_route: false,
-        is_prepaid: s.is_prepaid,
-        collected_amount: 0,
-        anticipo_amount: 0,
-        change_amount: 0,
-        withholding_amount: 0,
-        credit_amount: 0,
-        notes: null,
-      })),
+      ...route.stops.map((s) => {
+        const note = all_notes_by_id.get(s.dispatch_note_id);
+        return {
+          dispatch_note_id: s.dispatch_note_id,
+          stop_sequence: s.stop_sequence,
+          is_extra_route: false,
+          is_prepaid: note ? resolveIsPrepaid(note) : s.is_prepaid,
+          collected_amount: 0,
+          anticipo_amount: 0,
+          change_amount: 0,
+          withholding_amount: 0,
+          credit_amount: 0,
+          notes: null,
+        };
+      }),
       new_stop_data,
     ];
     const { total_to_collect, total_prepaid } = computeRouteTotals(
@@ -730,6 +1013,7 @@ export class DispatchNotesService {
     }));
 
     // Load the note for prepaid/total resolution (calculator input shape).
+    // invoice.payment_date + order.remaining_balance feed the DERIVED prepaid.
     const note = await tx.dispatch_notes.findFirst({
       where: { id: dispatch_note_id, store_id },
       select: {
@@ -737,6 +1021,7 @@ export class DispatchNotesService {
         grand_total: true,
         needs_collection: true,
         invoice: { select: { payment_date: true } },
+        order: { select: { remaining_balance: true } },
       },
     });
     if (!note) {

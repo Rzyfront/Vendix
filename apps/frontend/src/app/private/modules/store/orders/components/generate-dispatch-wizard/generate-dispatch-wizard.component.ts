@@ -10,7 +10,8 @@ import {
   signal,
 } from '@angular/core';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { startWith } from 'rxjs';
 
 import {
   ModalComponent,
@@ -26,7 +27,7 @@ import { StoreUserMultiSelectComponent } from '../../../../../../shared/componen
 import { SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 
-import { Order, OrderItem } from '../../interfaces/order.interface';
+import { Address, Order, OrderItem } from '../../interfaces/order.interface';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import {
   CreateDispatchFromOrderDto,
@@ -98,6 +99,41 @@ export class GenerateDispatchWizardComponent {
   readonly generated = output<number>();
   readonly closed = output<void>();
 
+  /**
+   * Emitted when the order has no shipping address and the user taps the CTA
+   * to capture one. The parent (order-details) owns the capture flow
+   * (`promptAddShippingAddress` + `app-shipping-address-modal`); the wizard
+   * only signals intent so we don't duplicate the modal here.
+   */
+  readonly requestAddress = output<void>();
+
+  // ── Shipping address (Bug 2: dirección de entrega obligatoria) ─────────
+  /**
+   * Shipping address resolved from the order's populated relation
+   * (`addresses_orders_shipping_address_idToaddresses`). The backend rejects
+   * `createFromOrder` with `DISPATCH_NOTE_NO_SHIPPING_ADDRESS` when this is
+   * absent, so the wizard surfaces it and gates the submit button.
+   */
+  readonly shippingAddress = computed<Address | null>(
+    () => this.order()?.addresses_orders_shipping_address_idToaddresses ?? null,
+  );
+
+  /** True when the order carries a usable delivery address. */
+  readonly hasShippingAddress = computed<boolean>(() => {
+    const addr = this.shippingAddress();
+    return !!addr && !!addr.address_line1?.trim();
+  });
+
+  /** One-line formatted address: `address_line1, city, state_province`. */
+  readonly shippingAddressLabel = computed<string>(() => {
+    const addr = this.shippingAddress();
+    if (!addr) return '';
+    return [addr.address_line1, addr.city, addr.state_province]
+      .map((p) => p?.trim())
+      .filter(Boolean)
+      .join(', ');
+  });
+
   // ── Wizard navigation ─────────────────────────────────────────────────
   readonly step = signal<1 | 2 | 3>(1);
   readonly submitting = signal<boolean>(false);
@@ -138,6 +174,33 @@ export class GenerateDispatchWizardComponent {
   });
 
   readonly locationOptions = signal<SelectorOption[]>([]);
+
+  /**
+   * Id of the warehouse the wizard pre-selects as the dispatch origin
+   * (Bug 1). The order object does not carry the active POS reservation's
+   * location, so we fall back to the store's default warehouse (the one that
+   * `is_default`), which is the same fallback the backend uses after the
+   * active reservation. Drives the "Bodega del POS" hint in the UI.
+   */
+  readonly posLocationId = signal<number | null>(null);
+
+  /**
+   * Signal mirror of the dispatch_location_id form control so the template
+   * can reactively decide whether to show the "Bodega del POS" hint without
+   * reading the plain form value in a non-reactive context (zoneless rule).
+   */
+  readonly selectedLocationId = toSignal(
+    this.dataForm.controls.dispatch_location_id.valueChanges.pipe(
+      startWith(this.dataForm.controls.dispatch_location_id.value),
+    ),
+    { initialValue: this.dataForm.controls.dispatch_location_id.value },
+  );
+
+  /** True when the pre-selected POS/default warehouse is the current choice. */
+  readonly isPosLocationSelected = computed<boolean>(() => {
+    const posId = this.posLocationId();
+    return posId != null && this.selectedLocationId() === posId;
+  });
 
   // ── Step 3: route assignment ──────────────────────────────────────────
   readonly routeMode = signal<RouteMode>('none');
@@ -197,6 +260,7 @@ export class GenerateDispatchWizardComponent {
     this.step.set(1);
     this.submitting.set(false);
     this.routeMode.set('none');
+    this.posLocationId.set(null);
     this.dataForm.reset({
       dispatch_location_id: null,
       agreed_delivery_date: '',
@@ -240,14 +304,31 @@ export class GenerateDispatchWizardComponent {
       .subscribe({
         next: (res) => {
           const list = res?.data ?? [];
+          const defaultLoc = list.find((l) => l.is_default) ?? null;
+          this.posLocationId.set(defaultLoc?.id ?? null);
           this.locationOptions.set(
             list.map((l) => ({
               value: l.id,
-              label: l.name + (l.is_default ? ' (Principal)' : ''),
+              // Bug 1: surface which warehouse reserved the stock at the POS.
+              label:
+                l.name +
+                (l.is_default ? ' · Bodega del POS (reservó el stock)' : ''),
             })),
           );
+          // Pre-select the POS/default warehouse when the user hasn't picked
+          // one yet, so the remisión deducts from the warehouse that reserved
+          // the units (matching the backend's reservation→default fallback).
+          if (
+            defaultLoc &&
+            this.dataForm.controls.dispatch_location_id.value == null
+          ) {
+            this.dataForm.controls.dispatch_location_id.setValue(defaultLoc.id);
+          }
         },
-        error: () => this.locationOptions.set([]),
+        error: () => {
+          this.locationOptions.set([]);
+          this.posLocationId.set(null);
+        },
       });
   }
 
@@ -385,10 +466,32 @@ export class GenerateDispatchWizardComponent {
     this.closed.emit();
   }
 
+  /**
+   * CTA shown when the order has no delivery address: delegate the capture to
+   * the parent (order-details), which owns the shared
+   * `app-shipping-address-modal`. We close this wizard first so the modals
+   * don't stack; the parent reopens the wizard (or the user does) once the
+   * address is saved.
+   */
+  requestShippingAddress(): void {
+    if (this.submitting()) return;
+    this.requestAddress.emit();
+    this.closed.emit();
+  }
+
   // ── Submit ────────────────────────────────────────────────────────────
   submit(): void {
     const order = this.order();
     if (!order) return;
+
+    // Bug 2 guard: the backend rejects with DISPATCH_NOTE_NO_SHIPPING_ADDRESS.
+    // Fail fast in the UI and steer the user to capture the address.
+    if (!this.hasShippingAddress()) {
+      this.toast.error(
+        'La orden no tiene dirección de entrega. Agrégala antes de generar la remisión.',
+      );
+      return;
+    }
 
     const dto = this.buildDto();
     if (!dto) return;
@@ -515,6 +618,10 @@ export class GenerateDispatchWizardComponent {
         'La orden no está en un estado válido para generar una remisión.',
       DSP_ORDER_DELIVERY_001:
         'Las órdenes de entrega directa no generan remisión de despacho.',
+      DISPATCH_NOTE_NO_SHIPPING_ADDRESS:
+        'La orden no tiene dirección de entrega. Agrégala antes de generar la remisión.',
+      DISPATCH_NOTE_INSUFFICIENT_STOCK:
+        'No hay stock suficiente en la bodega seleccionada para uno o más ítems. Verifica las existencias o cambia la bodega de despacho.',
     };
 
     if (code && byCode[code]) return byCode[code];

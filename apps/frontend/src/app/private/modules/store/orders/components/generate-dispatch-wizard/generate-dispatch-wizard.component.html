@@ -36,6 +36,56 @@
       </div>
     }
 
+    <!-- ───────── Dirección de entrega (Bug 2: obligatoria) ───────── -->
+    @if (hasShippingAddress()) {
+      <div
+        class="rounded-xl border border-border bg-surface p-3 flex items-start gap-3"
+      >
+        <span
+          class="flex h-9 w-9 items-center justify-center rounded-[0.625rem] flex-shrink-0 text-primary-600"
+        >
+          <app-icon name="map-pin" [size]="18"></app-icon>
+        </span>
+        <div class="min-w-0 flex-1">
+          <div class="text-xs font-bold text-text-secondary uppercase tracking-wide">
+            Dirección de entrega
+          </div>
+          <div class="text-sm text-text-primary">{{ shippingAddressLabel() }}</div>
+        </div>
+      </div>
+    } @else {
+      <div
+        class="rounded-xl border p-3 flex items-start gap-3"
+        style="border-color: var(--color-warning, #d97706); background: rgba(217, 119, 6, 0.08);"
+      >
+        <span
+          class="flex h-9 w-9 items-center justify-center rounded-[0.625rem] flex-shrink-0"
+          style="color: var(--color-warning, #d97706);"
+        >
+          <app-icon name="alert-triangle" [size]="18"></app-icon>
+        </span>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-bold text-text-primary">
+            Falta la dirección de entrega
+          </div>
+          <p class="text-xs text-text-secondary mt-0.5">
+            Esta orden no tiene dirección de entrega. No se puede generar la
+            remisión sin una dirección. Captúrala para continuar.
+          </p>
+          <app-button
+            variant="outline"
+            size="sm"
+            class="mt-2 inline-flex"
+            (clicked)="requestShippingAddress()"
+            [disabled]="submitting()"
+          >
+            <app-icon slot="icon" name="map-pin" [size]="16"></app-icon>
+            <span class="ml-1">Agregar dirección</span>
+          </app-button>
+        </div>
+      </div>
+    }
+
     <!-- ───────── STEP 1: ITEMS ───────── -->
     @if (step() === 1) {
       <div>
@@ -82,15 +132,23 @@
       <div class="space-y-4" [formGroup]="dataForm">
         <div>
           <app-selector
-            label="Ubicación de despacho"
-            placeholder="Selecciona una bodega (opcional)"
+            label="Bodega de despacho"
+            placeholder="Selecciona una bodega"
             [searchable]="true"
             [options]="locationOptions()"
             formControlName="dispatch_location_id"
           ></app-selector>
-          <p class="flex items-center gap-1.5 text-xs text-text-secondary mt-1.5">
-            <app-icon name="info" [size]="13" class="shrink-0"></app-icon>
-            Opcional — bodega de origen del despacho.
+          <p class="flex items-start gap-1.5 text-xs text-text-secondary mt-1.5">
+            <app-icon name="info" [size]="13" class="shrink-0 mt-0.5"></app-icon>
+            @if (isPosLocationSelected()) {
+              <span>
+                Bodega del POS — es la que reservó las unidades de esta orden. El
+                stock se descuenta desde aquí. Cámbiala solo si despachas desde
+                otra bodega.
+              </span>
+            } @else {
+              <span>Bodega de origen desde la que se descuenta el stock del despacho.</span>
+            }
           </p>
         </div>
 
@@ -359,7 +417,7 @@
         <app-button
           variant="primary"
           (clicked)="submit()"
-          [disabled]="submitting()"
+          [disabled]="submitting() || !hasShippingAddress()"
         >
           {{ submitting() ? "Generando..." : "Generar Remisión" }}
         </app-button>

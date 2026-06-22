@@ -57,6 +57,9 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { TicketData, TicketItem } from '../../../pos/models/ticket.model';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
+import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
+import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+import { STATUS_LABELS as DISPATCH_NOTE_STATUS_LABELS } from '../../../dispatch-notes/constants/dispatch-note.constants';
 
 export interface LifecycleStep {
   key: string;
@@ -142,6 +145,12 @@ export class OrderDetailsPageComponent {
     () => this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
   );
   orderRefunds = signal<RefundRecord[]>([]);
+  /**
+   * Bug 4 — dispatch notes (remisiones) generated from this order, loaded from
+   * `GET /store/dispatch-notes/by-order/:orderId`. Drives the
+   * "Despacho / Remisiones" traceability card.
+   */
+  dispatchNotes = signal<DispatchNote[]>([]);
   private rawTimeline = signal<any[]>([]);
   isLoading = signal(false);
   error: string | null = null;
@@ -992,6 +1001,8 @@ export class OrderDetailsPageComponent {
   // dispatch them from this page).
   private kitchenTicketsService = inject(KitchenTicketsService);
   private sanitizer = inject(DomSanitizer);
+  // Bug 4 — traceability order → dispatch note → route.
+  private dispatchNotesService = inject(DispatchNotesService);
 
   constructor() {
     this.currencySymbol = this.currencyService.currencySymbol;
@@ -1116,6 +1127,9 @@ export class OrderDetailsPageComponent {
 
           // Load refund history
           this.loadRefunds();
+
+          // Bug 4 — load dispatch notes (remisiones) for traceability.
+          this.loadDispatchNotes();
         },
         error: (err) => {
           console.error('Error loading order data:', err);
@@ -1957,6 +1971,10 @@ export class OrderDetailsPageComponent {
     const user = this.authFacade.getCurrentUser();
     const cashierName = user ? `${user.first_name} ${user.last_name}` : 'Administrador';
 
+    // Delivery address from the order's shipping address (may be undefined for
+    // counter POS sales without a shipping address).
+    const shippingAddress = this.formatShippingAddress(orderData);
+
     return {
       id: orderData.order_number || 'N/A',
       date: new Date(orderData.created_at || Date.now()),
@@ -1975,8 +1993,9 @@ export class OrderDetailsPageComponent {
             name: `${orderData.users.first_name || ''} ${orderData.users.last_name || ''}`.trim() || 'Consumidor Final',
             email: orderData.users.email,
             phone: orderData.users.phone,
+            shippingAddress,
           }
-        : { name: 'Consumidor Final' },
+        : { name: 'Consumidor Final', shippingAddress },
       store: orderData.stores
         ? {
             name: orderData.stores.name,
@@ -1988,6 +2007,71 @@ export class OrderDetailsPageComponent {
           }
         : undefined,
     };
+  }
+
+  /**
+   * Build a single-line delivery address from the order's shipping address
+   * relation. Returns `undefined` when there is no address (e.g. counter POS
+   * sales) so the ticket omits the line entirely. Empty parts are skipped.
+   */
+  private formatShippingAddress(orderData: Order): string | undefined {
+    const addr = orderData.addresses_orders_shipping_address_idToaddresses;
+    if (!addr) return undefined;
+    const parts = [
+      addr.address_line1,
+      addr.address_line2,
+      addr.city,
+      addr.state_province,
+    ]
+      .map((p) => (p ?? '').trim())
+      .filter((p) => p.length > 0);
+    return parts.length > 0 ? parts.join(', ') : undefined;
+  }
+
+  // ── Bug 4: order → dispatch note → route traceability ──────
+
+  /**
+   * Load the dispatch notes (remisiones) for the current order. Failures are
+   * non-fatal: the card simply stays hidden. Called from `loadData()`.
+   */
+  private loadDispatchNotes(): void {
+    if (!this.orderId) return;
+    const numericOrderId = Number(this.orderId);
+    if (!Number.isFinite(numericOrderId)) return;
+    this.dispatchNotesService
+      .getByOrder(numericOrderId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (notes) => this.dispatchNotes.set(Array.isArray(notes) ? notes : []),
+        error: () => this.dispatchNotes.set([]),
+      });
+  }
+
+  /** Human label for a dispatch-note status (reuses the shared constant). */
+  dispatchNoteStatusLabel(note: DispatchNote): string {
+    return DISPATCH_NOTE_STATUS_LABELS[note.status] || note.status;
+  }
+
+  /**
+   * Active route assignment of a dispatch note: the first stop whose route is
+   * present and whose status is not `released`. Returns `null` when the note
+   * is not currently on a route.
+   */
+  activeRoute(note: DispatchNote): { id: number; route_number: string } | null {
+    const stop = (note.dispatch_route_stops ?? []).find(
+      (s) => s.status !== 'released' && !!s.route,
+    );
+    return stop?.route ? { id: stop.route.id, route_number: stop.route.route_number } : null;
+  }
+
+  /** Navigate to the dispatch-note (remisión) detail page. */
+  viewDispatchNote(note: DispatchNote): void {
+    this.router.navigate(['/admin/orders/dispatch-notes', note.id]);
+  }
+
+  /** Navigate to the dispatch route (planilla) detail page. */
+  viewDispatchRoute(routeId: number): void {
+    this.router.navigate(['/admin/orders/planillas', routeId]);
   }
 
   goBack(): void {

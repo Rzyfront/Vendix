@@ -20,6 +20,8 @@ import {
   buildStopsData,
   computeRouteTotals,
   buildRouteReconciliation,
+  deriveStopIsPrepaid,
+  resolveIsPrepaid,
   RouteReconciliation,
   ReconciliationStopInput,
   RouteStopNoteInput,
@@ -55,7 +57,21 @@ const DISPATCH_ROUTE_INCLUDE = {
           grand_total: true,
           status: true,
           sales_order_id: true,
+          order_id: true,
+          // Live payment signals → DERIVED is_prepaid on read (never the frozen
+          // persisted stop boolean).
+          needs_collection: true,
+          // Delivery-address snapshot for the planilla per-stop address.
+          customer_address: true,
           sales_order: { select: { id: true, order_number: true, status: true } },
+          invoice: { select: { payment_date: true } },
+          order: {
+            select: {
+              id: true,
+              remaining_balance: true,
+              shipping_address_snapshot: true,
+            },
+          },
           // Withholding-agent flag drives the UI banner + the backend
           // re-validation in route-flow.service.settleStop().
           customer: { select: { is_withholding_agent: true } },
@@ -381,12 +397,16 @@ export class DispatchRoutesService {
     // Surface `customer.is_withholding_agent` as a top-level
     // `customer_is_withholding_agent` on each stop's dispatch_note for
     // legacy UI consumers. The nested `customer` object remains the
-    // source of truth.
+    // source of truth. We ALSO overwrite each stop's `is_prepaid` with the
+    // DERIVED value (live note/order payment state) so the frontend reflects
+    // the real prepaid status instead of the frozen persisted boolean.
     const stops_with_alias = (route.stops ?? []).map((stop: any) => {
       const dn = stop.dispatch_note ?? null;
-      if (!dn) return stop;
+      const is_prepaid = deriveStopIsPrepaid(stop);
+      if (!dn) return { ...stop, is_prepaid };
       return {
         ...stop,
+        is_prepaid,
         dispatch_note: {
           ...dn,
           customer_is_withholding_agent:
@@ -546,12 +566,20 @@ export class DispatchRoutesService {
     );
     const new_stops_data = buildStopsData(new_stop_inputs, new_notes_by_id);
 
-    // Recompute route totals over the COMPLETE set (existing + new). Existing
-    // stops contribute their persisted is_prepaid + the note's grand_total.
+    // Recompute route totals over the COMPLETE set (existing + new). is_prepaid
+    // is DERIVED from each note's live payment state (needs_collection +
+    // invoice.payment_date + order.remaining_balance), not the frozen persisted
+    // stop boolean — so the recomputed totals match the read-path derivation.
     const existing_note_ids_list = route.stops.map((s) => s.dispatch_note_id);
     const existing_notes_full = await this.prisma.dispatch_notes.findMany({
       where: { id: { in: existing_note_ids_list }, store_id },
-      select: { id: true, grand_total: true, needs_collection: true },
+      select: {
+        id: true,
+        grand_total: true,
+        needs_collection: true,
+        invoice: { select: { payment_date: true } },
+        order: { select: { remaining_balance: true } },
+      },
     });
     const all_notes_by_id = new Map<number, RouteStopNoteInput>(
       new_notes.map((n) => [n.id, n]),
@@ -559,18 +587,23 @@ export class DispatchRoutesService {
     for (const n of existing_notes_full) all_notes_by_id.set(n.id, n);
 
     const all_stops_data = [
-      ...route.stops.map((s) => ({
-        dispatch_note_id: s.dispatch_note_id,
-        stop_sequence: s.stop_sequence,
-        is_extra_route: false,
-        is_prepaid: s.is_prepaid,
-        collected_amount: 0,
-        anticipo_amount: 0,
-        change_amount: 0,
-        withholding_amount: 0,
-        credit_amount: 0,
-        notes: null,
-      })),
+      ...route.stops.map((s) => {
+        const note = all_notes_by_id.get(s.dispatch_note_id);
+        return {
+          dispatch_note_id: s.dispatch_note_id,
+          stop_sequence: s.stop_sequence,
+          is_extra_route: false,
+          // DERIVE from the live note payment state instead of the frozen
+          // persisted stop boolean, so totals match the read-path derivation.
+          is_prepaid: note ? resolveIsPrepaid(note) : s.is_prepaid,
+          collected_amount: 0,
+          anticipo_amount: 0,
+          change_amount: 0,
+          withholding_amount: 0,
+          credit_amount: 0,
+          notes: null,
+        };
+      }),
       ...new_stops_data,
     ];
     const { total_to_collect, total_prepaid } = computeRouteTotals(
@@ -739,6 +772,8 @@ export class DispatchRoutesService {
         grand_total: true,
         status: true,
         needs_collection: true,
+        customer_address: true,
+        order: { select: { shipping_address_snapshot: true } },
       },
     });
     return notes
@@ -750,6 +785,8 @@ export class DispatchRoutesService {
         grand_total: n.grand_total,
         status: n.status,
         needs_collection: n.needs_collection,
+        customer_address: n.customer_address,
+        shipping_address_snapshot: n.order?.shipping_address_snapshot ?? null,
       }));
   }
 }

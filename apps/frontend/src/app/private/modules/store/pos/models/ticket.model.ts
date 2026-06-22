@@ -28,6 +28,11 @@ export interface TicketData {
     email?: string;
     phone?: string;
     taxId?: string;
+    /**
+     * Optional delivery address line for orders that ship/deliver. Built from
+     * the order's shipping address. Omitted for counter POS sales (no address).
+     */
+    shippingAddress?: string;
   };
   store?: {
     name: string;

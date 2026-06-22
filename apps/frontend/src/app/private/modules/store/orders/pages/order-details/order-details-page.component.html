@@ -1093,6 +1093,59 @@
               </ng-template>
             </app-timeline>
           </app-card>
+
+          <!-- 5. DESPACHO / REMISIONES (trazabilidad orden → remisión → ruta) -->
+          @if (dispatchNotes().length > 0) {
+            <app-card
+              title="Despacho / Remisiones"
+              shadow="sm"
+              [responsivePadding]="true"
+            >
+              <div class="flex flex-col gap-3 pt-1">
+                @for (note of dispatchNotes(); track note.id) {
+                  <div
+                    class="flex flex-col gap-2 rounded-xl border border-border bg-[var(--color-surface)] p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div class="flex min-w-0 items-center gap-2">
+                      <app-icon
+                        name="package"
+                        [size]="16"
+                        class="shrink-0 text-text-secondary"
+                      />
+                      <div class="min-w-0">
+                        <p class="truncate text-sm font-bold text-gray-900">
+                          {{ note.dispatch_number }}
+                        </p>
+                        <p class="text-xs text-text-secondary">
+                          {{ dispatchNoteStatusLabel(note) }}
+                        </p>
+                      </div>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <app-button
+                        variant="ghost"
+                        size="sm"
+                        (clicked)="viewDispatchNote(note)"
+                      >
+                        <app-icon slot="icon" name="file-text" [size]="14" />
+                        Ver remisión
+                      </app-button>
+                      @if (activeRoute(note); as route) {
+                        <app-button
+                          variant="secondary"
+                          size="sm"
+                          (clicked)="viewDispatchRoute(route.id)"
+                        >
+                          <app-icon slot="icon" name="truck" [size]="14" />
+                          Ver ruta {{ route.route_number }}
+                        </app-button>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+            </app-card>
+          }
         </div>
 
         <!-- ═══ COLUMNA DERECHA (SIDEBAR) ═══ -->
@@ -1895,6 +1948,7 @@
       [isOpen]="showDispatchModal()"
       [order]="order()"
       (generated)="onDispatchGenerated($event)"
+      (requestAddress)="promptAddShippingAddress()"
       (closed)="showDispatchModal.set(false)"
     ></app-generate-dispatch-wizard>
 

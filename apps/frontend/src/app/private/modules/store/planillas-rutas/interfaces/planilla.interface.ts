@@ -41,6 +41,35 @@ export interface DispatchNoteSalesOrderSummary {
   status?: string;
 }
 
+/**
+ * Delivery-address JSON snapshot stored on a dispatch note / order. Mirrors the
+ * backend `customer_address` and `shipping_address_snapshot` shape. Every field
+ * is optional because legacy remisiones may carry a partial blob (or none).
+ */
+export interface DispatchDeliveryAddress {
+  address_line1?: string | null;
+  address_line2?: string | null;
+  city?: string | null;
+  state_province?: string | null;
+  country_code?: string | null;
+  postal_code?: string | null;
+  /** Legacy aliases tolerated by the address-presence check. */
+  line1?: string | null;
+  address?: string | null;
+}
+
+/**
+ * Minimal order summary carried by `dispatch_note.order` in the route include.
+ * Surfaces the `shipping_address_snapshot` fallback used when the note has no
+ * own `customer_address`.
+ */
+export interface DispatchNoteOrderSummary {
+  id?: number;
+  order_number?: string | null;
+  status?: string | null;
+  shipping_address_snapshot?: DispatchDeliveryAddress | null;
+}
+
 export interface DispatchNoteSummary {
   id: number;
   dispatch_number: string;
@@ -56,6 +85,18 @@ export interface DispatchNoteSummary {
    * "Orden pendiente de pago" chip on the planilla detail.
    */
   sales_order?: DispatchNoteSalesOrderSummary | null;
+  /**
+   * Delivery-address snapshot (JSON) of the dispatch note. Returned by the
+   * backend `DISPATCH_ROUTE_INCLUDE` so the planilla detail can show "¿dónde
+   * es?" per stop without fetching the full note. May be null on legacy
+   * remisiones; the address falls back to `order.shipping_address_snapshot`.
+   */
+  customer_address?: DispatchDeliveryAddress | null;
+  /**
+   * Linked order summary carrying the `shipping_address_snapshot` fallback used
+   * when `customer_address` is null.
+   */
+  order?: DispatchNoteOrderSummary | null;
   /**
    * Customer summary (subset of the parent `customer` user) — used by the
    * settle modal to surface the withholding-agent banner and by the
