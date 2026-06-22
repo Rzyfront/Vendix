@@ -18,6 +18,7 @@ describe('RouteSheetScannerService', () => {
   let aiMock: any;
   let prismaMock: any;
   let routeFlowMock: any;
+  let dispatchRoutesMock: any;
   let s3Mock: any;
 
   // The AI app returns a JSON string matching the route_sheet_ocr schema.
@@ -78,12 +79,18 @@ describe('RouteSheetScannerService', () => {
     };
 
     routeFlowMock = { settleStop: jest.fn().mockResolvedValue({}) };
+    // confirmAndSettle re-reads the route via DispatchRoutesService.findOne to
+    // return the updated route in its response.
+    dispatchRoutesMock = {
+      findOne: jest.fn().mockResolvedValue({ id: ROUTE_ID, status: 'settling' }),
+    };
     s3Mock = { uploadFile: jest.fn().mockResolvedValue('s3/key/planilla.jpg') };
 
     service = new RouteSheetScannerService(
       aiMock as any,
       prismaMock as any,
       routeFlowMock as any,
+      dispatchRoutesMock as any,
       s3Mock as any,
     );
   });
@@ -221,10 +228,12 @@ describe('RouteSheetScannerService', () => {
       prismaMock.dispatch_route_stops.findMany.mockResolvedValue([
         {
           id: 51,
+          status: 'pending',
           dispatch_note: { grand_total: new Prisma.Decimal(200) },
         },
         {
           id: 52,
+          status: 'pending',
           dispatch_note: { grand_total: new Prisma.Decimal(150) },
         },
       ]);
@@ -269,6 +278,90 @@ describe('RouteSheetScannerService', () => {
 
       expect(result.planilla_pdf_key).toBe('s3/key/planilla.jpg');
       expect(result.settled).toHaveLength(2);
+      expect(result.skipped).toHaveLength(0);
+      expect(result.errors).toHaveLength(0);
+      // The updated route is re-read and returned for the frontend refresh.
+      expect(dispatchRoutesMock.findOne).toHaveBeenCalledWith(ROUTE_ID);
+      expect(result.route).toMatchObject({ id: ROUTE_ID });
+    });
+
+    it('reconciles idempotently: skips already-terminal and not-in-route stops', async () => {
+      // Stop 51 is already delivered (terminal), stop 52 is pending. Stop 99 is
+      // not part of the route at all (absent from findMany).
+      prismaMock.dispatch_route_stops.findMany.mockResolvedValue([
+        {
+          id: 51,
+          status: 'delivered',
+          dispatch_note: { grand_total: new Prisma.Decimal(200) },
+        },
+        {
+          id: 52,
+          status: 'pending',
+          dispatch_note: { grand_total: new Prisma.Decimal(150) },
+        },
+      ]);
+
+      const dto: any = {
+        stops: [
+          { stop_id: 51, delivered: true, collected_amount: 200 },
+          { stop_id: 52, delivered: true, collected_amount: 150 },
+          { stop_id: 99, delivered: true, collected_amount: 10 },
+        ],
+        scan_result: { stops: [], confidence: 88 },
+      };
+
+      const result = await service.confirmAndSettle(ROUTE_ID, file(), dto);
+
+      // Only the pending stop 52 is settled — 51 (terminal) and 99 (not in
+      // route) are reconciled as skipped, never re-settled.
+      expect(routeFlowMock.settleStop).toHaveBeenCalledTimes(1);
+      expect(routeFlowMock.settleStop).toHaveBeenCalledWith(
+        ROUTE_ID,
+        52,
+        expect.objectContaining({ result: 'delivered' }),
+      );
+      expect(result.settled).toEqual([{ stop_id: 52, result: 'delivered' }]);
+      expect(result.skipped).toEqual(
+        expect.arrayContaining([
+          { stop_id: 51, reason: 'already_settled' },
+          { stop_id: 99, reason: 'not_in_route' },
+        ]),
+      );
+      expect(result.errors).toHaveLength(0);
+    });
+
+    it('collects per-stop settle failures without aborting the batch', async () => {
+      prismaMock.dispatch_route_stops.findMany.mockResolvedValue([
+        {
+          id: 51,
+          status: 'pending',
+          dispatch_note: { grand_total: new Prisma.Decimal(200) },
+        },
+        {
+          id: 52,
+          status: 'pending',
+          dispatch_note: { grand_total: new Prisma.Decimal(150) },
+        },
+      ]);
+
+      // Stop 51 throws (e.g. validation 400); stop 52 must still settle.
+      routeFlowMock.settleStop
+        .mockRejectedValueOnce(new Error('boom'))
+        .mockResolvedValueOnce({});
+
+      const dto: any = {
+        stops: [
+          { stop_id: 51, delivered: true, collected_amount: 200 },
+          { stop_id: 52, delivered: true, collected_amount: 150 },
+        ],
+        scan_result: { stops: [], confidence: 90 },
+      };
+
+      const result = await service.confirmAndSettle(ROUTE_ID, file(), dto);
+
+      expect(result.settled).toEqual([{ stop_id: 52, result: 'delivered' }]);
+      expect(result.errors).toEqual([{ stop_id: 51, message: 'boom' }]);
+      expect(result.skipped).toHaveLength(0);
     });
   });
 });

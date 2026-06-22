@@ -7,6 +7,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { RouteFlowService } from './route-flow.service';
+import { DispatchRoutesService } from '../dispatch-routes.service';
 import { SettleStopDto } from '../dto';
 import {
   ConfirmRouteSheetDto,
@@ -38,6 +39,7 @@ export class RouteSheetScannerService {
     private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
     private readonly routeFlow: RouteFlowService,
+    private readonly dispatchRoutes: DispatchRoutesService,
     private readonly s3Service: S3Service,
   ) {}
 
@@ -250,40 +252,84 @@ export class RouteSheetScannerService {
       throw new VendixHttpException(ErrorCodes.RTSCAN_MATCH_001);
     }
 
+    // Read every stop of the route once: net total (for result derivation) and
+    // CURRENT status (for the idempotent reconciliation). We index by the stop's
+    // own id so a decision pointing at a stop NOT in this route is detected.
     const stopIds = dto.stops.map((s) => s.stop_id);
     const stops = await this.prisma.dispatch_route_stops.findMany({
       where: { route_id: routeId, id: { in: stopIds } },
       select: {
         id: true,
+        status: true,
         dispatch_note: { select: { grand_total: true } },
       },
     });
-    const netById = new Map<number, number>(
-      stops.map((s) => [s.id, Number(s.dispatch_note?.grand_total ?? 0)]),
+    const stopById = new Map<
+      number,
+      { net: number; status: string }
+    >(
+      stops.map((s) => [
+        s.id,
+        {
+          net: Number(s.dispatch_note?.grand_total ?? 0),
+          status: s.status as string,
+        },
+      ]),
     );
 
-    // 1. Settle each confirmed stop via the existing settleStop flow.
+    // Terminal stop states are already settled — re-liquidating them throws a
+    // 400 ("La parada ya está 'delivered'"). The scan/confirm batch must be
+    // idempotent and reconcile against the live state, so we skip them.
+    const TERMINAL_STATUSES = new Set(['delivered', 'rejected', 'released']);
+
+    // 1. Settle each confirmed stop via the existing settleStop flow, with
+    //    per-stop reconciliation. One failing stop must NOT abort the batch.
     const settled: Array<{ stop_id: number; result: string }> = [];
+    const skipped: Array<{ stop_id: number; reason: string }> = [];
+    const errors: Array<{ stop_id: number; message: string }> = [];
+
     for (const decision of dto.stops) {
-      if (!netById.has(decision.stop_id)) {
-        // Stop is not part of this route / store — skip silently (scoped guard).
+      const current = stopById.get(decision.stop_id);
+
+      // Stop is not part of this route / store — reconcile as skipped.
+      if (!current) {
+        skipped.push({ stop_id: decision.stop_id, reason: 'not_in_route' });
         continue;
       }
+
+      // Already in a terminal state — do NOT call settleStop (it would 400).
+      // This is the reconciliation that makes re-confirming a sheet idempotent.
+      if (TERMINAL_STATUSES.has(current.status)) {
+        skipped.push({ stop_id: decision.stop_id, reason: 'already_settled' });
+        continue;
+      }
+
       const settleDto = new SettleStopDto();
       settleDto.result =
         (decision.result as dispatch_route_stop_result_enum) ??
         this.deriveResult(
           decision.delivered,
           Number(decision.collected_amount ?? 0),
-          netById.get(decision.stop_id) ?? 0,
+          current.net,
         );
       settleDto.collected_amount = Number(decision.collected_amount ?? 0);
       settleDto.payment_method = decision.payment_method;
       settleDto.withholding_breakdown = decision.withholding_breakdown;
       settleDto.notes = decision.notes;
 
-      await this.routeFlow.settleStop(routeId, decision.stop_id, settleDto);
-      settled.push({ stop_id: decision.stop_id, result: settleDto.result });
+      // Wrap each settle so a single failure (e.g. validation 400) is collected
+      // and the rest of the batch still runs.
+      try {
+        await this.routeFlow.settleStop(routeId, decision.stop_id, settleDto);
+        settled.push({ stop_id: decision.stop_id, result: settleDto.result });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Error liquidando la parada';
+        this.logger.warn(
+          `[RouteSheetScan] settleStop failed for stop ${decision.stop_id}: ${message}`,
+        );
+        errors.push({ stop_id: decision.stop_id, message });
+      }
     }
 
     // 2. Upload the route sheet to S3 (store the KEY, not a presigned URL).
@@ -305,11 +351,23 @@ export class RouteSheetScannerService {
       },
     });
 
+    // 4. Re-read the route in its updated state (same canonical shape the rest
+    //    of the flow returns: stops + reconciliation + derived is_prepaid) so
+    //    the frontend can refresh the detail view without a second round-trip.
+    const route_updated = await this.dispatchRoutes.findOne(routeId);
+
     this.logger.log(
-      `[RouteSheetScan] Route #${routeId} settled ${settled.length} stops + planilla persisted (${s3Key})`,
+      `[RouteSheetScan] Route #${routeId}: settled=${settled.length} skipped=${skipped.length} errors=${errors.length} + planilla persisted (${s3Key})`,
     );
 
-    return { route_id: routeId, planilla_pdf_key: s3Key, settled };
+    return {
+      route_id: routeId,
+      planilla_pdf_key: s3Key,
+      settled,
+      skipped,
+      errors,
+      route: route_updated,
+    };
   }
 
   // ───────────────────────────────────────────────────────────────────────────

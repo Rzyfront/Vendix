@@ -169,6 +169,18 @@ export class OrderDetailsPageComponent {
   showDispatchModal = signal(false);
   /** Chooser modal: "con remisión" vs "sin remisión" (single dispatch entry). */
   showDispatchSelector = signal(false);
+  /**
+   * Post-generación de remisión: modal "Remisión generada" cuando la remisión
+   * quedó asignada a una ruta (planilla). Ofrece navegar a la remisión o a la
+   * ruta. Cuando NO hay ruta, se usa el `dialogService.confirm` clásico (solo
+   * "Ver remisión"). El contexto guarda el id de la remisión y, si aplica, el
+   * id de la ruta activa para construir la navegación.
+   */
+  showDispatchGeneratedModal = signal(false);
+  dispatchGeneratedContext = signal<{ dispatchNoteId: number; routeId: number | null }>({
+    dispatchNoteId: 0,
+    routeId: null,
+  });
   /** A3-edit: modal de captura de dirección de envío en página. */
   showShippingAddressModal = signal(false);
   /** True mientras se persiste la dirección (POST address + PATCH order). */
@@ -1487,22 +1499,67 @@ export class OrderDetailsPageComponent {
     });
   }
 
-  private promptViewDispatchNote(dispatchNoteId: number): void {
-    this.dialogService
-      .confirm({
-        title: 'Remision generada',
-        message: 'La remision se creo correctamente. Deseas verla ahora?',
-        confirmText: 'Ver remision',
-        cancelText: 'Seguir aqui',
-        confirmVariant: 'primary',
-      })
-      .then((confirmed: boolean) => {
-        if (confirmed) {
-          this.router.navigate(['/admin/orders/dispatch-notes', dispatchNoteId]);
-        } else {
-          this.loadData();
-        }
-      });
+  private async promptViewDispatchNote(dispatchNoteId: number): Promise<void> {
+    // La remisión recién creada puede haber quedado asignada a una ruta
+    // (planilla) en la misma transacción. Para ofrecer "Ver ruta" necesitamos
+    // sus `dispatch_route_stops`, que el evento del wizard no entrega (solo el
+    // id), así que los traemos puntualmente. El fetch es best-effort: si falla,
+    // caemos al flujo clásico de solo "Ver remisión".
+    let routeId: number | null = null;
+    try {
+      const note = await firstValueFrom(
+        this.dispatchNotesService.getDispatchNote(dispatchNoteId),
+      );
+      routeId = this.activeRoute(note)?.id ?? null;
+    } catch {
+      routeId = null;
+    }
+
+    if (routeId != null) {
+      // Hay ruta activa: el dialog de 2 botones no alcanza para 3 acciones, así
+      // que usamos un app-modal pequeño con dos navegaciones + cerrar.
+      this.dispatchGeneratedContext.set({ dispatchNoteId, routeId });
+      this.showDispatchGeneratedModal.set(true);
+      return;
+    }
+
+    // Sin ruta: comportamiento clásico (solo "Ver remisión").
+    const confirmed = await this.dialogService.confirm({
+      title: 'Remision generada',
+      message: 'La remision se creo correctamente. Deseas verla ahora?',
+      confirmText: 'Ver remision',
+      cancelText: 'Seguir aqui',
+      confirmVariant: 'primary',
+    });
+    if (confirmed) {
+      this.router.navigate(['/admin/orders/dispatch-notes', dispatchNoteId]);
+    } else {
+      this.loadData();
+    }
+  }
+
+  /** Navega a la remisión generada y cierra el modal de confirmación. */
+  goToGeneratedDispatchNote(): void {
+    const { dispatchNoteId } = this.dispatchGeneratedContext();
+    this.showDispatchGeneratedModal.set(false);
+    if (dispatchNoteId) {
+      this.router.navigate(['/admin/orders/dispatch-notes', dispatchNoteId]);
+    }
+  }
+
+  /** Navega a la ruta (planilla) de la remisión generada y cierra el modal. */
+  goToGeneratedDispatchRoute(): void {
+    const { routeId } = this.dispatchGeneratedContext();
+    this.showDispatchGeneratedModal.set(false);
+    if (routeId != null) {
+      this.router.navigate(['/admin/orders/planillas', routeId]);
+    }
+  }
+
+  /** Cierra el modal "Remisión generada" y refresca la orden. */
+  dismissDispatchGeneratedModal(): void {
+    this.showDispatchGeneratedModal.set(false);
+    this.loadData();
   }
 
   openDeliverModal(): void {

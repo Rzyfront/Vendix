@@ -600,6 +600,16 @@ export class RouteFlowService {
       throw new BadRequestException(`La parada ya está '${stop.status}'`);
     }
 
+    // No hay entregas parciales / crédito en ruta: el pago es TOTAL o no hay
+    // pago. Entregada ⇒ pagada al 100% (o prepaga). Resultados válidos:
+    // 'delivered', 'rejected', 'released'. 'partial' queda deshabilitado.
+    if ((dto.result as string) === 'partial') {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_PARTIAL_DISABLED,
+        "Las entregas parciales no están habilitadas en ruta: el pago debe ser total. Marca la parada como entregada (pago completo) o rechazada.",
+      );
+    }
+
     // DERIVED prepaid for this stop from the live note/order payment state.
     // Never trust the persisted (frozen) stop.is_prepaid for the COD logic.
     const stopIsPrepaid = deriveStopIsPrepaid(stop);
@@ -619,7 +629,7 @@ export class RouteFlowService {
       Number(breakdown?.retefuente || 0) +
       Number(breakdown?.reteiva || 0) +
       Number(breakdown?.reteica || 0);
-    if (isWithholdingAgent && (dto.result === 'delivered' || dto.result === 'partial')) {
+    if (isWithholdingAgent && dto.result === 'delivered') {
       if (withholdingAmount <= 0 || !breakdown || breakdownSum <= 0) {
         throw new BadRequestException(
           `El cliente es agente retenedor: la liquidación requiere un desglose de retención (retefuente / reteiva / reteica) con suma > 0.`,
@@ -651,11 +661,10 @@ export class RouteFlowService {
       }
     }
 
-    // Compute credit amount for partial
-    let credit_amount = 0;
-    if (dto.result === 'partial') {
-      credit_amount = Math.max(0, net - total_paid - withholding);
-    }
+    // Sin crédito en ruta: el pago es total o no hay pago. `credit_amount`
+    // permanece en 0 siempre (la columna se conserva en el schema, pero ya no
+    // se usa). `anticipo_amount` deja de funcionar como pago parcial.
+    const credit_amount = 0;
 
     const from_status = stop.status;
 
@@ -711,24 +720,21 @@ export class RouteFlowService {
       await this.refreshRouteTotals(tx, id);
 
       // Live order-state mode: reflect the COD order as "delivered" the moment
-      // the stop is settled as delivered/partial. `rejected` is intentionally
-      // excluded (a refused delivery does not deliver the order). The walk to
-      // `finished` still happens at route close. No-op for `on_close` mode.
+      // the stop is settled as delivered (pago total). `rejected` is excluded
+      // (a refused delivery does not deliver the order). The walk to `finished`
+      // still happens at route close. No-op for `on_close` mode.
       if (orderStateUpdateMode === 'live') {
         const order_id = stop.dispatch_note?.order_id;
-        if (
-          order_id &&
-          (dto.result === 'delivered' || dto.result === 'partial')
-        ) {
+        if (order_id && dto.result === 'delivered') {
           await this.advanceOrderToDelivered(tx, store_id, order_id);
         }
       }
 
-      // Sync the remisión with the route close-out: a stop settled as
-      // delivered/partial drives its dispatch_note → 'delivered' (idempotent).
+      // Sync the remisión with the route close-out: a stop settled as delivered
+      // (pago total) drives its dispatch_note → 'delivered' (idempotent).
       // rejected/released do NOT deliver the note. The event is emitted AFTER
       // the tx commits (see deliveredEventPayload below).
-      if (dto.result === 'delivered' || dto.result === 'partial') {
+      if (dto.result === 'delivered') {
         deliveredEventPayload = await this.markDispatchNoteDeliveredInTx(
           tx,
           stop.dispatch_note as any,
@@ -1029,27 +1035,16 @@ export class RouteFlowService {
         include: ROUTE_INCLUDE,
       });
 
-      // COD: finish each linked order that was DELIVERED and fully COLLECTED.
-      // Delivered = stop result in {delivered, partial}. Collected = the COD
-      // order has no outstanding balance (settled via paso 7) OR the stop is
-      // prepaid. remaining_balance is read live from the order (the COD payment
-      // listener already decremented it on settleStop). Idempotent + scoped.
+      // COD: finish each linked order whose stop was ENTREGADA. Con la regla
+      // "entregada = pagada al 100% (o prepaga)" ya no hay gate de recaudo: toda
+      // parada con result='delivered' sincroniza su orden shipped → delivered →
+      // finished. Esto cierra el gap donde las órdenes se quedaban en 'shipped'.
+      // rejected/released NO avanzan. `advanceOrderToFinished` es idempotente
+      // (no-op si la orden ya está en/past target) y store-scoped.
       for (const stop of updated_route.stops) {
         const order_id = stop.dispatch_note?.order_id;
         if (!order_id) continue;
-        const delivered =
-          stop.result === 'delivered' || stop.result === 'partial';
-        if (!delivered) continue;
-
-        let collected = stop.is_prepaid === true;
-        if (!collected) {
-          const order = await tx.orders.findFirst({
-            where: { id: order_id, store_id },
-            select: { remaining_balance: true },
-          });
-          collected = order ? Number(order.remaining_balance) <= 0 : false;
-        }
-        if (!collected) continue;
+        if (stop.result !== 'delivered') continue;
 
         await this.advanceOrderToFinished(tx, store_id, order_id);
       }
