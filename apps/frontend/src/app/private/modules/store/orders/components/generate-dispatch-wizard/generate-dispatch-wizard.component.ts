@@ -28,6 +28,7 @@ import { SelectorOption } from '../../../../../../shared/components/selector/sel
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 
 import { Address, Order, OrderItem } from '../../interfaces/order.interface';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
 import {
   CreateDispatchFromOrderDto,
@@ -166,7 +167,10 @@ export class GenerateDispatchWizardComponent {
   // ── Step 2: dispatch data ─────────────────────────────────────────────
   readonly dataForm = this.fb.group({
     dispatch_location_id: this.fb.control<number | null>(null),
-    agreed_delivery_date: this.fb.control<string>(''),
+    // Default the delivery date to TODAY (local timezone) so the wizard opens
+    // with a sensible, editable value. Use toLocalDateString() — never
+    // toISOString() — to avoid the UTC off-by-one bug (see vendix-date-timezone).
+    agreed_delivery_date: this.fb.control<string>(toLocalDateString()),
     notes: this.fb.control<string>(''),
     target_status: this.fb.control<'draft' | 'confirmed'>('draft', {
       nonNullable: true,
@@ -263,7 +267,8 @@ export class GenerateDispatchWizardComponent {
     this.posLocationId.set(null);
     this.dataForm.reset({
       dispatch_location_id: null,
-      agreed_delivery_date: '',
+      // Re-seed the delivery date to TODAY (local) on every open/reset.
+      agreed_delivery_date: toLocalDateString(),
       notes: '',
       target_status: 'draft',
     });

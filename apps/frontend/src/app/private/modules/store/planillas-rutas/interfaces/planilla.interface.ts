@@ -324,9 +324,24 @@ export interface ConfirmRouteSheetDto {
   scan_result?: RouteSheetScanResult;
 }
 
-/** `POST /scan/confirm` → settlement summary returned by the backend. */
+/**
+ * `POST /scan/confirm` → idempotent settlement summary returned by the backend.
+ *
+ * The endpoint no longer throws 400 for already-settled stops; instead it
+ * reconciles them into `skipped`. `settled` are the stops settled in this call,
+ * `errors` are per-stop failures, and `route` is the fully-updated route (same
+ * shape as `GET /store/dispatch-routes/:id`) so the caller can refresh without
+ * a second round-trip.
+ */
 export interface ConfirmRouteSheetResult {
   route_id: number;
   planilla_pdf_key: string;
   settled: Array<{ stop_id: number; result: string }>;
+  skipped: Array<{
+    stop_id: number;
+    reason: 'not_in_route' | 'already_settled';
+  }>;
+  errors: Array<{ stop_id: number; message: string }>;
+  /** Fully-updated route, same shape as `GET /store/dispatch-routes/:id`. */
+  route: DispatchRoute;
 }

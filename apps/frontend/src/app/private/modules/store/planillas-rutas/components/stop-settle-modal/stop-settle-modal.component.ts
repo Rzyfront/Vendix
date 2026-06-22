@@ -1,4 +1,4 @@
-import { Component, computed, effect, input, output, signal } from "@angular/core";
+import { Component, computed, input, output, signal } from "@angular/core";
 import { FormsModule } from '@angular/forms';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -13,6 +13,20 @@ import {
   SettleStopDto,
 } from '../../interfaces/planilla.interface';
 
+/**
+ * Settle modal — TOTAL payment only.
+ *
+ * Per the dispatch-route business rule, a stop can only be settled as fully
+ * paid or not paid at all. There are NO partial payments, NO credit, and NO
+ * advance ("anticipo"). The result options are therefore reduced to:
+ *
+ *   - `delivered`: full payment — the collected amount MUST equal the total
+ *     (prepaid stops collect 0 and are recorded with payment_method=`prepaid`).
+ *   - `rejected`:  customer refused delivery — no cash collected.
+ *
+ * The "Liberar" path (release) lives in its own modal. The payload NEVER
+ * carries `result='partial'`, `anticipo_amount`, or `credit_amount`.
+ */
 @Component({
   selector: 'app-stop-settle-modal',
   standalone: true,
@@ -49,62 +63,46 @@ import {
           </div>
         }
 
-        @if (isWithholdingAgent()) {
-          <div
-            class="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
-          >
-            <strong>Cliente agente retenedor.</strong> Para liquidações
-            <em>delivered</em> o <em>partial</em> debes registrar un
-            desglose de retención (retefuente / reteiva / reteica) cuyo
-            total coincida con el monto retenido. El backend rechaza la
-            liquidación si la suma no coincide.
-          </div>
-        }
-
         <app-selector
           label="Resultado"
           [options]="resultOptions"
           [(ngModel)]="result"
         ></app-selector>
 
-        <div class="grid grid-cols-2 gap-2">
-          <app-input
-            label="Recaudado"
-            [currency]="true"
-            [(ngModel)]="collectedAmount"
-            (inputChange)="recalcCredit()"
-            [disabled]="isPrepaid()"
-          ></app-input>
-          <app-input
-            label="Retención"
-            [currency]="true"
-            [(ngModel)]="withholdingAmount"
-            (inputChange)="recalcCredit()"
-          ></app-input>
-          <app-input
-            label="Cambio"
-            [currency]="true"
-            [(ngModel)]="changeAmount"
-          ></app-input>
-          <app-selector
-            label="Método"
-            [options]="paymentMethodOptions"
-            [(ngModel)]="paymentMethod"
-            [disabled]="isPrepaid()"
-          ></app-selector>
-        </div>
-
-        @if (computedCredit() > 0) {
-          <div class="text-xs text-yellow-700 bg-yellow-50 p-2 rounded">
-            Saldo a crédito (calculado):
-            <strong>{{ computedCredit() | currency }}</strong>
+        @if (isDelivered() && !isPrepaid()) {
+          <div class="grid grid-cols-2 gap-2">
+            <app-input
+              label="Recaudado (debe cubrir el total)"
+              [currency]="true"
+              [(ngModel)]="collectedAmount"
+            ></app-input>
+            <app-selector
+              label="Método"
+              [options]="paymentMethodOptions"
+              [(ngModel)]="paymentMethod"
+            ></app-selector>
           </div>
+
+          @if (!collectedCoversTotal()) {
+            <div
+              class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800"
+            >
+              El monto recaudado ({{ collectedAmount | currency }}) debe ser
+              igual al total ({{ grandTotal() | currency }}). No se permiten
+              pagos parciales: cobra el total o registra la parada como
+              <strong>rechazada</strong>.
+            </div>
+          }
         }
 
-        <div class="text-xs text-text-secondary">
-          <strong>Tip:</strong> Si el cliente es agente retenedor, registra el
-          valor en "Retención".
-        </div>
+        @if (isRejected()) {
+          <div
+            class="rounded-md border border-border bg-surface px-3 py-2 text-xs text-text-secondary"
+          >
+            La parada se marcará como <strong>rechazada</strong>. No se
+            registrará recaudo.
+          </div>
+        }
       </div>
 
       <div slot="footer" class="flex gap-2">
@@ -118,7 +116,7 @@ import {
         <button
           type="button"
           (click)="submit()"
-          [disabled]="submitting()"
+          [disabled]="submitting() || !canConfirm()"
           class="flex-1 rounded-md bg-primary-600 text-white px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
           {{ submitting() ? 'Guardando...' : 'Confirmar' }}
@@ -133,25 +131,21 @@ export class StopSettleModalComponent {
   /**
    * True when the stop's dispatch note was already paid before dispatch.
    * The backend forces collected_amount=0 and payment_method='prepaid' in
-   * that case; the modal surfaces a banner and disables the collected/method
+   * that case; the modal surfaces a banner and hides the collected/method
    * fields so the operator does not enter a value that will be discarded.
    */
   readonly isPrepaid = input<boolean>(false);
 
-  /**
-   * True when the dispatch note's customer is a `users.is_withholding_agent`.
-   * Backend re-validates the rule on settle; this is a UI affordance.
-   */
-  readonly isWithholdingAgent = computed(
-    () => !!this.stop()?.dispatch_note?.customer?.is_withholding_agent,
-  );
-
   readonly close = output<void>();
   readonly submitted = output<SettleStopDto>();
 
+  /**
+   * Only TWO outcomes are allowed: full delivery (cobro total) or rejection.
+   * "Partial" was removed entirely — half/credit/advance payments are not a
+   * supported flow on a dispatch route.
+   */
   readonly resultOptions: SelectorOption[] = [
-    { value: 'delivered', label: 'Entregada y cobrada' },
-    { value: 'partial', label: 'Parcial (crédito y/o retención)' },
+    { value: 'delivered', label: 'Entregada y cobrada (total)' },
     { value: 'rejected', label: 'Rechazada' },
   ];
 
@@ -161,49 +155,78 @@ export class StopSettleModalComponent {
     { value: 'card', label: 'Tarjeta' },
   ];
 
-  result: DispatchRouteStopResult = 'delivered';
-  collectedAmount = 0;
-  withholdingAmount = 0;
-  changeAmount = 0;
+  /** Selected outcome — bound to the selector via ngModel. Mirrored to a signal. */
+  private _result: DispatchRouteStopResult = 'delivered';
+  get result(): DispatchRouteStopResult {
+    return this._result;
+  }
+  set result(value: DispatchRouteStopResult) {
+    this._result = value;
+    this.resultSig.set(value);
+  }
+
+  /** Collected amount (raw numeric from the currency CVA). Mirrored to a signal. */
+  private _collectedAmount = 0;
+  get collectedAmount(): number {
+    return this._collectedAmount;
+  }
+  set collectedAmount(value: number) {
+    this._collectedAmount = value;
+    this.collectedSig.set(Number(value) || 0);
+  }
+
   paymentMethod = 'cash';
   readonly submitting = signal(false);
 
-  readonly computedCredit = signal(0);
+  // Signal mirrors so templates/computed react in the zoneless runtime.
+  private readonly resultSig = signal<DispatchRouteStopResult>('delivered');
+  private readonly collectedSig = signal(0);
 
-  constructor() {
-    // Recalculate the credit projection whenever the modal opens or the
-    // grand-total input changes. Without this, the operator would see a
-    // stale `0` until they edited the collected/withholding fields.
-    effect(() => {
-      this.grandTotal();
-      this.recalcCredit();
-    });
-  }
+  readonly isDelivered = computed(() => this.resultSig() === 'delivered');
+  readonly isRejected = computed(() => this.resultSig() === 'rejected');
 
-  recalcCredit() {
-    const net = Number(this.grandTotal()) || 0;
-    const credit = Math.max(
-      0,
-      net - (Number(this.collectedAmount) || 0) - (Number(this.withholdingAmount) || 0),
-    );
-    this.computedCredit.set(credit);
-  }
+  /**
+   * Whether the collected amount fully covers the total. Prepaid stops cover
+   * the total by definition (collection happened before dispatch).
+   */
+  readonly collectedCoversTotal = computed(() => {
+    if (this.isPrepaid()) return true;
+    const total = Number(this.grandTotal()) || 0;
+    return (this.collectedSig() || 0) >= total;
+  });
+
+  /**
+   * Confirm is allowed when the stop is rejected, or when it is delivered with
+   * a collected amount that covers the total. Never with a partial amount.
+   */
+  readonly canConfirm = computed(() => {
+    if (this.isRejected()) return true;
+    if (this.isPrepaid()) return true;
+    return this.isDelivered() && this.collectedCoversTotal();
+  });
 
   submit() {
+    if (!this.canConfirm()) return;
     this.submitting.set(true);
+
+    if (this.isRejected()) {
+      this.submitted.emit({
+        result: 'rejected',
+        collected_amount: 0,
+        change_amount: 0,
+        payment_method: this.paymentMethod,
+      });
+      return;
+    }
+
+    // Delivered: full payment only. Prepaid stops collect 0; everyone else
+    // must have collected the full total (guarded by canConfirm).
     const dto: SettleStopDto = {
-      // Prepaid stops are always reported as fully delivered with no
-      // cash collection; the result dropdown is hidden in that case but
-      // we keep the same field for safety.
-      result: this.isPrepaid() ? 'delivered' : this.result,
+      result: 'delivered',
       collected_amount: this.isPrepaid() ? 0 : Number(this.collectedAmount) || 0,
-      withholding_amount: Number(this.withholdingAmount) || 0,
-      change_amount: Number(this.changeAmount) || 0,
+      change_amount: 0,
       payment_method: this.isPrepaid() ? 'prepaid' : this.paymentMethod,
     };
-    if (this.withholdingAmount > 0) {
-      dto.withholding_breakdown = { retefuente: Number(this.withholdingAmount) };
-    }
     this.submitted.emit(dto);
   }
 }
