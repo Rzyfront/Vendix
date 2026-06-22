@@ -242,25 +242,53 @@ import {
             a single handler that delegates to PosCartService.updateNotes.
           -->
           <div class="px-3 pt-2">
-            <label
-              class="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 uppercase tracking-wide mb-1"
-            >
-              <app-icon name="sticky-note" [size]="12"></app-icon>
-              <span>Nota del staff (opcional)</span>
-            </label>
-            <textarea
-              [ngModel]="cartState().notes"
-              (ngModelChange)="onStaffNoteChange($event)"
-              maxlength="500"
-              rows="2"
-              placeholder="Instrucción interna para el equipo (no se envía al cliente)"
-              class="w-full px-2.5 py-1.5 text-xs border border-amber-200 bg-amber-50/40 rounded-md text-text-primary placeholder:text-amber-700/50 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400 resize-none"
-            ></textarea>
-            <div class="flex justify-end mt-0.5">
-              <span class="text-[10px] text-amber-700/70">
-                {{ (cartState().notes || '').length }}/500
-              </span>
-            </div>
+            @if (!staffNoteExpanded()) {
+              <!-- Collapsed: compact toggle so the note never takes space unless requested -->
+              <button
+                type="button"
+                (click)="toggleStaffNote()"
+                class="w-full flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-amber-700 bg-amber-50/40 border border-dashed border-amber-200 rounded-md hover:bg-amber-50 transition-colors"
+              >
+                <app-icon name="sticky-note" [size]="12"></app-icon>
+                <span>{{ hasStaffNote() ? 'Ver nota de la orden' : 'Agregar nota' }}</span>
+                @if (hasStaffNote()) {
+                  <span class="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                } @else {
+                  <app-icon name="plus" [size]="12" class="ml-auto text-amber-600"></app-icon>
+                }
+              </button>
+            } @else {
+              <!-- Expanded: editable staff-only note (set at creation, never sent to the customer) -->
+              <div class="flex items-center justify-between mb-1">
+                <label
+                  class="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 uppercase tracking-wide"
+                >
+                  <app-icon name="sticky-note" [size]="12"></app-icon>
+                  <span>Nota adicional de la orden</span>
+                </label>
+                <button
+                  type="button"
+                  (click)="toggleStaffNote()"
+                  class="flex items-center justify-center w-5 h-5 rounded text-amber-700/70 hover:bg-amber-100 transition-colors"
+                  aria-label="Ocultar nota"
+                >
+                  <app-icon name="x" [size]="14"></app-icon>
+                </button>
+              </div>
+              <textarea
+                [ngModel]="cartState().notes"
+                (ngModelChange)="onStaffNoteChange($event)"
+                maxlength="500"
+                rows="2"
+                placeholder="Instrucción interna para el equipo (no se envía al cliente)"
+                class="w-full px-2.5 py-1.5 text-xs border border-amber-200 bg-amber-50/40 rounded-md text-text-primary placeholder:text-amber-700/50 focus:outline-none focus:ring-1 focus:ring-amber-400 focus:border-amber-400 resize-none"
+              ></textarea>
+              <div class="flex justify-end mt-0.5">
+                <span class="text-[10px] text-amber-700/70">
+                  {{ (cartState().notes || '').length }}/500
+                </span>
+              </div>
+            }
           </div>
 
           <!-- Checkout Actions -->
@@ -1281,6 +1309,22 @@ private cartService = inject(PosCartService);
     }
   }
 
+
+  /**
+   * Whether the staff-note editor is expanded. Collapsed by default so the
+   * note does not occupy space in the cart unless the user opts in. Toggled
+   * by the inline "Agregar nota" / "x" controls; independent of cart state so
+   * typing never collapses it.
+   */
+  readonly staffNoteExpanded = signal(false);
+
+  /** True when the current cart already carries a staff note (shows an indicator while collapsed). */
+  readonly hasStaffNote = computed(() => (this.cartState().notes ?? '').length > 0);
+
+  /** Reveal or hide the staff-note editor. */
+  toggleStaffNote(): void {
+    this.staffNoteExpanded.update((expanded) => !expanded);
+  }
 
   /**
    * Update the staff-only note for the current cart.
