@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { randomBytes } from 'crypto';
+import { user_state_enum } from '@prisma/client';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -466,6 +467,12 @@ export class CustomersService {
           },
         },
       },
+      // Archived customers must not appear in admin list views. The endpoint
+      // does not currently accept an explicit `state` filter, so we hide
+      // archived records unconditionally. The single-record endpoints
+      // (findOne / findByEmail) keep returning archived rows so admins can
+      // edit or restore them.
+      state: { not: user_state_enum.archived },
     };
 
     if (search) {
