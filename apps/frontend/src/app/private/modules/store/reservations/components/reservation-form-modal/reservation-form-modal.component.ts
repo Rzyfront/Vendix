@@ -18,7 +18,7 @@ import { ReservationsService } from '../../services/reservations.service';
 import { AvailabilitySlot, Booking, CreateBookingDto } from '../../interfaces/reservation.interface';
 import { CalendarWeekViewComponent, FreeSlot } from '../calendar/calendar-week-view/calendar-week-view.component';
 import { environment } from '../../../../../../../environments/environment';
-import { debounceTime, Subject, switchMap, of, forkJoin } from 'rxjs';
+import { debounceTime, Subject, switchMap, of, forkJoin, finalize } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
