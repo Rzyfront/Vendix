@@ -295,7 +295,7 @@ export class TaxSummaryComponent implements OnInit {
         type: 'category',
         data: taxCategories,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',

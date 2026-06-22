@@ -290,7 +290,7 @@ export class RefundsSummaryComponent implements OnInit {
         type: 'category',
         data: refundCats,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
@@ -340,7 +340,7 @@ export class RefundsSummaryComponent implements OnInit {
         type: 'category',
         data: distCats,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
