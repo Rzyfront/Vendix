@@ -10,6 +10,15 @@ import { CalendarWeekViewComponent } from '../calendar-week-view/calendar-week-v
 import { CalendarDayViewComponent } from '../calendar-day-view/calendar-day-view.component';
 import { finalize } from 'rxjs';
 
+/**
+ * Mirrors `FreeSlot` from `calendar-week-view.component.ts`. Defined locally
+ * to avoid a circular import between the two components.
+ */
+interface FreeSlot {
+  start: string;
+  end: string;
+}
+
 @Component({
   selector: 'app-calendar-container',
   standalone: true,
@@ -33,6 +42,7 @@ export class CalendarContainerComponent {
   viewMode = signal<CalendarViewMode>('week');
   currentDate = signal<Date>(new Date());
   bookingsByDate = signal<Record<string, Booking[]>>({});
+  freeSlotsByDate = signal<Record<string, FreeSlot[]>>({});
   loading = signal(false);
   selectedServiceId = signal<number | null>(null);
 
@@ -57,13 +67,56 @@ export class CalendarContainerComponent {
     const { dateFrom, dateTo } = this.getDateRange();
     this.loading.set(true);
 
+    const serviceId = this.selectedServiceId() ?? undefined;
+
+    // Fetch busy bookings AND free slots in parallel. We don't fail the whole
+    // load if `getAvailability` errors — a missing free-slots overlay is far
+    // less disruptive than a blank calendar. Bookings still load.
     this.reservationsService
-      .getCalendar(dateFrom, dateTo, this.selectedServiceId() ?? undefined)
-      .pipe(finalize(() => this.loading.set(false)))
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      .getCalendar(dateFrom, dateTo, serviceId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
         next: (data) => this.bookingsByDate.set(data),
         error: () => this.toastService.error('Error al cargar calendario'),
       });
+
+    if (serviceId) {
+      this.reservationsService
+        .getAvailability(serviceId, dateFrom, dateTo)
+        .pipe(finalize(() => this.loading.set(false)))
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (slots) => this.freeSlotsByDate.set(this.groupSlotsByDate(slots)),
+          error: () => {
+            // Silent failure: keep busy bookings visible, just no green overlay.
+            this.freeSlotsByDate.set({});
+          },
+        });
+    } else {
+      // No service selected → no availability concept → empty overlay.
+      this.freeSlotsByDate.set({});
+      this.loading.set(false);
+    }
+  }
+
+  /**
+   * Group a flat `AvailabilitySlot[]` (one entry per provider × date) into a
+   * `Record<date, FreeSlot[]>` indexed by `YYYY-MM-DD`. Each availability
+   * slot's `start_time` / `end_time` already encode the booking duration, so
+   * we just pass them through.
+   */
+  private groupSlotsByDate(
+    slots: Array<{ date: string; start_time: string; end_time: string }>,
+  ): Record<string, FreeSlot[]> {
+    const out: Record<string, FreeSlot[]> = {};
+    for (const slot of slots ?? []) {
+      if (!slot?.date || !slot?.start_time || !slot?.end_time) continue;
+      (out[slot.date] ??= []).push({
+        start: slot.start_time.substring(0, 5),
+        end: slot.end_time.substring(0, 5),
+      });
+    }
+    return out;
   }
 
   onNavigate(direction: 'prev' | 'next' | 'today'): void {

@@ -11,7 +11,7 @@ import {
   MessageEvent,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { Observable, map } from 'rxjs';
+import { Observable, map, merge } from 'rxjs';
 import { NotificationsService } from './notifications.service';
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
@@ -137,15 +137,32 @@ export class NotificationsController {
   stream(@Req() req: Request): Observable<MessageEvent> {
     const context = RequestContextService.getContext();
     const store_id = context?.store_id;
+    const user_id = context?.user_id;
     if (!store_id) throw new ForbiddenException('Store context required');
 
-    const subject = this.sse_service.getOrCreate(store_id);
+    // Per-store subject (broadcast) — feeds the bell badge for everyone.
+    const storeSubject = this.sse_service.getOrCreate(store_id);
+    // Per-user subject (targeted) — feeds `booking_check_in` notifications
+    // like "your turn now" that should ONLY reach the assigned provider.
+    const userSubject =
+      user_id != null
+        ? this.sse_service.getOrCreateForUser(store_id, user_id)
+        : null;
 
     req.on('close', () => {
       this.sse_service.unsubscribe(store_id);
+      if (user_id != null) {
+        this.sse_service.unsubscribeUser(store_id, user_id);
+      }
     });
 
-    return subject.pipe(
+    // Merge both streams so a single EventSource delivers both store-wide and
+    // user-targeted events to the same client.
+    const merged = userSubject
+      ? merge(storeSubject, userSubject)
+      : storeSubject;
+
+    return merged.pipe(
       map(
         (payload) =>
           ({
