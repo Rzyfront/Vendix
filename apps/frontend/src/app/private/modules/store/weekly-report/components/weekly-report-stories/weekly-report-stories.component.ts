@@ -80,7 +80,7 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
  *   9. Closing
  *
  * Al cerrar, emite `viewed` (el padre marca `viewed_at` en backend).
- * Implementado zoneless: usa signals + toSignal, sin NgZone/ZoneJS.
+ * Implementado zoneless: usa signals + toSignal, sin zone.js.
  */
 @Component({
   selector: 'app-weekly-report-stories',
@@ -165,7 +165,7 @@ const TIER_LABEL: Record<WeeklyTier, string> = {
                 @case ('sales') {
                   <div class="metric-grid">
                     <div class="metric-grid__item">
-                      <div class="metric-grid__label">Ingresos</div>
+                      <div class="metric-grid__label">Ventas completadas</div>
                       <div class="metric-grid__value metric-grid__value--big">
                         {{ slide.payload?.['total_revenue'] | currency:'$':'symbol-narrow':'1.0-0':'es-CO' }}
                       </div>

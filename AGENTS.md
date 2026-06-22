@@ -17,6 +17,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `git-workflow` |
 | -- | `how-to-dev` |
 | -- | `how-to-plan` |
+| -- | `pr-code-review` |
 | -- | `vendix-ai-agent-tools` |
 | -- | `vendix-ai-chat` |
 | -- | `vendix-ai-embeddings-rag` |
@@ -33,10 +34,6 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-currency-formatting` |
 | -- | `vendix-customer-auth` |
 | -- | `vendix-date-timezone` |
-| Editing dispatch_routes, dispatch_route_stops, or route-flow | `vendix-dispatch-routes` |
-| Working with DSD route settlement, declared_cash variance, or PDF planilla | `vendix-dispatch-routes` |
-| Adding or editing fiscal withholding breakdown per stop (retefuente/reteiva/reteica) | `vendix-dispatch-routes` |
-| Modifying the planillas-rutas frontend module | `vendix-dispatch-routes` |
 | -- | `vendix-engram` |
 | -- | `vendix-frontend` |
 | -- | `vendix-frontend-routing` |
@@ -78,6 +75,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding new models to domain scopes | `vendix-prisma-scopes` |
 | Adding new payment processors, modifying payment gateway logic, working with payment webhooks | `vendix-payment-processors` |
 | Adding new settings sections to stores or organizations | `vendix-settings-system` |
+| Adding or adjusting KDS card urgency tiers (warning / danger) driven by preparation_time_minutes | `vendix-restaurant-ops` |
+| Adding or adjusting the POS stock-vs-KDS decision modal (skipKds) for prepared+track_inventory+stock>0 products | `vendix-restaurant-ops` |
 | Adding or editing per-industry module rules | `vendix-panel-ui` |
 | Adding or modifying notification types | `vendix-notifications-system` |
 | Adding tool-use to AI features | `vendix-ai-agent-tools` |
@@ -97,6 +96,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Checking current development app status | `buildcheck-dev` |
+| Checking if a Vendix Linear issue already exists | `linear-issues` |
 | Checking production resource locations, IPs, distributions, buckets, ECR, RDS, Route53, or Secrets Manager metadata | `vendix-cloud-operations` |
 | Choosing between viable architectural approaches | `how-to-plan` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
@@ -197,6 +197,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Invalidating the sub:features:{storeId} Redis cache | `vendix-subscription-gate` |
+| Linking a PR to its Linear issue when opening a PR to dev | `git-workflow` |
 | Listing Vendix issues in Linear | `linear-issues` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
@@ -208,6 +209,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying store_settings or organization_settings | `vendix-settings-system` |
 | Modifying the AI chat widget | `vendix-ai-chat` |
 | Modifying the POS for restaurant flow (fire, open table, split bill) | `vendix-restaurant-ops` |
+| Modifying the POS open-table flow that propagates an optional customer to the session and draft order | `vendix-restaurant-ops` |
+| Modifying the POS payment close-out against an open table (table_session_id, applyPosPaymentToTableSession, table status cleaning) | `vendix-restaurant-ops` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
@@ -219,6 +222,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Pulling the latest Engram memories (engram sync --import) before starting work | `git-workflow` |
 | Querying by date ranges in backend | `vendix-date-timezone` |
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
+| Re-developing solutions identified by a code review below 80% | `pr-code-review` |
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
@@ -227,10 +231,12 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
 | Running an automated code review (pr-code-review) on a PR before merging | `git-workflow` |
+| Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |
 | Saving or consulting persistent project memory with Engram (mem_save, mem_search, mem_context, mem_sync) | `vendix-engram` |
 | Scoping inventory, suppliers, purchases, accounting, reports, or transfers by store vs organization | `vendix-operating-scope` |
+| Searching for an existing Vendix issue in Linear | `linear-issues` |
 | Selecting the correct skills for each plan step using the Skill Selection Matrix | `how-to-plan` |
 | Self-bootstrap Engram on a fresh dev machine | `vendix-engram` |
 | Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
@@ -244,6 +250,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Understanding Vendix architecture | `vendix-core` |
 | Understanding frontend web architecture | `vendix-frontend` |
 | Understanding settings inheritance and defaults | `vendix-settings-system` |
+| Updating a Linear issue to In Review after merging a PR to dev | `pr-code-review` |
 | Updating notification subscriptions or notification preferences | `vendix-notifications-system` |
 | Updating skill guidance or documenting repeatable AI patterns | `skill-creator` |
 | Updating the status of a Vendix Linear issue | `linear-issues` |
@@ -261,6 +268,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | When editing product schemas, pricing logic, or advanced product forms | `vendix-product-pricing` |
 | When editing schema.prisma, creating migrations, or using Prisma client | `vendix-prisma` |
 | When working with pricing that includes taxes/fees, creating UI components for pricing, or implementing price calculations | `vendix-calculated-pricing` |
+| Wiring the KDS ticket detail modal (recipe + actions replica) | `vendix-restaurant-ops` |
 | Wiring the subscription-paywall HTTP interceptor on the frontend | `vendix-subscription-gate` |
 | Wiring withholding (retefuente/reteiva/reteica) accounting or declarations | `vendix-tax-typing` |
 | Working across apps or shared libraries | `vendix-core` |
@@ -321,9 +329,14 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with toLocaleDateString or DatePipe | `vendix-date-timezone` |
 | Writing Code (Naming) | `vendix-naming-conventions` |
 | Writing Validation Logic | `vendix-validation` |
+| analizar PR | `pr-code-review` |
 | changes with database migrations | `git-workflow` |
+| code review | `pr-code-review` |
 | git commit, git push, create PR, create branch | `git-workflow` |
 | resolve merge conflicts | `git-workflow` |
+| review PR | `pr-code-review` |
+| revisar PR | `pr-code-review` |
+| revisar pull request | `pr-code-review` |
 
 ---
 

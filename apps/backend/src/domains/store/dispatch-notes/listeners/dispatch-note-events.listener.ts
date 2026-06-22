@@ -108,39 +108,72 @@ export class DispatchNoteEventsListener {
         return;
       }
 
-      // 1. Deduct stock for each item
-      for (const item of dispatch_note.dispatch_note_items) {
-        const location_id =
-          item.location_id || dispatch_note.dispatch_location_id;
+      // Única fuente de verdad: la reserva. Si ya fue consumida (por
+      // order-flow finished o un re-disparo de este evento), NO se vuelve a
+      // deducir el stock. Espejo de order-flow.service.ts:241-253. Cuenta las
+      // reservas 'active' de la referencia del pedido (sales_order_id ->
+      // order_id -> dispatch_note.id para remisiones standalone).
+      const reservationRefId =
+        dispatch_note.sales_order_id ??
+        dispatch_note.order_id ??
+        dispatch_note.id;
+      const activeReservations = await this.prisma
+        .withoutScope()
+        .stock_reservations.count({
+          where: {
+            reserved_for_type: 'order',
+            reserved_for_id: reservationRefId,
+            status: 'active',
+          },
+        });
 
-        if (!location_id) continue;
+      // 1. Deduct stock for each item — SOLO si todavía hay reservas activas.
+      // Si activeReservations === 0, el stock ya se dedujo por otro camino (o
+      // es un re-disparo) y deducir aquí sería un doble consumo prohibido.
+      if (activeReservations > 0) {
+        for (const item of dispatch_note.dispatch_note_items) {
+          const location_id =
+            item.location_id || dispatch_note.dispatch_location_id;
 
-        try {
-          await this.stockLevelManager.updateStock({
-            product_id: item.product_id,
-            variant_id: item.product_variant_id ?? undefined,
-            location_id,
-            quantity_change: -item.dispatched_quantity,
-            movement_type: 'stock_out',
-            reason: `Despacho remisión #${event.dispatch_number}`,
-            create_movement: true,
-            validate_availability: false, // Already confirmed/reserved
-          });
-        } catch (err) {
-          this.logger.error(
-            `[delivered] Failed to deduct stock for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
-          );
+          if (!location_id) continue;
+
+          try {
+            await this.stockLevelManager.updateStock({
+              product_id: item.product_id,
+              variant_id: item.product_variant_id ?? undefined,
+              location_id,
+              quantity_change: -item.dispatched_quantity,
+              movement_type: 'stock_out',
+              reason: `Despacho remisión #${event.dispatch_number}`,
+              create_movement: true,
+              validate_availability: false, // Already confirmed/reserved
+            });
+          } catch (err) {
+            this.logger.error(
+              `[delivered] Failed to deduct stock for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
+            );
+          }
         }
+      } else {
+        this.logger.log(
+          `[delivered] Dispatch note #${event.dispatch_number}: reservas ya consumidas (activeReservations=0) — se omite deducción de stock para evitar doble consumo`,
+        );
       }
 
       // 2. Handle sales order integration
       if (dispatch_note.sales_order_id) {
         try {
-          // Release stock reservations made by the sales order
+          // Release stock reservations made by the sales order. Step 1 above
+          // already decremented quantity_on_hand for every located item, so we
+          // MUST pass decrementOnHand:false here to avoid deducting the same
+          // stock twice (single source of truth = the reservation, consumed
+          // exactly once). Mirrors the order_id branch below.
           await this.stockLevelManager.releaseReservationsByReference(
             'order',
             dispatch_note.sales_order_id,
             'consumed',
+            undefined,
+            { decrementOnHand: false },
           );
 
           // Check if all items of the SO have been fully dispatched

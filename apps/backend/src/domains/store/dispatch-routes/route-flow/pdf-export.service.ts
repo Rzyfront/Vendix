@@ -72,7 +72,7 @@ const fmtDate = (d: Date | null | undefined) => {
   });
 };
 
-const MARGIN = 40;
+const MARGIN = 24; // thin margin to maximize printable width
 const PAGE_WIDTH = 612; // Letter
 const PAGE_HEIGHT = 792;
 
@@ -198,9 +198,9 @@ export class PdfExportService {
     doc.fillColor('black');
     doc.moveDown(0.2);
 
-    // Column layout (sums to the printable width = PAGE_WIDTH - 2*MARGIN = 532).
+    // Column layout (sums to the printable width = PAGE_WIDTH - 2*MARGIN = 564).
     // [#, Remisión, Cliente/Dirección, A cobrar, Entrega, Recaudo, Recaudado $]
-    const col_widths = [20, 70, 132, 70, 50, 50, 140];
+    const col_widths = [22, 74, 150, 74, 52, 52, 140];
     const aligns: Array<'left' | 'right' | 'center'> = [
       'center',
       'left',
@@ -453,16 +453,23 @@ export class PdfExportService {
 
   private drawFooter(doc: PDFKit.PDFDocument) {
     const range = doc.bufferedPageRange();
+    const generated = `Generado el ${new Date().toLocaleString('es-CO')}`;
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
+      // Writing inside the bottom-margin band makes PDFKit auto-append a blank
+      // page and pushes the footer onto it. Temporarily zero the bottom margin
+      // (and disable line wrapping) so the footer stays on its own page.
+      const prev_bottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
       doc.font('Helvetica').fontSize(8).fillColor('#666');
       doc.text(
-        `Generado el ${new Date().toLocaleString('es-CO')} — Página ${i + 1} de ${range.count}`,
+        `${generated} — Página ${i + 1} de ${range.count}`,
         MARGIN,
-        PAGE_HEIGHT - 30,
-        { width: PAGE_WIDTH - MARGIN * 2, align: 'center' },
+        PAGE_HEIGHT - 20,
+        { width: PAGE_WIDTH - MARGIN * 2, align: 'center', lineBreak: false },
       );
       doc.fillColor('black');
+      doc.page.margins.bottom = prev_bottom;
     }
   }
 

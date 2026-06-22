@@ -2,6 +2,7 @@ import {
   Component,
   ChangeDetectionStrategy,
   computed,
+  DestroyRef,
   effect,
   input,
   output,
@@ -15,7 +16,11 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
-import { KitchenTicket } from '../../interfaces';
+import {
+  itemHasActiveRecipe,
+  KitchenTicket,
+  KitchenTicketItem,
+} from '../../interfaces';
 import { KitchenTicketsService } from '../../services/kitchen-tickets.service';
 import { RecipesService } from '../../../recipes/services/recipes.service';
 import { Recipe } from '../../../recipes/interfaces';
@@ -69,6 +74,11 @@ export class KdsTicketDetailModalComponent {
    * `KitchenTicketsService.revert`.
    */
   readonly revertClicked = output<KitchenTicket>();
+  /**
+   * "Crear receta" para un plato sin receta — re-emitido al board, que
+   * deep-linkea a `recipes/new?product_id=…`. Mismo CTA que la card.
+   */
+  readonly createRecipeClicked = output<KitchenTicketItem>();
   /** Cierre del modal (X / backdrop / Escape) propagado al board. */
   readonly closed = output<void>();
 
@@ -78,6 +88,15 @@ export class KdsTicketDetailModalComponent {
   private readonly recipesService = inject(RecipesService);
   private readonly ticketsService = inject(KitchenTicketsService);
   private readonly toast = inject(ToastService);
+  // Captured in the injection context (field initializer) so `loadRecipe`
+  // — invoked from inside the constructor `effect`, OUTSIDE the injection
+  // context — can tie its subscription to THIS component's lifecycle.
+  // Calling `takeUntilDestroyed()` with no arg outside an injection context
+  // resolves the wrong destroy scope and cuts the HTTP stream before it can
+  // emit `next`/`error`, leaving every dish WITH a recipe stuck on
+  // "Cargando receta…" forever (no-arg form was the lone outlier vs the
+  // 1400+ `takeUntilDestroyed(this.destroyRef)` call sites in the repo).
+  private readonly destroyRef = inject(DestroyRef);
 
   /** Cache of recipe loads keyed by `product_id` to avoid hammering the API. */
   private readonly recipeCache = new Map<number, RecipeLoadState>();
@@ -114,6 +133,21 @@ export class KdsTicketDetailModalComponent {
     const s = this.ticketDisplay()?.status;
     return s === 'delivered' || s === 'cancelled';
   });
+
+  /**
+   * Mismo bloqueo que la card: el ticket solo es iniciable si TODOS los
+   * platos tienen receta activa (espejo del guard backend
+   * `KITCHEN_TICKET_NO_RECIPE`). El modal deshabilita "Iniciar" en
+   * consecuencia.
+   */
+  readonly canStart = computed(() =>
+    (this.ticketDisplay()?.items ?? []).every((it) => itemHasActiveRecipe(it)),
+  );
+
+  /** Per-dish recipe presence — drives the "Crear receta" CTA in the modal. */
+  itemHasRecipe(item: KitchenTicketItem): boolean {
+    return itemHasActiveRecipe(item);
+  }
 
   readonly elapsedLabel = computed(() => {
     const t = this.ticketDisplay();
@@ -167,15 +201,22 @@ export class KdsTicketDetailModalComponent {
     effect(() => {
       const t = this.ticket();
       if (!t) return;
-      const productIds = (t.items ?? [])
-        .map((it) => it.product_id)
-        .filter((id): id is number => typeof id === 'number');
-      for (const pid of productIds) {
+      for (const item of t.items ?? []) {
+        const pid = item.product_id;
+        if (typeof pid !== 'number') continue;
         if (this.recipeCache.has(pid)) continue;
+        // Short-circuit: si el payload ya indica que el plato no tiene receta
+        // activa (`product.recipe` ausente o `is_active === false`), lo
+        // marcamos 'missing' sin pegar a la API — evita un fetch que de todas
+        // formas degradaría a "no disponible".
+        if (!itemHasActiveRecipe(item)) {
+          this.recipeCache.set(pid, { status: 'missing' });
+          continue;
+        }
         this.loadRecipe(pid);
       }
       // Sync the local signal with the cache.
-      this.recipeStates.set(this.snapshotCache(productIds));
+      this.publishCache();
     });
   }
 
@@ -183,14 +224,20 @@ export class KdsTicketDetailModalComponent {
     this.recipeCache.set(productId, { status: 'loading' });
     this.recipesService
       .getByProduct(productId)
-      .pipe(takeUntilDestroyed())
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (recipe) => {
           this.recipeCache.set(productId, { status: 'ok', recipe });
           this.publishCache();
         },
         error: (err: any) => {
-          const code = err?.error?.error?.code ?? err?.code;
+          // Alineado con `KitchenTicketsService.handleMutationError`: el
+          // envelope de error de Vendix expone el código en
+          // `error.error_code` (o `error.code`). El parseo anterior
+          // (`err.error.error.code`, doble `.error`) nunca acertaba, así que
+          // recetas reales caían a 'error'/'missing'. Ahora se lee bien.
+          const code =
+            err?.error?.error_code ?? err?.error?.code ?? err?.code;
           // 403/404 → graceful degradation ("receta no disponible")
           if (
             code === 'MENU_NOT_FOUND' ||
@@ -253,6 +300,10 @@ export class KdsTicketDetailModalComponent {
     const t = this.ticketDisplay();
     if (t) this.revertClicked.emit(t);
   }
+  onCreateRecipe(item: KitchenTicketItem): void {
+    this.createRecipeClicked.emit(item);
+  }
+
   /** Emite el cierre al board para que resetee `selectedTicketId`. */
   onClose(): void {
     this.closed.emit();

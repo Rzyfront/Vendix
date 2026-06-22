@@ -100,14 +100,14 @@ import {
                   >
                   <!-- Product Image -->
                   <div class="item-image">
-                    @if (item.product.image_url || item.product.image) {
+                    @if (item.variant_image_url || item.product.image_url || item.product.image) {
                       <img
-                        [src]="item.product.image_url || item.product.image"
+                        [src]="item.variant_image_url || item.product.image_url || item.product.image"
                         [alt]="item.product.name"
                         (error)="handleImageError($event)"
                         />
                     }
-                    @if (!item.product.image_url && !item.product.image) {
+                    @if (!item.variant_image_url && !item.product.image_url && !item.product.image) {
                       <div
                         class="image-placeholder"
                         >

@@ -47,7 +47,7 @@
   <div class="space-y-3">
     @for (row of items().controls; track row; let i = $index) {
       <div
-        class="recipe-item rounded-lg p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-background border transition-colors"
+        class="recipe-item rounded-lg p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-end bg-[var(--color-surface)] border shadow-sm transition-colors"
         [class.recipe-item--just-added]="row === justAddedRow()"
         [style.borderColor]="
           isUnsaved(row)
@@ -85,6 +85,7 @@
 
         <!-- Cantidad -->
         <div class="md:col-span-2">
+          @let unit = productUnit(row.value.component_product_id);
           <app-input
             label="Cantidad"
             type="number"
@@ -93,14 +94,16 @@
             [min]="0"
             step="0.0001"
             tooltipText="Cuánto de este insumo lleva la receta, en su unidad de medida."
-            [suffixIcon]="true"
+            [suffixIcon]="!!unit"
           >
-            <span
-              slot="suffix-icon"
-              class="text-xs text-text-secondary font-medium"
-            >
-              {{ productUnit(row.value.component_product_id) }}
-            </span>
+            @if (unit) {
+              <span
+                slot="suffix-icon"
+                class="inline-flex items-center leading-none text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-md text-[var(--color-primary)] bg-[rgba(var(--color-primary-rgb),0.12)]"
+              >
+                {{ unit }}
+              </span>
+            }
           </app-input>
         </div>
 

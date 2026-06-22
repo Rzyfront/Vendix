@@ -4,8 +4,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
-import { DispatchNotePrintService } from '../../services/dispatch-note-print.service';
 import { DispatchNoteDetailComponent } from '../../components/dispatch-note-detail/dispatch-note-detail.component';
+import { DispatchNotePdfViewerComponent } from '../../components/dispatch-note-pdf-viewer/dispatch-note-pdf-viewer.component';
 import { DeliverModalComponent } from '../../components/deliver-modal/deliver-modal.component';
 import { VoidModalComponent } from '../../components/void-modal/void-modal.component';
 import { InvoiceModalComponent } from '../../components/invoice-modal/invoice-modal.component';
@@ -16,6 +16,7 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
   standalone: true,
   imports: [
     DispatchNoteDetailComponent,
+    DispatchNotePdfViewerComponent,
     DeliverModalComponent,
     VoidModalComponent,
     InvoiceModalComponent,
@@ -72,13 +73,20 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
           (invoiced)="handleInvoice()"
         ></app-invoice-modal>
       }
+
+      <!-- PDF Viewer -->
+      @if (showPdfViewer() && pdfNoteId()) {
+        <app-dispatch-note-pdf-viewer
+          [dispatchNoteId]="pdfNoteId()!"
+          (close)="showPdfViewer.set(false)"
+        ></app-dispatch-note-pdf-viewer>
+      }
     </div>
   `,
 })
 export class DispatchNoteDetailPageComponent {
   private route = inject(ActivatedRoute);
   private dispatchNotesService = inject(DispatchNotesService);
-  private printService = inject(DispatchNotePrintService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private destroyRef = inject(DestroyRef);
@@ -88,6 +96,8 @@ export class DispatchNoteDetailPageComponent {
   showDeliverModal = signal(false);
   showVoidModal = signal(false);
   showInvoiceModal = signal(false);
+  showPdfViewer = signal(false);
+  pdfNoteId = signal<number | null>(null);
 
   constructor() {
     const id = Number(this.route.snapshot.paramMap.get('id'));
@@ -193,6 +203,7 @@ export class DispatchNoteDetailPageComponent {
   }
 
   handlePrint(dn: DispatchNote): void {
-    this.printService.printDispatchNote(dn);
+    this.pdfNoteId.set(dn.id);
+    this.showPdfViewer.set(true);
   }
 }

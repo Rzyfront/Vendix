@@ -95,12 +95,18 @@ export class AnunciosService {
     return `${this.apiUrl}/product-images/${imageId}/proxy${query ? `?${query}` : ''}`;
   }
 
-  streamGenerate(id: number): Observable<AdCreativeStreamEvent> {
+  streamGenerate(
+    id: number,
+    correction?: string,
+  ): Observable<AdCreativeStreamEvent> {
     return new Observable<AdCreativeStreamEvent>((subscriber) => {
       const params = new URLSearchParams();
       const token = this.getAccessToken();
       if (token) params.set('token', token);
       params.set('request_id', this.createRequestId(id));
+      if (correction?.trim()) {
+        params.set('correction', correction.trim());
+      }
 
       const eventSource = new EventSource(
         `${this.apiUrl}/${id}/generate-stream?${params.toString()}`,

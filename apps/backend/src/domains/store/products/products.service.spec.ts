@@ -974,6 +974,112 @@ describe('ProductsService', () => {
     });
   });
 
+  describe('STATE FILTER PRIORITY (findAll)', () => {
+    // Regression: previously, the state filter was set with a ternary
+    // (pos_optimized ? ACTIVE : include_inactive ? undefined : { not: ARCHIVED })
+    // and then overridden by a spread `...(state && { state })`. The spread
+    // did not propagate correctly, so filtering by 'archived' returned 0
+    // products. Fix computes `effectiveState` with explicit priority.
+
+    const buildStateQuery = (
+      overrides: Partial<ProductQueryDto> = {},
+    ): ProductQueryDto =>
+      ({
+        page: 1,
+        limit: 10,
+        ...overrides,
+      }) as ProductQueryDto;
+
+    const getFindManyStateFilter = (callArgs: any): any => {
+      // The service wraps `where` inside an `AND` array when there are other
+      // filters; we unwrap it here so tests only assert the `state` clause.
+      const where = callArgs?.where ?? {};
+      if (Array.isArray(where.AND)) {
+        const stateEntry = where.AND.find(
+          (clause: any) => clause && 'state' in clause,
+        );
+        return stateEntry?.state;
+      }
+      return where.state;
+    };
+
+    it('uses the explicit `state` param when the caller asks for archived', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      await service.findAll(
+        buildStateQuery({ state: ProductState.ARCHIVED, include_inactive: true }),
+      );
+
+      const lastCall =
+        mockPrismaService.products.findMany.mock.calls[
+          mockPrismaService.products.findMany.mock.calls.length - 1
+        ][0];
+      expect(getFindManyStateFilter(lastCall)).toBe(ProductState.ARCHIVED);
+    });
+
+    it('forces ACTIVE when pos_optimized=true and no explicit state', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      await service.findAll(buildStateQuery({ pos_optimized: true }));
+
+      const lastCall =
+        mockPrismaService.products.findMany.mock.calls[
+          mockPrismaService.products.findMany.mock.calls.length - 1
+        ][0];
+      expect(getFindManyStateFilter(lastCall)).toBe(ProductState.ACTIVE);
+    });
+
+    it('omits the state filter when include_inactive=true and no explicit state', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      await service.findAll(buildStateQuery({ include_inactive: true }));
+
+      const lastCall =
+        mockPrismaService.products.findMany.mock.calls[
+          mockPrismaService.products.findMany.mock.calls.length - 1
+        ][0];
+      // No `state` clause should appear at all.
+      expect(getFindManyStateFilter(lastCall)).toBeUndefined();
+    });
+
+    it('excludes archived by default when no flags are set', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      await service.findAll(buildStateQuery({}));
+
+      const lastCall =
+        mockPrismaService.products.findMany.mock.calls[
+          mockPrismaService.products.findMany.mock.calls.length - 1
+        ][0];
+      expect(getFindManyStateFilter(lastCall)).toEqual({
+        not: ProductState.ARCHIVED,
+      });
+    });
+
+    it('explicit `state` wins over pos_optimized (caller priority)', async () => {
+      mockPrismaService.products.findMany.mockResolvedValue([]);
+      mockPrismaService.products.count.mockResolvedValue(0);
+
+      await service.findAll(
+        buildStateQuery({
+          state: ProductState.INACTIVE,
+          pos_optimized: true,
+        }),
+      );
+
+      const lastCall =
+        mockPrismaService.products.findMany.mock.calls[
+          mockPrismaService.products.findMany.mock.calls.length - 1
+        ][0];
+      // Even though pos_optimized is true, explicit INACTIVE should win.
+      expect(getFindManyStateFilter(lastCall)).toBe(ProductState.INACTIVE);
+    });
+  });
+
   describe('ACTIVE PROMOTIONS ON LISTING', () => {
     const buildListedProduct = (override: Partial<any> = {}) => ({
       id: override.id ?? 1,

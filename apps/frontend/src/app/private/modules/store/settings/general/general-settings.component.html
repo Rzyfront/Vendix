@@ -109,6 +109,20 @@
           </div>
         </section>
 
+        <!-- Dispatch Section -->
+        <section id="section-dispatch" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--teal">
+              <app-icon name="truck" size="18"></app-icon>
+            </div>
+            <h2 class="section-title">Despacho y Logística</h2>
+          </div>
+          <div class="section-body">
+            <app-dispatch-settings-form [settings]="settings().dispatch || { order_state_update_mode: 'on_close' }"
+              (settingsChange)="onSectionChange('dispatch', $event)" />
+          </div>
+        </section>
+
         <!-- Notifications Section -->
         <section id="section-notifications" class="settings-section">
           <div class="section-header">

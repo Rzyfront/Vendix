@@ -11,6 +11,7 @@ import { PosSettingsForm } from './components/pos-settings-form/pos-settings-for
 import { ReceiptsSettingsForm } from './components/receipts-settings-form/receipts-settings-form.component';
 import { AppSettingsForm } from './components/app-settings-form/app-settings-form.component';
 import { OperationsSettingsForm } from './components/operations-settings-form/operations-settings-form.component';
+import { DispatchSettingsForm } from './components/dispatch-settings-form/dispatch-settings-form.component';
 import { LucideAngularModule } from "lucide-angular";
 import { IconComponent } from '../../../../../shared/components/index';
 import { ScrollableTabsComponent } from '../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
@@ -33,6 +34,7 @@ import { firstValueFrom } from 'rxjs';
     ReceiptsSettingsForm,
     AppSettingsForm,
     OperationsSettingsForm,
+    DispatchSettingsForm,
     ScrollableTabsComponent,
     StickyHeaderComponent
 ],
@@ -68,6 +70,7 @@ export class GeneralSettingsComponent implements OnInit {
     { id: 'branding', label: 'Marca', icon: 'palette' },
     { id: 'inventory', label: 'Inventario', icon: 'package' },
     { id: 'operations', label: 'Operaciones', icon: 'clock' },
+    { id: 'dispatch', label: 'Despacho', icon: 'truck' },
     { id: 'notifications', label: 'Alertas', icon: 'bell' },
     { id: 'pos', label: 'POS', icon: 'monitor' },
     { id: 'receipts', label: 'Recibos', icon: 'file-text' },
@@ -229,7 +232,7 @@ export class GeneralSettingsComponent implements OnInit {
       }
 
       const knownSections: (keyof StoreSettings)[] = [
-        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'panel_ui',
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'panel_ui',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {

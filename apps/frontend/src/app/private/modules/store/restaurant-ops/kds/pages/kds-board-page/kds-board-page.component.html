@@ -99,6 +99,7 @@
                   (readyClicked)="markTicketReady($event)"
                   (deliverClicked)="markTicketDelivered($event)"
                   (cancelClicked)="cancelTicket($event)"
+                  (createRecipeClicked)="onCreateRecipe($event)"
                 />
               }
             }
@@ -118,6 +119,7 @@
     (deliverClicked)="markTicketDelivered($event)"
     (cancelClicked)="cancelTicket($event)"
     (revertClicked)="revertTicket($event)"
+    (createRecipeClicked)="onCreateRecipe($event)"
     (closed)="closeDetail()"
   />
 </div>

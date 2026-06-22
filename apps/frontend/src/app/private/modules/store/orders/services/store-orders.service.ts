@@ -31,6 +31,23 @@ import {
   AssignShippingMethodDto,
 } from '../interfaces/order.interface';
 
+/**
+ * Payload para crear una dirección store-side (`POST /store/addresses`).
+ * Usa los nombres del DTO del backend (`address_line_1`, `state`, `country`),
+ * que el service backend mapea a las columnas `address_line1`/`state_province`/`country_code`.
+ */
+export interface CreateAddressPayload {
+  address_line_1: string;
+  address_line_2?: string;
+  city: string;
+  state: string;
+  postal_code?: string;
+  country: string;
+  type?: string;
+  customer_id?: number;
+  delivery_instructions?: string;
+}
+
 // Caché estático global (persiste entre instancias del servicio)
 interface CacheEntry<T> {
   observable: T;
@@ -594,5 +611,46 @@ export class StoreOrdersService {
         return throwError(() => new Error(this.extractErrorMessage(error)));
       }),
     );
+  }
+
+  // ── Dirección de envío (captura en página) ────────────────
+
+  /**
+   * POST /store/addresses
+   * Crea una dirección; si trae `customer_id`, el backend la vincula al cliente.
+   * Devuelve la dirección creada (incluye `id`).
+   */
+  createCustomerAddress(
+    payload: CreateAddressPayload,
+  ): Observable<{ id: number } & Record<string, unknown>> {
+    const url = `${this.apiUrl}/store/addresses`;
+    return this.http.post<any>(url, payload).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error creating customer address:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  /**
+   * PATCH /store/orders/:id
+   * Asigna una dirección de envío existente a la orden. La respuesta incluye
+   * la relación `addresses_orders_shipping_address_idToaddresses` poblada.
+   */
+  updateOrderShippingAddress(
+    orderId: string,
+    shippingAddressId: number,
+  ): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}`;
+    return this.http
+      .patch<any>(url, { shipping_address_id: shippingAddressId })
+      .pipe(
+        map((r) => r.data || r),
+        catchError((error) => {
+          console.error('Error updating order shipping address:', error);
+          return throwError(() => new Error(this.extractErrorMessage(error)));
+        }),
+      );
   }
 }

@@ -5,12 +5,10 @@ import {
   FormGroup,
   Validators,
 } from '@angular/forms';
-import {
-  ButtonComponent,
-  ModalComponent,
-  StoreUserSelectComponent,
-  ToggleComponent,
-} from '../../../../../../shared/components/index';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { StoreUserSelectComponent } from '../../../../../../shared/components/store-user-select/store-user-select.component';
+import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
 import {
   Vehicle,
   CreateVehicleDto,

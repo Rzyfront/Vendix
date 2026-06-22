@@ -84,30 +84,102 @@ export class DispatchRoutesService {
     return store_id;
   }
 
-  async create(dto: CreateDispatchRouteDto) {
-    const store_id = this.getStoreId();
-    const user_id = RequestContextService.getContext()?.user_id;
-
-    // Validate driver: si es externo, requiere nombre + cédula; si es interno, FK users.
-    // Es mutuamente excluyente: no se permite mandar ambos (driver_user_id y external_*).
-    if (dto.driver_user_id && (dto.external_driver_name || dto.external_driver_id_number)) {
+  /**
+   * Validate the driver/assistant block and defensively sanitize `assistants`.
+   *
+   * Shared by `create()` and `update()` so both entry points enforce the same
+   * invariants (the frontend wizard already prevents these cases, but the
+   * backend must not trust the client). On success it MUTATES `dto.assistants`
+   * to the cleaned array (same behaviour create() relied on before).
+   *
+   * Rules enforced:
+   * 1. Internal (`driver_user_id`) and external (`external_driver_*`) driver are
+   *    mutually exclusive — they cannot both be present.
+   * 2. When `requireDriver` is true (create), a complete driver must be
+   *    provided: if `is_primary_driver_external` the external name + id_number
+   *    are required, otherwise `driver_user_id` is required. On a partial
+   *    update (`requireDriver = false`) this presence requirement is skipped so
+   *    a PATCH that doesn't touch driver fields stays valid.
+   * 3. The driver (`driver_user_id`) cannot also appear as an assistant
+   *    (`assistants[].user_id`) — checked AFTER sanitizing assistants.
+   *
+   * @param requireDriver when true (create) enforce that a driver is present.
+   */
+  private validateDriverAndAssistants(
+    dto: CreateDispatchRouteDto | UpdateDispatchRouteDto,
+    requireDriver: boolean,
+  ): void {
+    // (1) Internal vs external driver mutual exclusion.
+    if (
+      dto.driver_user_id &&
+      (dto.external_driver_name || dto.external_driver_id_number)
+    ) {
       throw new BadRequestException(
         'Conductor interno y externo son mutuamente excluyentes',
       );
     }
-    if (dto.is_primary_driver_external) {
-      if (!dto.external_driver_name || !dto.external_driver_id_number) {
-        throw new BadRequestException(
-          'Conductor externo requiere external_driver_name y external_driver_id_number',
-        );
+
+    // (2) On create, a complete driver must be provided.
+    if (requireDriver) {
+      if (dto.is_primary_driver_external) {
+        if (!dto.external_driver_name || !dto.external_driver_id_number) {
+          throw new BadRequestException(
+            'Conductor externo requiere external_driver_name y external_driver_id_number',
+          );
+        }
+      } else {
+        if (!dto.driver_user_id) {
+          throw new BadRequestException(
+            'Conductor interno requiere driver_user_id',
+          );
+        }
       }
-    } else {
-      if (!dto.driver_user_id) {
+    }
+
+    // Sanitize `assistants` defensive pass (DTO already validates shape with
+    // class-validator; this catches any item missing both user_id and external
+    // fields that would otherwise persist as `[]` on the JSONB column).
+    if (dto.assistants && Array.isArray(dto.assistants)) {
+      const cleaned: any[] = [];
+      for (const a of dto.assistants) {
+        if (!a || typeof a !== 'object') continue;
+        const obj = a as Record<string, unknown>;
+        const hasUser = typeof obj.user_id === 'number' && obj.user_id > 0;
+        const hasExt =
+          typeof obj.external_name === 'string' &&
+          obj.external_name.length > 0 &&
+          typeof obj.external_id_number === 'string' &&
+          obj.external_id_number.length > 0;
+        if (!hasUser && !hasExt) continue; // skip invalid items silently
+        cleaned.push(obj);
+      }
+      dto.assistants = cleaned;
+    }
+
+    // (3) The driver cannot also be listed as an assistant (checked after the
+    // sanitize pass so released/invalid items don't trigger a false positive).
+    if (dto.driver_user_id && Array.isArray(dto.assistants)) {
+      const driverIsAssistant = dto.assistants.some(
+        (a) =>
+          a &&
+          typeof a === 'object' &&
+          (a as Record<string, unknown>).user_id === dto.driver_user_id,
+      );
+      if (driverIsAssistant) {
         throw new BadRequestException(
-          'Conductor interno requiere driver_user_id',
+          'El conductor no puede figurar también como auxiliar',
         );
       }
     }
+  }
+
+  async create(dto: CreateDispatchRouteDto) {
+    const store_id = this.getStoreId();
+    const user_id = RequestContextService.getContext()?.user_id;
+
+    // Validate driver (mutual exclusion + required driver) and sanitize
+    // assistants (mutates dto.assistants). create() always requires a driver.
+    this.validateDriverAndAssistants(dto, true);
 
     // Validate that all dispatch_notes exist, belong to this store, and are not already in another route
     const note_ids = dto.stops.map((s) => s.dispatch_note_id);
@@ -151,26 +223,6 @@ export class DispatchRoutesService {
       throw new BadRequestException(
         `Las remisiones ${blocking.map((s) => s.dispatch_note_id).join(', ')} ya pertenecen a una planilla activa (estado: ${blocking.map((s) => s.route.status).join(', ')})`,
       );
-    }
-
-    // Sanitize `assistants` defensive pass (DTO already validates shape with
-    // class-validator; this catches any item missing both user_id and external
-    // fields that would otherwise persist as `[]` on the JSONB column).
-    if (dto.assistants && Array.isArray(dto.assistants)) {
-      const cleaned: any[] = [];
-      for (const a of dto.assistants) {
-        if (!a || typeof a !== 'object') continue;
-        const obj = a as Record<string, unknown>;
-        const hasUser = typeof obj.user_id === 'number' && obj.user_id > 0;
-        const hasExt =
-          typeof obj.external_name === 'string' &&
-          obj.external_name.length > 0 &&
-          typeof obj.external_id_number === 'string' &&
-          obj.external_id_number.length > 0;
-        if (!hasUser && !hasExt) continue; // skip invalid items silently
-        cleaned.push(obj);
-      }
-      dto.assistants = cleaned;
     }
 
     // Validate vehicle
@@ -554,6 +606,11 @@ export class DispatchRoutesService {
         'Solo se pueden editar planillas en estado borrador',
       );
     }
+
+    // Validate driver block + sanitize assistants. Partial update: the
+    // mutual-exclusion and driver-vs-assistant checks only apply to the fields
+    // actually present, and a complete driver is NOT required (requireDriver=false).
+    this.validateDriverAndAssistants(dto, false);
 
     return this.prisma.$transaction(async (tx) => {
       // Update stops if provided

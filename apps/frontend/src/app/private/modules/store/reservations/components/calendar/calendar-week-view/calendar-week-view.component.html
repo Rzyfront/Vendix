@@ -27,6 +27,19 @@
           <div class="time-row"></div>
         }
 
+        <!-- Free-slot overlay (green) -->
+        @for (slot of getFreeSlotsForDate(day.date); track slot.start + slot.end) {
+          <div
+            class="free-slot-block"
+            [style.top.%]="getFreeSlotTop(slot)"
+            [style.height.%]="getFreeSlotHeight(slot)"
+            (click)="onFreeSlotClick($event, day.date, slot)"
+            [attr.aria-label]="'Slot libre desde ' + slot.start + ' hasta ' + slot.end"
+            [title]="'Libre ' + slot.start + ' – ' + slot.end">
+            <span class="free-slot-time">{{ slot.start }}</span>
+          </div>
+        }
+
         <!-- Booking blocks -->
         @for (booking of getBookingsForDate(day.date); track booking.id) {
           <div

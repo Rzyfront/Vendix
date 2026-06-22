@@ -15,6 +15,7 @@ import { Subject, Subscription } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 
 import { StoresService } from './services/stores.service';
+import { SuperAdminWeeklyReportService } from '../weekly-report/services/super-admin-weekly-report.service';
 import {
   StoreListItem,
   StoreState,
@@ -73,6 +74,7 @@ export class StoresComponent implements OnInit, OnChanges {
   private destroyRef = inject(DestroyRef);
   // Dependencies
   private readonly storesService = inject(StoresService);
+  private readonly weeklyReportService = inject(SuperAdminWeeklyReportService);
   private readonly fb = inject(FormBuilder);
   private readonly dialogService = inject(DialogService);
   private readonly toastService = inject(ToastService);
@@ -130,6 +132,11 @@ export class StoresComponent implements OnInit, OnChanges {
 
   dropdownActions: DropdownAction[] = [
     { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    {
+      label: 'Generar reporte semanal (todas)',
+      icon: 'file-text',
+      action: 'weekly-report-all',
+    },
     {
       label: 'Nueva Tienda',
       icon: 'plus',
@@ -247,6 +254,11 @@ export class StoresComponent implements OnInit, OnChanges {
       label: 'Configuración',
       icon: 'settings',
       action: (store) => this.openSettingsModal(store),
+      variant: 'ghost'},
+    {
+      label: 'Generar reporte semanal',
+      icon: 'file-text',
+      action: (store) => this.generateWeeklyReport(store),
       variant: 'ghost'},
     {
       label: 'Eliminar',
@@ -616,6 +628,9 @@ private initializeCreateForm(): void {
       case 'create':
         this.openCreateStoreModal();
         break;
+      case 'weekly-report-all':
+        this.generateWeeklyReportForAll();
+        break;
     }
   }
 
@@ -690,6 +705,81 @@ private initializeCreateForm(): void {
                 this.toastService.error('Error al eliminar la tienda');
               }});
         }
+      });
+  }
+
+  /**
+   * Dispara la generación manual del reporte semanal de UNA tienda.
+   * Confirma primero porque cada generación exitosa emite una notificación
+   * `weekly_report` (SSE + push) al dueño de la tienda.
+   */
+  generateWeeklyReport(store: StoreListItem): void {
+    this.dialogService
+      .confirm({
+        title: 'Generar reporte semanal',
+        message: `Se generará el resumen semanal de "${store.name}" y se notificará al dueño de la tienda. ¿Continuar?`,
+        confirmText: 'Generar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary'})
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.weeklyReportService
+          .runForStore(store.id)
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (response) => {
+              if (response.success) {
+                this.toastService.success(
+                  response.message || 'Reporte generado',
+                );
+              } else {
+                this.toastService.error(
+                  'Respuesta inválida al generar el reporte semanal',
+                );
+              }
+            },
+            error: () => {
+              this.toastService.error('Error al generar el reporte semanal');
+            }});
+      });
+  }
+
+  /**
+   * Dispara la generación del reporte semanal para TODAS las tiendas activas.
+   * Confirma primero porque cada generación exitosa emite una notificación
+   * `weekly_report` (SSE + push) al dueño de cada tienda.
+   */
+  generateWeeklyReportForAll(): void {
+    this.dialogService
+      .confirm({
+        title: 'Generar para todas',
+        message:
+          'Se generará el resumen semanal de TODAS las tiendas activas y se notificará al dueño de cada tienda. ¿Continuar?',
+        confirmText: 'Generar',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary'})
+      .then((confirmed) => {
+        if (!confirmed) return;
+        this.weeklyReportService
+          .runForAll()
+          .pipe(takeUntilDestroyed(this.destroyRef))
+          .subscribe({
+            next: (response) => {
+              if (response.success && response.data) {
+                this.toastService.success(
+                  `Batch: ${response.data.generated} generados, ${response.data.skipped} saltados`,
+                );
+              } else {
+                this.toastService.error(
+                  'Respuesta inválida al generar los reportes semanales',
+                );
+              }
+            },
+            error: () => {
+              this.toastService.error(
+                'Error al generar los reportes semanales',
+              );
+            }});
       });
   }
 

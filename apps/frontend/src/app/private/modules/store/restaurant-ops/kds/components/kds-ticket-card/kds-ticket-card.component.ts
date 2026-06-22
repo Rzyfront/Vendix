@@ -8,9 +8,12 @@ import { CommonModule } from '@angular/common';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
+import { AlertBannerComponent } from '../../../../../../../shared/components/alert-banner/alert-banner.component';
 import { KitchenTicketsService } from '../../services/kitchen-tickets.service';
 import {
+  itemHasActiveRecipe,
   KitchenTicket,
+  KitchenTicketItem,
   KitchenTicketStatus,
 } from '../../interfaces';
 
@@ -31,7 +34,7 @@ import {
 @Component({
   selector: 'app-kds-ticket-card',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, BadgeComponent, IconComponent],
+  imports: [CommonModule, ButtonComponent, BadgeComponent, IconComponent, AlertBannerComponent],
   templateUrl: './kds-ticket-card.component.html',
   styleUrl: './kds-ticket-card.component.scss',
 })
@@ -46,6 +49,13 @@ export class KdsTicketCardComponent {
   readonly readyClicked = output<KitchenTicket>();
   readonly deliverClicked = output<KitchenTicket>();
   readonly cancelClicked = output<KitchenTicket>();
+  /**
+   * Emitted from the per-dish "Crear receta" CTA shown on items without an
+   * active recipe. The board deep-links to `recipes/new?product_id=…` so the
+   * operator can attach a recipe to the exact dish that is blocking the
+   * ticket. Stops propagation in the template so it never opens the modal.
+   */
+  readonly createRecipeClicked = output<KitchenTicketItem>();
   /**
    * Restaurant Suite — Fase K Gap 4: emitted on click of the card
    * body (NOT the actions footer). The board opens the detail
@@ -121,6 +131,56 @@ export class KdsTicketCardComponent {
   readonly isInPreparation = computed(
     () => this.ticket().status === 'in_preparation',
   );
+
+  // ─── Restaurant Suite — recipe readiness (per dish, blocking) ──────
+  /**
+   * True when at least one dish on the ticket has no active recipe. The
+   * backend `startPreparation` guard rejects the `in_preparation`
+   * transition for such tickets (`KITCHEN_TICKET_NO_RECIPE`); we surface
+   * the block proactively here instead of waiting for the failed click.
+   */
+  readonly hasRecipeLessItem = computed(() =>
+    (this.ticket().items ?? []).some((it) => !itemHasActiveRecipe(it)),
+  );
+
+  /** A ticket is startable only when every dish has an active recipe. */
+  readonly canStart = computed(() => !this.hasRecipeLessItem());
+
+  /** Per-dish recipe presence — drives the "Sin receta" badge + CTA. */
+  itemHasRecipe(item: KitchenTicketItem): boolean {
+    return itemHasActiveRecipe(item);
+  }
+
+  // ─── Restaurant Suite — per-dish urgency ───────────────────────────
+  /**
+   * Per-dish preparation time in minutes (product-level; the ticket item
+   * carries no variant FK). Missing/0/negative ⇒ default 10 min, matching
+   * the ticket-level `smallestPrepMinutes` rule.
+   */
+  itemPrepMinutes(item: KitchenTicketItem): number {
+    const DEFAULT_MIN = 10;
+    const v = Number(item.product?.preparation_time_minutes ?? 0);
+    return v > 0 ? v : DEFAULT_MIN;
+  }
+
+  /**
+   * Per-dish urgency tier against the SHARED elapsed clock. All items are
+   * fired at the same instant, so dishes with a shorter prep time cross the
+   * threshold sooner — a 2-min dish alerts while a 10-min dish is still calm.
+   * Suppressed in terminal states.
+   */
+  itemUrgency(item: KitchenTicketItem): 'none' | 'warning' | 'danger' {
+    if (this.isTerminal(this.ticket().status)) return 'none';
+    const prep = this.itemPrepMinutes(item);
+    const elapsed = this.elapsedSeconds();
+    if (elapsed >= (prep + 5) * 60) return 'danger';
+    if (elapsed >= prep * 60) return 'warning';
+    return 'none';
+  }
+
+  onCreateRecipe(item: KitchenTicketItem): void {
+    this.createRecipeClicked.emit(item);
+  }
 
   onCardClick(): void {
     this.cardClicked.emit(this.ticket());

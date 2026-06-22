@@ -457,7 +457,11 @@ export class MarketingAdCreativesService {
     return this.serializeCreative(updated);
   }
 
-  streamGenerate(id: number, requestId?: string): Observable<MessageEvent> {
+  streamGenerate(
+    id: number,
+    requestId?: string,
+    correction?: string,
+  ): Observable<MessageEvent> {
     const context = RequestContextService.getContext();
     const generationRequestId = this.resolveGenerationRequestId(id, requestId);
 
@@ -469,7 +473,7 @@ export class MarketingAdCreativesService {
           await this.assertDailyGenerationQuota(currentContext.store_id);
           await this.markProcessing(id);
 
-          const variables = this.buildVariables(creative);
+          const variables = this.buildVariables(creative, correction);
           const referenceImages = await this.buildReferenceImages(creative);
           let savedCreative: any = null;
 
@@ -874,7 +878,10 @@ export class MarketingAdCreativesService {
     );
   }
 
-  private buildVariables(creative: any): Record<string, string> {
+  private buildVariables(
+    creative: any,
+    correction?: string,
+  ): Record<string, string> {
     const productsContext = (creative.creative_products || [])
       .map((item: any, index: number) => {
         const product = item.product;
@@ -909,10 +916,15 @@ export class MarketingAdCreativesService {
     );
     const inventory = this.buildResourcesInventory(sourceTypes, products);
 
+    const basePrompt = creative.prompt?.trim() || 'Sin instrucciones adicionales';
+    const promptValue = correction?.trim()
+      ? `${basePrompt}\n\nCorreccion solicitada por el usuario respecto al intento anterior: ${correction.trim()}`
+      : basePrompt;
+
     return {
       title: creative.title,
       description: creative.description || 'Sin descripcion adicional',
-      prompt: creative.prompt || 'Sin instrucciones adicionales',
+      prompt: promptValue,
       format_label: this.formatLabel(creative.format as AdFormat),
       size,
       products_context: productsContext || 'Sin productos detallados',
@@ -1015,7 +1027,22 @@ export class MarketingAdCreativesService {
       );
     }
 
-    return postCopy.slice(0, 4000);
+    const withCta = await this.appendEcommerceCta(postCopy);
+    return withCta.slice(0, 4000);
+  }
+
+  /**
+   * Concatena un CTA fijo con el dominio ecommerce al final del post. El CTA NO
+   * lo genera la IA (el prompt tiene prohibido meter enlaces): se pega aqui de
+   * forma deterministica para garantizar el dominio correcto y evitar
+   * alucinaciones. Si la tienda no tiene dominio ecommerce activo, no anexa nada.
+   */
+  private async appendEcommerceCta(postCopy: string): Promise<string> {
+    const domain = await this.getEcommerceDomain();
+    const hostname = domain?.hostname?.trim();
+    if (!hostname) return postCopy;
+    if (postCopy.includes(hostname)) return postCopy;
+    return `${postCopy}\n\nConsigue esto y más en ${hostname}`;
   }
 
   private async buildMarketingTextVariables(
