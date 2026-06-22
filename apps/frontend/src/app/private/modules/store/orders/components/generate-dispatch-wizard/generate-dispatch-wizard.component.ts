@@ -17,6 +17,8 @@ import {
   ButtonComponent,
   IconComponent,
   SelectorComponent,
+  StepsLineComponent,
+  StepsLineItem,
   ToastService,
 } from '../../../../../../shared/components';
 import { StoreUserSelectComponent } from '../../../../../../shared/components/store-user-select/store-user-select.component';
