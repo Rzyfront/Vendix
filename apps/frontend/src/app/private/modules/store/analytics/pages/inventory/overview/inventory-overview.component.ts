@@ -194,10 +194,9 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
         splitNumber: 5,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: border } } },
       series: [
         this.buildLineSeries(
