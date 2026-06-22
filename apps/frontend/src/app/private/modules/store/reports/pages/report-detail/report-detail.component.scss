@@ -38,7 +38,7 @@
 .config-toolbar {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: end;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
   background: var(--color-surface);
@@ -58,7 +58,7 @@
 
     @media (min-width: 768px) {
       flex-direction: row !important;
-      align-items: center;
+      align-items: end;
     }
   }
 }
