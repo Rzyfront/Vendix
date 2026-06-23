@@ -4,6 +4,7 @@ import { seedPermissionsAndRoles } from './seeds/permissions-roles.seed';
 import { seedOrganizationsAndStores } from './seeds/organizations-stores.seed';
 import { seedVendixPlatformOrg } from './seeds/vendix-platform-org.seed';
 import { seedSystemPaymentMethods } from './seeds/system-payment-methods.seed';
+import { seedSystemShippingMethods } from './seeds/system-shipping-methods.seed';
 import { seedLegalDocuments } from './seeds/legal-documents.seed';
 import { seedUsers } from './seeds/users.seed';
 import { seedProductsAndCategories } from './seeds/products-categories.seed';
@@ -60,6 +61,12 @@ const seedModules = [
     name: 'System Payment Methods',
     fn: seedSystemPaymentMethods,
     description: 'System-wide payment methods',
+  },
+  {
+    name: 'System Shipping Methods',
+    fn: seedSystemShippingMethods,
+    description:
+      'System-wide shipping methods (own_fleet, carrier, pickup) that stores can activate',
   },
   {
     name: 'Organizations & Stores',
