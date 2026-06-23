@@ -316,6 +316,8 @@ import {
   Handshake,
   Music2,
   Navigation,
+  // Serial-numbers module icon
+  Fingerprint,
 } from 'lucide-angular';
 
 /**
@@ -722,6 +724,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'handshake': Handshake,
   'music-2': Music2,
   'navigation': Navigation,
+
+  // Serial-numbers module icon
+  'fingerprint': Fingerprint,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

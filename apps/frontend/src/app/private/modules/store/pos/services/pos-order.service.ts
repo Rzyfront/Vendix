@@ -1036,6 +1036,15 @@ export class PosOrderService {
       applied_price_tier_id: isCustomItem
         ? undefined
         : item.applied_price_tier_id ?? undefined,
+      // QUI-431 — serials for serialized products. `serial_ids` are existing
+      // pool rows; `serial_numbers` are free-text the backend resolves/creates.
+      // Both are ignored by the backend for non-serialized products.
+      serial_ids:
+        !isCustomItem && item.serial_ids?.length ? item.serial_ids : undefined,
+      serial_numbers:
+        !isCustomItem && item.serial_numbers?.length
+          ? item.serial_numbers
+          : undefined,
     };
   }
 

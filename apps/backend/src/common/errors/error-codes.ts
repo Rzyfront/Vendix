@@ -784,6 +784,26 @@ export const ErrorCodes = {
     devMessage: 'Stock transfer not found',
   },
 
+  // Serial number tracking (QUI-431)
+  SERIAL_REQUIRED_001: {
+    code: 'SERIAL_REQUIRED_001',
+    httpStatus: 400,
+    devMessage:
+      'This product requires serial numbers; the provided serials do not match the requested quantity',
+  },
+  SERIAL_PARITY_001: {
+    code: 'SERIAL_PARITY_001',
+    httpStatus: 409,
+    devMessage:
+      'Serial number parity violation: in-stock serial count does not match stock on hand for this product/location',
+  },
+  SERIAL_DUP_001: {
+    code: 'SERIAL_DUP_001',
+    httpStatus: 409,
+    devMessage:
+      'Serial number already committed to this document type (duplicate sale detected)',
+  },
+
   // Cash Registers
   CR_FIND_001: {
     code: 'CR_FIND_001',

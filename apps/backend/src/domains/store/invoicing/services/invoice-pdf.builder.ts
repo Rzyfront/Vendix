@@ -66,6 +66,9 @@ export interface InvoicePdfItem {
   // tier label and the real stock units consumed when packaging expands qty.
   applied_price_tier_name?: string | null;
   stock_units_consumed?: number | null;
+  // Serial number(s) snapshot (CSV) captured at sale time for serialized
+  // products (QUI-431). Rendered as a sub-line under the description.
+  serial_numbers_snapshot?: string | null;
 }
 
 export interface InvoicePdfTax {
@@ -428,8 +431,11 @@ export class InvoicePdfBuilder {
         typeof item.stock_units_consumed === 'number' &&
         item.stock_units_consumed > 0 &&
         item.stock_units_consumed !== item.quantity;
+      const has_serials =
+        typeof item.serial_numbers_snapshot === 'string' &&
+        item.serial_numbers_snapshot.trim().length > 0;
 
-      if (has_tier || has_package) {
+      if (has_tier || has_package || has_serials) {
         doc.font('Helvetica').fontSize(7).fillColor('#666666');
         if (has_tier) {
           doc.text(
@@ -446,6 +452,14 @@ export class InvoicePdfBuilder {
             ) / 100;
           doc.text(
             `× ${per_unit} unid/empaque (desconto ${item.stock_units_consumed} unid. de stock)`,
+            col_x.description + 6,
+            doc.y,
+            { width: 219 },
+          );
+        }
+        if (has_serials) {
+          doc.text(
+            `Serial(es): ${(item.serial_numbers_snapshot as string).trim()}`,
             col_x.description + 6,
             doc.y,
             { width: 219 },

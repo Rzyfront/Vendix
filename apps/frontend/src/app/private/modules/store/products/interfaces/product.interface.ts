@@ -50,6 +50,7 @@ export interface Product {
   reorder_point?: number | null;
   low_stock_threshold?: number | null;
   track_inventory?: boolean;
+  requires_serial_numbers?: boolean;
   weight?: number;
   dimensions?: {
     length: number;
@@ -313,6 +314,7 @@ export interface CreateProductDto {
   barcode?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
+  requires_serial_numbers?: boolean;
   weight?: number;
   dimensions?: {
     length: number;
@@ -376,6 +378,7 @@ export interface UpdateProductDto {
   barcode?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
+  requires_serial_numbers?: boolean;
   available_for_ecommerce?: boolean;
   is_featured?: boolean;
   allow_pos_price_override?: boolean;
@@ -558,6 +561,7 @@ export interface ProductManagement {
   sku?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
+  requires_serial_numbers?: boolean;
   state?: ProductState;
   category_id?: number | null;
   brand_id?: number | null;

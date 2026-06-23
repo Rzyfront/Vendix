@@ -25,6 +25,7 @@ import {
   CreateFromOrderDto,
   VoidDispatchNoteDto,
   DeliverDispatchNoteDto,
+  ConfirmDispatchNoteDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -185,8 +186,11 @@ export class DispatchNotesController {
 
   @Post(':id/confirm')
   @Permissions('store:dispatch_notes:confirm')
-  async confirm(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.dispatchNoteFlowService.confirm(id);
+  async confirm(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ConfirmDispatchNoteDto,
+  ) {
+    const result = await this.dispatchNoteFlowService.confirm(id, dto);
     return this.responseService.success(
       result,
       'Remisión confirmada exitosamente',

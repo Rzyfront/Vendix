@@ -17,9 +17,16 @@ import { OrderAutoFulfillmentListener } from './listeners/order-auto-fulfillment
 import { KitchenOrderDeliveredListener } from './listeners/kitchen-order-delivered.listener';
 import { KitchenOrderDeliveryRevertedListener } from './listeners/kitchen-order-delivery-reverted.listener';
 import { PaymentFromDispatchRouteListener } from './listeners/payment-from-dispatch-route.listener';
+import { InventorySerialNumbersModule } from '../../inventory/serial-numbers/inventory-serial-numbers.module';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, CashRegistersModule, SettingsModule],
+  imports: [
+    PrismaModule,
+    ResponseModule,
+    CashRegistersModule,
+    SettingsModule,
+    InventorySerialNumbersModule,
+  ],
   controllers: [OrderFlowController, OrderRefundsController],
   providers: [
     OrderFlowService,

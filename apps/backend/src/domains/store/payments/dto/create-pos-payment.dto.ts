@@ -154,6 +154,28 @@ export class PosOrderItemDto {
   @IsBoolean()
   @Type(() => Boolean)
   skip_kds?: boolean;
+
+  // QUI-431 — Seriales seleccionados por el cajero para esta línea.
+  // Solo aplica a productos serializados (`requires_serial_numbers=true`);
+  // para el resto se ignora silenciosamente (compatibilidad total).
+  //
+  // `serial_ids`: ids de filas existentes en `inventory_serial_numbers`
+  // (selección desde el modal POS). El backend valida que sean del producto
+  // y estén `in_stock`/`reserved` (SERIAL_REQUIRED_001) antes de marcarlos
+  // `sold` y vincularlos al `order_item`.
+  @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  serial_ids?: number[];
+
+  // `serial_numbers`: seriales como texto libre. El backend los resuelve o
+  // crea como filas reales del pool (`resolveOrCreateFromFreeText`) y luego
+  // los trata igual que `serial_ids`. Mantiene la paridad pool↔stock.
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  serial_numbers?: string[];
 }
 
 export class PosInstallmentTermsDto {

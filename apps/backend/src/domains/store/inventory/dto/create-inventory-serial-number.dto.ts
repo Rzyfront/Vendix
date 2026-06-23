@@ -1,49 +1,51 @@
 import {
   IsString,
   IsOptional,
-  IsUUID,
+  IsInt,
   IsEnum,
   IsArray,
-  ValidateNested,
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-// Using local enum definition until Prisma client is regenerated
-enum SerialNumberStatus {
-  IN_STOCK = 'in_stock',
-  RESERVED = 'reserved',
-  SOLD = 'sold',
-  RETURNED = 'returned',
-  DAMAGED = 'damaged',
-  EXPIRED = 'expired',
-  IN_TRANSIT = 'in_transit',
-}
+import { serial_status_enum } from '@prisma/client';
+
+/**
+ * QUI-431 — DTOs for the serial-number pool service.
+ *
+ * Rewritten against the REAL schema (snake_case, Int ids, no organization_id
+ * column on serials/batches). Status uses the generated `serial_status_enum`.
+ * Scope is enforced by `StorePrismaService` (relational via
+ * inventory_locations.store_id), so DTOs no longer carry organizationId.
+ */
 
 export class CreateInventorySerialNumberDto {
   @IsString()
-  serialNumber: string;
+  serial_number: string;
 
-  @IsUUID()
-  batchId: string;
-
-  @IsUUID()
-  productId: string;
+  @IsInt()
+  @Type(() => Number)
+  product_id: number;
 
   @IsOptional()
-  @IsUUID()
-  productVariantId?: string;
+  @IsInt()
+  @Type(() => Number)
+  product_variant_id?: number;
 
-  @IsUUID()
-  organizationId: string;
-
-  @IsOptional()
-  @IsEnum(SerialNumberStatus)
-  status?: SerialNumberStatus = SerialNumberStatus.IN_STOCK;
+  @IsInt()
+  @Type(() => Number)
+  location_id: number;
 
   @IsOptional()
-  @IsUUID()
-  locationId?: string;
+  @IsInt()
+  @Type(() => Number)
+  batch_id?: number;
 
   @IsOptional()
+  @IsEnum(serial_status_enum)
+  status?: serial_status_enum;
+
+  @IsOptional()
+  @Type(() => Number)
   cost?: number;
 
   @IsOptional()
@@ -52,67 +54,25 @@ export class CreateInventorySerialNumberDto {
 }
 
 export class CreateSerialNumbersForBatchDto {
-  @IsUUID()
-  batchId: string;
+  @IsInt()
+  @Type(() => Number)
+  batch_id: number;
 
   @IsArray()
   @IsString({ each: true })
-  serialNumbers: string[];
-
-  @IsUUID()
-  organizationId: string;
-
-  @IsOptional()
-  @IsUUID()
-  locationId?: string;
+  serial_numbers: string[];
 }
 
 export class UpdateInventorySerialNumberDto {
   @IsOptional()
-  @IsEnum(SerialNumberStatus)
-  status?: SerialNumberStatus;
+  @IsEnum(serial_status_enum)
+  status?: serial_status_enum;
 
   @IsOptional()
-  @IsUUID()
-  locationId?: string;
+  @IsInt()
+  @Type(() => Number)
+  location_id?: number;
 
-  @IsOptional()
-  @IsString()
-  notes?: string;
-
-  @IsOptional()
-  @IsUUID()
-  salesOrderId?: string;
-
-  @IsOptional()
-  @IsUUID()
-  purchaseOrderId?: string;
-}
-
-export class TransferSerialNumberDto {
-  @IsUUID()
-  targetLocationId: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
-}
-
-export class MarkAsSoldDto {
-  @IsUUID()
-  salesOrderId: string;
-}
-
-export class MarkAsReturnedDto {
-  @IsUUID()
-  locationId: string;
-
-  @IsOptional()
-  @IsString()
-  notes?: string;
-}
-
-export class MarkAsDamagedDto {
   @IsOptional()
   @IsString()
   notes?: string;
@@ -120,38 +80,57 @@ export class MarkAsDamagedDto {
 
 export class GetSerialNumbersDto {
   @IsOptional()
-  @IsUUID()
-  productId?: string;
+  @IsInt()
+  @Type(() => Number)
+  product_id?: number;
 
   @IsOptional()
-  @IsUUID()
-  productVariantId?: string;
+  @IsInt()
+  @Type(() => Number)
+  product_variant_id?: number;
 
   @IsOptional()
-  @IsUUID()
-  batchId?: string;
+  @IsInt()
+  @Type(() => Number)
+  batch_id?: number;
 
   @IsOptional()
-  @IsUUID()
-  locationId?: string;
+  @IsInt()
+  @Type(() => Number)
+  location_id?: number;
 
   @IsOptional()
-  @IsEnum(SerialNumberStatus)
-  status?: SerialNumberStatus;
+  @IsEnum(serial_status_enum)
+  status?: serial_status_enum;
 
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  page?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  @Min(1)
+  limit?: number;
 }
 
 export class GetAvailableSerialNumbersDto {
-  @IsUUID()
-  productId: string;
+  @IsInt()
+  @Type(() => Number)
+  product_id: number;
 
   @IsOptional()
-  @IsUUID()
-  productVariantId?: string;
+  @IsInt()
+  @Type(() => Number)
+  product_variant_id?: number;
 
-  @IsUUID()
-  locationId: string;
+  @IsInt()
+  @Type(() => Number)
+  location_id: number;
 }

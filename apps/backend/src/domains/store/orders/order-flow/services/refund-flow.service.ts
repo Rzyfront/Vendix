@@ -20,6 +20,8 @@ import { CreateRefundDto } from '../dto/create-refund.dto';
 import { SettingsService } from '../../../settings/settings.service';
 import { SessionsService } from '../../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../../cash-registers/movements/movements.service';
+import { SerialNumberEnforcementService } from '../../../inventory/serial-numbers/serial-number-enforcement.service';
+import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
 
 const REFUNDABLE_STATES = ['delivered', 'finished'];
 
@@ -35,6 +37,9 @@ export class RefundFlowService {
     private readonly settingsService: SettingsService,
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
+    // QUI-431 — serial pool + enforcement (no-op for non-serialized products).
+    private readonly serialEnforcement: SerialNumberEnforcementService,
+    private readonly serialNumbers: InventorySerialNumbersService,
   ) {}
 
   async previewRefund(
@@ -117,9 +122,11 @@ export class RefundFlowService {
           },
         });
 
-        // 2. Create refund_items
+        // 2. Create refund_items. Capture the created id per order_item so the
+        // serial-return step (QUI-431) can link serials to the refund line.
+        const refundItemIdByOrderItem = new Map<number, number>();
         for (const item of calculation.items) {
-          await tx.refund_items.create({
+          const refundItem = await tx.refund_items.create({
             data: {
               refund_id: refund.id,
               order_item_id: item.order_item_id,
@@ -132,6 +139,7 @@ export class RefundFlowService {
               reason: item.reason,
             },
           });
+          refundItemIdByOrderItem.set(item.order_item_id, refundItem.id);
         }
 
         // 3. Process inventory per item
@@ -158,6 +166,19 @@ export class RefundFlowService {
               },
               tx,
             );
+
+            // QUI-431 — serialized product returning to sellable stock: move
+            // the serials that were sold on the original order_item back to
+            // `returned` then `in_stock` (reenterStock=true), snapshot them on
+            // the refund line, and link them to the refund_item document.
+            await this.returnSerialsForRefund(
+              tx,
+              orderItem.products.id,
+              orderItem.id,
+              refundItemIdByOrderItem.get(item.order_item_id),
+              item.quantity,
+              true,
+            );
           } else if (
             item.inventory_action === 'write_off' &&
             item.location_id
@@ -175,6 +196,19 @@ export class RefundFlowService {
                 create_movement: true,
               },
               tx,
+            );
+
+            // QUI-431 — write-off of a serialized unit: the customer returned
+            // it but it does NOT re-enter sellable stock (it was written off as
+            // damaged). Move the serials sold on the original line to
+            // `returned` (reenterStock=false), snapshot + link to refund_item.
+            await this.returnSerialsForRefund(
+              tx,
+              orderItem.products.id,
+              orderItem.id,
+              refundItemIdByOrderItem.get(item.order_item_id),
+              item.quantity,
+              false,
             );
           }
         }
@@ -290,6 +324,78 @@ export class RefundFlowService {
 
         return completedRefund;
       });
+  }
+
+  /**
+   * QUI-431 — Return the serials of a refunded line of a serialized product,
+   * inside the refund transaction (`tx`).
+   *
+   * No-op for non-serialized products (the enforcement service short-circuits).
+   *
+   * Steps:
+   *  1. Find the serials that were `sold` on the ORIGINAL order_item via the
+   *     polymorphic junction (`sales_document_serials`, type='order_item'),
+   *     limited to `qty` (the refunded quantity for partial returns).
+   *  2. For each: `returnSerial(reenterStock)` — `sold → returned` and, when
+   *     `reenterStock` is true, `returned → in_stock` so it rejoins the
+   *     sellable pool (it retains its location_id from the sale).
+   *  3. Persist the CSV snapshot on the refund_item and link each serial to the
+   *     refund_item document via the junction (type='refund_item').
+   */
+  private async returnSerialsForRefund(
+    tx: any,
+    product_id: number,
+    order_item_id: number,
+    refund_item_id: number | undefined,
+    qty: number,
+    reenterStock: boolean,
+  ): Promise<void> {
+    if (!(await this.serialEnforcement.isSerialized(product_id, tx))) {
+      return;
+    }
+
+    // Serials sold on the original order_item (FIFO so partial returns are
+    // deterministic). The junction is the strong link captured at sale time.
+    const links = await tx.sales_document_serials.findMany({
+      where: {
+        document_item_type: 'order_item',
+        document_item_id: order_item_id,
+      },
+      orderBy: { id: 'asc' },
+      take: qty,
+    });
+    if (links.length === 0) return;
+
+    const returnedSerialNumbers: string[] = [];
+    for (const link of links) {
+      const serial = await this.serialNumbers.returnSerial(
+        link.serial_number_id,
+        reenterStock,
+        tx,
+      );
+      if (serial?.serial_number) {
+        returnedSerialNumbers.push(serial.serial_number);
+      }
+
+      // Strong link to the refund document line (skip if @@unique already has
+      // this serial against a refund_item — re-throws SERIAL_DUP_001 otherwise).
+      if (refund_item_id != null) {
+        await this.serialNumbers.linkToDocument(
+          link.serial_number_id,
+          'refund_item',
+          refund_item_id,
+          tx,
+        );
+      }
+    }
+
+    // Immutable snapshot on the refund line (CSV of serial_number strings).
+    if (refund_item_id != null && returnedSerialNumbers.length > 0) {
+      await tx.refund_items.updateMany({
+        where: { id: refund_item_id },
+        data: { serial_numbers_snapshot: returnedSerialNumbers.join(', ') },
+      });
+    }
   }
 
   /**

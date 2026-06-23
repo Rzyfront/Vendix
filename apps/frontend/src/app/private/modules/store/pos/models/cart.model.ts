@@ -54,6 +54,14 @@ export interface CartItem {
   // no DB migration is required. Defaults to false (legacy
   // behaviour: send to kitchen).
   skipKds?: boolean;
+  // QUI-431 — Serial numbers chosen by the cashier for a serialized
+  // product (`requires_serial_numbers=true`). `serial_ids` are existing
+  // pool rows picked from the selector; `serial_numbers` are free-text
+  // entries the backend resolves-or-creates as real pool rows at payment.
+  // Both are threaded onto the POS order line and sent to the backend on
+  // checkout. Ignored for non-serialized products.
+  serial_ids?: number[];
+  serial_numbers?: string[];
 }
 
 export interface CartDiscount {
@@ -129,6 +137,11 @@ export interface AddToCartRequest {
    * inventory and have stock > 0.
    */
   skipKds?: boolean;
+  // QUI-431 — Pre-selected serials for serialized products. The POS opens a
+  // selector modal before calling addToCart and passes the cashier's choice
+  // here. `serial_ids` are pool rows; `serial_numbers` are free-text entries.
+  serial_ids?: number[];
+  serial_numbers?: string[];
 }
 
 export interface AddCustomItemRequest {

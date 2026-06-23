@@ -548,6 +548,9 @@ export class InvoicingService {
           typeof item.stock_units_consumed === 'number'
             ? item.stock_units_consumed
             : null,
+        // Serial number(s) snapshot (CSV) copied from the order line so the
+        // invoice carries the same serials at emission time (QUI-431).
+        serial_numbers_snapshot: item.serial_numbers_snapshot ?? null,
       };
     });
     const shippingCost = Number(order.shipping_cost || 0);
@@ -566,6 +569,7 @@ export class InvoicingService {
               total_amount: new Prisma.Decimal(shippingCost),
               applied_price_tier_name: null,
               stock_units_consumed: null,
+              serial_numbers_snapshot: null,
             },
           ]
         : productItems;

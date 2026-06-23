@@ -260,6 +260,11 @@ export const APP_MODULES: {
           label: 'Transferencias',
           description: 'Transferencias de inventario entre ubicaciones',
         },
+        {
+          key: 'inventory_serials',
+          label: 'Números de Serie',
+          description: 'Gestión y seguimiento de números de serie',
+        },
       ],
     },
 

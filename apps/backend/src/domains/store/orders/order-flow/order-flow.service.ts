@@ -24,6 +24,8 @@ import { SettingsService } from '../../settings/settings.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../cash-registers/movements/movements.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/serial-number-enforcement.service';
+import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { OrderEtaService } from '../services/order-eta.service';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 import { storeIsRestaurant } from '../../../../common/helpers/industry-capabilities.helper';
@@ -63,6 +65,8 @@ export class OrderFlowService {
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
     private readonly stockLevelManager: StockLevelManager,
+    private readonly serialEnforcement: SerialNumberEnforcementService,
+    private readonly serialNumbers: InventorySerialNumbersService,
     private readonly orderEtaService: OrderEtaService,
   ) {}
 
@@ -284,6 +288,15 @@ export class OrderFlowService {
                 item.product_variant_id || undefined,
               );
 
+            // QUI-431 — auto-consume serial numbers (FIFO) for serialized
+            // products at the SAME location the stock is deducted from.
+            // Ecommerce fulfillment has no manual serial picker, so we always
+            // auto-select FIFO. Runs BEFORE the stock deduction so an
+            // insufficient-serials condition throws SERIAL_REQUIRED_001 before
+            // any stock is moved (never discount a serialized product without
+            // consuming its serials). No-op for non-serialized products.
+            await this.consumeSerialsForOrderItem(item, location_id);
+
             const stockUpdate = await this.stockLevelManager.updateStock({
               product_id: item.product_id,
               variant_id: item.product_variant_id || undefined,
@@ -347,6 +360,14 @@ export class OrderFlowService {
           });
         }
       } catch (error) {
+        // QUI-431 — serial-number business rules (e.g. SERIAL_REQUIRED_001 when
+        // a serialized product has no serials available) MUST propagate so the
+        // completion fails loudly instead of silently fulfilling without
+        // consuming serials. Only genuine stock/infra errors are logged and
+        // swallowed (legacy behavior).
+        if (error instanceof VendixHttpException) {
+          throw error;
+        }
         this.logger.error(
           `Failed to update stock for finished order #${orderId}: ${error.message}`,
         );
@@ -357,12 +378,214 @@ export class OrderFlowService {
   }
 
   /**
+   * QUI-431 — Consume the serial numbers for ONE order_item of a serialized
+   * product during ecommerce/admin order completion (the `finished` stock
+   * decrement path that does NOT go through
+   * `PaymentsService.updateInventoryFromOrder`).
+   *
+   * No-op for non-serialized products (the enforcement service short-circuits),
+   * so it can be called unconditionally for every fulfilled line.
+   *
+   * Ecommerce has no manual serial picker, so selection is always automatic:
+   * FIFO from `listAvailable` (in_stock, oldest first) at the sale location
+   * until `quantity` is covered. If fewer are available → SERIAL_REQUIRED_001
+   * (never discount stock silently for a serialized product). This runs BEFORE
+   * the stock deduction so the throw happens before any stock moves.
+   *
+   * For each resolved serial: transition → `sold` and link to the `order_item`
+   * via `sales_document_serials` (the @@unique guard throws SERIAL_DUP_001 on a
+   * concurrent double-sale). Finally persists the CSV of serial_number strings
+   * into `order_items.serial_numbers_snapshot` (immutable legal snapshot).
+   */
+  private async consumeSerialsForOrderItem(
+    orderItem: {
+      id: number;
+      product_id: number;
+      product_variant_id?: number | null;
+      quantity: number;
+    },
+    location_id: number,
+  ): Promise<void> {
+    const product_id = orderItem.product_id;
+    const variant_id = orderItem.product_variant_id ?? undefined;
+    const quantity = orderItem.quantity;
+
+    if (!(await this.serialEnforcement.isSerialized(product_id))) {
+      return;
+    }
+
+    // Auto-select FIFO from the sellable pool at the fulfillment location.
+    const available = await this.serialNumbers.listAvailable(
+      product_id,
+      location_id,
+      variant_id,
+    );
+    if (available.length < quantity) {
+      throw new VendixHttpException(
+        ErrorCodes.SERIAL_REQUIRED_001,
+        `No hay suficientes seriales disponibles (${available.length}/${quantity}) para el producto serializado`,
+        {
+          product_id,
+          product_variant_id: variant_id ?? null,
+          location_id,
+          requested_qty: quantity,
+          available_serials: available.length,
+        },
+      );
+    }
+    const serialIds: number[] = available
+      .slice(0, quantity)
+      .map((s: any) => s.id);
+
+    // Transition + link each serial.
+    const soldSerialNumbers: string[] = [];
+    for (const serial_id of serialIds) {
+      const sold = await this.serialNumbers.transition(serial_id, 'sold');
+      await this.serialNumbers.linkToDocument(
+        serial_id,
+        'order_item',
+        orderItem.id,
+      );
+      if (sold?.serial_number) soldSerialNumbers.push(sold.serial_number);
+    }
+
+    // Immutable snapshot (CSV of serial_number strings, NOT ids) on the line.
+    await this.prisma.order_items.updateMany({
+      where: { id: orderItem.id },
+      data: { serial_numbers_snapshot: soldSerialNumbers.join(', ') },
+    });
+  }
+
+  /**
+   * Promote a `draft` order to `created`, reserving stock idempotently.
+   *
+   * Table orders (restaurant flow) are born in `draft` WITHOUT a stock
+   * reservation; retail orders are born in `created` WITH one. `payOrder`
+   * only accepts `created`/`shipped`, so a draft order could never be paid.
+   * This method bridges that gap: it reserves stock for each tracked,
+   * non-service item (mirroring `reactivateOrder`) and then transitions the
+   * order draft -> created through `updateOrderState` (the single audited
+   * state-change seam).
+   *
+   * IDEMPOTENT: if the order is no longer `draft` it returns immediately, and
+   * each item is skipped when an active `order` reservation already exists for
+   * it (prevents a double reservation on retries / re-pay).
+   *
+   * Reservation is NON-BLOCKING (`validate_availability = false`): the table
+   * flow must never refuse a payment because of stock, matching POS semantics.
+   * Items already consumed at fire (`inventory_consumed_at_fire`) pass
+   * `skip_reservation = true` so the stock manager records the reservation row
+   * without decrementing available stock again.
+   */
+  private async promoteDraftToCreated(orderId: number): Promise<void> {
+    // Reload with the item shape the reservation loop needs.
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId },
+      include: {
+        order_items: {
+          include: {
+            products: {
+              select: {
+                id: true,
+                name: true,
+                track_inventory: true,
+                product_type: true,
+              },
+            },
+            product_variants: { select: { id: true } },
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order #${orderId} not found`);
+    }
+
+    // IDEMPOTENT: nothing to promote if it already left draft.
+    if ((order.state as OrderState) !== 'draft') {
+      return;
+    }
+
+    const userId = RequestContextService.getUserId();
+
+    // Reserve stock atomically. Reservations only — the state change happens
+    // after commit through updateOrderState (which uses this.prisma, not tx).
+    await this.prisma.$transaction(async (tx) => {
+      for (const item of order.order_items) {
+        if (
+          !item.products?.track_inventory ||
+          item.products?.product_type === 'service'
+        ) {
+          continue;
+        }
+
+        const skip = item.inventory_consumed_at_fire === true;
+
+        const location_id =
+          await this.stockLevelManager.getDefaultLocationForProduct(
+            item.product_id,
+            item.product_variant_id || undefined,
+          );
+
+        // Anti-duplicate: skip if an active reservation for this order+item
+        // already exists (e.g. a previous promote attempt that committed the
+        // reservations but failed before the state change).
+        const existing = await tx.stock_reservations.findFirst({
+          where: {
+            reserved_for_type: 'order',
+            reserved_for_id: orderId,
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id ?? null,
+            status: 'active',
+          },
+          select: { id: true },
+        });
+        if (existing) {
+          continue;
+        }
+
+        await this.stockLevelManager.reserveStock(
+          item.product_id,
+          item.product_variant_id || undefined,
+          location_id,
+          item.quantity,
+          'order',
+          orderId,
+          userId,
+          false, // validate_availability: NEVER block a payment on stock
+          tx,
+          undefined, // expires_at
+          skip, // skip_reservation: already consumed at fire
+        );
+      }
+    });
+
+    // Transition draft -> created after the reservations commit.
+    this.validateTransition('draft', 'created');
+    await this.updateOrderState(orderId, 'created', {
+      promoted_from_draft: true,
+      promoted_at: new Date(),
+    });
+
+    this.logger.log(`Order #${orderId} promoted draft -> created before payment`);
+  }
+
+  /**
    * Pay an order from POS (created state)
    * - Direct payment: goes to finished
    * - Online payment: goes to pending_payment
    */
   async payOrder(orderId: number, dto: PayOrderDto) {
-    const order = await this.getOrder(orderId);
+    let order = await this.getOrder(orderId);
+
+    // Table orders are born in 'draft' without a stock reservation. Promote
+    // them to 'created' (reserving stock) so the guard below accepts them.
+    // Idempotent + non-blocking; fastTrackOrder inherits this via payOrder.
+    if (order.state === 'draft') {
+      await this.promoteDraftToCreated(orderId);
+      order = await this.getOrder(orderId); // reload: now 'created'
+    }
 
     const allowedPayStates: OrderState[] = ['created', 'shipped'];
     if (!allowedPayStates.includes(order.state as OrderState)) {

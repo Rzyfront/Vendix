@@ -7,34 +7,20 @@ import {
   Body,
   Patch,
   Param,
-  Delete,
   Query,
   UseGuards,
-  Request,
+  ParseIntPipe,
 } from '@nestjs/common';
+import { ResponseService } from '@common/responses/response.service';
 import { InventorySerialNumbersService } from './inventory-serial-numbers.service';
 import {
-  CreateSerialNumbersForBatchDto,
-  UpdateInventorySerialNumberDto,
-  TransferSerialNumberDto,
-  MarkAsSoldDto,
-  MarkAsReturnedDto,
-  MarkAsDamagedDto,
+  CreateInventorySerialNumberDto,
   GetSerialNumbersDto,
   GetAvailableSerialNumbersDto,
+  UpdateInventorySerialNumberDto,
 } from '../dto/create-inventory-serial-number.dto';
-import { ApiTags, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
-
-// Using local enum definition until Prisma client is regenerated
-enum SerialNumberStatus {
-  IN_STOCK = 'in_stock',
-  RESERVED = 'reserved',
-  SOLD = 'sold',
-  RETURNED = 'returned',
-  DAMAGED = 'damaged',
-  EXPIRED = 'expired',
-  IN_TRANSIT = 'in_transit',
-}
+import { ApiTags, ApiOperation, ApiParam } from '@nestjs/swagger';
+import { serial_status_enum } from '@prisma/client';
 
 @ApiTags('inventory-serial-numbers')
 @Controller('store/inventory/serial-numbers')
@@ -42,228 +28,72 @@ enum SerialNumberStatus {
 export class InventorySerialNumbersController {
   constructor(
     private readonly serialNumbersService: InventorySerialNumbersService,
+    private readonly responseService: ResponseService,
   ) {}
-
-  @Post('batch')
-  @Permissions('store:inventory:serial_numbers:create')
-  @ApiOperation({ summary: 'Create serial numbers for a batch' })
-  @ApiResponse({
-    status: 201,
-    description: 'Serial numbers created successfully',
-  })
-  async createSerialNumbersForBatch(
-    @Body() createDto: CreateSerialNumbersForBatchDto,
-    @Request() req,
-  ) {
-    return this.serialNumbersService.createSerialNumbersForBatch(
-      createDto.batchId,
-      createDto.serialNumbers,
-      createDto.organizationId || req.user.organizationId,
-    );
-  }
 
   @Get()
   @Permissions('store:inventory:serial_numbers:read')
-  @ApiOperation({ summary: 'Get all serial numbers for organization' })
-  @ApiResponse({
-    status: 200,
-    description: 'Serial numbers retrieved successfully',
-  })
-  async getSerialNumbers(
-    @Query() filters: GetSerialNumbersDto,
-    @Request() req,
-  ) {
-    return this.serialNumbersService.getSerialNumbers(
-      req.user.organizationId,
-      filters,
-    );
-  }
-
-  @Get('status/:status')
-  @Permissions('store:inventory:serial_numbers:read')
-  @ApiOperation({ summary: 'Get serial numbers by status' })
-  @ApiParam({ name: 'status', enum: SerialNumberStatus })
-  @ApiResponse({
-    status: 200,
-    description: 'Serial numbers retrieved successfully',
-  })
-  async getSerialNumbersByStatus(
-    @Param('status') status: SerialNumberStatus,
-    @Query() filters: GetSerialNumbersDto,
-    @Request() req,
-  ) {
-    return this.serialNumbersService.getSerialNumbersByStatus(
-      status,
-      req.user.organizationId,
-      filters,
+  @ApiOperation({ summary: 'List serial numbers (paginated, filterable)' })
+  async list(@Query() filters: GetSerialNumbersDto) {
+    const result = await this.serialNumbersService.list(filters);
+    return this.responseService.paginated(
+      result.data,
+      result.total,
+      result.page,
+      result.limit,
+      'Seriales obtenidos exitosamente',
     );
   }
 
   @Get('available')
   @Permissions('store:inventory:serial_numbers:read')
   @ApiOperation({
-    summary: 'Get available serial numbers for product/variant at location',
+    summary: 'List available (in_stock) serials for product/variant at location',
   })
-  @ApiResponse({
-    status: 200,
-    description: 'Available serial numbers retrieved successfully',
-  })
-  async getAvailableSerialNumbers(
-    @Query() query: GetAvailableSerialNumbersDto,
-    @Request() req,
-  ) {
-    return this.serialNumbersService.getAvailableSerialNumbers(
-      query.productId,
-      query.productVariantId,
-      query.locationId,
-      req.user.organizationId,
+  async listAvailable(@Query() query: GetAvailableSerialNumbersDto) {
+    const data = await this.serialNumbersService.listAvailable(
+      query.product_id,
+      query.location_id,
+      query.product_variant_id,
+    );
+    return this.responseService.success(
+      data,
+      'Seriales disponibles obtenidos exitosamente',
     );
   }
 
   @Get(':id')
   @Permissions('store:inventory:serial_numbers:read')
-  @ApiOperation({ summary: 'Get serial number by ID' })
-  @ApiParam({ name: 'id', description: 'Serial number ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Serial number retrieved successfully',
-  })
-  async getSerialNumberById(@Param('id') id: string, @Request() req) {
-    return this.serialNumbersService.getSerialNumberById(
-      id,
-      req.user.organizationId,
-    );
+  @ApiOperation({ summary: 'Get serial number by id' })
+  @ApiParam({ name: 'id', description: 'Serial number id' })
+  async findOne(@Param('id', ParseIntPipe) id: number) {
+    const data = await this.serialNumbersService.findOne(id);
+    return this.responseService.success(data, 'Serial obtenido exitosamente');
   }
 
-  @Get('number/:serialNumber')
-  @Permissions('store:inventory:serial_numbers:read')
-  @ApiOperation({ summary: 'Get serial number by serial number string' })
-  @ApiParam({ name: 'serialNumber', description: 'Serial number string' })
-  @ApiResponse({
-    status: 200,
-    description: 'Serial number retrieved successfully',
-  })
-  async getSerialNumberByNumber(
-    @Param('serialNumber') serialNumber: string,
-    @Request() req,
-  ) {
-    return this.serialNumbersService.getSerialNumberByNumber(
-      serialNumber,
-      req.user.organizationId,
-    );
+  @Post()
+  @Permissions('store:inventory:serial_numbers:create')
+  @ApiOperation({ summary: 'Create a single serial number in the pool' })
+  async create(@Body() dto: CreateInventorySerialNumberDto) {
+    const data = await this.serialNumbersService.createSerial(dto);
+    return this.responseService.created(data, 'Serial creado exitosamente');
   }
 
   @Patch(':id/status')
   @Permissions('store:inventory:serial_numbers:update')
-  @ApiOperation({ summary: 'Update serial number status' })
-  @ApiParam({ name: 'id', description: 'Serial number ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Serial number status updated successfully',
-  })
-  async updateSerialNumberStatus(
-    @Param('id') id: string,
-    @Body() updateDto: UpdateInventorySerialNumberDto,
-    @Request() req,
+  @ApiOperation({ summary: 'Transition serial number status' })
+  @ApiParam({ name: 'id', description: 'Serial number id' })
+  async updateStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateInventorySerialNumberDto,
   ) {
-    return this.serialNumbersService.updateSerialNumberStatus(
+    const data = await this.serialNumbersService.transition(
       id,
-      updateDto.status!,
-      req.user.organizationId,
-      {
-        salesOrderId: updateDto.salesOrderId,
-        purchaseOrderId: updateDto.purchaseOrderId,
-        locationId: updateDto.locationId,
-        notes: updateDto.notes,
-      },
+      dto.status as serial_status_enum,
     );
-  }
-
-  @Patch(':id/transfer')
-  @Permissions('store:inventory:serial_numbers:update')
-  @ApiOperation({ summary: 'Transfer serial number to another location' })
-  @ApiParam({ name: 'id', description: 'Serial number ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Serial number transferred successfully',
-  })
-  async transferSerialNumber(
-    @Param('id') id: string,
-    @Body() transferDto: TransferSerialNumberDto,
-    @Request() req,
-  ) {
-    return this.serialNumbersService.transferSerialNumber(
-      id,
-      transferDto.targetLocationId,
-      req.user.organizationId,
-      transferDto.notes,
-    );
-  }
-
-  @Patch(':id/sold')
-  @Permissions('store:inventory:serial_numbers:update')
-  @ApiOperation({ summary: 'Mark serial number as sold' })
-  @ApiParam({ name: 'id', description: 'Serial number ID' })
-  @ApiResponse({ status: 200, description: 'Serial number marked as sold' })
-  async markAsSold(
-    @Param('id') id: string,
-    @Body() soldDto: MarkAsSoldDto,
-    @Request() req,
-  ) {
-    return this.serialNumbersService.markAsSold(
-      id,
-      soldDto.salesOrderId,
-      req.user.organizationId,
-    );
-  }
-
-  @Patch(':id/returned')
-  @Permissions('store:inventory:serial_numbers:update')
-  @ApiOperation({ summary: 'Mark serial number as returned' })
-  @ApiParam({ name: 'id', description: 'Serial number ID' })
-  @ApiResponse({ status: 200, description: 'Serial number marked as returned' })
-  async markAsReturned(
-    @Param('id') id: string,
-    @Body() returnedDto: MarkAsReturnedDto,
-    @Request() req,
-  ) {
-    return this.serialNumbersService.markAsReturned(
-      id,
-      returnedDto.locationId,
-      req.user.organizationId,
-      returnedDto.notes,
-    );
-  }
-
-  @Patch(':id/damaged')
-  @Permissions('store:inventory:serial_numbers:update')
-  @ApiOperation({ summary: 'Mark serial number as damaged' })
-  @ApiParam({ name: 'id', description: 'Serial number ID' })
-  @ApiResponse({ status: 200, description: 'Serial number marked as damaged' })
-  async markAsDamaged(
-    @Param('id') id: string,
-    @Body() damagedDto: MarkAsDamagedDto,
-    @Request() req,
-  ) {
-    return this.serialNumbersService.markAsDamaged(
-      id,
-      req.user.organizationId,
-      damagedDto.notes,
-    );
-  }
-
-  @Delete(':id')
-  @Permissions('store:inventory:serial_numbers:delete')
-  @ApiOperation({ summary: 'Delete serial number' })
-  @ApiParam({ name: 'id', description: 'Serial number ID' })
-  @ApiResponse({
-    status: 200,
-    description: 'Serial number deleted successfully',
-  })
-  async deleteSerialNumber(@Param('id') id: string, @Request() req) {
-    return this.serialNumbersService.deleteSerialNumber(
-      id,
-      req.user.organizationId,
+    return this.responseService.updated(
+      data,
+      'Estado del serial actualizado exitosamente',
     );
   }
 }

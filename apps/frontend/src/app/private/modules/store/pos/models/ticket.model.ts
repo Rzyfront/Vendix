@@ -10,6 +10,7 @@ export interface TicketItem {
   appliedPriceTierName?: string | null;
   isPackageUnit?: boolean;
   unitsPerPackage?: number | null;
+  serials?: string[];
 }
 
 export interface TicketData {

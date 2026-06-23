@@ -102,6 +102,7 @@ export class DefaultPanelUIService {
         inventory_suppliers: true,
         inventory_movements: true,
         inventory_transfers: true,
+        inventory_serials: true,
         customers: true,
         customers_all: true,
         customers_reviews: true,

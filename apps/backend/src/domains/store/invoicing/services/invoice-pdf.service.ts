@@ -147,6 +147,8 @@ export class InvoicePdfService {
           typeof item.stock_units_consumed === 'number'
             ? item.stock_units_consumed
             : null,
+        // Serial number(s) snapshot (CSV) for serialized products (QUI-431).
+        serial_numbers_snapshot: item.serial_numbers_snapshot ?? null,
       })),
 
       // Taxes
