@@ -17,6 +17,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-purchase-summary',
@@ -104,7 +105,7 @@ import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.
           </div>
         </div>
 
-        <div class="flex items-center gap-2 md:gap-3 flex-shrink-0">
+        <div class="flex items-end gap-2 md:gap-3 flex-shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -278,7 +279,7 @@ export class PurchaseSummaryComponent implements OnInit {
 
     const hasData = suppliersData.length > 0;
     const supplierNames = hasData
-      ? suppliersData.map((s) => s.supplier_name.length > 20 ? s.supplier_name.substring(0, 20) + '...' : s.supplier_name)
+      ? suppliersData.map((s) => s.supplier_name)
       : ['Sin datos'];
 
     this.suppliersChartOptions.set({
@@ -309,7 +310,7 @@ export class PurchaseSummaryComponent implements OnInit {
         type: 'category',
         data: supplierNames,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
@@ -318,7 +319,7 @@ export class PurchaseSummaryComponent implements OnInit {
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (v: number) => this.currencyService.format(Math.round(v), 0),
+          formatter: (v: number) => this.currencyService.formatChartAxis(v),
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },

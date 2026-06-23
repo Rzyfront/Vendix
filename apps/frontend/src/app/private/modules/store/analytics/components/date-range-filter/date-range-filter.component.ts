@@ -33,7 +33,8 @@ type DatePreset =
           [ngModel]="selectedPreset()"
           (ngModelChange)="onPresetChange($event)"
           size="sm"
-          placeholder="Período"
+          label="Período"
+          placeholder="Selecciona un período"
         ></app-selector>
       </div>
 

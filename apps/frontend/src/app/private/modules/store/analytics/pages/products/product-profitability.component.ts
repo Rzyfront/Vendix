@@ -26,6 +26,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-product-profitability',
@@ -198,7 +199,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [{
@@ -225,9 +226,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       .slice(0, 5)
       .reverse();
 
-    const names = top5.map((p) =>
-      p.product_name.length > 20 ? p.product_name.substring(0, 20) + '...' : p.product_name,
-    );
+    const names = top5.map((p) => p.product_name);
     const profits = top5.map((p) => p.profit);
 
     this.topProfitChartOptions.set({
@@ -282,14 +281,14 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.formatChartAxis(value) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [{
@@ -310,9 +309,7 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
     const top5 = [...products].sort((a, b) => b.profit - a.profit).slice(0, 5);
-    const productNames = top5.map((p) =>
-      p.product_name.length > 15 ? p.product_name.substring(0, 15) + '...' : p.product_name,
-    );
+    const productNames = top5.map((p) => p.product_name);
     const revenues = top5.map((p) => p.revenue);
     const costs = top5.map((p) => p.total_cost);
     const profits = top5.map((p) => p.profit);
@@ -364,14 +361,14 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'category',
         data: productNames,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 10 },
+        axisLabel: { color: textSecondary, fontSize: 10, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.formatChartAxis(value) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [

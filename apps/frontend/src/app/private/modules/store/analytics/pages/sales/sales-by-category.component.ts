@@ -20,6 +20,7 @@ import {
   getDefaultStartDate,
   getDefaultEndDate} from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 import {
   SalesByCategory,
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
@@ -99,7 +100,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             </p>
           </div>
         </div>
-        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+        <div class="flex items-end gap-2 md:gap-3 shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -272,7 +273,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: categories,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280', fontSize: 11 },
+        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
@@ -281,7 +282,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisLine: { show: false },
         axisLabel: {
           color: '#6b7280',
-          formatter: (v: number) => this.formatCurrency(Math.round(v)),
+          formatter: (v: number) => this.currencyService.formatChartAxis(v),
         },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
