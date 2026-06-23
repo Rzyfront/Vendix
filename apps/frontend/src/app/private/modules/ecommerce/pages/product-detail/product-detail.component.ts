@@ -382,9 +382,25 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
           <!-- Reviews Section -->
           @if (reviewsEnabled() === true) {
           <div class="reviews-section">
-            <h3 class="rv-section-title">
-              Opiniones ({{ reviewsTotalCount() }})
-            </h3>
+            <div class="rv-section-header">
+              <h3 class="rv-section-title">
+                Opiniones ({{ reviewsTotalCount() }})
+              </h3>
+              @if (canWriteReview()?.can_review && !reviewSubmitted()) {
+                <button
+                  type="button"
+                  class="rv-write-btn"
+                  (click)="scrollToReviewForm()"
+                >
+                  <app-icon name="edit-2" [size]="16"></app-icon>
+                  Escribir reseña
+                </button>
+              } @else if (canWriteReview()?.reason === 'already_reviewed') {
+                <span class="rv-tag rv-tag-info">Ya reseñaste</span>
+              } @else if (canWriteReview()?.reason === 'no_purchase') {
+                <span class="rv-tag rv-tag-warn">Compra para reseñar</span>
+              }
+            </div>
 
             <!-- Rating Summary -->
             @if (reviewsTotalCount() > 0) {
@@ -925,10 +941,48 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         margin-top: 4rem;
         padding-top: 2rem;
         border-top: 1px solid var(--color-border);
+        .rv-section-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          flex-wrap: wrap;
+          margin-bottom: 1.5rem;
+        }
         .rv-section-title {
           font-size: 1.25rem;
           font-weight: 800;
-          margin-bottom: 1.5rem;
+          margin: 0;
+        }
+        .rv-write-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
+          padding: 0.55rem 1rem;
+          background: var(--color-primary);
+          color: #fff;
+          border: 0;
+          border-radius: var(--radius-lg);
+          font-size: 0.875rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: opacity 0.2s ease;
+          &:hover { opacity: 0.9; }
+        }
+        .rv-tag {
+          display: inline-block;
+          padding: 0.3rem 0.7rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+          border-radius: var(--radius-md);
+        }
+        .rv-tag-info {
+          background: var(--color-surface);
+          color: var(--color-text-muted);
+        }
+        .rv-tag-warn {
+          background: rgba(245, 158, 11, 0.12);
+          color: #b45309;
         }
         .rv-summary {
           display: flex;
@@ -1870,6 +1924,18 @@ export class ProductDetailComponent implements OnInit {
     if (typeof variant.is_available === 'boolean') return variant.is_available;
     if (!this.variantTracksInventory(variant)) return true;
     return (variant.available_stock ?? variant.stock_quantity ?? 0) > 0;
+  }
+
+  /**
+   * Scrolls the user down to the review form so they can start writing
+   * a review. Triggered by the "Escribir reseña" CTA in the reviews
+   * section header. The form is at the bottom of the reviews list.
+   */
+  scrollToReviewForm(): void {
+    queueMicrotask(() => {
+      const el = document.querySelector('.rv-form-section');
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
   }
 
   onSubmitReview(): void {
