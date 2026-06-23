@@ -335,58 +335,10 @@ import { AdCreativeAssetService } from './services/ad-creative-asset.service';
                   <p
                     class="whitespace-pre-line text-sm leading-6 text-[var(--color-text-primary)]"
                   >
-                    {{ selectedAnuncioPostCopy() }}
+                    {{ selectedAnuncioPostCopyDisplay() }}
                   </p>
                 </div>
               }
-
-              <div
-                class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-4"
-              >
-                <div class="mb-2 flex items-center gap-2">
-                  <app-icon
-                    name="shopping-bag"
-                    [size]="18"
-                    class="text-[var(--color-primary)]"
-                  ></app-icon>
-                  <p
-                    class="text-sm font-semibold text-[var(--color-text-primary)]"
-                  >
-                    Call to action
-                  </p>
-                </div>
-
-                @if (ecommerceUrlLoading()) {
-                  <div
-                    class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]"
-                  >
-                    <app-icon
-                      name="loader-2"
-                      [size]="16"
-                      [spin]="true"
-                    ></app-icon>
-                    Buscando dominio ecommerce...
-                  </div>
-                } @else if (ecommerceUrl()) {
-                  <p class="text-sm leading-6 text-[var(--color-text-primary)]">
-                    Consigue esto y más en
-                    <a
-                      class="font-semibold text-[var(--color-primary)] underline-offset-2 hover:underline"
-                      [href]="ecommerceUrl()!"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      {{ ecommerceUrlLabel() }}
-                    </a>
-                  </p>
-                } @else {
-                  <p
-                    class="text-sm leading-6 text-[var(--color-text-secondary)]"
-                  >
-                    Consigue esto y más en la tienda online.
-                  </p>
-                }
-              </div>
             </aside>
           </div>
         }
@@ -653,6 +605,16 @@ export class AnunciosComponent {
     const creative = this.selectedAnuncio();
     return creative?.post_copy?.trim() || '';
   });
+  // Fusiona el CTA al final del post (mismo guard que el backend
+  // appendEcommerceCta): no duplica si el post ya contiene el dominio, y para
+  // anuncios viejos sin CTA lo anexa. Reactivo al cargar el dominio ecommerce.
+  protected readonly selectedAnuncioPostCopyDisplay = computed(() => {
+    const base = this.selectedAnuncioPostCopy();
+    if (!base) return '';
+    const host = this.ecommerceUrlLabel();
+    if (!host || base.includes(host)) return base;
+    return `${base}\n\nConsigue esto y más en ${host}`;
+  });
   protected readonly selectedAnuncioStatusLabel = computed(() => {
     const creative = this.selectedAnuncio();
     return creative ? this.statusLabel(creative.status) : '';
@@ -875,7 +837,7 @@ export class AnunciosComponent {
   }
 
   protected async copyPostCopy(): Promise<void> {
-    const postCopy = this.selectedAnuncioPostCopy();
+    const postCopy = this.selectedAnuncioPostCopyDisplay();
     if (!postCopy) return;
     await navigator.clipboard.writeText(postCopy);
     this.toastService.success('Post copiado.');

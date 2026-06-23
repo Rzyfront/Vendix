@@ -138,9 +138,10 @@ interface SelectedResourcePreview {
                           Que quieres comunicar?
                         </h2>
                         <p
-                          class="truncate text-xs leading-tight text-[var(--color-text-secondary)]"
+                          class="text-xs leading-snug text-[var(--color-text-secondary)]"
                         >
-                          Elige el formato y describe la idea.
+                          Elige el formato, describe tu idea, agrega imágenes,
+                          productos o un QR, y genera el anuncio con Vendix IA.
                         </p>
                       </div>
                     </div>
