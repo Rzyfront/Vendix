@@ -71,7 +71,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
           </div>
         </div>
 
-        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+        <div class="flex items-end gap-2 md:gap-3 shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"

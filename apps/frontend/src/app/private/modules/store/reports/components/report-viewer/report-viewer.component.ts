@@ -98,7 +98,7 @@ function formatStatValue(value: any, type: string): string | number {
               }
             </p>
           </div>
-          <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto">
+          <div class="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 w-full sm:w-auto">
             @if (report()?.requiresDateRange) {
               <vendix-date-range-filter [value]="dateRange()" (valueChange)="dateRangeChange.emit($event)" />
             }
