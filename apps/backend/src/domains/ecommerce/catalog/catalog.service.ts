@@ -386,10 +386,10 @@ export class CatalogService {
     return {
       data: filtered,
       meta: {
-        total: filtered.length,
+        total,
         page: Number(page),
         limit: Number(limit),
-        total_pages: Math.max(1, Math.ceil(filtered.length / Number(limit))),
+        total_pages: Math.max(1, Math.ceil(total / Number(limit))),
       },
     };
   }
