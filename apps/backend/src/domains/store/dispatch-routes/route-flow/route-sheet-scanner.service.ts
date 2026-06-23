@@ -315,6 +315,19 @@ export class RouteSheetScannerService {
       settleDto.collected_amount = Number(decision.collected_amount ?? 0);
       settleDto.payment_method = decision.payment_method;
       settleDto.withholding_breakdown = decision.withholding_breakdown;
+      // Derive withholding_amount from the breakdown sum. settleStop reads
+      // `dto.withholding_amount` (not the breakdown) for the withholding-agent
+      // gate and requires it to equal the breakdown sum, so a scanner payload
+      // that only carries the breakdown would otherwise 400 for a retenedor.
+      const wb = decision.withholding_breakdown as
+        | { retefuente?: number; reteiva?: number; reteica?: number }
+        | undefined;
+      if (wb) {
+        settleDto.withholding_amount =
+          Number(wb.retefuente || 0) +
+          Number(wb.reteiva || 0) +
+          Number(wb.reteica || 0);
+      }
       settleDto.notes = decision.notes;
 
       // Wrap each settle so a single failure (e.g. validation 400) is collected

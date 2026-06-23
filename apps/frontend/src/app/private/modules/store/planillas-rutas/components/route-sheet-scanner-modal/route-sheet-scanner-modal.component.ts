@@ -64,6 +64,17 @@ interface EditableStopDecision {
   collected_amount: number;
   payment_method: string;
   notes: string;
+  /**
+   * Optional fiscal-withholding breakdown for withholding-agent customers. The
+   * scan/match response does NOT surface `customer.is_withholding_agent` per
+   * stop, so the operator opts in via a "registrar retención" toggle. When set,
+   * the sum is sent as `withholding_breakdown` in the confirm payload and is
+   * counted toward covering the total (cash + withholding = total, NO partial).
+   */
+  withholding_enabled: boolean;
+  retefuente: number;
+  reteiva: number;
+  reteica: number;
 }
 
 @Component({
@@ -340,10 +351,55 @@ interface EditableStopDecision {
 
                     @if (isUndercollected(stop)) {
                       <p class="text-xs text-red-700">
-                        El monto recaudado no cubre el total
+                        Efectivo + retención no cubren el total
                         ({{ stop.net_total | currency }}). No se permiten pagos
-                        parciales: cobra el total o desmarca "Entregado".
+                        parciales: completa el cobro o desmarca "Entregado".
                       </p>
+                    }
+
+                    <!-- Withholding capture (cliente agente retenedor) -->
+                    <label class="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        [checked]="stop.withholding_enabled"
+                        (change)="updateWithholdingEnabled(i, $event)"
+                        class="h-4 w-4 rounded border-border text-primary-600 focus:ring-primary-600"
+                      />
+                      <span class="text-sm text-text-primary"
+                        >Cliente agente retenedor (registrar retención)</span
+                      >
+                    </label>
+
+                    @if (stop.withholding_enabled) {
+                      <div class="rounded-md border border-amber-200 bg-amber-50 p-2 space-y-2">
+                        <p class="text-xs text-amber-900">
+                          El cliente paga el neto en efectivo + certificado de
+                          retención. La suma se descuenta del total a cobrar.
+                        </p>
+                        <div class="grid grid-cols-3 gap-2">
+                          <app-input
+                            label="Retefuente"
+                            [currency]="true"
+                            [ngModel]="stop.retefuente"
+                            (ngModelChange)="updateWithholdingField(i, 'retefuente', $event)"
+                            [name]="'retefuente_' + i"
+                          ></app-input>
+                          <app-input
+                            label="Reteiva"
+                            [currency]="true"
+                            [ngModel]="stop.reteiva"
+                            (ngModelChange)="updateWithholdingField(i, 'reteiva', $event)"
+                            [name]="'reteiva_' + i"
+                          ></app-input>
+                          <app-input
+                            label="Reteica"
+                            [currency]="true"
+                            [ngModel]="stop.reteica"
+                            (ngModelChange)="updateWithholdingField(i, 'reteica', $event)"
+                            [name]="'reteica_' + i"
+                          ></app-input>
+                        </div>
+                      </div>
                     }
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -507,10 +563,19 @@ export class RouteSheetScannerModalComponent {
       .reduce((sum, s) => sum + (s.collected_amount || 0), 0),
   );
 
+  /** Sum of the per-row withholding breakdown (0 unless capture is enabled). */
+  private rowWithholding(stop: EditableStopDecision): number {
+    if (!stop.withholding_enabled) return 0;
+    return (
+      (stop.retefuente || 0) + (stop.reteiva || 0) + (stop.reteica || 0)
+    );
+  }
+
   /**
    * True when at least one editable (non-settled) row is marked delivered but
-   * its collected amount does not cover the net total. Blocks confirm to keep
-   * the "pago total o no pago" rule (no partial payments).
+   * cash + withholding does not cover the net total. Blocks confirm to keep
+   * the "pago total o no pago" rule (no partial payments). For a withholding
+   * agent the customer pays cash + withholding certificate = total.
    */
   readonly hasUndercollectedDelivery = computed(() =>
     this.editableStops().some(
@@ -519,17 +584,17 @@ export class RouteSheetScannerModalComponent {
         !s.already_settled &&
         s.delivered &&
         (s.net_total || 0) > 0 &&
-        (s.collected_amount || 0) < (s.net_total || 0),
+        (s.collected_amount || 0) + this.rowWithholding(s) < (s.net_total || 0),
     ),
   );
 
-  /** Per-row helper: a delivered row whose collected amount is below total. */
+  /** Per-row helper: a delivered row whose cash + withholding is below total. */
   isUndercollected(stop: EditableStopDecision): boolean {
     return (
       !stop.already_settled &&
       stop.delivered &&
       (stop.net_total || 0) > 0 &&
-      (stop.collected_amount || 0) < (stop.net_total || 0)
+      (stop.collected_amount || 0) + this.rowWithholding(stop) < (stop.net_total || 0)
     );
   }
 
@@ -703,6 +768,10 @@ export class RouteSheetScannerModalComponent {
       collected_amount: ex.collected_amount ?? 0,
       payment_method: ex.payment_method ?? 'cash',
       notes: ex.notes ?? '',
+      withholding_enabled: false,
+      retefuente: 0,
+      reteiva: 0,
+      reteica: 0,
     };
   }
 
@@ -745,6 +814,27 @@ export class RouteSheetScannerModalComponent {
     this.patchStop(index, { notes: value });
   }
 
+  /** Toggle the withholding-capture section for a withholding-agent customer. */
+  updateWithholdingEnabled(index: number, event: Event): void {
+    const enabled = (event.target as HTMLInputElement).checked;
+    // When disabling, zero the breakdown so it never reaches the payload.
+    this.patchStop(
+      index,
+      enabled
+        ? { withholding_enabled: true }
+        : { withholding_enabled: false, retefuente: 0, reteiva: 0, reteica: 0 },
+    );
+  }
+
+  updateWithholdingField(
+    index: number,
+    field: 'retefuente' | 'reteiva' | 'reteica',
+    value: number | null,
+  ): void {
+    const amount = value == null || value < 0 ? 0 : Number(value);
+    this.patchStop(index, { [field]: amount });
+  }
+
   private patchStop(index: number, patch: Partial<EditableStopDecision>): void {
     const stops = [...this.editableStops()];
     stops[index] = { ...stops[index], ...patch };
@@ -773,13 +863,30 @@ export class RouteSheetScannerModalComponent {
     // unnecessary and was the source of the previous 400.
     const stops: ConfirmRouteSheetStopDto[] = this.editableStops()
       .filter((s) => s.stop_id !== null && !s.already_settled)
-      .map((s) => ({
-        stop_id: s.stop_id as number,
-        delivered: s.delivered,
-        collected_amount: s.collected_amount,
-        payment_method: s.payment_method || undefined,
-        notes: s.notes || undefined,
-      }));
+      .map((s) => {
+        const decision: ConfirmRouteSheetStopDto = {
+          stop_id: s.stop_id as number,
+          delivered: s.delivered,
+          collected_amount: s.collected_amount,
+          payment_method: s.payment_method || undefined,
+          notes: s.notes || undefined,
+        };
+        // Withholding-agent stops: carry the captured breakdown so the backend
+        // settles the order 100% (cash + withholding certificate, no AR) and
+        // does not 400 on its withholding-agent validation. Only non-zero lines.
+        if (this.rowWithholding(s) > 0) {
+          const breakdown: {
+            retefuente?: number;
+            reteiva?: number;
+            reteica?: number;
+          } = {};
+          if (s.retefuente > 0) breakdown.retefuente = s.retefuente;
+          if (s.reteiva > 0) breakdown.reteiva = s.reteiva;
+          if (s.reteica > 0) breakdown.reteica = s.reteica;
+          decision.withholding_breakdown = breakdown;
+        }
+        return decision;
+      });
 
     if (stops.length === 0) {
       this.toast.error(
