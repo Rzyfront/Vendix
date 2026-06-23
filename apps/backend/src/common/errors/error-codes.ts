@@ -1962,6 +1962,12 @@ export const ErrorCodes = {
     devMessage:
       'One or more route stops have no delivery address; the route cannot be dispatched',
   },
+  DISPATCH_ROUTE_PARTIAL_DISABLED: {
+    code: 'DISPATCH_ROUTE_PARTIAL_DISABLED',
+    httpStatus: 400,
+    devMessage:
+      'Partial deliveries are not enabled on dispatch routes; payment must be total (delivered) or the stop must be rejected/released',
+  },
 
   // MCP (Model Context Protocol)
   AI_MCP_001: {

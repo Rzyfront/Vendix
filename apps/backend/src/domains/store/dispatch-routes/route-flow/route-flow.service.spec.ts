@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { RouteFlowService } from './route-flow.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException } from '@common/errors';
 
 describe('RouteFlowService — settleStop (cash settlement event fan-out)', () => {
   let service: RouteFlowService;
@@ -165,43 +166,24 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     );
   });
 
-  // ── b) CRÉDITO (partial) ───────────────────────────────────────────
-  it('b) credit stop (partial collection): emits credit_sale with amount = net - total_paid - withholding', async () => {
+  // ── b) PARCIAL DESHABILITADO ───────────────────────────────────────
+  it('b) partial result is rejected: throws DISPATCH_ROUTE_PARTIAL_DISABLED and never settles', async () => {
     prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
     prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
 
-    // net=200, collected=120 → credit_amount = 200 - 120 - 0 = 80
-    await service.settleStop(ROUTE_ID, STOP_ID, {
-      result: 'partial',
-      collected_amount: 120,
-      payment_method: 'cash',
-    } as any);
+    // No hay crédito / pago parcial en ruta: el pago es total o no hay pago.
+    await expect(
+      service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'partial',
+        collected_amount: 120,
+        payment_method: 'cash',
+      } as any),
+    ).rejects.toBeInstanceOf(VendixHttpException);
 
-    expect(cashSettlementMock.emitCreditSale).toHaveBeenCalledTimes(1);
-    expect(cashSettlementMock.emitCreditSale).toHaveBeenCalledWith(
-      expect.objectContaining({
-        store_id: STORE_ID,
-        route_id: ROUTE_ID,
-        stop_id: STOP_ID,
-        customer_id: 42,
-        amount: 80,
-      }),
-    );
-    // Partial collection still triggers a payment for the collected portion.
-    expect(cashSettlementMock.emitPaymentReceived).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: 120 }),
-    );
-
-    expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: 'partial',
-          result: 'partial',
-          collected_amount: 120,
-          credit_amount: 80,
-        }),
-      }),
-    );
+    // The stop is never updated and no credit-sale / payment is emitted.
+    expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+    expect(cashSettlementMock.emitCreditSale).not.toHaveBeenCalled();
+    expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
   });
 
   // ── c) RETENCIÓN (withholding) ─────────────────────────────────────
@@ -360,27 +342,27 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     );
   });
 
-  // ── h) PARTIAL → also delivers the remisión ────────────────────────
-  it("h) result 'partial' on a confirmed note: updates dispatch_note → delivered and emits dispatch_note.delivered", async () => {
+  // ── h) PARTIAL → rejected, never delivers the remisión ─────────────
+  it("h) result 'partial' is rejected: does NOT transition the remisión to delivered nor emit the event", async () => {
     prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
     prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
 
-    // net=200, collected=120 → partial (credit 80), still delivers the remisión.
-    await service.settleStop(ROUTE_ID, STOP_ID, {
-      result: 'partial',
-      collected_amount: 120,
-      payment_method: 'cash',
-    } as any);
+    // Partial is disabled: the whole settle is aborted before any side effect.
+    await expect(
+      service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'partial',
+        collected_amount: 120,
+        payment_method: 'cash',
+      } as any),
+    ).rejects.toBeInstanceOf(VendixHttpException);
 
-    expect(prismaMock.dispatch_notes.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 900 },
-        data: expect.objectContaining({ status: 'delivered' }),
-      }),
+    const deliveredUpdate = prismaMock.dispatch_notes.update.mock.calls.find(
+      (c: any[]) => c[0]?.data?.status === 'delivered',
     );
-    expect(eventEmitterMock.emit).toHaveBeenCalledWith(
+    expect(deliveredUpdate).toBeUndefined();
+    expect(eventEmitterMock.emit).not.toHaveBeenCalledWith(
       'dispatch_note.delivered',
-      expect.objectContaining({ dispatch_note_id: 900 }),
+      expect.anything(),
     );
   });
 

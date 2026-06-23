@@ -130,6 +130,23 @@ export class DispatchNoteDetailComponent {
 
   readonly hasCustomerAddress = computed<boolean>(() => this.customerAddressLines().length > 0);
 
+  // ── Ruta activa (planilla) ─────────────────────────
+  /**
+   * Asignación activa de la remisión a una planilla de ruta: el primer stop
+   * cuyo `route` está presente y cuyo estado NO es `released`. Devuelve `null`
+   * cuando la remisión no está actualmente en una ruta (sin asignar o liberada
+   * y nunca reasignada). Replica el patrón `activeRoute` de la lista de
+   * remisiones para ofrecer navegación a la planilla.
+   */
+  readonly activeRoute = computed<{ id: number; route_number: string } | null>(() => {
+    const stop = (this.dispatch_note().dispatch_route_stops ?? []).find(
+      (s) => s.status !== 'released' && !!s.route,
+    );
+    return stop?.route
+      ? { id: stop.route.id, route_number: stop.route.route_number }
+      : null;
+  });
+
   readonly customerPhone = computed<string>(() => {
     const a = this.dispatch_note().customer_address as { phone_number?: string } | string | null | undefined;
     return a && typeof a === 'object' ? a.phone_number || '' : '';
@@ -254,6 +271,11 @@ export class DispatchNoteDetailComponent {
   // ── Navigation ──────────────────────────────────────
   goToOrder(orderId: number): void {
     this.router.navigate(['/admin/orders', orderId]);
+  }
+
+  /** Navega al detalle de la planilla (ruta) asignada a la remisión. */
+  goToRoute(routeId: number): void {
+    this.router.navigate(['/admin/orders/planillas', routeId]);
   }
 
   // ── Utility methods ─────────────────────────────────

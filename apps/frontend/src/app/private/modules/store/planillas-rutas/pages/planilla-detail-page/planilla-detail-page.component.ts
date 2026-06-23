@@ -312,7 +312,7 @@ type StopCollectionState = 'prepaid' | 'collected' | 'pending_cod' | 'none';
         [isOpen]="showScannerModal()"
         [route]="route()"
         (closed)="showScannerModal.set(false)"
-        (confirmed)="onScanConfirmed()"
+        (confirmed)="onScanConfirmed($event)"
       ></app-route-sheet-scanner-modal>
     }
 
@@ -922,10 +922,19 @@ export class PlanillaDetailPageComponent {
     this.showScannerModal.set(true);
   }
 
-  /** After a scan-confirm settlement, refresh the route to reflect new stops. */
-  onScanConfirmed() {
+  /**
+   * After a scan-confirm settlement, refresh the route. The scanner returns the
+   * fully-updated route in the `/scan/confirm` response, so we apply it directly
+   * and avoid a second GET round-trip. Falls back to a reload if absent.
+   */
+  onScanConfirmed(route?: DispatchRoute) {
     this.showScannerModal.set(false);
-    this.load();
+    if (route) {
+      this.route.set(route);
+      this.service.invalidateStatsCache();
+    } else {
+      this.load();
+    }
   }
 
   /** Routes the documental/AI options-dropdown actions to their handlers. */

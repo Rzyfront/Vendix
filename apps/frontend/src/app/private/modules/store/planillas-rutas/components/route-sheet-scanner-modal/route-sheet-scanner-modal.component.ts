@@ -26,12 +26,16 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
 import { PlanillasRutasService } from '../../services/planillas-rutas.service';
 import {
   ConfirmRouteSheetDto,
+  ConfirmRouteSheetResult,
   ConfirmRouteSheetStopDto,
   DispatchRoute,
   RouteSheetMatchResult,
   RouteSheetMatchedStop,
   RouteSheetScanResult,
 } from '../../interfaces/planilla.interface';
+
+/** Stop statuses that are already settled/terminal and cannot be re-settled. */
+const TERMINAL_STOP_STATUSES = ['delivered', 'partial', 'rejected', 'released'];
 
 /**
  * Editable per-stop review row. Built from each `RouteSheetMatchedStop`:
@@ -47,11 +51,30 @@ interface EditableStopDecision {
   /** Net amount expected for this stop (from `current.grand_total`). */
   net_total: number;
   current_collected: number;
+  /**
+   * Current persisted status of the resolved stop (from `current.status`).
+   * When this is terminal (delivered/partial/rejected/released) the row is
+   * already settled: it is excluded from the confirm payload and rendered as
+   * "ya liquidada (conciliada)" instead of being editable.
+   */
+  current_status: string | null;
+  already_settled: boolean;
   // Editable fields
   delivered: boolean;
   collected_amount: number;
   payment_method: string;
   notes: string;
+  /**
+   * Optional fiscal-withholding breakdown for withholding-agent customers. The
+   * scan/match response does NOT surface `customer.is_withholding_agent` per
+   * stop, so the operator opts in via a "registrar retención" toggle. When set,
+   * the sum is sent as `withholding_breakdown` in the confirm payload and is
+   * counted toward covering the total (cash + withholding = total, NO partial).
+   */
+  withholding_enabled: boolean;
+  retefuente: number;
+  reteiva: number;
+  reteica: number;
 }
 
 @Component({
@@ -249,16 +272,23 @@ interface EditableStopDecision {
           <div>
             <h4 class="text-sm font-semibold text-text-primary mb-3">
               Paradas ({{ confirmableCount() }} de {{ editableStops().length }} liquidables)
+              @if (alreadySettledCount() > 0) {
+                <span class="text-xs font-normal text-text-secondary">
+                  · {{ alreadySettledCount() }} ya liquidada(s) (conciliada)
+                </span>
+              }
             </h4>
 
             <div class="space-y-3">
               @for (stop of editableStops(); track $index; let i = $index) {
                 <div
                   class="rounded-lg border p-3 space-y-3"
-                  [class.border-border]="stop.stop_id !== null"
-                  [class.bg-surface]="stop.stop_id !== null"
+                  [class.border-border]="stop.stop_id !== null && !stop.already_settled"
+                  [class.bg-surface]="stop.stop_id !== null && !stop.already_settled"
                   [class.border-red-200]="stop.stop_id === null"
                   [class.bg-red-50]="stop.stop_id === null"
+                  [class.border-emerald-200]="stop.already_settled"
+                  [class.bg-emerald-50]="stop.already_settled"
                 >
                   <!-- Header row -->
                   <div class="flex items-start justify-between gap-2 flex-wrap">
@@ -272,6 +302,11 @@ interface EditableStopDecision {
                       <app-badge [variant]="matchMethodVariant(stop.match_method)" size="xsm">
                         {{ matchMethodLabel(stop.match_method) }}
                       </app-badge>
+                      @if (stop.already_settled) {
+                        <app-badge variant="success" size="xsm">
+                          Ya liquidada (conciliada)
+                        </app-badge>
+                      }
                     </div>
                     @if (stop.net_total > 0) {
                       <span class="text-sm font-semibold text-text-primary">
@@ -284,6 +319,12 @@ interface EditableStopDecision {
                     <p class="text-xs text-red-700">
                       No se pudo emparejar esta fila con una parada real; se omitirá.
                     </p>
+                  } @else if (stop.already_settled) {
+                    <p class="text-xs text-emerald-700">
+                      Esta parada ya está
+                      <strong>{{ settledStatusLabel(stop.current_status) }}</strong
+                      >; se conciliará automáticamente y no se volverá a liquidar.
+                    </p>
                   } @else {
                     <!-- Editable fields -->
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -295,7 +336,7 @@ interface EditableStopDecision {
                           (change)="updateDelivered(i, $event)"
                           class="h-4 w-4 rounded border-border text-primary-600 focus:ring-primary-600"
                         />
-                        <span class="text-sm text-text-primary">Entregado</span>
+                        <span class="text-sm text-text-primary">Entregado (cobro total)</span>
                       </label>
 
                       <!-- Collected amount (currency input) -->
@@ -307,6 +348,59 @@ interface EditableStopDecision {
                         [name]="'collected_' + i"
                       ></app-input>
                     </div>
+
+                    @if (isUndercollected(stop)) {
+                      <p class="text-xs text-red-700">
+                        Efectivo + retención no cubren el total
+                        ({{ stop.net_total | currency }}). No se permiten pagos
+                        parciales: completa el cobro o desmarca "Entregado".
+                      </p>
+                    }
+
+                    <!-- Withholding capture (cliente agente retenedor) -->
+                    <label class="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        [checked]="stop.withholding_enabled"
+                        (change)="updateWithholdingEnabled(i, $event)"
+                        class="h-4 w-4 rounded border-border text-primary-600 focus:ring-primary-600"
+                      />
+                      <span class="text-sm text-text-primary"
+                        >Cliente agente retenedor (registrar retención)</span
+                      >
+                    </label>
+
+                    @if (stop.withholding_enabled) {
+                      <div class="rounded-md border border-amber-200 bg-amber-50 p-2 space-y-2">
+                        <p class="text-xs text-amber-900">
+                          El cliente paga el neto en efectivo + certificado de
+                          retención. La suma se descuenta del total a cobrar.
+                        </p>
+                        <div class="grid grid-cols-3 gap-2">
+                          <app-input
+                            label="Retefuente"
+                            [currency]="true"
+                            [ngModel]="stop.retefuente"
+                            (ngModelChange)="updateWithholdingField(i, 'retefuente', $event)"
+                            [name]="'retefuente_' + i"
+                          ></app-input>
+                          <app-input
+                            label="Reteiva"
+                            [currency]="true"
+                            [ngModel]="stop.reteiva"
+                            (ngModelChange)="updateWithholdingField(i, 'reteiva', $event)"
+                            [name]="'reteiva_' + i"
+                          ></app-input>
+                          <app-input
+                            label="Reteica"
+                            [currency]="true"
+                            [ngModel]="stop.reteica"
+                            (ngModelChange)="updateWithholdingField(i, 'reteica', $event)"
+                            [name]="'reteica_' + i"
+                          ></app-input>
+                        </div>
+                      </div>
+                    }
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <!-- Payment method selector -->
@@ -384,7 +478,7 @@ interface EditableStopDecision {
             <app-button
               variant="primary"
               [loading]="isConfirming()"
-              [disabled]="confirmableCount() === 0 || isConfirming()"
+              [disabled]="!canConfirm() || isConfirming()"
               (clicked)="onConfirm()"
             >
               Confirmar y liquidar
@@ -406,7 +500,11 @@ export class RouteSheetScannerModalComponent {
   readonly route = input<DispatchRoute | null>(null);
 
   readonly closed = output<void>();
-  readonly confirmed = output<void>();
+  /**
+   * Emits the fully-updated route returned by `/scan/confirm` so the parent
+   * can refresh the detail without a second round-trip to `GET :id`.
+   */
+  readonly confirmed = output<DispatchRoute>();
 
   /**
    * ViewChild refs for the hidden file inputs. Using `viewChild()` (zoneless
@@ -436,21 +534,73 @@ export class RouteSheetScannerModalComponent {
     return file?.type?.startsWith('image/') ?? false;
   });
 
-  /** Stops that can actually be confirmed (resolved to a real stop). */
+  /**
+   * Stops that can actually be confirmed: resolved to a real stop AND not
+   * already settled. Already-settled stops are reconciled by the backend and
+   * must NOT be re-sent in the confirm payload.
+   */
   readonly confirmableCount = computed(
-    () => this.editableStops().filter((s) => s.stop_id !== null).length,
+    () =>
+      this.editableStops().filter(
+        (s) => s.stop_id !== null && !s.already_settled,
+      ).length,
+  );
+
+  /** Count of rows that are already settled (shown as "conciliada"). */
+  readonly alreadySettledCount = computed(
+    () => this.editableStops().filter((s) => s.already_settled).length,
   );
 
   readonly totalNet = computed(() =>
     this.editableStops()
-      .filter((s) => s.stop_id !== null)
+      .filter((s) => s.stop_id !== null && !s.already_settled)
       .reduce((sum, s) => sum + (s.net_total || 0), 0),
   );
 
   readonly totalCollected = computed(() =>
     this.editableStops()
-      .filter((s) => s.stop_id !== null)
+      .filter((s) => s.stop_id !== null && !s.already_settled)
       .reduce((sum, s) => sum + (s.collected_amount || 0), 0),
+  );
+
+  /** Sum of the per-row withholding breakdown (0 unless capture is enabled). */
+  private rowWithholding(stop: EditableStopDecision): number {
+    if (!stop.withholding_enabled) return 0;
+    return (
+      (stop.retefuente || 0) + (stop.reteiva || 0) + (stop.reteica || 0)
+    );
+  }
+
+  /**
+   * True when at least one editable (non-settled) row is marked delivered but
+   * cash + withholding does not cover the net total. Blocks confirm to keep
+   * the "pago total o no pago" rule (no partial payments). For a withholding
+   * agent the customer pays cash + withholding certificate = total.
+   */
+  readonly hasUndercollectedDelivery = computed(() =>
+    this.editableStops().some(
+      (s) =>
+        s.stop_id !== null &&
+        !s.already_settled &&
+        s.delivered &&
+        (s.net_total || 0) > 0 &&
+        (s.collected_amount || 0) + this.rowWithholding(s) < (s.net_total || 0),
+    ),
+  );
+
+  /** Per-row helper: a delivered row whose cash + withholding is below total. */
+  isUndercollected(stop: EditableStopDecision): boolean {
+    return (
+      !stop.already_settled &&
+      stop.delivered &&
+      (stop.net_total || 0) > 0 &&
+      (stop.collected_amount || 0) + this.rowWithholding(stop) < (stop.net_total || 0)
+    );
+  }
+
+  /** Confirm enabled only when there is something to settle and no under-collection. */
+  readonly canConfirm = computed(
+    () => this.confirmableCount() > 0 && !this.hasUndercollectedDelivery(),
   );
 
   readonly wizardSteps = [
@@ -600,6 +750,11 @@ export class RouteSheetScannerModalComponent {
   /** Build an editable review row from a backend matched stop. */
   private toEditable(s: RouteSheetMatchedStop): EditableStopDecision {
     const ex = s.extracted;
+    const currentStatus = s.current?.status ?? null;
+    const alreadySettled =
+      s.stop_id !== null &&
+      currentStatus !== null &&
+      TERMINAL_STOP_STATUSES.includes(currentStatus);
     return {
       stop_id: s.stop_id,
       stop_sequence: s.stop_sequence,
@@ -607,11 +762,33 @@ export class RouteSheetScannerModalComponent {
       match_method: s.match_method,
       net_total: s.current?.grand_total ?? 0,
       current_collected: s.current?.collected_amount ?? 0,
+      current_status: currentStatus,
+      already_settled: alreadySettled,
       delivered: ex.delivered,
       collected_amount: ex.collected_amount ?? 0,
       payment_method: ex.payment_method ?? 'cash',
       notes: ex.notes ?? '',
+      withholding_enabled: false,
+      retefuente: 0,
+      reteiva: 0,
+      reteica: 0,
     };
+  }
+
+  /** Spanish label for a terminal stop status (shown in the conciliada chip). */
+  settledStatusLabel(status: string | null): string {
+    switch (status) {
+      case 'delivered':
+        return 'Entregada';
+      case 'rejected':
+        return 'Rechazada';
+      case 'released':
+        return 'Liberada';
+      case 'partial':
+        return 'Liquidada';
+      default:
+        return 'Liquidada';
+    }
   }
 
   // ============================================================
@@ -637,6 +814,27 @@ export class RouteSheetScannerModalComponent {
     this.patchStop(index, { notes: value });
   }
 
+  /** Toggle the withholding-capture section for a withholding-agent customer. */
+  updateWithholdingEnabled(index: number, event: Event): void {
+    const enabled = (event.target as HTMLInputElement).checked;
+    // When disabling, zero the breakdown so it never reaches the payload.
+    this.patchStop(
+      index,
+      enabled
+        ? { withholding_enabled: true }
+        : { withholding_enabled: false, retefuente: 0, reteiva: 0, reteica: 0 },
+    );
+  }
+
+  updateWithholdingField(
+    index: number,
+    field: 'retefuente' | 'reteiva' | 'reteica',
+    value: number | null,
+  ): void {
+    const amount = value == null || value < 0 ? 0 : Number(value);
+    this.patchStop(index, { [field]: amount });
+  }
+
   private patchStop(index: number, patch: Partial<EditableStopDecision>): void {
     const stops = [...this.editableStops()];
     stops[index] = { ...stops[index], ...patch };
@@ -652,18 +850,48 @@ export class RouteSheetScannerModalComponent {
     const scan = this.scanResult();
     if (!file) return;
 
+    // Guard: never submit an under-collected delivery (no partial payments).
+    if (this.hasUndercollectedDelivery()) {
+      this.toast.error(
+        'Hay paradas marcadas como entregadas cuyo monto no cubre el total. Cobra el total o desmarca "Entregado": no se permiten pagos parciales.',
+      );
+      return;
+    }
+
+    // Only send resolved, NOT-yet-settled stops. Already-terminal stops are
+    // reconciled by the backend (returned in `skipped`); re-sending them is
+    // unnecessary and was the source of the previous 400.
     const stops: ConfirmRouteSheetStopDto[] = this.editableStops()
-      .filter((s) => s.stop_id !== null)
-      .map((s) => ({
-        stop_id: s.stop_id as number,
-        delivered: s.delivered,
-        collected_amount: s.collected_amount,
-        payment_method: s.payment_method || undefined,
-        notes: s.notes || undefined,
-      }));
+      .filter((s) => s.stop_id !== null && !s.already_settled)
+      .map((s) => {
+        const decision: ConfirmRouteSheetStopDto = {
+          stop_id: s.stop_id as number,
+          delivered: s.delivered,
+          collected_amount: s.collected_amount,
+          payment_method: s.payment_method || undefined,
+          notes: s.notes || undefined,
+        };
+        // Withholding-agent stops: carry the captured breakdown so the backend
+        // settles the order 100% (cash + withholding certificate, no AR) and
+        // does not 400 on its withholding-agent validation. Only non-zero lines.
+        if (this.rowWithholding(s) > 0) {
+          const breakdown: {
+            retefuente?: number;
+            reteiva?: number;
+            reteica?: number;
+          } = {};
+          if (s.retefuente > 0) breakdown.retefuente = s.retefuente;
+          if (s.reteiva > 0) breakdown.reteiva = s.reteiva;
+          if (s.reteica > 0) breakdown.reteica = s.reteica;
+          decision.withholding_breakdown = breakdown;
+        }
+        return decision;
+      });
 
     if (stops.length === 0) {
-      this.toast.error('No hay paradas liquidables en el escaneo');
+      this.toast.error(
+        'No hay paradas pendientes de liquidar en el escaneo (todas ya están liquidadas).',
+      );
       return;
     }
 
@@ -679,17 +907,55 @@ export class RouteSheetScannerModalComponent {
       .subscribe({
         next: (res) => {
           this.isConfirming.set(false);
-          this.toast.success(
-            `Planilla liquidada (${res.settled.length} paradas)`,
-          );
-          this.confirmed.emit();
+          this.showConfirmSummary(res);
+          // Hand the fully-updated route back to the parent so it can refresh
+          // the detail without a second GET round-trip.
+          this.confirmed.emit(res.route);
           this.closeAndReset();
         },
-        error: (err: Error) => {
+        error: (err: any) => {
           this.isConfirming.set(false);
-          this.toast.error(err?.message || 'Error al liquidar la planilla');
+          this.toast.error(this.mapConfirmError(err));
         },
       });
+  }
+
+  /**
+   * Summarize the idempotent settle response: how many stops were settled,
+   * how many were reconciled (already settled / not in route), and list any
+   * per-stop errors so the operator can react instead of seeing a raw toast.
+   */
+  private showConfirmSummary(res: ConfirmRouteSheetResult): void {
+    const settled = res.settled?.length ?? 0;
+    const skipped = res.skipped?.length ?? 0;
+    const errors = res.errors ?? [];
+
+    const summary = `Liquidadas: ${settled} / Conciliadas: ${skipped} / Errores: ${errors.length}`;
+
+    if (errors.length > 0) {
+      const detail = errors
+        .map((e) => `Parada #${e.stop_id}: ${e.message}`)
+        .join('\n');
+      // Keep the summary visible and surface the failing stops explicitly.
+      this.toast.warning(`${summary}\n${detail}`);
+    } else if (skipped > 0) {
+      this.toast.success(`${summary} (paradas ya liquidadas conciliadas)`);
+    } else {
+      this.toast.success(summary);
+    }
+  }
+
+  /**
+   * Map known backend error codes to clear Spanish messages. In particular,
+   * `DISPATCH_ROUTE_PARTIAL_DISABLED` is the 400 the backend returns if a
+   * partial result ever reaches it — surface it instead of the raw string.
+   */
+  private mapConfirmError(err: any): string {
+    const code = err?.error?.error_code || err?.error_code;
+    if (code === 'DISPATCH_ROUTE_PARTIAL_DISABLED') {
+      return 'No se permiten pagos parciales en una ruta: cada parada debe cobrarse completa o quedar como rechazada/liberada.';
+    }
+    return err?.message || 'Error al liquidar la planilla';
   }
 
   // ============================================================

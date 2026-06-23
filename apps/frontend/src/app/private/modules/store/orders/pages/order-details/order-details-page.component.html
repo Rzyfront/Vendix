@@ -1952,6 +1952,49 @@
       (closed)="showDispatchModal.set(false)"
     ></app-generate-dispatch-wizard>
 
+    <!-- REMISIÓN GENERADA: navegar a la remisión o a su ruta (planilla) -->
+    <app-modal
+      [isOpen]="showDispatchGeneratedModal()"
+      (closed)="dismissDispatchGeneratedModal()"
+      title="Remision generada"
+      size="sm"
+    >
+      <div class="p-4">
+        <div
+          class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-start gap-3"
+        >
+          <app-icon
+            name="check-circle"
+            size="18"
+            class="text-emerald-600 mt-0.5"
+          ></app-icon>
+          <div>
+            <p class="text-sm font-bold text-emerald-800">
+              La remision se creo correctamente
+            </p>
+            <p class="text-xs text-emerald-600 mt-0.5">
+              Quedo asignada a una ruta. Puedes ver la remision o ir a la ruta.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div
+        slot="footer"
+        class="flex flex-col sm:flex-row items-stretch sm:items-center justify-end gap-2 p-4 border-t border-border"
+      >
+        <app-button variant="outline" (clicked)="dismissDispatchGeneratedModal()"
+          >Seguir aqui</app-button
+        >
+        <app-button variant="outline" (clicked)="goToGeneratedDispatchRoute()"
+          >Ver ruta</app-button
+        >
+        <app-button variant="primary" (clicked)="goToGeneratedDispatchNote()"
+          >Ver remision</app-button
+        >
+      </div>
+    </app-modal>
+
     <!-- A3-edit: CAPTURA DE DIRECCIÓN DE ENVÍO EN PÁGINA -->
     @if (showShippingAddressModal()) {
       <app-shipping-address-modal
