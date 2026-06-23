@@ -1,4 +1,4 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
@@ -1046,7 +1046,9 @@ export class OrderDetailsPageComponent {
 
     this.fastTrackForm = this.fb.group({
       payment: this.fb.group({
-        payment_method_id: this.fb.control<number | null>(null),
+        // Holds the StorePaymentMethod.id (string) selected via [ngValue]="pm.id";
+        // coerced to number for store_payment_method_id at submit time.
+        payment_method_id: this.fb.control<string | null>(null),
         amount: this.fb.control<number | null>(null),
         reference: this.fb.control<string>(''),
       }),
@@ -1065,6 +1067,23 @@ export class OrderDetailsPageComponent {
       this.orderId = params.get('id');
       if (this.orderId) {
         this.loadData();
+      }
+    });
+
+    // Bug 2 — preselect the first payment method in the fast-track modal.
+    // paymentMethods() loads async, so we cannot set it in openFastTrackModal().
+    // This effect reacts to the methods list, the modal being open, and the
+    // order's payment state (hasSuccessfulPayment reads the order() signal),
+    // patching the control only while it is still empty.
+    effect(() => {
+      const methods = this.paymentMethods();
+      if (
+        this.showFastTrackModal() &&
+        !this.hasSuccessfulPayment() &&
+        methods.length > 0 &&
+        this.fastTrackForm.get('payment')?.get('payment_method_id')?.value == null
+      ) {
+        this.fastTrackForm.get('payment')?.patchValue({ payment_method_id: methods[0].id });
       }
     });
   }
@@ -1817,17 +1836,21 @@ export class OrderDetailsPageComponent {
   submitFastTrack(): void {
     if (!this.orderId) return;
 
-    const paymentGroup = this.fastTrackForm.get('payment')!.value as { payment_method_id: number | null; amount: number | null; reference: string };
+    const paymentGroup = this.fastTrackForm.get('payment')!.value as { payment_method_id: string | null; amount: number | null; reference: string };
     const shipGroup = this.fastTrackForm.get('ship')!.value as Record<string, unknown>;
     const deliverGroup = this.fastTrackForm.get('deliver')!.value as Record<string, unknown>;
 
     const dto: FastTrackOrderDto = {};
     if (!this.hasSuccessfulPayment() && paymentGroup.payment_method_id) {
+      // PayOrderDto expects store_payment_method_id (number), payment_type
+      // and amount_received/payment_reference — NOT the legacy
+      // payment_method_id/amount/reference names. POS flow defaults to 'direct'.
       dto.payment = {
-        payment_method_id: Number(paymentGroup.payment_method_id),
-        amount: Number(paymentGroup.amount) || undefined,
-        reference: paymentGroup.reference || undefined,
-      } as any;
+        store_payment_method_id: Number(paymentGroup.payment_method_id),
+        payment_type: 'direct',
+        amount_received: Number(paymentGroup.amount) || undefined,
+        payment_reference: paymentGroup.reference || undefined,
+      };
     }
     const shipClean = this.compactObject(shipGroup);
     if (Object.keys(shipClean).length) dto.ship = shipClean as any;

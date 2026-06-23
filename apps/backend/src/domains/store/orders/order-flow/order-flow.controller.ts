@@ -172,7 +172,7 @@ export class OrderFlowController {
   }
 
   @Post('fast-track')
-  @Permissions('store:orders:update')
+  @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)
   async fastTrackOrder(
     @Param('orderId', ParseIntPipe) orderId: number,
