@@ -77,20 +77,26 @@ import {
             green when a note exists. Opens a modal to edit it. The note is
             internal (set at creation), never shown to the customer.
           -->
-          <button
-            type="button"
-            (click)="orderNoteModalOpen.set(true)"
-            class="w-8 h-8 rounded-md flex items-center justify-center transition-colors"
-            [class]="
-              hasStaffNote()
-                ? 'text-green-600 bg-green-50 hover:bg-green-100'
-                : 'text-text-secondary hover:text-text-primary hover:bg-muted/40'
-            "
-            aria-label="Nota de la orden"
-            title="Nota de la orden"
+          <app-tooltip
+            content="Nota de la orden"
+            position="bottom"
+            size="sm"
+            color="default"
           >
-            <app-icon name="sticky-note" [size]="16"></app-icon>
-          </button>
+            <button
+              type="button"
+              (click)="orderNoteModalOpen.set(true)"
+              class="w-8 h-8 rounded-md flex items-center justify-center transition-colors"
+              [class]="
+                hasStaffNote()
+                  ? 'text-green-600 bg-green-50 hover:bg-green-100'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-muted/40'
+              "
+              aria-label="Nota de la orden"
+            >
+              <app-icon name="notebook-pen" [size]="16"></app-icon>
+            </button>
+          </app-tooltip>
         </div>
 
         <!-- Totals Row (High Contrast) -->
@@ -718,6 +724,21 @@ import {
             {{ (cartState().notes || '').length }}/500
           </span>
         </div>
+      </div>
+
+      <div
+        slot="footer"
+        class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"
+      >
+        <app-button
+          class="w-full sm:w-auto"
+          variant="primary"
+          size="md"
+          customClasses="min-w-[120px]"
+          (clicked)="orderNoteModalOpen.set(false)"
+        >
+          Aceptar
+        </app-button>
       </div>
     </app-modal>
   `,
