@@ -15,6 +15,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-review-summary',
@@ -332,14 +333,14 @@ export class ReviewSummaryComponent implements OnInit {
         type: 'category',
         data: ['Pendientes', 'Aprobadas', 'Rechazadas'],
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
         min: 0,
         splitNumber: 5,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: [

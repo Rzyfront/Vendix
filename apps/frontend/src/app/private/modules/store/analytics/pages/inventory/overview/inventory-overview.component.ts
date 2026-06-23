@@ -27,6 +27,7 @@ import * as InventorySelectors from './state/inventory-overview.selectors';
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../../shared/utils/date-range-params.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../../shared/utils/chart-labels.util';
 import { AnalyticsCardComponent } from '../../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-registry';
 
@@ -193,10 +194,9 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
       yAxis: {
         type: 'value',
         min: 0,
-        max: 100,
         splitNumber: 5,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: border } } },
       series: [
         this.buildLineSeries(
@@ -290,14 +290,14 @@ private buildLineSeries(name: string, data: number[], color: string): any {
         type: 'category',
         data: sorted.map((v) => v.location_name),
         axisLine: { lineStyle: { color: border } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => this.currencyService.format(Math.round(v), 0) },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => this.currencyService.formatChartAxis(v) },
         splitLine: { lineStyle: { color: border } },
       },
       series: [{
@@ -355,14 +355,14 @@ private buildLineSeries(name: string, data: number[], color: string): any {
         type: 'category',
         data: sorted.map((v) => v.location_name),
         axisLine: { lineStyle: { color: border } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: border } },
       },
       series: [{

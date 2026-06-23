@@ -25,6 +25,7 @@ import { EChartsOption } from 'echarts';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-top-sellers',
@@ -130,11 +131,7 @@ onDateRangeChange(range: DateRangeFilter): void {
     }
 
     const reversed = [...topSellers].slice(0, 10).reverse();
-    const names = reversed.map((p) =>
-      p.product_name.length > 25
-        ? p.product_name.substring(0, 25) + '...'
-        : p.product_name,
-    );
+    const names = reversed.map((p) => p.product_name);
     const revenues = reversed.map((p) => p.revenue);
     const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 
@@ -167,7 +164,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
@@ -176,7 +173,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(value, 0),
+          formatter: (value: number) => this.currencyService.formatChartAxis(value),
         },
         splitLine: { lineStyle: { color: borderColor } },
       },

@@ -1,3 +1,4 @@
+export * from './chart-labels.util';
 export * from './data-url.util';
 export * from './date.util';
 export * from './markdown.util';
