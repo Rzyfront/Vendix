@@ -68,6 +68,12 @@ export interface CheckoutRequest {
   }>;
   guest_customer?: GuestCheckoutCustomer;
   /**
+   * Pickup fallback flag. When true, the customer is opting to pick up
+   * the order at the store instead of having it shipped. Used when the
+   * customer's address has no matching shipping zone.
+   */
+  pickup_only?: boolean;
+  /**
    * Optional coupon code typed by the customer. Backend validates against
    * {@link CouponsService.validate} and rejects the checkout if invalid.
    * The frontend NEVER sends precomputed totals.

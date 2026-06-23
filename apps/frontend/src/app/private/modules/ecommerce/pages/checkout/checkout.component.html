@@ -289,10 +289,22 @@
                 }
               </div>
             } @else if (!cartHasOnlyServices) {
-              <div class="error-message" style="margin-bottom: 2rem">
-                <i class="pi pi-exclamation-triangle"></i>
-                No hay opciones de envio disponibles para esta ubicacion. Por
-                favor revisa tu direccion.
+              <div class="pickup-fallback-card" style="margin-bottom: 2rem">
+                <i class="pi pi-shop"></i>
+                <div class="pickup-fallback-text">
+                  <strong>Recoger en tienda</strong>
+                  <p>
+                    Esta zona no tiene cobertura de envío. Recoge tu pedido
+                    en nuestra tienda cuando esté listo.
+                  </p>
+                </div>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  (clicked)="selectPickupFallback()"
+                >
+                  {{ pickup_selected() ? 'Seleccionado' : 'Elegir' }}
+                </app-button>
               </div>
             }
 
@@ -475,7 +487,8 @@
                   !canProceedFromAddress()) ||
                 (step() === paymentStep &&
                   !cartHasOnlyServices &&
-                  shipping_options().length === 0)
+                  shipping_options().length === 0 &&
+                  !pickup_selected())
               "
             >
               Continuar

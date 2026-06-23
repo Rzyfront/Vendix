@@ -180,9 +180,16 @@ export class CheckoutComponent implements OnInit {
     if (this.is_submitting() || this.wompiWidgetLoading()) return false;
     if (!this.cartHasOnlyServices) {
       // Carrito tiene ítems físicos: necesita método de envío seleccionado
-      // y al menos una opción de la zona correspondiente.
-      if (this.shipping_options().length === 0) return false;
-      if (this.selected_shipping_method_id == null) return false;
+      // y al menos una opción de la zona correspondiente — O el fallback de pickup.
+      if (this.shipping_options().length === 0 && !this.pickup_selected()) {
+        return false;
+      }
+      if (
+        this.shipping_options().length > 0 &&
+        this.selected_shipping_method_id == null
+      ) {
+        return false;
+      }
     }
     return true;
   });
@@ -590,6 +597,16 @@ export class CheckoutComponent implements OnInit {
   shipping_cost = 0;
   loading_payment_methods = false;
 
+  /**
+   * Fallback signal: true when the customer's address has no matching
+   * shipping zone and they opt for "Recoger en tienda" (pickup at the
+   * store). Set via `selectPickupFallback()` from the empty-state card.
+   * The order is sent with `pickup_only: true` in the checkout body so
+   * the backend can skip shipping_method/rate/address validation and
+   * persist `delivery_type='pickup'`.
+   */
+  readonly pickup_selected = signal(false);
+
   // ... (existing methods)
 
   // Modified logic: call this when address is finalized (e.g. Next from Address step)
@@ -665,9 +682,31 @@ export class CheckoutComponent implements OnInit {
     this.selected_shipping_method_id = option.method_id;
     this.selected_shipping_method_type = option.method_type || null;
     this.shipping_cost = cost;
+    // Selecting a real shipping option clears the pickup fallback.
+    this.pickup_selected.set(false);
 
     this.loadPaymentMethods(option.method_type);
     this.loadEtaPreview(option.method_id);
+  }
+
+  /**
+   * Opt-in fallback used when the customer's address has no matching
+   * shipping zone. The "Recoger en tienda" card in the empty-state
+   * calls this so the user can complete the order by picking up at
+   * the store. The order is sent with `pickup_only: true` in the
+   * checkout body — backend skips shipping_method/rate/address
+   * validation and persists `delivery_type='pickup'`.
+   */
+  selectPickupFallback(): void {
+    this.pickup_selected.set(true);
+    // Clear any previously selected shipping method/rate.
+    this.selected_shipping_option_id = null;
+    this.selected_shipping_method_id = null;
+    this.selected_shipping_method_type = 'pickup';
+    this.shipping_cost = 0;
+
+    // Reload payment methods filtered by 'pickup' so only DIRECT + ONLINE show.
+    this.loadPaymentMethods('pickup');
   }
 
   async loadEtaPreview(shippingMethodId?: number) {
@@ -811,11 +850,15 @@ export class CheckoutComponent implements OnInit {
     // Payment step validation
     if (this.step() === this.paymentStep) {
       // Sin opciones de envío para esta ubicación (carrito físico): el pedido
-      // no se puede despachar, así que bloqueamos el avance. Espejo del botón
-      // "Continuar" deshabilitado, como defensa en profundidad.
-      if (!this.cartHasOnlyServices && this.shipping_options().length === 0) {
+      // no se puede despachar, así que bloqueamos el avance — a menos que
+      // el cliente haya seleccionado el fallback "Recoger en tienda".
+      if (
+        !this.cartHasOnlyServices &&
+        this.shipping_options().length === 0 &&
+        !this.pickup_selected()
+      ) {
         this.error_message.set(
-          'No hay opciones de envío disponibles para esta ubicación. Por favor revisa tu dirección.',
+          'Esta zona no tiene cobertura de envío. Elige "Recoger en tienda" o cambia tu dirección.',
         );
         return;
       }
@@ -828,6 +871,7 @@ export class CheckoutComponent implements OnInit {
       // Check shipping selection (only for physical items)
       if (
         !this.cartHasOnlyServices &&
+        this.shipping_options().length > 0 &&
         this.shipping_options().length > 0 &&
         !this.selected_shipping_method_id
       ) {
@@ -984,8 +1028,13 @@ export class CheckoutComponent implements OnInit {
     const request: CheckoutRequest = {
       payment_method_id: this.selected_payment_method_id()!,
       notes: this.notes() || undefined,
-      // Only include shipping fields when cart has physical items
-      ...(!this.cartHasOnlyServices
+      // Pickup fallback: when the customer opted for "Recoger en tienda"
+      // because their address has no shipping zone, send the flag and
+      // skip shipping_method/rate (backend persists delivery_type='pickup').
+      ...(this.pickup_selected() ? { pickup_only: true } : {}),
+      // Only include shipping fields when cart has physical items AND the
+      // customer didn't pick the pickup fallback.
+      ...(!this.cartHasOnlyServices && !this.pickup_selected()
         ? {
             shipping_method_id: this.selected_shipping_method_id || undefined,
             shipping_rate_id: this.selected_shipping_option_id || undefined,
