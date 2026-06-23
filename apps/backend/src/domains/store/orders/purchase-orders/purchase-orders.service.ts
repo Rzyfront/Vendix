@@ -22,6 +22,8 @@ import {
   CostCalculationResult,
 } from '../../inventory/shared/services/costing.service';
 import { CostingMethodResolverService } from '../../inventory/shared/services/costing-method-resolver.service';
+import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
+import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/serial-number-enforcement.service';
 import { AuditService } from '@common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
@@ -37,6 +39,8 @@ export class PurchaseOrdersService {
     private stockLevelManager: StockLevelManager,
     private costingService: CostingService,
     private costingMethodResolver: CostingMethodResolverService,
+    private serialNumbersService: InventorySerialNumbersService,
+    private serialEnforcement: SerialNumberEnforcementService,
     private auditService: AuditService,
     private s3Service: S3Service,
     private settingsService: SettingsService,
@@ -1074,6 +1078,50 @@ export class PurchaseOrdersService {
             },
             tx,
           );
+
+          // ===== QUI-431: serial pool population (same tx) =====
+          // For serialized products, every received unit must exist as a real
+          // `in_stock` pool row at this location. We populate exactly
+          // `stockQtyReceived` rows (the minimum-stock-unit count that
+          // updateStock added to quantity_on_hand) using the provided serials,
+          // auto-generating unique placeholders for any shortfall so the pool
+          // stays in strict parity with stock-on-hand. No-op for products that
+          // do not require serial numbers.
+          if (await this.serialEnforcement.isSerialized(productId, tx)) {
+            // Resolve the optional inventory_batches.id from the PO line's
+            // batch_number (batch_id on serials is nullable; we only link
+            // when an existing batch row matches product + batch_number).
+            let serialBatchId: number | undefined;
+            if (orderItem?.batch_number) {
+              const batch = await tx.inventory_batches.findFirst({
+                where: {
+                  product_id: productId,
+                  batch_number: orderItem.batch_number,
+                },
+                select: { id: true },
+              });
+              serialBatchId = batch?.id;
+            }
+
+            await this.serialNumbersService.populatePoolOnReceipt(
+              productId,
+              productVariantId || undefined,
+              purchaseOrder.location_id!,
+              serialBatchId,
+              item.serial_numbers,
+              receiptUnitCost,
+              stockQtyReceived,
+              tx,
+            );
+
+            // Validate parity at item close (count in_stock serials vs on-hand).
+            await this.serialEnforcement.assertParityForLocation(
+              productId,
+              productVariantId || undefined,
+              purchaseOrder.location_id!,
+              tx,
+            );
+          }
         }
       }
 

@@ -214,6 +214,7 @@ export class StorePrismaService extends BasePrismaService {
       'stock_levels', // Relational
       'inventory_batches', // Relational
       'inventory_serial_numbers', // Relational
+      'sales_document_serials', // Relational (via serial -> inventory_locations.store_id)
       'order_items', // Relational
       'product_variants', // Relational
       'suppliers', // Org scoped
@@ -381,6 +382,9 @@ export class StorePrismaService extends BasePrismaService {
       },
       inventory_serial_numbers: {
         inventory_locations: { store_id: context.store_id },
+      },
+      sales_document_serials: {
+        serial: { inventory_locations: { store_id: context.store_id } },
       },
       order_items: { orders: { store_id: context.store_id } },
       product_variants: { products: { store_id: context.store_id } },
@@ -836,6 +840,10 @@ export class StorePrismaService extends BasePrismaService {
 
   get inventory_serial_numbers() {
     return this.scoped_client.inventory_serial_numbers;
+  }
+
+  get sales_document_serials() {
+    return this.scoped_client.sales_document_serials;
   }
 
   get payments() {

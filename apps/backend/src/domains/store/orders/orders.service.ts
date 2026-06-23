@@ -623,9 +623,15 @@ export class OrdersService {
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
     const order = await this.findOne(id);
 
-    if (order.state !== 'created') {
+    if (order.state !== 'created' && order.state !== 'draft') {
       throw new VendixHttpException(ErrorCodes.ORD_STATUS_001);
     }
+
+    // Las órdenes de mesa nacen en 'draft' SIN reservar stock (se reserva al
+    // pagar vía promoteDraftToCreated). Al editar un draft NO liberamos ni
+    // re-reservamos: no hay reservas que liberar y re-reservar duplicaría el
+    // descuento con inventory_consumed_at_fire. Para 'created' sí (flujo actual).
+    const isDraft = order.state === 'draft';
 
     // Multi-tarifa: revalida permission + recalcula snapshots si las nuevas
     // líneas traen applied_price_tier_id.
@@ -659,25 +665,27 @@ export class OrdersService {
         },
       });
 
-      for (const item of existingOrder?.order_items || []) {
-        if (!item.products?.track_inventory) continue;
-        try {
-          const location_id =
-            await this.stockLevelManager.getDefaultLocationForProduct(
+      if (!isDraft) {
+        for (const item of existingOrder?.order_items || []) {
+          if (!item.products?.track_inventory) continue;
+          try {
+            const location_id =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id || undefined,
+              );
+            await this.stockLevelManager.releaseReservation(
               item.product_id,
               item.product_variant_id || undefined,
+              location_id,
+              'order',
+              id,
             );
-          await this.stockLevelManager.releaseReservation(
-            item.product_id,
-            item.product_variant_id || undefined,
-            location_id,
-            'order',
-            id,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `Failed to release reservation for product ${item.product_id}: ${error.message}`,
-          );
+          } catch (error) {
+            this.logger.warn(
+              `Failed to release reservation for product ${item.product_id}: ${error.message}`,
+            );
+          }
         }
       }
 
@@ -771,37 +779,39 @@ export class OrdersService {
         },
       });
 
-      for (const item of updatedOrder?.order_items || []) {
-        if (!item.products?.track_inventory) continue;
-        try {
-          const location_id =
-            await this.stockLevelManager.getDefaultLocationForProduct(
+      if (!isDraft) {
+        for (const item of updatedOrder?.order_items || []) {
+          if (!item.products?.track_inventory) continue;
+          try {
+            const location_id =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id || undefined,
+              );
+            const stockUnitsConsumed =
+              typeof item.stock_units_consumed === 'number' &&
+              item.stock_units_consumed > 0
+                ? item.stock_units_consumed
+                : undefined;
+            await this.stockLevelManager.reserveStock(
               item.product_id,
               item.product_variant_id || undefined,
+              location_id,
+              item.quantity,
+              'order',
+              id,
+              undefined,
+              false, // Don't validate availability (non-restrictive UX)
+              undefined,
+              undefined,
+              false,
+              stockUnitsConsumed,
             );
-          const stockUnitsConsumed =
-            typeof item.stock_units_consumed === 'number' &&
-            item.stock_units_consumed > 0
-              ? item.stock_units_consumed
-              : undefined;
-          await this.stockLevelManager.reserveStock(
-            item.product_id,
-            item.product_variant_id || undefined,
-            location_id,
-            item.quantity,
-            'order',
-            id,
-            undefined,
-            false, // Don't validate availability (non-restrictive UX)
-            undefined,
-            undefined,
-            false,
-            stockUnitsConsumed,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `Failed to reserve stock for product ${item.product_id}: ${error.message}`,
-          );
+          } catch (error) {
+            this.logger.warn(
+              `Failed to reserve stock for product ${item.product_id}: ${error.message}`,
+            );
+          }
         }
       }
 

@@ -24,6 +24,9 @@ export interface OrderPdfItem {
   total_price: number;
   applied_price_tier_name?: string | null;
   stock_units_consumed?: number | null;
+  // Serial number(s) snapshot (CSV) captured at sale time for serialized
+  // products (QUI-431). Rendered as a sub-line under the item name.
+  serial_numbers_snapshot?: string | null;
 }
 
 const MARGIN = 50;
@@ -146,8 +149,11 @@ export class OrderPdfBuilder {
             typeof item.stock_units_consumed === 'number' &&
             item.stock_units_consumed > 0 &&
             item.stock_units_consumed !== item.quantity;
+          const hasSerials =
+            typeof item.serial_numbers_snapshot === 'string' &&
+            item.serial_numbers_snapshot.trim().length > 0;
 
-          if (hasTier || hasPackage) {
+          if (hasTier || hasPackage || hasSerials) {
             doc.fontSize(8).fillColor('#666666');
             if (hasTier) {
               doc.text(`Tarifa: ${item.applied_price_tier_name}`, col1X + 8, y, {
@@ -162,6 +168,15 @@ export class OrderPdfBuilder {
                 ) / 100;
               doc.text(
                 `× ${perUnit} unid/empaque (descontó ${item.stock_units_consumed} unid. de stock)`,
+                col1X + 8,
+                y,
+                { width: 280 },
+              );
+              y += 11;
+            }
+            if (hasSerials) {
+              doc.text(
+                `Serial(es): ${(item.serial_numbers_snapshot as string).trim()}`,
                 col1X + 8,
                 y,
                 { width: 280 },

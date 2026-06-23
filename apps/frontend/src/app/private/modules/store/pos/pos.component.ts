@@ -2443,10 +2443,10 @@ export class PosComponent {
         next: (response: any) => {
           const order = response.data || response;
 
-          if (order.state !== 'created') {
+          if (order.state !== 'created' && order.state !== 'draft') {
             this.loading.set(false);
             this.toastService.error(
-              'Solo se pueden editar ordenes en estado "Creada"',
+              'Solo se pueden editar ordenes en estado "Creada" o "Borrador"',
             );
             this.router.navigate(['/admin/orders', orderId]);
             return;

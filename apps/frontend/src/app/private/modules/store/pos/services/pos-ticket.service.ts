@@ -179,9 +179,13 @@ export class PosTicketService {
         item.isPackageUnit && item.unitsPerPackage
           ? `<br><span style="font-size: 10px; color: #1d4ed8;">x ${item.unitsPerPackage} unid c/u</span>`
           : '';
+      const serialLine =
+        Array.isArray(item.serials) && item.serials.length
+          ? `<br><span style="font-size: 10px; color: #6b7280;">Serial: ${item.serials.join(', ')}</span>`
+          : '';
       html += `
         <tr>
-          <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}</td>
+          <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}${serialLine}</td>
           <td style="text-align: center; padding: 2px;">${qtyDisplay}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${isWeightItem ? '/' + (item.weight_unit || 'kg') : ''}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.totalPrice)}</td>

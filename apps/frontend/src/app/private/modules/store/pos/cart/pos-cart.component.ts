@@ -80,16 +80,16 @@ import {
           <button
             type="button"
             (click)="orderNoteModalOpen.set(true)"
-            class="w-8 h-8 rounded-md flex items-center justify-center transition-colors"
+            class="staff-note-btn relative w-8 h-8 rounded-md flex items-center justify-center transition-colors"
             [class]="
               hasStaffNote()
                 ? 'text-green-600 bg-green-50 hover:bg-green-100'
                 : 'text-text-secondary hover:text-text-primary hover:bg-muted/40'
             "
             aria-label="Nota de la orden"
-            title="Nota de la orden"
           >
-            <app-icon name="sticky-note" [size]="16"></app-icon>
+            <span class="ai-tooltip">Nota de la orden</span>
+            <app-icon name="notebook-pen" [size]="16"></app-icon>
           </button>
         </div>
 
@@ -719,6 +719,21 @@ import {
           </span>
         </div>
       </div>
+
+      <div
+        slot="footer"
+        class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"
+      >
+        <app-button
+          class="w-full sm:w-auto"
+          variant="primary"
+          size="md"
+          customClasses="min-w-[120px]"
+          (clicked)="orderNoteModalOpen.set(false)"
+        >
+          Aceptar
+        </app-button>
+      </div>
     </app-modal>
   `,
   styles: [
@@ -813,6 +828,54 @@ import {
 
       .shipping-btn:hover:not(:disabled) {
         opacity: 1;
+      }
+
+      /* ── System AI tooltip (same pattern as ai-generate-btn) ── */
+      .ai-tooltip {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        padding: 6px 12px;
+        border-radius: 8px;
+        background: linear-gradient(
+          135deg,
+          rgba(var(--color-primary-rgb), 0.85) 0%,
+          rgba(var(--color-primary-rgb), 0.95) 50%,
+          rgba(var(--color-primary-rgb), 0.85) 100%
+        );
+        background-size: 200% 200%;
+        animation: ai-shimmer 3s ease-in-out infinite;
+        color: white;
+        font-size: 11px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease;
+        transform: translateY(-4px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow:
+          0 4px 12px rgba(0, 0, 0, 0.25),
+          inset 0 1px 1px rgba(255, 255, 255, 0.15);
+        z-index: 20;
+      }
+
+      .staff-note-btn:hover .ai-tooltip {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      @keyframes ai-shimmer {
+        0% {
+          background-position: 0% 50%;
+        }
+        50% {
+          background-position: 100% 50%;
+        }
+        100% {
+          background-position: 0% 50%;
+        }
       }
     `,
   ] })

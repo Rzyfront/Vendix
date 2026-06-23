@@ -889,14 +889,22 @@ export class PosCartService {
     // two lines of the same product with different skipKds decisions
     // must NOT collapse into a single cart line, otherwise we lose the
     // decision when filtering `skipKds` for the fire-to-kitchen call.
-    const existingItemIndex = isWeightProduct
-      ? -1 // Don't combine weight items
-      : currentState.items.findIndex(
-          (item) =>
-            item.product.id === request.product.id &&
-            (item.variant_id || null) === (request.variant?.id || null) &&
-            (item.skipKds ?? false) === (request.skipKds === true),
-        );
+    // QUI-431: serialized lines carry per-unit serial selections, so they must
+    // NOT collapse into an existing cart line (merging would lose the mapping
+    // between units and serials). A request with serials always starts a new line.
+    const hasSerials =
+      (request.serial_ids?.length ?? 0) > 0 ||
+      (request.serial_numbers?.length ?? 0) > 0;
+    const existingItemIndex =
+      isWeightProduct || hasSerials
+        ? -1 // Don't combine weight items / serialized lines
+        : currentState.items.findIndex(
+            (item) =>
+              item.product.id === request.product.id &&
+              (item.variant_id || null) === (request.variant?.id || null) &&
+              (item.skipKds ?? false) === (request.skipKds === true) &&
+              !(item.serial_ids?.length || item.serial_numbers?.length),
+          );
 
     // Variant-aware pricing
     const basePrice = this.resolveUnitPrice(request.product, request.variant);
@@ -962,6 +970,12 @@ export class PosCartService {
         // "usar stock" choice on the cart item. Filtered out of the
         // kitchen-fire call by the POS component.
         skipKds: request.skipKds === true,
+        // QUI-431: serials chosen for this serialized line (pool ids +
+        // free-text). Threaded onto the order payload at checkout.
+        serial_ids: request.serial_ids?.length ? request.serial_ids : undefined,
+        serial_numbers: request.serial_numbers?.length
+          ? request.serial_numbers
+          : undefined,
       };
       updatedItems = [newItem, ...currentState.items];
     }

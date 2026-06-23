@@ -17,6 +17,7 @@ import {
   RefundPaymentDto,
   PaymentQueryDto,
   CreatePosPaymentDto,
+  PosOrderItemDto,
   PosPaymentResponseDto,
   UpdateOrderWithPaymentDto,
 } from './dto';
@@ -49,6 +50,8 @@ import { WithholdingFlowService } from '../withholding-tax/withholding-flow.serv
 import type { WithholdingResolution } from '../withholding-tax/withholding-flow.service';
 import { KitchenFireService } from '../kitchen-fire/kitchen-fire.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
+import { SerialNumberEnforcementService } from '../inventory/serial-numbers/serial-number-enforcement.service';
+import { InventorySerialNumbersService } from '../inventory/serial-numbers/inventory-serial-numbers.service';
 
 /**
  * Multi-tarifa (Fase 5.5): snapshot por línea POS. Lleva tanto el dato
@@ -92,6 +95,10 @@ export class PaymentsService {
     private readonly priceResolverService: PriceResolverService,
     private readonly withholdingFlow: WithholdingFlowService,
     private readonly kitchenFireService: KitchenFireService,
+    // QUI-431 — serial-number pool + enforcement (no-op for non-serialized
+    // products, so they can be invoked unconditionally on the sale path).
+    private readonly serialEnforcement: SerialNumberEnforcementService,
+    private readonly serialNumbers: InventorySerialNumbersService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -1073,7 +1080,15 @@ export class PaymentsService {
 
 
         if (createPosPaymentDto.update_inventory && isDirectDeliveryFinished) {
-          inventoryCost = await this.updateInventoryFromOrder(tx, order);
+          // QUI-431 — POS serial selection. Pass the DTO lines so
+          // `updateInventoryFromOrder` can consume the operator-chosen serials
+          // for serialized products. Ecommerce/credit/other channels reach the
+          // same method with no DTO lines and auto-select FIFO.
+          inventoryCost = await this.updateInventoryFromOrder(
+            tx,
+            order,
+            createPosPaymentDto.items,
+          );
         }
 
         // 4. Emit order/payment events — drafts skip ALL events because they
@@ -3117,8 +3132,42 @@ export class PaymentsService {
   /**
    * Update inventory from order
    */
-  private async updateInventoryFromOrder(tx: any, order: any): Promise<number> {
+  private async updateInventoryFromOrder(
+    tx: any,
+    order: any,
+    posItems?: PosOrderItemDto[],
+  ): Promise<number> {
     let totalCost = 0;
+
+    // QUI-431 — Correlate the POS DTO lines (which carry serial selection) to
+    // the persisted order_items so we know which serials a given order_item
+    // should consume. Matching is by (product_id, variant_id), consuming each
+    // DTO line at most once so duplicate product lines map deterministically.
+    // Ecommerce / credit / other channels pass no `posItems`; those lines have
+    // no manual selection and fall back to FIFO auto-selection.
+    const claimedPosItems = new Set<number>();
+    const findPosSelectionForItem = (
+      orderItem: any,
+    ): { serial_ids?: number[]; serial_numbers?: string[] } | undefined => {
+      if (!posItems?.length) return undefined;
+      for (let i = 0; i < posItems.length; i++) {
+        if (claimedPosItems.has(i)) continue;
+        const dtoItem = posItems[i];
+        const sameProduct = dtoItem.product_id === orderItem.product_id;
+        const sameVariant =
+          (dtoItem.product_variant_id ?? null) ===
+          (orderItem.product_variant_id ?? null);
+        if (sameProduct && sameVariant) {
+          claimedPosItems.add(i);
+          return {
+            serial_ids: dtoItem.serial_ids,
+            serial_numbers: dtoItem.serial_numbers,
+          };
+        }
+      }
+      return undefined;
+    };
+
     for (const item of order.order_items) {
       if (!item.product_id) continue;
 
@@ -3135,6 +3184,8 @@ export class PaymentsService {
       });
       if (!product?.track_inventory || product.product_type === 'service')
         continue;
+
+      const posSelection = findPosSelectionForItem(item);
 
       // Find active reservation to get the correct location_id (matches Phase 1 reservation)
       const reservation = await tx.stock_reservations.findFirst({
@@ -3175,6 +3226,14 @@ export class PaymentsService {
           tx,
         );
         totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
+
+        // QUI-431 — serial consumption inside the SAME tx as the stock move.
+        await this.consumeSerialsForOrderItem(
+          tx,
+          item,
+          reservation.location_id,
+          posSelection,
+        );
       } else {
         // Fallback: reservation failed silently in Phase 1, use default location.
         // POS canal MUST exclude central warehouse and non-sellable types
@@ -3207,10 +3266,128 @@ export class PaymentsService {
           tx,
         );
         totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
+
+        // QUI-431 — serial consumption inside the SAME tx as the stock move.
+        await this.consumeSerialsForOrderItem(
+          tx,
+          item,
+          defaultLocation.id,
+          posSelection,
+        );
       }
     }
 
     return totalCost;
+  }
+
+  /**
+   * QUI-431 — Consume the serial numbers for ONE order_item of a serialized
+   * product, inside the caller's transaction (`tx`).
+   *
+   * No-op for non-serialized products (the enforcement service short-circuits),
+   * so this can be called unconditionally for every sold line.
+   *
+   * Resolution order:
+   *  1. POS selection (`serial_ids` and/or free-text `serial_numbers`). Free
+   *     text is resolved/created into real pool rows first, then merged with
+   *     the explicit ids. `requireConfirmedSerials` validates that exactly
+   *     `quantity` valid (in_stock|reserved) serials of this product were
+   *     provided → SERIAL_REQUIRED_001 otherwise.
+   *  2. Ecommerce / no selection: auto-select FIFO from `listAvailable`
+   *     (in_stock, oldest first) at the sale location until `quantity` is
+   *     covered. If fewer are available → SERIAL_REQUIRED_001 (never discount
+   *     stock silently for a serialized product).
+   *
+   * For each resolved serial: transition → `sold` and link to the `order_item`
+   * via `sales_document_serials` (the @@unique guard throws SERIAL_DUP_001 on a
+   * concurrent double-sale). Finally persists the CSV of serial_number strings
+   * into `order_items.serial_numbers_snapshot` (immutable legal snapshot).
+   */
+  private async consumeSerialsForOrderItem(
+    tx: any,
+    orderItem: any,
+    location_id: number,
+    posSelection?: { serial_ids?: number[]; serial_numbers?: string[] },
+  ): Promise<void> {
+    const product_id: number = orderItem.product_id;
+    const variant_id: number | undefined =
+      orderItem.product_variant_id ?? undefined;
+    const quantity: number = orderItem.quantity;
+
+    if (!(await this.serialEnforcement.isSerialized(product_id, tx))) {
+      return;
+    }
+
+    let serialIds: number[] = [];
+
+    const hasManualSelection =
+      (posSelection?.serial_ids?.length ?? 0) > 0 ||
+      (posSelection?.serial_numbers?.length ?? 0) > 0;
+
+    if (hasManualSelection) {
+      // Resolve any free-text serials into real pool rows first, then merge
+      // with the explicitly selected ids (de-duped).
+      const fromFreeText = await this.serialEnforcement.resolveOrCreateFromFreeText(
+        product_id,
+        location_id,
+        posSelection?.serial_numbers ?? [],
+        tx,
+        variant_id,
+      );
+      serialIds = Array.from(
+        new Set([...(posSelection?.serial_ids ?? []), ...fromFreeText]),
+      );
+
+      // Strict count/validity check → SERIAL_REQUIRED_001 on mismatch.
+      await this.serialEnforcement.requireConfirmedSerials(
+        product_id,
+        quantity,
+        serialIds,
+        tx,
+      );
+    } else {
+      // No manual selection (ecommerce / channels without a serial picker):
+      // auto-select FIFO from the sellable pool at the sale location.
+      const available = await this.serialNumbers.listAvailable(
+        product_id,
+        location_id,
+        variant_id,
+        tx,
+      );
+      if (available.length < quantity) {
+        throw new VendixHttpException(
+          ErrorCodes.SERIAL_REQUIRED_001,
+          `No hay suficientes seriales disponibles (${available.length}/${quantity}) para el producto serializado`,
+          {
+            product_id,
+            product_variant_id: variant_id ?? null,
+            location_id,
+            requested_qty: quantity,
+            available_serials: available.length,
+          },
+        );
+      }
+      serialIds = available.slice(0, quantity).map((s: any) => s.id);
+    }
+
+    // Transition + link each serial inside the same tx.
+    const soldSerialNumbers: string[] = [];
+    for (const serial_id of serialIds) {
+      const sold = await this.serialNumbers.transition(serial_id, 'sold', tx);
+      await this.serialNumbers.linkToDocument(
+        serial_id,
+        'order_item',
+        orderItem.id,
+        tx,
+      );
+      if (sold?.serial_number) soldSerialNumbers.push(sold.serial_number);
+    }
+
+    // Immutable snapshot (CSV of serial_number strings, NOT ids) on the line.
+    await tx.order_items.updateMany({
+      where: { id: orderItem.id },
+      data: { serial_numbers_snapshot: soldSerialNumbers.join(', ') },
+    });
   }
 
   /**

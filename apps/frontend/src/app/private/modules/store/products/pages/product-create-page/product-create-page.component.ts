@@ -1435,6 +1435,7 @@ export class ProductCreatePageComponent {
         barcode: ['', [Validators.maxLength(64)]],
         stock_quantity: [0, [Validators.min(0)]],
         track_inventory: [true],
+        requires_serial_numbers: [false],
         category_ids: [[] as number[]],
         brand_ids: [[]],
         tax_category_ids: [[] as number[]],
@@ -1614,6 +1615,7 @@ export class ProductCreatePageComponent {
       barcode: product.barcode,
       stock_quantity: product.stock_quantity,
       track_inventory: product.track_inventory !== false,
+      requires_serial_numbers: product.requires_serial_numbers ?? false,
       category_ids: categoryIds,
       brand_ids: product.brand?.id
         ? [product.brand.id]
@@ -3011,6 +3013,7 @@ export class ProductCreatePageComponent {
       sku: formValue.sku || undefined,
       barcode: formValue.barcode || undefined,
       track_inventory: isServiceType ? false : !!formValue.track_inventory,
+      requires_serial_numbers: !!formValue.requires_serial_numbers,
       stock_quantity: isServiceType
         ? undefined
         : formValue.track_inventory

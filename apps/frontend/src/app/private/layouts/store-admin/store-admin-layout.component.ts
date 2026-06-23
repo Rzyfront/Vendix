@@ -467,6 +467,11 @@ export class StoreAdminLayoutComponent {
           icon: 'circle',
           route: '/admin/inventory/suppliers',
         },
+        {
+          label: 'Números de Serie',
+          icon: 'fingerprint',
+          route: '/admin/inventory/serials',
+        },
       ],
     },
     {

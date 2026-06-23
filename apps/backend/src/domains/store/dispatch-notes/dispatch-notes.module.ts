@@ -10,9 +10,20 @@ import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { S3Module } from '../../../common/services/s3.module';
 import { InventoryModule } from '../inventory/inventory.module';
+// QUI-431 — explicit import so the serial pool + enforcement services are
+// available for injection into DispatchNoteFlowService / the events listener.
+// (InventoryModule already re-exports this module; the explicit import documents
+// the dependency and is harmless.)
+import { InventorySerialNumbersModule } from '../inventory/serial-numbers/inventory-serial-numbers.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, S3Module, InventoryModule],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    S3Module,
+    InventoryModule,
+    InventorySerialNumbersModule,
+  ],
   controllers: [DispatchNotesController],
   providers: [
     DispatchNotesService,

@@ -171,6 +171,15 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Serial Numbers (Números de Serie) — self-contained module, sibling of
+      // the inventory route block so it stays decoupled from InventoryComponent.
+      {
+        path: 'inventory/serials',
+        loadChildren: () =>
+          import(
+            '../../private/modules/store/serial-numbers/routes/serial-numbers.routes'
+          ).then((m) => m.serialNumbersRoutes),
+      },
       // Orders Routes
       {
         path: 'orders',

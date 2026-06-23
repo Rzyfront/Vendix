@@ -604,6 +604,41 @@ export class PlansService {
               await tx.subscription_plans.delete({ where: { id: row.id } });
             }
           }
+
+          // 2c. Persist the @unique redemption_code on exactly ONE surviving row
+          //     of the group: the canonical cycle (code === groupCode), or the
+          //     cheapest survivor when that row was archived/deleted above. This
+          //     path never reaches the legacy single-row write below, so without
+          //     this the code sent by the form was silently dropped (returned
+          //     null) for any multi-cycle plan.
+          if (redemptionCode !== undefined) {
+            const survivors = await tx.subscription_plans.findMany({
+              where: { plan_group_code: groupCode, state: { not: 'archived' } },
+            });
+            const canonical =
+              survivors.find((r) => r.code === groupCode) ??
+              [...survivors].sort(
+                (a, b) => Number(a.base_price) - Number(b.base_price),
+              )[0];
+            if (canonical) {
+              // Clear siblings first so setting the canonical row never trips the
+              // @unique constraint within its own group.
+              await tx.subscription_plans.updateMany({
+                where: {
+                  plan_group_code: groupCode,
+                  id: { not: canonical.id },
+                },
+                data: { redemption_code: null },
+              });
+              await tx.subscription_plans.update({
+                where: { id: canonical.id },
+                data: {
+                  redemption_code: redemptionCode,
+                  updated_at: new Date(),
+                },
+              });
+            }
+          }
         } else {
           // Legacy single-row path: per-cycle fields apply to the target row.
           await tx.subscription_plans.update({

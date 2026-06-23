@@ -14,3 +14,7 @@ export {
 } from './create-from-order.dto';
 export { VoidDispatchNoteDto } from './void-dispatch-note.dto';
 export { DeliverDispatchNoteDto } from './deliver-dispatch-note.dto';
+export {
+  ConfirmDispatchNoteDto,
+  ConfirmDispatchNoteItemSerialsDto,
+} from './confirm-dispatch-note.dto';

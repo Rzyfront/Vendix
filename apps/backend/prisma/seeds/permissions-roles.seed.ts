@@ -4151,6 +4151,11 @@ export async function seedPermissionsAndRoles(
     (p) =>
       p.name.includes('store:orders:create') ||
       p.name.includes('store:orders:read') ||
+      // POS order flow (pay / ship / deliver / fast-track / cancel). The
+      // substring 'store:orders:create' above does NOT match
+      // 'store:orders:order_flow:create', so list these explicitly.
+      p.name === 'store:orders:order_flow:create' ||
+      p.name === 'store:orders:order_flow:read' ||
       p.name.includes('store:payments:process') ||
       p.name.includes('store:products:read') ||
       p.name.includes('store:categories:read') ||
@@ -4254,6 +4259,11 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:orders:create') ||
       p.name.includes('store:orders:read') ||
       p.name.includes('store:orders:read:one') ||
+      // POS order flow (pay / ship / deliver / fast-track / cancel). The
+      // substring 'store:orders:create' above does NOT match
+      // 'store:orders:order_flow:create', so list these explicitly.
+      p.name === 'store:orders:order_flow:create' ||
+      p.name === 'store:orders:order_flow:read' ||
       // Cupones - leer y validar
       p.name.includes('store:coupons:read') ||
       p.name.includes('store:coupons:read:one') ||
@@ -4298,6 +4308,8 @@ export async function seedPermissionsAndRoles(
       // Inventario - solo lectura de stock
       p.name.includes('store:inventory:stock_levels:read') ||
       p.name.includes('store:inventory:locations:read') ||
+      // Seriales - lectura (POS lista seriales disponibles al vender productos serializados)
+      p.name === 'store:inventory:serial_numbers:read' ||
       // Ecommerce - solo lectura
       p.name.includes('store:ecommerce:read') ||
       // Configuración de tienda - solo lectura

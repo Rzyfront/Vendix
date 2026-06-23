@@ -507,6 +507,10 @@ export class OrganizationOrdersService {
         stock_units_consumed:
           (item as { stock_units_consumed?: number | null })
             .stock_units_consumed ?? null,
+        // Serial number(s) snapshot (CSV) for serialized products (QUI-431).
+        serial_numbers_snapshot:
+          (item as { serial_numbers_snapshot?: string | null })
+            .serial_numbers_snapshot ?? null,
       })),
       subtotal: Number(order.subtotal_amount),
       tax_amount: Number(order.tax_amount),

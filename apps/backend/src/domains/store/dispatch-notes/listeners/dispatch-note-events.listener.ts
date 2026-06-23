@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import {
+  serial_status_enum,
+  sales_document_item_type_enum,
+} from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 
 interface DispatchNoteEvent {
   dispatch_note_id: number;
@@ -22,6 +27,9 @@ export class DispatchNoteEventsListener {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly stockLevelManager: StockLevelManager,
+    // QUI-431 — optional so the existing unit spec (2-arg construction) keeps
+    // compiling/working: when absent (tests), the serial side-effects no-op.
+    private readonly serials?: InventorySerialNumbersService,
   ) {}
 
   // ─── CONFIRMED ──────────────────────────────────────────────
@@ -226,6 +234,16 @@ export class DispatchNoteEventsListener {
         }
       }
 
+      // 3. QUI-431 — serial lifecycle: the serials reserved + linked at confirm
+      // are now sold. Transition reserved → sold for every serial linked to
+      // this remisión's items. Idempotent (transition is a no-op when already
+      // in the target status) and isolated: a serial failure never blocks the
+      // stock flow above (already committed).
+      await this.markDispatchSerialsSold(
+        dispatch_note.dispatch_note_items.map((i) => i.id),
+        event.dispatch_number,
+      );
+
       this.logger.log(
         `[delivered] Dispatch note #${event.dispatch_number} processed — stock deducted`,
       );
@@ -279,6 +297,17 @@ export class DispatchNoteEventsListener {
         }
         // If linked to a sales order OR an order, we do NOT release their
         // reservations — they belong to that order's own lifecycle.
+
+        // QUI-431 — serial lifecycle: revert the serials reserved at confirm
+        // back to in_stock and unlink them, so they rejoin the sellable pool
+        // and can be dispatched again. Runs for ALL voided-while-confirmed
+        // notes (standalone or order-linked): the serial reservation + junction
+        // link belong to THIS remisión regardless of how the stock reservation
+        // is owned.
+        await this.revertDispatchSerialsToStock(
+          dispatch_note.dispatch_note_items.map((i) => i.id),
+          event.dispatch_number,
+        );
       }
 
       if (dispatch_note.delivered_at != null) {
@@ -493,6 +522,114 @@ export class DispatchNoteEventsListener {
           `[checkOrderStatus] Order #${order_id} marked as shipped`,
         );
       }
+    }
+  }
+
+  // ─── SERIAL LIFECYCLE (QUI-431) ─────────────────────────────
+
+  /**
+   * Load the serial pool ids linked to a set of dispatch_note_items via the
+   * polymorphic junction `sales_document_serials`
+   * (document_item_type = 'dispatch_note_item'). Returns [] when no serials are
+   * linked (the common case: no serialized goods on the remisión).
+   */
+  private async getLinkedDispatchSerialIds(
+    dispatch_note_item_ids: number[],
+  ): Promise<number[]> {
+    if (dispatch_note_item_ids.length === 0) return [];
+    const links = await this.prisma.sales_document_serials.findMany({
+      where: {
+        document_item_type: sales_document_item_type_enum.dispatch_note_item,
+        document_item_id: { in: dispatch_note_item_ids },
+      },
+      select: { serial_number_id: true },
+    });
+    return links.map((l) => l.serial_number_id);
+  }
+
+  /**
+   * deliver: transition every serial linked to this remisión reserved → sold.
+   * All transitions share ONE $transaction so the serial states move
+   * atomically; `transition()` no-ops when a serial is already `sold` (so a
+   * re-fired delivered event is safe). Isolated from the stock flow: failures
+   * are logged, never re-thrown (the stock side is already committed).
+   */
+  private async markDispatchSerialsSold(
+    dispatch_note_item_ids: number[],
+    dispatch_number: string,
+  ): Promise<void> {
+    if (!this.serials) return; // unit-test construction (no serial service)
+    try {
+      const serialIds = await this.getLinkedDispatchSerialIds(
+        dispatch_note_item_ids,
+      );
+      if (serialIds.length === 0) return;
+
+      await this.prisma.$transaction(async (tx) => {
+        for (const serial_id of serialIds) {
+          await this.serials!.transition(
+            serial_id,
+            serial_status_enum.sold,
+            tx,
+          );
+        }
+      });
+
+      this.logger.log(
+        `[delivered] Dispatch note #${dispatch_number}: ${serialIds.length} serial(s) marked sold`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[delivered] Failed to transition serials to sold for dispatch note #${dispatch_number}: ${err.message}`,
+      );
+    }
+  }
+
+  /**
+   * void: transition every serial linked to this remisión reserved → in_stock
+   * and unlink it (delete the junction row) so it rejoins the sellable pool and
+   * can be re-dispatched. All in ONE $transaction. Isolated: failures logged,
+   * never re-thrown.
+   */
+  private async revertDispatchSerialsToStock(
+    dispatch_note_item_ids: number[],
+    dispatch_number: string,
+  ): Promise<void> {
+    if (!this.serials) return; // unit-test construction (no serial service)
+    try {
+      const serialIds = await this.getLinkedDispatchSerialIds(
+        dispatch_note_item_ids,
+      );
+      if (serialIds.length === 0) return;
+
+      await this.prisma.$transaction(async (tx) => {
+        for (const serial_id of serialIds) {
+          await this.serials!.transition(
+            serial_id,
+            serial_status_enum.in_stock,
+            tx,
+          );
+        }
+        // Unlink: delete the junction rows for these dispatch lines so the
+        // serial is free to be linked to a future remisión (the
+        // @@unique([document_item_type, serial_number_id]) guard otherwise
+        // blocks re-dispatch).
+        await tx.sales_document_serials.deleteMany({
+          where: {
+            document_item_type:
+              sales_document_item_type_enum.dispatch_note_item,
+            document_item_id: { in: dispatch_note_item_ids },
+          },
+        });
+      });
+
+      this.logger.log(
+        `[voided] Dispatch note #${dispatch_number}: ${serialIds.length} serial(s) reverted to in_stock and unlinked`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[voided] Failed to revert serials for dispatch note #${dispatch_number}: ${err.message}`,
+      );
     }
   }
 }
