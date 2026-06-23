@@ -628,6 +628,7 @@ export class OrderFlowService {
           currency: order.currency,
           state: 'succeeded',
           transaction_id: transactionId,
+          payment_reference: dto.payment_reference ?? null,
           paid_at: new Date(),
           gateway_response: {
             payment_type: 'direct',
@@ -691,6 +692,7 @@ export class OrderFlowService {
           currency: order.currency,
           state: 'succeeded',
           transaction_id: transactionId,
+          payment_reference: dto.payment_reference ?? null,
           paid_at: new Date(),
           gateway_response: {
             payment_type: 'direct',
@@ -785,6 +787,7 @@ export class OrderFlowService {
           currency: order.currency,
           state: 'pending',
           transaction_id: transactionId,
+          payment_reference: dto.payment_reference ?? null,
           gateway_response: {
             payment_type: 'online',
           },
