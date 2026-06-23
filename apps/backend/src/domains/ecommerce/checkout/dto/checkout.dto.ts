@@ -8,6 +8,7 @@ import {
   IsDateString,
   Matches,
   IsEmail,
+  IsBoolean,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
@@ -142,6 +143,18 @@ export class CheckoutDto {
   @IsOptional()
   @IsString()
   coupon_code?: string;
+
+  /**
+   * When true, the customer is opting to pick up the order at the store
+   * instead of having it shipped. This is used as a fallback when the
+   * customer's address has no matching shipping zone — the frontend
+   * surfaces a "Recoger en tienda" option in that case and sends this
+   * flag so the backend can skip shipping_method/rate/address validation
+   * and persist the order with `delivery_type='pickup'`.
+   */
+  @IsOptional()
+  @IsBoolean()
+  pickup_only?: boolean;
 }
 
 class CheckoutBookingDto {

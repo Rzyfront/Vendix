@@ -69,11 +69,25 @@ Current flow:
 
 `GET /ecommerce/checkout/payment-methods` filters enabled store payment methods by `system_payment_method.processing_mode` and shipping type:
 
-- `pickup`: `DIRECT`, `ONLINE`.
-- Delivery/other shipping types: `ONLINE`, `ON_DELIVERY`.
-- No shipping type: all supported modes.
+- `pickup`: `DIRECT` (cash/wallet at the store) + `ONLINE`. `ON_DELIVERY` is excluded because the customer is already at the store.
+- Delivery methods (`own_fleet`, `carrier`, `custom`, `third_party_provider`): **all enabled modes** — `DIRECT` + `ONLINE` + `ON_DELIVERY`. The customer can pay with cash, prepaid wallet, online gateway, or on delivery regardless of who delivers.
+- No shipping type: all supported modes (initial load before shipping is selected).
 
-Frontend reloads payment methods after shipping selection because shipping method type changes eligible payment methods.
+Frontend reloads payment methods after shipping selection so the UI reflects the current context.
+
+**Why all modes for delivery:** A delivery destination does not preclude paying with wallet balance (already prepaid) or with cash on arrival. Showing all configured methods gives the customer the full set of options their store enabled, which matches the expected UX.
+
+## Pickup Fallback (no shipping zone)
+
+When the customer's address has no matching shipping zone, the backend `ShippingCalculatorService.calculateRates()` returns `[]`. The frontend then surfaces a "Recoger en tienda" card in place of the shipping-options list.
+
+When the customer picks it, the frontend sends `pickup_only: true` in the checkout body (`POST /ecommerce/checkout`). The backend:
+
+1. Skips the `shipping_method_id`/`shipping_rate_id` requirement (would otherwise throw `ORD_SHIP_REQUIRED_001`).
+2. Sets `delivery_type = 'pickup'` directly on the order.
+3. Skips the shipping-address requirement (the existing `delivery_type !== 'pickup'` check already handles this).
+
+The order is created without a shipping method/rate/address. Payment-methods re-fetch happens with `shipping_type='pickup'` so only `DIRECT` + `ONLINE` are surfaced — the customer pays at the store.
 
 ## Wompi Flow
 

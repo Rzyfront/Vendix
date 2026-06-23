@@ -695,7 +695,12 @@ export class CheckoutService {
       return true;
     });
 
-    if (hasPhysicalItems && !dto.shipping_method_id && !dto.shipping_rate_id) {
+    if (
+      hasPhysicalItems &&
+      !dto.pickup_only &&
+      !dto.shipping_method_id &&
+      !dto.shipping_rate_id
+    ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
@@ -756,7 +761,13 @@ export class CheckoutService {
       | 'direct_delivery'
       | 'other' = 'direct_delivery';
 
-    if (dto.shipping_rate_id) {
+    if (dto.pickup_only) {
+      // Pickup fallback: no shipping rate or method required. The order
+      // is fulfilled at the store. delivery_type is set to 'pickup' and
+      // shipping_address is not required (handled by the existing
+      // delivery_type !== 'pickup' check below).
+      delivery_type = 'pickup';
+    } else if (dto.shipping_rate_id) {
       const rate = await this.store_prisma.shipping_rates.findFirst({
         where: {
           id: dto.shipping_rate_id,
