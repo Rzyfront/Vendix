@@ -100,8 +100,13 @@ export class CheckoutService {
 
   async getPaymentMethods(shippingMethodType?: string) {
     // Determine allowed processing modes based on shipping method type
-    // - pickup: DIRECT (cash at store) + ONLINE (online payments)
-    // - delivery/carrier/own_fleet: ONLINE + ON_DELIVERY (pay on delivery)
+    // - pickup: DIRECT (cash at store) + ONLINE (online payments). No
+    //   ON_DELIVERY because the customer is already at the store.
+    // - delivery methods (own_fleet, carrier, custom, third_party_provider):
+    //   ALL enabled modes. Cash (DIRECT) and prepaid wallet (DIRECT) are still
+    //   valid for any delivery type — the wallet balance is prepaid online
+    //   and the customer can choose how to settle at confirmation.
+    // - no shipping_type: ALL modes (initial load before shipping is selected).
     let allowedModes: payment_processing_mode_enum[];
 
     if (shippingMethodType === 'pickup') {
@@ -110,13 +115,14 @@ export class CheckoutService {
         payment_processing_mode_enum.ONLINE,
       ];
     } else if (shippingMethodType) {
-      // For delivery methods (own_fleet, carrier, custom, third_party_provider)
+      // Delivery methods: show all configured payment methods.
       allowedModes = [
+        payment_processing_mode_enum.DIRECT,
         payment_processing_mode_enum.ONLINE,
         payment_processing_mode_enum.ON_DELIVERY,
       ];
     } else {
-      // No shipping type specified - return all methods (backwards compatibility)
+      // No shipping type specified - return all methods (initial load).
       allowedModes = [
         payment_processing_mode_enum.DIRECT,
         payment_processing_mode_enum.ONLINE,
