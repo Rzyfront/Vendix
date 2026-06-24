@@ -4110,19 +4110,22 @@ export class ProductCreatePageComponent {
     return levels.map((sl) => ({
       value: sl.location_id,
       label: sl.inventory_locations?.name
-        ? `${sl.inventory_locations.name} (${sl.quantity_available ?? 0} u.)`
+        ? `${sl.inventory_locations.name} (${sl.quantity_on_hand ?? 0} u.)`
         : `Ubicación ${sl.location_id}`,
     }));
   });
 
-  /** Cantidad disponible de la ubicación seleccionada (sirve de maxCount). */
+  /**
+   * Unidades físicas (on_hand) de la ubicación seleccionada: sirve de maxCount
+   * para el backfill. El backend valida la paridad real contra quantity_on_hand.
+   */
   readonly selectedLocationStock = computed<number | null>(() => {
     const locId = this.selectedSerialLocationId();
     if (locId == null) return null;
     const level = (this.product?.stock_levels ?? []).find(
       (sl) => sl.location_id === locId,
     );
-    return level ? (level.quantity_available ?? 0) : null;
+    return level ? (level.quantity_on_hand ?? 0) : null;
   });
 
   /** Columnas de la tabla de seriales (desktop). */
@@ -4215,7 +4218,7 @@ export class ProductCreatePageComponent {
       const options = this.serialLocationOptions();
       if (this.selectedSerialLocationId() == null && options.length > 0) {
         const withStock = (this.product?.stock_levels ?? []).find(
-          (sl) => (sl.quantity_available ?? 0) > 0,
+          (sl) => (sl.quantity_on_hand ?? 0) > 0,
         );
         this.selectedSerialLocationId.set(
           withStock ? withStock.location_id : Number(options[0].value),

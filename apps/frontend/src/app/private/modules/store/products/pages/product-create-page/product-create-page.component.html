@@ -1059,7 +1059,7 @@
               <!-- Modo creación: aún no hay stock al cual asociar seriales. -->
               <div class="flex items-start gap-2">
                 <app-icon
-                  name="fingerprint"
+                  name="hash"
                   size="18"
                   class="text-primary-600 mt-0.5"
                 ></app-icon>
@@ -1081,7 +1081,7 @@
               >
                 <div class="flex items-start gap-2 min-w-0">
                   <app-icon
-                    name="fingerprint"
+                    name="hash"
                     size="18"
                     class="text-primary-600 mt-0.5 shrink-0"
                   ></app-icon>
@@ -1175,7 +1175,7 @@
                     [actions]="serialTableActions"
                     [loading]="serialsLoading()"
                     emptyMessage="No hay números de serie registrados para esta ubicación."
-                    emptyIcon="fingerprint"
+                    emptyIcon="hash"
                   ></app-responsive-data-view>
 
                   <app-pagination

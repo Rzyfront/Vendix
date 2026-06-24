@@ -1543,7 +1543,9 @@ export class ProductsService {
         },
         stock_levels: {
           select: {
+            location_id: true,
             product_variant_id: true,
+            quantity_on_hand: true,
             quantity_available: true,
             quantity_reserved: true,
             reorder_point: true,
