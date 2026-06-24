@@ -1647,6 +1647,10 @@ export class ProductsService {
       stock_uom_id: product.stock_uom_id,
       purchase_uom_id: product.purchase_uom_id,
       track_inventory: product.track_inventory,
+      // Flag de seriales. Se persiste vía `...productData` en update y vía el
+      // bloque explícito en create, pero el form de edición lo lee de ESTE
+      // mapeo de detalle al recargar; sin exponerlo aquí parecía "no guardarse".
+      requires_serial_numbers: product.requires_serial_numbers,
       available_for_ecommerce: product.available_for_ecommerce,
       is_featured: product.is_featured,
       allow_pos_price_override: product.allow_pos_price_override,
