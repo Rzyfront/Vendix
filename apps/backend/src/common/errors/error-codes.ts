@@ -803,6 +803,12 @@ export const ErrorCodes = {
     devMessage:
       'Serial number already committed to this document type (duplicate sale detected)',
   },
+  SERIAL_DELETE_BLOCKED_409: {
+    code: 'SERIAL_DELETE_BLOCKED_409',
+    httpStatus: 409,
+    devMessage:
+      'Cannot delete this serial: it is not in_stock or it is already linked to a sales/dispatch document',
+  },
 
   // Cash Registers
   CR_FIND_001: {

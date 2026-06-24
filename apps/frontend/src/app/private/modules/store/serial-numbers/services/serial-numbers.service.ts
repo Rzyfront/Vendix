@@ -95,6 +95,41 @@ export interface AvailableSerialNumberQuery {
 }
 
 /**
+ * QUI-431 — A single serial to backfill via the bulk-create endpoint.
+ * `serial_number` is required; the rest are optional metadata captured from
+ * the textarea/CSV bulk-load modal.
+ */
+export interface BulkBackfillItem {
+  serial_number: string;
+  cost?: number;
+  warranty_expiry?: string;
+  notes?: string;
+}
+
+/**
+ * Body for `POST {basePath}/bulk`. Creates many serials at once for a
+ * product/variant at a location. The backend validates parity against the
+ * existing stock and reports per-row failures instead of aborting the batch.
+ */
+export interface BulkBackfillPayload {
+  product_id: number;
+  product_variant_id?: number;
+  location_id: number;
+  items: BulkBackfillItem[];
+}
+
+/**
+ * Result envelope payload for `POST {basePath}/bulk`. `created_serials` holds
+ * the rows that were persisted; `failed` lists each rejected serial with the
+ * reason so the UI can show a per-row failure report.
+ */
+export interface BulkBackfillResult {
+  created: number;
+  created_serials: SerialNumber[];
+  failed: { serial_number: string; reason: string }[];
+}
+
+/**
  * Store-scoped read service for inventory serial numbers.
  *
  * Backend permission enforcement:
@@ -162,6 +197,71 @@ export class SerialNumbersService {
       >(`${this.apiUrl}${this.basePath}/available`, { params })
       .pipe(
         map((res) => res?.data ?? []),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * QUI-431 — Backfill (or collect) many serials for a product/variant at a
+   * location. Returns the unwrapped result payload (created count, created
+   * rows, and per-serial failures). The backend never throws on partial
+   * failure; failures come back inside `failed`.
+   */
+  bulkCreate(payload: BulkBackfillPayload): Observable<BulkBackfillResult> {
+    return this.http
+      .post<
+        ApiResponse<BulkBackfillResult>
+      >(`${this.apiUrl}${this.basePath}/bulk`, payload)
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Update editable fields of a single serial (serial_number / notes / cost).
+   */
+  update(
+    id: number,
+    dto: { serial_number?: string; notes?: string; cost?: number },
+  ): Observable<SerialNumber> {
+    return this.http
+      .patch<
+        ApiResponse<SerialNumber>
+      >(`${this.apiUrl}${this.basePath}/${id}`, dto)
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Transition a serial to a new status (in_stock, damaged, returned, ...).
+   */
+  updateStatus(
+    id: number,
+    status: SerialNumberStatus,
+  ): Observable<SerialNumber> {
+    return this.http
+      .patch<
+        ApiResponse<SerialNumber>
+      >(`${this.apiUrl}${this.basePath}/${id}/status`, { status })
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Delete a single serial. Resolves to void on success.
+   */
+  remove(id: number): Observable<void> {
+    return this.http
+      .delete<
+        ApiResponse<{ success: true }>
+      >(`${this.apiUrl}${this.basePath}/${id}`)
+      .pipe(
+        map(() => void 0),
         catchError(this.handleError),
       );
   }

@@ -149,6 +149,8 @@ export interface PurchaseOrderItem {
     stock_unit?: string | null;
     purchase_unit?: string | null;
     purchase_to_stock_factor?: number | null;
+    // QUI-431: serialized product flag — drives serial capture in the receive modal.
+    requires_serial_numbers?: boolean | null;
   };
   products?: {
     id: number;
@@ -158,6 +160,8 @@ export interface PurchaseOrderItem {
     stock_unit?: string | null;
     purchase_unit?: string | null;
     purchase_to_stock_factor?: number | null;
+    // QUI-431: serialized product flag — drives serial capture in the receive modal.
+    requires_serial_numbers?: boolean | null;
   };
   product_variants?: {
     id: number;
@@ -240,6 +244,9 @@ export interface UpdatePurchaseOrderDto
 export interface ReceivePurchaseOrderItemDto {
   id: number;
   quantity_received: number;
+  // QUI-431: real serial numbers captured during reception (manual/bulk).
+  // Optional: backend auto-generates placeholders for any missing serials.
+  serial_numbers?: string[];
 }
 
 export interface PurchaseOrderQueryDto {
