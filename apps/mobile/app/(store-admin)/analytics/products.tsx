@@ -1,5 +1,5 @@
-import { useState, useMemo, useCallback } from 'react';
-import { View, ScrollView, Text, Pressable, StyleSheet, FlatList } from 'react-native';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { View, ScrollView, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
@@ -69,31 +69,13 @@ const styles = StyleSheet.create({
   cardSection: {
     marginBottom: spacing[4],
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
+  hintCard: {
+    padding: spacing[3],
   },
-  rowInfo: {
-    flex: 1,
-  },
-  rowTitle: {
+  hintText: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colorScales.gray[900],
-  },
-  rowDetail: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[500],
-    marginTop: spacing[0.5],
-  },
-  rowValue: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colorScales.gray[900],
+    color: colorScales.gray[600],
+    lineHeight: 20,
   },
 });
 
@@ -141,7 +123,9 @@ const ProductsScreen = () => {
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['analytics-products', preset],
-    queryFn: () => AnalyticsDetailService.getSalesAnalytics(dateRange),
+    // Backend no expone /store/analytics/products; getProductsAnalytics reusa
+    // /store/analytics/sales/summary (200 OK) y mapea total_units_sold.
+    queryFn: () => AnalyticsDetailService.getProductsAnalytics(dateRange),
   });
 
   const onRefresh = useCallback(async () => {
@@ -150,24 +134,15 @@ const ProductsScreen = () => {
     setRefreshing(false);
   }, [refetch]);
 
-  if (isError) {
-    toastError('Error cargando analíticas de productos');
-  }
+  // toastError fuera del render para evitar warning React.
+  useEffect(() => {
+    if (isError) toastError('Error cargando analíticas de productos');
+  }, [isError]);
 
-  const topProducts = useMemo(() => {
-    if (!data?.top_products?.length) return [];
-    return [...data.top_products].sort((a, b) => b.revenue - a.revenue);
-  }, [data]);
-
-  const bottomProducts = useMemo(() => {
-    if (!data?.top_products?.length) return [];
-    return [...data.top_products].sort((a, b) => a.revenue - b.revenue);
-  }, [data]);
-
-  const totalProductsSold = data?.total_products_sold ?? 0;
-  const topSeller = topProducts[0];
-  const topRevenue = topProducts[0];
-  const worstPerformer = bottomProducts[0];
+  const totalUnitsSold = data?.total_units_sold ?? 0;
+  const totalOrders = data?.total_orders ?? 0;
+  const totalRevenue = data?.total_revenue ?? 0;
+  const avgUnitsPerOrder = totalOrders > 0 ? Math.round(totalUnitsSold / totalOrders) : 0;
 
   return (
     <View style={styles.root}>
@@ -197,61 +172,42 @@ const ProductsScreen = () => {
                 style={styles.statsGridOverride}
                 items={[
                   {
-                    label: 'Total Productos',
-                    value: totalProductsSold.toLocaleString(),
+                    label: 'Productos Vendidos',
+                    value: totalUnitsSold.toLocaleString(),
                     icon: <Icon name="package" size={14} color={colors.primary} />,
                   },
                   {
-                    label: 'Mayor Ingreso',
-                    value: topRevenue ? formatCurrency(topRevenue.revenue) : '-',
+                    label: 'Ingresos',
+                    value: formatCurrency(totalRevenue),
                     icon: <Icon name="dollar-sign" size={14} color={colorScales.blue[500]} />,
+                  },
+                  {
+                    label: 'Órdenes c/ producto',
+                    value: totalOrders.toLocaleString(),
+                    icon: <Icon name="shopping-cart" size={14} color={colorScales.amber[600]} />,
+                  },
+                  {
+                    label: 'Promedio / orden',
+                    value: avgUnitsPerOrder.toLocaleString(),
+                    icon: <Icon name="bar-chart-2" size={14} color={colorScales.blue[600]} />,
+                    description: 'unidades por orden',
                   },
                 ]}
               />
 
-              {topProducts.length > 0 && (
-                <Card style={styles.cardSection}>
-                  <Card.Header title="Top Productos" />
-                  <Card.Body>
-                    <FlatList
-                      data={topProducts.slice(0, 10)}
-                      keyExtractor={(item, i) => `top-${item.product_name}-${i}`}
-                      scrollEnabled={false}
-                      renderItem={({ item }) => (
-                        <View style={styles.row}>
-                          <View style={styles.rowInfo}>
-                            <Text style={styles.rowTitle}>{item.product_name}</Text>
-                            <Text style={styles.rowDetail}>{item.quantity_sold} unidades vendidas</Text>
-                          </View>
-                          <Text style={styles.rowValue}>{formatCurrency(item.revenue)}</Text>
-                        </View>
-                      )}
-                    />
-                  </Card.Body>
-                </Card>
-              )}
-
-              {bottomProducts.length > 0 && bottomProducts.length > 1 && (
-                <Card style={styles.cardSection}>
-                  <Card.Header title="Menor Rendimiento" />
-                  <Card.Body>
-                    <FlatList
-                      data={bottomProducts.slice(0, 5)}
-                      keyExtractor={(item, i) => `bottom-${item.product_name}-${i}`}
-                      scrollEnabled={false}
-                      renderItem={({ item }) => (
-                        <View style={styles.row}>
-                          <View style={styles.rowInfo}>
-                            <Text style={styles.rowTitle}>{item.product_name}</Text>
-                            <Text style={styles.rowDetail}>{item.quantity_sold} unidades vendidas</Text>
-                          </View>
-                          <Text style={styles.rowValue}>{formatCurrency(item.revenue)}</Text>
-                        </View>
-                      )}
-                    />
-                  </Card.Body>
-                </Card>
-              )}
+              <Card style={styles.cardSection}>
+                <Card.Header title="Análisis Detallado" />
+                <Card.Body style={styles.hintCard}>
+                  <Text style={styles.hintText}>
+                    Para ver el Top de productos vendidos y los de menor rendimiento,
+                    consulta la sección de <Text style={{ fontWeight: '600' }}>Productos</Text> en el menú lateral.
+                    {'\n\n'}
+                    El backend aún no expone el endpoint detallado de analíticas por
+                    producto (`/store/analytics/products`); este resumen se calcula
+                    desde las ventas del período seleccionado.
+                  </Text>
+                </Card.Body>
+              </Card>
             </>
           ) : (
             <EmptyState title="Sin datos" description="No hay datos de productos para este período" />

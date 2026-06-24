@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { View, ScrollView, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -178,9 +178,10 @@ const OverviewScreen = () => {
     setRefreshing(false);
   }, [refetch]);
 
-  if (isError) {
-    toastError('Error cargando analíticas');
-  }
+  // toastError fuera del render para evitar warning React.
+  useEffect(() => {
+    if (isError) toastError('Error cargando analíticas');
+  }, [isError]);
 
   const expenseRatio = summary ? summary.total_revenue > 0 ? summary.total_expenses / summary.total_revenue : 0 : 0;
   const profitMargin = summary?.profit_margin ?? 0;

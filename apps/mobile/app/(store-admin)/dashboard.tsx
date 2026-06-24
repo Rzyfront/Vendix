@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { View, ScrollView, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
@@ -151,30 +151,33 @@ const styles = StyleSheet.create({
   quickLinksCard: {
     marginBottom: spacing[4],
   },
+  // Web parity: p-3 (12px) — override Card.Body default (16px)
+  quickLinksBody: {
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[3],
+  },
+  // Web parity: p-3 grid grid-cols-2 gap-1 (12px padding, 4px gap, 2 cols)
   quickLinksGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: spacing[2],
   },
   quickLinkItem: {
-    width: '48%',
+    width: '50%',
+    padding: 2, // half of gap-1 (4px) on each side → 4px between buttons
   },
+  // Web parity: flex items-center gap-2 px-3 py-2.5 text-sm hover:bg-primary/5 rounded-lg
   quickLinkButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[2.5],
-    paddingVertical: spacing[3.5],
-    paddingHorizontal: spacing[3],
-    backgroundColor: colorScales.gray[50],
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[100],
-    minHeight: 48,
+    gap: spacing[2], // gap-2 (8px) icon→text
+    paddingVertical: spacing[2.5], // py-2.5 (10px)
+    paddingHorizontal: spacing[3], // px-3 (12px)
+    backgroundColor: 'transparent',
+    borderRadius: borderRadius.md, // rounded-lg (8px) = md in this theme
   },
   quickLinkText: {
-    fontSize: 13,
-    fontWeight: typography.fontWeight.medium,
+    fontSize: typography.fontSize.sm, // text-sm (14px)
+    fontWeight: typography.fontWeight.normal,
     color: colors.text.primary,
     flex: 1,
   },
@@ -343,9 +346,10 @@ const DashboardScreen = () => {
     { label: 'Compras', icon: 'shopping-bag', route: '/inventory/pop' },
   ];
 
-  if (summaryError) {
-    toastError('Error cargando datos del dashboard');
-  }
+  // toastError fuera del render para evitar warning React.
+  useEffect(() => {
+    if (summaryError) toastError('Error cargando datos del dashboard');
+  }, [summaryError]);
 
   return (
     <View style={styles.root}>
@@ -476,18 +480,18 @@ const DashboardScreen = () => {
 
           <Card style={styles.quickLinksCard}>
             <Card.Header title="Accesos Rápidos" />
-            <Card.Body>
+            <Card.Body style={styles.quickLinksBody}>
               <View style={styles.quickLinksGrid}>
                 {quickLinks.map((link) => (
                   <View key={link.route} style={styles.quickLinkItem}>
                     <Pressable
                       style={({ pressed }) => [
                         styles.quickLinkButton,
-                        pressed && { backgroundColor: colorScales.gray[100] },
+                        pressed && { backgroundColor: 'rgba(46, 204, 113, 0.05)' }, // hover:bg-primary/5
                       ]}
                       onPress={() => router.push(link.route as any)}
                     >
-                      <Icon name={link.icon as any} size={16} color={colors.text.secondary} />
+                      <Icon name={link.icon as any} size={15} color={colors.text.secondary} />
                       <Text style={styles.quickLinkText} numberOfLines={1}>{link.label}</Text>
                     </Pressable>
                   </View>

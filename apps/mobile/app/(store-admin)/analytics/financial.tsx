@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { View, ScrollView, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { CartesianChart, Line } from 'victory-native';
@@ -150,9 +150,10 @@ const FinancialScreen = () => {
     setRefreshing(false);
   }, [refetch]);
 
-  if (isError) {
-    toastError('Error cargando analíticas financieras');
-  }
+  // toastError fuera del render para evitar warning React.
+  useEffect(() => {
+    if (isError) toastError('Error cargando analíticas financieras');
+  }, [isError]);
 
   const chartData = useMemo(() => {
     if (!data?.profit_loss_trends?.length) return [];

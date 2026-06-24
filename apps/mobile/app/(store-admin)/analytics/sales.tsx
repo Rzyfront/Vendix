@@ -1,8 +1,6 @@
-import { useState, useMemo, useCallback } from 'react';
-import { View, ScrollView, Text, Pressable, StyleSheet, FlatList } from 'react-native';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { View, ScrollView, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { CartesianChart, Line } from 'victory-native';
-import { SafeChart, TrendChartFallback } from '@/shared/components/chart/chart-fallback';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
@@ -101,6 +99,29 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.semibold,
     color: colorScales.gray[900],
   },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+  },
+  summaryItem: {
+    flex: 1,
+  },
+  summaryLabel: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginBottom: spacing[1],
+  },
+  summaryValue: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.text.primary,
+  },
+  summaryDivider: {
+    width: 1,
+    alignSelf: 'stretch',
+    backgroundColor: colorScales.gray[200],
+  },
 });
 
 function presetToDateRange(preset: DatePreset) {
@@ -156,38 +177,11 @@ const SalesScreen = () => {
     setRefreshing(false);
   }, [refetch]);
 
-  if (isError) {
-    toastError('Error cargando analíticas de ventas');
-  }
-
-  const trendData = useMemo(() => {
-    if (!data?.trends?.length) return [];
-    return data.trends.map((t) => ({
-      period: t.period.slice(5),
-      revenue: t.revenue,
-    }));
-  }, [data]);
-
-  const trendFallbackData = useMemo(() => {
-    if (!data?.trends?.length) return [];
-    return data.trends.map((t) => ({
-      x: t.period.slice(5),
-      revenue: t.revenue,
-    }));
-  }, [data]);
-
-  const channelData = useMemo(() => {
-    if (!data?.by_channel?.length) return null;
-    const channelColors: Record<string, string> = {
-      pos: colorScales.blue[400],
-      ecommerce: colorScales.green[400],
-    };
-    return data.by_channel.slice(0, 3).map((c) => ({
-      value: c.revenue,
-      color: channelColors[c.channel.toLowerCase()] || colorScales.gray[400],
-      label: c.channel,
-    }));
-  }, [data]);
+  // toastError fuera del render para evitar "Cannot update a component while
+  // rendering a different component" en React.
+  useEffect(() => {
+    if (isError) toastError('Error cargando analíticas de ventas');
+  }, [isError]);
 
   return (
     <View style={styles.root}>
@@ -220,86 +214,54 @@ const SalesScreen = () => {
                     label: 'Ingresos',
                     value: formatCurrency(data.total_revenue),
                     icon: <Icon name="trending-up" size={14} color={colors.primary} />,
+                    trend:
+                      data.revenue_growth != null
+                        ? { value: data.revenue_growth, positive: data.revenue_growth >= 0 }
+                        : undefined,
                   },
                   {
                     label: 'Órdenes',
                     value: data.total_orders.toLocaleString(),
                     icon: <Icon name="shopping-bag" size={14} color={colors.primary} />,
+                    trend:
+                      data.orders_growth != null
+                        ? { value: data.orders_growth, positive: data.orders_growth >= 0 }
+                        : undefined,
+                  },
+                  {
+                    label: 'Ticket Prom.',
+                    value: formatCurrency(data.average_order_value || 0),
+                    icon: <Icon name="receipt" size={14} color={colorScales.blue[600]} />,
+                  },
+                  {
+                    label: 'Clientes',
+                    value: (data.total_customers || 0).toLocaleString(),
+                    icon: <Icon name="users" size={14} color={colorScales.amber[600]} />,
+                    description: 'clientes únicos',
                   },
                 ]}
               />
 
               <Card style={styles.chartCard}>
-                <Card.Header title="Tendencia de Ingresos" />
+                <Card.Header title="Resumen del Período" />
                 <Card.Body>
-                  {trendData.length > 0 ? (
-                    <View style={styles.chartContainer}>
-                      <SafeChart
-                        fallback={<TrendChartFallback data={trendFallbackData} title="Tendencia de Ingresos" />}
-                      >
-                        <CartesianChart
-                          data={trendData}
-                          xKey="period"
-                          yKeys={['revenue']}
-                          padding={{ top: 20, bottom: 40, left: 50, right: 20 }}
-                          axisOptions={{
-                            font: null,
-                            tickCount: 5,
-                            formatYLabel: (value: number) => formatCurrency(value),
-                            lineColor: colors.cardBorder,
-                            labelColor: colors.text.secondary,
-                          }}
-                        >
-                          {({ points }: any) => (
-                            <Line points={points.revenue} color={colors.primary} strokeWidth={2} />
-                          )}
-                        </CartesianChart>
-                      </SafeChart>
+                  <View style={styles.summaryRow}>
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryLabel}>Unidades vendidas</Text>
+                      <Text style={styles.summaryValue}>{(data.total_units_sold || 0).toLocaleString()}</Text>
                     </View>
-                  ) : (
-                    <EmptyState title="Sin datos" description="Sin datos de tendencia" />
-                  )}
+                    <View style={styles.summaryDivider} />
+                    <View style={styles.summaryItem}>
+                      <Text style={styles.summaryLabel}>Ingreso por unidad</Text>
+                      <Text style={styles.summaryValue}>
+                        {data.total_units_sold > 0
+                          ? formatCurrency(data.total_revenue / data.total_units_sold)
+                          : '-'}
+                      </Text>
+                    </View>
+                  </View>
                 </Card.Body>
               </Card>
-
-              {channelData && (
-                <Card style={styles.chartCard}>
-                  <Card.Header title="Ventas por Canal" />
-                  <Card.Body>
-                    <View style={styles.chartContainer}>
-                      {channelData.map((item, index) => (
-                        <View key={index} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                          <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: item.color }} />
-                          <Text style={{ flex: 1, fontSize: 14, color: colors.text.primary }}>{item.label}</Text>
-                          <Text style={{ fontSize: 14, fontWeight: '600', color: colors.text.primary }}>{((item.value / channelData.reduce((s, i) => s + i.value, 0)) * 100).toFixed(0)}%</Text>
-                        </View>
-                      ))}
-                    </View>
-                  </Card.Body>
-                </Card>
-              )}
-
-              {data.top_products?.length > 0 && (
-                <Card style={styles.chartCard}>
-                  <Card.Header title="Productos Más Vendidos" />
-                  <Card.Body>
-                    <FlatList
-                      data={data.top_products}
-                      keyExtractor={(item, i) => `${item.product_name}-${i}`}
-                      scrollEnabled={false}
-                      renderItem={({ item }) => (
-                        <View style={styles.productRow}>
-                          <View style={styles.productInfo}>
-                            <Text style={styles.productName}>{item.product_name}</Text>
-                            <Text style={styles.productDetail}>{item.quantity_sold} unidades</Text>
-                          </View>
-                          <Text style={styles.productRevenue}>{formatCurrency(item.revenue)}</Text>
-                        </View>
-                      )}
-                    />
-                  </Card.Body>
-                </Card>
-              )}
             </>
           ) : (
             <EmptyState title="Sin datos" description="No hay datos de ventas para este período" />
