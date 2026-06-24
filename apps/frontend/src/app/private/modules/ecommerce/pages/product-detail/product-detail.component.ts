@@ -390,10 +390,10 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
                 <button
                   type="button"
                   class="rv-write-btn"
-                  (click)="scrollToReviewForm()"
+                  (click)="openReviewForm()"
                 >
                   <app-icon name="edit-2" [size]="16"></app-icon>
-                  Escribir reseña
+                  {{ showReviewForm() ? 'Ocultar formulario' : 'Escribir reseña' }}
                 </button>
               } @else if (canWriteReview()?.reason === 'already_reviewed') {
                 <span class="rv-tag rv-tag-info">Ya reseñaste</span>
@@ -561,7 +561,8 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
               </div>
             }
 
-            <!-- Write Review Form -->
+            <!-- Write Review Form (collapsible: only visible after the
+                 user clicks the "Escribir reseña" CTA) -->
             <div class="rv-form-section">
               @if (reviewSubmitted()) {
                 <div class="rv-submitted">
@@ -572,7 +573,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
                   />
                   <p>Tu reseña fue publicada.</p>
                 </div>
-              } @else if (canWriteReview()?.can_review) {
+              } @else if (showReviewForm() && canWriteReview()?.can_review) {
                 <h4 class="rv-form-title">Escribe tu opinión</h4>
                 <form [formGroup]="reviewForm" (ngSubmit)="onSubmitReview()">
                   <div class="star-picker">
@@ -1607,6 +1608,12 @@ export class ProductDetailComponent implements OnInit {
   reviewSubmitting = signal(false);
   reviewSubmitted = signal(false);
   reviewErrorMessage = signal<string | null>(null);
+  /**
+   * Controls the visibility of the review form. Hidden by default so
+   * the form doesn't take up space in the reviews section. Toggled
+   * via the "Escribir reseña" CTA in the section header.
+   */
+  showReviewForm = signal(false);
 
   // Computed
   latestReviews = computed(() => this.reviewsList());
@@ -1927,15 +1934,20 @@ export class ProductDetailComponent implements OnInit {
   }
 
   /**
-   * Scrolls the user down to the review form so they can start writing
-   * a review. Triggered by the "Escribir reseña" CTA in the reviews
-   * section header. The form is at the bottom of the reviews list.
+   * Toggles the review form. Triggered by the "Escribir reseña" CTA
+   * in the reviews section header. The form is hidden by default and
+   * becomes visible when the user clicks the button.
    */
-  scrollToReviewForm(): void {
-    queueMicrotask(() => {
-      const el = document.querySelector('.rv-form-section');
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
+  openReviewForm(): void {
+    this.showReviewForm.set(!this.showReviewForm());
+    if (this.showReviewForm()) {
+      // Wait for Angular to render the form, then smooth-scroll it
+      // into view.
+      queueMicrotask(() => {
+        const el = document.querySelector('.rv-form-section');
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
   }
 
   onSubmitReview(): void {
