@@ -215,6 +215,12 @@ export interface OrderStats {
   pending_orders: number;
   completed_orders: number;
   average_order_value: number;
+  // Growth rates — backend no las expone aún, pero el web las muestra con
+  // fallback `|| 0`. Mantenemos compatibilidad y agregamos cuando se expongan.
+  ordersGrowthRate?: number;
+  pendingGrowthRate?: number;
+  completedGrowthRate?: number;
+  revenueGrowthRate?: number;
 }
 
 export interface OrderQuery {

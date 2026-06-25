@@ -110,6 +110,20 @@ export const colorScales = {
     800: '#9A3412',
     900: '#7C2D12',
   },
+  // Emerald scale — parity con web (Tailwind emerald-*).
+  // Usado por Completadas en orders (web usa bg-emerald-100/text-emerald-500).
+  emerald: {
+    50: '#ECFDF5',
+    100: '#D1FAE5',
+    200: '#A7F3D0',
+    300: '#6EE7B7',
+    400: '#34D399',
+    500: '#10B981',
+    600: '#059669',
+    700: '#047857',
+    800: '#065F46',
+    900: '#064E3B',
+  },
 } as const;
 
 export type ColorScales = typeof colorScales;
