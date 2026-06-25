@@ -85,7 +85,19 @@ export interface TableSessionOrder {
   subtotal_amount: number | string;
   tax_amount: number | string;
   discount_amount: number | string;
+  /**
+   * Customer assigned to the order, or `null` when the table is
+   * anonymous. Populated by the enriched `GET /store/table-sessions/:id`
+   * contract (no "Cliente General" sentinel — true anonymous is `null`).
+   */
+  customer?: TableSessionCustomerRef | null;
   order_items: TableSessionOrderItem[];
+}
+
+export interface TableSessionCustomerRef {
+  id: number;
+  first_name: string;
+  last_name: string;
 }
 
 export interface TableSessionOrderItem {
@@ -96,7 +108,38 @@ export interface TableSessionOrderItem {
   unit_price: number | string;
   total_price: number | string;
   inventory_consumed_at_fire: boolean;
+  /**
+   * Kitchen-ticket items linked to this order item, ordered DESC by id
+   * (most recent first). Empty/undefined when the item was never fired.
+   * Used to derive the per-dish kitchen-state badge — see
+   * `kitchenStateFor` on the session page.
+   */
+  kitchen_ticket_items?: KitchenTicketItemRef[];
 }
+
+/**
+ * Minimal projection of a `kitchen_ticket_items` row carried in the
+ * enriched table-session contract. Mirrors the backend `findOne`
+ * include for `GET /store/table-sessions/:id`.
+ */
+export interface KitchenTicketItemRef {
+  id: number;
+  status: KitchenTicketItemRefStatus;
+  kitchen_ticket_id: number;
+  kitchen_ticket?: {
+    id: number;
+    status: string;
+    daily_number: number | null;
+    fired_at: string | Date;
+  };
+}
+
+export type KitchenTicketItemRefStatus =
+  | 'pending'
+  | 'in_preparation'
+  | 'ready'
+  | 'delivered'
+  | 'cancelled';
 
 export interface CreateTableDto {
   name: string;
@@ -154,6 +197,45 @@ export interface SplitResult {
     grand_total: number | string;
     items_count: number;
   }>;
+}
+
+/**
+ * Payload for settling a table's bill through the unified POS payment
+ * endpoint (`POST /store/payments/pos`) keyed by `table_session_id`.
+ * `subtotal` + `total_amount` are required by the POS DTO validator even
+ * though the backend re-derives the authoritative totals from the order.
+ */
+export interface PayTableSessionDto {
+  table_session_id: number;
+  store_payment_method_id: number;
+  subtotal: number;
+  total_amount: number;
+  /** Cash received (only for cash methods, enables change calculation). */
+  amount_received?: number;
+  /** Reference for non-cash methods (transfer/card). */
+  payment_reference?: string;
+}
+
+/**
+ * Subset of the POS payment response we consume on the table-checkout
+ * flow. The backend returns much more, but the table page only needs to
+ * know the operation succeeded.
+ */
+export interface PayTableSessionResult {
+  success?: boolean;
+  message?: string;
+  order?: {
+    id: number;
+    order_number?: string;
+    status?: string;
+    payment_status?: string;
+    total_amount?: number;
+  };
+  payment?: {
+    id: number;
+    amount: number;
+    change?: number;
+  };
 }
 
 /**

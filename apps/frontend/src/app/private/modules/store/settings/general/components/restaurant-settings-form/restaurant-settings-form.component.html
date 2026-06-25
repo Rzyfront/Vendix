@@ -1,0 +1,18 @@
+<div class="restaurant-settings-form">
+  <div>
+    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Cobro en mesa</h4>
+    <div class="flex items-start justify-between gap-4">
+      <div class="flex-1">
+        <p class="text-sm font-medium text-[var(--color-text-primary)]">Habilitar cobro desde la mesa</p>
+        <p class="text-xs text-[var(--color-text-muted)] mt-1">
+          Permite cobrar la cuenta directamente desde la vista de la mesa. Si está desactivado, solo se muestra el estado del pago.
+        </p>
+      </div>
+      <app-toggle
+        [formControl]="enableTableCheckoutControl"
+        ariaLabel="Habilitar cobro desde la mesa"
+        (changed)="onFieldChange()"
+      ></app-toggle>
+    </div>
+  </div>
+</div>

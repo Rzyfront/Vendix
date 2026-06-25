@@ -1,0 +1,67 @@
+<app-modal
+  [isOpen]="isOpen()"
+  [size]="'sm'"
+  [title]="'Asignar cliente'"
+  [subtitle]="'Asocia o cambia el cliente de la cuenta de esta mesa.'"
+  (isOpenChange)="onIsOpenChange($event)"
+  (closed)="onModalClosed()"
+>
+  <div class="assign-content">
+    <!-- Current customer -->
+    @if (current(); as c) {
+      <div class="current-customer">
+        <div class="info">
+          <app-icon name="user-check" [size]="16"></app-icon>
+          <span>Actual: {{ c.first_name }} {{ c.last_name }}</span>
+        </div>
+        <app-button
+          variant="ghost"
+          size="sm"
+          [loading]="isProcessing()"
+          (clicked)="detach()"
+        >
+          Quitar cliente
+        </app-button>
+      </div>
+    } @else {
+      <div class="current-customer none">
+        <app-icon name="user" [size]="16"></app-icon>
+        <span>Sin cliente asignado (anónimo)</span>
+      </div>
+    }
+
+    <!-- Picked draft -->
+    @if (picked(); as p) {
+      <div class="picked-chip">
+        <div class="info">
+          <app-icon name="user-check" [size]="16"></app-icon>
+          <span>{{ p.first_name }} {{ p.last_name ?? '' }}</span>
+        </div>
+        <app-button variant="ghost" size="sm" (clicked)="clearPicked()">
+          Cambiar
+        </app-button>
+      </div>
+    } @else {
+      <app-pos-customer-selector
+        [allowAnonymous]="true"
+        (customerSelected)="onCustomerSelected($event)"
+      />
+    }
+  </div>
+
+  <div slot="footer" class="assign-footer">
+    <app-button variant="ghost" (clicked)="onModalClosed()">
+      Cancelar
+    </app-button>
+    <app-button
+      variant="primary"
+      [disabled]="!picked() || isProcessing()"
+      [loading]="isProcessing()"
+      [showTextWhileLoading]="true"
+      (clicked)="confirmAssign()"
+    >
+      <app-icon slot="icon" name="check" [size]="18"></app-icon>
+      Asignar cliente
+    </app-button>
+  </div>
+</app-modal>

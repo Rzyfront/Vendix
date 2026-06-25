@@ -4,6 +4,8 @@
     subtitle="Vista del piso del restaurante. Haz clic en una mesa disponible para abrir cuenta."
     icon="table"
     variant="glass"
+    [showBackButton]="true"
+    backRoute="/admin"
     [actions]="headerActions()"
     (actionClicked)="onHeaderAction($event)"
   />

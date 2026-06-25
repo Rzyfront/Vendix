@@ -211,6 +211,22 @@ export class TablesService {
       }
     }
 
+    // State-transition guard: a table with an OPEN session (closed_at IS
+    // NULL) cannot be moved to a "free" status — `available` or `reserved`
+    // — because doing so would orphan the open check. `occupied` and
+    // `cleaning` are always allowed (they reflect the table being in use
+    // or being reset). Reuses the existing TABLE_INVALID_STATUS code; no
+    // new error code is introduced.
+    if (dto.status === 'available' || dto.status === 'reserved') {
+      const activeSession = await this.getActiveSession(id);
+      if (activeSession) {
+        throw new VendixHttpException(
+          ErrorCodes.TABLE_INVALID_STATUS,
+          `La mesa tiene una cuenta abierta; no puede marcarse como "${dto.status}"`,
+        );
+      }
+    }
+
     const data: Prisma.tablesUpdateInput = {
       ...(dto.name !== undefined && { name: dto.name }),
       ...(dto.zone !== undefined && { zone: dto.zone }),

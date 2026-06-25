@@ -324,6 +324,9 @@ export interface StoreSettings {
   // Dispatch - DSD route / dispatch behavior toggles
   dispatch?: DispatchSettings;
 
+  // Restaurant - restaurant suite behavior toggles
+  restaurant?: RestaurantSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -499,6 +502,18 @@ export interface ReservationsSettings {
 export interface OperationsSettings {
   default_preparation_time_minutes: number;
   ticket_closing_hour?: number;
+}
+
+// ============================================================================
+// RESTAURANT - Restaurant suite behavior toggles
+// ============================================================================
+export interface RestaurantSettings {
+  /**
+   * Enables paying/closing a table check directly from the table screen
+   * (table checkout). When false (default), the check is only paid via
+   * the normal POS payment flow.
+   */
+  enable_table_checkout: boolean;
 }
 
 // ============================================================================
