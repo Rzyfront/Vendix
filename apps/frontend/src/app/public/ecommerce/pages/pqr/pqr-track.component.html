@@ -1,0 +1,92 @@
+<section class="pqr-track">
+  <header class="hero">
+    <h1>Consultar estado de PQR</h1>
+    <p class="lead">
+      Ingresa tu número de ticket para ver el estado y las respuestas
+      públicas que el equipo de Vendix haya publicado.
+    </p>
+  </header>
+
+  <div class="search-bar">
+    <input
+      type="search"
+      placeholder="Ej: PQR-1-00001"
+      [ngModel]="queryInput()"
+      (ngModelChange)="queryInput.set($event)"
+      (keydown.enter)="search()"
+    />
+    <button class="primary-btn" (click)="search()">Consultar</button>
+  </div>
+
+  @switch (state()) {
+  @case ('loading') {
+  <div class="state-card">Consultando…</div>
+  }
+  @case ('not_found') {
+  <div class="state-card state-card--warn">
+    <app-icon name="alert-triangle" [size]="24"></app-icon>
+    <div>
+      <strong>No encontramos un ticket con ese número.</strong>
+      <p>Verifica que esté bien escrito e intenta de nuevo.</p>
+    </div>
+  </div>
+  }
+  @case ('error') {
+  <div class="state-card state-card--error">
+    <app-icon name="alert-circle" [size]="24"></app-icon>
+    <div>
+      <strong>Algo salió mal.</strong>
+      <p>{{ errorMsg() }}</p>
+    </div>
+  </div>
+  }
+  @case ('loaded') {
+  @if (view(); as v) {
+  <article class="ticket-card">
+    <header class="ticket-header">
+      <div>
+        <code class="mono">{{ v.ticket_number }}</code>
+        <span class="type-tag" [attr.data-type]="v.pqr_type">{{ typeLabel() }}</span>
+        <app-pqr-status-pill [status]="v.status"></app-pqr-status-pill>
+      </div>
+      <h2>{{ v.title }}</h2>
+    </header>
+
+    <dl class="meta">
+      <dt>Creado</dt>
+      <dd>{{ v.created_at | date: 'medium' }}</dd>
+      @if (v.resolved_at) {
+      <dt>Respondido</dt>
+      <dd>{{ v.resolved_at | date: 'medium' }}</dd>
+      }
+      @if (v.closed_at) {
+      <dt>Cerrado</dt>
+      <dd>{{ v.closed_at | date: 'medium' }}</dd>
+      }
+    </dl>
+
+    <section class="responses">
+      <h3>Respuestas del equipo</h3>
+      @if (v.public_responses.length === 0) {
+      <p class="muted">
+        Aún no hay respuestas publicadas. Te avisaremos por correo
+        electrónico cuando haya una actualización.
+      </p>
+      }
+      @for (r of v.public_responses; track r.id) {
+      <div class="response">
+        <header>
+          <strong>{{ r.author_name }}</strong>
+          <span class="muted">{{ r.created_at | date: 'medium' }}</span>
+        </header>
+        <p>{{ r.content }}</p>
+      </div>
+      }
+    </section>
+
+    <a routerLink="/pqr" class="cta">Radicar otro PQR</a>
+  </article>
+  }
+  }
+  }
+</section>

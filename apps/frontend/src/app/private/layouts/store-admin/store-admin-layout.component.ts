@@ -501,6 +501,11 @@ export class StoreAdminLayoutComponent {
       route: '/admin/ecommerce',
     },
     {
+      label: 'PQRs',
+      icon: 'mail-question',
+      route: '/admin/pqrs',
+    },
+    {
       label: 'Marketing',
       icon: 'megaphone',
       children: [

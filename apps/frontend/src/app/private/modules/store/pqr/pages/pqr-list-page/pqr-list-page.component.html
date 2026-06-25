@@ -1,0 +1,184 @@
+<section class="pqr-list-page">
+  <header class="page-header">
+    <div class="header-titles">
+      <h1>Peticiones, Quejas y Reclamos</h1>
+      <p class="subtitle">
+        Bandeja unificada del canal público de PQRs. Cualquier visitante puede
+        radicar uno desde el storefront.
+      </p>
+    </div>
+  </header>
+
+  <!-- Stats cards -->
+  @if (stats(); as s) {
+  <div class="stats-grid">
+    <article class="stat-card">
+      <span class="stat-label">Total</span>
+      <span class="stat-value">{{ s.total }}</span>
+    </article>
+    <article class="stat-card stat-card--accent">
+      <span class="stat-label">Últimas 24h</span>
+      <span class="stat-value">{{ s.recent_24h }}</span>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Nuevos</span>
+      <span class="stat-value">{{ s.by_status['NEW'] || 0 }}</span>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Respondidas</span>
+      <span class="stat-value">{{ s.by_status['RESOLVED'] || 0 }}</span>
+    </article>
+  </div>
+
+  <div class="type-breakdown">
+    @for (entry of [s.by_type['PETITION'] || 0, s.by_type['COMPLAINT'] || 0, s.by_type['CLAIM'] || 0]; track $index) {
+    <span class="type-chip">
+      <strong>{{ ['Peticiones', 'Quejas', 'Reclamos'][$index] }}:</strong>
+      {{ entry }}
+    </span>
+    }
+  </div>
+  }
+
+  <!-- Filters -->
+  <div class="filters-bar">
+    <div class="filter-group">
+      <label>Estado</label>
+      <select
+        [ngModel]="statusFilter()"
+        (ngModelChange)="setStatusFilter($event)"
+      >
+        <option value="">Todos</option>
+        <option value="NEW">Nuevo</option>
+        <option value="OPEN">Abierto</option>
+        <option value="IN_PROGRESS">En progreso</option>
+        <option value="WAITING_RESPONSE">Esperando respuesta</option>
+        <option value="RESOLVED">Respondida</option>
+        <option value="CLOSED">Cerrada</option>
+        <option value="REOPENED">Reabierta</option>
+      </select>
+    </div>
+
+    <div class="filter-group">
+      <label>Tipo</label>
+      <select
+        [ngModel]="typeFilter()"
+        (ngModelChange)="setTypeFilter($event)"
+      >
+        <option value="">Todos</option>
+        <option value="PETITION">Petición</option>
+        <option value="COMPLAINT">Queja</option>
+        <option value="CLAIM">Reclamo</option>
+      </select>
+    </div>
+
+    <div class="filter-group filter-group--search">
+      <label>Buscar</label>
+      <div class="search-input">
+        <app-icon name="search" [size]="16"></app-icon>
+        <input
+          type="search"
+          placeholder="Asunto o número de ticket…"
+          [ngModel]="searchInput()"
+          (ngModelChange)="searchInput.set($event)"
+          (keydown.enter)="applySearch()"
+        />
+        @if (searchInput()) {
+        <button class="clear-btn" (click)="clearSearch()" aria-label="Limpiar">
+          ×
+        </button>
+        }
+      </div>
+    </div>
+
+    <button class="primary-btn" (click)="applySearch()">Aplicar</button>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrapper">
+    @if (loading()) {
+    <div class="loading-overlay">
+      <span>Cargando…</span>
+    </div>
+    }
+
+    @if (errorMsg(); as msg) {
+    <div class="error-banner">{{ msg }}</div>
+    }
+
+    <table class="pqr-table">
+      <thead>
+        <tr>
+          <th>Ticket</th>
+          <th>Tipo</th>
+          <th>Asunto</th>
+          <th>Estado</th>
+          <th>Asignado a</th>
+          <th>Creado</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (t of tickets(); track t.id) {
+        <tr [routerLink]="['/admin/pqrs', t.id]" class="row-link">
+          <td class="mono">{{ t.ticket_number }}</td>
+          <td>
+            <span class="type-tag" [attr.data-type]="t.pqr_type">
+              {{ typeLabel(t.pqr_type) }}
+            </span>
+          </td>
+          <td class="title-cell">{{ t.title }}</td>
+          <td><app-pqr-status-pill [status]="t.status"></app-pqr-status-pill></td>
+          <td>
+            @if (t.assigned_to) {
+            <span>{{ t.assigned_to.name }}</span>
+            } @else {
+            <span class="muted">—</span>
+            }
+          </td>
+          <td>{{ t.created_at | date: 'short' }}</td>
+        </tr>
+        } @empty {
+        <tr>
+          <td colspan="6" class="empty-state">
+            No hay PQRs con los filtros seleccionados.
+          </td>
+        </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination -->
+  @if (totalPages() > 1) {
+  <nav class="pagination">
+    <button
+      class="page-btn"
+      [disabled]="(query().page ?? 1) <= 1"
+      (click)="goToPage((query().page ?? 1) - 1)"
+    >
+      ‹ Anterior
+    </button>
+    @for (p of pageNumbers(); track $index) {
+    @if (p === '…') {
+    <span class="page-ellipsis">…</span>
+    } @else {
+    <button
+      class="page-btn"
+      [class.active]="p === (query().page ?? 1)"
+      (click)="goToPage(p)"
+    >
+      {{ p }}
+    </button>
+    }
+    }
+    <button
+      class="page-btn"
+      [disabled]="(query().page ?? 1) >= totalPages()"
+      (click)="goToPage((query().page ?? 1) + 1)"
+    >
+      Siguiente ›
+    </button>
+    <span class="page-info">{{ total() }} resultados</span>
+  </nav>
+  }
+</section>

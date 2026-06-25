@@ -3836,6 +3836,9 @@ enum ticket_category_enum {
   PROBLEM
   CHANGE
   QUESTION
+  PETITION
+  COMPLAINT
+  CLAIM
 }
 
 enum ticket_priority_enum {

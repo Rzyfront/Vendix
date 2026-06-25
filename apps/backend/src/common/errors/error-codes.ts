@@ -340,6 +340,41 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'User not found',
   },
+  SUP_PQR_001: {
+    code: 'SUP_PQR_001',
+    httpStatus: 500,
+    devMessage: 'PQR platform organization missing — run seeders',
+  },
+  SUP_PQR_002: {
+    code: 'SUP_PQR_002',
+    httpStatus: 500,
+    devMessage: 'PQR anonymous user missing — run seeders',
+  },
+  SUP_PQR_003: {
+    code: 'SUP_PQR_003',
+    httpStatus: 404,
+    devMessage: 'PQR ticket not found',
+  },
+  SUP_PQR_004: {
+    code: 'SUP_PQR_004',
+    httpStatus: 403,
+    devMessage: 'PQR access denied',
+  },
+  SUP_PQR_005: {
+    code: 'SUP_PQR_005',
+    httpStatus: 429,
+    devMessage: 'PQR rate limit exceeded',
+  },
+  SUP_PQR_006: {
+    code: 'SUP_PQR_006',
+    httpStatus: 400,
+    devMessage: 'PQR invalid status transition',
+  },
+  SUP_PQR_007: {
+    code: 'SUP_PQR_007',
+    httpStatus: 422,
+    devMessage: 'PQR requester email could not be parsed from description',
+  },
 
   // Organization
   ORG_FIND_001: {

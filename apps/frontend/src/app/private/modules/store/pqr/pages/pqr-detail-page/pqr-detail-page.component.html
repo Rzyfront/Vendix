@@ -1,0 +1,203 @@
+<section class="pqr-detail-page">
+  <a class="back-link" (click)="goBack()">
+    <app-icon name="chevron-left" [size]="14"></app-icon>
+    Volver al listado
+  </a>
+
+  @if (loading() && !detail()) {
+  <div class="loading">Cargando…</div>
+  } @if (errorMsg(); as msg) {
+  <div class="error-banner">{{ msg }}</div>
+  } @if (detail(); as d) {
+  <header class="ticket-header">
+    <div class="ticket-id-row">
+      <span class="mono">{{ d.ticket_number }}</span>
+      <span class="type-tag" [attr.data-type]="d.pqr_type">
+        {{ typeLabel(d.pqr_type) }}
+      </span>
+      <app-pqr-status-pill [status]="d.status"></app-pqr-status-pill>
+    </div>
+    <h1>{{ d.title }}</h1>
+    <div class="ticket-meta">
+      <span>
+        <app-icon name="calendar" [size]="14"></app-icon>
+        Creado {{ d.created_at | date: 'medium' }}
+      </span>
+      @if (d.assigned_to) {
+      <span>
+        <app-icon name="user" [size]="14"></app-icon>
+        Asignado a {{ d.assigned_to.name }}
+      </span>
+      }
+      @if (d.first_response_at) {
+      <span>
+        <app-icon name="message-circle" [size]="14"></app-icon>
+        Primera respuesta {{ d.first_response_at | date: 'short' }}
+      </span>
+      }
+    </div>
+    <div class="ticket-actions">
+      <button class="primary-btn" (click)="openStatusModal()">
+        Cambiar estado
+      </button>
+    </div>
+  </header>
+
+  <div class="layout-grid">
+    <!-- Left: description + comments -->
+    <div class="main-column">
+      <article class="card">
+        <h3>Descripción del solicitante</h3>
+        <pre class="description-block">{{ d.description }}</pre>
+      </article>
+
+      <article class="card">
+        <h3>Comentarios ({{ d.comments.length }})</h3>
+        @if (d.comments.length === 0) {
+        <p class="muted">No hay comentarios aún.</p>
+        }
+        @for (c of d.comments; track c.id) {
+        <div class="comment" [class.comment--public]="!c.is_internal">
+          <header class="comment-header">
+            <strong>{{ c.author_name }}</strong>
+            <span class="comment-meta">
+              {{ c.author_type }} · {{ c.created_at | date: 'medium' }}
+              @if (!c.is_internal) {
+              <span class="badge badge--public">Visible al solicitante</span>
+              } @else {
+              <span class="badge badge--internal">Interno</span>
+              }
+            </span>
+          </header>
+          <p class="comment-body">{{ c.content }}</p>
+        </div>
+        }
+
+        <!-- Composer -->
+        <div class="composer">
+          <textarea
+            rows="4"
+            placeholder="Escribe una respuesta o nota interna…"
+            [ngModel]="newComment()"
+            (ngModelChange)="newComment.set($event)"
+          ></textarea>
+          <div class="composer-controls">
+            <label class="check">
+              <input
+                type="checkbox"
+                [checked]="isInternal()"
+                (change)="onIsInternalChange(($any($event.target)).checked)"
+              />
+              <span>Comentario interno (no se envía al solicitante)</span>
+            </label>
+            @if (isInternal()) {
+            <label class="check">
+              <input
+                type="checkbox"
+                [checked]="notifyRequester()"
+                (change)="notifyRequester.set(($any($event.target)).checked)"
+              />
+              <span>Notificar al solicitante por email</span>
+            </label>
+            }
+            <button
+              class="primary-btn"
+              [disabled]="!canSubmitComment()"
+              (click)="submitComment()"
+            >
+              {{ submitting() ? 'Enviando…' : 'Publicar comentario' }}
+            </button>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- Right: requester + history -->
+    <aside class="side-column">
+      <article class="card">
+        <h3>Solicitante</h3>
+        <dl>
+          <dt>Nombre</dt>
+          <dd>{{ d.requester_name || '—' }}</dd>
+          <dt>Email</dt>
+          <dd>
+            <a [href]="'mailto:' + d.requester_email">{{
+              d.requester_email
+            }}</a>
+          </dd>
+          @if (d.requester_phone) {
+          <dt>Teléfono</dt>
+          <dd>{{ d.requester_phone }}</dd>
+          }
+        </dl>
+      </article>
+
+      <article class="card">
+        <h3>Historial</h3>
+        @if (d.status_history.length === 0) {
+        <p class="muted">Sin cambios de estado.</p>
+        }
+        @for (h of d.status_history; track h.id) {
+        <div class="history-item">
+          <app-pqr-status-pill [status]="h.new_status"></app-pqr-status-pill>
+          <div class="history-meta">
+            <span class="muted">
+              {{ h.old_status || '—' }} → {{ h.new_status }}
+            </span>
+            <span>{{ h.created_at | date: 'short' }}</span>
+            @if (h.change_reason) {
+            <p class="reason">{{ h.change_reason }}</p>
+            }
+          </div>
+        </div>
+        }
+      </article>
+    </aside>
+  </div>
+
+  <!-- Status change modal -->
+  @if (showStatusModal()) {
+  <div class="modal-overlay" (click)="closeStatusModal()">
+    <div class="modal" (click)="$event.stopPropagation()">
+      <h2>Cambiar estado del PQR</h2>
+      <p class="muted">
+        Cambiar a <strong>Respondida</strong> o <strong>Cerrada</strong>
+        enviará un email automático al solicitante.
+      </p>
+      <label class="modal-field">
+        <span>Estado</span>
+        <select
+          [ngModel]="newStatus()"
+          (ngModelChange)="newStatus.set($event)"
+        >
+          @for (opt of statusOptions; track opt.value) {
+          <option [value]="opt.value">{{ opt.label }}</option>
+          }
+        </select>
+      </label>
+      @if (newStatus() === 'RESOLVED' || newStatus() === 'CLOSED') {
+      <label class="modal-field">
+        <span>Resumen de la resolución (opcional)</span>
+        <textarea
+          rows="4"
+          [ngModel]="resolutionSummary()"
+          (ngModelChange)="resolutionSummary.set($event)"
+          placeholder="Detalle breve que verá el solicitante en el email…"
+        ></textarea>
+      </label>
+      }
+      <div class="modal-actions">
+        <button class="ghost-btn" (click)="closeStatusModal()">Cancelar</button>
+        <button
+          class="primary-btn"
+          [disabled]="submitting()"
+          (click)="confirmStatusChange()"
+        >
+          {{ submitting() ? 'Guardando…' : 'Confirmar cambio' }}
+        </button>
+      </div>
+    </div>
+  </div>
+  }
+</section>
+}
