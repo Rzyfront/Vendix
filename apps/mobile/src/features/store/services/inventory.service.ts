@@ -365,6 +365,42 @@ export const InventoryService = {
     await apiClient.delete(endpoint);
   },
 
+  async downloadAdjustmentTemplate(locationId?: number): Promise<Blob> {
+    const params = locationId ? `?location_id=${locationId}` : '';
+    const res = await apiClient.get(
+      `${Endpoints.STORE.INVENTORY.ADJUSTMENTS.BULK_TEMPLATE}${params}`,
+      { responseType: 'blob' },
+    );
+    return res.data as Blob;
+  },
+
+  async uploadBulkAdjustments(
+    file: { uri: string; name: string; type?: string },
+    locationId: number,
+    adjustmentType: string,
+    description?: string,
+  ): Promise<{ total_processed: number; successful: number; failed: number; results: any[] }> {
+    const formData = new FormData();
+    // @ts-expect-error - React Native FormData accepts file objects
+    formData.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    formData.append('location_id', String(locationId));
+    formData.append('adjustment_type', adjustmentType);
+    if (description) formData.append('description', description);
+
+    const res = await apiClient.post(
+      Endpoints.STORE.INVENTORY.ADJUSTMENTS.BULK_UPLOAD,
+      formData,
+      {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      },
+    );
+    return unwrap<{ total_processed: number; successful: number; failed: number; results: any[] }>(res);
+  },
+
   async getTransfers(query?: TransferQuery): Promise<PaginatedResponse<StockTransfer>> {
     const params: Record<string, unknown> = {
       page: query?.page ?? 1,

@@ -387,14 +387,46 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
 
   return (
     <View style={styles.container}>
+      {/* Top bar — logo Vendix + breadcrumb + título + iconos (NO sticky) */}
+      <View style={styles.topBar}>
+        <View style={styles.topBarLeft}>
+          <View style={styles.topBarLogo}>
+            <Icon name="shopping-cart" size={20} color={colors.background} />
+          </View>
+          <View style={{ marginLeft: spacing[2], flex: 1 }}>
+            <Text style={styles.topBarBreadcrumb}>Productos / {mode === 'edit' ? 'Editar Producto' : 'Crear Producto'}</Text>
+            <Text style={styles.topBarTitle}>{mode === 'edit' ? 'Editar Producto' : 'Crear Producto'}</Text>
+          </View>
+        </View>
+        <View style={styles.topBarActions}>
+          <Pressable hitSlop={8} style={styles.topBarIconBtn}>
+            <Icon name="search" size={18} color={colorScales.gray[500]} />
+          </Pressable>
+          <View style={styles.topBarNotif}>
+            <Pressable hitSlop={8} style={styles.topBarIconBtn}>
+              <Icon name="bell" size={18} color={colorScales.gray[500]} />
+            </Pressable>
+            <View style={styles.topBarNotifBadge}>
+              <Text style={styles.topBarNotifText}>2</Text>
+            </View>
+          </View>
+          <View style={styles.topBarAvatar}>
+            <Text style={styles.topBarAvatarText}>VD</Text>
+            <View style={styles.topBarAvatarDot} />
+          </View>
+        </View>
+      </View>
+
+      {/* Header sticky — flecha + título + iconos (X / +) */}
       <StickyHeader
         title={mode === 'edit' ? 'Editar Producto' : 'Nuevo Producto'}
-        subtitle={mode === 'edit' ? product?.name : 'Creá un producto completo'}
+        showCloseButton={false}
         backHref="/(store-admin)/products"
         actions={[
-          { label: 'Cancelar', variant: 'outline', onPress: () => router.back() },
+          { label: '', icon: 'x', variant: 'outline', onPress: () => router.back() },
           {
-            label: mode === 'edit' ? 'Guardar cambios' : 'Crear producto',
+            label: '',
+            icon: mode === 'edit' ? 'check' : 'plus',
             variant: 'primary',
             loading: mutation.isPending,
             onPress: submit,
