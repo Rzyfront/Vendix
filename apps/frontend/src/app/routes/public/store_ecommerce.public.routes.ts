@@ -107,6 +107,14 @@ export const storeEcommercePublicRoutes: Routes = [
         },
       },
       {
+        path: 'cartas',
+        loadComponent: () =>
+          import('../../private/modules/ecommerce/pages/menus/menus-page.component').then(
+            (c) => c.MenusPageComponent,
+          ),
+        data: { title: 'Carta' },
+      },
+      {
         path: 'cart',
         loadComponent: () =>
           import('../../private/modules/ecommerce/pages/cart/cart.component').then(
