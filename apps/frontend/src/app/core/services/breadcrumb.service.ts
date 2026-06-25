@@ -1083,6 +1083,13 @@ export class BreadcrumbService {
       parent: 'PQRs',
       icon: 'message-square',
     },
+    // Org-admin aggregated PQR oversight across all stores in the org.
+    {
+      path: '/admin/support/pqrs',
+      title: 'PQRs',
+      parent: 'Atención al cliente',
+      icon: 'message-square',
+    },
 
     // Additional Inventory submodules
     {

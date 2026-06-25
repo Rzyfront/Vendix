@@ -30,6 +30,16 @@ export const orgAdminRoutes: Routes = [
             (c) => c.StoresComponent,
           ),
       },
+      // PQR oversight (Peticiones / Quejas / Reclamos) — aggregated across
+      // all stores in the requesting org. Org-admin sees the consolidated
+      // view; per-store response work happens at the store-admin level.
+      {
+        path: 'support/pqrs',
+        loadComponent: () =>
+          import(
+            '../../private/modules/organization/support/pqrs.component'
+          ).then((c) => c.OrgAdminPqrsComponent),
+      },
       {
         path: 'users',
         children: [

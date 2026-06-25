@@ -182,6 +182,21 @@ export class OrganizationAdminLayoutComponent {
       route: '/admin/users',
     },
     {
+      // Aggregated PQR oversight across all stores in the requesting
+      // org. Read-only at the org-admin level — response work happens
+      // per-store. Mirrors the super-admin Soporte/PQRs grouping so
+      // operators moving between the two contexts see consistent UI.
+      label: 'Atención al cliente',
+      icon: 'headset',
+      children: [
+        {
+          label: 'PQRs',
+          icon: 'message-square',
+          route: '/admin/support/pqrs',
+        },
+      ],
+    },
+    {
       label: 'Inventario',
       icon: 'warehouse',
       children: [
