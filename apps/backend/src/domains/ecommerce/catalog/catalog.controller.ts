@@ -43,6 +43,17 @@ export class CatalogController {
   }
 
   @Public()
+  @Get('menus')
+  @Header('Cache-Control', 'no-store')
+  async getMenus() {
+    // store_id se resuelve automáticamente desde el dominio por DomainResolverMiddleware.
+    // Devuelve cartas activas con disponibilidad por horario; vacío si la
+    // tienda no es de industria restaurant. Independiente del catálogo.
+    const data = await this.catalog_service.getPublicMenus();
+    return { success: true, data };
+  }
+
+  @Public()
   @Get(':slug')
   @Header('Cache-Control', 'no-store')
   async getProductBySlug(@Param('slug') slug: string) {

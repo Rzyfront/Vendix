@@ -10,7 +10,7 @@ import {
 import { HttpClient } from '@angular/common/http';
 import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { map } from 'rxjs/operators';
+import { map, switchMap } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
   FormBuilder,
@@ -86,6 +86,12 @@ import {
 import { resolvePackSize } from '../../../../../../shared/services/pricing/packaging.util';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
+// QUI-431 — Serial-number summary + full management modal.
+import {
+  SerialNumbersService,
+  SerialSummary,
+} from '../../../serial-numbers/services/serial-numbers.service';
+import { ProductSerialsManagerModalComponent } from '../../../serial-numbers/components/product-serials-manager-modal/product-serials-manager-modal.component';
 
 interface VariantAttribute {
   name: string;
@@ -165,6 +171,7 @@ interface PriceTierOverrideRow {
     DatePipe,
     DecimalPipe,
     KeyValuePipe,
+    ProductSerialsManagerModalComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -468,6 +475,7 @@ export class ProductCreatePageComponent {
   private barcodeService = inject(PosBarcodeService);
   private readonly authFacade = inject(AuthFacade);
   private readonly uomService = inject(UomService);
+  private readonly serialNumbersService = inject(SerialNumbersService);
 
   /**
    * Industrias EFECTIVAS de la tienda, con la MISMA cascada de fuentes que
@@ -1579,6 +1587,9 @@ export class ProductCreatePageComponent {
         if (product.has_multiple_price_tiers) {
           this.loadPriceTiersForProduct(id, product.enabled_price_tier_ids);
         }
+        // QUI-431 — resumen de seriales (solo productos serializados; el getter
+        // isSerialized lee el form ya parcheado arriba).
+        this.loadSerialSummary();
       },
       error: (error: any) => {
         console.error('Error loading product:', error);
@@ -4009,5 +4020,62 @@ export class ProductCreatePageComponent {
     variant.track_inventory_override = next;
     // Trigger CD for the template — array mutation is not signal-backed here
     this.generatedVariants = [...this.generatedVariants];
+  }
+
+  // ─── QUI-431: Números de serie — resumen + gestor en modal LG ───────────
+  //
+  // La página solo muestra un RESUMEN compacto (contadores del pool) y un botón
+  // que abre el modal completo de gestión (app-product-serials-manager-modal).
+  // Solo aplica a productos serializados (requires_serial_numbers = true) y el
+  // resumen solo se carga en modo edición (necesita productId + stock).
+
+  /** Visibilidad del modal completo de gestión de seriales (zoneless model). */
+  readonly serialsManagerOpen = signal(false);
+
+  /** Contadores del pool de seriales del producto (resumen compacto). */
+  readonly serialSummary = signal<SerialSummary>({
+    total: 0,
+    by_status: {},
+    warranty_expired: 0,
+    warranty_expiring_soon: 0,
+  });
+
+  /** True cuando el toggle requires_serial_numbers está activo. */
+  get isSerialized(): boolean {
+    return !!this.productForm.get('requires_serial_numbers')?.value;
+  }
+
+  /**
+   * Conteo de seriales por estado del resumen, con fallback a 0 cuando el
+   * backend omite un estado sin filas. (Encapsula el acceso al Record para
+   * evitar el `?? 0` redundante en plantilla que el compilador AOT marca.)
+   */
+  serialCountByStatus(status: string): number {
+    return this.serialSummary().by_status[status] ?? 0;
+  }
+
+  /**
+   * Carga el resumen de seriales del producto. Solo aplica a productos
+   * serializados en modo edición (requiere productId). No-op en creación o si
+   * el producto no es serializado; el modal (changed) la vuelve a invocar tras
+   * cualquier alta/edición/eliminación/carga masiva exitosa.
+   */
+  loadSerialSummary(): void {
+    if (!this.isSerialized || this.productId == null) return;
+    this.serialNumbersService
+      .summary({ product_id: this.productId })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (summary) => this.serialSummary.set(summary),
+        error: () => {
+          // Silencioso: el resumen es informativo; el gestor maneja sus errores.
+          this.serialSummary.set({
+            total: 0,
+            by_status: {},
+            warranty_expired: 0,
+            warranty_expiring_soon: 0,
+          });
+        },
+      });
   }
 }

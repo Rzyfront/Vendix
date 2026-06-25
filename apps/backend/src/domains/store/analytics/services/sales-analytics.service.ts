@@ -508,7 +508,6 @@ export class SalesAnalyticsService {
   }
 
   async getSalesTrends(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -516,6 +515,15 @@ export class SalesAnalyticsService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
+
+    // Hourly view (e.g. dashboard "today"): group by the store's LOCAL hour,
+    // limited to the current local day up to "now". Timezone-aware so a sale at
+    // 2pm store time lands on the 14:00 bucket (the other granularities stay UTC).
+    if (granularity === Granularity.HOUR) {
+      return this.getHourlyTrendsForToday(storeId, query.channel);
+    }
+
+    const { startDate, endDate } = parseDateRange(query);
 
     // Map granularity to PostgreSQL DATE_TRUNC interval
     // Use Prisma.raw() so the interval is inlined as a SQL literal
@@ -568,6 +576,95 @@ export class SalesAnalyticsService {
       { revenue: 0, orders: 0, units_sold: 0, average_order_value: 0 },
       formatPeriodFromDate,
     );
+  }
+
+  /**
+   * Resolves the store's IANA timezone from store_settings, falling back to
+   * America/Bogota. Validated against a safe charset because it is inlined
+   * into raw SQL via Prisma.raw().
+   */
+  private async resolveStoreTimezone(storeId: number): Promise<string> {
+    const settings = await this.prisma.store_settings.findFirst({
+      where: { store_id: storeId },
+      select: { settings: true },
+    });
+    const tz = (settings?.settings as any)?.general?.timezone as
+      | string
+      | undefined;
+    return tz && /^[A-Za-z0-9_/+-]+$/.test(tz) ? tz : 'America/Bogota';
+  }
+
+  /**
+   * Hourly sales trend for the current day in the store's LOCAL timezone.
+   * Buckets run from 00:00 to the current local hour (inclusive); missing
+   * hours are zero-filled. Independent of the UTC parseDateRange/fillTimeSeries
+   * path used by the other granularities.
+   */
+  private async getHourlyTrendsForToday(storeId: number, channel?: string) {
+    const timezone = await this.resolveStoreTimezone(storeId);
+    const tzSql = Prisma.raw(`'${timezone}'`);
+
+    const results = await (this.prisma.withoutScope() as any).$queryRaw<
+      Array<{
+        hour_local: number;
+        revenue: any;
+        order_count: bigint;
+        units_sold: any;
+      }>
+    >`
+      SELECT
+        EXTRACT(HOUR FROM (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql}))::int AS hour_local,
+        COALESCE(SUM(o.grand_total), 0) AS revenue,
+        COUNT(DISTINCT o.id) AS order_count,
+        COALESCE(SUM(oi.quantity), 0) AS units_sold
+      FROM orders o
+      LEFT JOIN order_items oi ON oi.order_id = o.id
+      WHERE o.store_id = ${storeId}
+        AND o.state IN ('delivered', 'finished')
+        AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql})::date
+            = (NOW() AT TIME ZONE ${tzSql})::date
+        ${channel ? Prisma.sql`AND o.channel = ${channel}::order_channel_enum` : Prisma.empty}
+      GROUP BY 1
+      ORDER BY 1 ASC
+    `;
+
+    // Current local date + hour: label the buckets and know where to stop.
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      hour12: false,
+    }).formatToParts(new Date());
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00';
+    const dateStr = `${get('year')}-${get('month')}-${get('day')}`;
+    let currentHour = parseInt(get('hour'), 10);
+    if (Number.isNaN(currentHour) || currentHour === 24) currentHour = 0;
+
+    const byHour = new Map<number, any>();
+    for (const r of results) byHour.set(Number(r.hour_local), r);
+
+    const filled: Array<{
+      period: string;
+      revenue: number;
+      orders: number;
+      units_sold: number;
+      average_order_value: number;
+    }> = [];
+    for (let h = 0; h <= currentHour; h++) {
+      const r = byHour.get(h);
+      const revenue = r ? Number(r.revenue) : 0;
+      const orders = r ? Number(r.order_count) : 0;
+      filled.push({
+        period: `${dateStr}T${String(h).padStart(2, '0')}:00`,
+        revenue,
+        orders,
+        units_sold: r ? Number(r.units_sold) : 0,
+        average_order_value: orders > 0 ? revenue / orders : 0,
+      });
+    }
+    return filled;
   }
 
   async getSalesByCustomer(query: SalesAnalyticsQueryDto) {

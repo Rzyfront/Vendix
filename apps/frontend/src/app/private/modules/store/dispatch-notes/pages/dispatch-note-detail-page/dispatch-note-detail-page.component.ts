@@ -9,7 +9,14 @@ import { DispatchNotePdfViewerComponent } from '../../components/dispatch-note-p
 import { DeliverModalComponent } from '../../components/deliver-modal/deliver-modal.component';
 import { VoidModalComponent } from '../../components/void-modal/void-modal.component';
 import { InvoiceModalComponent } from '../../components/invoice-modal/invoice-modal.component';
-import { DispatchNote } from '../../interfaces/dispatch-note.interface';
+import {
+  DispatchNoteSerialsModalComponent,
+  DispatchNoteSerialLine,
+} from '../../components/dispatch-note-serials-modal/dispatch-note-serials-modal.component';
+import {
+  DispatchNote,
+  ConfirmDispatchNoteItemSerialsDto,
+} from '../../interfaces/dispatch-note.interface';
 
 @Component({
   selector: 'app-dispatch-note-detail-page',
@@ -20,6 +27,7 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
     DeliverModalComponent,
     VoidModalComponent,
     InvoiceModalComponent,
+    DispatchNoteSerialsModalComponent,
   ],
   template: `
     <div class="min-h-screen" style="background-color: var(--color-background)">
@@ -74,6 +82,13 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
         ></app-invoice-modal>
       }
 
+      <!-- Serial Selection Modal (QUI-431) -->
+      <app-dispatch-note-serials-modal
+        [(isOpen)]="showSerialsModal"
+        [items]="serialLines()"
+        (confirmed)="onSerialsConfirmed($event)"
+      ></app-dispatch-note-serials-modal>
+
       <!-- PDF Viewer -->
       @if (showPdfViewer() && pdfNoteId()) {
         <app-dispatch-note-pdf-viewer
@@ -99,6 +114,10 @@ export class DispatchNoteDetailPageComponent {
   showPdfViewer = signal(false);
   pdfNoteId = signal<number | null>(null);
 
+  // QUI-431 — serial-selection modal state for confirming serialized notes.
+  showSerialsModal = signal(false);
+  serialLines = signal<DispatchNoteSerialLine[]>([]);
+
   constructor() {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (id) {
@@ -123,6 +142,16 @@ export class DispatchNoteDetailPageComponent {
   }
 
   async handleConfirm(dn: DispatchNote): Promise<void> {
+    // QUI-431 — if any line is serialized, collect serials via the modal
+    // instead of the plain confirm dialog. The backend requires exactly
+    // `dispatched_quantity` serials per serialized line (SERIAL_REQUIRED_001).
+    const lines = this.buildSerialLines(dn);
+    if (lines.length > 0) {
+      this.serialLines.set(lines);
+      this.showSerialsModal.set(true);
+      return;
+    }
+
     const confirmed = await this.dialogService.confirm({
       title: 'Confirmar Remision',
       message: `Confirmar la remision ${dn.dispatch_number}?`,
@@ -131,15 +160,49 @@ export class DispatchNoteDetailPageComponent {
     });
     if (!confirmed) return;
 
-    this.dispatchNotesService.confirm(dn.id)
+    this._doConfirm(dn.id);
+  }
+
+  /** QUI-431 — modal emitted the assembled serials → confirm with item_serials. */
+  onSerialsConfirmed(item_serials: ConfirmDispatchNoteItemSerialsDto[]): void {
+    const dn = this.dispatch_note();
+    if (!dn) return;
+    this.showSerialsModal.set(false);
+    this._doConfirm(dn.id, { item_serials });
+  }
+
+  /** Shared confirm call (with or without serials). */
+  private _doConfirm(
+    id: number,
+    body?: { item_serials: ConfirmDispatchNoteItemSerialsDto[] },
+  ): void {
+    this.dispatchNotesService.confirm(id, body)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Remision confirmada');
-          this.loadDispatchNote(dn.id);
+          this.loadDispatchNote(id);
         },
-        error: () => this.toastService.error('Error al confirmar la remision'),
+        error: (err: Error) =>
+          this.toastService.error(err?.message || 'Error al confirmar la remision'),
       });
+  }
+
+  /**
+   * QUI-431 — Extract the serialized lines from a dispatch note. A line is
+   * serialized when its included product has `requires_serial_numbers`.
+   */
+  private buildSerialLines(dn: DispatchNote): DispatchNoteSerialLine[] {
+    return (dn.dispatch_note_items ?? [])
+      .filter((item) => item.product?.requires_serial_numbers === true)
+      .map((item) => ({
+        dispatch_note_item_id: item.id,
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? undefined,
+        location_id: item.location_id ?? dn.dispatch_location_id ?? undefined,
+        dispatched_quantity: item.dispatched_quantity,
+        product_name: item.product?.name ?? `Producto #${item.product_id}`,
+      }));
   }
 
   openDeliverModal(dn: DispatchNote): void {

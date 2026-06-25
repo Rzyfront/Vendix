@@ -13,31 +13,9 @@
     "
     icon="receipt"
     variant="glass"
-    [actions]="[
-      { id: 'back', label: 'Volver', icon: 'arrow-left', variant: 'ghost' },
-      { id: 'add', label: 'Agregar items', icon: 'plus', variant: 'primary' },
-      {
-        id: 'fire',
-        label: 'Enviar a cocina',
-        icon: 'flame',
-        variant: 'secondary',
-        disabled: !hasUnfiredItems() || isClosed(),
-      },
-      {
-        id: 'split',
-        label: 'Dividir cuenta',
-        icon: 'split',
-        variant: 'ghost',
-        disabled: items().length < 2 || isClosed(),
-      },
-      {
-        id: 'close',
-        label: 'Cerrar mesa',
-        icon: 'lock',
-        variant: 'danger',
-        disabled: isClosed(),
-      },
-    ]"
+    [showBackButton]="true"
+    backRoute="/admin/restaurant-ops/tables"
+    [actions]="headerActions()"
     (actionClicked)="onHeaderAction($event)"
   />
 
@@ -49,126 +27,320 @@
       </div>
     } @else if (session()) {
       <div class="grid gap-4 md:grid-cols-3">
-        <!-- Order summary -->
+        <!-- ── Resumen ──────────────────────────────────────────────── -->
         <app-card title="Resumen" [responsive]="true">
-          <div class="summary">
-            <div class="row">
-              <span>Estado de la orden</span>
-              <app-badge [variant]="isClosed() ? 'neutral' : 'primary'">
-                {{ session()?.order?.state ?? '—' }}
-              </app-badge>
-            </div>
-            <div class="row">
-              <span>Comensales</span>
-              <span>{{ session()?.guest_count ?? '—' }}</span>
-            </div>
-            <div class="row">
-              <span>Items en la cuenta</span>
-              <span>{{ items().length }}</span>
-            </div>
-            <div class="row total">
-              <span>Total</span>
-              <strong>{{ orderTotal() | currency }}</strong>
-            </div>
-            <div class="row">
-              <span>Sesión</span>
+          <!-- Estado de la orden (styled summary panel) -->
+          <div class="summary-panel">
+            <!-- Hero: total + payment status -->
+            <div class="summary-hero">
+              <div class="hero-total">
+                <span class="hero-label">Total de la cuenta</span>
+                <strong class="hero-amount">{{ orderTotal() | currency }}</strong>
+              </div>
               <app-badge
-                [variant]="isClosed() ? 'success' : 'info'"
+                class="hero-badge"
+                [variant]="isClosed() ? 'success' : 'warning'"
               >
-                {{ isClosed() ? 'Cerrada' : 'Abierta' }}
+                <app-icon
+                  [name]="isClosed() ? 'circle-check' : 'clock'"
+                  [size]="12"
+                ></app-icon>
+                {{ isClosed() ? 'Pagada / Cerrada' : 'Pago pendiente' }}
               </app-badge>
             </div>
+
+            <!-- Detail rows -->
+            <dl class="summary-grid">
+              <div class="cell">
+                <dt>Estado de la orden</dt>
+                <dd>
+                  <app-badge [variant]="isClosed() ? 'neutral' : 'primary'">
+                    {{ orderStateLabel() }}
+                  </app-badge>
+                </dd>
+              </div>
+
+              <div class="cell">
+                <dt>Cliente</dt>
+                <dd>
+                  @if (customerName(); as name) {
+                    <span class="customer-name">
+                      <app-icon name="user-check" [size]="14"></app-icon>
+                      {{ name }}
+                    </span>
+                  } @else {
+                    <span class="muted">Anónimo</span>
+                  }
+                </dd>
+              </div>
+
+              <div class="cell">
+                <dt>Comensales</dt>
+                <dd>{{ session()?.guest_count ?? '—' }}</dd>
+              </div>
+
+              <div class="cell">
+                <dt>Items</dt>
+                <dd>{{ items().length }}</dd>
+              </div>
+            </dl>
           </div>
+
+          <!--
+            Estado de la mesa: the collapsed timeline is the SOLE display of
+            the current status; the "Cambiar estado" selector below is the
+            SOLE control to change it (deduped — no redundant button row).
+          -->
+          <div class="status-group">
+            <span class="group-label">Estado de la mesa</span>
+            <app-timeline
+              [steps]="tableStatusSteps()"
+              [collapsible]="true"
+              expand_label="Ver estados de la mesa"
+              collapse_label="Ocultar estados"
+              size="sm"
+            />
+            @if (!isClosed()) {
+              <app-selector
+                class="status-selector"
+                size="sm"
+                placeholder="Cambiar estado de la mesa"
+                [options]="tableStatusOptions"
+                (valueChange)="onTableStatusChange($event)"
+              />
+            }
+          </div>
+
+          <!-- Secondary actions (Cerrar mesa moved to sticky header) -->
+          @if (!isClosed()) {
+            <div class="summary-actions">
+              <app-button
+                variant="outline"
+                size="sm"
+                [disabled]="items().length < 2"
+                (clicked)="openSplit()"
+              >
+                <app-icon slot="icon" name="split" [size]="14"></app-icon>
+                Dividir cuenta
+              </app-button>
+
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="openAssignCustomer()"
+              >
+                <app-icon slot="icon" name="user-plus" [size]="14"></app-icon>
+                {{ customerName() ? 'Cambiar cliente' : 'Asignar cliente' }}
+              </app-button>
+            </div>
+          }
 
           @if (hasUnfiredItems() && !isClosed()) {
             <div class="unfired-hint">
               <app-icon name="flame" [size]="14"></app-icon>
               <span>
-                Hay items sin enviar a cocina. Los insumos se descuentan
-                al hacer fire.
+                Hay platos sin enviar a cocina. Los insumos se descuentan al
+                hacer fire.
               </span>
             </div>
           }
         </app-card>
 
-        <!-- Items -->
-        <app-card
-          [title]="'Items (' + items().length + ')'"
-          class="md:col-span-2"
-          [responsive]="true"
-        >
+        <!-- ── Items ────────────────────────────────────────────────── -->
+        <app-card class="md:col-span-2" [responsive]="true">
+          <!-- Card header: title + "Agregar items" (moved from sticky header) -->
+          <div slot="header" class="items-card-header">
+            <h3 class="items-card-title">Items ({{ items().length }})</h3>
+            <app-button
+              variant="primary"
+              size="sm"
+              [disabled]="isClosed()"
+              (clicked)="openAddItems()"
+            >
+              <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+              Agregar items
+            </app-button>
+          </div>
+
           @if (items().length === 0) {
             <div class="empty">
-              <app-icon name="inbox" [size]="32"></app-icon>
-              <p>No hay items en esta cuenta todavía.</p>
-              <app-button variant="primary" (clicked)="openAddItems()">
-                Agregar el primer item
-              </app-button>
-            </div>
-          } @else {
-            <div class="item-toolbar">
-              <app-button
-                variant="ghost"
-                size="sm"
-                (clicked)="selectAllUnfired()"
-              >
-                Seleccionar sin enviar
-              </app-button>
-              <app-button
-                variant="ghost"
-                size="sm"
-                (clicked)="clearSelection()"
-                [disabled]="selectedItemIds().size === 0"
-              >
-                Limpiar selección
-              </app-button>
-            </div>
-
-            <div class="item-list">
-              @for (
-                item of items();
-                track trackById($index, item)
-              ) {
-                <div
-                  class="item-row"
-                  [class.is-selected]="isSelected(item.id)"
-                  [class.is-fired]="item.inventory_consumed_at_fire"
-                  (click)="toggleItemSelection(item.id)"
-                >
-                  <div class="item-toggle" (click)="$event.stopPropagation()">
-                    <app-toggle
-                      [checked]="isSelected(item.id)"
-                      [disabled]="item.inventory_consumed_at_fire"
-                      [ariaLabel]="'Seleccionar ' + item.product_name"
-                      (changed)="toggleItemSelection(item.id)"
-                    ></app-toggle>
-                  </div>
-                  <div class="item-info">
-                    <span class="name">{{ item.product_name }}</span>
-                    <span class="qty">× {{ item.quantity }}</span>
-                  </div>
-                  <div class="item-status">
-                    @if (item.inventory_consumed_at_fire) {
-                      <app-badge variant="success">
-                        <app-icon name="flame" [size]="12"></app-icon>
-                        Enviado
-                      </app-badge>
-                    } @else {
-                      <app-badge variant="neutral">Pendiente</app-badge>
-                    }
-                  </div>
-                  <div class="item-price">
-                    {{ +item.total_price | currency }}
-                  </div>
-                </div>
+              <div class="empty-icon">
+                <app-icon name="inbox" [size]="28"></app-icon>
+              </div>
+              <p class="empty-title">Aún no hay platos en la cuenta</p>
+              <p class="empty-sub">
+                Agrega items para empezar a tomar el pedido de esta mesa.
+              </p>
+              @if (!isClosed()) {
+                <app-button variant="primary" (clicked)="openAddItems()">
+                  <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+                  Agregar el primer plato
+                </app-button>
               }
             </div>
+          } @else {
+            <!--
+              Batch fire (secondary, discreet). Per-dish fire on each row
+              covers the common case; this only appears while there are
+              pending dishes. Toggling on reveals checkboxes + a batch CTA.
+            -->
+            @if (!isClosed() && pendingCount() > 0) {
+              <div class="batch-bar" [class.is-active]="selectionMode()">
+                @if (!selectionMode()) {
+                  <span class="batch-hint">
+                    {{ pendingCount() }} plato(s) sin enviar
+                  </span>
+                  <button
+                    type="button"
+                    class="batch-toggle"
+                    (click)="toggleSelectionMode()"
+                  >
+                    <app-icon name="check-square" [size]="14"></app-icon>
+                    Enviar varios a la vez
+                  </button>
+                } @else {
+                  <label class="batch-select-all">
+                    <app-toggle
+                      [checked]="allPendingSelected()"
+                      ariaLabel="Seleccionar todos los platos pendientes"
+                      (changed)="toggleSelectAllPending()"
+                    ></app-toggle>
+                    <span>Seleccionar todos los pendientes</span>
+                  </label>
+
+                  <div class="batch-actions">
+                    <span class="batch-count">
+                      {{ selectedCount() }} seleccionado(s)
+                    </span>
+                    <app-button
+                      variant="secondary"
+                      size="sm"
+                      [loading]="isFiring() && firingItemId() === null"
+                      [disabled]="selectedCount() === 0"
+                      (clicked)="fireSelected()"
+                    >
+                      <app-icon slot="icon" name="flame" [size]="14"></app-icon>
+                      Enviar {{ selectedCount() }} a cocina
+                    </app-button>
+                    <app-button
+                      variant="ghost"
+                      size="sm"
+                      (clicked)="exitSelectionMode()"
+                    >
+                      Cancelar
+                    </app-button>
+                  </div>
+                }
+              </div>
+            }
+
+            <ul class="item-list" role="list">
+              @for (item of items(); track trackById($index, item)) {
+                <li
+                  class="item-row"
+                  [class.is-selected]="isSelected(item.id)"
+                  [class.is-fired]="isItemFired(item)"
+                  [class.selectable]="
+                    selectionMode() && !isClosed() && !isItemFired(item)
+                  "
+                  (click)="
+                    selectionMode() && !isItemFired(item)
+                      ? toggleItemSelection(item.id)
+                      : null
+                  "
+                >
+                  <!-- Batch checkbox (only in selection mode, for pending) -->
+                  @if (selectionMode() && !isClosed() && !isItemFired(item)) {
+                    <div
+                      class="item-check"
+                      (click)="$event.stopPropagation()"
+                    >
+                      <app-toggle
+                        [checked]="isSelected(item.id)"
+                        [ariaLabel]="'Seleccionar ' + item.product_name"
+                        (changed)="toggleItemSelection(item.id)"
+                      ></app-toggle>
+                    </div>
+                  }
+
+                  <!-- Quantity chip -->
+                  <div class="item-qty" aria-hidden="true">
+                    {{ item.quantity }}×
+                  </div>
+
+                  <!-- Name + price -->
+                  <div class="item-main">
+                    <span class="name">{{ item.product_name }}</span>
+                    <span class="price">{{ +item.total_price | currency }}</span>
+                  </div>
+
+                  <!-- Kitchen status -->
+                  <div class="item-status">
+                    @if (kitchenStatusFor(item); as status) {
+                      <app-badge [variant]="kitchenBadgeVariant(status)">
+                        <app-icon name="chef-hat" [size]="12"></app-icon>
+                        {{ kitchenStatusLabel(status) }}
+                      </app-badge>
+                    } @else {
+                      <span class="pending-tag">
+                        <app-icon name="clock" [size]="12"></app-icon>
+                        Sin enviar
+                      </span>
+                    }
+                  </div>
+
+                  <!-- Per-dish primary action (hidden in selection mode) -->
+                  @if (!isClosed() && !selectionMode()) {
+                    <div class="item-action" (click)="$event.stopPropagation()">
+                      @if (!isItemFired(item)) {
+                        <app-button
+                          variant="secondary"
+                          size="sm"
+                          [loading]="isFiring() && firingItemId() === item.id"
+                          (clicked)="fireItem(item)"
+                        >
+                          <app-icon
+                            slot="icon"
+                            name="flame"
+                            [size]="14"
+                          ></app-icon>
+                          Enviar a cocina
+                        </app-button>
+                      } @else if (canDeliver(item)) {
+                        <app-button
+                          variant="success"
+                          size="sm"
+                          [loading]="
+                            deliveringTicketId() != null &&
+                            kitchenStatusFor(item) !== 'delivered'
+                          "
+                          (clicked)="markDelivered(item)"
+                        >
+                          <app-icon
+                            slot="icon"
+                            name="check"
+                            [size]="14"
+                          ></app-icon>
+                          Marcar entregado
+                        </app-button>
+                      } @else {
+                        <span class="item-done">
+                          <app-icon name="circle-check" [size]="14"></app-icon>
+                          Entregado
+                        </span>
+                      }
+                    </div>
+                  }
+                </li>
+              }
+            </ul>
           }
         </app-card>
       </div>
     }
   </div>
 
+  <!-- ── Modals ─────────────────────────────────────────────────────── -->
   <app-add-items-modal
     [isOpen]="isAddItemsOpen()"
     [loading]="isAddingItems()"
@@ -184,5 +356,24 @@
     (isOpenChange)="isSplitOpen.set($event)"
     (splitByItems)="onSplitByItems($event)"
     (splitByAmount)="onSplitByAmount($event)"
+  />
+
+  @if (checkoutEnabled()) {
+    <app-table-payment-modal
+      [isOpen]="isPayOpen()"
+      [total]="orderTotal()"
+      [tableName]="session()?.table?.name ?? ''"
+      [isProcessing]="isPaying()"
+      (isOpenChange)="isPayOpen.set($event)"
+      (pay)="onPay($event)"
+    />
+  }
+
+  <app-assign-customer-modal
+    [isOpen]="isAssignCustomerOpen()"
+    [current]="customer()"
+    [isProcessing]="isAssigningCustomer()"
+    (isOpenChange)="isAssignCustomerOpen.set($event)"
+    (assign)="onAssignCustomer($event)"
   />
 </div>

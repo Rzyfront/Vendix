@@ -683,6 +683,11 @@ export class PaymentsService {
           user,
         ))!;
         const order = orderCreation.order;
+        // QUI-431 — ¿la venta tiene productos serializados? Calculado UNA vez
+        // dentro de `createOrUpdateOrderFromPos` (antes de crear la orden, para
+        // poder forzar su delivery_type) y reutilizado aquí en el gate de
+        // inventario (paso 3) y la máquina de estados (`deferToFulfillment`).
+        const hasSerialized = orderCreation.hasSerialized;
 
         // Plan KDS fire-flows (B5): the auto-fire result captured inside
         // the larger payment $transaction. Defaults to null when the store
@@ -1047,7 +1052,10 @@ export class PaymentsService {
             tx,
             order.id,
             'succeeded',
-            order.delivery_type,
+            // QUI-431 — difiere a fulfillment para domicilio O serializado.
+            // OJO: tras forzar el delivery_type, order.delivery_type ya es
+            // 'pickup' para serializado, por eso se incluye `hasSerialized`.
+            order.delivery_type === 'home_delivery' || hasSerialized,
             hasKitchenItems,
           );
         } else if (isDigitalPayment) {
@@ -1056,7 +1064,8 @@ export class PaymentsService {
             tx,
             order.id,
             'pending_payment',
-            order.delivery_type,
+            // QUI-431 — difiere a fulfillment para domicilio O serializado.
+            order.delivery_type === 'home_delivery' || hasSerialized,
             hasKitchenItems,
           );
         } else if (!createPosPaymentDto.is_draft) {
@@ -1066,7 +1075,8 @@ export class PaymentsService {
             tx,
             order.id,
             'pending_payment',
-            order.delivery_type,
+            // QUI-431 — difiere a fulfillment para domicilio O serializado.
+            order.delivery_type === 'home_delivery' || hasSerialized,
             hasKitchenItems,
           );
         }
@@ -1074,9 +1084,15 @@ export class PaymentsService {
         // 3. Update inventory only when product is physically delivered
         // Direct delivery with payment = finished = product left our hands
         // Any other flow (home_delivery, credit sale) = keep reservation until delivery/cancellation
+        // QUI-431 — los productos serializados NO se entregan/consumen al
+        // instante: se cobran pero la reserva queda ACTIVA y el serial se
+        // registra luego en una remisión. Por eso `!hasSerialized` excluye la
+        // venta serializada de `updateInventoryFromOrder` (no se consume stock
+        // ni se marcan seriales como vendidos en este punto).
         const isDirectDeliveryFinished =
           createPosPaymentDto.requires_payment &&
-          order.delivery_type !== 'home_delivery';
+          order.delivery_type !== 'home_delivery' &&
+          !hasSerialized;
 
 
         if (createPosPaymentDto.update_inventory && isDirectDeliveryFinished) {
@@ -2420,6 +2436,10 @@ export class PaymentsService {
     dtoStoreId: number,
   ): Promise<{
     order: any;
+    // QUI-431 — alineado con la rama de venta fresca (`createOrUpdateOrderFromPos`)
+    // para que el caller lea la misma forma; aquí solo se calcula sobre las
+    // líneas nuevas que el DTO añadió al cierre de mesa.
+    hasSerialized: boolean;
     promotionsSnapshot: any[];
     appliedPromotions: any[];
     couponInfo: { coupon_id: number | null; coupon_code: string | null; discount_amount: number };
@@ -2655,8 +2675,23 @@ export class PaymentsService {
       data: { status: 'cleaning', updated_at: new Date() },
     });
 
+    // QUI-431 — detección de serializados sobre TODAS las líneas del pedido de
+    // la mesa (las que ya vivían en el draft + las nuevas del cierre), no solo
+    // `dto.items`. Un serializado agregado en cualquier momento de la sesión
+    // debe disparar el desvío a remisión; si solo miráramos las líneas del
+    // cierre, una unidad serializada del draft se consumiría por FIFO silencioso
+    // en lugar de diferirse. `updated.order_items` es el set persistido tras el
+    // merge (incluye viejas + nuevas con IDs reales).
+    const hasSerialized = await this.orderHasSerializedItems(
+      tx,
+      ((updated as any).order_items ?? []).map((i: any) => ({
+        product_id: i.product_id,
+      })) as PosOrderItemDto[],
+    );
+
     return {
       order: updated,
+      hasSerialized,
       promotionsSnapshot: promotionQuote.order_promotions_snapshot ?? [],
       appliedPromotions: promotionQuote.applied_promotions ?? [],
       couponInfo,
@@ -2704,6 +2739,12 @@ export class PaymentsService {
         { reason: 'items_required' },
       );
     }
+
+    // QUI-431 — ¿Hay productos serializados en esta venta? Se computa UNA vez
+    // ANTES de crear la orden porque condiciona el delivery_type persistido
+    // (abajo). Se retorna al caller (`processPosPayment`) para reutilizarlo en
+    // el gate de inventario y la máquina de estados sin re-consultar la BD.
+    const hasSerialized = await this.orderHasSerializedItems(tx, items);
 
     let retries = 3;
     let orderNumber: string;
@@ -2809,7 +2850,18 @@ export class PaymentsService {
           internal_notes: dto.internal_notes,
           notes: dto.notes,
           // Shipping fields (for delivery orders)
-          delivery_type: dto.delivery_type || 'direct_delivery',
+          // QUI-431 — Una venta con productos serializados NO se entrega al
+          // instante en el mostrador: el serial concreto se registra después en
+          // una remisión. Por eso se difiere a fulfillment. `home_delivery` se
+          // respeta tal cual (ya es un flujo diferido con su propia logística);
+          // cualquier otro tipo (direct_delivery / pickup / other) con
+          // serializado se fuerza a `pickup`, porque pickup ES elegible para
+          // remisión y direct_delivery NO lo es.
+          delivery_type: hasSerialized
+            ? (dto.delivery_type === 'home_delivery'
+                ? 'home_delivery'
+                : 'pickup')
+            : dto.delivery_type || 'direct_delivery',
           payment_form: dto.is_draft
             ? null
             : dto.payment_form || (dto.requires_payment ? '1' : '2'),
@@ -2857,6 +2909,9 @@ export class PaymentsService {
 
         return {
           order,
+          // QUI-431 — se propaga al caller para reutilizar la detección de
+          // serializados en el gate de inventario y la máquina de estados.
+          hasSerialized,
           promotionsSnapshot: promotionQuote.order_promotions_snapshot,
           appliedPromotions: promotionQuote.applied_promotions,
           couponInfo,
@@ -3065,7 +3120,7 @@ export class PaymentsService {
     tx: any,
     orderId: number,
     paymentState: string,
-    deliveryType?: string,
+    deferToFulfillment = false,
     hasKitchenItems = false,
   ) {
     let orderState: string;
@@ -3080,8 +3135,13 @@ export class PaymentsService {
           // do NOT set `completed_at` here: the sale is paid but the lifecycle
           // is still open (cocina pendiente).
           orderState = 'processing';
-        } else if (deliveryType === 'home_delivery') {
-          // Shipping order — needs to be prepared and dispatched
+        } else if (deferToFulfillment) {
+          // QUI-431 — la entrega se difiere a una etapa posterior de
+          // fulfillment (despacho a domicilio O producto serializado que se
+          // registra en una remisión). Pagada pero NO terminada: queda en
+          // `processing` sin `completed_at`. Esta rama consolida el antiguo
+          // caso exclusivo de `home_delivery`; el caller decide la condición
+          // (`order.delivery_type === 'home_delivery' || hasSerialized`).
           orderState = 'processing';
         } else if (await this.hasPendingKitchenItemsTx(tx, orderId)) {
           // F2-guard (POS payment, AUTOMATIC path): defensive backstop.
@@ -3281,6 +3341,37 @@ export class PaymentsService {
   }
 
   /**
+   * QUI-431 — ¿La venta POS incluye al menos un producto serializado?
+   *
+   * Una sola query batch sobre los product_id de las líneas del DTO contra
+   * `products.requires_serial_numbers` (el flag es a nivel de PRODUCTO, no de
+   * variante). Se computa UNA vez (antes de crear la orden) y se reutiliza en
+   * el forzado de delivery_type, el gate de inventario y la máquina de estados.
+   *
+   * Las líneas sin product_id (productos custom) se ignoran. Devuelve false
+   * cuando no hay product_ids o ninguno requiere seriales.
+   */
+  private async orderHasSerializedItems(
+    tx: any,
+    posItems?: PosOrderItemDto[],
+  ): Promise<boolean> {
+    const productIds = Array.from(
+      new Set(
+        (posItems ?? [])
+          .map((i) => i.product_id)
+          .filter((id): id is number => id != null),
+      ),
+    );
+    if (productIds.length === 0) return false;
+
+    const found = await tx.products.findMany({
+      where: { id: { in: productIds }, requires_serial_numbers: true },
+      select: { id: true },
+    });
+    return found.length > 0;
+  }
+
+  /**
    * QUI-431 — Consume the serial numbers for ONE order_item of a serialized
    * product, inside the caller's transaction (`tx`).
    *
@@ -3346,8 +3437,15 @@ export class PaymentsService {
         tx,
       );
     } else {
-      // No manual selection (ecommerce / channels without a serial picker):
-      // auto-select FIFO from the sellable pool at the sale location.
+      // QUI-431 — Se eliminó la rama que lanzaba SERIAL_REQUIRED_001 para
+      // "entrega directa". Es seguro porque ahora las ventas POS con productos
+      // serializados se DESVÍAN antes de llegar aquí: en `processPosPayment` el
+      // gate `isDirectDeliveryFinished` incluye `!hasSerialized`, así que
+      // `updateInventoryFromOrder` (único caller de este método) jamás se
+      // ejecuta para una venta serializada de mostrador (su stock queda
+      // reservado y el serial se registra luego en una remisión). El FIFO
+      // diferido de abajo solo aplica a canales no-POS (ecommerce / orden con
+      // despacho), donde la confirmación del serial ocurre al alistar/despachar.
       const available = await this.serialNumbers.listAvailable(
         product_id,
         location_id,

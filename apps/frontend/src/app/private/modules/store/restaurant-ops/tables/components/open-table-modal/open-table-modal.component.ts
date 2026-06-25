@@ -15,6 +15,8 @@ import {
   IconComponent,
 } from '../../../../../../../shared/components/index';
 import { Table, OpenTableSessionDto } from '../../interfaces';
+import { PosCustomerSelectorComponent } from '../../../../pos/components/pos-customer-selector/pos-customer-selector.component';
+import { PosCustomer } from '../../../../pos/models/customer.model';
 
 /**
  * Modal for opening a new table session.
@@ -33,6 +35,7 @@ import { Table, OpenTableSessionDto } from '../../interfaces';
     ButtonComponent,
     InputComponent,
     IconComponent,
+    PosCustomerSelectorComponent,
   ],
   template: `
     <app-modal
@@ -71,6 +74,36 @@ import { Table, OpenTableSessionDto } from '../../interfaces';
         />
       </form>
 
+      <!-- Cliente opcional asociado a la cuenta de la mesa -->
+      <div class="customer-block">
+        <div class="customer-label">
+          <app-icon name="user" [size]="16"></app-icon>
+          <span>Cliente (opcional)</span>
+        </div>
+        @if (selectedCustomer(); as c) {
+          <div class="customer-chip">
+            <div class="chip-info">
+              <app-icon name="user-check" [size]="16"></app-icon>
+              <span>{{ c.first_name }} {{ c.last_name ?? '' }}</span>
+            </div>
+            <app-button
+              variant="ghost"
+              size="sm"
+              (clicked)="clearCustomer()"
+            >
+              Quitar
+            </app-button>
+          </div>
+        } @else {
+          <app-pos-customer-selector
+            [selectedCustomer]="selectedCustomer()"
+            [allowAnonymous]="true"
+            (customerSelected)="onCustomerSelected($event)"
+            (customerCleared)="clearCustomer()"
+          />
+        }
+      </div>
+
       <div slot="footer" class="flex justify-end gap-2">
         <app-button variant="ghost" (clicked)="onCancel()">
           Cancelar
@@ -101,22 +134,42 @@ export class OpenTableModalComponent {
 
   readonly form: FormGroup;
 
+  /** Cliente opcional seleccionado para asociar a la sesión/orden. */
+  readonly selectedCustomer = signal<PosCustomer | null>(null);
+
   constructor() {
     this.form = this.fb.group({
       guest_count: [null as number | null],
     });
   }
 
+  onCustomerSelected(customer: PosCustomer): void {
+    this.selectedCustomer.set(customer);
+  }
+
+  clearCustomer(): void {
+    this.selectedCustomer.set(null);
+  }
+
   onCancel(): void {
+    this.selectedCustomer.set(null);
     this.isOpenChange.emit(false);
   }
 
   onSubmit(): void {
     if (this.form.invalid || !this.table()) return;
     const v = this.form.getRawValue() as { guest_count: number | null };
+    const customer = this.selectedCustomer();
+    const customerId =
+      customer &&
+      Number.isFinite(Number(customer.id)) &&
+      Number(customer.id) > 0
+        ? Number(customer.id)
+        : undefined;
     this.open.emit({
       table_id: this.table()!.id,
       guest_count: v.guest_count ?? undefined,
+      ...(customerId ? { customer_id: customerId } : {}),
     });
   }
 }

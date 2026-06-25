@@ -26,6 +26,14 @@ export interface TableSessionView {
     subtotal_amount: Prisma.Decimal | number;
     tax_amount: Prisma.Decimal | number;
     discount_amount: Prisma.Decimal | number;
+    // The order's customer (orders.customer_id is Int? nullable). The
+    // Prisma relation is named `users`; we remap it to `customer` here so
+    // the open-table consumer reads a stable field name.
+    customer: {
+      id: number;
+      first_name: string;
+      last_name: string;
+    } | null;
     order_items: Array<{
       id: number;
       product_id: number | null;
@@ -34,6 +42,20 @@ export interface TableSessionView {
       unit_price: Prisma.Decimal | number;
       total_price: Prisma.Decimal | number;
       inventory_consumed_at_fire: boolean;
+      // KDS state per dish (Restaurant Suite — Gap 2 pattern, mirrors
+      // orders.service.findOne). Ordered desc by id so the most recent
+      // ticket-item wins; empty for items never fired to the kitchen.
+      kitchen_ticket_items: Array<{
+        id: number;
+        status: string;
+        kitchen_ticket_id: number;
+        kitchen_ticket: {
+          id: number;
+          status: string;
+          daily_number: number | null;
+          fired_at: Date;
+        };
+      }>;
     }>;
   };
   table?: {
@@ -376,6 +398,16 @@ export class TableSessionsService {
             subtotal_amount: true,
             tax_amount: true,
             discount_amount: true,
+            // Customer of the draft order. orders.customer_id is Int?
+            // nullable; the Prisma relation is `users`. We remap it to
+            // `customer` below.
+            users: {
+              select: {
+                id: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
             order_items: {
               orderBy: { id: 'asc' },
               select: {
@@ -386,6 +418,25 @@ export class TableSessionsService {
                 unit_price: true,
                 total_price: true,
                 inventory_consumed_at_fire: true,
+                // KDS state per dish — same include shape as
+                // orders.service.findOne (Gap 2). Ordered desc by id so
+                // the most recent ticket-item leads the array.
+                kitchen_ticket_items: {
+                  orderBy: { id: 'desc' },
+                  select: {
+                    id: true,
+                    status: true,
+                    kitchen_ticket_id: true,
+                    kitchen_ticket: {
+                      select: {
+                        id: true,
+                        status: true,
+                        daily_number: true,
+                        fired_at: true,
+                      },
+                    },
+                  },
+                },
               },
             },
           },
@@ -403,6 +454,107 @@ export class TableSessionsService {
     if (!session) {
       throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
     }
-    return session;
+
+    // Remap the Prisma `users` relation to `customer` so the consumer
+    // reads a stable field name (orders' customer relation is `users`).
+    const { order, ...rest } = session;
+    return {
+      ...rest,
+      order: order
+        ? {
+            id: order.id,
+            state: order.state,
+            grand_total: order.grand_total,
+            subtotal_amount: order.subtotal_amount,
+            tax_amount: order.tax_amount,
+            discount_amount: order.discount_amount,
+            customer: order.users
+              ? {
+                  id: order.users.id,
+                  first_name: order.users.first_name,
+                  last_name: order.users.last_name,
+                }
+              : null,
+            order_items: order.order_items.map((it) => ({
+              id: it.id,
+              product_id: it.product_id,
+              product_name: it.product_name,
+              quantity: it.quantity,
+              unit_price: it.unit_price,
+              total_price: it.total_price,
+              inventory_consumed_at_fire: it.inventory_consumed_at_fire,
+              kitchen_ticket_items: it.kitchen_ticket_items.map((kti) => ({
+                id: kti.id,
+                status: kti.status,
+                kitchen_ticket_id: kti.kitchen_ticket_id,
+                kitchen_ticket: {
+                  id: kti.kitchen_ticket.id,
+                  status: kti.kitchen_ticket.status,
+                  daily_number: kti.kitchen_ticket.daily_number,
+                  fired_at: kti.kitchen_ticket.fired_at,
+                },
+              })),
+            })),
+          }
+        : undefined,
+    };
+  }
+
+  // ------------------------------------------------------------ customer
+  /**
+   * Assign (or detach) the customer of the draft order backing an open
+   * table session.
+   *
+   * Validation order mirrors `addItems`:
+   *   1. tenant context (scoped service).
+   *   2. session exists, belongs to the current store (findOne is scoped),
+   *      and is OPEN (closed_at IS NULL).
+   *   3. the customer exists (users.findUnique) when customerId != null.
+   *
+   * The mutation is a single `orders.customer_id` write on the linked
+   * order. Passing `null` detaches the customer (anonymous check).
+   */
+  async assignCustomer(
+    sessionId: number,
+    customerId: number | null,
+  ): Promise<TableSessionView> {
+    const { storeId } = this.requireContext();
+
+    // findOne is store-scoped (StorePrismaService), so a session from
+    // another store surfaces as TABLE_SESSION_NOT_FOUND.
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+    if (!session.order) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_NOT_FOUND);
+    }
+
+    // Validate the FK only when a customer is provided. Same pattern as
+    // OrdersService.create — `users` getter is unscoped, so findUnique by
+    // id is safe (no AND-wrap caveat).
+    if (customerId != null) {
+      const user = await this.prisma.users.findUnique({
+        where: { id: customerId },
+      });
+      if (!user) {
+        throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
+      }
+    }
+
+    // Tenant-guarded write: updateMany with the store filter so a cross
+    // store order can never be mutated.
+    await this.prisma.orders.updateMany({
+      where: { id: session.order_id, store_id: storeId },
+      data: { customer_id: customerId, updated_at: new Date() },
+    });
+
+    this.logger.log(
+      `Table session customer ${
+        customerId == null ? 'detached' : `set to ${customerId}`
+      }: session=${sessionId} order=${session.order_id}`,
+    );
+
+    return this.findOne(sessionId);
   }
 }

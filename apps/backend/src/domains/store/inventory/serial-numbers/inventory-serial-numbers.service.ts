@@ -9,6 +9,9 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   CreateInventorySerialNumberDto,
   GetSerialNumbersDto,
+  BulkBackfillSerialNumbersDto,
+  PatchSerialNumberDto,
+  SummarySerialNumbersDto,
 } from '../dto/create-inventory-serial-number.dto';
 
 /**
@@ -67,6 +70,19 @@ export class InventorySerialNumbersService {
     if (filters.batch_id) where.batch_id = filters.batch_id;
     if (filters.location_id) where.location_id = filters.location_id;
     if (filters.status) where.status = filters.status;
+    // QUI-431 — warranty_expiry range filter (inclusive). Only the bounds that
+    // were sent are applied. warranty_expiry is a DateTime column; @IsDateString
+    // strings parse to UTC instants via new Date(...) (no tz drift for instants).
+    if (filters.warranty_expiry_from || filters.warranty_expiry_to) {
+      const warranty: Prisma.DateTimeFilter = {};
+      if (filters.warranty_expiry_from) {
+        warranty.gte = new Date(filters.warranty_expiry_from);
+      }
+      if (filters.warranty_expiry_to) {
+        warranty.lte = new Date(filters.warranty_expiry_to);
+      }
+      where.warranty_expiry = warranty;
+    }
     if (filters.search) {
       where.OR = [
         { serial_number: { contains: filters.search, mode: 'insensitive' } },
@@ -170,6 +186,77 @@ export class InventorySerialNumbersService {
         status: serial_status_enum.in_stock,
       },
     });
+  }
+
+  /**
+   * QUI-431 — Aggregate summary of the serial pool for the current store.
+   *
+   * Store scope is enforced by the scoped client (relational via
+   * inventory_locations.store_id), exactly like list(). Optional product_id /
+   * location_id narrow the base where. Returns:
+   *   - total: all serials matching the scope/filters
+   *   - by_status: count per serial_status_enum value (every key defaults to 0)
+   *   - warranty_expired: serials whose warranty_expiry < now
+   *   - warranty_expiring_soon: serials with now <= warranty_expiry <= now + 30d
+   *
+   * by_status + total come from a single groupBy(['status']); the two warranty
+   * tallies are scope-aware count() calls layered on the same base where.
+   */
+  async summary(
+    filters: SummarySerialNumbersDto,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{
+    total: number;
+    by_status: Record<serial_status_enum, number>;
+    warranty_expired: number;
+    warranty_expiring_soon: number;
+  }> {
+    const prisma = this.client(tx);
+
+    const baseWhere: Prisma.inventory_serial_numbersWhereInput = {};
+    if (filters.product_id) baseWhere.product_id = filters.product_id;
+    if (filters.location_id) baseWhere.location_id = filters.location_id;
+
+    // Every enum key defaults to 0 so the shape is stable for the frontend.
+    const by_status: Record<serial_status_enum, number> = {
+      [serial_status_enum.in_stock]: 0,
+      [serial_status_enum.reserved]: 0,
+      [serial_status_enum.sold]: 0,
+      [serial_status_enum.returned]: 0,
+      [serial_status_enum.damaged]: 0,
+      [serial_status_enum.expired]: 0,
+      [serial_status_enum.in_transit]: 0,
+    };
+
+    const now = new Date();
+    const soon = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const [grouped, warranty_expired, warranty_expiring_soon] =
+      await Promise.all([
+        prisma.inventory_serial_numbers.groupBy({
+          by: ['status'],
+          where: baseWhere,
+          _count: true,
+        }),
+        prisma.inventory_serial_numbers.count({
+          where: { ...baseWhere, warranty_expiry: { lt: now } },
+        }),
+        prisma.inventory_serial_numbers.count({
+          where: { ...baseWhere, warranty_expiry: { gte: now, lte: soon } },
+        }),
+      ]);
+
+    let total = 0;
+    for (const row of grouped as Array<{
+      status: serial_status_enum;
+      _count: number;
+    }>) {
+      const count = typeof row._count === 'number' ? row._count : 0;
+      by_status[row.status] = count;
+      total += count;
+    }
+
+    return { total, by_status, warranty_expired, warranty_expiring_soon };
   }
 
   // ===========================================================================
@@ -308,6 +395,222 @@ export class InventorySerialNumbersService {
       }
     }
     return result;
+  }
+
+  // ===========================================================================
+  // Backfill / edit / delete over existing stock (QUI-431 continuation)
+  // ===========================================================================
+
+  /**
+   * Backfill serial identities over EXISTING on-hand stock for a
+   * product/variant at a location.
+   *
+   * Never mutates stock: this only registers WHICH individual units the
+   * existing on-hand quantity corresponds to. Parity guard (key rule):
+   * existing in_stock serials + new items MUST NOT exceed
+   * stock_levels.quantity_on_hand for that (product, variant, location);
+   * otherwise SERIAL_PARITY_001 is thrown and nothing is created.
+   *
+   * Each item is created `in_stock` reusing `createSerial`. A per-item P2002
+   * (globally unique serial_number) is captured into `failed` instead of
+   * aborting the whole batch. `warranty_expiry` (not handled by createSerial)
+   * is applied with a targeted scope-safe update when present.
+   *
+   * Wrapped in `$transaction` so the parity check and all inserts commit
+   * atomically (the scoped client's overridden $transaction keeps tenant
+   * isolation inside `tx`).
+   */
+  async bulkBackfill(dto: BulkBackfillSerialNumbersDto): Promise<{
+    created: number;
+    created_serials: any[];
+    failed: { serial_number: string; reason: string }[];
+  }> {
+    // Normalize input the same way the rest of the service does: trim, drop
+    // blanks, de-dupe case-insensitively (first occurrence wins).
+    const seen = new Set<string>();
+    const items = (dto.items ?? [])
+      .map((item) => ({
+        ...item,
+        serial_number: (item.serial_number ?? '').toString().trim(),
+      }))
+      .filter((item) => {
+        if (item.serial_number.length === 0) return false;
+        const key = item.serial_number.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+    if (items.length === 0) {
+      return { created: 0, created_serials: [], failed: [] };
+    }
+
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Parity guard: serials registered must not exceed units on hand.
+      const stockLevel = await (tx as any).stock_levels.findFirst({
+        where: {
+          product_id: dto.product_id,
+          product_variant_id: dto.product_variant_id ?? null,
+          location_id: dto.location_id,
+        },
+        select: { quantity_on_hand: true },
+      });
+      const onHand = stockLevel?.quantity_on_hand ?? 0;
+
+      const existing = await this.countInStock(
+        dto.product_id,
+        dto.location_id,
+        dto.product_variant_id,
+        tx,
+      );
+
+      if (existing + items.length > onHand) {
+        throw new VendixHttpException(
+          ErrorCodes.SERIAL_PARITY_001,
+          `No puedes registrar más seriales (${
+            existing + items.length
+          }) que unidades en stock (${onHand}) en esta ubicación`,
+          {
+            product_id: dto.product_id,
+            product_variant_id: dto.product_variant_id ?? null,
+            location_id: dto.location_id,
+            existing_serials: existing,
+            new_serials: items.length,
+            quantity_on_hand: onHand,
+          },
+        );
+      }
+
+      const created_serials: any[] = [];
+      const failed: { serial_number: string; reason: string }[] = [];
+
+      for (const item of items) {
+        try {
+          const row = await this.createSerial(
+            {
+              serial_number: item.serial_number,
+              product_id: dto.product_id,
+              product_variant_id: dto.product_variant_id,
+              location_id: dto.location_id,
+              status: serial_status_enum.in_stock,
+              cost: item.cost,
+              notes: item.notes,
+            },
+            tx,
+          );
+
+          // createSerial does not set warranty_expiry; apply it when present.
+          if (item.warranty_expiry) {
+            await (tx as any).inventory_serial_numbers.updateMany({
+              where: { id: row.id },
+              data: { warranty_expiry: new Date(item.warranty_expiry) },
+            });
+            row.warranty_expiry = new Date(item.warranty_expiry);
+          }
+
+          created_serials.push(row);
+        } catch (error: any) {
+          if (
+            error instanceof Prisma.PrismaClientKnownRequestError &&
+            error.code === 'P2002'
+          ) {
+            failed.push({
+              serial_number: item.serial_number,
+              reason: 'Serial number ya existe (debe ser único)',
+            });
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      return { created: created_serials.length, created_serials, failed };
+    });
+  }
+
+  /**
+   * Edit the descriptive fields of a serial (serial_number / notes / cost).
+   * Does NOT change status (that is PATCH /:id/status). When serial_number
+   * changes, a P2002 (global @unique) is re-thrown as SERIAL_DUP_001.
+   * Returns the updated serial via findOne.
+   */
+  async updateSerial(id: number, dto: PatchSerialNumberDto): Promise<any> {
+    // Ensure it exists & is in scope (throws INV_FIND_001 otherwise).
+    await this.findOne(id);
+
+    const data: Prisma.inventory_serial_numbersUpdateInput = {
+      updated_at: new Date(),
+    };
+    if (dto.serial_number !== undefined) {
+      data.serial_number = dto.serial_number.toString().trim();
+    }
+    if (dto.notes !== undefined) data.notes = dto.notes;
+    if (dto.cost !== undefined) data.cost = new Prisma.Decimal(dto.cost);
+    // QUI-431 — edit warranty_expiry. undefined => leave untouched; null/''
+    // => clear (NULL); a date string => persist as a Date instant.
+    if (dto.warranty_expiry !== undefined) {
+      data.warranty_expiry =
+        dto.warranty_expiry === null || dto.warranty_expiry === ''
+          ? null
+          : new Date(dto.warranty_expiry);
+    }
+
+    try {
+      // Scope-safe write: updateMany with the unique id, then re-read.
+      await (this.prisma as any).inventory_serial_numbers.updateMany({
+        where: { id },
+        data,
+      });
+    } catch (error: any) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new VendixHttpException(ErrorCodes.SERIAL_DUP_001, undefined, {
+          serial_id: id,
+          serial_number: data.serial_number,
+        });
+      }
+      throw error;
+    }
+
+    return this.findOne(id);
+  }
+
+  /**
+   * Delete a serial row. Only allowed when status === in_stock AND the serial
+   * is not linked to any sales/dispatch document (sales_document_serials).
+   * Never touches stock. Throws SERIAL_DELETE_BLOCKED_409 otherwise,
+   * INV_FIND_001 if absent.
+   */
+  async deleteSerial(id: number): Promise<{ success: true }> {
+    const serial = await this.findOne(id);
+
+    if (serial.status !== serial_status_enum.in_stock) {
+      throw new VendixHttpException(
+        ErrorCodes.SERIAL_DELETE_BLOCKED_409,
+        undefined,
+        { serial_id: id, status: serial.status },
+      );
+    }
+
+    const linkedCount = await (
+      this.prisma as any
+    ).sales_document_serials.count({
+      where: { serial_number_id: id },
+    });
+    if (linkedCount > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.SERIAL_DELETE_BLOCKED_409,
+        undefined,
+        { serial_id: id, linked_documents: linkedCount },
+      );
+    }
+
+    await (this.prisma as any).inventory_serial_numbers.deleteMany({
+      where: { id },
+    });
+    return { success: true };
   }
 
   // ===========================================================================

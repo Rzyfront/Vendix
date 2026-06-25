@@ -656,7 +656,14 @@ export class DispatchNotesService {
       order.shipping_address_snapshot,
       orderShippingRelation,
     );
+    // Excepción pickup (recogida en tienda): no hay dirección de entrega porque
+    // el cliente retira el pedido en el mostrador. La remisión documenta el
+    // handover + el registro de seriales, así que NO exigimos dirección. En ese
+    // caso customer_address_snapshot queda null y más abajo se persiste como
+    // Prisma.JsonNull. Para cualquier otro delivery_type (p.ej. home_delivery)
+    // la dirección sigue siendo obligatoria.
     if (
+      order.delivery_type !== 'pickup' &&
       !this.snapshotHasAddress(order.shipping_address_snapshot) &&
       !customer_address_snapshot
     ) {

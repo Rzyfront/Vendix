@@ -1255,6 +1255,10 @@ export class ProductsService {
             pricing_type: String(product.pricing_type),
             product_type: product.product_type,
             track_inventory: product.track_inventory,
+            // El POS lee este flag para abrir el modal obligatorio de captura
+            // de seriales; sin exponerlo aquí, el modal nunca se dispara y la
+            // venta de entrega directa procede sin verificar el serial.
+            requires_serial_numbers: product.requires_serial_numbers,
             available_for_ecommerce: product.available_for_ecommerce,
             is_featured: product.is_featured,
             allow_pos_price_override: product.allow_pos_price_override,
@@ -1409,6 +1413,10 @@ export class ProductsService {
           is_combo: product.is_combo,
           is_batch_produced: product.is_batch_produced,
           track_inventory: product.track_inventory,
+          // El POS lee este flag para abrir el modal obligatorio de captura
+          // de seriales; sin exponerlo aquí, el modal nunca se dispara y la
+          // venta de entrega directa procede sin verificar el serial.
+          requires_serial_numbers: product.requires_serial_numbers,
           available_for_ecommerce: product.available_for_ecommerce,
           is_featured: product.is_featured,
           allow_pos_price_override: product.allow_pos_price_override,
@@ -1543,7 +1551,9 @@ export class ProductsService {
         },
         stock_levels: {
           select: {
+            location_id: true,
             product_variant_id: true,
+            quantity_on_hand: true,
             quantity_available: true,
             quantity_reserved: true,
             reorder_point: true,
@@ -1645,6 +1655,10 @@ export class ProductsService {
       stock_uom_id: product.stock_uom_id,
       purchase_uom_id: product.purchase_uom_id,
       track_inventory: product.track_inventory,
+      // Flag de seriales. Se persiste vía `...productData` en update y vía el
+      // bloque explícito en create, pero el form de edición lo lee de ESTE
+      // mapeo de detalle al recargar; sin exponerlo aquí parecía "no guardarse".
+      requires_serial_numbers: product.requires_serial_numbers,
       available_for_ecommerce: product.available_for_ecommerce,
       is_featured: product.is_featured,
       allow_pos_price_override: product.allow_pos_price_override,

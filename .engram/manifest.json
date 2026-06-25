@@ -272,6 +272,14 @@
       "sessions": 1,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "520c7991",
+      "created_by": "rzy",
+      "created_at": "2026-06-24T02:28:03Z",
+      "sessions": 0,
+      "memories": 3,
+      "prompts": 0
     }
   ]
 }

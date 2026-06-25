@@ -22,6 +22,7 @@ import { ProductCardComponent } from '../../components/product-card/product-card
 import { HeroBannerComponent } from '../../components/hero-banner';
 import { CategoriesShowcaseComponent } from '../../components/categories-showcase/categories-showcase.component';
 import { BrandsShowcaseComponent } from '../../components/brands-showcase/brands-showcase.component';
+import { MenusShowcaseComponent } from '../../components/menus-showcase/menus-showcase.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
@@ -34,6 +35,8 @@ interface HomeSectionConfig {
   subtitle?: string;
   limit?: number;
   sort_order?: number;
+  /** Cartas only: 'hide' (off-schedule hidden) | 'badge' (shown with badge). */
+  availability_display?: 'hide' | 'badge';
 }
 
 interface HomeSectionsConfig {
@@ -42,6 +45,7 @@ interface HomeSectionsConfig {
   categories: HomeSectionConfig;
   brands: HomeSectionConfig;
   featured_products: HomeSectionConfig;
+  menus: HomeSectionConfig;
 }
 
 type HomeSectionKey = keyof HomeSectionsConfig;
@@ -85,6 +89,14 @@ const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
     limit: 16,
     sort_order: 50,
   },
+  menus: {
+    enabled: false,
+    title: 'Nuestras cartas',
+    subtitle: 'Descubre los platos disponibles según el horario',
+    limit: 8,
+    sort_order: 60,
+    availability_display: 'hide',
+  },
 };
 
 @Component({
@@ -96,6 +108,7 @@ const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
     HeroBannerComponent,
     CategoriesShowcaseComponent,
     BrandsShowcaseComponent,
+    MenusShowcaseComponent,
     ProductQuickViewModalComponent,
     ShareModalComponent,
     ButtonComponent,
@@ -261,6 +274,10 @@ export class HomeComponent implements OnInit {
             featured_products: {
               ...DEFAULT_HOME_SECTIONS.featured_products,
               ...(configuredSections.featured_products || {}),
+            },
+            menus: {
+              ...DEFAULT_HOME_SECTIONS.menus,
+              ...(configuredSections.menus || {}),
             },
           });
           this.loadFeaturedProducts();

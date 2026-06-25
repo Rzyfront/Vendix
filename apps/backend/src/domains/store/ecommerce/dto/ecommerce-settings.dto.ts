@@ -248,6 +248,17 @@ export class EcommerceHomeSectionDto {
   @Type(() => Number)
   @Min(1)
   sort_order?: number;
+
+  @ApiPropertyOptional({
+    example: 'hide',
+    enum: ['hide', 'badge'],
+    description:
+      'Cartas only: how to render dishes outside their schedule — hide them or show a "Disponible a las HH:mm" badge',
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(['hide', 'badge'])
+  availability_display?: string;
 }
 
 export class EcommerceHomeSectionsDto {
@@ -280,6 +291,16 @@ export class EcommerceHomeSectionsDto {
   @ValidateNested()
   @Type(() => EcommerceHomeSectionDto)
   featured_products?: EcommerceHomeSectionDto;
+
+  @ApiPropertyOptional({
+    type: EcommerceHomeSectionDto,
+    description:
+      'Restaurant menus (cartas) section — only honored when the store industry includes "restaurant"',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => EcommerceHomeSectionDto)
+  menus?: EcommerceHomeSectionDto;
 }
 
 /**

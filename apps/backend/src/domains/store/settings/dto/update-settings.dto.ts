@@ -14,6 +14,7 @@ import {
   PublicationSettingsDto,
   OperationsSettingsDto,
   DispatchSettingsDto,
+  RestaurantSettingsDto,
   PanelUISettingsDto,
   AccountingFlowsSettingsDto,
   ModuleFlowsSettingsDto,
@@ -93,6 +94,12 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => DispatchSettingsDto)
   dispatch?: DispatchSettingsDto;
+
+  @ApiProperty({ type: RestaurantSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RestaurantSettingsDto)
+  restaurant?: RestaurantSettingsDto;
 
   @ApiProperty({ type: PanelUISettingsDto, required: false })
   @IsOptional()
