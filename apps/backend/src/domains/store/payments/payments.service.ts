@@ -3233,6 +3233,9 @@ export class PaymentsService {
           item,
           reservation.location_id,
           posSelection,
+          // updateInventoryFromOrder solo corre en cierre de entrega directa
+          // (isDirectDeliveryFinished) → exigir seriales confirmados, sin FIFO.
+          true,
         );
       } else {
         // Fallback: reservation failed silently in Phase 1, use default location.
@@ -3273,6 +3276,8 @@ export class PaymentsService {
           item,
           defaultLocation.id,
           posSelection,
+          // Mismo caso: entrega directa → exigir seriales confirmados.
+          true,
         );
       }
     }
@@ -3308,6 +3313,7 @@ export class PaymentsService {
     orderItem: any,
     location_id: number,
     posSelection?: { serial_ids?: number[]; serial_numbers?: string[] },
+    enforceConfirmedSerials = false,
   ): Promise<void> {
     const product_id: number = orderItem.product_id;
     const variant_id: number | undefined =
@@ -3345,9 +3351,25 @@ export class PaymentsService {
         serialIds,
         tx,
       );
+    } else if (enforceConfirmedSerials) {
+      // Entrega directa (mostrador): el operador DEBE confirmar QUÉ serial
+      // físico sale. Nunca auto-asignar FIFO en silencio aquí, o la venta
+      // marcaría un serial arbitrario (incluso un placeholder de recepción)
+      // como vendido sin que nadie verifique la unidad entregada.
+      throw new VendixHttpException(
+        ErrorCodes.SERIAL_REQUIRED_001,
+        'Se requieren seriales confirmados para la entrega directa de un producto serializado',
+        {
+          product_id,
+          product_variant_id: variant_id ?? null,
+          location_id,
+          requested_qty: quantity,
+        },
+      );
     } else {
-      // No manual selection (ecommerce / channels without a serial picker):
-      // auto-select FIFO from the sellable pool at the sale location.
+      // Canales diferidos (ecommerce / orden con despacho): auto-seleccionar
+      // FIFO del pool vendible en la ubicación de venta (la confirmación del
+      // serial concreto ocurre al alistar/despachar, no en este punto).
       const available = await this.serialNumbers.listAvailable(
         product_id,
         location_id,

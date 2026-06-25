@@ -1255,6 +1255,10 @@ export class ProductsService {
             pricing_type: String(product.pricing_type),
             product_type: product.product_type,
             track_inventory: product.track_inventory,
+            // El POS lee este flag para abrir el modal obligatorio de captura
+            // de seriales; sin exponerlo aquí, el modal nunca se dispara y la
+            // venta de entrega directa procede sin verificar el serial.
+            requires_serial_numbers: product.requires_serial_numbers,
             available_for_ecommerce: product.available_for_ecommerce,
             is_featured: product.is_featured,
             allow_pos_price_override: product.allow_pos_price_override,
@@ -1409,6 +1413,10 @@ export class ProductsService {
           is_combo: product.is_combo,
           is_batch_produced: product.is_batch_produced,
           track_inventory: product.track_inventory,
+          // El POS lee este flag para abrir el modal obligatorio de captura
+          // de seriales; sin exponerlo aquí, el modal nunca se dispara y la
+          // venta de entrega directa procede sin verificar el serial.
+          requires_serial_numbers: product.requires_serial_numbers,
           available_for_ecommerce: product.available_for_ecommerce,
           is_featured: product.is_featured,
           allow_pos_price_override: product.allow_pos_price_override,
