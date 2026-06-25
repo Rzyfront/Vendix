@@ -280,6 +280,14 @@
       "sessions": 0,
       "memories": 3,
       "prompts": 0
+    },
+    {
+      "id": "b13bea1e",
+      "created_by": "rzy",
+      "created_at": "2026-06-25T15:19:00Z",
+      "sessions": 6,
+      "memories": 20,
+      "prompts": 3
     }
   ]
 }
