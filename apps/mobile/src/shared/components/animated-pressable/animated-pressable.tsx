@@ -1,4 +1,4 @@
-import { type ReactNode, type ComponentProps } from 'react';
+import { useState, type ReactNode, type ComponentProps } from 'react';
 import { Pressable, type PressableProps } from 'react-native';
 import Animated, {
   useSharedValue,
@@ -48,11 +48,13 @@ export function AnimatedPressable({
   active = true,
   ...rest
 }: AnimatedPressableProps) {
+  const [isPressed, setIsPressed] = useState(false);
   const scale = useSharedValue(1);
   const opacity = useSharedValue(1);
 
   const handlePressIn = () => {
     if (!active) return;
+    setIsPressed(true);
     scale.value = withSpring(pressedScale, motion.spring.gentle);
     opacity.value = withTiming(pressedOpacity, {
       duration: motion.duration.fast,
@@ -62,6 +64,7 @@ export function AnimatedPressable({
 
   const handlePressOut = () => {
     if (!active) return;
+    setIsPressed(false);
     scale.value = withSpring(1, motion.spring.firm);
     opacity.value = withTiming(1, {
       duration: motion.duration.fast,
@@ -74,15 +77,17 @@ export function AnimatedPressable({
     opacity: opacity.value,
   }));
 
+  const resolvedStyle = typeof style === 'function'
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ? (style as any)({ pressed: isPressed })
+    : style;
+
   return (
     <AnimatedPressableRoot
       {...rest}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
-      style={typeof style === 'function'
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ? (state: any) => [animatedStyle, (style as any)(state)]
-        : [animatedStyle, style]}
+      style={[resolvedStyle, animatedStyle]}
     >
       {children}
     </AnimatedPressableRoot>
