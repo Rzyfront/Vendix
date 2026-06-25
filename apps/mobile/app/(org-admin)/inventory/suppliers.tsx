@@ -45,7 +45,7 @@ export default function SuppliersScreen() {
               ? { label: 'Activo', variant: 'success' }
               : { label: 'Inactivo', variant: 'muted' }
           }
-          chevron
+          chevron={false}
         />
       ))}
     </OrgPageContainer>

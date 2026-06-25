@@ -4,7 +4,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { OrgSubscriptionsService } from '@/features/org/services/org-subscriptions.service';
 import { OrgListItem } from '@/shared/components/org-list-item';
 import { OrgPageContainer } from '@/shared/components/org-page-container';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { OrgSectionHeader } from '@/shared/components/org-section-header';
 import { colors, colorScales, spacing, typography } from '@/shared/theme';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -64,9 +64,8 @@ export default function SubscriptionsScreen() {
       {usage && usage.metrics?.length ? (
         <View style={styles.section}>
           <OrgSectionHeader title="Uso del plan" subtitle="Métricas del periodo actual" />
-          <OrgStatsGrid
-            columns={2}
-            stats={usage.metrics.map((m) => ({
+          <StatsGrid
+            items={usage.metrics.map((m) => ({
               label: m.label,
               value: `${m.used}/${m.limit}`,
               icon: 'bar-chart',

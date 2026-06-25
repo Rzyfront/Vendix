@@ -13,6 +13,7 @@ import { useTenantStore } from '@/core/store/tenant.store';
 import { useCartStore } from '@/features/store/pos/store/cart.store';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import type { CreatePosPaymentDto, PaymentMethod, PosCustomer } from '@/features/store/types';
+import { CheckoutStepIndicator } from './checkout-step-indicator';
 
 function getPaymentMethodType(method?: PaymentMethod | null): string {
   return method?.system_payment_method?.type || method?.type || '';
@@ -177,6 +178,10 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
             <Icon name="x" size={24} color={colorScales.gray[500]} />
           </Pressable>
         </View>
+
+        {/* Step indicator — UX: el usuario siempre sabe en qué paso está. */}
+        <CheckoutStepIndicator currentStep="shipping" />
+        <View style={styles.stepDivider} />
 
         <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
           {/* Customer Section */}
@@ -488,6 +493,10 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily, color: colorScales.gray[900],
   },
   closeBtn: { padding: spacing[1] },
+  stepDivider: {
+    height: 1,
+    backgroundColor: colorScales.gray[200],
+  },
   body: { flex: 1 },
   bodyContent: { padding: spacing[4], gap: spacing[5], paddingBottom: spacing[10] },
   section: { gap: spacing[3] },

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
-import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView, Platform } from 'react-native';
+import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { OrgDomainsService } from '@/features/org/services/org-domains.service';
@@ -81,90 +81,27 @@ export function DomainVerifyModal({ visible, domain, onClose, onVerified }: Doma
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} snapPoint="full">
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.container}>
-        <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <View style={styles.headerIcon}>
-              <Icon name="shield-check" size={20} color={colors.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title}>Verificar DNS</Text>
-              <Text style={styles.subtitle} numberOfLines={1}>{domain.hostname}</Text>
-            </View>
-          </View>
-          <Pressable onPress={onClose} style={styles.closeBtn}>
-            <Icon name="x" size={24} color={colorScales.gray[500]} />
-          </Pressable>
-        </View>
-
-        <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
-          <View style={styles.targetBlock}>
-            <Text style={styles.label}>Apunta tu CNAME a</Text>
-            {loadingInstructions ? (
-              <ActivityIndicator size="small" color={colors.primary} />
-            ) : instructions?.target ? (
-              <View style={styles.targetRow}>
-                <Text style={styles.targetValue} numberOfLines={1}>{instructions.target}</Text>
-                <Pressable style={styles.copyBtn} onPress={handleCopy}>
-                  <Icon name={copied ? 'check' : 'copy'} size={14} color={colors.primary} />
-                  <Text style={styles.copyText}>{copied ? 'Copiado' : 'Copiar'}</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <Text style={styles.helperText}>No se pudo cargar el edge host. Reintenta.</Text>
-            )}
-          </View>
-
-          <Text style={styles.sectionLabel}>Registros DNS requeridos</Text>
-          {loadingInstructions ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : instructions?.records?.length ? (
-            <View style={styles.recordsTable}>
-              <View style={[styles.recordRow, styles.recordHeader]}>
-                <Text style={[styles.recordCell, styles.recordCellType]}>Tipo</Text>
-                <Text style={[styles.recordCell, styles.recordCellHost]}>Host</Text>
-                <Text style={[styles.recordCell, styles.recordCellValue]}>Valor</Text>
-                <Text style={[styles.recordCell, styles.recordCellTtl]}>TTL</Text>
-              </View>
-              {instructions.records.map((r, i) => (
-                <View key={i} style={styles.recordRow}>
-                  <Text style={[styles.recordCell, styles.recordCellType, styles.recordMono]}>{r.type}</Text>
-                  <Text style={[styles.recordCell, styles.recordCellHost, styles.recordMono]} numberOfLines={1}>{r.host}</Text>
-                  <Text style={[styles.recordCell, styles.recordCellValue, styles.recordMono]} numberOfLines={2}>{r.value}</Text>
-                  <Text style={[styles.recordCell, styles.recordCellTtl, styles.recordMono]}>{r.ttl ?? '—'}</Text>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <Text style={styles.helperText}>Sin instrucciones DNS disponibles.</Text>
-          )}
-
-          <View style={styles.statusBlock}>
-            <Text style={styles.label}>Estado actual</Text>
-            <Text style={styles.statusText}>{formatStatus(domain.status)}</Text>
-          </View>
-
-          {result ? (
-            <View style={[styles.resultBlock, result.verified ? styles.resultOk : styles.resultErr]}>
-              <Icon
-                name={result.verified ? 'check-circle' : 'alert-triangle'}
-                size={16}
-                color={result.verified ? colors.success : colors.error}
-              />
-              <Text style={[styles.resultText, result.verified ? styles.resultTextOk : styles.resultTextErr]}>
-                {result.message ?? (result.verified ? 'Propiedad verificada.' : 'Verificación falló.')}
-              </Text>
-            </View>
-          ) : null}
-        </ScrollView>
-
+    <OrgCenteredModal
+      visible={visible}
+      onClose={onClose}
+      title="Verificar DNS"
+      subtitle={domain.hostname}
+      size="lg"
+      footer={
         <View style={styles.footer}>
-          <Pressable style={styles.cancelBtn} onPress={onClose}>
+          <Pressable
+            style={({ pressed }) => [styles.cancelBtn, pressed && { opacity: 0.75 }]}
+            onPress={onClose}
+            disabled={verifying}
+          >
             <Text style={styles.cancelText}>Cerrar</Text>
           </Pressable>
           <Pressable
-            style={[styles.verifyBtn, verifying && styles.verifyBtnDisabled]}
+            style={({ pressed }) => [
+              styles.verifyBtn,
+              verifying && styles.verifyBtnDisabled,
+              pressed && { opacity: 0.85 },
+            ]}
             onPress={handleVerify}
             disabled={verifying}
           >
@@ -178,42 +115,73 @@ export function DomainVerifyModal({ visible, domain, onClose, onVerified }: Doma
             )}
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
-    </BottomSheet>
+      }
+    >
+      <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
+        <View style={styles.targetBlock}>
+          <Text style={styles.label}>Apunta tu CNAME a</Text>
+          {loadingInstructions ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : instructions?.target ? (
+            <View style={styles.targetRow}>
+              <Text style={styles.targetValue} numberOfLines={1}>{instructions.target}</Text>
+              <Pressable style={styles.copyBtn} onPress={handleCopy}>
+                <Icon name={copied ? 'check' : 'copy'} size={14} color={colors.primary} />
+                <Text style={styles.copyText}>{copied ? 'Copiado' : 'Copiar'}</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <Text style={styles.helperText}>No se pudo cargar el edge host. Reintenta.</Text>
+          )}
+        </View>
+
+        <Text style={styles.sectionLabel}>Registros DNS requeridos</Text>
+        {loadingInstructions ? (
+          <ActivityIndicator size="small" color={colors.primary} />
+        ) : instructions?.records?.length ? (
+          <View style={styles.recordsTable}>
+            <View style={[styles.recordRow, styles.recordHeader]}>
+              <Text style={[styles.recordCell, styles.recordCellType]}>Tipo</Text>
+              <Text style={[styles.recordCell, styles.recordCellHost]}>Host</Text>
+              <Text style={[styles.recordCell, styles.recordCellValue]}>Valor</Text>
+              <Text style={[styles.recordCell, styles.recordCellTtl]}>TTL</Text>
+            </View>
+            {instructions.records.map((r, i) => (
+              <View key={i} style={styles.recordRow}>
+                <Text style={[styles.recordCell, styles.recordCellType, styles.recordMono]}>{r.type}</Text>
+                <Text style={[styles.recordCell, styles.recordCellHost, styles.recordMono]} numberOfLines={1}>{r.host}</Text>
+                <Text style={[styles.recordCell, styles.recordCellValue, styles.recordMono]} numberOfLines={2}>{r.value}</Text>
+                <Text style={[styles.recordCell, styles.recordCellTtl, styles.recordMono]}>{r.ttl ?? '—'}</Text>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.helperText}>Sin instrucciones DNS disponibles.</Text>
+        )}
+
+        <View style={styles.statusBlock}>
+          <Text style={styles.label}>Estado actual</Text>
+          <Text style={styles.statusText}>{formatStatus(domain.status)}</Text>
+        </View>
+
+        {result ? (
+          <View style={[styles.resultBlock, result.verified ? styles.resultOk : styles.resultErr]}>
+            <Icon
+              name={result.verified ? 'check-circle' : 'alert-triangle'}
+              size={16}
+              color={result.verified ? colors.success : colors.error}
+            />
+            <Text style={[styles.resultText, result.verified ? styles.resultTextOk : styles.resultTextErr]}>
+              {result.message ?? (result.verified ? 'Propiedad verificada.' : 'Verificación falló.')}
+            </Text>
+          </View>
+        ) : null}
+      </ScrollView>
+    </OrgCenteredModal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[200],
-  },
-  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing[3], flex: 1, minWidth: 0 },
-  headerIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colorScales.green[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: typography.fontSize.lg,
-    fontWeight: typography.fontWeight.bold as any,
-    color: colorScales.gray[900],
-  },
-  subtitle: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[500],
-    marginTop: 2,
-  },
-  closeBtn: { padding: spacing[1] },
   body: { flex: 1 },
   bodyContent: { padding: spacing[4], gap: spacing[4] },
   targetBlock: {

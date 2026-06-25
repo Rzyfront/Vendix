@@ -58,6 +58,41 @@ export function getActionColor(action: string): string {
   return ACTION_COLORS[action] ?? colorScales.gray[500];
 }
 
+/**
+ * Mapea una acción de auditoría al variant del `OrgBadge` (paridad con el
+ * `badgeConfig.colorMap` de `logs.component.ts` en la web). Se usa para
+ * colorear el badge de la card y del detail modal.
+ */
+export function getActionBadgeVariant(
+  action: string,
+): 'success' | 'info' | 'error' | 'warning' | 'muted' | 'neutral' | 'primary' {
+  switch (action) {
+    case 'CREATE':
+    case 'ACCOUNT_UNLOCKED':
+    case 'EMAIL_VERIFY':
+    case 'ONBOARDING_COMPLETE':
+      return 'success';
+    case 'UPDATE':
+    case 'LOGIN':
+    case 'PASSWORD_CHANGE':
+    case 'PERMISSION_CHANGE':
+      return 'info';
+    case 'DELETE':
+    case 'ACCOUNT_LOCKED':
+    case 'SUSPICIOUS_ACTIVITY':
+      return 'error';
+    case 'LOGIN_FAILED':
+    case 'PASSWORD_RESET':
+      return 'warning';
+    case 'LOGOUT':
+    case 'VIEW':
+    case 'SEARCH':
+      return 'muted';
+    default:
+      return 'neutral';
+  }
+}
+
 export function getActionIcon(action: string): string {
   switch (action) {
     case 'CREATE':

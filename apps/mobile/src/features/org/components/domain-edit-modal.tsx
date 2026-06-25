@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
+import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { OrgDomainsService } from '@/features/org/services/org-domains.service';
 import type { Domain, UpdateDomainInput } from '@/core/models/org-admin/domains.types';
 import { DomainFormFields } from './domain-form-fields';
@@ -14,6 +14,8 @@ interface DomainEditModalProps {
 /**
  * Modal "Editar dominio" para ORG_ADMIN Dominios.
  *
+ * Espejo del `DomainEditModalComponent` de la web — `OrgCenteredModal`
+ * (NO `BottomSheet`) para mantener paridad con el modal centrado de la web.
  * Wrapper sobre `DomainFormFields` con `initial={domain}`. El form ya
  * bloquea en modo edición los campos destructivos (hostname/root/ownership),
  * por lo que el payload de update solo lleva los editables
@@ -39,14 +41,21 @@ export function DomainEditModal({ visible, domain, onClose, onUpdated }: DomainE
   if (!domain) return null;
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} snapPoint="full">
+    <OrgCenteredModal
+      visible={visible}
+      onClose={onClose}
+      title="Editar dominio"
+      subtitle="Actualiza la configuración del dominio seleccionado"
+      size="lg"
+    >
       <DomainFormFields
+        hideHeader
         initial={domain}
         submitting={submitting}
         onSubmit={handleSubmit as any}
         onCancel={onClose}
         submitLabel="Guardar cambios"
       />
-    </BottomSheet>
+    </OrgCenteredModal>
   );
 }

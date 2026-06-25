@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { OrgReportsService } from '@/features/org/services/org-reports.service';
 import { Card } from '@/shared/components/card/card';
 import { Spinner } from '@/shared/components/spinner/spinner';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { OrgListItem } from '@/shared/components/org-list-item';
 import { colors, colorScales, spacing, typography } from '@/shared/theme';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -57,13 +57,18 @@ export default function SalesReportScreen() {
         {data ? (
           <>
             <View style={styles.section}>
-              <OrgStatsGrid
-                columns={2}
-                stats={[
-                  { label: 'Ventas totales', value: formatCurrency(data.total_sales.amount), icon: 'dollar-sign', color: colors.success },
+              <StatsGrid
+                items={[
+                  { label: 'Ventas totales', value: formatCurrency(data.total_sales.amount), icon: 'dollar-sign', iconColor: colors.success, iconBg: colors.success + '15' },
                   { label: 'Órdenes', value: data.total_orders, icon: 'clipboard-list' },
                   { label: 'Ticket promedio', value: formatCurrency(data.average_ticket.amount), icon: 'trending-up' },
-                  { label: 'Tendencia', value: `${data.change_percent > 0 ? '+' : ''}${data.change_percent.toFixed(1)}%`, icon: data.trend === 'up' ? 'trending-up' : data.trend === 'down' ? 'trending-down' : 'minus', color: data.trend === 'up' ? colors.success : data.trend === 'down' ? colors.error : undefined },
+                  {
+                    label: 'Tendencia',
+                    value: `${data.change_percent > 0 ? '+' : ''}${data.change_percent.toFixed(1)}%`,
+                    icon: data.trend === 'up' ? 'trending-up' : data.trend === 'down' ? 'trending-down' : 'minus',
+                    iconColor: data.trend === 'up' ? colors.success : data.trend === 'down' ? colors.error : undefined,
+                    iconBg: data.trend === 'up' ? colors.success + '15' : data.trend === 'down' ? colors.error + '15' : undefined,
+                  },
                 ]}
               />
             </View>

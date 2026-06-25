@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { OrgReportsService } from '@/features/org/services/org-reports.service';
 import { Card } from '@/shared/components/card/card';
 import { Spinner } from '@/shared/components/spinner/spinner';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { OrgListItem } from '@/shared/components/org-list-item';
 import { colors, colorScales, spacing, typography } from '@/shared/theme';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -52,13 +52,12 @@ export default function InventoryReportScreen() {
         {data ? (
           <>
             <View style={styles.section}>
-              <OrgStatsGrid
-                columns={2}
-                stats={[
+              <StatsGrid
+                items={[
                   { label: 'Productos', value: data.total_products, icon: 'package' },
-                  { label: 'Valor total', value: formatCurrency(data.total_value.amount), icon: 'dollar-sign', color: colors.success },
-                  { label: 'Stock bajo', value: data.low_stock?.length ?? 0, icon: 'alert-triangle', color: colorScales.amber[500] },
-                  { label: 'Por vencer', value: data.expiring_batches, icon: 'clock', color: colorScales.red[500] },
+                  { label: 'Valor total', value: formatCurrency(data.total_value.amount), icon: 'dollar-sign', iconColor: colors.success, iconBg: colors.success + '15' },
+                  { label: 'Stock bajo', value: data.low_stock?.length ?? 0, icon: 'alert-triangle', iconColor: colorScales.amber[500], iconBg: colorScales.amber[500] + '15' },
+                  { label: 'Por vencer', value: data.expiring_batches, icon: 'clock', iconColor: colorScales.red[500], iconBg: colorScales.red[500] + '15' },
                 ]}
               />
             </View>

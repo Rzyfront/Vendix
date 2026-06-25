@@ -15,6 +15,7 @@ import { useTenantStore } from '@/core/store/tenant.store';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import type { PaymentMethod, PosCustomer } from '@/features/store/types';
 import type { CreatePosPaymentDto } from '@/features/store/types';
+import { CheckoutStepIndicator } from './checkout-step-indicator';
 
 function resolvePositiveId(...values: unknown[]): number | undefined {
   for (const value of values) {
@@ -353,6 +354,10 @@ export function PosPaymentModal({ visible, onClose, onSuccess }: PosPaymentModal
             <Icon name="x" size={24} color={colorScales.gray[500]} />
           </Pressable>
         </View>
+
+        {/* Step indicator — UX: el usuario siempre sabe en qué paso está. */}
+        <CheckoutStepIndicator currentStep="payment" />
+        <View style={styles.stepDivider} />
 
         {/* Content - all sections stacked */}
         <ScrollView
@@ -822,6 +827,10 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.semibold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
+  },
+  stepDivider: {
+    height: 1,
+    backgroundColor: colorScales.gray[100],
   },
   sectionTabs: {
     flexDirection: 'row',

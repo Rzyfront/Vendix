@@ -4,7 +4,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { OrgPayrollService } from '@/features/org/services/org-payroll.service';
 import { OrgListItem } from '@/shared/components/org-list-item';
 import { OrgPageContainer } from '@/shared/components/org-page-container';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { OrgSectionHeader } from '@/shared/components/org-section-header';
 import { colors, colorScales, spacing, typography } from '@/shared/theme';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -41,9 +41,8 @@ export default function PayrollScreen() {
       onRefresh={onRefresh}
     >
       <View style={styles.section}>
-        <OrgStatsGrid
-          columns={2}
-          stats={[
+        <StatsGrid
+          items={[
             { label: 'Empleados', value: employees.length, icon: 'briefcase' },
             { label: 'Frecuencia', value: settingsQuery.data?.default_payment_frequency ?? '—', icon: 'clock' },
             { label: 'Periodos', value: periods.length, icon: 'calendar-clock' },

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -31,6 +31,7 @@ import { Button } from '@/shared/components/button/button';
 import { Input } from '@/shared/components/input/input';
 import {
   PosSearchBar,
+  PosScreenHeader,
   PosMobileFooter,
   PosCartModal,
   PosFilterDropdown,
@@ -39,11 +40,12 @@ import {
   PosCustomItemModal,
   PosPaymentModal,
 } from '@/features/pos/components';
-import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
+import { toastSuccess, toastError, toastWarning, toastInfo } from '@/shared/components/toast/toast.store';
 import type {
   CreatePosPaymentDto,
   PaymentMethod,
   PosPaymentResponse,
+  PosMode,
   Product,
   ProductVariant,
   PosCustomer,
@@ -59,12 +61,17 @@ const productCardStyles = StyleSheet.create({
     width: PRODUCT_CARD_WIDTH,
     backgroundColor: colors.background,
     borderRadius: borderRadius.xl,
-    padding: spacing[3],
+    padding: spacing[2], // paridad web: `p-2 sm:p-3`
     marginBottom: spacing[3],
     borderWidth: 1,
     borderColor: colorScales.gray[100],
     ...shadows.sm,
     overflow: 'hidden',
+  },
+  // Estado presionado: borde primary (paridad web `hover:border-primary` +
+  // `active:scale-[0.97]`). Se controla vía prop `pressed`.
+  cardPressed: {
+    borderColor: colors.primary,
   },
   imageArea: {
     width: '100%',
@@ -72,11 +79,14 @@ const productCardStyles = StyleSheet.create({
     borderRadius: borderRadius.lg,
     marginBottom: spacing[2],
     overflow: 'hidden',
+    // Gradient bg approximate — paridad web `bg-gradient-to-br from-surface
+    // to-muted/30`. RN no soporta linear-gradient cross-platform sin expo,
+    // así que usamos una capa overlay semitransparente encima de gray[100].
     backgroundColor: colorScales.gray[100],
   },
   imageGradient: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colorScales.gray[100],
+    backgroundColor: 'rgba(255, 255, 255, 0.55)', // top-light layer sobre gray[100]
   },
   productImage: {
     width: '100%',
@@ -86,6 +96,10 @@ const productCardStyles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
+    // Paridad web: tile 48×48 con `bg-primary/10` (en lugar de icon suelto).
+    backgroundColor: 'rgba(34, 197, 94, 0.10)',
+    borderRadius: borderRadius.md,
+    margin: '30%', // centra un tile ~40% del área
   },
   badgesContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -116,35 +130,62 @@ const productCardStyles = StyleSheet.create({
     fontFamily: typography.fontFamily,
     color: '#FFFFFF',
   },
+  // Nombre — paridad web `text-xs sm:text-sm font-medium line-clamp-2`.
+  // En mobile-first sólo usamos 2 líneas + font xs.
   name: {
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.xs,
     fontWeight: typography.fontWeight.medium as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
-    lineHeight: 18,
+    lineHeight: 16,
   },
+  namePressed: {
+    color: colors.primary, // paridad web `group-hover:text-primary`
+  },
+  // Descripción — paridad web `hidden sm:block text-xs text-text-secondary
+  // line-clamp-1`. En mobile NO se renderiza (sólo en sm+).
   description: {
     fontSize: typography.fontSize.xs,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[500],
-    lineHeight: 16,
+    lineHeight: 14,
     marginTop: 2,
   },
   row: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'baseline',
     justifyContent: 'space-between',
     marginTop: spacing[1],
   },
   priceContainer: {
     flexDirection: 'column',
+    flexShrink: 1,
   },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing[1],
+    flexWrap: 'wrap',
+  },
+  // Precio — paridad web `text-xs sm:text-sm font-bold text-text-primary`.
   price: {
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.xs,
     fontWeight: typography.fontWeight.bold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginTop: spacing[0.5],
+  },
+  // Precio en promoción — paridad web `text-success` (verde).
+  priceOnSale: {
+    color: colors.primary, // success color
+  },
+  // Precio compare-at tachado — paridad web `text-text-muted line-through`.
+  priceCompareAt: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.normal as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[400],
+    textDecorationLine: 'line-through',
   },
   priceWeightUnit: {
     fontSize: 10,
@@ -157,37 +198,6 @@ const productCardStyles = StyleSheet.create({
     fontFamily: typography.fontFamily,
     lineHeight: 14,
     marginTop: 1,
-  },
-  bottomSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing[2],
-    paddingTop: spacing[2],
-    borderTopWidth: 1,
-    borderTopColor: colorScales.gray[100],
-  },
-  bottomLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    minWidth: 0,
-  },
-  skuText: {
-    fontSize: typography.fontSize.xs,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    color: colorScales.gray[400],
-    maxWidth: 80,
-  },
-  addButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
   },
 });
 
@@ -217,6 +227,69 @@ const s = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  // Spinner + texto — paridad web `inline-block animate-spin rounded-full
+  // h-8 w-8 border-b-2 border-primary` + `<p>Cargando productos...</p>`.
+  loadingSpinner: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderTopColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: colors.primary,
+    borderLeftColor: 'transparent',
+  },
+  loadingText: {
+    marginTop: spacing[3],
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    fontWeight: typography.fontWeight.medium as any,
+  },
+  // Empty state POS — paridad web `flex flex-col items-center justify-center h-64 text-center p-8`.
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[16],
+    gap: spacing[3],
+  },
+  emptyTile: {
+    width: 80,
+    height: 80,
+    borderRadius: 16,
+    backgroundColor: 'rgba(34, 197, 94, 0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[2],
+  },
+  emptyTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: colorScales.gray[900],
+    textAlign: 'center',
+  },
+  emptyDescription: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    textAlign: 'center',
+    maxWidth: 280,
+    lineHeight: 20,
+  },
+  emptyAction: {
+    marginTop: spacing[2],
+    paddingHorizontal: spacing[5],
+    paddingVertical: spacing[3],
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[300],
+    backgroundColor: colors.background,
+  },
+  emptyActionText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: colorScales.gray[700],
   },
   containerPad: {
     paddingHorizontal: spacing[4],
@@ -795,6 +868,7 @@ const ProductCard = ({
   onPress: (product: Product) => void;
 }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const [pressed, setPressed] = useState(false);
   const hasVariants = (product.product_variants?.length ?? 0) > 0;
   const tracksInventory = product.track_inventory !== false;
   const stockQty = product.stock_quantity ?? 0;
@@ -808,10 +882,20 @@ const ProductCard = ({
   const isLowStock = tracksInventory && variantStockTotal > 0 && variantStockTotal <= 5;
   const isUnavailable = variantStockTotal === 0;
 
+  // Sale/promo logic — paridad web `hasActivePromoOrSale()`:
+  //   is_on_sale === true AND sale_price > 0 AND sale_price < base_price
+  // (active_promotion del backend todavía no está mapeada en el Product type
+  // mobile — pendiente de Fase 4 cuando el payload `pos_optimized` lo incluya).
+  const isOnSale =
+    product.is_on_sale === true &&
+    typeof product.sale_price === 'number' &&
+    product.sale_price > 0 &&
+    product.sale_price < (product.base_price ?? Infinity);
+  const salePrice = isOnSale ? product.sale_price : null;
+
   const getStockText = () => {
-    if (!tracksInventory) return 'Disponible';
+    if (!tracksInventory) return null; // Web: oculta el inline label
     if (variantStockTotal === 0) return 'Sin stock';
-    if (variantStockTotal <= 5) return `${variantStockTotal} en stock`;
     return `${variantStockTotal} en stock`;
   };
 
@@ -819,20 +903,21 @@ const ProductCard = ({
     if (!tracksInventory) return colorScales.blue[600];
     if (variantStockTotal === 0) return colors.error;
     if (variantStockTotal <= 5) return colors.warning;
-    return colorScales.blue[600];
+    return colorScales.gray[500]; // Web: text-text-muted
   };
 
   const getStockBadge = () => {
     if (tracksInventory) {
-      if (variantStockTotal === 0) return { label: 'Agotado', variant: 'error' as const };
+      if (variantStockTotal === 0) return { label: 'AGOTADO', variant: 'error' as const }; // Web: uppercase
       if (variantStockTotal <= 5) return { label: `Últimas ${variantStockTotal}`, variant: 'warning' as const };
-      return { label: `${variantStockTotal} en stock`, variant: 'info' as const };
+      return null; // Web: no muestra badge cuando hay stock normal
     } else {
       return { label: 'Disponible', variant: 'info' as const };
     }
   };
 
   const handlePressIn = () => {
+    setPressed(true);
     Animated.spring(scaleAnim, {
       toValue: 0.97,
       useNativeDriver: true,
@@ -842,6 +927,7 @@ const ProductCard = ({
   };
 
   const handlePressOut = () => {
+    setPressed(false);
     Animated.spring(scaleAnim, {
       toValue: 1,
       useNativeDriver: true,
@@ -853,6 +939,9 @@ const ProductCard = ({
   const stockBadge = getStockBadge();
   const stockText = getStockText();
   const stockTextColor = getStockTextColor();
+  // Web: para productos con variantes NO muestra el inline stock label
+  // (el stock se valida al abrir el variant selector).
+  const showInlineStock = stockText && !hasVariants;
 
   return (
     <Animated.View style={[{ transform: [{ scale: scaleAnim }] }]}>
@@ -862,6 +951,7 @@ const ProductCard = ({
         onPressOut={isUnavailable ? undefined : handlePressOut}
         style={[
           productCardStyles.card,
+          pressed && productCardStyles.cardPressed,
           isUnavailable && { opacity: 0.6 },
         ]}
       >
@@ -877,13 +967,12 @@ const ProductCard = ({
             />
           ) : (
             <View style={productCardStyles.imageFallback}>
-              <Icon name="image" size={32} color={colorScales.gray[400]} />
+              <Icon name="image" size={28} color="rgba(34, 197, 94, 0.6)" />
             </View>
           )}
 
           {/* Badges overlaid on image */}
           <View style={productCardStyles.badgesContainer} pointerEvents="none">
-            {/* Stock badge - top center */}
             {stockBadge && (
               <View style={productCardStyles.stockBadge}>
                 <Badge
@@ -894,7 +983,6 @@ const ProductCard = ({
               </View>
             )}
 
-            {/* Variants badge - top left */}
             {hasVariants && (
               <View style={productCardStyles.variantsBadge}>
                 <Icon name="layers" size={12} color="#FFFFFF" />
@@ -906,28 +994,41 @@ const ProductCard = ({
           </View>
         </View>
 
-        {/* Product Name */}
-        <Text style={productCardStyles.name} numberOfLines={1} ellipsizeMode="tail">
+        {/* Product Name — 2 líneas con line-clamp-2 (paridad web) */}
+        <Text
+          style={[productCardStyles.name, pressed && productCardStyles.namePressed]}
+          numberOfLines={2}
+          ellipsizeMode="tail"
+        >
           {product.name}
         </Text>
 
-        {/* Description — siempre renderizada para mantener altura uniforme */}
-        <Text style={productCardStyles.description} numberOfLines={1} ellipsizeMode="tail">
-          {product.description || ' '}
-        </Text>
+        {/* Description — oculta en mobile (paridad web `hidden sm:block`) */}
 
         {/* Price + Stock row */}
         <View style={productCardStyles.row}>
           <View style={productCardStyles.priceContainer}>
-            <Text style={productCardStyles.price}>
-              {formatCurrency(product.final_price)}
-              {product.pricing_type === 'weight' && (
-                <Text style={productCardStyles.priceWeightUnit}>
-                  {' /kg'}
+            <View style={productCardStyles.priceRow}>
+              <Text
+                style={[
+                  productCardStyles.price,
+                  isOnSale && productCardStyles.priceOnSale,
+                ]}
+              >
+                {formatCurrency(salePrice ?? product.final_price)}
+                {product.pricing_type === 'weight' && (
+                  <Text style={productCardStyles.priceWeightUnit}>
+                    {' /kg'}
+                  </Text>
+                )}
+              </Text>
+              {isOnSale && (
+                <Text style={productCardStyles.priceCompareAt}>
+                  {formatCurrency(product.base_price ?? product.final_price)}
                 </Text>
               )}
-            </Text>
-            {stockText && (
+            </View>
+            {showInlineStock && (
               <Text style={[productCardStyles.stockText, { color: stockTextColor }]}>
                 {stockText}
               </Text>
@@ -935,26 +1036,9 @@ const ProductCard = ({
           </View>
         </View>
 
-        {/* Bottom section: SKU + Add button */}
-        <View style={productCardStyles.bottomSection}>
-          <View style={productCardStyles.bottomLeft}>
-            {product.sku ? (
-              <Text style={productCardStyles.skuText} numberOfLines={1}>
-                {product.sku}
-              </Text>
-            ) : null}
-          </View>
-          <Pressable
-            onPress={(e) => {
-              e.stopPropagation?.();
-              if (!isUnavailable) onPress(product);
-            }}
-            style={productCardStyles.addButton}
-            disabled={isUnavailable}
-          >
-            <Icon name="plus" size={14} color="#FFFFFF" />
-          </Pressable>
-        </View>
+        {/* Bottom row (SKU + + button) — ELIMINADO en mobile.
+            Web: `hidden sm:flex` (toda la card es tap target). Mobile-first
+            replica el comportamiento ocultándolo siempre. */}
       </Pressable>
     </Animated.View>
   );
@@ -1699,16 +1783,16 @@ const PaymentSheet = ({
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
       if (result.fallbackReason) {
-        toastWarning(`Venta cerrada sin pago: ${result.fallbackReason}`, 6500);
+        toastWarning(`Venta cerrada sin pago: ${result.fallbackReason}`, 3500);
       } else {
-        toastSuccess('Venta finalizada');
+        toastSuccess(`Venta registrada: ${formatCurrency(summary.total)}`);
       }
       onSuccess(orderNumber, receiptData);
     },
     onError: (error) => {
       const parsed = parsePosCheckoutError(error);
       setSaleError({ message: parsed.message, details: parsed.details });
-      toastError(parsed.message, 7000);
+      toastError(parsed.message, 3500);
     },
   });
 
@@ -1920,6 +2004,34 @@ const SuccessModal = ({
   );
 };
 
+/**
+ * Spinner rotatorio — paridad web `animate-spin` del bloque de loading del
+ * `pos-product-selection.component`. Reemplaza al `<Spinner>` genérico.
+ *
+ * Usa `Animated.loop` con `rotate` interpolado 0° → 360° en 800ms (lineal
+ * implícito para mantener el giro constante — `animate-spin` de Tailwind
+ * también es lineal 1s).
+ */
+const PosLoaderSpinner = () => {
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin]);
+  const rotate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+  return <Animated.View style={[s.loadingSpinner, { transform: [{ rotate }] }]} />;
+};
+
 const PosScreen = () => {
   const [search, setSearch] = useState('');
   const [showVariants, setShowVariants] = useState(false);
@@ -1934,6 +2046,17 @@ const PosScreen = () => {
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+
+  // Cierra TODOS los modales del checkout flow. Útil cuando el usuario
+  // presiona X en cualquier paso del flujo y quiere volver limpio a la
+  // pantalla de selección de productos sin quedar atrapado en un modal.
+  const closeCheckoutModals = useCallback(() => {
+    setShowCartModal(false);
+    setShowPaymentModal(false);
+    setShowShippingModal(false);
+    setShowCustomItemModal(false);
+    setShowCustomerModal(false);
+  }, []);
   const [activeFilters, setActiveFilters] = useState({
     category_id: '',
     brand_id: '',
@@ -1948,6 +2071,10 @@ const PosScreen = () => {
 
   const summary = useCartStore((s) => s.summary);
   const addItem = useCartStore((s) => s.addItem);
+  const customer = useCartStore((s) => s.customer);
+  const mode = useCartStore((s) => s.mode ?? 'sale');
+  const setMode = useCartStore((s) => s.setMode);
+  const setCustomer = useCartStore((s) => s.setCustomer);
 
   const { data: products, isLoading } = useQuery({
     queryKey: ['pos-products', search, activeFilters],
@@ -2122,8 +2249,76 @@ const PosScreen = () => {
     useCartStore.getState().addCustomItem(data);
   }, []);
 
+  // "Crear" — paridad web: abre `pos-order-create-modal` (fulfillment + KDS
+  // guard). En Fase 1 sólo se valida el carrito y se notifica; la lógica
+  // completa con selector consumo/entrega + KDS fire se implementa en Fase 4.
+  const handleCreate = useCallback(() => {
+    if (summary.totalItems === 0) {
+      toastWarning('El carrito está vacío');
+      return;
+    }
+    toastWarning('Próximamente: Crear pedido (fulfillment + KDS)');
+  }, [summary.totalItems]);
+
+  // CTA primario del footer — despacha según el modo activo.
+  // - `sale`     → abre modal de pago
+  // - `quotation`→ crea cotización (Fase 4 — sólo placeholder)
+  // - `layaway`  → abre layaway-config-modal (Fase 4 — sólo placeholder)
+  const handlePrimaryCta = useCallback(() => {
+    if (summary.totalItems === 0) {
+      toastWarning('El carrito está vacío');
+      return;
+    }
+    switch (mode) {
+      case 'sale':
+        setShowPaymentModal(true);
+        return;
+      case 'quotation':
+        toastWarning('Próximamente: Crear cotización');
+        return;
+      case 'layaway':
+        if (!customer) {
+          toastWarning('Debes asignar un cliente para crear un plan separé');
+          setShowCustomerModal(true);
+          return;
+        }
+        toastWarning('Próximamente: Configurar plan separé');
+        return;
+    }
+  }, [mode, customer, summary.totalItems]);
+
+  // Cambia el modo del POS (POS / Cotizar / Separé). En paridad con el web
+  // `pos.component.ts` (`setQuotationMode` / `setLayawayMode`), los handlers
+  // reales (crear cotización / plan separé con sus servicios) viven en una
+  // fase posterior — por ahora solo actualizamos el modo y dejamos que el
+  // footer + header reflejen el cambio visualmente.
+  const handleChangeMode = useCallback((next: PosMode) => {
+    if (next === 'layaway' && !customer) {
+      // Web: `if (!this.selectedCustomer()) { toast warning + open customer modal }`
+      toastWarning('Debes asignar un cliente para crear un plan separé');
+      setShowCustomerModal(true);
+      return;
+    }
+    setMode(next);
+  }, [customer, setMode]);
+
+  // Limpia el cliente seleccionado desde el chip del header.
+  const handleClearCustomer = useCallback(() => {
+    setCustomer(null);
+  }, [setCustomer]);
+
   return (
     <View style={[s.posRoot]}>
+      {/* Header POS — paridad con el bloque inline del web pos.component.ts
+          (logo + título + badge + customer chip + mode switcher). */}
+      <PosScreenHeader
+        mode={mode}
+        customer={customer}
+        onOpenCustomer={() => setShowCustomerModal(true)}
+        onClearCustomer={handleClearCustomer}
+        onChangeMode={handleChangeMode}
+      />
+
       {/* Search Bar - Con filtros y cliente como web */}
       <PosSearchBar
         onSearch={setSearch}
@@ -2132,17 +2327,40 @@ const PosScreen = () => {
         selectedCustomer={null}
       />
 
-      {/* Product Grid - Cards exactamente igual que antes */}
+      {/* Product Grid - paridad web pos-product-selection.component */}
       {isLoading ? (
         <View style={s.centerContent}>
-          <Spinner />
+          {/* Spinner + texto — paridad web `animate-spin h-8 w-8 border-b-2 border-primary` + `Cargando productos...` */}
+          <PosLoaderSpinner />
+          <Text style={s.loadingText}>Cargando productos...</Text>
         </View>
       ) : productList.length === 0 ? (
-        <EmptyState
-          title="Sin productos"
-          description={search ? 'No se encontraron resultados' : 'No hay productos disponibles'}
-          icon="package"
-        />
+        /* Empty state POS-específico — paridad web:
+           - Tile 80×80 `rounded-2xl` con `package-open` icon
+           - Título dinámico según haya search o no
+           - Descripción
+           - Botón "Limpiar búsqueda" condicional */
+        <View style={s.emptyState}>
+          <View style={s.emptyTile}>
+            <Icon name="package-open" size={36} color={colors.primary} />
+          </View>
+          <Text style={s.emptyTitle}>
+            {search ? 'No se encontraron productos' : 'No hay productos disponibles'}
+          </Text>
+          <Text style={s.emptyDescription}>
+            {search
+              ? 'Intenta buscar con otros términos o cambia la categoría.'
+              : 'Los productos aparecerán aquí cuando estén disponibles.'}
+          </Text>
+          {search ? (
+            <Pressable
+              style={({ pressed }) => [s.emptyAction, pressed && { opacity: 0.7 }]}
+              onPress={() => setSearch('')}
+            >
+              <Text style={s.emptyActionText}>Limpiar búsqueda</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : (
         <FlatList
           data={productList}
@@ -2161,25 +2379,24 @@ const PosScreen = () => {
         />
       )}
 
-      {/* Mobile Footer - 3 filas como web */}
+      {/* Mobile Footer - 3 filas como web, mode-aware primary CTA */}
       <PosMobileFooter
         itemCount={summary.totalItems}
         total={summary.total}
         taxAmount={summary.taxAmount}
+        mode={mode}
         onViewCart={() => setShowCartModal(true)}
         onCustomItem={handleCustomItem}
-        onSaveDraft={handleSaveDraft}
+        onCreate={handleCreate}
         onShipping={handleShipping}
-        onCheckout={() => {
-          setShowPaymentModal(true);
-        }}
+        onPrimaryCta={handlePrimaryCta}
         canCreateCustomItems
       />
 
-      {/* Cart Modal */}
+      {/* Cart Modal — bottom sheet con slide-up (paridad web). */}
       <PosCartModal
         visible={showCartModal}
-        onClose={() => setShowCartModal(false)}
+        onClose={() => closeCheckoutModals()}
         items={useCartStore.getState().items}
         subtotal={summary.subtotal}
         taxAmount={summary.taxAmount}
@@ -2194,12 +2411,24 @@ const PosScreen = () => {
         }}
         onRemoveItem={(id) => useCartStore.getState().removeItem(id)}
         onClearCart={() => useCartStore.getState().clearCart()}
-        onViewDetail={() => setShowCart(true)}
-        onSaveDraft={handleSaveDraft}
+        onCustomItem={() => {
+          setShowCartModal(false);
+          setShowCustomItemModal(true);
+        }}
+        onCreate={() => {
+          setShowCartModal(false);
+          // TODO: abrir PosOrderCreateModal cuando el componente exista.
+          toastInfo('Crear pedido: módulo en desarrollo');
+        }}
+        onShipping={() => {
+          setShowCartModal(false);
+          setShowShippingModal(true);
+        }}
         onCheckout={() => {
           setShowCartModal(false);
           setShowPaymentModal(true);
         }}
+        canCreateCustomItems
       />
 
       {/* Variant Picker */}
@@ -2223,12 +2452,12 @@ const PosScreen = () => {
         }}
       />
 
-      {/* Payment Modal */}
+      {/* Payment Modal — cierre seguro: limpia TODO el checkout flow. */}
       <PosPaymentModal
         visible={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
+        onClose={() => closeCheckoutModals()}
         onSuccess={(orderNumber) => {
-          setShowPaymentModal(false);
+          closeCheckoutModals();
           setOrderNumber(orderNumber);
           setShowSuccess(true);
         }}
@@ -2261,10 +2490,10 @@ const PosScreen = () => {
         }}
       />
 
-      {/* Shipping Modal */}
+      {/* Shipping Modal — cierre seguro: limpia TODO el checkout flow. */}
       <ShippingModal
         visible={showShippingModal}
-        onClose={() => setShowShippingModal(false)}
+        onClose={() => closeCheckoutModals()}
         onSuccess={handleShippingSuccess}
         onSelectCustomer={() => {
           setShowShippingModal(false);
@@ -2272,19 +2501,20 @@ const PosScreen = () => {
         }}
       />
 
+      {/* Order Create Modal — placeholder hasta que se implemente el componente. */}
+      {/* TODO: integrar PosOrderCreateModal cuando esté disponible. */}
+
       {/* Custom Item Modal */}
       <PosCustomItemModal
         visible={showCustomItemModal}
-        onClose={() => setShowCustomItemModal(false)}
+        onClose={() => {
+          setShowCustomItemModal(false);
+          // Re-abre el cart modal para que el usuario siga editando.
+          if (useCartStore.getState().items.length > 0) {
+            setShowCartModal(true);
+          }
+        }}
         onAdd={handleAddCustomItem}
-      />
-
-      {/* Filter Dropdown */}
-      <PosFilterDropdown
-        visible={showFilters}
-        onClose={() => setShowFilters(false)}
-        onApplyFilters={(filters: any) => setActiveFilters(filters)}
-        currentFilters={activeFilters}
       />
     </View>
   );

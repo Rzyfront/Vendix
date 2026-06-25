@@ -4,7 +4,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import { OrgOrdersService } from '@/features/org/services/org-orders.service';
 import { OrgListItem } from '@/shared/components/org-list-item';
 import { OrgPageContainer } from '@/shared/components/org-page-container';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { OrgSectionHeader } from '@/shared/components/org-section-header';
 import { colors, colorScales, spacing, typography } from '@/shared/theme';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -43,13 +43,12 @@ export default function OrdersList() {
     >
       {stats ? (
         <View style={styles.section}>
-          <OrgStatsGrid
-            columns={2}
-            stats={[
+          <StatsGrid
+            items={[
               { label: 'Total órdenes', value: stats.total_orders, icon: 'clipboard-list' },
-              { label: 'Ingresos totales', value: formatCurrency(stats.total_revenue.amount), icon: 'dollar-sign', color: colors.success },
-              { label: 'Ticket promedio', value: formatCurrency(stats.average_ticket.amount), icon: 'trending-up', color: colorScales.blue[500] },
-              { label: 'Pendientes', value: stats.pending_orders, icon: 'clock', color: colorScales.amber[500] },
+              { label: 'Ingresos totales', value: formatCurrency(stats.total_revenue.amount), icon: 'dollar-sign', iconColor: colors.success, iconBg: colors.success + '15' },
+              { label: 'Ticket promedio', value: formatCurrency(stats.average_ticket.amount), icon: 'trending-up', iconColor: colorScales.blue[500], iconBg: colorScales.blue[500] + '15' },
+              { label: 'Pendientes', value: stats.pending_orders, icon: 'clock', iconColor: colorScales.amber[500], iconBg: colorScales.amber[500] + '15' },
             ]}
           />
         </View>

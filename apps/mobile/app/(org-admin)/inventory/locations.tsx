@@ -57,7 +57,7 @@ export default function LocationsScreen() {
               ? { label: 'Activa', variant: 'success' }
               : { label: 'Inactiva', variant: 'muted' }
           }
-          chevron
+          chevron={false}
         />
       ))}
     </OrgPageContainer>

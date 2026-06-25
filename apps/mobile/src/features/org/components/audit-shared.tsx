@@ -5,6 +5,7 @@ import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { OrgDetailRow } from '@/shared/components/org-detail-row';
 import { Icon } from '@/shared/components/icon/icon';
 import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
+import { formatDateTimeUTC } from '@/shared/utils/date';
 
 /**
  * Visor de diff antiguo → nuevo para los `old_values` / `new_values` de
@@ -158,7 +159,7 @@ export function AuditLogDetailModal({
           <OrgDetailRow
             icon="calendar"
             label="Fecha"
-            value={new Date(log.created_at).toLocaleString()}
+            value={formatDateTimeUTC(log.created_at)}
           />
           <OrgDetailRow
             icon="globe"

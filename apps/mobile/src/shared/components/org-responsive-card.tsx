@@ -350,10 +350,12 @@ export function OrgResponsiveCard({
 const styles = StyleSheet.create({
   card: {
     marginBottom: spacing[2],
+    padding: spacing[3],
   },
   body: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    gap: spacing[3],
   },
   avatar: {
     width: 40,
@@ -361,7 +363,6 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing[3],
     flexShrink: 0,
   },
   mainContent: {
@@ -396,8 +397,8 @@ const styles = StyleSheet.create({
   detailsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: spacing[2],
-    rowGap: spacing[2],
+    marginTop: spacing[3],
+    rowGap: spacing[3],
   },
   detailItem: {
     width: '33.333%',
@@ -414,7 +415,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    marginTop: 2,
+    marginTop: 4,
   },
   detailLabelIcon: {
     marginRight: 2,

@@ -26,6 +26,10 @@ interface DomainFormFieldsProps {
   onSubmit: (data: CreateDomainInput) => void;
   onCancel: () => void;
   submitLabel?: string;
+  /** Si true, oculta el header interno (título+icono). Se usa cuando el
+   *  componente se renderiza dentro de un `OrgCenteredModal` que provee
+   *  su propio title/subtitle — patrón de paridad web. */
+  hideHeader?: boolean;
 }
 
 /**
@@ -48,6 +52,7 @@ export function DomainFormFields({
   onSubmit,
   onCancel,
   submitLabel = 'Guardar',
+  hideHeader = false,
 }: DomainFormFieldsProps) {
   const isEdit = !!initial;
 
@@ -126,12 +131,16 @@ export function DomainFormFields({
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerIcon}>
-          <Icon name="globe" size={20} color={colors.primary} />
+      {/* Header interno: solo se renderiza cuando NO está oculto por el
+          modal padre (que provee su propio title/subtitle). */}
+      {!hideHeader ? (
+        <View style={styles.headerRow}>
+          <View style={styles.headerIcon}>
+            <Icon name="globe" size={20} color={colors.primary} />
+          </View>
+          <Text style={styles.headerTitle}>{isEdit ? 'Editar dominio' : 'Nuevo dominio'}</Text>
         </View>
-        <Text style={styles.headerTitle}>{isEdit ? 'Editar dominio' : 'Nuevo dominio'}</Text>
-      </View>
+      ) : null}
 
       <ScrollView style={styles.form} contentContainerStyle={styles.formContent} keyboardShouldPersistTaps="handled">
         {/* Hostname */}

@@ -12,7 +12,6 @@ import { UserDropdownModal } from '@/features/user/user-dropdown-modal';
 import { NotificationsService } from '@/features/notifications/notifications.service';
 import { useAuthStore } from '@/core/store/auth.store';
 import { ScopeChip } from '@/features/org/components/scope-chip';
-import { ToastContainer } from '@/shared/components/toast/toast';
 
 interface AdminShellProps {
   children: ReactNode;
@@ -65,6 +64,10 @@ export function AdminShell({
   const pathname = usePathname();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
+
+  // NOTA: el feedback de "Cambiaste a X tienda" lo emite directamente
+  // `performStoreSwitch()` desde el call-site — no usamos un notifier global
+  // aquí para evitar duplicación de toasts.
 
   const windowWidth = Dimensions.get('window').width;
   const DRAWER_WIDTH = Math.min(windowWidth * 0.8, 320);
@@ -211,9 +214,6 @@ export function AdminShell({
           <DrawerMenu currentRoute={pathname} onClose={closeDrawer} variant={variant} />
         </Animated.View>
       )}
-
-      {/* Toast notifications */}
-      <ToastContainer />
     </View>
   );
 }

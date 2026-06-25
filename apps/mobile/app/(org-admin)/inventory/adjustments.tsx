@@ -51,7 +51,7 @@ export default function AdjustmentsScreen() {
               : { label: a.status, variant: 'muted' }
           }
           rightMeta={new Date(a.created_at).toLocaleDateString()}
-          chevron
+          chevron={false}
         />
       ))}
     </OrgPageContainer>

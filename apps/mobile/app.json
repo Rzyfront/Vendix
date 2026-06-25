@@ -28,7 +28,8 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.quickss.vendix"
     },
     "android": {
       "package": "com.quickss.vendix",

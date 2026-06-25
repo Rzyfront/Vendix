@@ -11,6 +11,8 @@ export interface StatsGridItem {
   iconBg?: string;
   iconColor?: string;
   trend?: { value: number; positive: boolean };
+  /** When true, renders a skeleton placeholder instead of value. */
+  loading?: boolean;
 }
 
 interface StatsGridProps {
@@ -18,24 +20,34 @@ interface StatsGridProps {
   style?: ViewStyle;
 }
 
-const CARD_WIDTH = 150;
+const CARD_WIDTH = 160;
 
 const styles = StyleSheet.create({
   container: {
     backgroundColor: 'transparent',
-    paddingTop: spacing[3],
+    paddingTop: spacing[1],
     paddingBottom: spacing[1],
   },
   scrollContent: {
     flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
+    gap: spacing[3],
+    paddingHorizontal: spacing[4],
   },
   item: {
     width: CARD_WIDTH,
   },
 });
 
+/**
+ * Stats grid mobile-first, espejo del patrón canónico del dashboard ORG_ADMIN.
+ *
+ * Renderiza un scroll horizontal de tarjetas de 160px (mismo tamaño, padding y
+ * posicionamiento del ícono que la tarjeta del dashboard.tsx).
+ *
+ * Cada tarjeta entra con un fade-in + slide-up escalonado (40ms entre cards).
+ * Esto da vida al dashboard sin saturar — los primeros 8 cards terminan en
+ * ~320ms, suficientemente rápido para no sentirse lento.
+ */
 export function StatsGrid({ items, style }: StatsGridProps) {
   return (
     <View style={[styles.container, style]}>
@@ -54,6 +66,8 @@ export function StatsGrid({ items, style }: StatsGridProps) {
               iconBg={item.iconBg}
               iconColor={item.iconColor}
               trend={item.trend}
+              loading={item.loading}
+              enterIndex={index}
             />
           </View>
         ))}

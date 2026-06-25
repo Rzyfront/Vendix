@@ -11,6 +11,7 @@ import {
   UserCheck,
   UserPlus,
   Mail,
+  MailCheck,
   Phone,
   Building2,
   Store,
@@ -85,6 +86,9 @@ import {
   CheckSquare,
   Square,
   CheckCircle,
+  XCircle,
+  AlertCircle,
+  BellRing,
   Flag,
   Star,
   Globe,
@@ -408,6 +412,7 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'user-check': UserCheck,
   'user-plus': UserPlus,
   mail: Mail,
+  'mail-check': MailCheck,
   'map-pin': MapPin,
   phone: Phone,
   building: Building2,
@@ -484,6 +489,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'check-square': CheckSquare,
   square: Square,
   'check-circle': CheckCircle,
+  'x-circle': XCircle,
+  'alert-circle': AlertCircle,
+  'bell-ring': BellRing,
   flag: Flag,
   star: Star,
   globe: Globe,
@@ -802,6 +810,8 @@ interface IconProps {
   color?: string;
   style?: StyleProp<ViewStyle>;
 }
+
+export type IconName = keyof typeof iconMap;
 
 export function Icon({ name, size = 24, color = colors.text.primary, style }: IconProps) {
   const LucideIcon = iconMap[name];

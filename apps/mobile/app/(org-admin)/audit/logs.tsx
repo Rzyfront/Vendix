@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -7,6 +7,8 @@ import {
   StyleSheet,
   RefreshControl,
   ActivityIndicator,
+  Dimensions,
+  Modal,
 } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Sharing from 'expo-sharing';
@@ -14,10 +16,15 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { OrgAuditService } from '@/features/org/services/org-audit.service';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { OrgResponsiveCard, type OrgCardAction } from '@/shared/components/org-responsive-card';
-import { OrgOptionsDropdown, type OrgOptionsAction } from '@/shared/components/org-options-dropdown';
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Icon } from '@/shared/components/icon/icon';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
+import {
+  OptionsDropdown,
+  type FilterConfig,
+  type FilterValues,
+} from '@/shared/components/options-dropdown';
 import {
   AuditLogDetailModal,
   PaginationBar,
@@ -28,6 +35,7 @@ import {
   formatAction,
   formatResource,
   formatUser,
+  getActionBadgeVariant,
   getActionColor,
   getActionIcon,
   getResourceIcon,
@@ -39,35 +47,43 @@ import type {
   AuditQueryParams,
   AuditStats,
 } from '@/core/models/org-admin/audit.types';
-import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
+import { borderRadius, colorScales, colors, spacing, typography, interFonts } from '@/shared/theme';
+import { formatDateTimeUTC } from '@/shared/utils/date';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 
 /**
  * Auditoría · Registros de auditoría (paridad visual con web).
  *
- * Layout mobile (espejo de `logs.component.html` + `md:static md:bg-transparent`):
- *   ┌──────────────────────────────────────────┐ ← sticky top-0 z-20
- *   │ [stats grid scroll horiz.]               │
- *   ├──────────────────────────────────────────┤ ← sticky top-[99px] z-10
- *   │ Registros de auditoría    [Acciones▾]    │
- *   │ 142 eventos                [Filtros 0▾]  │
+ * Layout mobile (espejo de `logs.component.html`):
+ *   ┌──────────────────────────────────────────┐ ← Stats grid scroll horiz.
  *   ├──────────────────────────────────────────┤
- *   │ [OrgResponsiveCard × N]                  │ ← scroll
- *   │  - avatar (square 80x80) + title-group   │
- *   │  - details-grid 3-col                    │
- *   │  - footer: 👁 [⋮]                        │
- *   ├──────────────────────────────────────────┤
- *   │ [PaginationBar]                          │
+ *   │ ┌──────────────────────────────────────┐ │
+ *   │ │ Registros de auditoría (N)           │ │ ← tableCard
+ *   │ │ [🔍 search] [+] [⚙ filter]          │ │
+ *   │ ├──────────────────────────────────────┤ │
+ *   │ │ [OrgResponsiveCard × N]              │ │
+ *   │ └──────────────────────────────────────┘ │
  *   └──────────────────────────────────────────┘
+ *
+ * Paridad con el patrón aplicado a users/stores/domains:
+ *   - `tableCard` + `tableHeader` (1:1 con el `<app-card>` web)
+ *   - Search bar + 3 icon-only triggers (40x40, primary border, primary icon)
+ *   - Filters → popover anclado al trigger (`<OptionsDropdown showActions={false}>`)
+ *   - Actions → modal centrado (`<OrgCenteredModal>`)
  */
 
 const PAGE_SIZE = 10;
-const DEFAULT_FILTERS = { resource: null, action: null, from: null, to: null } as {
-  resource: AuditLogResource | null;
-  action: AuditLogAction | null;
-  from: string | null;
-  to: string | null;
+const SCREEN_WIDTH = Dimensions.get('window').width;
+
+// Empty-string sentinels ('') en lugar de null para que `FilterValues` (que
+// permite string | string[] | null) pueda representar "Todos" sin ambigüedad.
+const DEFAULT_FILTERS = {
+  resource: '' as AuditLogResource | '',
+  action: '' as AuditLogAction | '',
+  from: '' as string | '',
+  to: '' as string | '',
 };
+type LocalFilters = typeof DEFAULT_FILTERS;
 
 function auditStatsItems(stats: AuditStats | null | undefined) {
   const combined = stats?.logs_by_action_and_resource ?? {};
@@ -136,25 +152,114 @@ function auditStatsItems(stats: AuditStats | null | undefined) {
   ];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ListHeader — espejo del patrón users/stores/domains
+// (tableCard + tableHeader + título + search + 2 icon-only triggers)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ListHeaderProps {
+  stats: AuditStats | null | undefined;
+  count: number;
+  search: string;
+  onSearchChange: (v: string) => void;
+  onActionsPress: () => void;
+  filterConfigs: FilterConfig[];
+  filterValues: FilterValues;
+  onFilterChange: (values: FilterValues) => void;
+  onClearAllFilters: () => void;
+  activeFilterCount: boolean;
+}
+
+function ListHeader({
+  stats,
+  count,
+  search,
+  onSearchChange,
+  onActionsPress,
+  filterConfigs,
+  filterValues,
+  onFilterChange,
+  onClearAllFilters,
+  activeFilterCount,
+}: ListHeaderProps) {
+  return (
+    <View>
+      {/* Stats — espejo del bloque `stats-container` web */}
+      <View style={styles.statsWrap}>
+        <StatsGrid items={auditStatsItems(stats)} />
+      </View>
+
+      {/* ── Table card header (paridad 1:1 con users/stores/domains) ─── */}
+      <View style={styles.tableHeader}>
+        <View style={styles.tableTitleRow}>
+          <Text style={styles.tableTitle}>
+            Registros de auditoría{' '}
+            <Text style={styles.tableTitleCount}>({count})</Text>
+          </Text>
+        </View>
+
+        {/* Search + 2 icon-only triggers en UNA sola línea.
+            Espejo del `<app-options-dropdown>` web mobile responsive
+            (max-width: 1023px): cada trigger es 40x40, primary border,
+            primary icon. */}
+        <View style={styles.searchRow}>
+          <View style={{ flex: 1 }}>
+            <SearchBar
+              value={search}
+              onChangeText={onSearchChange}
+              placeholder="Buscar registros..."
+              style={styles.searchInput}
+            />
+          </View>
+          {/* Actions trigger (+ button) — abre modal con Actualizar/Exportar */}
+          <Pressable
+            style={({ pressed }) => [styles.optionsTrigger, pressed && { opacity: 0.85 }]}
+            onPress={onActionsPress}
+            accessibilityLabel="Abrir acciones"
+          >
+            <Icon name="plus" size={18} color={colors.primary} />
+          </Pressable>
+          {/* Filters trigger (espejo del `<app-options-dropdown>` web mobile).
+              Usa el `OptionsDropdown` shared con `showActions={false}` para
+              que solo se renderice el trigger de filtros; el popover se ancla
+              al trigger (NO modal/sheet centrado) — paridad 1:1 con la web. */}
+          <OptionsDropdown
+            showActions={false}
+            filters={filterConfigs}
+            filterValues={filterValues}
+            onFilterChange={onFilterChange}
+            onClearAllFilters={onClearAllFilters}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function AuditLogsScreen() {
   const queryClient = useQueryClient();
 
-  const [filters, setFilters] = useState(DEFAULT_FILTERS);
+  const [filters, setFilters] = useState<LocalFilters>(DEFAULT_FILTERS);
+  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<AuditLog | null>(null);
+  const [actionsModalOpen, setActionsModalOpen] = useState(false);
 
   // ───── Queries ───────────────────────────────────────────────────────────
   const queryParams: AuditQueryParams = useMemo(
     () => ({
       offset: (page - 1) * PAGE_SIZE,
       limit: PAGE_SIZE,
-      ...(filters.resource ? { resource: filters.resource } : {}),
-      ...(filters.action ? { action: filters.action } : {}),
+      ...(search ? { search } : {}),
+      ...(filters.resource ? { resource: filters.resource as AuditLogResource } : {}),
+      ...(filters.action ? { action: filters.action as AuditLogAction } : {}),
       ...(filters.from ? { from_date: filters.from } : {}),
       ...(filters.to ? { to_date: filters.to } : {}),
     }),
-    [page, filters],
+    [page, search, filters],
   );
 
   const { data, isLoading, refetch } = useQuery({
@@ -173,22 +278,82 @@ export default function AuditLogsScreen() {
   const totalPages = data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const hasFilters =
-    !!filters.resource || !!filters.action || !!filters.from || !!filters.to;
-  const activeFiltersCount = [
-    filters.resource,
-    filters.action,
-    filters.from,
-    filters.to,
-  ].filter(Boolean).length;
+    !!search || !!filters.resource || !!filters.action || !!filters.from || !!filters.to;
+  const activeFilterCount = !!(filters.resource || filters.action || filters.from || filters.to);
+
+  // ───── Filter configs (espejo del `filterConfigs` web) ─────────────────
+  const filterConfigs = useMemo<FilterConfig[]>(
+    () => [
+      {
+        key: 'resource',
+        label: 'Recurso',
+        type: 'select',
+        options: [
+          { value: '', label: 'Todos los recursos' },
+          ...AUDIT_RESOURCE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+        ],
+      },
+      {
+        key: 'action',
+        label: 'Acción',
+        type: 'select',
+        options: [
+          { value: '', label: 'Todas las acciones' },
+          ...AUDIT_ACTION_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+        ],
+      },
+      {
+        key: 'from',
+        label: 'Desde',
+        type: 'date',
+        helpText: 'Fecha inicial del evento',
+      },
+      {
+        key: 'to',
+        label: 'Hasta',
+        type: 'date',
+        helpText: 'Fecha final del evento',
+      },
+    ],
+    [],
+  );
+
+  // Mapea LocalFilters → FilterValues para el OptionsDropdown.
+  // Empty string `''` se transforma a `null` para que el popover sepa que
+  // el filtro está "sin valor" (y pueda mostrar el check del primer option).
+  const filterValues = useMemo<FilterValues>(
+    () => ({
+      resource: filters.resource || null,
+      action: filters.action || null,
+      from: filters.from || null,
+      to: filters.to || null,
+    }),
+    [filters],
+  );
+
+  const handleFilterChange = useCallback((values: FilterValues) => {
+    setFilters({
+      resource: ((values.resource as AuditLogResource | null) ?? '') as AuditLogResource | '',
+      action: ((values.action as AuditLogAction | null) ?? '') as AuditLogAction | '',
+      from: (values.from as string | null) ?? '',
+      to: (values.to as string | null) ?? '',
+    });
+    setPage(1);
+  }, []);
+
+  const handleClearAllFilters = useCallback(() => {
+    setFilters(DEFAULT_FILTERS);
+    setPage(1);
+  }, []);
 
   // ───── Export CSV mutation ────────────────────────────────────────────────
   const exportMutation = useMutation({
     mutationFn: () => {
       const params: Record<string, string | undefined> = {
-        resource: filters.resource ?? undefined,
-        action: filters.action ?? undefined,
-        from_date: filters.from ?? undefined,
-        to_date: filters.to ?? undefined,
+        resource: filters.resource || undefined,
+        action: filters.action || undefined,
+        from_date: filters.from || undefined,
+        to_date: filters.to || undefined,
       };
       return OrgAuditService.exportLogsCsv(params);
     },
@@ -209,8 +374,11 @@ export default function AuditLogsScreen() {
         } else {
           toastSuccess(`${filename} generado (${(csv.length / 1024).toFixed(1)} KB)`);
         }
-      } catch (err) {
-        toastSuccess('Exportación generada');
+      } catch (err: any) {
+        const msg =
+          err?.message ||
+          'El archivo CSV se generó pero no se pudo abrir el diálogo de compartir.';
+        toastError(`${msg} (el archivo quedó guardado en caché).`);
       }
     },
     onError: () => toastError('No se pudo exportar el CSV'),
@@ -225,82 +393,35 @@ export default function AuditLogsScreen() {
     setRefreshing(false);
   };
 
-  const clearFilters = () => {
-    setFilters(DEFAULT_FILTERS);
+  const handleSearchChange = (v: string) => {
+    setSearch(v);
     setPage(1);
   };
 
-  const actions: OrgOptionsAction[] = [
-    { key: 'refresh', label: 'Actualizar', icon: 'refresh-cw', onPress: onRefresh },
-    {
-      key: 'export',
-      label: exportMutation.isPending ? 'Exportando…' : 'Exportar CSV',
-      icon: 'download',
-      variant: 'primary',
-      disabled: exportMutation.isPending,
-      onPress: () => exportMutation.mutate(),
-    },
-  ];
+  const handleClearAll = () => {
+    handleClearAllFilters();
+    setSearch('');
+  };
 
   return (
     <View style={styles.root}>
-      {/* Sticky top: stats grid (web: `stats-container sticky top-0 z-20`) */}
-      <View style={styles.stickyStats}>
-        <StatsGrid items={auditStatsItems(stats)} />
-      </View>
-
-      {/* Sticky below: title row + options dropdown (web: `sticky top-[99px] z-10`) */}
-      <View style={styles.stickyTitleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.titleMain}>
-            Registros de auditoría{' '}
-            <Text style={styles.titleCount}>({total})</Text>
-          </Text>
-        </View>
-        <OrgOptionsDropdown
-          actions={actions}
-          activeFiltersCount={activeFiltersCount}
-          renderFiltersContent={({ onClose }) => (
-            <View>
-              <FilterSection
-                label="Recurso"
-                value={filters.resource ? formatResource(filters.resource) : 'Todos los recursos'}
-                onPress={() => {
-                  onClose();
-                }}
-                onClear={() => {
-                  setFilters({ ...filters, resource: null });
-                  setPage(1);
-                }}
-                hasValue={!!filters.resource}
-              />
-              <FilterSection
-                label="Acción"
-                value={filters.action ? formatAction(filters.action) : 'Todas las acciones'}
-                onPress={() => {
-                  onClose();
-                }}
-                onClear={() => {
-                  setFilters({ ...filters, action: null });
-                  setPage(1);
-                }}
-                hasValue={!!filters.action}
-              />
-              {activeFiltersCount > 0 ? (
-                <Pressable onPress={clearFilters} style={styles.clearAllRow}>
-                  <Icon name="x" size={14} color={colors.error} />
-                  <Text style={styles.clearAllText}>Limpiar todos los filtros</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          )}
-        />
-      </View>
-
-      {/* Scrollable list */}
       <FlatList<AuditLog>
         data={logs}
         keyExtractor={(l) => String(l.id)}
+        ListHeaderComponent={
+          <ListHeader
+            stats={stats}
+            count={total}
+            search={search}
+            onSearchChange={handleSearchChange}
+            onActionsPress={() => setActionsModalOpen(true)}
+            filterConfigs={filterConfigs}
+            filterValues={filterValues}
+            onFilterChange={handleFilterChange}
+            onClearAllFilters={handleClearAllFilters}
+            activeFilterCount={activeFilterCount}
+          />
+        }
         ListEmptyComponent={
           isLoading ? (
             <View style={styles.loading}>
@@ -312,13 +433,15 @@ export default function AuditLogsScreen() {
               title="No hay registros con estos filtros"
               description="Limpia los filtros o actualiza la lista para revisar nuevos eventos."
               actionLabel="Limpiar filtros"
-              onAction={clearFilters}
+              onAction={handleClearAll}
             />
           ) : (
             <EmptyState
               icon="history"
               title="No hay registros de auditoría"
               description="Los eventos aparecerán aquí cuando se registren cambios auditables."
+              actionLabel="Actualizar"
+              onAction={onRefresh}
             />
           )
         }
@@ -333,15 +456,6 @@ export default function AuditLogsScreen() {
               onPress: () => setSelected(item),
             },
           ];
-          // Paridad con web `logs.component.ts cardConfig`:
-          //   title        = formatAuditAction(action)         — ej. "Crear usuario"
-          //   subtitle     = formatAuditResource(resource) + #id
-          //   badge        = formatAuditAction(action) con color
-          //   detail[0]    = Usuario (icon user)
-          //   detail[1]    = Fecha
-          //   detail[2]    = IP
-          // Antes: el title era el usuario y "Acción" aparecía como detail, lo que
-          // duplicaba info con el badge y enterraba lo más importante (la acción).
           return (
             <OrgResponsiveCard
               title={formatAction(item.action)}
@@ -350,27 +464,15 @@ export default function AuditLogsScreen() {
               }`}
               leftIcon={getActionIcon(item.action)}
               leftIconColor={getActionColor(item.action)}
-              badge={{ label: formatAction(item.action), variant: 'primary' }}
+              badge={{
+                label: formatAction(item.action),
+                variant: getActionBadgeVariant(item.action),
+              }}
               details={[
-                {
-                  label: 'Usuario',
-                  value: formatUser(item),
-                  icon: 'user',
-                },
-                {
-                  label: 'Fecha',
-                  value: new Date(item.created_at).toLocaleString(),
-                  icon: 'calendar',
-                },
-                {
-                  label: 'IP',
-                  value: item.ip_address ?? '—',
-                  icon: 'globe',
-                  monospace: true,
-                },
+                { label: 'Usuario', value: formatUser(item), icon: 'user' },
+                { label: 'Fecha', value: formatDateTimeUTC(item.created_at), icon: 'calendar' },
+                { label: 'IP', value: item.ip_address ?? '—', icon: 'globe', monospace: true },
               ]}
-              footerLabel="Detalle"
-              footerValue={formatAction(item.action)}
               actions={cardActions}
               onPress={() => setSelected(item)}
               chevron={false}
@@ -395,7 +497,6 @@ export default function AuditLogsScreen() {
           />
         }
         contentContainerStyle={styles.listContent}
-        style={styles.flatList}
       />
 
       <AuditLogDetailModal
@@ -408,125 +509,170 @@ export default function AuditLogsScreen() {
         formatUser={formatUser}
         onClose={() => setSelected(null)}
       />
-    </View>
-  );
-}
 
-function FilterSection({
-  label,
-  value,
-  onPress,
-  onClear,
-  hasValue,
-}: {
-  label: string;
-  value: string;
-  onPress: () => void;
-  onClear?: () => void;
-  hasValue?: boolean;
-}) {
-  return (
-    <View style={styles.filterSection}>
-      <Pressable style={styles.filterSectionMain} onPress={onPress}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.filterLabel}>{label}</Text>
-          <Text style={styles.filterValue} numberOfLines={1}>
-            {value}
-          </Text>
+      {/* ── Actions Modal — espejo del patrón users/stores/domains ── */}
+      <OrgCenteredModal
+        visible={actionsModalOpen}
+        onClose={() => setActionsModalOpen(false)}
+        title="Acciones"
+        subtitle="¿Qué quieres hacer con la lista de registros?"
+        size="sm"
+      >
+        <View style={styles.actionsModalList}>
+          <Pressable
+            style={styles.actionsModalOption}
+            onPress={() => {
+              setActionsModalOpen(false);
+              onRefresh();
+            }}
+          >
+            <View style={[styles.actionsModalIconWrap, { backgroundColor: colorScales.gray[100] }]}>
+              <Icon name="refresh-cw" size={16} color={colorScales.gray[700]} />
+            </View>
+            <View style={styles.actionsModalTextWrap}>
+              <Text style={styles.actionsModalOptionTitle}>Actualizar</Text>
+              <Text style={styles.actionsModalOptionHint}>
+                Recargar la lista con los últimos cambios
+              </Text>
+            </View>
+          </Pressable>
+
+          <Pressable
+            style={styles.actionsModalOption}
+            onPress={() => {
+              setActionsModalOpen(false);
+              exportMutation.mutate();
+            }}
+            disabled={exportMutation.isPending}
+          >
+            <View style={[styles.actionsModalIconWrap, { backgroundColor: colors.primary + '15' }]}>
+              <Icon name="download" size={16} color={colors.primary} />
+            </View>
+            <View style={styles.actionsModalTextWrap}>
+              <Text style={styles.actionsModalOptionTitle}>
+                {exportMutation.isPending ? 'Exportando…' : 'Exportar CSV'}
+              </Text>
+              <Text style={styles.actionsModalOptionHint}>
+                Descargar todos los registros visibles en formato CSV
+              </Text>
+            </View>
+          </Pressable>
         </View>
-        <Icon name="chevron-right" size={16} color={colorScales.gray[400]} />
-      </Pressable>
-      {hasValue && onClear ? (
-        <Pressable onPress={onClear} hitSlop={6} style={styles.filterClearBtn}>
-          <Icon name="x" size={12} color={colors.error} />
-        </Pressable>
-      ) : null}
+      </OrgCenteredModal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colorScales.gray[50] },
-  loading: { paddingVertical: spacing[12], alignItems: 'center' },
-  // Sticky stats: scroll horizontal, NO flex: 1 (altura fija al contenido)
-  stickyStats: {
-    backgroundColor: colorScales.gray[50],
-    paddingBottom: spacing[2],
-  },
-  // Sticky title row: justo debajo de stats
-  stickyTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[3],
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
-  },
-  titleMain: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.gray[900],
-  },
-  titleCount: {
-    fontWeight: typography.fontWeight.normal,
-    color: colorScales.gray[500],
-  },
-  flatList: {
+  root: {
     flex: 1,
+    backgroundColor: colorScales.gray[50],
+    paddingHorizontal: spacing[4],
   },
+  loading: { paddingVertical: spacing[12], alignItems: 'center' },
   separator: { height: spacing[3] },
   listContent: {
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[3],
+    paddingTop: spacing[2],
     paddingBottom: spacing[24],
   },
-  filterSection: {
+
+  // ── Stats wrap (mismo patrón users/stores/domains) ─────────────
+  statsWrap: {
+    marginHorizontal: -spacing[4],
+    marginBottom: spacing[3],
+  },
+
+  // ── Table card header (paridad 1:1 con users/stores/domains) ───
+  tableHeader: {
+    backgroundColor: '#fff',
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[2],
+    marginBottom: spacing[3],
+  },
+  tableTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
+    justifyContent: 'space-between',
+    marginBottom: spacing[3],
   },
-  filterSectionMain: {
-    flex: 1,
+  tableTitle: {
+    fontSize: typography.fontSize.lg,
+    fontFamily: interFonts.semibold,
+    color: colorScales.gray[900],
+    flexShrink: 1,
+  },
+  tableTitleCount: {
+    fontFamily: interFonts.regular,
+    color: colorScales.gray[400],
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  searchInput: {
+    width: '100%',
+    height: 40,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
+  },
+  // Espejo del `.options-dropdown-trigger` web mobile responsive (40x40,
+  // primary border, primary icon, 12px radius).
+  optionsTrigger: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+
+  // ── Actions Modal (espejo del `<app-options-dropdown>` web) ────
+  actionsModalList: {
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    backgroundColor: colors.card,
+  },
+  actionsModalOption: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[3],
+    paddingHorizontal: spacing[3],
     paddingVertical: spacing[3],
-    paddingHorizontal: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
   },
-  filterClearBtn: {
-    width: 32,
-    height: 32,
+  actionsModalIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing[2],
-    borderRadius: borderRadius.md,
+    flexShrink: 0,
   },
-  filterLabel: {
-    fontSize: 10,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.gray[500],
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+  actionsModalTextWrap: {
+    flex: 1,
+    minWidth: 0,
   },
-  filterValue: {
+  actionsModalOptionTitle: {
     fontSize: typography.fontSize.sm,
+    fontFamily: interFonts.semibold,
     color: colorScales.gray[900],
+  },
+  actionsModalOptionHint: {
+    fontSize: typography.fontSize.xs,
+    fontFamily: interFonts.regular,
+    color: colorScales.gray[500],
     marginTop: 2,
-    fontWeight: typography.fontWeight.medium,
-  },
-  clearAllRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: spacing[3],
-    paddingHorizontal: spacing[2],
-  },
-  clearAllText: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colors.error,
   },
 });

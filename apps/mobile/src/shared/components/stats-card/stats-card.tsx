@@ -1,6 +1,13 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
 import { View, Text, StyleSheet, type ViewStyle, type ViewProps } from 'react-native';
-import { colorScales, spacing, borderRadius, typography, interFonts } from '@/shared/theme';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withDelay,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
+import { colorScales, spacing, borderRadius, typography, interFonts, motion } from '@/shared/theme';
 import { Icon } from '../icon/icon';
 
 interface StatsCardProps extends ViewProps {
@@ -11,8 +18,22 @@ interface StatsCardProps extends ViewProps {
   iconBg?: string;
   iconColor?: string;
   trend?: { value: number; positive: boolean };
+  /** When true, renders 3 skeleton bars instead of value/description. */
+  loading?: boolean;
+  /**
+   * Index used to stagger entrance animations across a `StatsGrid`.
+   * 40ms delay per index — los primeros 8 cards terminan de entrar en ~320ms.
+   * Si no se provee, no hay delay (entrada inmediata).
+   */
+  enterIndex?: number;
+  /** Disable entrance animation (ej: cuando se quiere render inmediato en re-mounts). */
+  animateEntrance?: boolean;
   style?: ViewStyle;
 }
+
+const ENTER_STAGGER_MS = 40;
+const ENTER_BASE_MS = 60;
+const SLIDE_OFFSET = 8;
 
 const styles = StyleSheet.create({
   card: {
@@ -89,6 +110,10 @@ const styles = StyleSheet.create({
     marginLeft: spacing[1],
     flexShrink: 1,
   },
+  skeleton: {
+    backgroundColor: colorScales.gray[100],
+    borderRadius: 4,
+  },
 });
 
 export function StatsCard({
@@ -99,6 +124,9 @@ export function StatsCard({
   iconBg = '#dbeafe',
   iconColor = '#2563eb',
   trend,
+  loading,
+  enterIndex = 0,
+  animateEntrance = true,
   style,
   ...props
 }: StatsCardProps) {
@@ -107,8 +135,49 @@ export function StatsCard({
       ? <Icon name={icon} size={13} color={iconColor} />
       : icon;
 
+  // Entrance animation — fade-in + small slide-up, staggered by index.
+  const opacity = useSharedValue(animateEntrance ? 0 : 1);
+  const translateY = useSharedValue(animateEntrance ? SLIDE_OFFSET : 0);
+
+  useEffect(() => {
+    if (!animateEntrance) return;
+    const delay = ENTER_BASE_MS + enterIndex * ENTER_STAGGER_MS;
+    opacity.value = withDelay(
+      delay,
+      withTiming(1, {
+        duration: motion.duration.base,
+        easing: motion.easing.standard,
+      }),
+    );
+    translateY.value = withDelay(
+      delay,
+      withTiming(0, {
+        duration: motion.duration.base,
+        easing: motion.easing.standard,
+      }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  if (loading) {
+    return (
+      <Animated.View style={[styles.card, animatedStyle, style]} {...props}>
+        <View style={styles.content}>
+          <View style={[styles.skeleton, { height: 10, width: '50%' }]} />
+          <View style={[styles.skeleton, { height: 20, width: '75%', marginTop: 4 }]} />
+          <View style={[styles.skeleton, { height: 10, width: '40%', marginTop: 4 }]} />
+        </View>
+      </Animated.View>
+    );
+  }
+
   return (
-    <View style={[styles.card, style]} {...props}>
+    <Animated.View style={[styles.card, animatedStyle, style]} {...props}>
       {iconContent && (
         <View style={[styles.iconContainer, { backgroundColor: iconBg }]}>
           {iconContent}
@@ -146,7 +215,6 @@ export function StatsCard({
           </View>
         )}
       </View>
-    </View>
+    </Animated.View>
   );
 }
-

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -10,37 +10,154 @@ import {
 } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { OrgAuditService } from '@/features/org/services/org-audit.service';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
-import {
-  OrgResponsiveCard,
-  type OrgCardAction,
-} from '@/shared/components/org-responsive-card';
-import {
-  OrgOptionsDropdown,
-  type OrgOptionsAction,
-} from '@/shared/components/org-options-dropdown';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
+import { OrgResponsiveCard, type OrgCardAction } from '@/shared/components/org-responsive-card';
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { OrgDetailRow } from '@/shared/components/org-detail-row';
 import { Icon } from '@/shared/components/icon/icon';
 import { PaginationBar } from '@/features/org/components/audit-shared';
 import {
+  OptionsDropdown,
+  type FilterConfig,
+  type FilterValues,
+} from '@/shared/components/options-dropdown';
+import {
   formatSessionUser,
   getDeviceIcon,
   isSessionActive,
 } from '@/features/org/components/audit-formatters';
 import type { ActiveSession } from '@/core/models/org-admin/audit.types';
-import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
+import { borderRadius, colorScales, colors, spacing, typography, interFonts } from '@/shared/theme';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 
 /**
  * Auditoría · Sesiones (paridad visual con web).
  *
- * Layout: stats sticky top, title row sticky, cards scroll, modal centered.
+ * Layout mobile (espejo del `sessions.component.ts` web):
+ *   ┌──────────────────────────────────────────┐ ← Stats grid scroll horiz.
+ *   ├──────────────────────────────────────────┤
+ *   │ ┌──────────────────────────────────────┐ │
+ *   │ │ Sesiones (N)                        │ │ ← tableCard
+ *   │ │ [+] [⚙ Estado ▾]                    │ │
+ *   │ ├──────────────────────────────────────┤ │
+ *   │ │ [OrgResponsiveCard × N]              │ │
+ *   │ └──────────────────────────────────────┘ │
+ *   └──────────────────────────────────────────┘
+ *
+ * Paridad con el patrón aplicado a users/stores/domains/logs:
+ *   - `tableCard` + `tableHeader` (1:1 con el `<app-card>` web)
+ *   - 2 icon-only triggers (actions + filters, 40x40, primary border)
+ *   - Filters → popover anclado al trigger (`<OptionsDropdown showActions={false}>`)
+ *   - Actions → modal centrado (`<OrgCenteredModal>`)
  */
 
 const PAGE_SIZE = 10;
 type StatusFilter = 'all' | 'active' | 'inactive';
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'Todas las sesiones' },
+  { value: 'active', label: 'Sólo sesiones activas' },
+  { value: 'inactive', label: 'Sólo sesiones inactivas' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ListHeader — espejo del patrón users/stores/domains/logs
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ListHeaderProps {
+  count: number;
+  activeCount: number;
+  inactiveCount: number;
+  onActionsPress: () => void;
+  filterConfigs: FilterConfig[];
+  filterValues: FilterValues;
+  onFilterChange: (values: FilterValues) => void;
+  onClearAllFilters: () => void;
+  activeFilterCount: boolean;
+}
+
+function ListHeader({
+  count,
+  activeCount,
+  inactiveCount,
+  onActionsPress,
+  filterConfigs,
+  filterValues,
+  onFilterChange,
+  onClearAllFilters,
+  activeFilterCount,
+}: ListHeaderProps) {
+  return (
+    <View>
+      {/* Stats — espejo del bloque `stats-container` web */}
+      <View style={styles.statsWrap}>
+        <StatsGrid
+          items={[
+            {
+              label: 'Total Sesiones',
+              value: count,
+              icon: 'monitor',
+              iconColor: colorScales.blue[600],
+              iconBg: colorScales.blue[600] + '15',
+              description: 'sesiones registradas',
+            },
+            {
+              label: 'Activas',
+              value: activeCount,
+              icon: 'check-circle',
+              iconColor: colorScales.green[600],
+              iconBg: colorScales.green[600] + '15',
+              description: 'sesiones activas',
+            },
+            {
+              label: 'Inactivas',
+              value: inactiveCount,
+              icon: 'x-circle',
+              iconColor: colorScales.red[600],
+              iconBg: colorScales.red[600] + '15',
+              description: 'sesiones terminadas',
+            },
+          ]}
+        />
+      </View>
+
+      {/* ── Table card header (paridad 1:1 con users/stores/domains/logs) ─ */}
+      <View style={styles.tableHeader}>
+        <View style={styles.tableTitleRow}>
+          <Text style={styles.tableTitle}>
+            Sesiones{' '}
+            <Text style={styles.tableTitleCount}>({count})</Text>
+          </Text>
+        </View>
+
+        {/* 2 icon-only triggers en UNA sola línea. Sin search bar porque la
+            web no incluye búsqueda para sesiones (los filtros son por status). */}
+        <View style={styles.searchRow}>
+          <View style={{ flex: 1 }} />
+          {/* Actions trigger (+ button) — abre modal con Actualizar */}
+          <Pressable
+            style={({ pressed }) => [styles.optionsTrigger, pressed && { opacity: 0.85 }]}
+            onPress={onActionsPress}
+            accessibilityLabel="Abrir acciones"
+          >
+            <Icon name="plus" size={18} color={colors.primary} />
+          </Pressable>
+          {/* Filters trigger (espejo del `<app-options-dropdown>` web mobile).
+              Popover anclado al trigger (NO modal/sheet centrado). */}
+          <OptionsDropdown
+            showActions={false}
+            filters={filterConfigs}
+            filterValues={filterValues}
+            onFilterChange={onFilterChange}
+            onClearAllFilters={onClearAllFilters}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function SessionsScreen() {
   const queryClient = useQueryClient();
@@ -50,6 +167,7 @@ export default function SessionsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<ActiveSession | null>(null);
   const [pendingTerminate, setPendingTerminate] = useState<ActiveSession | null>(null);
+  const [actionsModalOpen, setActionsModalOpen] = useState(false);
 
   const queryParams = useMemo(
     () => ({
@@ -71,6 +189,40 @@ export default function SessionsScreen() {
   const activeCount = sessions.filter((s) => isSessionActive(s)).length;
   const inactiveCount = Math.max(total - activeCount, 0);
 
+  // ───── Filter configs (espejo del form web) ──────────────────────
+  const filterConfigs = useMemo<FilterConfig[]>(
+    () => [
+      {
+        key: 'status',
+        label: 'Estado',
+        type: 'select',
+        options: STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+      },
+    ],
+    [],
+  );
+
+  const filterValues = useMemo<FilterValues>(
+    () => ({
+      status: status || null,
+    }),
+    [status],
+  );
+
+  const handleFilterChange = useCallback((values: FilterValues) => {
+    const next = (values.status as StatusFilter | null) ?? 'all';
+    setStatus(next);
+    setPage(1);
+  }, []);
+
+  const handleClearAllFilters = useCallback(() => {
+    setStatus('all');
+    setPage(1);
+  }, []);
+
+  const activeFilterCount = status !== 'all';
+
+  // ───── Mutations ─────────────────────────────────────────────────
   const terminateMutation = useMutation({
     mutationFn: (id: string | number) => OrgAuditService.terminateSession(id),
     onSuccess: () => {
@@ -88,91 +240,24 @@ export default function SessionsScreen() {
     setRefreshing(false);
   };
 
-  const activeFiltersCount = status === 'all' ? 0 : 1;
-  const actions: OrgOptionsAction[] = [
-    { key: 'refresh', label: 'Actualizar', icon: 'refresh-cw', onPress: onRefresh },
-  ];
-
   return (
     <View style={styles.root}>
-      {/* Sticky top: stats grid */}
-      <View style={styles.stickyStats}>
-        <OrgStatsGrid
-          stats={[
-            {
-              label: 'Total Sesiones',
-              value: total,
-              icon: 'monitor',
-              color: colorScales.blue[600],
-              subText: 'sesiones registradas',
-            },
-            {
-              label: 'Activas',
-              value: activeCount,
-              icon: 'check-circle',
-              color: colorScales.green[600],
-              subText: 'sesiones activas',
-            },
-            {
-              label: 'Inactivas',
-              value: inactiveCount,
-              icon: 'x-circle',
-              color: colorScales.red[600],
-              subText: 'sesiones terminadas',
-            },
-          ]}
-        />
-      </View>
-
-      {/* Sticky below: title row + options dropdown */}
-      <View style={styles.stickyTitleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.titleMain}>
-            Sesiones{' '}
-            <Text style={styles.titleCount}>({total})</Text>
-          </Text>
-        </View>
-        <OrgOptionsDropdown
-          actions={actions}
-          activeFiltersCount={activeFiltersCount}
-          renderFiltersContent={() => (
-            <View>
-              <FilterSection
-                label="Todas"
-                value="Mostrar todas las sesiones"
-                active={status === 'all'}
-                onPress={() => {
-                  setStatus('all');
-                  setPage(1);
-                }}
-              />
-              <FilterSection
-                label="Activas"
-                value="Sólo sesiones con is_active=true"
-                active={status === 'active'}
-                onPress={() => {
-                  setStatus('active');
-                  setPage(1);
-                }}
-              />
-              <FilterSection
-                label="Inactivas"
-                value="Sólo sesiones terminadas o expiradas"
-                active={status === 'inactive'}
-                onPress={() => {
-                  setStatus('inactive');
-                  setPage(1);
-                }}
-              />
-            </View>
-          )}
-        />
-      </View>
-
-      {/* Scrollable list */}
       <FlatList<ActiveSession>
         data={sessions}
         keyExtractor={(s) => String(s.id)}
+        ListHeaderComponent={
+          <ListHeader
+            count={total}
+            activeCount={activeCount}
+            inactiveCount={inactiveCount}
+            onActionsPress={() => setActionsModalOpen(true)}
+            filterConfigs={filterConfigs}
+            filterValues={filterValues}
+            onFilterChange={handleFilterChange}
+            onClearAllFilters={handleClearAllFilters}
+            activeFilterCount={activeFilterCount}
+          />
+        }
         ListEmptyComponent={
           isLoading ? (
             <View style={styles.loading}>
@@ -184,10 +269,7 @@ export default function SessionsScreen() {
               title="Sin sesiones con este filtro"
               description="Cambia el filtro de estado para ver más sesiones."
               actionLabel="Mostrar todas"
-              onAction={() => {
-                setStatus('all');
-                setPage(1);
-              }}
+              onAction={handleClearAllFilters}
             />
           ) : (
             <EmptyState
@@ -240,12 +322,7 @@ export default function SessionsScreen() {
                     : { label: 'Inactiva', variant: 'muted' }
               }
               details={[
-                {
-                  label: 'IP',
-                  value: item.ip_address ?? '—',
-                  icon: 'globe',
-                  monospace: true,
-                },
+                { label: 'IP', value: item.ip_address ?? '—', icon: 'globe', monospace: true },
                 {
                   label: 'Última actividad',
                   value: new Date(
@@ -291,10 +368,9 @@ export default function SessionsScreen() {
           />
         }
         contentContainerStyle={styles.listContent}
-        style={styles.flatList}
       />
 
-      {/* Detail modal — centered (espejo de app-modal web) */}
+      {/* Detail modal — centrado (espejo de app-modal web) */}
       <OrgCenteredModal
         visible={!!selected}
         onClose={() => setSelected(null)}
@@ -410,7 +486,7 @@ export default function SessionsScreen() {
         ) : null}
       </OrgCenteredModal>
 
-      {/* Confirm terminate — centered */}
+      {/* Confirm terminate — centrado */}
       <OrgCenteredModal
         visible={!!pendingTerminate}
         onClose={() => !terminateMutation.isPending && setPendingTerminate(null)}
@@ -449,74 +525,145 @@ export default function SessionsScreen() {
           El usuario será desconectado y deberá volver a iniciar sesión.
         </Text>
       </OrgCenteredModal>
+
+      {/* ── Actions Modal — espejo del patrón users/stores/domains/logs ── */}
+      <OrgCenteredModal
+        visible={actionsModalOpen}
+        onClose={() => setActionsModalOpen(false)}
+        title="Acciones"
+        subtitle="¿Qué quieres hacer con la lista de sesiones?"
+        size="sm"
+      >
+        <View style={styles.actionsModalList}>
+          <Pressable
+            style={styles.actionsModalOption}
+            onPress={() => {
+              setActionsModalOpen(false);
+              onRefresh();
+            }}
+          >
+            <View style={[styles.actionsModalIconWrap, { backgroundColor: colorScales.gray[100] }]}>
+              <Icon name="refresh-cw" size={16} color={colorScales.gray[700]} />
+            </View>
+            <View style={styles.actionsModalTextWrap}>
+              <Text style={styles.actionsModalOptionTitle}>Actualizar</Text>
+              <Text style={styles.actionsModalOptionHint}>
+                Recargar la lista con los últimos cambios
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+      </OrgCenteredModal>
     </View>
   );
 }
 
-function FilterSection({
-  label,
-  value,
-  active,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      style={[styles.filterSection, active && styles.filterSectionActive]}
-      onPress={onPress}
-    >
-      <View style={{ flex: 1 }}>
-        <Text style={styles.filterLabel}>{label}</Text>
-        <Text style={styles.filterValue} numberOfLines={1}>
-          {value}
-        </Text>
-      </View>
-      {active ? (
-        <Icon name="check" size={16} color={colorScales.green[600]} />
-      ) : (
-        <Icon name="chevron-right" size={16} color={colorScales.gray[400]} />
-      )}
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colorScales.gray[50] },
-  loading: { paddingVertical: spacing[12], alignItems: 'center' },
-  stickyStats: {
+  root: {
+    flex: 1,
     backgroundColor: colorScales.gray[50],
-    paddingBottom: spacing[2],
+    paddingHorizontal: spacing[4],
   },
-  stickyTitleRow: {
+  loading: { paddingVertical: spacing[12], alignItems: 'center' },
+  separator: { height: spacing[3] },
+  listContent: {
+    paddingTop: spacing[2],
+    paddingBottom: spacing[24],
+  },
+
+  // ── Stats wrap (mismo patrón users/stores/domains/logs) ─────────
+  statsWrap: {
+    marginHorizontal: -spacing[4],
+    marginBottom: spacing[3],
+  },
+
+  // ── Table card header (paridad 1:1 con users/stores/domains/logs) ─
+  tableHeader: {
+    backgroundColor: '#fff',
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[2],
+    marginBottom: spacing[3],
+  },
+  tableTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing[3],
+  },
+  tableTitle: {
+    fontSize: typography.fontSize.lg,
+    fontFamily: interFonts.semibold,
+    color: colorScales.gray[900],
+    flexShrink: 1,
+  },
+  tableTitleCount: {
+    fontFamily: interFonts.regular,
+    color: colorScales.gray[400],
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: spacing[2],
+  },
+  // Espejo del `.options-dropdown-trigger` web mobile responsive.
+  optionsTrigger: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+
+  // ── Actions Modal (espejo del `<app-options-dropdown>` web) ────
+  actionsModalList: {
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    backgroundColor: colors.card,
+  },
+  actionsModalOption: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[3],
-    paddingHorizontal: spacing[4],
+    paddingHorizontal: spacing[3],
     paddingVertical: spacing[3],
-    backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[100],
   },
-  titleMain: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.bold,
+  actionsModalIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  actionsModalTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  actionsModalOptionTitle: {
+    fontSize: typography.fontSize.sm,
+    fontFamily: interFonts.semibold,
     color: colorScales.gray[900],
   },
-  titleCount: {
-    fontWeight: typography.fontWeight.normal,
+  actionsModalOptionHint: {
+    fontSize: typography.fontSize.xs,
+    fontFamily: interFonts.regular,
     color: colorScales.gray[500],
+    marginTop: 2,
   },
-  flatList: { flex: 1 },
-  separator: { height: spacing[3] },
-  listContent: {
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[3],
-    paddingBottom: spacing[24],
-  },
+
+  // ── Detail modal styles ─────────────────────────────────────
   detailHero: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -573,30 +720,5 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: colorScales.gray[500],
     marginBottom: spacing[4],
-  },
-  filterSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[3],
-    paddingVertical: spacing[3],
-    paddingHorizontal: spacing[2],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
-  },
-  filterSectionActive: {
-    backgroundColor: colorScales.green[50],
-  },
-  filterLabel: {
-    fontSize: 10,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.gray[500],
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  filterValue: {
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[900],
-    marginTop: 2,
-    fontWeight: typography.fontWeight.medium,
   },
 });

@@ -1,7 +1,17 @@
-import { Pressable, StyleSheet } from 'react-native';
+import { useEffect } from 'react';
+import { StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSequence,
+  withSpring,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { Icon } from '@/shared/components/icon/icon';
-import { colorScales, borderRadius } from '@/shared/theme';
+import { AnimatedPressable } from '@/shared/components/animated-pressable';
+import { colorScales, borderRadius, motion } from '@/shared/theme';
 
 /**
  * Scope chip del header global — paridad 1:1 con el web `HeaderComponent`
@@ -16,6 +26,9 @@ import { colorScales, borderRadius } from '@/shared/theme';
  *
  * Tap → navega a `/(org-admin)/settings/operating-scope` para que el usuario
  * pueda cambiar el modo si lo necesita.
+ *
+ * Animación sutil: al cambiar de scope (org/store), el icono hace un pequeño
+ * pulse (scale 1 → 1.15 → 1) para señalar el cambio sin ser intrusivo.
  */
 
 export type OperatingScopeValue = 'STORE' | 'ORGANIZATION';
@@ -29,20 +42,36 @@ export function ScopeChip({ scope }: ScopeChipProps) {
   const isOrg = scope === 'ORGANIZATION';
   const label = isOrg ? 'Modo operativo: Organización' : 'Modo operativo: Por tienda';
 
+  // Pulse animation al cambiar scope.
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    pulse.value = withSequence(
+      withSpring(1.15, { damping: 8, stiffness: 240, mass: 0.6 }),
+      withSpring(1, motion.spring.firm),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
+
+  const animatedIconStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulse.value }],
+  }));
+
   return (
-    <Pressable
+    <AnimatedPressable
       onPress={() => router.push('/(org-admin)/settings/operating-scope' as never)}
       hitSlop={6}
-      style={({ pressed }) => [styles.button, pressed && styles.pressed]}
+      style={styles.button}
       accessibilityLabel={label}
       accessibilityRole="button"
     >
-      <Icon
-        name={isOrg ? 'building' : 'store'}
-        size={20}
-        color={isOrg ? '#2563eb' : colorScales.gray[600]}
-      />
-    </Pressable>
+      <Animated.View style={animatedIconStyle}>
+        <Icon
+          name={isOrg ? 'building' : 'store'}
+          size={20}
+          color={isOrg ? '#2563eb' : colorScales.gray[600]}
+        />
+      </Animated.View>
+    </AnimatedPressable>
   );
 }
 
@@ -54,8 +83,5 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  pressed: {
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
   },
 });

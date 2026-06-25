@@ -50,7 +50,7 @@ export default function TransfersScreen() {
               : { label: t.status, variant: 'muted' }
           }
           rightMeta={t.expected_date ? new Date(t.expected_date).toLocaleDateString() : undefined}
-          chevron
+          chevron={false}
         />
       ))}
     </OrgPageContainer>

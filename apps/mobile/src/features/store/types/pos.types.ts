@@ -46,6 +46,8 @@ export interface CartState {
   notes: string;
   discounts: CartDiscount[];
   summary: CartSummary;
+  /** Modo de operación del POS (paridad web `isQuotationMode / isLayawayMode`). */
+  mode?: PosMode;
 }
 
 export interface PaymentMethod {
@@ -135,4 +137,12 @@ export interface PaymentResult {
   change?: number;
 }
 
-export type PosMode = 'sale' | 'quotation';
+/**
+ * Modo de operación del POS — paridad con `pos.component.ts` web
+ * (`isQuotationMode`, `isLayawayMode`, `isEditMode`).
+ *
+ * - `sale`     → Punto de venta (default). Cobrar normal.
+ * - `quotation`→ Crear cotización. No descuenta inventario.
+ * - `layaway`  → Crear plan separé. Requiere cliente.
+ */
+export type PosMode = 'sale' | 'quotation' | 'layaway';

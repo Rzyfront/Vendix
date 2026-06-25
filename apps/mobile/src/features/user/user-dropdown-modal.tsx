@@ -1,24 +1,29 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  Pressable,
   StyleSheet,
   ScrollView,
   Modal as RNModal,
   TouchableWithoutFeedback,
-  Alert,
   Platform,
 } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withDelay,
+  withTiming,
+} from 'react-native-reanimated';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { AuthService } from '@/core/auth/auth.service';
-import { getQueryClient } from '@/core/api/query-client';
-import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
+import { performStoreSwitch } from '@/core/auth/store-switcher';
+import { colors, colorScales, spacing, typography, borderRadius, motion } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
-import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
+import { AnimatedPressable } from '@/shared/components/animated-pressable';
+import { toastError, toastInfo } from '@/shared/components/toast/toast.store';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 
 interface UserDropdownModalProps {
@@ -75,6 +80,90 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
     ? 'Dueño'
     : user?.roles?.[0] || 'Usuario';
 
+  // Dropdown container fade+slide-in (fade 0→1, slide -8→0). Una sola animación
+  // por apertura — los items individuales se animan en cascada justo después.
+  const dropdownOpacity = useSharedValue(0);
+  const dropdownTranslate = useSharedValue(-8);
+  useEffect(() => {
+    if (visible) {
+      dropdownOpacity.value = withTiming(1, {
+        duration: motion.duration.fast,
+        easing: motion.easing.standard,
+      });
+      dropdownTranslate.value = withTiming(0, {
+        duration: motion.duration.fast,
+        easing: motion.easing.standard,
+      });
+    } else {
+      dropdownOpacity.value = 0;
+      dropdownTranslate.value = -8;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+  const dropdownAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: dropdownOpacity.value,
+    transform: [{ translateY: dropdownTranslate.value }],
+  }));
+
+  /**
+   * Hook compartido: stagger fade-in para items de menú dentro del dropdown.
+   * 40ms por index, base 80ms → los primeros 6 items terminan en ~280ms.
+   * Se reinicia cuando `visible` pasa a true.
+   */
+  const useMenuItemEnter = (index: number) => {
+    const opacity = useSharedValue(0);
+    const translate = useSharedValue(6);
+    useEffect(() => {
+      if (visible) {
+        const delay = 80 + index * 40;
+        opacity.value = withDelay(
+          delay,
+          withTiming(1, { duration: motion.duration.base, easing: motion.easing.standard }),
+        );
+        translate.value = withDelay(
+          delay,
+          withTiming(0, { duration: motion.duration.base, easing: motion.easing.standard }),
+        );
+      } else {
+        opacity.value = 0;
+        translate.value = 6;
+      }
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [visible]);
+    return useAnimatedStyle(() => ({
+      opacity: opacity.value,
+      transform: [{ translateY: translate.value }],
+    }));
+  };
+
+  const StaggeredMenuItem = ({
+    index,
+    children,
+    onPress,
+    showSeparator,
+  }: {
+    index: number;
+    children: React.ReactNode;
+    onPress: () => void;
+    showSeparator?: boolean;
+  }) => {
+    const enterStyle = useMenuItemEnter(index);
+    return (
+      <Animated.View style={enterStyle}>
+        <AnimatedPressable
+          onPress={onPress}
+          style={({ pressed }: { pressed: boolean }) => [
+            styles.menuItem,
+            showSeparator && styles.menuItemSeparator,
+            pressed && styles.menuItemPressed,
+          ]}
+        >
+          {children}
+        </AnimatedPressable>
+      </Animated.View>
+    );
+  };
+
   // Calculate new modules count (fresh settings from API, fallback to auth store)
   const panelUi = freshSettings?.config?.panel_ui ?? userSettings?.config?.panel_ui;
   const newModuleCount = (() => {
@@ -97,6 +186,7 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
     setIsProcessing(true);
     try {
       await AuthService.logout();
+      toastInfo('Sesión cerrada');
       onClose();
       router.replace('/(auth)/login' as never);
     } catch (error) {
@@ -118,18 +208,13 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
 
   const handleGoToOrganization = () => {
     onClose();
+    // Pequeño delay para que el modal termine de cerrar antes del switch.
     setTimeout(async () => {
       setIsProcessing(true);
       try {
-        await AuthService.switchEnvironment('ORG_ADMIN');
-        // Limpiar el cache de React Query para que las queries se ejecuten
-        // con el nuevo token ORG_ADMIN (no mostrar datos de STORE_ADMIN).
-        const qc = getQueryClient();
-        await qc.cancelQueries();
-        qc.clear();
-        router.replace('/(org-admin)/dashboard' as never);
+        await performStoreSwitch({ kind: 'ORG_ADMIN' });
       } catch {
-        toastError('Error al cambiar de entorno');
+        // toastError ya emitido por el helper
       } finally {
         setIsProcessing(false);
       }
@@ -140,18 +225,11 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
     if (!storeSlug) return;
     setIsProcessing(true);
     try {
-      await AuthService.switchEnvironment('STORE_ADMIN', storeSlug);
-      // Limpiar el cache de React Query para que las queries se ejecuten
-      // con el nuevo token STORE_ADMIN (no mostrar datos de ORG_ADMIN).
-      const qc = getQueryClient();
-      await qc.cancelQueries();
-      qc.clear();
-      toastSuccess(`Cambiado al entorno de la tienda "${storeName ?? storeSlug}"`);
+      await performStoreSwitch({ kind: 'STORE_ADMIN', storeSlug, storeName: storeName ?? undefined });
       setShowConfirm(false);
       onClose();
-      router.replace('/(store-admin)/dashboard' as never);
-    } catch (error: any) {
-      toastError(error?.message || 'Error al cambiar a la tienda');
+    } catch {
+      // toastError ya emitido por el helper
     } finally {
       setIsProcessing(false);
     }
@@ -221,7 +299,7 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.overlay}>
           <TouchableWithoutFeedback>
-            <View style={styles.dropdown}>
+            <Animated.View style={[styles.dropdown, dropdownAnimatedStyle]}>
               {/* User Header */}
               <View style={styles.header}>
                 <View style={styles.avatar}>
@@ -247,21 +325,16 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
                 </View>
               )}
 
-              {/* Menu Options */}
+              {/* Menu Options — entrada escalonada + press feedback sutil */}
               <ScrollView style={styles.menuContainer} showsVerticalScrollIndicator={false}>
                 {visibleOptions.map((option, index) => {
-                  const isLastDanger = option.type === 'danger' && index === visibleOptions.length - 1;
                   const showSeparator = option.type === 'danger' && index > 0;
-
                   return (
-                    <Pressable
-                      key={index}
+                    <StaggeredMenuItem
+                      key={option.label}
+                      index={index}
                       onPress={option.action}
-                      style={({ pressed }) => [
-                        styles.menuItem,
-                        showSeparator && styles.menuItemSeparator,
-                        pressed && styles.menuItemPressed,
-                      ]}
+                      showSeparator={showSeparator}
                     >
                       <Icon
                         name={option.icon}
@@ -282,11 +355,11 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
                           <Text style={styles.badgeText}>{option.badge}</Text>
                         </View>
                       )}
-                    </Pressable>
+                    </StaggeredMenuItem>
                   );
                 })}
               </ScrollView>
-            </View>
+            </Animated.View>
           </TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>

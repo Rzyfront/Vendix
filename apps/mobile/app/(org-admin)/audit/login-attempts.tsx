@@ -1,9 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
   Text,
-  TextInput,
   View,
   StyleSheet,
   RefreshControl,
@@ -11,49 +10,174 @@ import {
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { OrgAuditService } from '@/features/org/services/org-audit.service';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
-import {
-  OrgResponsiveCard,
-  type OrgCardAction,
-} from '@/shared/components/org-responsive-card';
-import {
-  OrgOptionsDropdown,
-  type OrgOptionsAction,
-} from '@/shared/components/org-options-dropdown';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
+import { OrgResponsiveCard, type OrgCardAction } from '@/shared/components/org-responsive-card';
 import { OrgCenteredModal } from '@/shared/components/org-centered-modal';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { OrgDetailRow } from '@/shared/components/org-detail-row';
 import { PaginationBar } from '@/features/org/components/audit-shared';
 import { Icon } from '@/shared/components/icon/icon';
+import { SearchBar } from '@/shared/components/search-bar/search-bar';
+import {
+  OptionsDropdown,
+  type FilterConfig,
+  type FilterValues,
+} from '@/shared/components/options-dropdown';
 import {
   getLoginAttemptStatusColor,
   getLoginAttemptStatusIcon,
   LOGIN_ATTEMPT_STATUS_LABELS,
 } from '@/features/org/components/audit-formatters';
 import type { LoginAttempt, LoginAttemptsStats } from '@/core/models/org-admin/audit.types';
-import { borderRadius, colorScales, colors, spacing, typography } from '@/shared/theme';
+import { borderRadius, colorScales, colors, spacing, typography, interFonts } from '@/shared/theme';
 
 /**
  * Auditoría · Intentos de Login (paridad visual con web).
  *
- * Layout mobile (espejo de logs.component.html):
- *   ┌──────────────────────────────────────────┐ ← sticky top-0 z-20
- *   │ [stats grid scroll horiz.]               │
- *   ├──────────────────────────────────────────┤ ← sticky top-[99px] z-10
- *   │ Intentos de inicio       [Acciones▾]     │
- *   │ 142 registros            [Filtros 1▾]    │
+ * Layout mobile (espejo del `login-attempts.component.ts` web):
+ *   ┌──────────────────────────────────────────┐ ← Stats grid scroll horiz.
  *   ├──────────────────────────────────────────┤
- *   │ [OrgResponsiveCard × N]                  │ ← scroll
- *   ├──────────────────────────────────────────┤
- *   │ [PaginationBar]                          │
+ *   │ ┌──────────────────────────────────────┐ │
+ *   │ │ Intentos de inicio (N)              │ │ ← tableCard
+ *   │ │ [🔍 email search] [+] [⚙ Estado ▾]  │ │
+ *   │ ├──────────────────────────────────────┤ │
+ *   │ │ [OrgResponsiveCard × N]              │ │
+ *   │ └──────────────────────────────────────┘ │
  *   └──────────────────────────────────────────┘
  *
- * El SearchBar (email) ahora vive dentro del OptionsDropdown → Filtros
- * (no como barra standalone), igual que en la web.
+ * Paridad con el patrón aplicado a users/stores/domains/logs/sessions:
+ *   - `tableCard` + `tableHeader` (1:1 con el `<app-card>` web)
+ *   - Search bar (email) + 2 icon-only triggers (actions + filters)
+ *   - Filters → popover anclado al trigger (`<OptionsDropdown showActions={false}>`)
+ *   - Actions → modal centrado (`<OrgCenteredModal>`)
+ *
+ * En la web el email search vive como input standalone en el header
+ * (NO dentro del dropdown). Eso lo respetamos acá.
  */
 
 const PAGE_SIZE = 10;
 type SuccessFilter = 'all' | 'success' | 'failed';
+const SUCCESS_OPTIONS: { value: SuccessFilter; label: string }[] = [
+  { value: 'all', label: 'Todos los intentos' },
+  { value: 'success', label: 'Sólo exitosos' },
+  { value: 'failed', label: 'Sólo fallidos' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ListHeader — espejo del patrón users/stores/domains/logs/sessions
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ListHeaderProps {
+  count: number;
+  stats: LoginAttemptsStats | null | undefined;
+  search: string;
+  onSearchChange: (v: string) => void;
+  onActionsPress: () => void;
+  filterConfigs: FilterConfig[];
+  filterValues: FilterValues;
+  onFilterChange: (values: FilterValues) => void;
+  onClearAllFilters: () => void;
+  activeFilterCount: boolean;
+}
+
+function ListHeader({
+  count,
+  stats,
+  search,
+  onSearchChange,
+  onActionsPress,
+  filterConfigs,
+  filterValues,
+  onFilterChange,
+  onClearAllFilters,
+  activeFilterCount,
+}: ListHeaderProps) {
+  return (
+    <View>
+      {/* Stats — espejo del bloque `stats-container` web */}
+      <View style={styles.statsWrap}>
+        <StatsGrid
+          items={[
+            {
+              label: 'Total Intentos',
+              value: stats?.total_attempts ?? count,
+              icon: 'log-in',
+              iconColor: colorScales.blue[600],
+              iconBg: colorScales.blue[600] + '15',
+              description: 'intentos de login',
+            },
+            {
+              label: 'Exitosos',
+              value: stats?.successful_attempts ?? 0,
+              icon: 'check-circle',
+              iconColor: colorScales.green[600],
+              iconBg: colorScales.green[600] + '15',
+              description: 'inicios exitosos',
+            },
+            {
+              label: 'Fallidos',
+              value: stats?.failed_attempts ?? 0,
+              icon: 'x-circle',
+              iconColor: colorScales.red[600],
+              iconBg: colorScales.red[600] + '15',
+              description: 'intentos fallidos',
+            },
+            {
+              label: 'Tasa de éxito',
+              value: `${Math.round(stats?.success_rate ?? 0)}%`,
+              icon: 'trending-up',
+              iconColor: colorScales.blue[700],
+              iconBg: colorScales.blue[700] + '15',
+              description: '% exitosos',
+            },
+          ]}
+        />
+      </View>
+
+      {/* ── Table card header (paridad 1:1 con users/stores/domains/logs/sessions) */}
+      <View style={styles.tableHeader}>
+        <View style={styles.tableTitleRow}>
+          <Text style={styles.tableTitle}>
+            Intentos de inicio{' '}
+            <Text style={styles.tableTitleCount}>({count})</Text>
+          </Text>
+        </View>
+
+        {/* Search bar (email) + 2 icon-only triggers en UNA sola línea.
+            Espejo del `<app-options-dropdown>` web mobile responsive. */}
+        <View style={styles.searchRow}>
+          <View style={{ flex: 1 }}>
+            <SearchBar
+              value={search}
+              onChangeText={onSearchChange}
+              placeholder="Buscar por email..."
+              style={styles.searchInput}
+            />
+          </View>
+          {/* Actions trigger (+ button) — abre modal con Actualizar */}
+          <Pressable
+            style={({ pressed }) => [styles.optionsTrigger, pressed && { opacity: 0.85 }]}
+            onPress={onActionsPress}
+            accessibilityLabel="Abrir acciones"
+          >
+            <Icon name="plus" size={18} color={colors.primary} />
+          </Pressable>
+          {/* Filters trigger (espejo del `<app-options-dropdown>` web mobile).
+              Popover anclado al trigger (NO modal/sheet centrado). */}
+          <OptionsDropdown
+            showActions={false}
+            filters={filterConfigs}
+            filterValues={filterValues}
+            onFilterChange={onFilterChange}
+            onClearAllFilters={onClearAllFilters}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function LoginAttemptsScreen() {
   const [search, setSearch] = useState('');
@@ -61,6 +185,7 @@ export default function LoginAttemptsScreen() {
   const [page, setPage] = useState(1);
   const [refreshing, setRefreshing] = useState(false);
   const [selected, setSelected] = useState<LoginAttempt | null>(null);
+  const [actionsModalOpen, setActionsModalOpen] = useState(false);
 
   const queryParams = useMemo(
     () => ({
@@ -88,154 +213,75 @@ export default function LoginAttemptsScreen() {
   const total = data?.meta?.total ?? 0;
   const totalPages = data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE));
   const hasFilters = !!search || filter !== 'all';
-  const activeFiltersCount = (search ? 1 : 0) + (filter !== 'all' ? 1 : 0);
+  const activeFilterCount = filter !== 'all';
+
+  // ───── Filter configs (espejo del form web) ──────────────────────
+  const filterConfigs = useMemo<FilterConfig[]>(
+    () => [
+      {
+        key: 'status',
+        label: 'Estado',
+        type: 'select',
+        options: SUCCESS_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+      },
+    ],
+    [],
+  );
+
+  const filterValues = useMemo<FilterValues>(
+    () => ({
+      status: filter || null,
+    }),
+    [filter],
+  );
+
+  const handleFilterChange = useCallback((values: FilterValues) => {
+    const next = (values.status as SuccessFilter | null) ?? 'all';
+    setFilter(next);
+    setPage(1);
+  }, []);
+
+  const handleClearAllFilters = useCallback(() => {
+    setFilter('all');
+    setPage(1);
+  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([
-      refetch(),
-      // stats query not invalidated on purpose (kept fresh in 60s window)
-    ]);
+    await Promise.all([refetch()]);
     setRefreshing(false);
   };
 
-  const clearFilters = () => {
-    setSearch('');
-    setFilter('all');
+  const handleSearchChange = (v: string) => {
+    setSearch(v);
     setPage(1);
   };
 
-  const actions: OrgOptionsAction[] = [
-    {
-      key: 'refresh',
-      label: 'Actualizar',
-      icon: 'refresh-cw',
-      onPress: onRefresh,
-    },
-  ];
+  const handleClearAll = () => {
+    handleClearAllFilters();
+    setSearch('');
+    setPage(1);
+  };
 
   return (
     <View style={styles.root}>
-      {/* Sticky top: stats grid (web: `stats-container sticky top-0 z-20`) */}
-      <View style={styles.stickyStats}>
-        <OrgStatsGrid
-          stats={[
-            {
-              label: 'Total Intentos',
-              value: stats?.total_attempts ?? total,
-              icon: 'log-in',
-              color: colorScales.blue[600],
-              subText: 'intentos de login',
-            },
-            {
-              label: 'Exitosos',
-              value: stats?.successful_attempts ?? 0,
-              icon: 'check-circle',
-              color: colorScales.green[600],
-              subText: 'inicios exitosos',
-            },
-            {
-              label: 'Fallidos',
-              value: stats?.failed_attempts ?? 0,
-              icon: 'x-circle',
-              color: colorScales.red[600],
-              subText: 'intentos fallidos',
-            },
-            {
-              label: 'Tasa de éxito',
-              value: `${Math.round(stats?.success_rate ?? 0)}%`,
-              icon: 'trending-up',
-              color: colorScales.blue[700],
-              subText: '% exitosos',
-            },
-          ]}
-        />
-      </View>
-
-      {/* Sticky below: title row + options dropdown (web: `sticky top-[99px] z-10`) */}
-      <View style={styles.stickyTitleRow}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.titleMain}>
-            Intentos de inicio{' '}
-            <Text style={styles.titleCount}>({total})</Text>
-          </Text>
-        </View>
-        <OrgOptionsDropdown
-          actions={actions}
-          activeFiltersCount={activeFiltersCount}
-          renderFiltersContent={() => (
-            <View>
-              {/* Email search dentro del OptionsDropdown (web: filterConfigs.email) */}
-              <View style={styles.filterSearchWrap}>
-                <Icon name="search" size={14} color={colorScales.gray[500]} />
-                <TextInput
-                  style={styles.filterSearchInput}
-                  value={search}
-                  onChangeText={(v) => {
-                    setSearch(v);
-                    setPage(1);
-                  }}
-                  placeholder="Buscar por email…"
-                  placeholderTextColor={colorScales.gray[400]}
-                  autoCorrect={false}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  returnKeyType="search"
-                />
-                {search ? (
-                  <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                    <Icon name="x" size={14} color={colorScales.gray[500]} />
-                  </Pressable>
-                ) : null}
-              </View>
-
-              <FilterSection
-                label="Todos"
-                value="Mostrar todos los intentos"
-                active={filter === 'all'}
-                onPress={() => {
-                  setFilter('all');
-                  setPage(1);
-                }}
-              />
-              <FilterSection
-                label="Exitosos"
-                value="Sólo intentos con success=true"
-                active={filter === 'success'}
-                icon="check-circle"
-                iconColor={colorScales.green[600]}
-                onPress={() => {
-                  setFilter('success');
-                  setPage(1);
-                }}
-              />
-              <FilterSection
-                label="Fallidos"
-                value="Sólo intentos con success=false"
-                active={filter === 'failed'}
-                icon="x-circle"
-                iconColor={colorScales.red[600]}
-                onPress={() => {
-                  setFilter('failed');
-                  setPage(1);
-                }}
-              />
-
-              {hasFilters ? (
-                <Pressable onPress={clearFilters} style={styles.clearAllRow}>
-                  <Icon name="x" size={14} color={colors.error} />
-                  <Text style={styles.clearAllText}>Limpiar todos los filtros</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          )}
-        />
-      </View>
-
-      {/* Scrollable list */}
       <FlatList<LoginAttempt>
         data={attempts}
         keyExtractor={(a) => String(a.id)}
+        ListHeaderComponent={
+          <ListHeader
+            count={total}
+            stats={stats}
+            search={search}
+            onSearchChange={handleSearchChange}
+            onActionsPress={() => setActionsModalOpen(true)}
+            filterConfigs={filterConfigs}
+            filterValues={filterValues}
+            onFilterChange={handleFilterChange}
+            onClearAllFilters={handleClearAllFilters}
+            activeFilterCount={activeFilterCount}
+          />
+        }
         ListEmptyComponent={
           isLoading ? (
             <View style={styles.loading}>
@@ -247,7 +293,7 @@ export default function LoginAttemptsScreen() {
               title="Sin intentos con este filtro"
               description="Ajusta la búsqueda o cambia el filtro para revisar más eventos."
               actionLabel="Limpiar filtros"
-              onAction={clearFilters}
+              onAction={handleClearAll}
             />
           ) : (
             <EmptyState
@@ -290,12 +336,7 @@ export default function LoginAttemptsScreen() {
                       : 'warning',
               }}
               details={[
-                {
-                  label: 'IP',
-                  value: item.ip_address ?? '—',
-                  icon: 'globe',
-                  monospace: true,
-                },
+                { label: 'IP', value: item.ip_address ?? '—', icon: 'globe', monospace: true },
                 {
                   label: 'Fecha',
                   value: new Date(
@@ -303,16 +344,8 @@ export default function LoginAttemptsScreen() {
                   ).toLocaleString(),
                   icon: 'calendar',
                 },
-                {
-                  label: 'User agent',
-                  value: item.user_agent ?? '—',
-                  icon: 'monitor',
-                },
-                {
-                  label: 'Tienda',
-                  value: item.stores?.name ?? '—',
-                  icon: 'store',
-                },
+                { label: 'User agent', value: item.user_agent ?? '—', icon: 'monitor' },
+                { label: 'Tienda', value: item.stores?.name ?? '—', icon: 'store' },
               ]}
               footerLabel="Motivo"
               footerValue={item.failure_reason ?? '—'}
@@ -340,10 +373,9 @@ export default function LoginAttemptsScreen() {
           />
         }
         contentContainerStyle={styles.listContent}
-        style={styles.flatList}
       />
 
-      {/* Detail modal — centered (espejo de app-modal web) */}
+      {/* Detail modal — centrado (espejo de app-modal web) */}
       <OrgCenteredModal
         visible={!!selected}
         onClose={() => setSelected(null)}
@@ -427,106 +459,152 @@ export default function LoginAttemptsScreen() {
           </View>
         ) : null}
       </OrgCenteredModal>
+
+      {/* ── Actions Modal — espejo del patrón users/stores/domains/logs/sessions */}
+      <OrgCenteredModal
+        visible={actionsModalOpen}
+        onClose={() => setActionsModalOpen(false)}
+        title="Acciones"
+        subtitle="¿Qué quieres hacer con la lista de intentos?"
+        size="sm"
+      >
+        <View style={styles.actionsModalList}>
+          <Pressable
+            style={styles.actionsModalOption}
+            onPress={() => {
+              setActionsModalOpen(false);
+              onRefresh();
+            }}
+          >
+            <View style={[styles.actionsModalIconWrap, { backgroundColor: colorScales.gray[100] }]}>
+              <Icon name="refresh-cw" size={16} color={colorScales.gray[700]} />
+            </View>
+            <View style={styles.actionsModalTextWrap}>
+              <Text style={styles.actionsModalOptionTitle}>Actualizar</Text>
+              <Text style={styles.actionsModalOptionHint}>
+                Recargar la lista con los últimos cambios
+              </Text>
+            </View>
+          </Pressable>
+        </View>
+      </OrgCenteredModal>
     </View>
   );
 }
 
-function FilterSection({
-  label,
-  value,
-  active,
-  icon,
-  iconColor,
-  onPress,
-}: {
-  label: string;
-  value: string;
-  active: boolean;
-  icon?: string;
-  iconColor?: string;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable
-      style={[styles.filterSection, active && styles.filterSectionActive]}
-      onPress={onPress}
-    >
-      {icon ? (
-        <View
-          style={[
-            styles.filterIcon,
-            { backgroundColor: (iconColor ?? colorScales.gray[500]) + '15' },
-          ]}
-        >
-          <Icon name={icon} size={14} color={iconColor ?? colorScales.gray[500]} />
-        </View>
-      ) : null}
-      <View style={{ flex: 1 }}>
-        <Text style={styles.filterLabel}>{label}</Text>
-        <Text style={styles.filterValue} numberOfLines={1}>
-          {value}
-        </Text>
-      </View>
-      {active ? (
-        <Icon name="check" size={16} color={colorScales.green[600]} />
-      ) : (
-        <Icon name="chevron-right" size={16} color={colorScales.gray[400]} />
-      )}
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colorScales.gray[50] },
-  loading: { paddingVertical: spacing[12], alignItems: 'center' },
-  stickyStats: {
+  root: {
+    flex: 1,
     backgroundColor: colorScales.gray[50],
-    paddingBottom: spacing[2],
-  },
-  stickyTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[3],
     paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
   },
-  titleMain: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.gray[900],
-  },
-  titleCount: {
-    fontWeight: typography.fontWeight.normal,
-    color: colorScales.gray[500],
-  },
-  flatList: { flex: 1 },
+  loading: { paddingVertical: spacing[12], alignItems: 'center' },
   separator: { height: spacing[3] },
   listContent: {
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[3],
+    paddingTop: spacing[2],
     paddingBottom: spacing[24],
   },
-  filterSearchWrap: {
+
+  // ── Stats wrap (mismo patrón users/stores/domains/logs/sessions)
+  statsWrap: {
+    marginHorizontal: -spacing[4],
+    marginBottom: spacing[3],
+  },
+
+  // ── Table card header (paridad 1:1 con users/stores/domains/logs/sessions)
+  tableHeader: {
+    backgroundColor: '#fff',
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    paddingHorizontal: spacing[2],
+    paddingVertical: spacing[2],
+    marginBottom: spacing[3],
+  },
+  tableTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing[3],
+  },
+  tableTitle: {
+    fontSize: typography.fontSize.lg,
+    fontFamily: interFonts.semibold,
+    color: colorScales.gray[900],
+    flexShrink: 1,
+  },
+  tableTitleCount: {
+    fontFamily: interFonts.regular,
+    color: colorScales.gray[400],
+  },
+  searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[2],
-    backgroundColor: colorScales.gray[100],
-    borderRadius: borderRadius.md,
+  },
+  searchInput: {
+    width: '100%',
+    height: 40,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
+  },
+  // Espejo del `.options-dropdown-trigger` web mobile responsive.
+  optionsTrigger: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+
+  // ── Actions Modal (espejo del `<app-options-dropdown>` web) ────
+  actionsModalList: {
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+    backgroundColor: colors.card,
+  },
+  actionsModalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
     paddingHorizontal: spacing[3],
-    height: 38,
-    marginHorizontal: spacing[2],
-    marginTop: spacing[2],
-    marginBottom: spacing[1],
+    paddingVertical: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
   },
-  filterSearchInput: {
+  actionsModalIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  actionsModalTextWrap: {
     flex: 1,
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[900],
-    paddingVertical: 0,
+    minWidth: 0,
   },
+  actionsModalOptionTitle: {
+    fontSize: typography.fontSize.sm,
+    fontFamily: interFonts.semibold,
+    color: colorScales.gray[900],
+  },
+  actionsModalOptionHint: {
+    fontSize: typography.fontSize.xs,
+    fontFamily: interFonts.regular,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+
+  // ── Detail modal styles ─────────────────────────────────────
   detailHero: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -571,48 +649,4 @@ const styles = StyleSheet.create({
   },
   modalBtnSecondary: { backgroundColor: colorScales.gray[100] },
   modalBtnSecondaryText: { color: colorScales.gray[700], fontWeight: typography.fontWeight.semibold },
-  filterSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[3],
-    paddingVertical: spacing[3],
-    paddingHorizontal: spacing[2],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
-  },
-  filterSectionActive: {
-    backgroundColor: colorScales.green[50],
-  },
-  filterIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterLabel: {
-    fontSize: 10,
-    fontWeight: typography.fontWeight.bold,
-    color: colorScales.gray[500],
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
-  },
-  filterValue: {
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[900],
-    marginTop: 2,
-    fontWeight: typography.fontWeight.medium,
-  },
-  clearAllRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: spacing[3],
-    paddingHorizontal: spacing[2],
-  },
-  clearAllText: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colors.error,
-  },
 });

@@ -24,6 +24,13 @@ interface OrgStatsGridProps {
 }
 
 /**
+ * @deprecated Use `StatsGrid` + `StatsCard` from `@/shared/components/stats-card/stats-grid`
+ *             instead. The horizontal scroll layout used by the dashboard, audit,
+ *             domains, orders, payroll, subscriptions, reports and fiscal screens
+ *             is now the canonical pattern; `OrgStatsGrid` is retained only because
+ *             `config/payment-methods.tsx` explicitly requests `layout="grid"`.
+ *             Will be removed once payment-methods.tsx is migrated.
+ *
  * Stats grid mobile-first, espejo de `StatsComponent` + `.stats-container` de la web.
  *
  *   • En mobile (`layout="scroll"`, default) es un **scroll horizontal** de

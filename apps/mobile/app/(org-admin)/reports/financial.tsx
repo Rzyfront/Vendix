@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { OrgReportsService } from '@/features/org/services/org-reports.service';
 import { Card } from '@/shared/components/card/card';
 import { Spinner } from '@/shared/components/spinner/spinner';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { OrgListItem } from '@/shared/components/org-list-item';
 import { colors, colorScales, spacing, typography } from '@/shared/theme';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -52,13 +52,12 @@ export default function FinancialReportScreen() {
         {data ? (
           <>
             <View style={styles.section}>
-              <OrgStatsGrid
-                columns={2}
-                stats={[
-                  { label: 'Ingresos', value: formatCurrency(data.revenue.amount), icon: 'trending-up', color: colors.success },
-                  { label: 'Costos', value: formatCurrency(data.cogs.amount), icon: 'package', color: colorScales.amber[500] },
+              <StatsGrid
+                items={[
+                  { label: 'Ingresos', value: formatCurrency(data.revenue.amount), icon: 'trending-up', iconColor: colors.success, iconBg: colors.success + '15' },
+                  { label: 'Costos', value: formatCurrency(data.cogs.amount), icon: 'package', iconColor: colorScales.amber[500], iconBg: colorScales.amber[500] + '15' },
                   { label: 'Utilidad bruta', value: formatCurrency(data.gross_profit.amount), icon: 'dollar-sign' },
-                  { label: 'Utilidad neta', value: formatCurrency(data.net_income.amount), icon: 'check-circle', color: data.net_income.amount > 0 ? colors.success : colors.error },
+                  { label: 'Utilidad neta', value: formatCurrency(data.net_income.amount), icon: 'check-circle', iconColor: data.net_income.amount > 0 ? colors.success : colors.error, iconBg: (data.net_income.amount > 0 ? colors.success : colors.error) + '15' },
                 ]}
               />
             </View>

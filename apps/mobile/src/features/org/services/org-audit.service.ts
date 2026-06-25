@@ -34,14 +34,40 @@ import type {
  * El backend usa `limit/offset` para audit logs y `page/limit` para
  * login-attempts + sessions. Ambos se exponen unificados a través de
  * `paginatedLogs()` y los tipos `Paginated*Response`.
+ *
+ * ⚠️ Shape del envelope paginado del backend (ResponseService.paginated):
+ *   { success: true, message: '...', data: T[], meta: { total, page, limit, totalPages } }
+ *
+ * `apiGet<T>` con `unwrap` retorna SOLO `payload.data` (el array) y
+ * descarta `meta`. Para los endpoints paginados usamos `apiGetRaw` y
+ * normalizamos manualmente a `{ data, meta }` — eso preserva `total` y
+ * `totalPages` que el componente necesita para la PaginationBar.
  */
+type RawPaginatedEnvelope<T> = {
+  success?: boolean;
+  message?: string;
+  data: T[];
+  meta?: { total: number; page: number; limit: number; totalPages: number };
+};
+
+async function fetchPaginated<T>(
+  path: string,
+  params: ListParams,
+): Promise<{ data: T[]; meta?: RawPaginatedEnvelope<T>['meta'] }> {
+  const envelope = await apiGetRaw<RawPaginatedEnvelope<T>>(path, params);
+  return {
+    data: Array.isArray(envelope?.data) ? envelope.data : [],
+    meta: envelope?.meta,
+  };
+}
+
 export const OrgAuditService = {
   // ─── Logs ────────────────────────────────────────────────────────────────
 
   listLogs: async (
     params?: ListParams & { from_date?: string; to_date?: string },
   ): Promise<PaginatedAuditResponse> =>
-    apiGet<PaginatedAuditResponse>(Endpoints.ORGANIZATION.AUDIT.LOGS, {
+    fetchPaginated<AuditLog>(Endpoints.ORGANIZATION.AUDIT.LOGS, {
       limit: 50,
       offset: 0,
       ...params,
@@ -68,10 +94,7 @@ export const OrgAuditService = {
   listLoginAttempts: async (
     params?: ListParams & { email?: string; success?: boolean },
   ): Promise<PaginatedLoginAttemptsResponse> =>
-    apiGet<PaginatedLoginAttemptsResponse>(
-      Endpoints.ORGANIZATION.AUDIT.LOGIN_ATTEMPTS,
-      params,
-    ),
+    fetchPaginated<LoginAttempt>(Endpoints.ORGANIZATION.AUDIT.LOGIN_ATTEMPTS, params ?? {}),
 
   getLoginAttemptsStats: async (): Promise<LoginAttemptsStats> =>
     apiGet<LoginAttemptsStats>(Endpoints.ORGANIZATION.AUDIT.LOGIN_ATTEMPTS_STATS),
@@ -81,7 +104,7 @@ export const OrgAuditService = {
   listSessions: async (
     params?: ListParams & { status?: 'active' | 'inactive' },
   ): Promise<PaginatedSessionsResponse> =>
-    apiGet<PaginatedSessionsResponse>(Endpoints.ORGANIZATION.AUDIT.SESSIONS, params),
+    fetchPaginated<ActiveSession>(Endpoints.ORGANIZATION.AUDIT.SESSIONS, params ?? {}),
 
   getUserSessions: async (userId: string | number): Promise<ActiveSession[]> =>
     apiGet<ActiveSession[]>(

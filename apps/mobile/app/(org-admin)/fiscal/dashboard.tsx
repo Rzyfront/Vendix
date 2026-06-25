@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { OrgFiscalService } from '@/features/org/services/org-fiscal.service';
 import { Card } from '@/shared/components/card/card';
 import { Spinner } from '@/shared/components/spinner/spinner';
-import { OrgStatsGrid } from '@/shared/components/org-stats-grid';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { OrgListItem } from '@/shared/components/org-list-item';
 import { colors, colorScales, spacing, typography } from '@/shared/theme';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -43,13 +43,12 @@ export default function FiscalDashboard() {
         {data ? (
           <>
             <View style={styles.section}>
-              <OrgStatsGrid
-                columns={2}
-                stats={[
+              <StatsGrid
+                items={[
                   { label: 'Obligaciones', value: data.total_obligations, icon: 'clipboard-list' },
-                  { label: 'Pendientes', value: data.pending_obligations, icon: 'clock', color: colorScales.amber[500] },
-                  { label: 'Vencidas', value: data.overdue, icon: 'alert-triangle', color: colors.error },
-                  { label: 'Impuestos año', value: formatCurrency(data.total_taxes_paid_year.amount), icon: 'dollar-sign', color: colors.success },
+                  { label: 'Pendientes', value: data.pending_obligations, icon: 'clock', iconColor: colorScales.amber[500], iconBg: colorScales.amber[500] + '15' },
+                  { label: 'Vencidas', value: data.overdue, icon: 'alert-triangle', iconColor: colors.error, iconBg: colors.error + '15' },
+                  { label: 'Impuestos año', value: formatCurrency(data.total_taxes_paid_year.amount), icon: 'dollar-sign', iconColor: colors.success, iconBg: colors.success + '15' },
                 ]}
               />
             </View>
