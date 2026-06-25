@@ -342,11 +342,12 @@ export class StoresService {
     }
 
     // Single source of truth for "pending dispatch" (ref 2026-06-25).
-    // state=processing + delivery_type ∈ {home_delivery, pickup}.
-    // Coincide con orders.service.ts findAll(pending_dispatch) y con el
+    // state ∈ {processing, pending_payment} + delivery_type ≠ direct_delivery.
+    // pending_payment cubre el contraentrega (COD): se despacha antes de cobrar.
+    // Coincide con orders.service.ts findAll(query.dispatchable) y con el
     // filtro "Por enviar" del frontend.
     const dispatchWhere: Prisma.ordersWhereInput = {
-      state: 'processing',
+      state: { in: ['processing', 'pending_payment'] },
       // Alineado con orders.service.ts findAll(query.dispatchable) — ref 2026-06-25
       // (plan wizard remisión order-first). Excluye direct_delivery
       // (counter-handover, no genera remisión) e incluye home_delivery,

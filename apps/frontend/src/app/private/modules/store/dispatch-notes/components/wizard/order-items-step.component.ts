@@ -137,15 +137,16 @@ export class OrderItemsStepComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (notes) => {
-          // Sum dispatched_quantity per order_item_id across all existing notes.
+          // Suma dispatched_quantity por sales_order_item_id (= order_items.id)
+          // a través de todas las remisiones NO anuladas de la orden. El
+          // backend (getByOrder + createFromOrder) ahora persiste y devuelve
+          // sales_order_item_id, dando enlace exacto al renglón de la orden.
+          // setSelectedOrder hace match contra oi.id, así que la clave coincide.
           const dispatched = new Map<number, number>();
           for (const note of notes ?? []) {
             for (const line of (note as any).dispatch_note_items ?? []) {
               if (!line?.dispatched_quantity) continue;
-              // line may not carry order_item_id; remisión items store it
-              // but the byOrder endpoint may trim it. Fall back to product_id
-              // matching against the order items when missing.
-              const key = line.sales_order_item_id ?? line.order_item_id;
+              const key = line.sales_order_item_id;
               if (typeof key === 'number') {
                 dispatched.set(key, (dispatched.get(key) ?? 0) + Number(line.dispatched_quantity));
               }

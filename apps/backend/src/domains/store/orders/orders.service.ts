@@ -315,13 +315,14 @@ export class OrdersService {
       }),
       // "Despachable" — ref 2026-06-25, plan wizard remisión order-first.
       // Single source of truth compartido con stores.service.ts dispatchWhere:
-      // state=processing + delivery_type ≠ direct_delivery (incluye
-      // home_delivery, pickup y other). Coincide con el dashboard de
-      // tienda y el filtro "Por enviar" del frontend.
+      // state ∈ {processing, pending_payment} + delivery_type ≠ direct_delivery
+      // (incluye home_delivery, pickup y other). pending_payment cubre el
+      // contraentrega (COD): se despacha antes de cobrar. Coincide con el
+      // dashboard de tienda y el filtro "Por enviar" del frontend.
       // NOTA: NO excluye órdenes parcialmente remisionadas; el frontend
       // descuenta cantidades ya despachadas vía getByOrder(orderId).
       ...(query.dispatchable && {
-        state: 'processing',
+        state: { in: ['processing', 'pending_payment'] as order_state_enum[] },
         delivery_type: { not: 'direct_delivery' },
       }),
       ...(date_from &&

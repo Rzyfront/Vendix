@@ -164,18 +164,13 @@ import {
                         </span>
                       }
                     </div>
-                    @if (item.stock_available !== undefined && item.stock_available !== null) {
-                      <p class="text-[10px] text-[var(--color-text-muted)]">
-                        Disp: {{ item.stock_available }}
-                      </p>
-                    }
                   </div>
 
                   <!-- Quantity control -->
                   <app-quantity-control
                     [value]="item.dispatched_quantity"
                     [min]="1"
-                    [max]="item.stock_available ?? 9999"
+                    [max]="item.pending_quantity ?? 9999"
                     size="sm"
                     (valueChange)="onQuantityChange(item, $event)"
                   ></app-quantity-control>

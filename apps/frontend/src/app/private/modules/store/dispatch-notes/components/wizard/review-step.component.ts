@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   inject,
   input,
   output,
@@ -12,6 +13,7 @@ import {
   ButtonComponent,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import {
   DispatchNoteWizardService,
   WizardTerminalAction,
@@ -223,7 +225,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
           <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
             Acción terminal
           </p>
-          @for (opt of terminalOptions; track opt.value) {
+          @for (opt of availableTerminalOptions(); track opt.value) {
             <label
               class="flex items-start gap-2 p-2 rounded-md cursor-pointer transition-colors"
               [class]="
@@ -315,6 +317,7 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
 })
 export class ReviewStepComponent {
   readonly wizardService = inject(DispatchNoteWizardService);
+  private readonly authFacade = inject(AuthFacade);
 
   // Inputs
   readonly created = input<boolean>(false);
@@ -348,6 +351,23 @@ export class ReviewStepComponent {
       description: 'Entrega inmediata tras verificar seriales.',
     },
   ];
+
+  /**
+   * Terminal options filtradas por permiso (ref 2026-06-25).
+   * 'draft' siempre disponible; 'confirm_route' requiere
+   * store:dispatch_notes:confirm; 'deliver' requiere
+   * store:dispatch_notes:deliver. Defensa-en-profundidad: el backend
+   * también valida estos permisos en confirm()/deliver().
+   */
+  readonly availableTerminalOptions = computed(() => {
+    const canConfirm = this.authFacade.hasPermission('store:dispatch_notes:confirm');
+    const canDeliver = this.authFacade.hasPermission('store:dispatch_notes:deliver');
+    return this.terminalOptions.filter((opt) => {
+      if (opt.value === 'confirm_route') return canConfirm;
+      if (opt.value === 'deliver') return canDeliver;
+      return true;
+    });
+  });
 
   get successTitle(): string {
     switch (this.completedAction()) {

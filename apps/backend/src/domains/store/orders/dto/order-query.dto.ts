@@ -75,8 +75,10 @@ export class OrderQueryDto {
 
   /**
    * "Despachable" / "Por enviar" — ref 2026-06-25.
-   * Filtra órdenes pendientes de despacho: state=processing +
-   * delivery_type ≠ direct_delivery (incluye home_delivery, pickup, other).
+   * Filtra órdenes pendientes de despacho: state ∈ {processing,
+   * pending_payment} + delivery_type ≠ direct_delivery (incluye
+   * home_delivery, pickup, other). pending_payment cubre el contraentrega
+   * (COD): se despacha antes de cobrar.
    * Single source of truth compartido con orders.service.ts findAll()
    * y stores.service.ts dispatchWhere. Usado por el botón "Por enviar"
    * de la lista y por el contador del dashboard.
