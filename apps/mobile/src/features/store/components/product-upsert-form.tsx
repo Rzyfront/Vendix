@@ -404,7 +404,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
           {/* Tipo de Producto */}
-          <Section title="Tipo de Producto" subtitle="Define si el producto es físico, un servicio o preparado">
+          <Section title="Tipo de Producto" subtitle="Define si el producto es físico, un servicio o preparado" icon="package">
             <InputButtons
               value={form.product_type}
               onChange={(v) => updateField('product_type', v as ProductType)}
@@ -418,7 +418,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           </Section>
 
           {/* Información General */}
-          <Section title="Información General" subtitle="Datos visibles en punto de venta, catálogo e inventario">
+          <Section title="Información General" subtitle="Datos visibles en punto de venta, catálogo e inventario" icon="info">
             <Input label="Nombre" value={form.name} onChangeText={(value) => updateField('name', value)} error={errors.name} />
             <View style={{ flexDirection: 'row', gap: spacing[2] }}>
               <View style={{ flex: 1 }}>
@@ -455,7 +455,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           </Section>
 
           {/* Precios y Rentabilidad */}
-          <Section title="Precios y Rentabilidad" subtitle={`Precio final estimado ${formatCurrency(finalPreview)}`}>
+          <Section title="Precios y Rentabilidad" subtitle={`Precio final estimado ${formatCurrency(finalPreview)}`} icon="dollar-sign">
             <View style={{ flexDirection: 'row', gap: spacing[2] }}>
               <View style={{ flex: 1 }}>
                 <Input
@@ -550,7 +550,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           </Section>
 
           {/* Imágenes del Producto (placeholder) */}
-          <Section title="Imágenes del Producto" subtitle="Gestioná las imágenes desde la versión web">
+          <Section title="Imágenes del Producto" subtitle="Gestioná las imágenes desde la versión web" icon="image">
             <View
               style={{
                 height: 120,
@@ -570,7 +570,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </View>
           </Section>
 
-          <Section title="Inventario" subtitle="Stock inicial y visibilidad comercial">
+          <Section title="Inventario" subtitle="Stock inicial y visibilidad comercial" icon="warehouse">
             <Toggle
               value={form.track_inventory}
               onChange={(v) => updateField('track_inventory', v)}
@@ -614,7 +614,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           </Section>
 
           {/* Disponibilidad y Estado */}
-          <Section title="Disponibilidad y Estado" subtitle="Configurá la visibilidad y el estado del producto">
+          <Section title="Disponibilidad y Estado" subtitle="Configurá la visibilidad y el estado del producto" icon="eye">
             <InputButtons
               label="Estado"
               value={form.state}
@@ -641,7 +641,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             />
           </Section>
 
-          <Section title="Clasificación" subtitle="Categorías, marca e impuestos">
+          <Section title="Clasificación" subtitle="Categorías, marca e impuestos" icon="tag">
             <Selector
               label="Marca"
               value={form.brand_id}
@@ -668,7 +668,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             />
           </Section>
 
-          <Section title="Variantes" subtitle="Opciones vendibles del producto">
+          <Section title="Variantes" subtitle="Opciones vendibles del producto" icon="list">
             <Toggle
               value={form.has_variants}
               onChange={(v) => updateField('has_variants', v)}
@@ -712,11 +712,18 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   );
 }
 
-function Section({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function Section({ title, subtitle, icon, children }: { title: string; subtitle?: string; icon?: string; children: React.ReactNode }) {
   return (
     <Card style={styles.section}>
       <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>{title}</Text>
+        <View style={styles.sectionHeaderRow}>
+          {icon && (
+            <View style={styles.sectionIcon}>
+              <Icon name={icon} size={16} color={colorScales.gray[500]} />
+            </View>
+          )}
+          <Text style={styles.sectionTitle}>{title}</Text>
+        </View>
         {subtitle && <Text style={styles.sectionSubtitle}>{subtitle}</Text>}
       </View>
       <View style={styles.sectionBody}>{children}</View>
@@ -765,6 +772,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
   sectionSubtitle: { fontSize: typography.fontSize.xs, color: colorScales.gray[500], marginTop: 4 },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
+  sectionIcon: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
   sectionBody: { padding: spacing[5], gap: spacing[3] },
   chipBlock: { gap: spacing[2] },
   blockLabel: { fontSize: typography.fontSize.xs, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase', letterSpacing: 1 },
