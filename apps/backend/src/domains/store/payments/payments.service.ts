@@ -2675,9 +2675,19 @@ export class PaymentsService {
       data: { status: 'cleaning', updated_at: new Date() },
     });
 
-    // QUI-431 — detección de serializados sobre las líneas nuevas del cierre
-    // de mesa, para que el caller aplique el mismo gate/máquina de estados.
-    const hasSerialized = await this.orderHasSerializedItems(tx, dto.items);
+    // QUI-431 — detección de serializados sobre TODAS las líneas del pedido de
+    // la mesa (las que ya vivían en el draft + las nuevas del cierre), no solo
+    // `dto.items`. Un serializado agregado en cualquier momento de la sesión
+    // debe disparar el desvío a remisión; si solo miráramos las líneas del
+    // cierre, una unidad serializada del draft se consumiría por FIFO silencioso
+    // en lugar de diferirse. `updated.order_items` es el set persistido tras el
+    // merge (incluye viejas + nuevas con IDs reales).
+    const hasSerialized = await this.orderHasSerializedItems(
+      tx,
+      ((updated as any).order_items ?? []).map((i: any) => ({
+        product_id: i.product_id,
+      })) as PosOrderItemDto[],
+    );
 
     return {
       order: updated,
