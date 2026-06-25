@@ -310,6 +310,16 @@ export interface OrderQuery {
 
   missing_shipping_method?: boolean;
 
+  /**
+   * "Despachable" / "Por enviar" — ref 2026-06-25.
+   * Filtra órdenes pendientes de despacho: state=processing +
+   * delivery_type ≠ direct_delivery (incluye home_delivery, pickup, other).
+   * Single source of truth compartido con orders.service.ts findAll()
+   * y stores.service.ts dispatchWhere. Usado por el botón "Por enviar"
+   * de la lista y por el contador del dashboard.
+   */
+  dispatchable?: boolean;
+
   // Ordenamiento
   sort?: string; // Format: 'field:direction' e.g., 'created_at:desc'
   sort_by?: string;
