@@ -13,8 +13,8 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { OptionsDropdownComponent } from '../../../../shared/components/options-dropdown/options-dropdown.component';
 import { FilterConfig, FilterValues } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
-import { toLocalDateString, getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../shared/utils/date.util';
-import { AnalyticsService } from '../analytics/services/analytics.service';
+import { toLocalDateString, getDefaultEndDate, formatChartPeriod } from '../../../../shared/utils/date.util';
+import { AnalyticsService, ProfitLossSummary } from '../analytics/services/analytics.service';
 import { DateRangeFilter } from '../analytics/interfaces/analytics.interface';
 import {
   SalesSummary,
@@ -75,6 +75,15 @@ const QUICK_LINKS: QuickLink[] = [
           [loading]="loading()"
         />
         <app-stats
+          title="Ganancias"
+          [value]="formatCurrency(profitLoss()?.bottom_line?.net_profit || 0)"
+          [smallText]="getMarginText(profitLoss()?.bottom_line?.net_margin)"
+          iconName="trending-up"
+          iconBgColor="bg-success/10"
+          iconColor="text-success"
+          [loading]="loading()"
+        />
+        <app-stats
           title="Órdenes"
           [value]="summary()?.total_orders || 0"
           [smallText]="getGrowthText(summary()?.orders_growth)"
@@ -84,21 +93,12 @@ const QUICK_LINKS: QuickLink[] = [
           [loading]="loading()"
         />
         <app-stats
-          title="Ticket Prom."
-          [value]="formatCurrency(summary()?.average_order_value || 0)"
-          [smallText]="(summary()?.total_units_sold || 0) + ' uds. vendidas'"
-          iconName="receipt"
-          iconBgColor="bg-accent/10"
-          iconColor="text-accent"
-          [loading]="loading()"
-        />
-        <app-stats
-          title="Clientes"
-          [value]="summary()?.total_customers || 0"
-          smallText="clientes únicos"
-          iconName="users"
-          iconBgColor="bg-warning/10"
-          iconColor="text-warning"
+          title="Gastos"
+          [value]="formatCurrency(profitLoss()?.operating_expenses || 0)"
+          smallText="gastos operativos"
+          iconName="trending-down"
+          iconBgColor="bg-error/10"
+          iconColor="text-error"
           [loading]="loading()"
         />
       </div>
@@ -304,7 +304,7 @@ export class DashboardComponent {
   storeId = signal<string | null>(null);
 
   // Date range
-  selectedPreset = signal<string>('thisMonth');
+  selectedPreset = signal<string>('today');
   customStartDate = signal<string>('');
   customEndDate = signal<string>('');
 
@@ -342,9 +342,9 @@ export class DashboardComponent {
   });
 
   dateRange = signal<DateRangeFilter>({
-    start_date: getDefaultStartDate(),
+    start_date: getDefaultEndDate(),
     end_date: getDefaultEndDate(),
-    preset: 'thisMonth',
+    preset: 'today',
   });
 
   // Loading states
@@ -355,6 +355,7 @@ export class DashboardComponent {
 
   // Data
   summary = signal<SalesSummary | null>(null);
+  profitLoss = signal<ProfitLossSummary | null>(null);
   trends = signal<SalesTrend[]>([]);
   channels = signal<SalesByChannel[]>([]);
   lowStockCount = signal(0);
@@ -435,6 +436,15 @@ export class DashboardComponent {
           this.toastService.error('Error al cargar el resumen');
           this.loading.set(false);
         },
+      });
+
+    // 1b. Profit & Loss → cards Ganancias + Gastos
+    this.analyticsService
+      .getProfitLossSummary(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => this.profitLoss.set(response.data),
+        error: () => { /* ganancias/gastos no críticos para el resto del dashboard */ },
       });
 
     // 2. Sales trends → trend chart
@@ -651,6 +661,11 @@ export class DashboardComponent {
     if (growth === undefined || growth === null) return '';
     const sign = growth >= 0 ? '+' : '';
     return `${sign}${growth.toFixed(1)}% vs mes ant.`;
+  }
+
+  getMarginText(margin?: number): string {
+    if (margin === undefined || margin === null) return '';
+    return `${margin.toFixed(1)}% margen`;
   }
 
   navigateTo(path: string): void {
