@@ -1,3 +1,12 @@
+/**
+ * @deprecated Removido del wizard de remisión desde v2 (ref 2026-06-25,
+ *   plan wizard remisión order-first). El wizard ahora es order-first
+ *   y la selección de cliente/productos se hace desde la orden. Este
+ *   componente se conserva solo como referencia hasta que se unifique
+ *   con `generate-dispatch-wizard` en el detalle de orden (follow-up).
+ *   No incluir en imports de `dispatch-note-wizard.component.ts`.
+ */
+// @ts-nocheck — deprecated (ref 2026-06-25), no longer wired into the wizard.
 import {
   Component,
   DestroyRef,

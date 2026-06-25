@@ -195,6 +195,13 @@ export interface Product {
   product_type?: 'physical' | 'prepared' | 'service' | string;
   final_price: number;
   image_url?: string;
+  /**
+   * Ref 2026-06-25, plan wizard remisión order-first.
+   * Si true, el item requiere asignación de seriales antes de confirmar
+   * la remisión (gate backend SERIAL_REQUIRED_001). El frontend lo lee
+   * del GET /store/orders/:id (findOne incluye products).
+   */
+  requires_serial_numbers?: boolean;
 }
 
 export interface ProductVariant {

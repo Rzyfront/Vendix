@@ -322,7 +322,7 @@ export class OrdersService {
       // descuenta cantidades ya despachadas vía getByOrder(orderId).
       ...(query.dispatchable && {
         state: 'processing',
-        delivery_type: { in: ['home_delivery', 'pickup'] },
+        delivery_type: { not: 'direct_delivery' },
       }),
       ...(date_from &&
         date_to && {
