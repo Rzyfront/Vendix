@@ -412,9 +412,7 @@ export default function ProductsListScreen() {
       )}
 
       {canCreate && (
-        {canCreate && (
-          <Fab icon="plus" accessibilityLabel="Nuevo producto" onPress={() => setQuickCreateOpen(true)} />
-        )}
+        <Fab icon="plus" accessibilityLabel="Nuevo producto" onPress={() => setQuickCreateOpen(true)} />
       )}
 
       {/* "..." → Confirm delete modal (only Eliminar option) */}
