@@ -5,54 +5,27 @@ import {
 import { useIsFocused } from '@react-navigation/native';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
+import { ProductService } from '@/features/store/services/product.service';
 import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateAdjustmentDto } from '@/features/store/services/inventory.service';
 import type { StockAdjustment, AdjustmentType, AdjustmentState, Location } from '@/features/store/types';
-import { ADJUSTMENT_TYPE_LABELS, ADJUSTMENT_STATE_LABELS } from '@/features/store/types';
-import { useTenantStore } from '@/core/store/tenant.store';
+import { ADJUSTMENT_TYPE_LABELS } from '@/features/store/types';
 import { Input } from '@/shared/components/input/input';
 import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { Icon } from '@/shared/components/icon/icon';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { formatDate } from '@/shared/utils/date';
 import { spacing, borderRadius, colors, colorScales, typography, shadows } from '@/shared/theme';
+import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
+import { ADJUSTMENT_STATS, ADJUSTMENT_TYPE_OPTIONS, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
 
 const STATE_VARIANT: Record<AdjustmentState, 'warning' | 'success'> = {
   pending: 'warning',
   applied: 'success',
 };
-
-const ADJUSTMENT_TYPE_OPTIONS: { label: string; value: AdjustmentType | 'all' }[] = [
-  { label: 'Todos los tipos', value: 'all' },
-  { label: 'Daño', value: 'damage' },
-  { label: 'Pérdida', value: 'loss' },
-  { label: 'Robo', value: 'theft' },
-  { label: 'Vencido', value: 'expiration' },
-  { label: 'Conteo', value: 'count_variance' },
-  { label: 'Corrección', value: 'manual_correction' },
-];
-
-interface StatItem {
-  title: string;
-  value: number;
-  smallText: string;
-  iconName: keyof typeof Ionicons.glyphMap;
-  bgColor: string;
-  iconColor: string;
-}
-
-const STATS: StatItem[] = [
-  { title: 'Total Ajustes', value: 0, smallText: 'Movimientos registrados', iconName: 'clipboard-outline', bgColor: '#dbeafe', iconColor: '#2563eb' },
-  { title: 'Pérdidas', value: 0, smallText: 'Productos extraviados', iconName: 'trending-down-outline', bgColor: '#fee2e2', iconColor: '#dc2626' },
-  { title: 'Daños', value: 0, smallText: 'Productos dañados', iconName: 'warning-outline', bgColor: '#fef3c7', iconColor: '#d97706' },
-  { title: 'Correcciones', value: 0, smallText: 'Ajustes de inventario', iconName: 'create-outline', bgColor: '#dcfce7', iconColor: '#16a34a' },
-];
-
-// (Los colores de las stat cards usan hex legacy para el badge/icono del header — no son parte de los contenedores)
-
-import { Ionicons } from '@expo/vector-icons';
 
 function AdjustmentCard({ item }: { item: StockAdjustment }) {
   // Fallbacks seguros para evitar "[object Object]" si el backend devuelve un objeto en campos string
@@ -106,7 +79,6 @@ function AdjustmentCard({ item }: { item: StockAdjustment }) {
 
 export default function AdjustmentsScreen() {
   const queryClient = useQueryClient();
-  const currentStoreId = useTenantStore((s) => s.storeId);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<AdjustmentType | 'all'>('all');
   const [modalVisible, setModalVisible] = useState(false);
@@ -148,20 +120,27 @@ export default function AdjustmentsScreen() {
     value: Number(loc.id),
     label: loc.name,
   }));
-  // Productos mock para búsqueda (en la web viene de `searchAdjustableProducts`)
-  // Incluye productos con "kit", "limpieza", etc. para que la búsqueda por texto parcial funcione
-  const ALL_PRODUCTS: Array<{ id: number; name: string; sku?: string; stock: number; category?: string }> = [
-    { id: 101, name: 'Kit de Limpieza Soplete', sku: 'KIT-LIM-SOP', stock: 20, category: 'Kits' },
-    { id: 102, name: 'Kit de Limpieza Industrial', sku: 'KIT-LIM-IND', stock: 15, category: 'Kits' },
-    { id: 103, name: 'Kit de Limpieza Deluxe', sku: 'KIT-LIM-DLX', stock: 8, category: 'Kits' },
-    { id: 104, name: 'Camiseta Básica Blanca', sku: 'CAM-BAS-BLA', stock: 50, category: 'Ropa' },
-    { id: 105, name: 'Pantalón Jean Clásico', sku: 'PAN-JEA-CLA', stock: 30, category: 'Ropa' },
-    { id: 106, name: 'Zapatillas Deportivas', sku: 'ZAP-DEP-001', stock: 25, category: 'Calzado' },
-    { id: 107, name: 'Gorra Ajustable', sku: 'GOR-AJU-001', stock: 100, category: 'Accesorios' },
-    { id: 108, name: 'Mochila Escolar', sku: 'MOC-ESC-001', stock: 15, category: 'Accesorios' },
-    { id: 109, name: 'Camiseta Kit Premium', sku: 'CAM-KIT-PRM', stock: 12, category: 'Ropa' },
-    { id: 110, name: 'Kit de Herramientas Pro', sku: 'KIT-HER-PRO', stock: 10, category: 'Kits' },
-  ];
+  // Productos reales desde el backend (reemplaza el MOCK hardcoded anterior)
+  const productsQuery = useQuery({
+    queryKey: ['adjustments-products-search', productSearchTerm],
+    queryFn: () =>
+      ProductService.list({
+        page: 1,
+        limit: 50,
+        search: productSearchTerm.trim() || undefined,
+        include_variants: true,
+      }),
+    enabled: createStep === 2 && productSearchTerm.trim().length > 0,
+    staleTime: 30_000,
+  });
+  const storeProducts: Array<{ id: number; name: string; sku?: string; stock: number; category?: string }> =
+    (productsQuery.data?.data ?? []).map((p) => ({
+      id: Number(p.id),
+      name: p.name,
+      sku: p.sku,
+      stock: p.stock_quantity ?? 0,
+      category: p.category?.name,
+    }));
   const selectedLocationName = selectedLocation ? LOCATIONS.find((l) => l.value === selectedLocation)?.label : '';
 
   const isFocused = useIsFocused();
@@ -203,19 +182,22 @@ export default function AdjustmentsScreen() {
       setConfirmCreate(false);
       toastSuccess('Ajuste creado correctamente');
     },
-    onError: () => toastError('Error al crear el ajuste'),
+    onError: (error: any) => {
+      const message =
+        error?.response?.data?.message ||
+        error?.response?.data?.error?.message ||
+        error?.message ||
+        'Error al crear el ajuste';
+      toastError(typeof message === 'string' ? message : 'Error al crear el ajuste');
+    },
   });
 
   const adjustments = data?.pages.flatMap((p) => p.data) ?? [];
 
-  // Filtro client-side por tienda actual: el backend aún no acota por store_id en
-  // /store/inventory/adjustments (solo por organization_id), así que descartamos
-  // cualquier ajuste cuya ubicación pertenezca a otra tienda.
-  const storeAdjustments = currentStoreId
-    ? adjustments.filter(
-        (a) => a.inventory_locations?.store_id === Number(currentStoreId),
-      )
-    : adjustments;
+  // El backend `/store/inventory/adjustments` ya filtra por `organization_id` del
+  // contexto, así que NO descartamos ajustes client-side por `store_id` (esa lógica
+  // anterior filtraba ajustes legítimos cuya ubicación tenía `store_id` null).
+  const storeAdjustments = adjustments;
 
   const totals = {
     total: storeAdjustments.length,
@@ -245,8 +227,13 @@ export default function AdjustmentsScreen() {
   }, [screenW]);
 
   const handleSubmit = () => {
-    if (!form.product_id || !form.description || form.quantity_after <= 0 || !selectedLocation) return;
-    // Construir el DTO batch que espera el backend
+    if (!form.product_id || !form.description || form.quantity_after <= 0 || !selectedLocation) {
+      toastError('Completa todos los campos requeridos');
+      return;
+    }
+    // DTO batch que espera el backend (POST /store/inventory/adjustments/batch-complete).
+    // El campo `quantity_after` es el stock FINAL (no el cambio). El backend calcula
+    // automáticamente `quantity_change = quantity_after - quantity_before`.
     const dto: CreateAdjustmentDto = {
       location_id: selectedLocation,
       items: [{
@@ -259,6 +246,12 @@ export default function AdjustmentsScreen() {
     };
     createMutation.mutate(dto);
   };
+
+  // Stock actual del producto seleccionado (viene de ProductService.list)
+  const selectedProductCurrentStock =
+    storeProducts.find((p) => p.id === form.product_id)?.stock ?? 0;
+  // Diferencia calculada en cliente para mostrar en UI (el backend hace lo mismo)
+  const calculatedQuantityChange = form.quantity_after - selectedProductCurrentStock;
 
   // --- Wizard helpers (Crear Ajuste — 3 pasos como la web) ---
   const canAdvanceStep1 = selectedLocation !== null;
@@ -288,15 +281,10 @@ export default function AdjustmentsScreen() {
       setProductSearchResults([]);
       return;
     }
-    const lower = term.toLowerCase().trim();
-    // Búsqueda por coincidencia parcial en nombre, SKU y categoría (como la web)
+    // Backend query se dispara automáticamente via useQuery (enabled).
+    // Acá filtramos los resultados contra el producto ya seleccionado.
     setProductSearchResults(
-      ALL_PRODUCTS.filter((p) => {
-        const nameMatch = p.name.toLowerCase().includes(lower);
-        const skuMatch = p.sku ? p.sku.toLowerCase().includes(lower) : false;
-        const categoryMatch = p.category ? p.category.toLowerCase().includes(lower) : false;
-        return nameMatch || skuMatch || categoryMatch;
-      }).filter((p) => p.id !== form.product_id),
+      storeProducts.filter((p) => p.id !== form.product_id),
     );
   };
   const selectProduct = (product: { id: number; name: string; sku?: string; stock: number }) => {
@@ -308,22 +296,44 @@ export default function AdjustmentsScreen() {
 
   return (
     <View style={styles.screen}>
-      {/* Stats: ancho completo de la pantalla (fuera del card) */}
-      <View style={styles.statsContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsScroll}>
-          {STATS.map((stat, idx) => {
-            const vals = [totals.total, totals.losses, totals.damages, totals.corrections];
-            return (
-              <View key={idx} style={styles.statCard}>
-                <Ionicons name={stat.iconName} size={16} color={stat.iconColor} style={styles.statIcon} />
-                <Text style={styles.statLabel}>{stat.title}</Text>
-                <Text style={styles.statValue}>{vals[idx]}</Text>
-                <Text style={styles.statSmall}>{stat.smallText}</Text>
-              </View>
-            );
-          })}
-        </ScrollView>
-      </View>
+      {/* Stats: calculado dinámicamente desde los datos (no más hardcoded 0) */}
+      <StatsGrid
+        style={styles.statsContainer}
+        items={[
+          {
+            label: ADJUSTMENT_STATS.total.label,
+            value: totals.total,
+            icon: INVENTORY_ICONS.adjustmentsTotalStat,
+            iconBg: STAT_PALETTE.blue.bg,
+            iconColor: STAT_PALETTE.blue.color,
+            description: ADJUSTMENT_STATS.total.description,
+          },
+          {
+            label: ADJUSTMENT_STATS.loss.label,
+            value: totals.losses,
+            icon: INVENTORY_ICONS.lossStat,
+            iconBg: STAT_PALETTE.red.bg,
+            iconColor: STAT_PALETTE.red.color,
+            description: ADJUSTMENT_STATS.loss.description,
+          },
+          {
+            label: ADJUSTMENT_STATS.damage.label,
+            value: totals.damages,
+            icon: INVENTORY_ICONS.damageStat,
+            iconBg: STAT_PALETTE.amber.bg,
+            iconColor: STAT_PALETTE.amber.color,
+            description: ADJUSTMENT_STATS.damage.description,
+          },
+          {
+            label: ADJUSTMENT_STATS.correction.label,
+            value: totals.corrections,
+            icon: INVENTORY_ICONS.correctionStat,
+            iconBg: STAT_PALETTE.green.bg,
+            iconColor: STAT_PALETTE.green.color,
+            description: ADJUSTMENT_STATS.correction.description,
+          },
+        ]}
+      />
 
       {/* Card contenedor: título + búsqueda + cards de ajustes (con margen y border radius) */}
       <View style={styles.cardContainer}>
@@ -342,7 +352,7 @@ export default function AdjustmentsScreen() {
             {/* POS-style search bar — fondo transparente para integrarse con el card */}
             <View style={styles.searchRow}>
               <View style={styles.searchInput}>
-                <Ionicons name="search-outline" size={16} color={colorScales.gray[400]} style={{ marginRight: 6 }} />
+                <Icon name="search" size={16} color={colorScales.gray[400]} style={{ marginRight: 6 }} />
                 <TextInput
                   style={styles.searchTextInput}
                   value={search}
@@ -355,7 +365,7 @@ export default function AdjustmentsScreen() {
                 />
                 {search.length > 0 && (
                   <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                    <Ionicons name="close" size={16} color={colorScales.gray[400]} />
+                    <Icon name="x" size={16} color={colorScales.gray[400]} />
                   </Pressable>
                 )}
               </View>
@@ -400,21 +410,21 @@ export default function AdjustmentsScreen() {
           <View style={styles.dropdown}>
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); setModalVisible(true); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="add-outline" size={18} color={colors.primary} />
+                <Icon name="plus" size={18} color={colors.primary} />
               </View>
               <Text style={styles.dropdownItemPrimary}>Nuevo Ajuste</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); /* bulk */ }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="cloud-upload-outline" size={18} color={colorScales.gray[500]} />
+                <Icon name="upload" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Carga Masiva</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="sync-outline" size={18} color={colorScales.gray[500]} />
+                <Icon name="refresh" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Refrescar</Text>
             </Pressable>
@@ -436,7 +446,7 @@ export default function AdjustmentsScreen() {
                 <Text style={styles.dropdownSelectText}>
                   {ADJUSTMENT_TYPE_OPTIONS.find((o) => o.value === activeFilter)?.label ?? 'Todos los tipos'}
                 </Text>
-                <Ionicons name="chevron-down" size={14} color={colorScales.gray[500]} />
+                <Icon name="chevron-down" size={14} color={colorScales.gray[500]} />
               </Pressable>
             </View>
             <View style={styles.dropdownDivider} />
@@ -445,7 +455,7 @@ export default function AdjustmentsScreen() {
                 {ADJUSTMENT_TYPE_OPTIONS.map((opt) => (
                   <Pressable key={opt.value} style={[styles.dropdownOption, activeFilter === opt.value && styles.dropdownOptionActive]} onPress={() => { setActiveFilter(opt.value); setShowTypeOptions(false); setShowFilters(false); }}>
                     <Text style={[styles.dropdownOptionText, activeFilter === opt.value && styles.dropdownOptionTextActive]}>{opt.label}</Text>
-                    {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                    {activeFilter === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                   </Pressable>
                 ))}
               </View>
@@ -653,7 +663,7 @@ export default function AdjustmentsScreen() {
                           </Pressable>
                         </View>
                         <Text style={styles.selectedProductStock}>
-                          Stock actual: {ALL_PRODUCTS.find((p) => p.id === form.product_id)?.stock ?? 0}
+                          Stock actual: {storeProducts.find((p) => p.id === form.product_id)?.stock ?? 0}
                         </Text>
                       </View>
                     ) : (
@@ -704,11 +714,25 @@ export default function AdjustmentsScreen() {
                         </View>
                         <View style={styles.qtyPreview}>
                           <Text style={styles.qtyPreviewLabel}>Cambio</Text>
-                          <Text style={[styles.qtyPreviewValue, form.quantity_after > 0 ? styles.qtyPreviewValuePositive : styles.qtyPreviewValueNeutral]}>
-                            {form.quantity_after > 0 ? `+${form.quantity_after}` : '0'}
+                          <Text
+                            style={[
+                              styles.qtyPreviewValue,
+                              calculatedQuantityChange > 0
+                                ? styles.qtyPreviewValuePositive
+                                : calculatedQuantityChange < 0
+                                  ? styles.qtyPreviewValueNegative
+                                  : styles.qtyPreviewValueNeutral,
+                            ]}
+                          >
+                            {calculatedQuantityChange > 0
+                              ? `+${calculatedQuantityChange}`
+                              : `${calculatedQuantityChange}`}
                           </Text>
                         </View>
                       </View>
+                      <Text style={styles.qtyHelperText}>
+                        Stock actual: {selectedProductCurrentStock}
+                      </Text>
 
                       <Input
                         label="Motivo / Nota (opcional)"
@@ -751,7 +775,9 @@ export default function AdjustmentsScreen() {
                     <View style={styles.summaryRow}>
                       <Text style={styles.summaryLabel}>Cambio</Text>
                       <Text style={[styles.summaryValue, styles.summaryValueBold]}>
-                        {form.quantity_after > 0 ? `+${form.quantity_after}` : '0'}
+                        {calculatedQuantityChange > 0
+                          ? `+${calculatedQuantityChange}`
+                          : `${calculatedQuantityChange}`}
                       </Text>
                     </View>
                     {form.reason_code ? (
@@ -1045,7 +1071,15 @@ const styles = StyleSheet.create({
 
   /* Dropdowns (positioned near buttons) */
   dropdownBackdrop: { flex: 1 },
-  dropdownPositioner: { position: 'absolute', alignItems: 'flex-end' },
+  dropdownPositioner: {
+    position: 'absolute',
+    alignItems: 'flex-end',
+    // Render the dropdown above the backdrop and any sibling content.
+    // Without an explicit zIndex/elevation, the absolutely-positioned
+    // dropdown can render behind sibling Views on Android.
+    zIndex: 100,
+    elevation: 12,
+  },
   dropdownArrow: {
     width: 0, height: 0, borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 8,
     borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: colors.background,
@@ -1226,7 +1260,9 @@ const styles = StyleSheet.create({
   qtyPreviewLabel: { fontSize: 10, color: colorScales.gray[500], textTransform: 'uppercase' as any, fontWeight: '600' as any, marginBottom: 2 },
   qtyPreviewValue: { fontSize: 16, fontWeight: '700' as any },
   qtyPreviewValuePositive: { color: colors.primary },
+  qtyPreviewValueNegative: { color: colors.error },
   qtyPreviewValueNeutral: { color: colorScales.gray[500] },
+  qtyHelperText: { fontSize: 11, color: colorScales.gray[500], marginTop: -spacing[1], marginBottom: spacing[2] },
 
   /* Step 3: CONFIRMAR — location info + total */
   locationInfoCard: {

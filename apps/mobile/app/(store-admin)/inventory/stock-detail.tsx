@@ -13,6 +13,8 @@ import { Spinner } from '@/shared/components/spinner/spinner';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colorScales, typography, colors } from '@/shared/theme';
+import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
+import { STOCK_DETAIL_STATS } from '@/features/store/constants/inventory-labels';
 
 const TYPE_VARIANT: Record<string, 'info' | 'success' | 'warning'> = {
   warehouse: 'info',
@@ -102,10 +104,11 @@ export default function StockDetailScreen() {
             </Pressable>
 
             <View style={styles.titleWrap}>
-              <Text style={styles.title}>Stock por Ubicación</Text>
+              <Text style={styles.title}>Stock por Bodega</Text>
               {productInfo && (
                 <Text style={styles.subtitle}>
-                  {productInfo.name}{productInfo.sku ? ` · ${productInfo.sku}` : ''}
+                  {productInfo.name}
+                  {productInfo.sku ? ` · ${productInfo.sku}` : ''}
                 </Text>
               )}
             </View>
@@ -114,19 +117,28 @@ export default function StockDetailScreen() {
               style={styles.statsWrap}
               items={[
                 {
-                  label: 'Disponible',
+                  label: STOCK_DETAIL_STATS.available.label,
                   value: stock.totalAvailable,
-                  icon: <Icon name="check-circle" size={14} color={colorScales.green[600]} />,
+                  icon: INVENTORY_ICONS.stockAvailableStat,
+                  iconBg: STAT_PALETTE.green.bg,
+                  iconColor: STAT_PALETTE.green.color,
+                  description: STOCK_DETAIL_STATS.available.description,
                 },
                 {
-                  label: 'Reservado',
+                  label: STOCK_DETAIL_STATS.reserved.label,
                   value: stock.totalReserved,
-                  icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
+                  icon: INVENTORY_ICONS.stockReservedStat,
+                  iconBg: STAT_PALETTE.amber.bg,
+                  iconColor: STAT_PALETTE.amber.color,
+                  description: STOCK_DETAIL_STATS.reserved.description,
                 },
                 {
-                  label: 'En Mano',
+                  label: STOCK_DETAIL_STATS.onHand.label,
                   value: stock.totalOnHand,
-                  icon: <Icon name="package" size={14} color={colorScales.blue[600]} />,
+                  icon: INVENTORY_ICONS.stockOnHandStat,
+                  iconBg: STAT_PALETTE.blue.bg,
+                  iconColor: STAT_PALETTE.blue.color,
+                  description: STOCK_DETAIL_STATS.onHand.description,
                 },
               ]}
             />

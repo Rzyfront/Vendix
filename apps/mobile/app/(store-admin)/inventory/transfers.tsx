@@ -2,7 +2,6 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet, TextInput, Dimensions, Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
@@ -21,6 +20,8 @@ import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colorScales, typography, colors, shadows } from '@/shared/theme';
+import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
+import { TRANSFER_STATS, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
 
 const STATE_VARIANT: Record<TransferState, 'warning' | 'info' | 'success' | 'default'> = {
   pending: 'warning',
@@ -265,28 +266,36 @@ export default function TransfersScreen() {
         style={styles.statsWrap}
         items={[
           {
-            label: 'Total',
+            label: TRANSFER_STATS.total.label,
             value: transfers.length,
-            icon: <Icon name="clipboard-list" size={14} color={colorScales.blue[600]} />,
-            description: 'Movimientos',
+            icon: INVENTORY_ICONS.transferTotalStat,
+            iconBg: STAT_PALETTE.blue.bg,
+            iconColor: STAT_PALETTE.blue.color,
+            description: TRANSFER_STATS.total.description,
           },
           {
-            label: 'Borradores',
+            label: TRANSFER_STATS.draft.label,
             value: transfers.filter((t) => t.state === 'pending').length,
-            icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
-            description: 'Pendientes',
+            icon: INVENTORY_ICONS.draftStat,
+            iconBg: STAT_PALETTE.gray.bg,
+            iconColor: STAT_PALETTE.gray.color,
+            description: TRANSFER_STATS.draft.description,
           },
           {
-            label: 'En Tránsito',
+            label: TRANSFER_STATS.inTransit.label,
             value: transfers.filter((t) => t.state === 'in_transit').length,
-            icon: <Icon name="truck" size={14} color={colorScales.amber[600]} />,
-            description: 'En camino',
+            icon: INVENTORY_ICONS.inTransitStat,
+            iconBg: STAT_PALETTE.amber.bg,
+            iconColor: STAT_PALETTE.amber.color,
+            description: TRANSFER_STATS.inTransit.description,
           },
           {
-            label: 'Completadas',
+            label: TRANSFER_STATS.completed.label,
             value: transfers.filter((t) => t.state === 'completed').length,
-            icon: <Icon name="check-circle" size={14} color={colorScales.green[600]} />,
-            description: 'Recibidas',
+            icon: INVENTORY_ICONS.completedStat,
+            iconBg: STAT_PALETTE.emerald.bg,
+            iconColor: STAT_PALETTE.emerald.color,
+            description: TRANSFER_STATS.completed.description,
           },
         ]}
       />
@@ -309,7 +318,7 @@ export default function TransfersScreen() {
             {/* Barra de búsqueda + botones + y filtro (alineado con la web) */}
             <View style={styles.searchRow}>
               <View style={styles.searchInputWrap}>
-                <Ionicons name="search-outline" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
+                <Icon name="search" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
                 <TextInput
                   style={styles.searchInputField}
                   value={search}
@@ -322,7 +331,7 @@ export default function TransfersScreen() {
                 />
                 {search.length > 0 && (
                   <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                    <Ionicons name="close" size={16} color={colorScales.gray[400]} />
+                    <Icon name="x" size={16} color={colorScales.gray[400]} />
                   </Pressable>
                 )}
               </View>
@@ -363,14 +372,14 @@ export default function TransfersScreen() {
           <View style={styles.dropdown}>
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="sync-outline" size={18} color={colorScales.gray[500]} />
+                <Icon name="refresh" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Refrescar</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); openCreateModal(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="add-outline" size={18} color={colors.primary} />
+                <Icon name="plus" size={18} color={colors.primary} />
               </View>
               <Text style={styles.dropdownItemPrimary}>Nueva Transferencia</Text>
             </Pressable>
@@ -396,7 +405,7 @@ export default function TransfersScreen() {
                 <Text style={styles.filterPopupSelectText}>
                   {FILTER_OPTIONS.find((o) => o.value === activeFilter)?.label ?? 'Todos los estados'}
                 </Text>
-                <Ionicons name={showFilterOptions ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
+                <Icon name={showFilterOptions ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
               </Pressable>
               {showFilterOptions && (
                 <View style={styles.filterPopupOptionsList}>
@@ -409,7 +418,7 @@ export default function TransfersScreen() {
                       <Text style={[styles.filterPopupOptionText, activeFilter === opt.value && styles.filterPopupOptionTextActive]}>
                         {opt.label}
                       </Text>
-                      {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                      {activeFilter === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                     </Pressable>
                   ))}
                 </View>
@@ -430,7 +439,7 @@ export default function TransfersScreen() {
                 <Text style={styles.createSubtitle}>{wizardHeader.subtitle}</Text>
               </View>
               <Pressable onPress={closeCreateModal} hitSlop={8}>
-                <Ionicons name="close" size={22} color={colorScales.gray[500]} />
+                <Icon name="x" size={22} color={colorScales.gray[500]} />
               </Pressable>
             </View>
 
@@ -444,7 +453,7 @@ export default function TransfersScreen() {
                     <View style={styles.stepItem}>
                       <View style={[styles.stepCircle, (isActive || isDone) && styles.stepCircleActive]}>
                         {isDone ? (
-                          <Ionicons name="checkmark" size={14} color={colors.background} />
+                          <Icon name="check" size={14} color={colors.background} />
                         ) : (
                           <Text style={[styles.stepNum, isActive && styles.stepNumActive]}>{s.num}</Text>
                         )}
@@ -473,7 +482,7 @@ export default function TransfersScreen() {
                       <Text style={[styles.locationDropdownText, !originLocation && styles.locationDropdownPlaceholder, !!originLocation && styles.locationDropdownTextSelected]} numberOfLines={1}>
                         {originLocation ? locationLabel(originLocation) : 'Seleccionar origen'}
                       </Text>
-                      <Ionicons name="chevron-down" size={16} color={colorScales.gray[500]} style={{ transform: showOriginDropdown ? [{ rotate: '180deg' }] : [] }} />
+                      <Icon name="chevron-down" size={16} color={colorScales.gray[500]} style={{ transform: showOriginDropdown ? [{ rotate: '180deg' }] : [] }} />
                     </Pressable>
                     {showOriginDropdown && (
                       <View style={styles.locationDropdownList}>
@@ -497,7 +506,7 @@ export default function TransfersScreen() {
                               <Text style={[styles.locationDropdownOptionText, originLocation === loc.value && styles.locationDropdownOptionTextActive]}>
                                 {loc.label}
                               </Text>
-                              {originLocation === loc.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                              {originLocation === loc.value && <Icon name="check" size={16} color={colors.primary} />}
                             </Pressable>
                           ))
                         )}
@@ -515,7 +524,7 @@ export default function TransfersScreen() {
                       <Text style={[styles.locationDropdownText, !destinationLocation && styles.locationDropdownPlaceholder, !!destinationLocation && styles.locationDropdownTextSelected]} numberOfLines={1}>
                         {destinationLocation ? locationLabel(destinationLocation) : 'Seleccionar destino'}
                       </Text>
-                      <Ionicons name="chevron-down" size={16} color={colorScales.gray[500]} style={{ transform: showDestinationDropdown ? [{ rotate: '180deg' }] : [] }} />
+                      <Icon name="chevron-down" size={16} color={colorScales.gray[500]} style={{ transform: showDestinationDropdown ? [{ rotate: '180deg' }] : [] }} />
                     </Pressable>
                     {showDestinationDropdown && (
                       <View style={styles.locationDropdownList}>
@@ -541,7 +550,7 @@ export default function TransfersScreen() {
                                 <Text style={[styles.locationDropdownOptionText, destinationLocation === loc.value && styles.locationDropdownOptionTextActive]}>
                                   {loc.label}
                                 </Text>
-                                {destinationLocation === loc.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                                {destinationLocation === loc.value && <Icon name="check" size={16} color={colors.primary} />}
                               </Pressable>
                             ))
                         )}
@@ -599,7 +608,7 @@ export default function TransfersScreen() {
                   <View style={styles.formGroup}>
                     <Text style={styles.formLabel}>Buscar producto</Text>
                     <View style={styles.searchBox}>
-                      <Ionicons name="search" size={16} color={colorScales.gray[400]} />
+                      <Icon name="search" size={16} color={colorScales.gray[400]} />
                       <TextInput
                         style={styles.searchInputWizard}
                         value={productSearchTerm}
@@ -611,7 +620,7 @@ export default function TransfersScreen() {
                       />
                       {productSearchTerm.length > 0 && (
                         <Pressable onPress={() => searchProducts('')} hitSlop={6}>
-                          <Ionicons name="close" size={14} color={colorScales.gray[400]} />
+                          <Icon name="x" size={14} color={colorScales.gray[400]} />
                         </Pressable>
                       )}
                     </View>
@@ -648,7 +657,7 @@ export default function TransfersScreen() {
                             <View style={styles.selectedProductHeader}>
                               <Text style={styles.selectedProductName} numberOfLines={1}>{product?.name ?? `Producto #${item.product_id}`}</Text>
                               <Pressable onPress={() => removeProduct(item.product_id)} hitSlop={4}>
-                                <Ionicons name="trash" size={16} color={colors.error} />
+                                <Icon name="trash-2" size={16} color={colors.error} />
                               </Pressable>
                             </View>
                             <View style={styles.qtyRow}>
@@ -727,7 +736,7 @@ export default function TransfersScreen() {
                     onPress={goToStep2}
                     disabled={!canAdvanceStep1}
                   >
-                    <Ionicons name="chevron-forward" size={18} color={colors.background} />
+                    <Icon name="chevron-right" size={18} color={colors.background} />
                     <Text style={styles.continueBtnText}>Continuar</Text>
                   </Pressable>
                 </>
@@ -743,7 +752,7 @@ export default function TransfersScreen() {
                     onPress={goToStep3}
                     disabled={!canAdvanceStep2}
                   >
-                    <Ionicons name="chevron-forward" size={18} color={colors.background} />
+                    <Icon name="chevron-right" size={18} color={colors.background} />
                     <Text style={styles.continueBtnText}>Continuar</Text>
                   </Pressable>
                 </>
@@ -762,7 +771,7 @@ export default function TransfersScreen() {
                     {createMutation.isPending ? (
                       <Spinner size="sm" />
                     ) : (
-                      <Ionicons name="chevron-forward" size={18} color={colors.background} />
+                      <Icon name="chevron-right" size={18} color={colors.background} />
                     )}
                     <Text style={styles.continueBtnText}>{createMutation.isPending ? 'Creando...' : 'Crear Transferencia'}</Text>
                   </Pressable>

@@ -8,17 +8,20 @@ export interface StatsGridItem {
   value: string | number;
   icon?: ReactNode | string;
   description?: string;
+  /** Highlighted secondary text rendered with brand color (emerald by default). */
+  smallText?: string;
+  smallTextColor?: string;
   iconBg?: string;
   iconColor?: string;
   trend?: { value: number; positive: boolean };
+  /** Render the card without background, border, or shadow. */
+  bare?: boolean;
 }
 
 interface StatsGridProps {
   items: StatsGridItem[];
   style?: ViewStyle;
 }
-
-const CARD_WIDTH = 150;
 
 const styles = StyleSheet.create({
   container: {
@@ -32,7 +35,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   item: {
-    width: CARD_WIDTH,
+    // Width is auto so the card sizes itself by content while the parent
+    // ScrollView enables horizontal overflow when needed. Replaces the
+    // previous fixed CARD_WIDTH (150) that was narrower than the inner
+    // StatsCard (160), causing visible misalignment.
   },
 });
 
@@ -51,9 +57,12 @@ export function StatsGrid({ items, style }: StatsGridProps) {
               value={item.value}
               icon={item.icon}
               description={item.description}
+              smallText={item.smallText}
+              smallTextColor={item.smallTextColor}
               iconBg={item.iconBg}
               iconColor={item.iconColor}
               trend={item.trend}
+              bare={item.bare}
             />
           </View>
         ))}

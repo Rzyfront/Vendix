@@ -211,6 +211,7 @@ export interface LocationQuery {
 export interface CreateAdjustmentItem {
   product_id: number;
   type: AdjustmentType;
+  /** Final stock quantity (NOT the change). Backend computes `quantity_change = quantity_after - quantity_before`. */
   quantity_after: number;
   reason_code?: string;
   description?: string;
@@ -297,13 +298,66 @@ export const InventoryService = {
       state: query?.state,
     };
     const res = await apiClient.get(`${Endpoints.STORE.INVENTORY.ADJUSTMENTS.LIST}${buildQuery(params)}`);
-    const page = unwrapPaginated<Record<string, any>>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
-    return { ...page, data: page.data.map(normalizeAdjustment) };
+    // Backend returns `successResponse<AdjustmentResponse>` where data is
+    // `{ adjustments: [...], total: number, hasMore: boolean }` — NOT a plain array.
+    // Standard `unwrapPaginated` expects `{ data: T[] }`, so we custom-unwrap here.
+    const body = res.data as
+      | { success?: boolean; data?: { adjustments?: Record<string, any>[]; total?: number; hasMore?: boolean } }
+      | { adjustments?: Record<string, any>[]; total?: number; hasMore?: boolean };
+    const payload =
+      body && typeof body === 'object' && 'success' in body && (body as any).success
+        ? (body as any).data
+        : body;
+    const adjustments = Array.isArray((payload as any)?.adjustments)
+      ? (payload as any).adjustments
+      : [];
+    const total = Number((payload as any)?.total ?? adjustments.length);
+    const hasMore = Boolean((payload as any)?.hasMore);
+    const page = Number(query?.page ?? 1);
+    const limit = Number(query?.limit ?? 20);
+
+    return {
+      data: adjustments.map(normalizeAdjustment),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+        hasNext: hasMore,
+        hasPrev: page > 1,
+      },
+    };
   },
 
   async createAdjustment(dto: CreateAdjustmentDto): Promise<StockAdjustment> {
+    // POST /store/inventory/adjustments/batch-complete — creates AND applies immediately.
+    // Backend expects `BatchCreateAdjustmentsDto`: { location_id, items: [{ product_id, type, quantity_after, ... }] }.
+    // The `quantity_after` field is the final stock (not the change); backend computes the delta.
     const res = await apiClient.post(Endpoints.STORE.INVENTORY.ADJUSTMENTS.CREATE, dto);
-    return normalizeAdjustment(unwrap<Record<string, any>>(res));
+    // The batch-complete endpoint returns `{ adjustments: [...], ... }` — unwrap to first item.
+    const payload = unwrap<Record<string, any> | { adjustments?: Record<string, any>[] }>(res);
+    const firstItem = (payload as any)?.adjustments?.[0] ?? payload;
+    return normalizeAdjustment(firstItem as Record<string, any>);
+  },
+
+  async createAdjustmentDraft(dto: CreateAdjustmentDto): Promise<StockAdjustment> {
+    // POST /store/inventory/adjustments/batch — creates as PENDING (draft, not applied).
+    const res = await apiClient.post(Endpoints.STORE.INVENTORY.ADJUSTMENTS.CREATE_DRAFT, dto);
+    const payload = unwrap<Record<string, any> | { adjustments?: Record<string, any>[] }>(res);
+    const firstItem = (payload as any)?.adjustments?.[0] ?? payload;
+    return normalizeAdjustment(firstItem as Record<string, any>);
+  },
+
+  async approveAdjustment(id: number, approvedByUserId: number): Promise<StockAdjustment> {
+    const endpoint = Endpoints.STORE.INVENTORY.ADJUSTMENTS.APPROVE.replace(':id', String(id));
+    const res = await apiClient.patch(endpoint, { approvedByUserId });
+    const payload = unwrap<Record<string, any>>(res);
+    return normalizeAdjustment(payload);
+  },
+
+  async deleteAdjustment(id: number): Promise<void> {
+    const endpoint = Endpoints.STORE.INVENTORY.ADJUSTMENTS.DELETE.replace(':id', String(id));
+    await apiClient.delete(endpoint);
   },
 
   async getTransfers(query?: TransferQuery): Promise<PaginatedResponse<StockTransfer>> {
@@ -327,7 +381,11 @@ export const InventoryService = {
   },
 
   async getMovements(query?: MovementQuery): Promise<PaginatedResponse<StockMovement>> {
+    const page = query?.page ?? 1;
+    const limit = query?.limit ?? 20;
     const params: Record<string, unknown> = {
+      page,
+      limit,
       search: query?.search,
       movement_type: query?.movement_type,
       product_id: query?.product_id,
@@ -338,10 +396,10 @@ export const InventoryService = {
       end_date: query?.end_date,
     };
     const res = await apiClient.get(`${Endpoints.STORE.INVENTORY.MOVEMENTS.LIST}${buildQuery(params)}`);
-    const page = unwrapPaginated<Record<string, any>>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
+    const pageResult = unwrapPaginated<Record<string, any>>(res, { page, limit });
     return {
-      ...page,
-      data: page.data.map(normalizeMovement),
+      ...pageResult,
+      data: pageResult.data.map(normalizeMovement),
     };
   },
 

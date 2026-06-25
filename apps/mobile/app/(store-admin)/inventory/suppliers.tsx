@@ -2,13 +2,13 @@ import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet, TextInput, Dimensions,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
 import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateSupplierDto, UpdateSupplierDto } from '@/features/store/services/inventory.service';
 import type { Supplier } from '@/features/store/types';
 import { useTenantStore } from '@/core/store/tenant.store';
+import { getAppType } from '@/core/store/auth.store';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
@@ -16,6 +16,8 @@ import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
+import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
+import { CURRENCY_OPTIONS, SUPPLIER_STATS, TAX_REGIME_OPTIONS, PERSON_TYPE_OPTIONS } from '@/features/store/constants/inventory-labels';
 
 const STATE_LABELS = {
   true: 'Activo',
@@ -89,15 +91,37 @@ function SupplierCard({
   );
 }
 
-const emptyForm: CreateSupplierDto & { is_active?: boolean } = {
-  name: '', code: '', contact_person: '', email: '', phone: '', mobile: '',
-  website: '', tax_id: '', payment_terms: '', currency: 'COP', lead_time_days: null,
-  notes: '', address: '', is_active: true,
+const emptyForm: CreateSupplierDto & {
+  is_active?: boolean;
+  tax_regime?: string;
+  person_type?: string;
+  is_self_withholder?: boolean;
+  notes?: string;
+} = {
+  name: '',
+  code: '',
+  contact_person: '',
+  email: '',
+  phone: '',
+  mobile: '',
+  website: '',
+  tax_id: '',
+  payment_terms: '',
+  currency: 'COP',
+  lead_time_days: null,
+  notes: '',
+  address: '',
+  is_active: true,
+  tax_regime: 'COMUN',
+  person_type: 'JURIDICA',
+  is_self_withholder: false,
 };
 
 export default function SuppliersScreen() {
   const queryClient = useQueryClient();
   const currentStoreId = useTenantStore((s) => s.storeId);
+  const appType = getAppType();
+  const isStoreScope = appType === 'STORE_ADMIN';
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [showActions, setShowActions] = useState(false);
@@ -112,24 +136,15 @@ export default function SuppliersScreen() {
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<CreateSupplierDto & { is_active?: boolean }>({ ...emptyForm });
+  const [form, setForm] = useState<typeof emptyForm>({ ...emptyForm });
   const [deleteTarget, setDeleteTarget] = useState<Supplier | null>(null);
+  const [showTaxRegimeDropdown, setShowTaxRegimeDropdown] = useState(false);
+  const [showPersonTypeDropdown, setShowPersonTypeDropdown] = useState(false);
 
   const FILTER_OPTIONS: { label: string; value: 'all' | 'active' | 'inactive' }[] = [
     { label: 'Todos los estados', value: 'all' },
     { label: 'Activos', value: 'active' },
     { label: 'Inactivos', value: 'inactive' },
-  ];
-
-  const CURRENCY_OPTIONS: { code: string; label: string }[] = [
-    { code: 'COP', label: 'COP - Peso Colombiano' },
-    { code: 'USD', label: 'USD - Dólar Americano' },
-    { code: 'EUR', label: 'EUR - Euro' },
-    { code: 'MXN', label: 'MXN - Peso Mexicano' },
-    { code: 'ARS', label: 'ARS - Peso Argentino' },
-    { code: 'CLP', label: 'CLP - Peso Chileno' },
-    { code: 'PEN', label: 'PEN - Sol Peruano' },
-    { code: 'BRL', label: 'BRL - Real Brasileiro' },
   ];
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, refetch, isRefetching } = useInfiniteQuery({
@@ -144,6 +159,18 @@ export default function SuppliersScreen() {
     initialPageParam: 1,
   });
 
+  // Pending purchase orders — feeds the "Órdenes Pendientes" stat.
+  const { data: pendingOrdersResponse } = useQuery({
+    queryKey: ['pending-purchase-orders'],
+    queryFn: () =>
+      InventoryService.getPurchaseOrders({
+        page: 1,
+        limit: 100,
+        status: 'pending',
+      }),
+  });
+  const pendingPOCount = pendingOrdersResponse?.data?.length ?? 0;
+
   const allSuppliers: Supplier[] = data?.pages.flatMap((p) => p.data) ?? [];
 
   // Filtro client-side por estado (workaround si el backend no lo soporta directamente)
@@ -156,7 +183,6 @@ export default function SuppliersScreen() {
     total: allSuppliers.length,
     active: allSuppliers.filter((s) => !!s.is_active).length,
     inactive: allSuppliers.filter((s) => !s.is_active).length,
-    withEmail: allSuppliers.filter((s) => s.email).length,
   };
 
   const handleEndReached = useCallback(() => {
@@ -226,6 +252,8 @@ export default function SuppliersScreen() {
     setEditingId(null);
     setForm({ ...emptyForm });
     setShowCurrencyDropdown(false);
+    setShowTaxRegimeDropdown(false);
+    setShowPersonTypeDropdown(false);
   };
 
   const handleEdit = (supplier: Supplier) => {
@@ -245,6 +273,9 @@ export default function SuppliersScreen() {
       notes: supplier.notes,
       address: supplier.address,
       is_active: !!supplier.is_active,
+      tax_regime: (supplier as any).tax_regime || 'COMUN',
+      person_type: (supplier as any).person_type || 'JURIDICA',
+      is_self_withholder: !!(supplier as any).is_self_withholder,
     });
     setModalVisible(true);
   };
@@ -254,7 +285,12 @@ export default function SuppliersScreen() {
       toastError('Nombre y código son obligatorios');
       return;
     }
-    const dto: CreateSupplierDto = {
+    // Basic email validation
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      toastError('Email inválido');
+      return;
+    }
+    const dto: any = {
       name: form.name.trim(),
       code: form.code.trim(),
       contact_person: form.contact_person?.trim() || undefined,
@@ -263,6 +299,9 @@ export default function SuppliersScreen() {
       mobile: form.mobile?.trim() || undefined,
       website: form.website?.trim() || undefined,
       tax_id: form.tax_id?.trim() || undefined,
+      tax_regime: form.tax_regime || undefined,
+      person_type: form.person_type || undefined,
+      is_self_withholder: !!form.is_self_withholder,
       payment_terms: form.payment_terms?.trim() || undefined,
       currency: form.currency || undefined,
       lead_time_days: form.lead_time_days ?? null,
@@ -273,7 +312,7 @@ export default function SuppliersScreen() {
     if (editingId) {
       updateMutation.mutate({ id: editingId, dto });
     } else {
-      createMutation.mutate(dto);
+      createMutation.mutate(dto as CreateSupplierDto);
     }
   };
 
@@ -281,6 +320,8 @@ export default function SuppliersScreen() {
     setEditingId(null);
     setForm({ ...emptyForm });
     setShowCurrencyDropdown(false);
+    setShowTaxRegimeDropdown(false);
+    setShowPersonTypeDropdown(false);
     setModalVisible(true);
   };
 
@@ -315,33 +356,50 @@ export default function SuppliersScreen() {
 
   return (
     <View style={styles.screen}>
+      {/* Read-only banner when operating scope is not STORE (organization-level access) */}
+      {!isStoreScope && (
+        <View style={styles.readOnlyBanner}>
+          <Icon name="info" size={16} color={colorScales.blue[600]} />
+          <Text style={styles.readOnlyBannerText}>
+            Modo organización — Solo lectura
+          </Text>
+        </View>
+      )}
       {/* Stats: ancho completo de la pantalla (fuera del card) */}
       <StatsGrid
         style={styles.statsWrap}
         items={[
           {
-            label: 'Total',
+            label: SUPPLIER_STATS.total.label,
             value: totals.total,
-            icon: <Icon name="building" size={14} color={colorScales.blue[600]} />,
-            description: 'Proveedores',
+            icon: INVENTORY_ICONS.suppliersTotalStat,
+            iconBg: STAT_PALETTE.blue.bg,
+            iconColor: STAT_PALETTE.blue.color,
+            description: SUPPLIER_STATS.total.description,
           },
           {
-            label: 'Activos',
+            label: SUPPLIER_STATS.active.label,
             value: totals.active,
-            icon: <Icon name="check-circle" size={14} color={colorScales.green[600]} />,
-            description: 'Operativos',
+            icon: INVENTORY_ICONS.activeStat,
+            iconBg: STAT_PALETTE.green.bg,
+            iconColor: STAT_PALETTE.green.color,
+            description: SUPPLIER_STATS.active.description,
           },
           {
-            label: 'Inactivos',
+            label: SUPPLIER_STATS.inactive.label,
             value: totals.inactive,
-            icon: <Ionicons name="ellipsis-horizontal" size={14} color={colorScales.gray[500]} />,
-            description: 'Fuera de operación',
+            icon: INVENTORY_ICONS.inactiveStat,
+            iconBg: STAT_PALETTE.amber.bg,
+            iconColor: STAT_PALETTE.amber.color,
+            description: SUPPLIER_STATS.inactive.description,
           },
           {
-            label: 'Con email',
-            value: totals.withEmail,
-            icon: <Icon name="mail" size={14} color={colorScales.amber[600]} />,
-            description: 'Registrados',
+            label: SUPPLIER_STATS.pendingPO.label,
+            value: pendingPOCount,
+            icon: INVENTORY_ICONS.pendingPOStat,
+            iconBg: STAT_PALETTE.purple.bg,
+            iconColor: STAT_PALETTE.purple.color,
+            description: SUPPLIER_STATS.pendingPO.description,
           },
         ]}
       />
@@ -365,7 +423,7 @@ export default function SuppliersScreen() {
               </View>
               <View style={styles.searchRow}>
                 <View style={styles.searchInputWrap}>
-                  <Ionicons name="search-outline" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
+                  <Icon name="search" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
                   <TextInput
                     style={styles.searchInputField}
                     value={search}
@@ -378,7 +436,7 @@ export default function SuppliersScreen() {
                   />
                   {search.length > 0 && (
                     <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                      <Ionicons name="close" size={16} color={colorScales.gray[400]} />
+                      <Icon name="x" size={16} color={colorScales.gray[400]} />
                     </Pressable>
                   )}
                 </View>
@@ -449,7 +507,7 @@ export default function SuppliersScreen() {
                 <Text style={styles.filterPopupSelectText}>
                   {FILTER_OPTIONS.find((o) => o.value === activeFilter)?.label ?? 'Todos los estados'}
                 </Text>
-                <Ionicons name={showFilterStateList ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
+                <Icon name={showFilterStateList ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
               </Pressable>
               {showFilterStateList && (
                 <View style={styles.filterPopupOptionsList}>
@@ -462,7 +520,7 @@ export default function SuppliersScreen() {
                       <Text style={[styles.filterPopupOptionText, activeFilter === opt.value && styles.filterPopupOptionTextActive]}>
                         {opt.label}
                       </Text>
-                      {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                      {activeFilter === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                     </Pressable>
                   ))}
                 </View>
@@ -486,7 +544,7 @@ export default function SuppliersScreen() {
                 </Text>
               </View>
               <Pressable onPress={closeModal} hitSlop={8} style={styles.createCloseBtn}>
-                <Ionicons name="close" size={22} color={colorScales.gray[500]} />
+                <Icon name="x" size={22} color={colorScales.gray[500]} />
               </Pressable>
             </View>
 
@@ -606,7 +664,7 @@ export default function SuppliersScreen() {
                   <Text style={{ flex: 1, fontSize: 14, color: colorScales.gray[900] }}>
                     {CURRENCY_OPTIONS.find((c) => c.code === form.currency)?.label || 'Seleccionar moneda'}
                   </Text>
-                  <Ionicons
+                  <Icon
                     name={showCurrencyDropdown ? 'chevron-up' : 'chevron-down'}
                     size={16}
                     color={colorScales.gray[500]}
@@ -623,7 +681,7 @@ export default function SuppliersScreen() {
                         <Text style={[styles.currencyDropdownOptionText, form.currency === opt.code && styles.currencyDropdownOptionTextActive]}>
                           {opt.label}
                         </Text>
-                        {form.currency === opt.code && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                        {form.currency === opt.code && <Icon name="check" size={16} color={colors.primary} />}
                       </Pressable>
                     ))}
                   </View>
@@ -639,6 +697,107 @@ export default function SuppliersScreen() {
                   placeholder="15"
                   placeholderTextColor={colorScales.gray[400]}
                   keyboardType="numeric"
+                />
+              </View>
+
+              {/* ── Sección: Clasificación Fiscal ── */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Régimen Tributario</Text>
+                <Pressable
+                  style={[styles.inputField, styles.selectField]}
+                  onPress={() => setShowTaxRegimeDropdown(!showTaxRegimeDropdown)}
+                >
+                  <Text style={styles.selectFieldText}>
+                    {TAX_REGIME_OPTIONS.find((o) => o.value === form.tax_regime)?.label || 'Seleccionar'}
+                  </Text>
+                  <Icon
+                    name={showTaxRegimeDropdown ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={colorScales.gray[500]}
+                  />
+                </Pressable>
+                {showTaxRegimeDropdown && (
+                  <View style={styles.dropdownList}>
+                    {TAX_REGIME_OPTIONS.map((opt) => (
+                      <Pressable
+                        key={opt.value}
+                        style={[styles.dropdownOption, form.tax_regime === opt.value && styles.dropdownOptionActive]}
+                        onPress={() => {
+                          setForm({ ...form, tax_regime: opt.value });
+                          setShowTaxRegimeDropdown(false);
+                        }}
+                      >
+                        <Text style={[styles.dropdownOptionText, form.tax_regime === opt.value && styles.dropdownOptionTextActive]}>
+                          {opt.label}
+                        </Text>
+                        {form.tax_regime === opt.value && <Icon name="check" size={16} color={colors.primary} />}
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Tipo de Persona</Text>
+                <Pressable
+                  style={[styles.inputField, styles.selectField]}
+                  onPress={() => setShowPersonTypeDropdown(!showPersonTypeDropdown)}
+                >
+                  <Text style={styles.selectFieldText}>
+                    {PERSON_TYPE_OPTIONS.find((o) => o.value === form.person_type)?.label || 'Seleccionar'}
+                  </Text>
+                  <Icon
+                    name={showPersonTypeDropdown ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={colorScales.gray[500]}
+                  />
+                </Pressable>
+                {showPersonTypeDropdown && (
+                  <View style={styles.dropdownList}>
+                    {PERSON_TYPE_OPTIONS.map((opt) => (
+                      <Pressable
+                        key={opt.value}
+                        style={[styles.dropdownOption, form.person_type === opt.value && styles.dropdownOptionActive]}
+                        onPress={() => {
+                          setForm({ ...form, person_type: opt.value });
+                          setShowPersonTypeDropdown(false);
+                        }}
+                      >
+                        <Text style={[styles.dropdownOptionText, form.person_type === opt.value && styles.dropdownOptionTextActive]}>
+                          {opt.label}
+                        </Text>
+                        {form.person_type === opt.value && <Icon name="check" size={16} color={colors.primary} />}
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+
+              {/* ── Sección: Configuración ── */}
+              <Pressable
+                style={styles.toggleRow}
+                onPress={() => setForm({ ...form, is_self_withholder: !form.is_self_withholder })}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.toggleLabel}>¿Es autorretenedor?</Text>
+                  <Text style={styles.toggleDesc}>Marca si el proveedor practica autorretención</Text>
+                </View>
+                <View style={[styles.toggleSwitch, form.is_self_withholder && styles.toggleSwitchOn]}>
+                  <View style={[styles.toggleKnob, form.is_self_withholder && styles.toggleKnobOn]} />
+                </View>
+              </Pressable>
+
+              {/* ── Sección: Notas ── */}
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>Notas</Text>
+                <TextInput
+                  style={[styles.inputField, styles.textArea]}
+                  value={form.notes ?? ''}
+                  onChangeText={(t) => setForm({ ...form, notes: t })}
+                  placeholder="Notas adicionales..."
+                  placeholderTextColor={colorScales.gray[400]}
+                  multiline
+                  numberOfLines={3}
                 />
               </View>
 
@@ -877,6 +1036,33 @@ const styles = StyleSheet.create({
   currencyDropdownOptionActive: { backgroundColor: colorScales.green[50] },
   currencyDropdownOptionText: { fontSize: 14, color: colorScales.gray[700] },
   currencyDropdownOptionTextActive: { fontWeight: '700' as any, color: colors.primary },
+  /* Reusable select field + dropdown list */
+  selectField: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  selectFieldText: { flex: 1, fontSize: 14, color: colorScales.gray[900] },
+  dropdownList: { marginTop: 4, borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: borderRadius.lg, backgroundColor: colors.background, overflow: 'hidden' },
+  dropdownOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing[2.5], paddingHorizontal: spacing[3], borderBottomWidth: 1, borderBottomColor: colorScales.gray[100] },
+  dropdownOptionActive: { backgroundColor: colorScales.green[50] },
+  dropdownOptionText: { fontSize: 14, color: colorScales.gray[700] },
+  dropdownOptionTextActive: { fontWeight: '700' as any, color: colors.primary },
+  /* Read-only banner (organization scope) */
+  readOnlyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    marginHorizontal: spacing[3],
+    marginBottom: spacing[2],
+    padding: spacing[3],
+    backgroundColor: colorScales.blue[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.blue[200],
+  },
+  readOnlyBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: colorScales.blue[700],
+    fontWeight: '500' as any,
+  },
   createFooter: { flexDirection: 'row', paddingHorizontal: spacing[4], paddingTop: spacing[3], paddingBottom: spacing[4], borderTopWidth: 1, borderTopColor: colorScales.gray[200], backgroundColor: colors.background, gap: spacing[2] },
   cancelBtn: { flex: 1, paddingVertical: 10, borderRadius: borderRadius.full, backgroundColor: colorScales.gray[900], alignItems: 'center', justifyContent: 'center' },
   cancelBtnText: { fontSize: 13, fontWeight: '700' as any, color: colors.background },
