@@ -10,6 +10,7 @@ import {
   DispatchNoteStats,
   CreateDispatchNoteDto,
   CreateDispatchFromOrderDto,
+  ConfirmDispatchNoteDto,
 } from '../interfaces/dispatch-note.interface';
 
 let dispatchNoteStatsCache: { observable: Observable<any>; lastFetch: number } | null = null;
@@ -104,12 +105,20 @@ export class DispatchNotesService {
     );
   }
 
-  confirm(id: number): Observable<DispatchNote> {
-    return this.http.post<any>(`${this.apiUrl}/store/dispatch-notes/${id}/confirm`, {}).pipe(
-      map((r) => r.data || r),
-      tap(() => this.invalidateCache()),
-      catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
-    );
+  /**
+   * Confirm a dispatch note. Pass `body.item_serials` when the note has
+   * serialized lines (QUI-431); otherwise the body defaults to `{}` and the
+   * backend confirms normally. The backend validates serial parity per
+   * serialized line and raises `SERIAL_REQUIRED_001` if any line is short.
+   */
+  confirm(id: number, body?: ConfirmDispatchNoteDto): Observable<DispatchNote> {
+    return this.http
+      .post<any>(`${this.apiUrl}/store/dispatch-notes/${id}/confirm`, body ?? {})
+      .pipe(
+        map((r) => r.data || r),
+        tap(() => this.invalidateCache()),
+        catchError((error) => throwError(() => new Error(this.extractErrorMessage(error)))),
+      );
   }
 
   deliver(id: number, dto?: any): Observable<DispatchNote> {

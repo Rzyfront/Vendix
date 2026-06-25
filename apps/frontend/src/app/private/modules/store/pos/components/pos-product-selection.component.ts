@@ -1021,18 +1021,10 @@ export class PosProductSelectionComponent {
       return;
     }
 
-    // QUI-431: serialized product → pick serials before adding (variant-aware).
-    let serialIds: number[] | undefined;
-    let serialNumbers: string[] | undefined;
-    if (this.requiresSerials(product)) {
-      const selection = await this.askSerialSelection(product, 1, variant.id);
-      if (!selection) return;
-      serialIds = selection.serialIds.length ? selection.serialIds : undefined;
-      serialNumbers = selection.freeTextSerials.length
-        ? selection.freeTextSerials
-        : undefined;
-    }
-
+    // QUI-431: serialized products NO longer capture serials at the POS.
+    // The serial numbers are now registered when the dispatch remission is
+    // confirmed, so the add proceeds directly without opening the (kept, but
+    // unused-here) serial-selection modal and without aborting on cancel.
     this.addingToCart.add(product.id);
 
     this.cartService
@@ -1040,8 +1032,6 @@ export class PosProductSelectionComponent {
         product,
         quantity: 1,
         variant,
-        serial_ids: serialIds,
-        serial_numbers: serialNumbers,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
@@ -1352,18 +1342,10 @@ export class PosProductSelectionComponent {
       skipKds = choice === 'stock';
     }
 
-    // QUI-431: serialized product → ask the cashier to pick serials before
-    // adding to cart. Cancelling aborts the add.
-    let serialIds: number[] | undefined;
-    let serialNumbers: string[] | undefined;
-    if (this.requiresSerials(product)) {
-      const selection = await this.askSerialSelection(product, 1);
-      if (!selection) return;
-      serialIds = selection.serialIds.length ? selection.serialIds : undefined;
-      serialNumbers = selection.freeTextSerials.length
-        ? selection.freeTextSerials
-        : undefined;
-    }
+    // QUI-431: serialized products NO longer capture serials at the POS.
+    // The serial numbers are now registered when the dispatch remission is
+    // confirmed, so the add proceeds directly without opening the (kept, but
+    // unused-here) serial-selection modal and without aborting on cancel.
 
     // Regular unit product
     this.addingToCart.add(product.id);
@@ -1373,8 +1355,6 @@ export class PosProductSelectionComponent {
         product: product,
         quantity: 1,
         skipKds,
-        serial_ids: serialIds,
-        serial_numbers: serialNumbers,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

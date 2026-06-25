@@ -19,12 +19,17 @@ import type {
   DispatchNote,
   CreateDispatchNoteDto,
   CreateDispatchNoteItemDto,
+  ConfirmDispatchNoteItemSerialsDto,
 } from '../../interfaces/dispatch-note.interface';
 
 import { CustomerStepComponent } from './customer-step.component';
 import { ProductsStepComponent } from './products-step.component';
 import { DetailsStepComponent } from './details-step.component';
 import { ReviewStepComponent } from './review-step.component';
+import {
+  DispatchNoteSerialsModalComponent,
+  DispatchNoteSerialLine,
+} from '../dispatch-note-serials-modal/dispatch-note-serials-modal.component';
 
 @Component({
   selector: 'app-dispatch-note-wizard',
@@ -38,6 +43,7 @@ import { ReviewStepComponent } from './review-step.component';
     ProductsStepComponent,
     DetailsStepComponent,
     ReviewStepComponent,
+    DispatchNoteSerialsModalComponent,
   ],
   providers: [DispatchNoteWizardService],
   template: `
@@ -210,6 +216,14 @@ import { ReviewStepComponent } from './review-step.component';
         </div>
       </div>
     </app-modal>
+
+    <!-- Serial Selection Modal (QUI-431) -->
+    <app-dispatch-note-serials-modal
+      [(isOpen)]="showSerialsModal"
+      [items]="serialLines()"
+      (confirmed)="onSerialsConfirmed($event)"
+      (cancelled)="onSerialsCancelled()"
+    ></app-dispatch-note-serials-modal>
   `,
 })
 export class DispatchNoteWizardComponent {
@@ -231,6 +245,14 @@ export class DispatchNoteWizardComponent {
   readonly isCreated = signal(false);
   readonly createdNote = signal<DispatchNote | null>(null);
   readonly showActionMenu = signal(false);
+
+  // QUI-431 — serial-selection state. When a created draft has serialized
+  // lines, we pause the confirm/invoice chain to collect serials.
+  readonly showSerialsModal = signal(false);
+  readonly serialLines = signal<DispatchNoteSerialLine[]>([]);
+  // The pending note + downstream action while the serials modal is open.
+  private pendingSerialNote: DispatchNote | null = null;
+  private pendingSerialAction: 'confirm' | 'invoice' | null = null;
   readonly createActionLabel = computed(() => {
     switch (this.wizardService.createAction()) {
       case 'confirm':
@@ -301,52 +323,120 @@ export class DispatchNoteWizardComponent {
         next: (note) => this._onCreateSuccess(note, 'draft'),
         error: (err) => this._onCreateError(err),
       });
-    } else if (action === 'confirm') {
-      // confirm: crear -> confirmar
-      create$
-        .pipe(
-          switchMap((note) =>
-            this.dispatchNotesService
-              .confirm(note.id)
-              .pipe(
-                switchMap((confirmed) =>
-                  of({ note: confirmed, partial: 'confirm' as const }),
-                ),
-              ),
-          ),
-        )
-        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-          next: ({ note, partial }) => this._onCreateSuccess(note, partial),
+      return;
+    }
+
+    // confirm / invoice: crear primero como borrador y luego encadenar.
+    // QUI-431 — si la nota creada tiene líneas serializadas, NO auto-confirmar:
+    // pausar para recolectar seriales vía el modal y continuar al confirmarlos.
+    create$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (note) => {
+        const lines = this._buildSerialLines(note);
+        if (lines.length > 0) {
+          this.pendingSerialNote = note;
+          this.pendingSerialAction = action;
+          this.serialLines.set(lines);
+          this.showSerialsModal.set(true);
+          // keep isSubmitting true; the chain resumes on serial confirm.
+          return;
+        }
+        // No serialized lines → flujo encadenado original.
+        this._continueAfterCreate(note, action);
+      },
+      error: (err) => this._onCreateError(err),
+    });
+  }
+
+  /**
+   * QUI-431 — Resume the confirm/invoice chain for a freshly created (draft)
+   * note. `body` carries the assembled `item_serials[]` when the note has
+   * serialized lines; it is omitted for non-serialized notes.
+   */
+  private _continueAfterCreate(
+    note: DispatchNote,
+    action: 'confirm' | 'invoice',
+    body?: { item_serials: ConfirmDispatchNoteItemSerialsDto[] },
+  ): void {
+    if (action === 'confirm') {
+      this.dispatchNotesService
+        .confirm(note.id, body)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (confirmed) => this._onCreateSuccess(confirmed, 'confirm'),
           error: (err) => this._onCreateError(err, 'confirm'),
         });
-    } else {
-      // invoice: crear -> confirmar -> entregar -> facturar
-      create$
-        .pipe(
-          switchMap((note) =>
-            this.dispatchNotesService.confirm(note.id).pipe(
-              switchMap((confirmed) =>
-                this.dispatchNotesService.deliver(confirmed.id).pipe(
-                  switchMap((delivered) =>
-                    this.dispatchNotesService.invoice(delivered.id).pipe(
-                      switchMap((invoiced) =>
-                        of({
-                          note: invoiced,
-                          partial: 'invoice' as const,
-                        }),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+      return;
+    }
+
+    // invoice: confirmar -> entregar -> facturar
+    this.dispatchNotesService
+      .confirm(note.id, body)
+      .pipe(
+        switchMap((confirmed) =>
+          this.dispatchNotesService.deliver(confirmed.id).pipe(
+            switchMap((delivered) =>
+              this.dispatchNotesService
+                .invoice(delivered.id)
+                .pipe(switchMap((invoiced) => of(invoiced))),
             ),
           ),
-        )
-        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-          next: ({ note, partial }) => this._onCreateSuccess(note, partial),
-          error: (err) => this._onCreateError(err, 'invoice'),
-        });
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (invoiced) => this._onCreateSuccess(invoiced, 'invoice'),
+        error: (err) => this._onCreateError(err, 'invoice'),
+      });
+  }
+
+  /** QUI-431 — modal emitted serials → resume the paused confirm/invoice chain. */
+  onSerialsConfirmed(item_serials: ConfirmDispatchNoteItemSerialsDto[]): void {
+    const note = this.pendingSerialNote;
+    const action = this.pendingSerialAction;
+    this.showSerialsModal.set(false);
+    if (!note || !action) {
+      this.isSubmitting.set(false);
+      return;
     }
+    this.pendingSerialNote = null;
+    this.pendingSerialAction = null;
+    this._continueAfterCreate(note, action, { item_serials });
+  }
+
+  /**
+   * QUI-431 — operator cancelled the serials modal. The draft note already
+   * exists, so surface it as a created draft instead of losing it silently.
+   */
+  onSerialsCancelled(): void {
+    const note = this.pendingSerialNote;
+    this.showSerialsModal.set(false);
+    this.pendingSerialNote = null;
+    this.pendingSerialAction = null;
+    if (note) {
+      this._onCreateSuccess(note, 'draft');
+      this.toast.info(
+        'Remision creada como borrador. Confírmala asignando los seriales.',
+      );
+    } else {
+      this.isSubmitting.set(false);
+    }
+  }
+
+  /**
+   * QUI-431 — Extract serialized lines from a created note. A line is
+   * serialized when its included product has `requires_serial_numbers`.
+   */
+  private _buildSerialLines(note: DispatchNote): DispatchNoteSerialLine[] {
+    return (note.dispatch_note_items ?? [])
+      .filter((item) => item.product?.requires_serial_numbers === true)
+      .map((item) => ({
+        dispatch_note_item_id: item.id,
+        product_id: item.product_id,
+        product_variant_id: item.product_variant_id ?? undefined,
+        location_id: item.location_id ?? note.dispatch_location_id ?? undefined,
+        dispatched_quantity: item.dispatched_quantity,
+        product_name: item.product?.name ?? `Producto #${item.product_id}`,
+      }));
   }
 
   private _onCreateSuccess(
@@ -402,6 +492,7 @@ export class DispatchNoteWizardComponent {
     this.wizardService.reset();
     this.isCreated.set(false);
     this.createdNote.set(null);
+    this._resetSerialState();
     this.isOpenChange.emit(false);
   }
 
@@ -410,6 +501,14 @@ export class DispatchNoteWizardComponent {
     this.wizardService.reset();
     this.isCreated.set(false);
     this.createdNote.set(null);
+    this._resetSerialState();
+  }
+
+  private _resetSerialState(): void {
+    this.showSerialsModal.set(false);
+    this.serialLines.set([]);
+    this.pendingSerialNote = null;
+    this.pendingSerialAction = null;
   }
 
   onViewDetail(id: number): void {
