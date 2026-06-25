@@ -46,6 +46,18 @@
     <div class="product-list">
       @for (row of filteredRows(); track trackById($index, row)) {
         <div class="product-row">
+          <div class="product-thumb">
+            @if (row.image_url) {
+              <img
+                [src]="row.image_url"
+                [alt]="row.name"
+                loading="lazy"
+                (error)="onThumbError($event)"
+              />
+            } @else {
+              <app-icon name="image" [size]="20"></app-icon>
+            }
+          </div>
           <div class="info">
             <div class="name">{{ row.name }}</div>
             <div class="meta">

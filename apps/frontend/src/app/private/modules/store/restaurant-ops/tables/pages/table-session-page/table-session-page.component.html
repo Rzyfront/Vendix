@@ -147,7 +147,11 @@
         </app-card>
 
         <!-- ── Items ────────────────────────────────────────────────── -->
-        <app-card class="md:col-span-2" [responsive]="true">
+        <app-card
+          class="md:col-span-2"
+          [responsive]="true"
+          [showHeader]="true"
+        >
           <!-- Card header: title + "Agregar items" (moved from sticky header) -->
           <div slot="header" class="items-card-header">
             <h3 class="items-card-title">Items ({{ items().length }})</h3>
@@ -241,16 +245,24 @@
                   [class.is-selected]="isSelected(item.id)"
                   [class.is-fired]="isItemFired(item)"
                   [class.selectable]="
-                    selectionMode() && !isClosed() && !isItemFired(item)
+                    selectionMode() &&
+                    !isClosed() &&
+                    !isItemFired(item) &&
+                    isPrepared(item)
                   "
                   (click)="
-                    selectionMode() && !isItemFired(item)
+                    selectionMode() && !isItemFired(item) && isPrepared(item)
                       ? toggleItemSelection(item.id)
                       : null
                   "
                 >
-                  <!-- Batch checkbox (only in selection mode, for pending) -->
-                  @if (selectionMode() && !isClosed() && !isItemFired(item)) {
+                  <!-- Batch checkbox (only in selection mode, for prepared pendings) -->
+                  @if (
+                    selectionMode() &&
+                    !isClosed() &&
+                    !isItemFired(item) &&
+                    isPrepared(item)
+                  ) {
                     <div
                       class="item-check"
                       (click)="$event.stopPropagation()"
@@ -274,23 +286,31 @@
                     <span class="price">{{ +item.total_price | currency }}</span>
                   </div>
 
-                  <!-- Kitchen status -->
-                  <div class="item-status">
-                    @if (kitchenStatusFor(item); as status) {
-                      <app-badge [variant]="kitchenBadgeVariant(status)">
-                        <app-icon name="chef-hat" [size]="12"></app-icon>
-                        {{ kitchenStatusLabel(status) }}
-                      </app-badge>
-                    } @else {
-                      <span class="pending-tag">
-                        <app-icon name="clock" [size]="12"></app-icon>
-                        Sin enviar
-                      </span>
-                    }
-                  </div>
+                  <!-- Kitchen status: only for prepared dishes. -->
+                  @if (isPrepared(item)) {
+                    <div class="item-status">
+                      @if (kitchenStatusFor(item); as status) {
+                        <app-badge [variant]="kitchenBadgeVariant(status)">
+                          <app-icon name="chef-hat" [size]="12"></app-icon>
+                          {{ kitchenStatusLabel(status) }}
+                        </app-badge>
+                      } @else {
+                        <span class="pending-tag">
+                          <app-icon name="clock" [size]="12"></app-icon>
+                          Sin enviar
+                        </span>
+                      }
+                    </div>
+                  }
 
-                  <!-- Per-dish primary action (hidden in selection mode) -->
-                  @if (!isClosed() && !selectionMode()) {
+                  <!--
+                    Per-dish primary action (hidden in selection mode AND
+                    hidden for non-dish items: bottled water / retail
+                    add-ons do not flow through the kitchen).
+                  -->
+                  @if (
+                    !isClosed() && !selectionMode() && isPrepared(item)
+                  ) {
                     <div class="item-action" (click)="$event.stopPropagation()">
                       @if (!isItemFired(item)) {
                         <app-button
