@@ -445,7 +445,7 @@ export default function MovementsScreen() {
           ListHeaderComponent={
             <View>
               <View style={styles.titleRow}>
-                <Text style={styles.listTitle}>Movimientos ({movements.length})</Text>
+                <Text style={styles.listTitle}>Movimientos ({pagination.total})</Text>
               </View>
               <View style={styles.searchRow}>
                 <View style={styles.searchInputWrap}>

@@ -27,7 +27,13 @@ const STATE_VARIANT: Record<AdjustmentState, 'warning' | 'success'> = {
   applied: 'success',
 };
 
-function AdjustmentCard({ item }: { item: StockAdjustment }) {
+function AdjustmentCard({
+  item,
+  onView,
+}: {
+  item: StockAdjustment;
+  onView?: (item: StockAdjustment) => void;
+}) {
   // Fallbacks seguros para evitar "[object Object]" si el backend devuelve un objeto en campos string
   const productName =
     typeof item.products?.name === 'string'
@@ -41,6 +47,7 @@ function AdjustmentCard({ item }: { item: StockAdjustment }) {
       : 'Sin ubicación';
   const typeLabel = ADJUSTMENT_TYPE_LABELS[item.adjustment_type] ?? 'Ajuste';
   const dateLabel = formatDate(item.created_at);
+  const quantityChange = Number(item.quantity_change ?? 0);
   return (
     <View style={styles.card}>
       <View style={styles.cardBody}>
@@ -64,16 +71,247 @@ function AdjustmentCard({ item }: { item: StockAdjustment }) {
           </View>
         </View>
 
-        {/* Fila 3: Footer con CAMBIO + pin (como la web) */}
+        {/* Fila 3: Footer con CAMBIO + botón (ver) (como la web) */}
         <View style={styles.cardFooter}>
           <View style={styles.cardFooterLeft}>
             <Text style={styles.cardFooterLabel}>CAMBIO</Text>
-            <Text style={styles.cardFooterValue}>{Number(item.quantity_change ?? 0)}</Text>
+            <Text style={styles.cardFooterValue}>{`${quantityChange}`}</Text>
           </View>
-          <Icon name="map-pin" size={16} color={colorScales.gray[500]} />
+          {onView && (
+            <Pressable
+              onPress={() => onView(item)}
+              hitSlop={8}
+              style={({ pressed }) => [styles.eyeBtn, pressed && { opacity: 0.6 }]}
+              accessibilityLabel="Ver detalle del ajuste"
+            >
+              <Icon name="eye" size={16} color={colors.primary} />
+            </Pressable>
+          )}
         </View>
       </View>
     </View>
+  );
+}
+
+/**
+ * Adjustment detail popup — opened when the user taps the eye (ver) button on
+ * an AdjustmentCard. Mirrors the web `app-adjustment-detail-modal` visual
+ * contract: header with status badge, product/variant/location, before/after/
+ * change breakdown, motivo, and contextual actions (Eliminar / Aprobar /
+ * Cerrar) based on whether the adjustment is pending or already applied.
+ */
+function AdjustmentDetailModal({
+  adjustment,
+  onClose,
+  onApprove,
+  onDelete,
+  isSubmitting = false,
+}: {
+  adjustment: StockAdjustment | null;
+  onClose: () => void;
+  onApprove?: (a: StockAdjustment) => void;
+  onDelete?: (a: StockAdjustment) => void;
+  isSubmitting?: boolean;
+}) {
+  if (!adjustment) return null;
+
+  const typeInfo = ADJUSTMENT_TYPE_MAP[adjustment.adjustment_type];
+  const isPending = !adjustment.approved_at;
+  const quantityBefore = Number(adjustment.quantity_before ?? 0);
+  const quantityAfter = Number(adjustment.quantity_after ?? 0);
+  const quantityChange = Number(adjustment.quantity_change ?? 0);
+  const productName =
+    typeof adjustment.products?.name === 'string'
+      ? adjustment.products.name
+      : 'Producto';
+  const locationName =
+    typeof adjustment.inventory_locations?.name === 'string'
+      ? adjustment.inventory_locations.name
+      : 'Sin ubicación';
+  const reasonLabel = REASON_CODE_LABELS[adjustment.reason_code ?? ''] ?? adjustment.reason_code ?? '—';
+  const createdBy =
+    typeof adjustment.created_by_user?.user_name === 'string'
+      ? adjustment.created_by_user.user_name
+      : '—';
+  const approvedBy =
+    typeof adjustment.approved_by_user?.user_name === 'string'
+      ? adjustment.approved_by_user.user_name
+      : null;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.detailOverlay}>
+        <View style={styles.detailModal}>
+          {/* Header */}
+          <View style={styles.detailHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailTitle}>Detalle del Ajuste</Text>
+              <Text style={styles.detailSubtitle} numberOfLines={1}>
+                {productName}
+              </Text>
+            </View>
+            <Pressable onPress={onClose} hitSlop={8} style={styles.detailCloseBtn}>
+              <Icon name="x" size={22} color={colorScales.gray[500]} />
+            </Pressable>
+          </View>
+
+          <ScrollView
+            style={styles.detailBody}
+            contentContainerStyle={styles.detailBodyContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Tipo badge */}
+            <View style={styles.detailTypeCard}>
+              <View style={styles.detailTypeIcon}>
+                <Icon name={typeInfo?.icon ?? 'edit-2'} size={20} color={colors.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.detailTypeLabel}>Tipo de Ajuste</Text>
+                <Text style={styles.detailTypeValue}>{typeInfo?.label ?? 'Ajuste'}</Text>
+              </View>
+            </View>
+
+            {/* Ubicación */}
+            <View style={styles.detailSection}>
+              <View style={styles.detailSectionHeader}>
+                <Icon name="map-pin" size={14} color={colorScales.gray[500]} />
+                <Text style={styles.detailSectionTitle}>UBICACIÓN</Text>
+              </View>
+              <View style={styles.detailInfoCard}>
+                <Text style={styles.detailInfoPrimary}>{locationName}</Text>
+              </View>
+            </View>
+
+            {/* Cambio de Cantidad: Antes / Cambio / Después */}
+            <View style={styles.detailSection}>
+              <View style={styles.detailSectionHeader}>
+                <Icon name="hash" size={14} color={colorScales.gray[500]} />
+                <Text style={styles.detailSectionTitle}>CAMBIO DE CANTIDAD</Text>
+              </View>
+              <View style={styles.detailQuantityCard}>
+                <View style={styles.detailQuantityRow}>
+                  <View style={styles.detailQuantityCell}>
+                    <Text style={styles.detailQuantityLabel}>ANTES</Text>
+                    <Text style={styles.detailQuantityValue}>{`${quantityBefore}`}</Text>
+                  </View>
+                  <Icon
+                    name={quantityChange >= 0 ? 'trending-up' : 'trending-down'}
+                    size={20}
+                    color={quantityChange >= 0 ? colors.primary : colors.error}
+                  />
+                  <View style={styles.detailQuantityCell}>
+                    <Text style={styles.detailQuantityLabel}>CAMBIO</Text>
+                    <Text
+                      style={[
+                        styles.detailQuantityValue,
+                        {
+                          color: quantityChange >= 0 ? colors.primary : colors.error,
+                        },
+                      ]}
+                    >
+                      {quantityChange > 0 ? `+${quantityChange}` : `${quantityChange}`}
+                    </Text>
+                  </View>
+                  <Icon name="arrow-right" size={20} color={colorScales.gray[400]} />
+                  <View style={styles.detailQuantityCell}>
+                    <Text style={styles.detailQuantityLabel}>DESPUÉS</Text>
+                    <Text style={styles.detailQuantityValue}>{`${quantityAfter}`}</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* Motivo */}
+            <View style={styles.detailSection}>
+              <View style={styles.detailSectionHeader}>
+                <Icon name="file-text" size={14} color={colorScales.gray[500]} />
+                <Text style={styles.detailSectionTitle}>MOTIVO</Text>
+              </View>
+              <View style={styles.detailInfoCard}>
+                <Text style={styles.detailInfoPrimary}>{reasonLabel}</Text>
+                {adjustment.description ? (
+                  <Text style={styles.detailInfoSecondary}>{adjustment.description}</Text>
+                ) : null}
+              </View>
+            </View>
+
+            {/* Auditoría */}
+            <View style={styles.detailSection}>
+              <View style={styles.detailSectionHeader}>
+                <Icon name="users" size={14} color={colorScales.gray[500]} />
+                <Text style={styles.detailSectionTitle}>AUDITORÍA</Text>
+              </View>
+              <View style={styles.detailInfoCard}>
+                <View style={styles.detailAuditRow}>
+                  <View style={styles.detailAuditIcon}>
+                    <Icon name="user" size={14} color={colors.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.detailInfoLabel}>CREADO POR</Text>
+                    <Text style={styles.detailInfoPrimary}>{createdBy}</Text>
+                    <Text style={styles.detailInfoSecondary}>
+                      {formatDate(adjustment.created_at)}
+                    </Text>
+                  </View>
+                </View>
+                {approvedBy ? (
+                  <View style={[styles.detailAuditRow, { marginTop: spacing[2] }]}>
+                    <View style={styles.detailAuditIcon}>
+                      <Icon name="user-check" size={14} color={colors.success} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailInfoLabel}>APROBADO POR</Text>
+                      <Text style={styles.detailInfoPrimary}>{approvedBy}</Text>
+                      <Text style={styles.detailInfoSecondary}>
+                        {adjustment.approved_at ? formatDate(adjustment.approved_at) : '—'}
+                      </Text>
+                    </View>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          </ScrollView>
+
+          {/* Footer: contextual actions */}
+          <View style={styles.detailFooter}>
+            {isPending ? (
+              <>
+                {onDelete && (
+                  <Pressable
+                    style={styles.detailDangerBtn}
+                    onPress={() => onDelete(adjustment)}
+                    disabled={isSubmitting}
+                  >
+                    <Text style={styles.detailDangerBtnText}>Eliminar</Text>
+                  </Pressable>
+                )}
+                <View style={{ width: spacing[2] }} />
+                {onApprove && (
+                  <Pressable
+                    style={styles.detailPrimaryBtn}
+                    onPress={() => onApprove(adjustment)}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? (
+                      <Spinner size="sm" />
+                    ) : (
+                      <Icon name="check" size={16} color={colors.background} />
+                    )}
+                    <Text style={styles.detailPrimaryBtnText}>
+                      {isSubmitting ? 'Aprobando…' : 'Aprobar'}
+                    </Text>
+                  </Pressable>
+                )}
+              </>
+            ) : (
+              <Pressable style={styles.detailCancelBtn} onPress={onClose}>
+                <Text style={styles.detailCancelBtnText}>Cerrar</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -82,6 +320,7 @@ export default function AdjustmentsScreen() {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<AdjustmentType | 'all'>('all');
   const [modalVisible, setModalVisible] = useState(false);
+  const [detailAdjustment, setDetailAdjustment] = useState<StockAdjustment | null>(null);
   const [createStep, setCreateStep] = useState<1 | 2 | 3>(1);
   const [confirmCreate, setConfirmCreate] = useState(false);
   const [showActions, setShowActions] = useState(false);
@@ -183,13 +422,49 @@ export default function AdjustmentsScreen() {
       toastSuccess('Ajuste creado correctamente');
     },
     onError: (error: any) => {
-      const message =
+      // Log full error for debugging
+      console.error('[createAdjustment] Error:', {
+        status: error?.response?.status,
+        data: error?.response?.data,
+        message: error?.message,
+      });
+      const apiMessage =
         error?.response?.data?.message ||
         error?.response?.data?.error?.message ||
-        error?.message ||
-        'Error al crear el ajuste';
-      toastError(typeof message === 'string' ? message : 'Error al crear el ajuste');
+        error?.response?.data?.error;
+      const errorCode =
+        error?.response?.data?.error_code ||
+        error?.response?.data?.errorCode;
+      const messageParts: string[] = [];
+      if (typeof apiMessage === 'string') messageParts.push(apiMessage);
+      else if (Array.isArray(apiMessage)) messageParts.push(apiMessage.join(', '));
+      if (errorCode) messageParts.push(`(${errorCode})`);
+      if (messageParts.length === 0 && error?.message) messageParts.push(error.message);
+      if (messageParts.length === 0) messageParts.push('Error desconocido al crear el ajuste');
+      toastError(messageParts.join(' '));
     },
+  });
+
+  // Action mutations wired to AdjustmentDetailModal contextual buttons
+  const approveMutation = useMutation({
+    mutationFn: (id: number) => InventoryService.approveAdjustment(id, 0),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adjustments'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
+      setDetailAdjustment(null);
+      toastSuccess('Ajuste aprobado');
+    },
+    onError: () => toastError('No se pudo aprobar el ajuste'),
+  });
+
+  const deleteAdjustmentMutation = useMutation({
+    mutationFn: (id: number) => InventoryService.deleteAdjustment(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['adjustments'] });
+      setDetailAdjustment(null);
+      toastSuccess('Ajuste eliminado');
+    },
+    onError: () => toastError('No se pudo eliminar el ajuste'),
   });
 
   const adjustments = data?.pages.flatMap((p) => p.data) ?? [];
@@ -267,7 +542,16 @@ export default function AdjustmentsScreen() {
     { num: 2, label: 'PRODUCTOS' },
     { num: 3, label: 'CONFIRMAR' },
   ];
-  const TYPE_OPTIONS: { value: AdjustmentType; label: string; icon: string }[] = [
+  const REASON_CODE_LABELS: Record<string, string> = {
+  DAMAGED: 'Producto dañado',
+  LOST: 'Producto perdido',
+  THEFT: 'Robo confirmado',
+  EXPIRED: 'Producto vencido',
+  INV_COUNT: 'Conteo de inventario',
+  OTHER: 'Otro',
+};
+
+const TYPE_OPTIONS: { value: AdjustmentType; label: string; icon: string }[] = [
     { value: 'damage', label: 'Daño', icon: 'alert-triangle' },
     { value: 'loss', label: 'Pérdida', icon: 'trending-down' },
     { value: 'theft', label: 'Robo', icon: 'lock' },
@@ -340,7 +624,9 @@ export default function AdjustmentsScreen() {
       <FlatList
         data={storeAdjustments}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => <AdjustmentCard item={item} />}
+        renderItem={({ item }) => (
+          <AdjustmentCard item={item} onView={setDetailAdjustment} />
+        )}
         ListHeaderComponent={
           <View>
             {/* Search + Title row */}
@@ -906,6 +1192,15 @@ export default function AdjustmentsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal de detalle — abierto al pulsar el botón (ver) en una card */}
+      <AdjustmentDetailModal
+        adjustment={detailAdjustment}
+        onClose={() => setDetailAdjustment(null)}
+        onApprove={(a) => approveMutation.mutate(Number(a.id))}
+        onDelete={(a) => deleteAdjustmentMutation.mutate(Number(a.id))}
+        isSubmitting={approveMutation.isPending || deleteAdjustmentMutation.isPending}
+      />
     </View>
   );
 }
@@ -913,21 +1208,14 @@ export default function AdjustmentsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colorScales.gray[50] },
 
-  /* Card contenedor principal — margen lateral + bottom + border radius + fondo blanco (alineado con la web) */
+  /* Card contenedor principal — invisible: la lista de ajustes se ve directamente
+     sobre el fondo de la pantalla sin contenedor visual */
   cardContainer: {
     flex: 1,
     marginHorizontal: spacing[3],
     marginBottom: spacing[3],
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    backgroundColor: 'transparent',
+    overflow: 'visible',
   },
 
   /* Stats: horizontal scroll — ancho completo, fondo transparente (gris de la pantalla) */
@@ -1065,6 +1353,80 @@ const styles = StyleSheet.create({
     fontWeight: '800' as any,
     color: colorScales.gray[900],
   },
+  /* Botón (ver) en el footer de la card — circular como en web */
+  eyeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* Modal de detalle de ajuste — replica web app-adjustment-detail-modal */
+  detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: spacing[4] },
+  detailModal: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    width: '100%', maxWidth: 520, maxHeight: '90%',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8,
+  },
+  detailHeader: {
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    paddingHorizontal: spacing[4], paddingVertical: spacing[4], borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
+  },
+  detailTitle: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
+  detailSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 2 },
+  detailCloseBtn: { padding: spacing[1] },
+  detailBody: { flexGrow: 0, flexShrink: 1, maxHeight: 480 },
+  detailBodyContent: { padding: spacing[4], gap: spacing[4] },
+  detailTypeCard: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing[3],
+    padding: spacing[3], borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.green[200], backgroundColor: colorScales.green[50],
+  },
+  detailTypeIcon: {
+    width: 40, height: 40, borderRadius: borderRadius.md,
+    backgroundColor: colors.background, borderWidth: 1, borderColor: colorScales.green[200],
+    alignItems: 'center', justifyContent: 'center',
+  },
+  detailTypeLabel: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
+  detailTypeValue: { fontSize: typography.fontSize.base, fontWeight: '700' as any, color: colors.primary, marginTop: 2 },
+  detailSection: { gap: spacing[2] },
+  detailSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing[1.5] },
+  detailSectionTitle: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
+  detailInfoCard: {
+    padding: spacing[3], borderRadius: borderRadius.lg,
+    borderWidth: 1, borderColor: colorScales.gray[200], backgroundColor: colors.background, gap: spacing[1],
+  },
+  detailInfoLabel: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
+  detailInfoPrimary: { fontSize: typography.fontSize.sm, fontWeight: '600' as any, color: colorScales.gray[900] },
+  detailInfoSecondary: { fontSize: typography.fontSize.xs, color: colorScales.gray[500], marginTop: 2 },
+  detailQuantityCard: { padding: spacing[4], borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200], backgroundColor: colorScales.gray[50] },
+  detailQuantityRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing[2] },
+  detailQuantityCell: { flex: 1, alignItems: 'center', gap: 2 },
+  detailQuantityLabel: { fontSize: 9, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
+  detailQuantityValue: { fontSize: typography.fontSize.lg, fontWeight: '800' as any, color: colorScales.gray[900] },
+  detailAuditRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing[2] },
+  detailAuditIcon: {
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: colorScales.green[50],
+    alignItems: 'center', justifyContent: 'center',
+  },
+  detailFooter: {
+    flexDirection: 'row', paddingHorizontal: spacing[4], paddingTop: spacing[3], paddingBottom: spacing[4],
+    borderTopWidth: 1, borderTopColor: colorScales.gray[200], backgroundColor: colorScales.gray[50],
+  },
+  detailDangerBtn: { flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, borderWidth: 1.5, borderColor: colorScales.red[500], alignItems: 'center', justifyContent: 'center' },
+  detailDangerBtnText: { fontSize: 14, fontWeight: '700' as any, color: colorScales.red[600] },
+  detailCancelBtn: { flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, borderWidth: 1.5, borderColor: colorScales.gray[300], alignItems: 'center', justifyContent: 'center' },
+  detailCancelBtnText: { fontSize: 14, fontWeight: '700' as any, color: colorScales.gray[700] },
+  detailPrimaryBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing[2],
+    paddingVertical: 12, borderRadius: borderRadius.lg, backgroundColor: colors.primary,
+  },
+  detailPrimaryBtnText: { fontSize: 14, fontWeight: '700' as any, color: colors.background },
 
   /* List */
   listContent: { paddingBottom: spacing[6] },

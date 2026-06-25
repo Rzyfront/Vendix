@@ -11,17 +11,16 @@ import type { CreateTransferDto } from '@/features/store/services/inventory.serv
 import type { StockTransfer, TransferState, Location, Product } from '@/features/store/types';
 import { TRANSFER_STATE_LABELS } from '@/features/store/types';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
-import { Badge } from '@/shared/components/badge/badge';
 import { Icon } from '@/shared/components/icon/icon';
 import { Input } from '@/shared/components/input/input';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Button } from '@/shared/components/button/button';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
-import { formatRelative } from '@/shared/utils/date';
+import { formatDate, formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colorScales, typography, colors, shadows } from '@/shared/theme';
 import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
-import { TRANSFER_STATS, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
+import { TRANSFER_STATS, TRANSFER_STATE_MAP, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
 
 const STATE_VARIANT: Record<TransferState, 'warning' | 'info' | 'success' | 'default'> = {
   pending: 'warning',
@@ -40,26 +39,86 @@ const FILTER_OPTIONS: FilterChip[] = [
   { label: 'Canceladas', value: 'cancelled' },
 ];
 
-const TransferCard = ({ item }: { item: StockTransfer }) => (
-  <View style={styles.transferCard}>
-    <View style={styles.cardHeader}>
-      <View style={styles.cardHeaderLeft}>
-        <Text style={styles.cardTitle}>Transferencia #{item.id.slice(0, 8)}</Text>
-        <Text style={styles.cardSubtitle}>
-          {item.origin_location_name} → {item.destination_location_name}
+const TransferCard = ({
+  item,
+  onView,
+}: {
+  item: StockTransfer;
+  onView?: (item: StockTransfer) => void;
+}) => {
+  const displayId = item.transfer_number ?? `Transferencia #${item.id.slice(0, 8)}`;
+  const stateInfo = TRANSFER_STATE_MAP[item.state];
+  const stateColor = stateInfo?.palette
+    ? STAT_PALETTE[stateInfo.palette as keyof typeof STAT_PALETTE] ?? STAT_PALETTE.gray
+    : STAT_PALETTE.gray;
+  const itemsCount = item.items_count ?? item.product_count ?? 0;
+  return (
+    <View style={styles.transferCard}>
+      {/* Header: title (transfer_number) + status badge */}
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle} numberOfLines={1}>
+          {displayId}
         </Text>
+        <View
+          style={[
+            styles.statusBadge,
+            { backgroundColor: stateColor.bg, borderColor: stateColor.color },
+          ]}
+        >
+          <Text style={[styles.statusBadgeText, { color: stateColor.color }]}>
+            {(stateInfo?.label ?? TRANSFER_STATE_LABELS[item.state]).toLowerCase()}
+          </Text>
+        </View>
       </View>
-      <Badge label={TRANSFER_STATE_LABELS[item.state]} variant={STATE_VARIANT[item.state]} size="sm" />
-    </View>
-    <View style={styles.cardFooter}>
-      <View style={styles.footerLeft}>
-        <Icon name="package" size={14} color={colorScales.gray[500]} />
-        <Text style={styles.footerDetail}>{item.product_count} productos</Text>
+
+      {/* Subtitle: origin → destination */}
+      <Text style={styles.cardSubtitle} numberOfLines={1}>
+        {item.origin_location_name} {item.origin_location_name && item.destination_location_name ? '→' : ''}{' '}
+        {item.destination_location_name}
+      </Text>
+
+      {/* Detail grid: Fecha | Esperada */}
+      <View style={styles.cardDetailGrid}>
+        <View style={styles.cardDetailCell}>
+          <View style={styles.cardDetailLabelRow}>
+            <Icon name="calendar" size={12} color={colorScales.gray[400]} />
+            <Text style={styles.cardDetailLabel}>FECHA</Text>
+          </View>
+          <Text style={styles.cardDetailValue}>
+            {item.transfer_date ? formatDate(item.transfer_date) : '—'}
+          </Text>
+        </View>
+        <View style={styles.cardDetailCell}>
+          <View style={styles.cardDetailLabelRow}>
+            <Icon name="clock" size={12} color={colorScales.gray[400]} />
+            <Text style={styles.cardDetailLabel}>ESPERADA</Text>
+          </View>
+          <Text style={styles.cardDetailValue}>
+            {item.expected_date ? formatDate(item.expected_date) : '—'}
+          </Text>
+        </View>
       </View>
-      <Text style={styles.footerDate}>{formatRelative(item.created_at)}</Text>
+
+      {/* Footer: items count + view (eye) button */}
+      <View style={styles.cardFooter}>
+        <View style={styles.cardFooterCell}>
+          <Text style={styles.cardDetailLabel}>ITEMS</Text>
+          <Text style={styles.cardFooterValue}>{itemsCount}</Text>
+        </View>
+        {onView && (
+          <Pressable
+            onPress={() => onView(item)}
+            hitSlop={6}
+            style={({ pressed }) => [styles.eyeBtn, pressed && { opacity: 0.6 }]}
+            accessibilityLabel="Ver detalle de transferencia"
+          >
+            <Icon name="eye" size={16} color={colors.primary} />
+          </Pressable>
+        )}
+      </View>
     </View>
-  </View>
-);
+  );
+};
 
 function EmptyTransfers({ onCreate }: { onCreate: () => void }) {
   return (
@@ -79,11 +138,188 @@ function EmptyTransfers({ onCreate }: { onCreate: () => void }) {
   );
 }
 
+/**
+ * Transfer detail popup — opened when the user taps the eye (ver) button on
+ * a TransferCard. Matches the web `app-transfer-detail-modal` visual contract:
+ * header with status badge, origin → destination summary, dates, items list,
+ * and contextual actions footer (Aprobar / Recibir / Cancelar / Cerrar).
+ */
+function TransferDetailModal({
+  transfer,
+  onClose,
+  onApprove,
+  onComplete,
+  onCancel,
+  isSubmitting = false,
+}: {
+  transfer: StockTransfer | null;
+  onClose: () => void;
+  onApprove?: (transfer: StockTransfer) => void;
+  onComplete?: (transfer: StockTransfer) => void;
+  onCancel?: (transfer: StockTransfer) => void;
+  isSubmitting?: boolean;
+}) {
+  if (!transfer) return null;
+  const stateInfo = TRANSFER_STATE_MAP[transfer.state];
+  const stateColor = stateInfo?.palette
+    ? STAT_PALETTE[stateInfo.palette as keyof typeof STAT_PALETTE] ?? STAT_PALETTE.gray
+    : STAT_PALETTE.gray;
+  const itemsCount = transfer.items_count ?? transfer.product_count ?? 0;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.detailOverlay}>
+        <View style={styles.detailModal}>
+          {/* Header */}
+          <View style={styles.detailHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailTitle}>
+                {transfer.transfer_number ?? `Transferencia #${transfer.id.slice(0, 8)}`}
+              </Text>
+              <Text style={styles.detailSubtitle}>
+                {transfer.origin_location_name} → {transfer.destination_location_name}
+              </Text>
+            </View>
+            <Pressable onPress={onClose} hitSlop={8} style={styles.detailCloseBtn}>
+              <Icon name="x" size={22} color={colorScales.gray[500]} />
+            </Pressable>
+          </View>
+
+          <ScrollView
+            style={styles.detailBody}
+            contentContainerStyle={styles.detailBodyContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Status badge */}
+            <View style={styles.detailBadgeRow}>
+              <View
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: stateColor.bg, borderColor: stateColor.color },
+                ]}
+              >
+                <Text style={[styles.statusBadgeText, { color: stateColor.color }]}>
+                  {stateInfo?.label ?? TRANSFER_STATE_LABELS[transfer.state]}
+                </Text>
+              </View>
+            </View>
+
+            {/* Dates grid */}
+            <View style={styles.detailDatesGrid}>
+              <View style={styles.detailDateCell}>
+                <View style={styles.cardDetailLabelRow}>
+                  <Icon name="calendar" size={12} color={colorScales.gray[500]} />
+                  <Text style={styles.cardDetailLabel}>FECHA</Text>
+                </View>
+                <Text style={styles.detailDateValue}>
+                  {transfer.transfer_date ? formatDate(transfer.transfer_date) : '—'}
+                </Text>
+              </View>
+              <View style={styles.detailDateCell}>
+                <View style={styles.cardDetailLabelRow}>
+                  <Icon name="clock" size={12} color={colorScales.gray[500]} />
+                  <Text style={styles.cardDetailLabel}>ESPERADA</Text>
+                </View>
+                <Text style={styles.detailDateValue}>
+                  {transfer.expected_date ? formatDate(transfer.expected_date) : '—'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Items card */}
+            <View style={styles.detailSection}>
+              <View style={styles.cardDetailLabelRow}>
+                <Icon name="package" size={12} color={colorScales.gray[500]} />
+                <Text style={styles.cardDetailLabel}>ITEMS</Text>
+              </View>
+              <Text style={styles.detailItemsValue}>{itemsCount}</Text>
+            </View>
+
+            {/* Notes (si existen) */}
+            {transfer.notes ? (
+              <View style={styles.detailSection}>
+                <View style={styles.cardDetailLabelRow}>
+                  <Icon name="file-text" size={12} color={colorScales.gray[500]} />
+                  <Text style={styles.cardDetailLabel}>NOTAS</Text>
+                </View>
+                <Text style={styles.detailNotesText}>{transfer.notes}</Text>
+              </View>
+            ) : null}
+
+            {/* Cronología (siempre visible) */}
+            <View style={styles.detailSection}>
+              <View style={styles.cardDetailLabelRow}>
+                <Icon name="history" size={12} color={colorScales.gray[500]} />
+                <Text style={styles.cardDetailLabel}>CRONOLOGÍA</Text>
+              </View>
+              <Text style={styles.detailTimelineText}>
+                Creada {formatRelative(transfer.created_at)}
+              </Text>
+            </View>
+          </ScrollView>
+
+          {/* Footer: contextual actions */}
+          <View style={styles.detailFooter}>
+            {transfer.state === 'pending' && (
+              <>
+                <Pressable
+                  style={styles.detailCancelBtn}
+                  onPress={() => onCancel?.(transfer)}
+                  disabled={isSubmitting}
+                >
+                  <Text style={styles.detailCancelBtnText}>Cancelar</Text>
+                </Pressable>
+                <View style={{ width: spacing[3] }} />
+                <Pressable
+                  style={styles.detailPrimaryBtn}
+                  onPress={() => onApprove?.(transfer)}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <Spinner size="sm" />
+                  ) : (
+                    <Icon name="check" size={16} color={colors.background} />
+                  )}
+                  <Text style={styles.detailPrimaryBtnText}>
+                    {isSubmitting ? 'Aprobando…' : 'Aprobar'}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+            {transfer.state === 'in_transit' && (
+              <Pressable
+                style={styles.detailPrimaryBtn}
+                onPress={() => onComplete?.(transfer)}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <Icon name="package-check" size={16} color={colors.background} />
+                )}
+                <Text style={styles.detailPrimaryBtnText}>
+                  {isSubmitting ? 'Recibiendo…' : 'Recibir'}
+                </Text>
+              </Pressable>
+            )}
+            {(transfer.state === 'completed' || transfer.state === 'cancelled') && (
+              <Pressable style={styles.detailCancelBtn} onPress={onClose}>
+                <Text style={styles.detailCancelBtnText}>Cerrar</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function TransfersScreen() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<TransferState | 'all'>('all');
   const [modalVisible, setModalVisible] = useState(false);
+  const [detailTransfer, setDetailTransfer] = useState<StockTransfer | null>(null);
   // Dropdowns posicionados (acciones + y filtro)
   const [showActions, setShowActions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -158,6 +394,44 @@ export default function TransfersScreen() {
       toastSuccess('Transferencia creada correctamente');
     },
     onError: () => toastError('Error al crear la transferencia'),
+  });
+
+  // Action mutations wired to TransferDetailModal contextual buttons
+  const actionMutation = useMutation({
+    mutationFn: async ({
+      action,
+      transfer,
+    }: {
+      action: 'approve' | 'complete' | 'cancel';
+      transfer: StockTransfer;
+    }) => {
+      if (action === 'approve') return InventoryService.approveTransfer(transfer.id);
+      if (action === 'cancel') return InventoryService.cancelTransfer(transfer.id);
+      // For 'complete' the backend expects the items received; pass 1 of each as default.
+      const items = (transfer as any).stock_transfer_items ?? [];
+      return InventoryService.completeTransfer(
+        transfer.id,
+        items.map((it: any) => ({ id: it.id ?? it.product_id, quantity_received: it.quantity ?? it.quantity_sent ?? 1 })),
+      );
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['transfers'] });
+      setDetailTransfer(null);
+      const labels = {
+        approve: 'Transferencia aprobada',
+        complete: 'Transferencia recibida',
+        cancel: 'Transferencia cancelada',
+      } as const;
+      toastSuccess(labels[vars.action]);
+    },
+    onError: (_err, vars) => {
+      const labels = {
+        approve: 'No se pudo aprobar la transferencia',
+        complete: 'No se pudo recibir la transferencia',
+        cancel: 'No se pudo cancelar la transferencia',
+      } as const;
+      toastError(labels[vars.action]);
+    },
   });
 
   const transfers = data?.pages.flatMap((p) => p.data) ?? [];
@@ -305,7 +579,9 @@ export default function TransfersScreen() {
       <FlatList
         data={transfers}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <TransferCard item={item} />}
+        renderItem={({ item }) => (
+          <TransferCard item={item} onView={setDetailTransfer} />
+        )}
         ListHeaderComponent={
           <View>
             {/* Título "Transferencias (N)" — alineado con la web */}
@@ -362,7 +638,16 @@ export default function TransfersScreen() {
         onEndReachedThreshold={0.3}
         contentContainerStyle={styles.listContent}
       />
-      </View>
+
+      {/* Modal de detalle — abierto al pulsar el botón (ver) */}
+      <TransferDetailModal
+        transfer={detailTransfer}
+        onClose={() => setDetailTransfer(null)}
+        onApprove={(t) => actionMutation.mutate({ action: 'approve', transfer: t })}
+        onComplete={(t) => actionMutation.mutate({ action: 'complete', transfer: t })}
+        onCancel={(t) => actionMutation.mutate({ action: 'cancel', transfer: t })}
+        isSubmitting={actionMutation.isPending}
+      />
 
       {/* Dropdown de acciones (Refrescar + Nueva Transferencia) */}
       <Modal visible={showActions} transparent animationType="fade" onRequestClose={() => setShowActions(false)}>
@@ -782,26 +1067,20 @@ export default function TransfersScreen() {
         </View>
       </Modal>
     </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
-  /* Card contenedor — debajo de las stats, con margen lateral + bottom + border radius + fondo blanco */
+  /* Card contenedor — invisible: la lista de transferencias se ve directamente
+     sobre el fondo de la pantalla sin contenedor visual */
   cardContainer: {
     flex: 1,
     marginHorizontal: spacing[3],
     marginBottom: spacing[3],
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    backgroundColor: 'transparent',
+    overflow: 'visible',
   },
   statsWrap: {},
 
@@ -857,7 +1136,7 @@ const styles = StyleSheet.create({
   emptySearch: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing[8], gap: spacing[2] },
   emptySearchText: { fontSize: typography.fontSize.sm, color: colorScales.gray[500] },
 
-  /* Transfer card: mismo estilo que AdjustmentCard (blanco, borderRadius.lg, gray[200], padding spacing[4]) */
+  /* Transfer card: estilo web — title + badge + subtítulo + detail grid + footer */
   transferCard: {
     marginHorizontal: spacing[3],
     marginBottom: spacing[3],
@@ -873,14 +1152,88 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 1,
   },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing[2] },
-  cardHeaderLeft: { flex: 1 },
-  cardTitle: { fontSize: typography.fontSize.base, fontWeight: '600' as any, color: colorScales.gray[900] },
-  cardSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 2 },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing[3], paddingTop: spacing[3], borderTopWidth: 1, borderTopColor: colorScales.gray[100] },
-  footerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing[1] },
-  footerDetail: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
-  footerDate: { fontSize: typography.fontSize.xs, color: colorScales.gray[400] },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing[2] },
+  cardTitle: { fontSize: typography.fontSize.base, fontWeight: '700' as any, color: colorScales.gray[900], flex: 1 },
+  statusBadge: {
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    textTransform: 'lowercase' as any,
+    letterSpacing: 0.3,
+  },
+  cardSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: spacing[2] },
+  cardDetailGrid: {
+    flexDirection: 'row',
+    gap: spacing[3],
+    marginTop: spacing[3],
+    paddingTop: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+  },
+  cardDetailCell: { flex: 1, gap: spacing[1] },
+  cardDetailLabelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[1] },
+  cardDetailLabel: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], letterSpacing: 0.5, textTransform: 'uppercase' as any },
+  cardDetailValue: { fontSize: typography.fontSize.sm, fontWeight: '600' as any, color: colorScales.gray[900] },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing[3],
+  },
+  cardFooterCell: { gap: 2 },
+  cardFooterValue: { fontSize: typography.fontSize.lg, fontWeight: '800' as any, color: colorScales.gray[900] },
+  eyeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* Modal de detalle de transferencia — popup que coincide con la web */
+  detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: spacing[4] },
+  detailModal: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    width: '100%', maxWidth: 520, maxHeight: '90%',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8,
+  },
+  detailHeader: {
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    paddingHorizontal: spacing[4], paddingVertical: spacing[4], borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
+  },
+  detailTitle: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
+  detailSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 2 },
+  detailCloseBtn: { padding: spacing[1] },
+  detailBody: { flexGrow: 0, flexShrink: 1, maxHeight: 460 },
+  detailBodyContent: { padding: spacing[4], gap: spacing[4] },
+  detailBadgeRow: { flexDirection: 'row' },
+  detailDatesGrid: { flexDirection: 'row', gap: spacing[3] },
+  detailDateCell: { flex: 1, gap: spacing[1] },
+  detailDateValue: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: colorScales.gray[900] },
+  detailSection: { gap: spacing[1] },
+  detailItemsValue: { fontSize: typography.fontSize['2xl'], fontWeight: '800' as any, color: colorScales.gray[900] },
+  detailNotesText: { fontSize: typography.fontSize.sm, color: colorScales.gray[700], lineHeight: 20 },
+  detailTimelineText: { fontSize: typography.fontSize.sm, color: colorScales.gray[500] },
+  detailFooter: {
+    flexDirection: 'row', paddingHorizontal: spacing[4], paddingTop: spacing[3], paddingBottom: spacing[4],
+    borderTopWidth: 1, borderTopColor: colorScales.gray[200], backgroundColor: colorScales.gray[50],
+  },
+  detailCancelBtn: { flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, borderWidth: 1.5, borderColor: colorScales.red[500], alignItems: 'center', justifyContent: 'center' },
+  detailCancelBtnText: { fontSize: 14, fontWeight: '700' as any, color: colorScales.red[600] },
+  detailPrimaryBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing[2],
+    paddingVertical: 12, borderRadius: borderRadius.lg, backgroundColor: colors.primary,
+  },
+  detailPrimaryBtnText: { fontSize: 14, fontWeight: '700' as any, color: colors.background },
   listContent: { paddingBottom: spacing[6] },
 
   /* Dropdowns posicionados (acciones + y filtro) */

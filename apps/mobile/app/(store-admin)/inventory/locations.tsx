@@ -810,21 +810,14 @@ export default function LocationsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colorScales.gray[50] },
-  /* Card contenedor — mismo estilo que adjustments/transfers/movements */
+  /* Card contenedor — invisible: la lista de ubicaciones se ve directamente
+     sobre el fondo de la pantalla sin contenedor visual */
   cardContainer: {
     flex: 1,
     marginHorizontal: spacing[3],
     marginBottom: spacing[3],
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    backgroundColor: 'transparent',
+    overflow: 'visible',
   },
   statsWrap: {},
   titleRow: { paddingHorizontal: spacing[4], paddingTop: spacing[4], paddingBottom: spacing[2] },

@@ -37,6 +37,8 @@ export const Endpoints = {
       LOW_STOCK: '/store/products/low-stock/:threshold',
       GENERATE_DESCRIPTION: '/store/products/generate-description',
       PROMOTIONS: '/store/products/:productId/promotions',
+      BULK_UPLOAD: '/store/products/bulk-upload',
+      BULK_IMAGE_UPLOAD: '/store/products/bulk-image-upload',
     },
     ORDERS: {
       LIST: '/store/orders',
@@ -167,6 +169,9 @@ export const Endpoints = {
       TRANSFERS: {
         LIST: '/store/stock-transfers',
         CREATE: '/store/stock-transfers',
+        APPROVE: '/store/stock-transfers/:id/approve',
+        COMPLETE: '/store/stock-transfers/:id/complete',
+        CANCEL: '/store/stock-transfers/:id/cancel',
       },
       MOVEMENTS: {
         LIST: '/store/inventory/movements',
