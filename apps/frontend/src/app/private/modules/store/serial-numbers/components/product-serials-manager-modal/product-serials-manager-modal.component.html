@@ -6,9 +6,9 @@
   subtitle="Gestiona los seriales del producto por ubicación"
   size="lg"
 >
-  <div class="space-y-4 p-1 md:p-2">
-    <!-- Filtros: ubicación + estado -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:items-end">
+  <div class="space-y-3 p-1 md:p-2">
+    <!-- Filtros: ubicación + estado + garantía en una sola fila (modal lg = 1024px) -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 items-end">
       <app-selector
         label="Ubicación"
         [options]="locationOptions()"
@@ -26,20 +26,22 @@
         (valueChange)="onStatusFilterChange($event)"
         placeholder="Todos los estados"
       ></app-selector>
-    </div>
 
-    <!-- Filtro: rango de garantía -->
-    <div class="flex flex-col gap-1">
-      <span class="text-xs font-medium text-gray-500 flex items-center gap-1.5">
-        <app-icon name="shield" [size]="14" class="text-gray-400"></app-icon>
-        Vencimiento de garantía
-      </span>
-      <app-date-range-picker
-        [initialFrom]="warrantyFrom()"
-        [initialTo]="warrantyTo()"
-        [showClear]="true"
-        (dateRangeChange)="onWarrantyRangeChange($event)"
-      ></app-date-range-picker>
+      <!-- Filtro: rango de garantía (ocupa 2 columnas para alojar Desde/Hasta) -->
+      <div class="flex flex-col gap-1 md:col-span-2">
+        <span
+          class="flex items-center gap-1.5 text-sm font-medium text-[var(--color-text-primary)] mb-1"
+        >
+          <app-icon name="shield" [size]="14" class="text-gray-400"></app-icon>
+          Vencimiento de garantía
+        </span>
+        <app-date-range-picker
+          [initialFrom]="warrantyFrom()"
+          [initialTo]="warrantyTo()"
+          [showClear]="true"
+          (dateRangeChange)="onWarrantyRangeChange($event)"
+        ></app-date-range-picker>
+      </div>
     </div>
 
     <!-- Búsqueda + acciones -->
