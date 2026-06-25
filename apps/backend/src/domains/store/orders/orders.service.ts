@@ -352,6 +352,14 @@ export class OrdersService {
           order_items: {
             select: { id: true, product_name: true, quantity: true },
           },
+          // Cliente para la columna "Cliente" de los listados (wizard de
+          // remisiones, lista de órdenes). findAll ya FILTRA por users en la
+          // búsqueda pero no los devolvía → "No data" en la lista. Select
+          // ligero: solo lo que renderiza el transform (nombre); guests
+          // (customer_id null) traen users=null y caen al fallback.
+          users: {
+            select: { id: true, first_name: true, last_name: true },
+          },
         },
       }),
       this.prisma.orders.count({ where }),

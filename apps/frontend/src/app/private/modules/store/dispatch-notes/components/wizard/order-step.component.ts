@@ -8,7 +8,6 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
-  CardComponent,
   EmptyStateComponent,
   InputsearchComponent,
   ItemListCardConfig,
@@ -35,7 +34,6 @@ import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.s
   selector: 'app-dispatch-wizard-order-step',
   standalone: true,
   imports: [
-    CardComponent,
     EmptyStateComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
@@ -94,15 +92,14 @@ export class OrderStepComponent {
   readonly tableColumns = computed<TableColumn[]>(() => [
     { key: 'order_number', label: '#Orden', sortable: false, priority: 1 },
     {
-      key: 'customer',
+      // Campo PLANO precomputado en fetch(): app-table gatea el transform tras
+      // la existencia de row[key], y el cliente vive en row.users (no row.customer)
+      // → un transform sobre key:'customer' nunca corría. customer_name evita el
+      // gateo y sirve también al card (subtitleKey) sin transform.
+      key: 'customer_name',
       label: 'Cliente',
       sortable: false,
       priority: 1,
-      transform: (_v: any, row: Order) => {
-        const u = (row as any).users;
-        if (u) return `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim() || `Cliente #${row.customer_id}`;
-        return `Cliente #${row.customer_id}`;
-      },
     },
     {
       key: 'state',
@@ -130,7 +127,7 @@ export class OrderStepComponent {
 
   readonly cardConfig = computed<ItemListCardConfig>(() => ({
     titleKey: 'order_number',
-    subtitleKey: 'customer',
+    subtitleKey: 'customer_name',
     badgeKey: 'state',
     // No actions — clicking the card picks the order.
     actions: [],
@@ -154,7 +151,13 @@ export class OrderStepComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (full) => {
-          this.wizardService.setSelectedOrder(full);
+          // getOrderById está tipado Observable<Order> pero en runtime emite
+          // el envelope { success, message, data: Order } (mismo patrón que la
+          // lista). Sin desenvolver, setSelectedOrder guardaría el sobre y
+          // selectedOrder.order_items quedaría undefined → el paso Items se
+          // rompe y el wizard no avanza. Igual que order-details-page:1104.
+          const order = (full as any)?.data ?? full;
+          this.wizardService.setSelectedOrder(order);
           this.wizardService.nextStep();
           this.loading.set(false);
         },
@@ -174,8 +177,27 @@ export class OrderStepComponent {
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => {
-          this.orders.set(res.data ?? []);
+        next: (res: any) => {
+          // El envelope real es { success, message, data: { data: Order[],
+          // pagination } } (curl-verified; PaginatedOrdersResponse miente: no
+          // hay interceptor que desenvuelva el sobre). El array vive en
+          // res.data.data; fallback a res.data por si algún día se aplana.
+          const list = res?.data?.data ?? res?.data ?? [];
+          // Aplana el nombre del cliente a un campo plano (customer_name) que
+          // tabla y card consumen directo. La relación users solo viene si el
+          // backend la incluye (findAll la trae con select ligero); guests
+          // (customer_id null) quedan con cadena vacía → la celda muestra vacío.
+          const orders = (Array.isArray(list) ? list : []).map((o: any) => {
+            const u = o?.users;
+            const name = u
+              ? `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim()
+              : '';
+            return {
+              ...o,
+              customer_name: name || (o?.customer_id ? `Cliente #${o.customer_id}` : ''),
+            };
+          });
+          this.orders.set(orders);
           this.loading.set(false);
         },
         error: () => {
