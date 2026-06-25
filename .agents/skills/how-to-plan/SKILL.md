@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "2.1"
+  version: "2.3"
   scope: [root]
   auto_invoke:
     - "Creating implementation plans or decomposing non-trivial work"
@@ -18,6 +18,7 @@ metadata:
     - "Running the Plan Validation Checklist before requesting approval"
     - "Selecting the correct skills for each plan step using the Skill Selection Matrix"
     - "Picking concrete verification mechanisms (curl, build, audit, log inspection) per step"
+    - "Choosing agent-browser for frontend E2E verification in a plan step"
 ---
 
 # How To Plan
@@ -207,6 +208,7 @@ When writing `Verification` and `End-to-End Verification`, pick from this catalo
 | Mechanism | When | Example |
 |-----------|------|---------|
 | `curl` (primary API check) | API contract, auth boundaries & endpoint sanity | `curl -H 'Authorization: Bearer $TOK' http://localhost:3000/organization/invoicing/invoices` |
+| `agent-browser` (frontend E2E) | User-facing flow: login, navigation, form submit, render — against the real vhost | `agent-browser open https://vendix.com && agent-browser snapshot -i` (see `how-to-test`) |
 | Backend unit test | Service logic | `npm run test -w apps/backend -- --runInBand src/domains/organization/invoicing/invoicing.service.spec.ts` |
 | Frontend build | Type safety after refactor | `npm run build:prod -w apps/frontend` |
 | Zoneless audit | Signal-based components | `npm run zoneless:audit` |
@@ -222,6 +224,11 @@ When writing `Verification` and `End-to-End Verification`, pick from this catalo
 > or by **asking the user** for the `slug`, `email`, and `password` of an authorized dev test
 > account. Bruno remains an opt-in template (`vendix-bruno-test`) only when a developer explicitly
 > requests writing a `.bru` test.
+>
+> **For frontend flows, `agent-browser` is the E2E verification mechanism** — drive the real vhost
+> (`https://vendix.com` and its subdomains), never `localhost:4200`, because the app resolves its
+> `app_type` by hostname. The full curl + agent-browser methodology (install, vhost setup,
+> credentials, recipes) lives in `how-to-test`.
 
 ## Plan Validation Checklist
 
@@ -383,8 +390,11 @@ If any of these gates is not met, the work is **not done** — return to the gat
 - `skill-sync` — Synchronizing skill metadata to AGENTS.md / CLAUDE.md after changes.
 - `vendix-core` — Map of skills by domain for Reuse Discovery.
 - `buildcheck-dev` — Verification of build / runtime after execution.
+- `how-to-test` — Runtime verification methodology: `curl` for API/auth, `agent-browser` for frontend E2E against the vhost.
 
 ## Changelog
+
+- **v2.3** — Added `agent-browser` to the Verification Mechanisms Catalog as the frontend E2E mechanism (drive the real vhost, not `localhost:4200`). Linked the new `how-to-test` skill (full curl + agent-browser methodology) from the verification note and Related Skills. Synced frontmatter version (was stale at 2.1 while the changelog already listed 2.2).
 
 - **v2.2** — Removed Bruno from the Verification Mechanisms Catalog and all examples. `curl` is now the primary mechanism for API-contract and auth-boundary checks; agents must not run `.bru` tests as plan verification. Documented dev credential sources (seed owner accounts + ask-the-user). Bruno survives only as the opt-in `vendix-bruno-test` template.
 - **v2.1** — Hardening pass for 100% format compliance. Added: explicit "six mandatory fields per step" rule, `Plan Validation Checklist` (structural / per-step / files / verification + Skill Selection Matrix), `Field-by-Field Rigor` table with acceptable-vs-rejected examples, `Verification Mechanisms Catalog` (Bruno, curl, build, audit, log inspection). Annotated `Required Plan Format` template with `[MANDATORY]` inline markers. Anti-Patterns extended with: missing `Why`/`Verification`, wildcards in `Critical Files`, vague `Resources`, `how-to-plan` listed as step skill, non-spec sections (`Assumptions`/`Notes`/`Risks`), absent `Knowledge Gaps`, subscription-gate misapplied to read-only steps, missing `vendix-multi-tenant-context` on tenant-scoped steps.

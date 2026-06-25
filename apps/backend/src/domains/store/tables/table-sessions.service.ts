@@ -42,6 +42,12 @@ export interface TableSessionView {
       unit_price: Prisma.Decimal | number;
       total_price: Prisma.Decimal | number;
       inventory_consumed_at_fire: boolean;
+      // Snapshot of `products.product_type` taken at order creation
+      // (Restaurant Suite — see addItems at L311 and OrdersService
+      // create at orders.service.ts:138-141). Drives the table-session
+      // UI to know whether an order_item is a `prepared` dish (kitchen
+      // flow) or a non-dish like bottled water (no kitchen control).
+      item_type: string | null;
       // KDS state per dish (Restaurant Suite — Gap 2 pattern, mirrors
       // orders.service.findOne). Ordered desc by id so the most recent
       // ticket-item wins; empty for items never fired to the kitchen.
@@ -418,6 +424,10 @@ export class TableSessionsService {
                 unit_price: true,
                 total_price: true,
                 inventory_consumed_at_fire: true,
+                // Snapshot of product_type (see addItems at L311).
+                // Read-only projection: lets the table-session UI hide
+                // the kitchen controls for non-dish items.
+                item_type: true,
                 // KDS state per dish — same include shape as
                 // orders.service.findOne (Gap 2). Ordered desc by id so
                 // the most recent ticket-item leads the array.
@@ -483,6 +493,7 @@ export class TableSessionsService {
               unit_price: it.unit_price,
               total_price: it.total_price,
               inventory_consumed_at_fire: it.inventory_consumed_at_fire,
+              item_type: it.item_type,
               kitchen_ticket_items: it.kitchen_ticket_items.map((kti) => ({
                 id: kti.id,
                 status: kti.status,

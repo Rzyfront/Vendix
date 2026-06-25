@@ -250,6 +250,12 @@
 
 .item-row {
   display: grid;
+  /*
+   * Up to 4 columns: checkbox/qty, name+price, kitchen status, action.
+   * The status and action columns only render for `prepared` dishes
+   * (see template guards), so a non-dish row collapses to the first
+   * two columns and the price sits at the end of `item-main`.
+   */
   grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: 0.75rem 1rem;
@@ -262,15 +268,18 @@
     background 0.15s ease,
     box-shadow 0.15s ease;
 
-  /* Pending dishes carry a subtle left accent so they stand out from sent. */
+  /*
+   * Status differentiation is carried by a soft background tint per
+   * state instead of a side bar. The kitchen-state badge in the row
+   * remains the primary signal; the tint is a secondary cue so a
+   * pending dish and a sent one are still distinguishable at a glance
+   * even when scrolling.
+   */
   &:not(.is-fired) {
-    border-left: 3px solid
-      color-mix(in srgb, var(--color-warning) 55%, var(--color-border));
+    background: color-mix(in srgb, var(--color-warning) 3%, var(--color-surface));
   }
 
   &.is-fired {
-    border-left: 3px solid
-      color-mix(in srgb, var(--color-success) 55%, var(--color-border));
     background: color-mix(in srgb, var(--color-success) 4%, var(--color-surface));
   }
 

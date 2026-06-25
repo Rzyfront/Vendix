@@ -7,6 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { DatePipe, NgClass } from '@angular/common';
 import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { ModalComponent } from '../../../../../../shared/components';
@@ -64,6 +65,12 @@ export class OrderPaymentModalComponent {
   change = signal<number>(0);
   isProcessing = input<boolean>(false);
   referenceControl = new FormControl('');
+  // Bridge the FormControl value into a signal so `canProcess` (a computed)
+  // recalculates when the user types. Reading FormControl.value directly inside a
+  // computed does not create a reactive dependency under zoneless change detection.
+  private referenceValue = toSignal(this.referenceControl.valueChanges, {
+    initialValue: this.referenceControl.value ?? '',
+  });
 
   // ── Credit State ──────────────────────────────────────────
   customAmount = signal<number>(0);
@@ -140,7 +147,7 @@ export class OrderPaymentModalComponent {
     }
 
     if (method.requiresReference) {
-      const ref = this.referenceControl.value;
+      const ref = this.referenceValue();
       return !!ref && ref.trim().length >= 4;
     }
 

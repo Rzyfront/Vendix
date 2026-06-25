@@ -109,6 +109,15 @@ export interface TableSessionOrderItem {
   total_price: number | string;
   inventory_consumed_at_fire: boolean;
   /**
+   * Snapshot of `products.product_type` taken at order creation by the
+   * backend (see `table-sessions.service.ts:addItems`). The table
+   * session UI uses this to gate the kitchen control: only items with
+   * `item_type === 'prepared'` participate in the fire-to-kitchen flow.
+   * Null when the backend projection is older (legacy snapshots) — the
+   * UI falls back to `false` (non-dish).
+   */
+  item_type?: string | null;
+  /**
    * Kitchen-ticket items linked to this order item, ordered DESC by id
    * (most recent first). Empty/undefined when the item was never fired.
    * Used to derive the per-dish kitchen-state badge — see
@@ -250,4 +259,11 @@ export interface SellableProductOption {
   base_price?: number | string | null;
   is_sellable?: boolean;
   product_type?: 'physical' | 'service' | 'prepared';
+  /**
+   * Thumbnail URL for the product picker. Mirrors the field
+   * `Product.image_url` returned by `ProductsService.getProducts` — the
+   * modal casts the response to this shape and loses it at the type
+   * level, so we carry it here to avoid `as any` in the template.
+   */
+  image_url?: string | null;
 }

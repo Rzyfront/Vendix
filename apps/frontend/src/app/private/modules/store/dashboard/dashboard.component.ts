@@ -212,7 +212,7 @@ const QUICK_LINKS: QuickLink[] = [
               @if (dispatchPendingCount() > 0) {
                 <div
                   class="flex items-center gap-3 p-3 bg-primary/10 rounded-lg cursor-pointer hover:bg-primary/15 transition-colors"
-                  (click)="navigateTo('/admin/orders/sales?status=processing&delivery=home_delivery')"
+                  (click)="navigateTo('/admin/orders/sales?dispatchable=true')"
                 >
                   <div class="flex-shrink-0 w-7 h-7 bg-primary/20 rounded-full flex items-center justify-center">
                     <app-icon name="truck" [size]="14" class="text-primary"></app-icon>

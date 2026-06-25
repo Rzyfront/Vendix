@@ -146,6 +146,16 @@ export class AddItemsModalComponent {
     return row.id;
   }
 
+  /**
+   * Hide the broken <img> and let the parent .product-thumb show the
+   * default icon. Mirrors the POS pattern (see
+   * pos-product-selection.component.ts:onImageError).
+   */
+  onThumbError(event: Event): void {
+    const target = event.target as HTMLImageElement;
+    if (target) target.style.display = 'none';
+  }
+
   private loadProducts(): void {
     this.productsLoading.set(true);
     this.productsService

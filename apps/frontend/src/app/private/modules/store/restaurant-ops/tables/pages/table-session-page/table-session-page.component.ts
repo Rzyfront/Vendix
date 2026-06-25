@@ -155,9 +155,24 @@ export class TableSessionPageComponent implements OnInit {
     return this.items().filter((it) => ids.has(it.id));
   });
 
-  readonly hasUnfiredItems = computed(() =>
-    this.items().some((it) => !this.isItemFired(it)),
+  /**
+   * Is the given order item a `prepared` dish (eligible for the kitchen
+   * flow)? Backed by the `item_type` snapshot exposed by the backend
+   * in `TableSessionView.order_items[].item_type`. Items without the
+   * snapshot (legacy payloads) are treated as non-dish — the kitchen
+   * controls stay hidden, never the other way around.
+   */
+  isPrepared(item: TableSessionOrderItem): boolean {
+    return item.item_type === 'prepared';
+  }
+
+  /** Pending items that are also `prepared` (visible kitchen targets). */
+  private readonly pendingPreparedItems = computed<TableSessionOrderItem[]>(
+    () => this.items().filter((it) => this.isPrepared(it) && !this.isItemFired(it)),
   );
+
+  /** True when at least one prepared dish is still pending fire. */
+  readonly hasUnfiredItems = computed(() => this.pendingPreparedItems().length > 0);
 
   readonly isClosed = computed(() => !!this.session()?.closed_at);
 
@@ -205,10 +220,12 @@ export class TableSessionPageComponent implements OnInit {
   /** Count of currently selected (pending) items for the batch toolbar. */
   readonly selectedCount = computed(() => this.selectedItemIds().size);
 
-  /** Number of items still pending fire-to-kitchen. */
-  readonly pendingCount = computed(
-    () => this.items().filter((it) => !this.isItemFired(it)).length,
-  );
+  /**
+   * Number of `prepared` items still pending fire-to-kitchen. Non-dish
+   * items (bottled water, retail add-ons) are intentionally excluded —
+   * they do not go through the kitchen flow.
+   */
+  readonly pendingCount = computed(() => this.pendingPreparedItems().length);
 
   /** Current table status (drives the collapsed status timeline). */
   readonly tableStatus = computed<TableStatus | null>(
@@ -444,7 +461,7 @@ export class TableSessionPageComponent implements OnInit {
    */
   readonly selectionMode = signal(false);
 
-  /** True when all pending items are currently selected. */
+  /** True when all `prepared` pending items are currently selected. */
   readonly allPendingSelected = computed(() => {
     const pending = this.pendingCount();
     return pending > 0 && this.selectedItemIds().size === pending;
@@ -464,7 +481,7 @@ export class TableSessionPageComponent implements OnInit {
 
   toggleItemSelection(itemId: number): void {
     const item = this.items().find((it) => it.id === itemId);
-    if (item && this.isItemFired(item)) return; // fired items are not selectable
+    if (item && (this.isItemFired(item) || !this.isPrepared(item))) return;
     this.selectedItemIds.update((s) => {
       const next = new Set(s);
       if (next.has(itemId)) next.delete(itemId);
@@ -477,15 +494,17 @@ export class TableSessionPageComponent implements OnInit {
     return this.selectedItemIds().has(itemId);
   }
 
-  /** Toggle "select all pending": selects all if not all selected, else clears. */
+  /**
+   * Toggle "select all pending": selects all `prepared` pending items
+   * if not all are selected, else clears. Non-dish items are skipped
+   * — they do not belong to the kitchen flow.
+   */
   toggleSelectAllPending(): void {
     if (this.allPendingSelected()) {
       this.selectedItemIds.set(new Set());
       return;
     }
-    const pending = this.items()
-      .filter((it) => !this.isItemFired(it))
-      .map((it) => it.id);
+    const pending = this.pendingPreparedItems().map((it) => it.id);
     this.selectedItemIds.set(new Set(pending));
   }
 
@@ -620,9 +639,7 @@ export class TableSessionPageComponent implements OnInit {
   fireSelected(): void {
     const ids = this.selectedItemIds().size
       ? Array.from(this.selectedItemIds())
-      : this.items()
-          .filter((it) => !this.isItemFired(it))
-          .map((it) => it.id);
+      : this.pendingPreparedItems().map((it) => it.id);
     if (ids.length === 0) {
       this.toastService.error('Selecciona al menos un item para enviar');
       return;

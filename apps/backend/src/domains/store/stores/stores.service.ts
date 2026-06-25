@@ -341,8 +341,26 @@ export class StoresService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
-    const [recentOrders, dispatchPendingOrders, refundPendingOrders] =
-      await Promise.all([
+    // Single source of truth for "pending dispatch" (ref 2026-06-25).
+    // state ∈ {processing, pending_payment} + delivery_type ≠ direct_delivery.
+    // pending_payment cubre el contraentrega (COD): se despacha antes de cobrar.
+    // Coincide con orders.service.ts findAll(query.dispatchable) y con el
+    // filtro "Por enviar" del frontend.
+    const dispatchWhere: Prisma.ordersWhereInput = {
+      state: { in: ['processing', 'pending_payment'] },
+      // Alineado con orders.service.ts findAll(query.dispatchable) — ref 2026-06-25
+      // (plan wizard remisión order-first). Excluye direct_delivery
+      // (counter-handover, no genera remisión) e incluye home_delivery,
+      // pickup y other. Coincide con el filtro "Por enviar" del frontend.
+      delivery_type: { not: 'direct_delivery' },
+    };
+
+    const [
+      recentOrders,
+      dispatchPendingOrders,
+      dispatchPendingCount,
+      refundPendingOrders,
+    ] = await Promise.all([
         // Recent orders (last 10) — store_id filter handled by scope
         this.prisma.orders.findMany({
           where: { state: { not: 'cancelled' } },
@@ -361,14 +379,10 @@ export class StoresService {
           take: 10,
         }),
 
-        // Órdenes listas para despachar (processing + home_delivery + paid + has shipping)
+        // Pending-dispatch preview (top 5 oldest). The single source of truth
+        // (dispatchWhere) is defined alongside the real count below.
         this.prisma.orders.findMany({
-          where: {
-            state: 'processing',
-            delivery_type: 'home_delivery',
-            shipping_method_id: { not: null },
-            payments: { some: { state: 'succeeded' } },
-          },
+          where: dispatchWhere,
           include: {
             users: { select: { first_name: true, last_name: true } },
             _count: { select: { order_items: true } },
@@ -376,6 +390,10 @@ export class StoresService {
           orderBy: { created_at: 'asc' },
           take: 5,
         }),
+
+        // Real count of pending-dispatch orders (not capped at 5). Single
+        // source of truth shared with orders.service.ts findAll(pending_dispatch).
+        this.prisma.orders.count({ where: dispatchWhere }),
 
         // Refunds pendientes (no completados ni cancelados ni fallidos)
         this.prisma.refunds.findMany({
@@ -449,7 +467,7 @@ export class StoresService {
     return {
       recentOrders: formattedRecentOrders,
       dispatchPendingOrders: formattedDispatchPendingOrders,
-      dispatchPendingCount: formattedDispatchPendingOrders.length,
+      dispatchPendingCount,
       refundPendingOrders: formattedRefundPendingOrders,
       refundPendingCount: formattedRefundPendingOrders.length,
     };
