@@ -501,11 +501,6 @@ export class StoreAdminLayoutComponent {
       route: '/admin/ecommerce',
     },
     {
-      label: 'PQRs',
-      icon: 'mail-question',
-      route: '/admin/pqrs',
-    },
-    {
       label: 'Marketing',
       icon: 'megaphone',
       children: [
@@ -736,6 +731,11 @@ export class StoreAdminLayoutComponent {
           label: 'Soporte',
           icon: 'circle',
           route: '/admin/help/support',
+        },
+        {
+          label: 'Quejas y Reclamos',
+          icon: 'message-square',
+          route: '/admin/pqrs',
         },
         {
           label: 'Centro de Ayuda',

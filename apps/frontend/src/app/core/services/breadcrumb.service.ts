@@ -1047,6 +1047,43 @@ export class BreadcrumbService {
       icon: 'file-text',
     },
 
+    // PQRs (Peticiones, Quejas y Reclamos)
+    // The visible title is "Quejas y Reclamos" to match the sidebar
+    // label introduced in the layout. Parent chain: Tienda > Ayuda >
+    // Quejas y Reclamos (matches the sidebar grouping).
+    {
+      path: '/admin/pqrs',
+      title: 'Quejas y Reclamos',
+      parent: 'Ayuda',
+      icon: 'message-square',
+    },
+    {
+      path: '/admin/pqrs/:id',
+      title: 'Detalle de PQR',
+      parent: 'Quejas y Reclamos',
+      icon: 'message-square',
+    },
+    // Global PQR oversight for super-admin (compliance view). Distinct
+    // from the support tickets view by parent.
+    {
+      path: '/super-admin/support/tickets',
+      title: 'Tickets',
+      parent: 'Soporte',
+      icon: 'headset',
+    },
+    {
+      path: '/super-admin/support/pqrs',
+      title: 'PQRs',
+      parent: 'Soporte',
+      icon: 'message-square',
+    },
+    {
+      path: '/super-admin/support/pqrs/:id',
+      title: 'Detalle de PQR',
+      parent: 'PQRs',
+      icon: 'message-square',
+    },
+
     // Additional Inventory submodules
     {
       path: '/admin/inventory/transfers',

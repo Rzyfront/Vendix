@@ -4,73 +4,181 @@
   margin: 0 auto;
 }
 
-.page-header {
-  margin-bottom: 1.5rem;
-
-  h1 {
-    font-size: 1.75rem;
-    font-weight: 700;
-    margin: 0 0 0.25rem;
-    color: #0f172a;
-  }
-
-  .subtitle {
-    margin: 0;
-    color: #64748b;
-    font-size: 0.95rem;
-  }
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 0.75rem;
-  margin-bottom: 1rem;
-}
-
-.stat-card {
+// ─── Primary CTA card ─────────────────────────────────────────────────────
+//
+// One card that answers the only question the store owner actually has
+// when they open this page: "what do I need to do today?" Replaces the
+// previous 4-stat grid (Total / 24h / Nuevos / Respondidas) which
+// presented operator metrics without an actionable next step.
+//
+// Color states:
+//   default: calm white with green accent (all caught up)
+//   urgent : red border + tinted background (overdue exists)
+//   empty  : centered illustration + onboarding copy (no PQRs yet)
+.cta-card {
   background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 1rem 1.25rem;
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.25rem;
   display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  align-items: center;
+  gap: 1rem;
+  transition: border-color 0.15s, background 0.15s;
 
-  &--accent {
-    background: linear-gradient(135deg, #eef2ff, #f5f3ff);
-    border-color: #c7d2fe;
+  &__main {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
   }
 
-  .stat-label {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: #64748b;
+  &__icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: #ecfdf5;
+    color: #047857;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    &--muted {
+      background: #f1f5f9;
+      color: #94a3b8;
+    }
+  }
+
+  &__copy {
+    flex: 1;
+    min-width: 0;
+
+    h2 {
+      margin: 0 0 0.25rem;
+      font-size: 1.0625rem;
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1.3;
+    }
+
+    p {
+      margin: 0;
+      color: #475569;
+      font-size: 0.875rem;
+      line-height: 1.45;
+    }
+  }
+
+  &__action {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    background: #7ed7a5;
+    color: #064e3b;
+    padding: 0.625rem 1rem;
+    border-radius: 10px;
     font-weight: 600;
+    font-size: 0.875rem;
+    text-decoration: none;
+    transition: background 0.15s;
+    flex-shrink: 0;
+
+    &:hover {
+      background: #6bc695;
+    }
   }
 
-  .stat-value {
-    font-size: 1.875rem;
-    font-weight: 700;
-    color: #0f172a;
-    line-height: 1.1;
+  &--urgent {
+    border-color: #fecaca;
+    background: linear-gradient(135deg, #fef2f2, #ffffff);
+
+    .cta-card__icon {
+      background: #fee2e2;
+      color: #b91c1c;
+    }
+
+    .cta-card__action {
+      background: #dc2626;
+      color: #ffffff;
+
+      &:hover {
+        background: #b91c1c;
+      }
+    }
+
+    h2 {
+      color: #991b1b;
+    }
+  }
+
+  &--empty {
+    justify-content: center;
+  }
+
+  &__empty {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    color: #64748b;
+
+    h2 {
+      margin: 0 0 0.125rem;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #334155;
+    }
+
+    p {
+      margin: 0;
+      font-size: 0.875rem;
+    }
   }
 }
 
-.type-breakdown {
-  display: flex;
-  gap: 0.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 1.5rem;
+// ─── Filters (collapsible) ────────────────────────────────────────────────
+//
+// Collapsed by default — keeps the page calm when the owner only needs
+// to scan their queue. Expanding shows Estado / Tipo / Buscar with an
+// "activos" badge when any filter is applied.
+.filters-section {
+  margin-bottom: 1.25rem;
 
-  .type-chip {
-    background: #f8fafc;
+  > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    padding: 0.5rem 0.875rem;
+    background: #ffffff;
     border: 1px solid #e2e8f0;
-    padding: 0.375rem 0.75rem;
+    border-radius: 10px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #475569;
+    list-style: none;
+    user-select: none;
+
+    &::-webkit-details-marker {
+      display: none;
+    }
+
+    &:hover {
+      background: #f8fafc;
+    }
+
+    app-icon {
+      color: #94a3b8;
+    }
+  }
+
+  &__badge {
+    background: #ecfdf5;
+    color: #047857;
+    font-size: 0.7rem;
+    padding: 0.125rem 0.5rem;
     border-radius: 9999px;
-    font-size: 0.8rem;
-    color: #334155;
+    font-weight: 600;
   }
 }
 
@@ -83,7 +191,7 @@
   background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  margin-bottom: 1rem;
+  margin-top: 0.5rem;
 
   .filter-group {
     display: flex;
@@ -108,8 +216,8 @@
 
       &:focus {
         outline: none;
-        border-color: #6366f1;
-        box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+        border-color: #7ed7a5;
+        box-shadow: 0 0 0 3px rgba(126, 215, 165, 0.2);
       }
     }
 
@@ -149,8 +257,8 @@
 
   .primary-btn {
     padding: 0.5rem 1.25rem;
-    background: #4f46e5;
-    color: #ffffff;
+    background: #7ed7a5;
+    color: #064e3b;
     border: 0;
     border-radius: 8px;
     font-weight: 600;
@@ -159,129 +267,303 @@
     height: 38px;
 
     &:hover {
-      background: #4338ca;
+      background: #6bc695;
     }
+  }
+
+  .filters-hint {
+    align-self: center;
+    color: #94a3b8;
+    font-size: 0.75rem;
+    font-style: italic;
+    margin-left: auto;
   }
 }
 
-.table-wrapper {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-  overflow: hidden;
-  position: relative;
-}
-
-.loading-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(255, 255, 255, 0.8);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 5;
+// ─── Loading + error ──────────────────────────────────────────────────────
+.loading-banner {
+  text-align: center;
+  padding: 1rem;
   color: #64748b;
   font-weight: 500;
 }
 
 .error-banner {
   background: #fef2f2;
-  border-bottom: 1px solid #fecaca;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
   color: #991b1b;
   padding: 0.75rem 1rem;
   font-size: 0.9rem;
+  margin-bottom: 1rem;
 }
 
-.pqr-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
+// ─── PQR cards ───────────────────────────────────────────────────────────
+//
+// One card per PQR — easier to scan than a table when the queue is
+// small (< 20 PQRs). Each card surfaces the SLA legal status (color
+// coded) so the owner immediately sees which PQRs need attention TODAY.
+.cards-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
 
-  thead {
-    background: #f8fafc;
-    text-align: left;
+.pqr-card {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #7ed7a5;
+  border-radius: 12px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.05s;
 
-    th {
-      padding: 0.75rem 1rem;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      color: #64748b;
-      font-weight: 600;
-      border-bottom: 1px solid #e2e8f0;
-    }
+  &:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+    transform: translateY(-1px);
   }
 
-  tbody tr {
-    border-bottom: 1px solid #f1f5f9;
-    transition: background 0.15s;
-    cursor: pointer;
-
-    &:hover {
-      background: #f8fafc;
-    }
-
-    &:last-child {
-      border-bottom: 0;
-    }
+  &--warn {
+    border-left-color: #f59e0b;
   }
 
-  td {
-    padding: 0.875rem 1rem;
-    color: #1e293b;
-    vertical-align: middle;
+  &--overdue {
+    border-left-color: #dc2626;
+    background: linear-gradient(135deg, #fef2f2, #ffffff);
   }
 
-  .mono {
+  &__main {
+    flex: 1;
+    min-width: 0;
+    padding: 1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  &__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  &__title-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  &__ticket {
     font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.75rem;
+    color: #94a3b8;
+  }
+
+  &__title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #0f172a;
+    line-height: 1.4;
+  }
+
+  &__footer {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding-top: 0.25rem;
+  }
+
+  &__meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
     font-size: 0.8rem;
+    color: #64748b;
+
+    app-icon {
+      color: #cbd5e1;
+    }
+  }
+
+  &__status {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.625rem;
+    border-radius: 6px;
+    background: #f1f5f9;
     color: #475569;
   }
 
-  .title-cell {
-    max-width: 360px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  // Inline action button — visible always on mobile, on hover on desktop
+  &__action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    padding: 0 1.25rem;
+    background: transparent;
+    color: #7ed7a5;
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-decoration: none;
+    border-left: 1px solid #e2e8f0;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+    align-self: stretch;
+
+    &:hover {
+      background: #ecfdf5;
+      color: #047857;
+    }
+
+    app-icon {
+      transition: transform 0.15s;
+    }
+
+    &:hover app-icon {
+      transform: translateX(2px);
+    }
   }
 
-  .muted {
-    color: #cbd5e1;
-  }
+  &--overdue &__action {
+    color: #dc2626;
 
-  .empty-state {
-    text-align: center;
-    padding: 3rem 1rem;
-    color: #94a3b8;
+    &:hover {
+      background: #fee2e2;
+      color: #991b1b;
+    }
   }
 }
 
+// ─── Type tag (PETITION / COMPLAINT / CLAIM) ──────────────────────────────
+//
+// PETITION is the lightest weight (informational, low urgency).
+// COMPLAINT and CLAIM are visually louder — they have tighter legal SLA
+// (10 days vs 15) and represent customer dissatisfaction, so they need
+// to read as "needs attention" at a glance.
 .type-tag {
   display: inline-flex;
-  padding: 0.125rem 0.5rem;
+  padding: 0.1875rem 0.625rem;
   border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 600;
+  letter-spacing: 0.01em;
 
   &[data-type='PETITION'] {
     background: #eef2ff;
     color: #4338ca;
   }
   &[data-type='COMPLAINT'] {
-    background: #fef3c7;
-    color: #92400e;
+    background: #fed7aa;
+    color: #9a3412;
   }
   &[data-type='CLAIM'] {
-    background: #fee2e2;
+    background: #fecaca;
     color: #991b1b;
   }
 }
 
+// ─── SLA badge ────────────────────────────────────────────────────────────
+//
+// Color-coded per Colombian PQR regulation:
+//   ok      → green  : ≥ 5 business days remaining
+//   warn    → amber  : 1-4 business days remaining
+//   overdue → red    : 0 or negative days remaining
+//
+// Tooltip cites the legal source so the owner can verify.
+.sla-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.625rem;
+  border-radius: 9999px;
+  cursor: help;
+
+  &[data-status='ok'] {
+    background: #ecfdf5;
+    color: #047857;
+  }
+
+  &[data-status='warn'] {
+    background: #fef3c7;
+    color: #92400e;
+  }
+
+  &[data-status='overdue'] {
+    background: #fee2e2;
+    color: #b91c1c;
+  }
+}
+
+// ─── Empty state ─────────────────────────────────────────────────────────
+.empty-state {
+  text-align: center;
+  padding: 3rem 1rem;
+  background: #ffffff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  color: #64748b;
+
+  &__icon {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: #f1f5f9;
+    color: #94a3b8;
+    margin: 0 auto 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  h3 {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #334155;
+  }
+
+  p {
+    margin: 0;
+    font-size: 0.875rem;
+  }
+
+  &__reset {
+    background: none;
+    border: 0;
+    color: #047857;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    font-size: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+
+    &:hover {
+      color: #064e3b;
+    }
+  }
+}
+
+// ─── Pagination ──────────────────────────────────────────────────────────
 .pagination {
   display: flex;
   align-items: center;
   gap: 0.25rem;
-  margin-top: 1rem;
+  margin-top: 1.25rem;
   flex-wrap: wrap;
 
   .page-btn {
@@ -299,9 +581,9 @@
     }
 
     &.active {
-      background: #4f46e5;
-      color: #ffffff;
-      border-color: #4f46e5;
+      background: #7ed7a5;
+      color: #064e3b;
+      border-color: #7ed7a5;
     }
 
     &:disabled {

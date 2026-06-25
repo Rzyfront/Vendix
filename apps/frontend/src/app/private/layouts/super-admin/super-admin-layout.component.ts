@@ -282,7 +282,12 @@ export class SuperAdminLayoutComponent {
           {
             label: 'Tickets',
             icon: 'circle',
-            route: '/super-admin/support',
+            route: '/super-admin/support/tickets',
+          },
+          {
+            label: 'PQRs',
+            icon: 'message-square',
+            route: '/super-admin/support/pqrs',
           },
           {
             label: 'Centro de Ayuda',

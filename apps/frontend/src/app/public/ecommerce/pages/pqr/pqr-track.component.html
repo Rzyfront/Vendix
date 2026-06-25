@@ -12,7 +12,7 @@
       type="search"
       placeholder="Ej: PQR-1-00001"
       [ngModel]="queryInput()"
-      (ngModelChange)="queryInput.set($event)"
+      (ngModelChange)="queryInput.set($event.target.value)"
       (keydown.enter)="search()"
     />
     <button class="primary-btn" (click)="search()">Consultar</button>

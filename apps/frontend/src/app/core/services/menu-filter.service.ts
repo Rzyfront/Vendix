@@ -189,6 +189,11 @@ export class MenuFilterService {
     Ayuda: 'help',
     Soporte: ['help_support', 'settings_support'],
     'Centro de Ayuda': 'help_center',
+    // Quejas y Reclamos (Peticiones, Quejas y Reclamos) — child of `help`.
+    // The visible label is plain Spanish for end users; the underlying
+    // `help_pqrs` key is kept for the panel_ui contract and the existing
+    // merged config of users (no migration needed).
+    'Quejas y Reclamos': 'help_pqrs',
   };
 
   /**

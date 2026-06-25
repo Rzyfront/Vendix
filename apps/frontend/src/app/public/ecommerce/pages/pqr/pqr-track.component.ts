@@ -6,6 +6,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import {
@@ -27,6 +28,7 @@ type TrackState = 'idle' | 'loading' | 'loaded' | 'not_found' | 'error';
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     RouterLink,
     DatePipe,
     PqrStatusPillComponent,

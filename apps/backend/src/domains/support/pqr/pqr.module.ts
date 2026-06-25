@@ -13,6 +13,10 @@ import { PqrEmailService } from './pqr-email.service';
  * - `PqrEmailService` as an event listener (no controller) that sends the
  *   admin-vendix notification on `pqr.created` and requester notifications
  *   on `pqr.response_sent` / `pqr.status_changed`.
+ *
+ * Note: org-admin PQR oversight was scoped out and will land in a
+ * follow-up iteration — see comment in pqr.service.ts createPublic for
+ * the multi-tenant attribution groundwork already in place.
  */
 @Module({
   imports: [PrismaModule, EmailModule],

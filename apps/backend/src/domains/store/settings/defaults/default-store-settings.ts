@@ -248,6 +248,10 @@ export function getDefaultStoreSettings(): StoreSettings {
         help: true,
         help_support: true,
         help_center: true,
+        // PQRs (Peticiones, Quejas y Reclamos) — child of `help`.
+        // Keep in sync with PANEL_UI_FALLBACK.STORE_ADMIN.help_pqrs
+        // and the seed user_settings_default.template_data.
+        help_pqrs: true,
       },
       STORE_ECOMMERCE: {
         profile: true,

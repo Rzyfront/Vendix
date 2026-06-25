@@ -1,151 +1,230 @@
 <section class="pqr-list-page">
-  <header class="page-header">
-    <div class="header-titles">
-      <h1>Peticiones, Quejas y Reclamos</h1>
-      <p class="subtitle">
-        Bandeja unificada del canal público de PQRs. Cualquier visitante puede
-        radicar uno desde el storefront.
-      </p>
-    </div>
-  </header>
-
-  <!-- Stats cards -->
+  <!-- Primary CTA card — answers "what do I do today?" -->
   @if (stats(); as s) {
-  <div class="stats-grid">
-    <article class="stat-card">
-      <span class="stat-label">Total</span>
-      <span class="stat-value">{{ s.total }}</span>
-    </article>
-    <article class="stat-card stat-card--accent">
-      <span class="stat-label">Últimas 24h</span>
-      <span class="stat-value">{{ s.recent_24h }}</span>
-    </article>
-    <article class="stat-card">
-      <span class="stat-label">Nuevos</span>
-      <span class="stat-value">{{ s.by_status['NEW'] || 0 }}</span>
-    </article>
-    <article class="stat-card">
-      <span class="stat-label">Respondidas</span>
-      <span class="stat-value">{{ s.by_status['RESOLVED'] || 0 }}</span>
-    </article>
-  </div>
-
-  <div class="type-breakdown">
-    @for (entry of [s.by_type['PETITION'] || 0, s.by_type['COMPLAINT'] || 0, s.by_type['CLAIM'] || 0]; track $index) {
-    <span class="type-chip">
-      <strong>{{ ['Peticiones', 'Quejas', 'Reclamos'][$index] }}:</strong>
-      {{ entry }}
-    </span>
+  <div
+    class="cta-card"
+    [class.cta-card--urgent]="overdueCount() > 0"
+    [class.cta-card--empty]="s.total === 0"
+  >
+    @if (s.total === 0) {
+    <div class="cta-card__empty">
+      <div class="cta-card__icon cta-card__icon--muted">
+        <app-icon name="inbox" [size]="32"></app-icon>
+      </div>
+      <div>
+        <h2>Aún no tienes PQRs</h2>
+        <p>
+          Cuando un visitante radique una petición, queja o reclamo desde tu
+          storefront, aparecerá aquí. Mientras tanto, todo en orden.
+        </p>
+      </div>
+    </div>
+    } @else {
+    <div class="cta-card__main">
+      <div class="cta-card__icon">
+        <app-icon
+          [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-square'"
+          [size]="28"
+        ></app-icon>
+      </div>
+      <div class="cta-card__copy">
+        <h2>
+          @if (overdueCount() > 0) {
+            Tienes {{ overdueCount() }} PQR{{ overdueCount() === 1 ? '' : 's' }}
+            con SLA vencido
+          } @else if (pendingCount() > 0) {
+            Tienes {{ pendingCount() }} PQR{{ pendingCount() === 1 ? '' : 's' }}
+            sin responder
+          } @else {
+            Todas las PQRs están al día ✨
+          }
+        </h2>
+        <p>
+          @if (overdueCount() > 0) {
+            ⚠️ Riesgo de silencio administrativo. Responde hoy para evitar
+            consecuencias legales.
+          } @else if (pendingCount() > 0) {
+            Mantén tu tiempo de respuesta dentro del término legal (15 días
+            hábiles para peticiones, 10 para quejas y reclamos).
+          } @else {
+            Buen trabajo. No tienes PQRs pendientes.
+          }
+        </p>
+      </div>
+      @if (pendingCount() > 0) {
+        <a class="cta-card__action" [routerLink]="['/admin/pqrs']">
+          Ver pendientes
+          <app-icon name="arrow-right" [size]="16"></app-icon>
+        </a>
+      }
+    </div>
     }
   </div>
   }
 
-  <!-- Filters -->
-  <div class="filters-bar">
-    <div class="filter-group">
-      <label>Estado</label>
-      <select
-        [ngModel]="statusFilter()"
-        (ngModelChange)="setStatusFilter($event)"
-      >
-        <option value="">Todos</option>
-        <option value="NEW">Nuevo</option>
-        <option value="OPEN">Abierto</option>
-        <option value="IN_PROGRESS">En progreso</option>
-        <option value="WAITING_RESPONSE">Esperando respuesta</option>
-        <option value="RESOLVED">Respondida</option>
-        <option value="CLOSED">Cerrada</option>
-        <option value="REOPENED">Reabierta</option>
-      </select>
-    </div>
-
-    <div class="filter-group">
-      <label>Tipo</label>
-      <select
-        [ngModel]="typeFilter()"
-        (ngModelChange)="setTypeFilter($event)"
-      >
-        <option value="">Todos</option>
-        <option value="PETITION">Petición</option>
-        <option value="COMPLAINT">Queja</option>
-        <option value="CLAIM">Reclamo</option>
-      </select>
-    </div>
-
-    <div class="filter-group filter-group--search">
-      <label>Buscar</label>
-      <div class="search-input">
-        <app-icon name="search" [size]="16"></app-icon>
-        <input
-          type="search"
-          placeholder="Asunto o número de ticket…"
-          [ngModel]="searchInput()"
-          (ngModelChange)="searchInput.set($event)"
-          (keydown.enter)="applySearch()"
-        />
-        @if (searchInput()) {
-        <button class="clear-btn" (click)="clearSearch()" aria-label="Limpiar">
-          ×
-        </button>
-        }
+  <!-- Filters — collapsed by default to keep the view calm -->
+  <details class="filters-section">
+    <summary>
+      <app-icon name="filter" [size]="16"></app-icon>
+      Filtros
+      @if (statusFilter() || typeFilter() || searchInput()) {
+      <span class="filters-section__badge">activos</span>
+      }
+    </summary>
+    <div class="filters-bar">
+      <div class="filter-group">
+        <label>Estado</label>
+        <select
+          [ngModel]="statusFilter()"
+          (ngModelChange)="setStatusFilter($event)"
+        >
+          <option value="">Todos</option>
+          <option value="NEW">Nuevo</option>
+          <option value="OPEN">Abierto</option>
+          <option value="IN_PROGRESS">En progreso</option>
+          <option value="WAITING_RESPONSE">Esperando respuesta</option>
+          <option value="RESOLVED">Resuelto</option>
+          <option value="CLOSED">Cerrado</option>
+          <option value="REOPENED">Reabierto</option>
+        </select>
       </div>
+      <div class="filter-group">
+        <label>Tipo</label>
+        <select
+          [ngModel]="typeFilter()"
+          (ngModelChange)="setTypeFilter($event)"
+        >
+          <option value="">Todos</option>
+          <option value="PETITION">Petición</option>
+          <option value="COMPLAINT">Queja</option>
+          <option value="CLAIM">Reclamo</option>
+        </select>
+      </div>
+      <div class="filter-group filter-group--search">
+        <label>Buscar</label>
+        <div class="search-input">
+          <app-icon name="search" [size]="16"></app-icon>
+          <input
+            type="search"
+            placeholder="Asunto o número de ticket…"
+            [ngModel]="searchInput()"
+            (ngModelChange)="searchInput.set($event)"
+          />
+          @if (searchInput()) {
+          <button class="clear-btn" (click)="clearSearch()" aria-label="Limpiar">
+            ×
+          </button>
+          }
+        </div>
+      </div>
+      <span class="filters-hint">Los filtros se aplican automáticamente</span>
     </div>
+  </details>
 
-    <button class="primary-btn" (click)="applySearch()">Aplicar</button>
-  </div>
+  <!-- Cards list — primary view for store owners -->
+  @if (loading()) {
+  <div class="loading-banner">Cargando…</div>
+  }
 
-  <!-- Table -->
-  <div class="table-wrapper">
-    @if (loading()) {
-    <div class="loading-overlay">
-      <span>Cargando…</span>
-    </div>
-    }
+  @if (errorMsg(); as msg) {
+  <div class="error-banner">{{ msg }}</div>
+  }
 
-    @if (errorMsg(); as msg) {
-    <div class="error-banner">{{ msg }}</div>
-    }
-
-    <table class="pqr-table">
-      <thead>
-        <tr>
-          <th>Ticket</th>
-          <th>Tipo</th>
-          <th>Asunto</th>
-          <th>Estado</th>
-          <th>Asignado a</th>
-          <th>Creado</th>
-        </tr>
-      </thead>
-      <tbody>
-        @for (t of tickets(); track t.id) {
-        <tr [routerLink]="['/admin/pqrs', t.id]" class="row-link">
-          <td class="mono">{{ t.ticket_number }}</td>
-          <td>
+  <div class="cards-list">
+    @for (t of tickets(); track t.id) {
+    @let info = slaInfo(t);
+    <article
+      class="pqr-card"
+      [class.pqr-card--overdue]="info.status === 'overdue'"
+      [class.pqr-card--warn]="info.status === 'warn'"
+    >
+      <a class="pqr-card__main" [routerLink]="['/admin/pqrs', t.id]">
+        <div class="pqr-card__head">
+          <div class="pqr-card__title-row">
             <span class="type-tag" [attr.data-type]="t.pqr_type">
               {{ typeLabel(t.pqr_type) }}
             </span>
-          </td>
-          <td class="title-cell">{{ t.title }}</td>
-          <td><app-pqr-status-pill [status]="t.status"></app-pqr-status-pill></td>
-          <td>
-            @if (t.assigned_to) {
-            <span>{{ t.assigned_to.name }}</span>
+            <span class="pqr-card__ticket">{{ t.ticket_number }}</span>
+          </div>
+          <span
+            class="sla-badge"
+            [attr.data-status]="info.status"
+            [title]="
+              'Término legal: ' +
+              info.limit +
+              ' días hábiles (Ley 1755/2015 art. 14 — peticiones; Ley 1474/2011 art. 55 — quejas y reclamos)'
+            "
+          >
+            <app-icon
+              [name]="
+                info.status === 'overdue'
+                  ? 'alert-triangle'
+                  : info.status === 'warn'
+                    ? 'clock'
+                    : 'check-circle'
+              "
+              [size]="14"
+            ></app-icon>
+            @if (info.status === 'overdue') {
+              Vencido · {{ -info.remaining }} días
+            } @else if (info.status === 'warn') {
+              Vence en {{ info.remaining }} día{{ info.remaining === 1 ? '' : 's' }}
             } @else {
-            <span class="muted">—</span>
+              {{ info.remaining }} días hábiles
             }
-          </td>
-          <td>{{ t.created_at | date: 'short' }}</td>
-        </tr>
-        } @empty {
-        <tr>
-          <td colspan="6" class="empty-state">
-            No hay PQRs con los filtros seleccionados.
-          </td>
-        </tr>
+          </span>
+        </div>
+
+        <h3 class="pqr-card__title">{{ t.title }}</h3>
+
+        <div class="pqr-card__footer">
+          <span class="pqr-card__meta">
+            <app-icon name="calendar" [size]="14"></app-icon>
+            {{ t.created_at | date: 'shortDate' }}
+          </span>
+          <span class="pqr-card__status" [attr.data-status]="t.status">
+            {{
+              ({
+                NEW: 'Nuevo',
+                OPEN: 'Abierto',
+                IN_PROGRESS: 'En progreso',
+                WAITING_RESPONSE: 'Esperando',
+                RESOLVED: 'Resuelto',
+                CLOSED: 'Cerrado',
+                REOPENED: 'Reabierto'
+              })[t.status] || t.status
+            }}
+          </span>
+        </div>
+      </a>
+      <a
+        class="pqr-card__action"
+        [routerLink]="['/admin/pqrs', t.id]"
+        title="Abrir y responder"
+      >
+        <app-icon name="message-circle" [size]="16"></app-icon>
+        Responder
+      </a>
+    </article>
+    } @empty {
+    <div class="empty-state">
+      <div class="empty-state__icon">
+        <app-icon name="search-x" [size]="48"></app-icon>
+      </div>
+      <h3>No hay PQRs con esos filtros</h3>
+      <p>
+        @if (statusFilter() || typeFilter() || searchInput()) {
+          Prueba ajustando los filtros o
+          <button class="empty-state__reset" (click)="clearAllFilters()">
+            limpia los filtros
+          </button>
+          para ver todos.
+        } @else {
+          Cuando recibas nuevas peticiones, quejas o reclamos, aparecerán aquí.
         }
-      </tbody>
-    </table>
+      </p>
+    </div>
+    }
   </div>
 
   <!-- Pagination -->
