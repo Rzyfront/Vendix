@@ -23,7 +23,12 @@ import {
   ToastService,
   SpinnerComponent,
   DialogService,
+  TimelineComponent,
 } from '../../../../../../../shared/components/index';
+import {
+  TimelineStep,
+  TimelineVariant,
+} from '../../../../../../../shared/components/timeline/timeline.interfaces';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/index';
 import {
   TableSession,
@@ -74,6 +79,7 @@ import { AssignCustomerModalComponent } from '../../components/assign-customer-m
     IconComponent,
     ToggleComponent,
     SpinnerComponent,
+    TimelineComponent,
     CurrencyPipe,
     AddItemsModalComponent,
     SplitOrderModalComponent,
@@ -160,20 +166,55 @@ export class TableSessionPageComponent implements OnInit {
   /** Order state is a payment-status proxy (draft = unpaid, etc.). */
   readonly orderState = computed(() => this.session()?.order?.state ?? '—');
 
-  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
-    const checkout = this.checkoutEnabled();
-    const actions: StickyHeaderActionButton[] = [
-      {
-        id: 'add',
-        label: 'Agregar items',
-        icon: 'plus',
-        // When checkout is on, "Cobrar" is the terminal primary action, so
-        // "Agregar items" steps down to secondary to keep one clear primary.
-        variant: checkout ? 'secondary' : 'primary',
-        disabled: this.isClosed(),
-      },
+  /** Current table status (drives the collapsed status timeline). */
+  readonly tableStatus = computed<TableStatus | null>(
+    () => (this.session()?.table?.status as TableStatus) ?? null,
+  );
+
+  /**
+   * Table status as a collapsed-timeline (reuses the shared `app-timeline`,
+   * same component the order-details page uses). The lifecycle is presented
+   * in the natural order available → occupied → reserved → cleaning; the
+   * current status is `current`, prior ones `completed`, later ones
+   * `upcoming`. `cleaning` is flagged as a `terminal/warning` step so it
+   * reads as the closing/turnover stage.
+   */
+  readonly tableStatusSteps = computed<TimelineStep[]>(() => {
+    const current = this.tableStatus();
+    const order: TableStatus[] = [
+      'available',
+      'occupied',
+      'reserved',
+      'cleaning',
     ];
-    if (checkout) {
+    const currentIdx = current ? order.indexOf(current) : -1;
+    return order.map((status, i) => {
+      let stepStatus: TimelineStep['status'];
+      if (currentIdx === -1) {
+        stepStatus = 'upcoming';
+      } else if (i < currentIdx) {
+        stepStatus = 'completed';
+      } else if (i === currentIdx) {
+        stepStatus = status === 'cleaning' ? 'terminal' : 'current';
+      } else {
+        stepStatus = 'upcoming';
+      }
+      const variant: TimelineVariant =
+        status === 'cleaning' && i === currentIdx ? 'warning' : 'default';
+      return {
+        key: status,
+        label: TablesService.statusLabel(status),
+        status: stepStatus,
+        variant,
+      };
+    });
+  });
+
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
+    const actions: StickyHeaderActionButton[] = [];
+    // Core flow only: Cobrar (when checkout is ON) + Cerrar mesa.
+    // "Agregar items" lives in the Items card header now.
+    if (this.checkoutEnabled()) {
       actions.push({
         id: 'pay',
         label: 'Cobrar',
@@ -185,6 +226,15 @@ export class TableSessionPageComponent implements OnInit {
           : 'Cobrar y cerrar la mesa',
       });
     }
+    actions.push({
+      id: 'close',
+      label: 'Cerrar mesa',
+      icon: 'lock',
+      variant: 'outline-danger',
+      loading: this.isClosing(),
+      disabled: this.isClosed(),
+      title: this.isClosed() ? 'La mesa ya está cerrada' : 'Cerrar la mesa',
+    });
     return actions;
   });
 
@@ -738,11 +788,11 @@ export class TableSessionPageComponent implements OnInit {
 
   onHeaderAction(actionId: string): void {
     switch (actionId) {
-      case 'add':
-        this.openAddItems();
-        return;
       case 'pay':
         this.openPay();
+        return;
+      case 'close':
+        this.closeSession();
         return;
     }
   }

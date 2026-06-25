@@ -29,50 +29,90 @@
       <div class="grid gap-4 md:grid-cols-3">
         <!-- ── Resumen ──────────────────────────────────────────────── -->
         <app-card title="Resumen" [responsive]="true">
-          <div class="summary">
-            <div class="row">
-              <span>Estado de la orden</span>
-              <app-badge [variant]="isClosed() ? 'neutral' : 'primary'">
-                {{ orderState() }}
+          <!-- Estado de la orden (styled summary panel) -->
+          <div class="summary-panel">
+            <!-- Hero: total + payment status -->
+            <div class="summary-hero">
+              <div class="hero-total">
+                <span class="hero-label">Total de la cuenta</span>
+                <strong class="hero-amount">{{ orderTotal() | currency }}</strong>
+              </div>
+              <app-badge
+                class="hero-badge"
+                [variant]="isClosed() ? 'success' : 'warning'"
+              >
+                <app-icon
+                  [name]="isClosed() ? 'circle-check' : 'clock'"
+                  [size]="12"
+                ></app-icon>
+                {{ isClosed() ? 'Pagada / Cerrada' : 'Pago pendiente' }}
               </app-badge>
             </div>
 
-            <div class="row">
-              <span>Cliente</span>
-              @if (customerName(); as name) {
-                <span class="customer-name">
-                  <app-icon name="user-check" [size]="14"></app-icon>
-                  {{ name }}
-                </span>
-              } @else {
-                <span class="muted">Anónimo</span>
-              }
-            </div>
+            <!-- Detail rows -->
+            <dl class="summary-grid">
+              <div class="cell">
+                <dt>Estado de la orden</dt>
+                <dd>
+                  <app-badge [variant]="isClosed() ? 'neutral' : 'primary'">
+                    {{ orderState() }}
+                  </app-badge>
+                </dd>
+              </div>
 
-            <div class="row">
-              <span>Comensales</span>
-              <span>{{ session()?.guest_count ?? '—' }}</span>
-            </div>
+              <div class="cell">
+                <dt>Cliente</dt>
+                <dd>
+                  @if (customerName(); as name) {
+                    <span class="customer-name">
+                      <app-icon name="user-check" [size]="14"></app-icon>
+                      {{ name }}
+                    </span>
+                  } @else {
+                    <span class="muted">Anónimo</span>
+                  }
+                </dd>
+              </div>
 
-            <div class="row">
-              <span>Items en la cuenta</span>
-              <span>{{ items().length }}</span>
-            </div>
+              <div class="cell">
+                <dt>Comensales</dt>
+                <dd>{{ session()?.guest_count ?? '—' }}</dd>
+              </div>
 
-            <div class="row">
-              <span>Estado de pago</span>
-              <app-badge [variant]="isClosed() ? 'success' : 'warning'">
-                {{ isClosed() ? 'Cerrada' : 'Pendiente' }}
-              </app-badge>
-            </div>
-
-            <div class="row total">
-              <span>Total</span>
-              <strong>{{ orderTotal() | currency }}</strong>
-            </div>
+              <div class="cell">
+                <dt>Items</dt>
+                <dd>{{ items().length }}</dd>
+              </div>
+            </dl>
           </div>
 
-          <!-- Secondary actions (moved out of the header) -->
+          <!-- Estado de la mesa: collapsed timeline (shared app-timeline) -->
+          <div class="status-group">
+            <span class="group-label">Estado de la mesa</span>
+            <app-timeline
+              [steps]="tableStatusSteps()"
+              [collapsible]="true"
+              expand_label="Ver estados de la mesa"
+              collapse_label="Ocultar estados"
+              size="sm"
+            />
+            @if (!isClosed()) {
+              <div class="status-buttons">
+                @for (opt of tableStatusOptions; track opt.value) {
+                  <app-button
+                    variant="ghost"
+                    size="xsm"
+                    [class.active]="tableStatus() === opt.value"
+                    (clicked)="changeTableStatus(opt.value)"
+                  >
+                    {{ opt.label }}
+                  </app-button>
+                }
+              </div>
+            }
+          </div>
+
+          <!-- Secondary actions (Cerrar mesa moved to sticky header) -->
           @if (!isClosed()) {
             <div class="summary-actions">
               <app-button
@@ -93,33 +133,6 @@
                 <app-icon slot="icon" name="user-plus" [size]="14"></app-icon>
                 {{ customerName() ? 'Cambiar cliente' : 'Asignar cliente' }}
               </app-button>
-
-              <app-button
-                variant="outline-danger"
-                size="sm"
-                [loading]="isClosing()"
-                (clicked)="closeSession()"
-              >
-                <app-icon slot="icon" name="lock" [size]="14"></app-icon>
-                Cerrar mesa
-              </app-button>
-            </div>
-
-            <!-- Change table status -->
-            <div class="status-group">
-              <span class="group-label">Estado de la mesa</span>
-              <div class="status-buttons">
-                @for (opt of tableStatusOptions; track opt.value) {
-                  <app-button
-                    variant="ghost"
-                    size="xsm"
-                    [class.active]="session()?.table?.status === opt.value"
-                    (clicked)="changeTableStatus(opt.value)"
-                  >
-                    {{ opt.label }}
-                  </app-button>
-                }
-              </div>
             </div>
           }
 
@@ -135,11 +148,21 @@
         </app-card>
 
         <!-- ── Items ────────────────────────────────────────────────── -->
-        <app-card
-          [title]="'Items (' + items().length + ')'"
-          class="md:col-span-2"
-          [responsive]="true"
-        >
+        <app-card class="md:col-span-2" [responsive]="true">
+          <!-- Card header: title + "Agregar items" (moved from sticky header) -->
+          <div slot="header" class="items-card-header">
+            <h3 class="items-card-title">Items ({{ items().length }})</h3>
+            <app-button
+              variant="primary"
+              size="sm"
+              [disabled]="isClosed()"
+              (clicked)="openAddItems()"
+            >
+              <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+              Agregar items
+            </app-button>
+          </div>
+
           @if (items().length === 0) {
             <div class="empty">
               <app-icon name="inbox" [size]="32"></app-icon>
