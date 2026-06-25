@@ -357,6 +357,7 @@ export class DashboardComponent {
   summary = signal<SalesSummary | null>(null);
   profitLoss = signal<ProfitLossSummary | null>(null);
   trends = signal<SalesTrend[]>([]);
+  trendGranularity = signal<'hour' | 'day'>('day');
   channels = signal<SalesByChannel[]>([]);
   lowStockCount = signal(0);
   outOfStockCount = signal(0);
@@ -447,9 +448,12 @@ export class DashboardComponent {
         error: () => { /* ganancias/gastos no críticos para el resto del dashboard */ },
       });
 
-    // 2. Sales trends → trend chart
+    // 2. Sales trends → trend chart (hourly when viewing "today", else daily)
+    const trendGranularity: 'hour' | 'day' =
+      this.selectedPreset() === 'today' ? 'hour' : 'day';
+    this.trendGranularity.set(trendGranularity);
     this.analyticsService
-      .getSalesTrends({ ...query, granularity: 'day' })
+      .getSalesTrends({ ...query, granularity: trendGranularity })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -512,7 +516,7 @@ export class DashboardComponent {
     const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
 
-    const labels = trends.map((t) => formatChartPeriod(t.period, 'day'));
+    const labels = trends.map((t) => formatChartPeriod(t.period, this.trendGranularity()));
     const revenues = trends.map((t) => t.revenue);
     const orders = trends.map((t) => t.orders);
 
