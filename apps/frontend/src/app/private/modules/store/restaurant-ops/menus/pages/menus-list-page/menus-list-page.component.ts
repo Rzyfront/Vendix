@@ -278,31 +278,10 @@ export class MenusListPageComponent implements OnInit {
     }
   }
 
-  async createMenu(): Promise<void> {
-    const name = await this.dialogService.prompt({
-      title: 'Nueva carta',
-      message: 'Nombre de la nueva carta',
-      placeholder: 'Ej: Carta principal',
-      confirmText: 'Crear',
-    });
-    if (!name || !name.trim()) return;
-    this.menusService
-      .create({ name: name.trim(), is_active: true })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (created) => {
-          this.toastService.success('Carta creada');
-          this.router.navigate([
-            '/admin/restaurant-ops/menus',
-            created.id,
-            'edit',
-          ]);
-        },
-        error: (e: unknown) =>
-          this.toastService.error(
-            typeof e === 'string' ? e : 'Error al crear la carta',
-          ),
-      });
+  createMenu(): void {
+    // Página de creación completa: el builder en modo `new` pide el nombre y
+    // luego permite construir secciones, platos y ventanas horarias.
+    this.router.navigate(['/admin/restaurant-ops/menus/new']);
   }
 
   editMenu(menu: Menu): void {
