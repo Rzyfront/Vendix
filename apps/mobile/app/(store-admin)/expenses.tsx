@@ -15,10 +15,9 @@ import { getNextPageParam } from '@/core/api/pagination';
 import type {
   Expense,
   ExpenseCategory,
+  ExpenseState,
   CreateExpenseDto,
 } from '@/features/store/types';
-
-type ExpenseState = Expense['state'];
 
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
@@ -27,11 +26,16 @@ import { Badge } from '@/shared/components/badge/badge';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
-import { ListItem } from '@/shared/components/list-item/list-item';
 import { Button } from '@/shared/components/button/button';
 import { Input } from '@/shared/components/input/input';
 import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
 import { Modal } from '@/shared/components/modal/modal';
+import {
+  OptionsDropdown,
+  type FilterConfig,
+  type DropdownAction,
+  type FilterValues,
+} from '@/shared/components/options-dropdown/options-dropdown';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { formatDate } from '@/shared/utils/date';
@@ -55,14 +59,31 @@ const STATE_LABELS: Record<ExpenseState, string> = {
   refunded: 'Reembolsado',
 };
 
-type FilterChip = { label: string; value: ExpenseState | 'all' };
+// ─────────────────────────────────────────────────────────────────────────────
+// Filtros — paridad con web (expenses-list.component.html → app-options-dropdown)
+// Web tiene: Estado (single-select). Mantenemos solo Estado en mobile.
+// ─────────────────────────────────────────────────────────────────────────────
 
-const FILTER_CHIPS: FilterChip[] = [
-  { label: 'Todas', value: 'all' },
-  { label: 'Pendientes', value: 'pending' },
-  { label: 'Aprobados', value: 'approved' },
-  { label: 'Pagadas', value: 'paid' },
-  { label: 'Rechazadas', value: 'rejected' },
+const STATE_FILTER_OPTIONS = [
+  { value: '', label: 'Todos los estados' },
+  { value: 'pending', label: 'Pendientes' },
+  { value: 'approved', label: 'Aprobados' },
+  { value: 'paid', label: 'Pagados' },
+  { value: 'rejected', label: 'Rechazados' },
+];
+
+const EXPENSE_FILTERS: FilterConfig[] = [
+  {
+    key: 'state',
+    label: 'Estado',
+    type: 'select',
+    options: STATE_FILTER_OPTIONS,
+  },
+];
+
+const EXPENSE_ACTIONS: DropdownAction[] = [
+  { label: 'Nuevo Gasto', icon: 'plus', action: 'create_expense', variant: 'primary' },
+  { label: 'Actualizar', icon: 'refresh-cw', action: 'refresh', variant: 'outline' },
 ];
 
 const ExpenseCard = ({ expense, onPress }: { expense: Expense; onPress: () => void }) => (
@@ -92,10 +113,14 @@ const ExpenseCard = ({ expense, onPress }: { expense: Expense; onPress: () => vo
 export default function ExpensesScreen() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState<ExpenseState | 'all'>('all');
+  const [filterValues, setFilterValues] = useState<FilterValues>({ state: null });
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [categoriesSheetVisible, setCategoriesSheetVisible] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+
+  const activeState = typeof filterValues.state === 'string' && filterValues.state !== ''
+    ? (filterValues.state as ExpenseState) : undefined;
+  const hasActiveFilters = !!activeState || !!search.trim();
 
   const { data: stats } = useQuery({
     queryKey: ['expense-stats'],
@@ -111,19 +136,20 @@ export default function ExpensesScreen() {
     refetch,
     isRefetching,
   } = useInfiniteQuery({
-    queryKey: ['expenses', search, activeFilter],
+    queryKey: ['expenses', search, activeState],
     queryFn: ({ pageParam = 1 }) =>
       ExpenseService.list({
         page: pageParam,
         limit: 20,
         search: search || undefined,
-        state: activeFilter === 'all' ? undefined : activeFilter,
+        state: activeState,
       }),
     getNextPageParam,
     initialPageParam: 1,
   });
 
   const expenses = data?.pages.flatMap((p) => p.data) ?? [];
+  const totalItems = data?.pages[0]?.meta?.total ?? expenses.length;
 
   const { data: categories = [] } = useQuery({
     queryKey: ['expense-categories'],
@@ -250,11 +276,28 @@ export default function ExpensesScreen() {
     refetch();
   }, [refetch]);
 
+  const handleFilterChange = useCallback((values: FilterValues) => {
+    setFilterValues(values);
+  }, []);
+
+  const handleClearAllFilters = useCallback(() => {
+    setFilterValues({ state: null });
+    setSearch('');
+  }, []);
+
+  const handleActionClick = useCallback((actionKey: string) => {
+    if (actionKey === 'create_expense') {
+      openCreate();
+    } else if (actionKey === 'refresh') {
+      handleRefresh();
+    }
+  }, [handleRefresh]);
+
   const renderItem = useCallback(
     ({ item }: { item: Expense }) => (
       <ExpenseCard expense={item} onPress={() => openEdit(item)} />
     ),
-    [openEdit],
+    [], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const renderFooter = useCallback(() => {
@@ -272,22 +315,46 @@ export default function ExpensesScreen() {
         renderItem={renderItem}
         ListHeaderComponent={
           <View>
+            {/* Stats — paridad con web expenses-stats.component.html (4 stats) */}
             <StatsGrid
               style={styles.statsWrap}
               items={[
                 {
                   label: 'Total Gastos',
                   value: formatCurrency(stats?.totalAmount ?? 0),
-                  icon: <Icon name="dollar-sign" size={14} color={colorScales.green[600]} />,
+                  icon: <Icon name="dollar-sign" size={14} color={colorScales.blue[600]} />,
+                  iconBg: colorScales.blue[100],
+                  iconColor: colorScales.blue[600],
+                  description: `${stats?.total ?? 0} registros`,
                 },
                 {
                   label: 'Pendientes',
                   value: stats?.pending ?? 0,
                   icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
+                  iconBg: colorScales.amber[100],
+                  iconColor: colorScales.amber[600],
+                  description: 'Por aprobar',
+                },
+                {
+                  label: 'Aprobados',
+                  value: stats?.approved ?? 0,
+                  icon: <Icon name="check-circle" size={14} color={colorScales.green[600]} />,
+                  iconBg: colorScales.green[100],
+                  iconColor: colorScales.green[600],
+                  description: 'Listos para pago',
+                },
+                {
+                  label: 'Pagados',
+                  value: stats?.paid ?? 0,
+                  icon: <Icon name="wallet" size={14} color={colorScales.purple[600]} />,
+                  iconBg: colorScales.purple[100],
+                  iconColor: colorScales.purple[600],
+                  description: 'Gastos liquidados',
                 },
               ]}
             />
 
+            {/* Search + OptionsDropdown + Categorías — paridad web */}
             <View style={styles.searchRow}>
               <View style={styles.searchFlex}>
                 <SearchBar
@@ -297,34 +364,52 @@ export default function ExpensesScreen() {
                   placeholder="Buscar gastos..."
                 />
               </View>
-              <Pressable style={styles.categoryButton} onPress={() => setCategoriesSheetVisible(true)}>
-                <Icon name="tag" size={20} color={colorScales.gray[600]} />
+
+              <OptionsDropdown
+                filters={EXPENSE_FILTERS}
+                actions={EXPENSE_ACTIONS}
+                filterValues={filterValues}
+                isLoading={isLoading}
+                onFilterChange={handleFilterChange}
+                onActionClick={handleActionClick}
+                onClearAllFilters={handleClearAllFilters}
+              />
+
+              {/* Botón categorías — feature única de expenses (no en orders) */}
+              <Pressable
+                style={({ pressed }) => [styles.categoryButton, pressed && { opacity: 0.7 }]}
+                onPress={() => setCategoriesSheetVisible(true)}
+                hitSlop={4}
+              >
+                <Icon name="tag" size={18} color={colorScales.gray[600]} />
               </Pressable>
             </View>
 
-            <View style={styles.filterRow}>
-              {FILTER_CHIPS.map((chip) => (
-                <Pressable
-                  key={chip.value}
-                  onPress={() => setActiveFilter(chip.value)}
-                  style={[
-                    styles.chip,
-                    activeFilter === chip.value ? styles.chipActive : styles.chipInactive,
-                  ]}
-                >
-                  <ListItem title={chip.label} />
-                </Pressable>
-              ))}
-            </View>
+            {/* Title count — paridad con expenses-list.component.html */}
+            <Text style={styles.titleCount}>
+              Gastos ({totalItems})
+            </Text>
           </View>
         }
         ListEmptyComponent={
           isLoading ? (
-            <Spinner />
+            <View style={styles.loadingContainer}>
+              <Spinner />
+              <Text style={styles.loadingText}>Cargando gastos...</Text>
+            </View>
           ) : (
             <EmptyState
-              title="Sin gastos"
-              description="No se encontraron gastos"
+              icon="coins"
+              title={hasActiveFilters ? 'Sin gastos con esos filtros' : 'Sin gastos'}
+              description={
+                hasActiveFilters
+                  ? 'Intenta ajustar los filtros para encontrar más resultados'
+                  : 'Aún no hay gastos registrados'
+              }
+              actionLabel={!hasActiveFilters ? 'Crear nuevo gasto' : undefined}
+              onAction={!hasActiveFilters ? openCreate : undefined}
+              secondaryActionLabel="Actualizar"
+              onSecondaryAction={handleRefresh}
             />
           )
         }
@@ -470,7 +555,7 @@ export default function ExpensesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colorScales.gray[50],
+    backgroundColor: colors.background,
   },
   flex1: {
     flex: 1,
@@ -515,40 +600,45 @@ const styles = StyleSheet.create({
   statsWrap: {
     paddingHorizontal: spacing[4],
   },
+  // Search row — paridad con expenses-list.component.html
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing[4],
-    marginBottom: spacing[3],
+    marginBottom: spacing[2],
     gap: spacing[2],
   },
   searchFlex: {
     flex: 1,
   },
   categoryButton: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colorScales.gray[100],
+    backgroundColor: colors.card,
     borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
   },
-  filterRow: {
-    flexDirection: 'row',
-    gap: spacing[2],
+  // Title count — paridad web línea 13
+  titleCount: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[600],
+    letterSpacing: 0.3,
     paddingHorizontal: spacing[4],
-    marginBottom: spacing[3],
+    marginBottom: spacing[2],
   },
-  chip: {
-    paddingHorizontal: spacing[3],
-    paddingVertical: 6,
-    borderRadius: borderRadius.full,
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing[12],
+    gap: spacing[2],
   },
-  chipActive: {
-    backgroundColor: colors.primary,
-  },
-  chipInactive: {
-    backgroundColor: colorScales.gray[200],
+  loadingText: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
   },
   listContent: {
     paddingBottom: spacing[6],
