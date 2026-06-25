@@ -55,7 +55,7 @@
                 <dt>Estado de la orden</dt>
                 <dd>
                   <app-badge [variant]="isClosed() ? 'neutral' : 'primary'">
-                    {{ orderState() }}
+                    {{ orderStateLabel() }}
                   </app-badge>
                 </dd>
               </div>
@@ -86,7 +86,11 @@
             </dl>
           </div>
 
-          <!-- Estado de la mesa: collapsed timeline (shared app-timeline) -->
+          <!--
+            Estado de la mesa: the collapsed timeline is the SOLE display of
+            the current status; the "Cambiar estado" selector below is the
+            SOLE control to change it (deduped — no redundant button row).
+          -->
           <div class="status-group">
             <span class="group-label">Estado de la mesa</span>
             <app-timeline
@@ -97,18 +101,13 @@
               size="sm"
             />
             @if (!isClosed()) {
-              <div class="status-buttons">
-                @for (opt of tableStatusOptions; track opt.value) {
-                  <app-button
-                    variant="ghost"
-                    size="xsm"
-                    [class.active]="tableStatus() === opt.value"
-                    (clicked)="changeTableStatus(opt.value)"
-                  >
-                    {{ opt.label }}
-                  </app-button>
-                }
-              </div>
+              <app-selector
+                class="status-selector"
+                size="sm"
+                placeholder="Cambiar estado de la mesa"
+                [options]="tableStatusOptions"
+                (valueChange)="onTableStatusChange($event)"
+              />
             }
           </div>
 
@@ -165,71 +164,117 @@
 
           @if (items().length === 0) {
             <div class="empty">
-              <app-icon name="inbox" [size]="32"></app-icon>
-              <p>No hay items en esta cuenta todavía.</p>
+              <div class="empty-icon">
+                <app-icon name="inbox" [size]="28"></app-icon>
+              </div>
+              <p class="empty-title">Aún no hay platos en la cuenta</p>
+              <p class="empty-sub">
+                Agrega items para empezar a tomar el pedido de esta mesa.
+              </p>
               @if (!isClosed()) {
                 <app-button variant="primary" (clicked)="openAddItems()">
-                  Agregar el primer item
+                  <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+                  Agregar el primer plato
                 </app-button>
               }
             </div>
           } @else {
-            @if (!isClosed()) {
-              <div class="item-toolbar">
-                <app-button
-                  variant="ghost"
-                  size="sm"
-                  (clicked)="selectAllUnfired()"
-                >
-                  Seleccionar sin enviar
-                </app-button>
-                <app-button
-                  variant="ghost"
-                  size="sm"
-                  (clicked)="clearSelection()"
-                  [disabled]="selectedItemIds().size === 0"
-                >
-                  Limpiar selección
-                </app-button>
-                <app-button
-                  variant="secondary"
-                  size="sm"
-                  [loading]="isFiring() && firingItemId() === null"
-                  [disabled]="!hasUnfiredItems()"
-                  (clicked)="fireSelected()"
-                >
-                  <app-icon slot="icon" name="flame" [size]="14"></app-icon>
-                  Enviar seleccionados
-                </app-button>
+            <!--
+              Batch fire (secondary, discreet). Per-dish fire on each row
+              covers the common case; this only appears while there are
+              pending dishes. Toggling on reveals checkboxes + a batch CTA.
+            -->
+            @if (!isClosed() && pendingCount() > 0) {
+              <div class="batch-bar" [class.is-active]="selectionMode()">
+                @if (!selectionMode()) {
+                  <span class="batch-hint">
+                    {{ pendingCount() }} plato(s) sin enviar
+                  </span>
+                  <button
+                    type="button"
+                    class="batch-toggle"
+                    (click)="toggleSelectionMode()"
+                  >
+                    <app-icon name="check-square" [size]="14"></app-icon>
+                    Enviar varios a la vez
+                  </button>
+                } @else {
+                  <label class="batch-select-all">
+                    <app-toggle
+                      [checked]="allPendingSelected()"
+                      ariaLabel="Seleccionar todos los platos pendientes"
+                      (changed)="toggleSelectAllPending()"
+                    ></app-toggle>
+                    <span>Seleccionar todos los pendientes</span>
+                  </label>
+
+                  <div class="batch-actions">
+                    <span class="batch-count">
+                      {{ selectedCount() }} seleccionado(s)
+                    </span>
+                    <app-button
+                      variant="secondary"
+                      size="sm"
+                      [loading]="isFiring() && firingItemId() === null"
+                      [disabled]="selectedCount() === 0"
+                      (clicked)="fireSelected()"
+                    >
+                      <app-icon slot="icon" name="flame" [size]="14"></app-icon>
+                      Enviar {{ selectedCount() }} a cocina
+                    </app-button>
+                    <app-button
+                      variant="ghost"
+                      size="sm"
+                      (clicked)="exitSelectionMode()"
+                    >
+                      Cancelar
+                    </app-button>
+                  </div>
+                }
               </div>
             }
 
-            <div class="item-list">
+            <ul class="item-list" role="list">
               @for (item of items(); track trackById($index, item)) {
-                <div
+                <li
                   class="item-row"
                   [class.is-selected]="isSelected(item.id)"
                   [class.is-fired]="isItemFired(item)"
+                  [class.selectable]="
+                    selectionMode() && !isClosed() && !isItemFired(item)
+                  "
+                  (click)="
+                    selectionMode() && !isItemFired(item)
+                      ? toggleItemSelection(item.id)
+                      : null
+                  "
                 >
-                  <!-- Selection toggle (only for unfired, when open) -->
-                  @if (!isClosed() && !isItemFired(item)) {
-                    <div class="item-toggle">
+                  <!-- Batch checkbox (only in selection mode, for pending) -->
+                  @if (selectionMode() && !isClosed() && !isItemFired(item)) {
+                    <div
+                      class="item-check"
+                      (click)="$event.stopPropagation()"
+                    >
                       <app-toggle
                         [checked]="isSelected(item.id)"
                         [ariaLabel]="'Seleccionar ' + item.product_name"
                         (changed)="toggleItemSelection(item.id)"
                       ></app-toggle>
                     </div>
-                  } @else {
-                    <div class="item-toggle-placeholder"></div>
                   }
 
-                  <div class="item-info">
-                    <span class="name">{{ item.product_name }}</span>
-                    <span class="qty">× {{ item.quantity }}</span>
+                  <!-- Quantity chip -->
+                  <div class="item-qty" aria-hidden="true">
+                    {{ item.quantity }}×
                   </div>
 
-                  <!-- Kitchen state badge or "no disparado" -->
+                  <!-- Name + price -->
+                  <div class="item-main">
+                    <span class="name">{{ item.product_name }}</span>
+                    <span class="price">{{ +item.total_price | currency }}</span>
+                  </div>
+
+                  <!-- Kitchen status -->
                   <div class="item-status">
                     @if (kitchenStatusFor(item); as status) {
                       <app-badge [variant]="kitchenBadgeVariant(status)">
@@ -237,17 +282,16 @@
                         {{ kitchenStatusLabel(status) }}
                       </app-badge>
                     } @else {
-                      <app-badge variant="neutral">Sin enviar</app-badge>
+                      <span class="pending-tag">
+                        <app-icon name="clock" [size]="12"></app-icon>
+                        Sin enviar
+                      </span>
                     }
                   </div>
 
-                  <div class="item-price">
-                    {{ +item.total_price | currency }}
-                  </div>
-
-                  <!-- Per-dish action -->
-                  @if (!isClosed()) {
-                    <div class="item-action">
+                  <!-- Per-dish primary action (hidden in selection mode) -->
+                  @if (!isClosed() && !selectionMode()) {
+                    <div class="item-action" (click)="$event.stopPropagation()">
                       @if (!isItemFired(item)) {
                         <app-button
                           variant="secondary"
@@ -279,12 +323,17 @@
                           ></app-icon>
                           Marcar entregado
                         </app-button>
+                      } @else {
+                        <span class="item-done">
+                          <app-icon name="circle-check" [size]="14"></app-icon>
+                          Entregado
+                        </span>
                       }
                     </div>
                   }
-                </div>
+                </li>
               }
-            </div>
+            </ul>
           }
         </app-card>
       </div>

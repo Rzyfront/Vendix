@@ -24,6 +24,8 @@ import {
   SpinnerComponent,
   DialogService,
   TimelineComponent,
+  SelectorComponent,
+  SelectorOption,
 } from '../../../../../../../shared/components/index';
 import {
   TimelineStep,
@@ -80,6 +82,7 @@ import { AssignCustomerModalComponent } from '../../components/assign-customer-m
     ToggleComponent,
     SpinnerComponent,
     TimelineComponent,
+    SelectorComponent,
     CurrencyPipe,
     AddItemsModalComponent,
     SplitOrderModalComponent,
@@ -163,8 +166,49 @@ export class TableSessionPageComponent implements OnInit {
     () => this.settingsFacade.settings()?.restaurant?.enable_table_checkout === true,
   );
 
-  /** Order state is a payment-status proxy (draft = unpaid, etc.). */
-  readonly orderState = computed(() => this.session()?.order?.state ?? '—');
+  /** Raw order state from the backend (English enum value). */
+  readonly orderState = computed(() => this.session()?.order?.state ?? null);
+
+  /**
+   * Spanish labels for order states. Local map (the orders module util
+   * `OrderFormatUtils.formatOrderStatus` is mostly English and coupled to
+   * the orders `OrderState` enum, so a complete local map is cleaner and
+   * stays in scope). Covers the lifecycle states a table draft order can
+   * surface. Unknown values fall back to the raw value capitalized.
+   */
+  private readonly ORDER_STATE_LABELS_ES: Record<string, string> = {
+    draft: 'Borrador',
+    created: 'Confirmada',
+    confirmed: 'Confirmada',
+    pending: 'Pendiente',
+    pending_payment: 'Pago pendiente',
+    processing: 'En proceso',
+    shipped: 'Enviada',
+    delivered: 'Entregada',
+    completed: 'Completada',
+    finished: 'Completada',
+    cancelled: 'Cancelada',
+    refunded: 'Reembolsada',
+    partially_refunded: 'Reembolso parcial',
+  };
+
+  /** Order state translated to Spanish for display. */
+  readonly orderStateLabel = computed(() => {
+    const state = this.orderState();
+    if (!state) return '—';
+    return (
+      this.ORDER_STATE_LABELS_ES[state] ??
+      state.charAt(0).toUpperCase() + state.slice(1)
+    );
+  });
+
+  /** Count of currently selected (pending) items for the batch toolbar. */
+  readonly selectedCount = computed(() => this.selectedItemIds().size);
+
+  /** Number of items still pending fire-to-kitchen. */
+  readonly pendingCount = computed(
+    () => this.items().filter((it) => !this.isItemFired(it)).length,
+  );
 
   /** Current table status (drives the collapsed status timeline). */
   readonly tableStatus = computed<TableStatus | null>(
@@ -174,7 +218,7 @@ export class TableSessionPageComponent implements OnInit {
   /**
    * Table status as a collapsed-timeline (reuses the shared `app-timeline`,
    * same component the order-details page uses). The lifecycle is presented
-   * in the natural order available → occupied → reserved → cleaning; the
+   * in the natural order available → reserved → occupied → cleaning; the
    * current status is `current`, prior ones `completed`, later ones
    * `upcoming`. `cleaning` is flagged as a `terminal/warning` step so it
    * reads as the closing/turnover stage.
@@ -183,8 +227,8 @@ export class TableSessionPageComponent implements OnInit {
     const current = this.tableStatus();
     const order: TableStatus[] = [
       'available',
-      'occupied',
       'reserved',
+      'occupied',
       'cleaning',
     ];
     const currentIdx = current ? order.indexOf(current) : -1;
@@ -391,7 +435,32 @@ export class TableSessionPageComponent implements OnInit {
     return (active ?? rows[0]).kitchen_ticket_id;
   }
 
-  // ── Selection helpers ──────────────────────────────────────────────────
+  // ── Selection helpers (batch fire mode) ────────────────────────────────
+
+  /**
+   * Batch-selection mode. Per-dish fire (point 1) covers the common case;
+   * the batch mode is a discreet secondary affordance, only enabled while
+   * there are pending items. Toggling off clears the selection.
+   */
+  readonly selectionMode = signal(false);
+
+  /** True when all pending items are currently selected. */
+  readonly allPendingSelected = computed(() => {
+    const pending = this.pendingCount();
+    return pending > 0 && this.selectedItemIds().size === pending;
+  });
+
+  toggleSelectionMode(): void {
+    this.selectionMode.update((on) => {
+      if (on) this.selectedItemIds.set(new Set());
+      return !on;
+    });
+  }
+
+  exitSelectionMode(): void {
+    this.selectionMode.set(false);
+    this.selectedItemIds.set(new Set());
+  }
 
   toggleItemSelection(itemId: number): void {
     const item = this.items().find((it) => it.id === itemId);
@@ -408,11 +477,16 @@ export class TableSessionPageComponent implements OnInit {
     return this.selectedItemIds().has(itemId);
   }
 
-  selectAllUnfired(): void {
-    const unfired = this.items()
+  /** Toggle "select all pending": selects all if not all selected, else clears. */
+  toggleSelectAllPending(): void {
+    if (this.allPendingSelected()) {
+      this.selectedItemIds.set(new Set());
+      return;
+    }
+    const pending = this.items()
       .filter((it) => !this.isItemFired(it))
       .map((it) => it.id);
-    this.selectedItemIds.set(new Set(unfired));
+    this.selectedItemIds.set(new Set(pending));
   }
 
   clearSelection(): void {
@@ -568,7 +642,7 @@ export class TableSessionPageComponent implements OnInit {
         next: (res) => {
           this.isFiring.set(false);
           this.firingItemId.set(null);
-          this.clearSelection();
+          this.exitSelectionMode();
           this.toastService.success(
             `Enviado a cocina — ticket #${res.kitchen_ticket_id}`,
           );
@@ -623,12 +697,25 @@ export class TableSessionPageComponent implements OnInit {
 
   // ── Change table status ────────────────────────────────────────────────
 
-  readonly tableStatusOptions: { value: TableStatus; label: string }[] = [
+  /**
+   * Options for the single "Cambiar estado" selector. The timeline is the
+   * sole DISPLAY of the current status; this selector is the sole CONTROL
+   * to change it (no more redundant 4-button row).
+   */
+  readonly tableStatusOptions: SelectorOption[] = [
     { value: 'available', label: TablesService.statusLabel('available') },
-    { value: 'occupied', label: TablesService.statusLabel('occupied') },
     { value: 'reserved', label: TablesService.statusLabel('reserved') },
+    { value: 'occupied', label: TablesService.statusLabel('occupied') },
     { value: 'cleaning', label: TablesService.statusLabel('cleaning') },
   ];
+
+  /** Selector handler — the `app-selector` emits the chosen status value. */
+  onTableStatusChange(value: string | number | null): void {
+    if (value == null) return;
+    const status = value as TableStatus;
+    if (status === this.tableStatus()) return; // no-op if unchanged
+    this.changeTableStatus(status);
+  }
 
   changeTableStatus(status: TableStatus): void {
     const tableId = this.session()?.table_id;
