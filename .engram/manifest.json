@@ -288,6 +288,22 @@
       "sessions": 6,
       "memories": 20,
       "prompts": 3
+    },
+    {
+      "id": "ddbb95cd",
+      "created_by": "rzy",
+      "created_at": "2026-06-25T16:03:36Z",
+      "sessions": 3,
+      "memories": 1,
+      "prompts": 0
+    },
+    {
+      "id": "bf510198",
+      "created_by": "rzy",
+      "created_at": "2026-06-25T16:20:59Z",
+      "sessions": 0,
+      "memories": 2,
+      "prompts": 0
     }
   ]
 }

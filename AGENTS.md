@@ -98,7 +98,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Checking current development app status | `buildcheck-dev` |
 | Checking if a Vendix Linear issue already exists | `linear-issues` |
 | Checking production resource locations, IPs, distributions, buckets, ECR, RDS, Route53, or Secrets Manager metadata | `vendix-cloud-operations` |
+| Choosing agent-browser for frontend E2E verification in a plan step | `how-to-plan` |
 | Choosing between viable architectural approaches | `how-to-plan` |
+| Choosing test credentials from seeds or asking the user | `how-to-test` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
 | Complex plans requiring delegated agent work | `agent-teams` |
 | Computing partner margin, fixed surcharge, or effective price | `vendix-saas-billing` |
@@ -159,6 +161,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Displaying or formatting dates in frontend | `vendix-date-timezone` |
 | Displaying or formatting money/currency values | `vendix-currency-formatting` |
 | Distinguishing panel_ui visibility from backend authorization | `vendix-permissions` |
+| Driving a browser to confirm UI behavior with agent-browser | `how-to-test` |
 | EC2 maintenance, deployment disk issues, or Docker layer/pull failures | `vendix-ec2-maintenance` |
 | Editing @Permissions decorators | `vendix-permissions` |
 | Editing Schema | `vendix-prisma-schema` |
@@ -195,6 +198,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing stats cards or dashboard metrics with mobile scroll | `vendix-frontend-stats-cards` |
 | Implementing sticky headers or refactoring module headers | `vendix-frontend-sticky-header` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
+| Installing or configuring agent-browser (CLI or MCP) | `how-to-test` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Invalidating the sub:features:{storeId} Redis cache | `vendix-subscription-gate` |
 | Linking a PR to its Linear issue when opening a PR to dev | `git-workflow` |
@@ -223,6 +227,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Querying by date ranges in backend | `vendix-date-timezone` |
 | Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
 | Re-developing solutions identified by a code review below 80% | `pr-code-review` |
+| Reaching the app via the local vhost vendix.com instead of localhost | `how-to-test` |
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
@@ -231,6 +236,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
 | Running an automated code review (pr-code-review) on a PR before merging | `git-workflow` |
+| Running an end-to-end frontend flow in a browser | `how-to-test` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |
@@ -263,6 +269,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Using toSignal() in facades — validating initialValue presence | `vendix-zoneless-signals` |
 | Validating variant availability in ecommerce, POS, cart, checkout, reservations, or catalog | `vendix-product-variants` |
 | Verifying Build | `buildcheck-dev` |
+| Verifying an API endpoint or auth boundary with curl | `how-to-test` |
 | Verifying plan completeness before approval | `how-to-plan` |
 | When adding icons to components, buttons, menus, or using <app-icon> | `vendix-frontend-icons` |
 | When editing product schemas, pricing logic, or advanced product forms | `vendix-product-pricing` |
