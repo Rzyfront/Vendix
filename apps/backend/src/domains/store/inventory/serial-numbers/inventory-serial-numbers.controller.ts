@@ -21,6 +21,7 @@ import {
   UpdateInventorySerialNumberDto,
   BulkBackfillSerialNumbersDto,
   PatchSerialNumberDto,
+  SummarySerialNumbersDto,
 } from '../dto/create-inventory-serial-number.dto';
 import { ApiTags, ApiOperation, ApiParam } from '@nestjs/swagger';
 import { serial_status_enum } from '@prisma/client';
@@ -62,6 +63,20 @@ export class InventorySerialNumbersController {
     return this.responseService.success(
       data,
       'Seriales disponibles obtenidos exitosamente',
+    );
+  }
+
+  @Get('summary')
+  @Permissions('store:inventory:serial_numbers:read')
+  @ApiOperation({
+    summary:
+      'Serial pool summary: totals by status + warranty expired/expiring-soon',
+  })
+  async summary(@Query() query: SummarySerialNumbersDto) {
+    const data = await this.serialNumbersService.summary(query);
+    return this.responseService.success(
+      data,
+      'Resumen de seriales obtenido exitosamente',
     );
   }
 

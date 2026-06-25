@@ -10,7 +10,7 @@ import {
   ArrayMinSize,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { serial_status_enum } from '@prisma/client';
 
 /**
@@ -107,6 +107,17 @@ export class GetSerialNumbersDto {
   @IsEnum(serial_status_enum)
   status?: serial_status_enum;
 
+  // QUI-431 — warranty expiry range filter (inclusive). Either bound may be
+  // sent independently; the service builds `warranty_expiry: { gte?, lte? }`
+  // using only the provided keys.
+  @IsOptional()
+  @IsDateString()
+  warranty_expiry_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  warranty_expiry_to?: string;
+
   @IsOptional()
   @IsString()
   search?: string;
@@ -122,6 +133,23 @@ export class GetSerialNumbersDto {
   @Type(() => Number)
   @Min(1)
   limit?: number;
+}
+
+/**
+ * QUI-431 — Query for GET /store/inventory/serial-numbers/summary.
+ * Optional product/location narrowing; store scope is enforced by the scoped
+ * Prisma client (relational via inventory_locations.store_id).
+ */
+export class SummarySerialNumbersDto {
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  product_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  location_id?: number;
 }
 
 export class GetAvailableSerialNumbersDto {
@@ -210,4 +238,13 @@ export class PatchSerialNumberDto {
   @IsNumber()
   @Type(() => Number)
   cost?: number;
+
+  // QUI-431 — edit the warranty expiry. A date string sets it; an empty
+  // string or null clears it (warranty_expiry := NULL). The Transform coerces
+  // '' to null up front so @IsDateString (skipped by @IsOptional on null)
+  // does not reject the clear-intent payload; the service treats null as clear.
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? null : value))
+  @IsDateString()
+  warranty_expiry?: string | null;
 }

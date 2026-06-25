@@ -38,11 +38,6 @@ import {
   StickyHeaderActionButton,
   BadgeComponent,
   TooltipComponent,
-  ResponsiveDataViewComponent,
-  PaginationComponent,
-  TableColumn,
-  TableAction,
-  ItemListCardConfig,
 } from '../../../../../../shared/components';
 import {
   CurrencyPipe,
@@ -91,13 +86,12 @@ import {
 import { resolvePackSize } from '../../../../../../shared/services/pricing/packaging.util';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
-// QUI-431 — Embedded serial-number management (backfill over existing stock).
+// QUI-431 — Serial-number summary + full management modal.
 import {
   SerialNumbersService,
-  SerialNumber,
-  SerialNumberStatus,
+  SerialSummary,
 } from '../../../serial-numbers/services/serial-numbers.service';
-import { SerialBulkLoadModalComponent } from '../../../serial-numbers/components/serial-bulk-load-modal/serial-bulk-load-modal.component';
+import { ProductSerialsManagerModalComponent } from '../../../serial-numbers/components/product-serials-manager-modal/product-serials-manager-modal.component';
 
 interface VariantAttribute {
   name: string;
@@ -177,9 +171,7 @@ interface PriceTierOverrideRow {
     DatePipe,
     DecimalPipe,
     KeyValuePipe,
-    ResponsiveDataViewComponent,
-    PaginationComponent,
-    SerialBulkLoadModalComponent,
+    ProductSerialsManagerModalComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -1595,6 +1587,9 @@ export class ProductCreatePageComponent {
         if (product.has_multiple_price_tiers) {
           this.loadPriceTiersForProduct(id, product.enabled_price_tier_ids);
         }
+        // QUI-431 — resumen de seriales (solo productos serializados; el getter
+        // isSerialized lee el form ya parcheado arriba).
+        this.loadSerialSummary();
       },
       error: (error: any) => {
         console.error('Error loading product:', error);
@@ -4027,73 +4022,23 @@ export class ProductCreatePageComponent {
     this.generatedVariants = [...this.generatedVariants];
   }
 
-  // ─── QUI-431: Gestión embebida de números de serie (backfill) ───────────
+  // ─── QUI-431: Números de serie — resumen + gestor en modal LG ───────────
   //
-  // Solo aplica a productos serializados (requires_serial_numbers = true) y
-  // SOLO en modo edición (necesita productId + stock existente). Es BACKFILL:
-  // registra seriales sobre stock ya existente; NO altera inventario. La tabla
-  // y la carga operan por ubicación (location), por eso se ofrece un selector.
+  // La página solo muestra un RESUMEN compacto (contadores del pool) y un botón
+  // que abre el modal completo de gestión (app-product-serials-manager-modal).
+  // Solo aplica a productos serializados (requires_serial_numbers = true) y el
+  // resumen solo se carga en modo edición (necesita productId + stock).
 
-  /** Estado enum → etiqueta en español (espejo de la lista de seriales). */
-  private static readonly SERIAL_STATUS_LABELS: Record<
-    SerialNumberStatus,
-    string
-  > = {
-    in_stock: 'En stock',
-    reserved: 'Reservado',
-    sold: 'Vendido',
-    returned: 'Devuelto',
-    damaged: 'Dañado',
-    expired: 'Expirado',
-    in_transit: 'En tránsito',
-  };
+  /** Visibilidad del modal completo de gestión de seriales (zoneless model). */
+  readonly serialsManagerOpen = signal(false);
 
-  /** Mapa de color por estado (hex de 7 caracteres, exigido por badge custom). */
-  private static readonly SERIAL_STATUS_COLOR_MAP: Record<string, string> = {
-    in_stock: '#22c55e',
-    reserved: '#f59e0b',
-    sold: '#3b82f6',
-    returned: '#a855f7',
-    damaged: '#ef4444',
-    expired: '#6b7280',
-    in_transit: '#06b6d4',
-  };
-
-  /** Opciones del selector de estado dentro del modal de edición. */
-  readonly serialStatusOptions: SelectorOption[] = (
-    Object.keys(
-      ProductCreatePageComponent.SERIAL_STATUS_LABELS,
-    ) as SerialNumberStatus[]
-  ).map((value) => ({
-    value,
-    label: ProductCreatePageComponent.SERIAL_STATUS_LABELS[value],
-  }));
-
-  // Estado de la sección (todo signal-based — zoneless)
-  readonly serialsSectionExpanded = signal(false);
-  readonly serialsLoaded = signal(false);
-  readonly serialsLoading = signal(false);
-  readonly productSerials = signal<SerialNumber[]>([]);
-  readonly serialsTotal = signal(0);
-  readonly serialsPage = signal(1);
-  readonly serialsLimit = signal(10);
-  readonly serialsStatusFilter = signal<'all' | SerialNumberStatus>('all');
-  readonly serialsSearch = signal('');
-  readonly selectedSerialLocationId = signal<number | null>(null);
-  readonly bulkModalOpen = signal(false);
-
-  // Estado del modal de edición de un serial individual
-  readonly serialEditOpen = signal(false);
-  readonly editingSerial = signal<SerialNumber | null>(null);
-  readonly editSerialNumber = signal('');
-  readonly editSerialNotes = signal('');
-  readonly editSerialCost = signal<number | null>(null);
-  readonly editSerialStatus = signal<SerialNumberStatus>('in_stock');
-  readonly serialEditSaving = signal(false);
-
-  readonly serialsTotalPages = computed(
-    () => Math.ceil(this.serialsTotal() / this.serialsLimit()) || 1,
-  );
+  /** Contadores del pool de seriales del producto (resumen compacto). */
+  readonly serialSummary = signal<SerialSummary>({
+    total: 0,
+    by_status: {},
+    warranty_expired: 0,
+    warranty_expiring_soon: 0,
+  });
 
   /** True cuando el toggle requires_serial_numbers está activo. */
   get isSerialized(): boolean {
@@ -4101,331 +4046,36 @@ export class ProductCreatePageComponent {
   }
 
   /**
-   * Niveles de stock del producto cargado (fuente de las ubicaciones). El
-   * detalle del producto trae product.stock_levels con location_id +
-   * inventory_locations.name + quantity_available.
+   * Conteo de seriales por estado del resumen, con fallback a 0 cuando el
+   * backend omite un estado sin filas. (Encapsula el acceso al Record para
+   * evitar el `?? 0` redundante en plantilla que el compilador AOT marca.)
    */
-  readonly serialLocationOptions = computed<SelectorOption[]>(() => {
-    const levels = this.product?.stock_levels ?? [];
-    return levels.map((sl) => ({
-      value: sl.location_id,
-      label: sl.inventory_locations?.name
-        ? `${sl.inventory_locations.name} (${sl.quantity_on_hand ?? 0} u.)`
-        : `Ubicación ${sl.location_id}`,
-    }));
-  });
+  serialCountByStatus(status: string): number {
+    return this.serialSummary().by_status[status] ?? 0;
+  }
 
   /**
-   * Unidades físicas (on_hand) de la ubicación seleccionada: sirve de maxCount
-   * para el backfill. El backend valida la paridad real contra quantity_on_hand.
+   * Carga el resumen de seriales del producto. Solo aplica a productos
+   * serializados en modo edición (requiere productId). No-op en creación o si
+   * el producto no es serializado; el modal (changed) la vuelve a invocar tras
+   * cualquier alta/edición/eliminación/carga masiva exitosa.
    */
-  readonly selectedLocationStock = computed<number | null>(() => {
-    const locId = this.selectedSerialLocationId();
-    if (locId == null) return null;
-    const level = (this.product?.stock_levels ?? []).find(
-      (sl) => sl.location_id === locId,
-    );
-    return level ? (level.quantity_on_hand ?? 0) : null;
-  });
-
-  /** Columnas de la tabla de seriales (desktop). */
-  readonly serialTableColumns: TableColumn[] = [
-    { key: 'serial_number', label: 'Serial', sortable: false, priority: 1 },
-    {
-      key: 'status',
-      label: 'Estado',
-      priority: 1,
-      transform: (value: SerialNumberStatus | string) =>
-        ProductCreatePageComponent.SERIAL_STATUS_LABELS[
-          value as SerialNumberStatus
-        ] ?? String(value ?? '-'),
-      badge: true,
-      badgeConfig: {
-        type: 'custom',
-        size: 'sm',
-        colorMap: ProductCreatePageComponent.SERIAL_STATUS_COLOR_MAP,
-      },
-    },
-    {
-      key: 'cost',
-      label: 'Costo',
-      priority: 2,
-      align: 'right',
-      transform: (value: string | number | null) =>
-        value == null || value === ''
-          ? '-'
-          : this.currencyService.format(Number(value) || 0),
-    },
-    {
-      key: 'notes',
-      label: 'Notas',
-      priority: 3,
-      defaultValue: '-',
-    },
-    {
-      key: 'created_at',
-      label: 'Creado',
-      priority: 3,
-      transform: (value: string | null) =>
-        value ? new Date(value).toLocaleDateString() : '-',
-    },
-  ];
-
-  /** Card config para la vista móvil. */
-  readonly serialCardConfig: ItemListCardConfig = {
-    titleKey: 'serial_number',
-    avatarFallbackIcon: 'fingerprint',
-    avatarShape: 'square',
-    badgeKey: 'status',
-    badgeConfig: {
-      type: 'custom',
-      size: 'sm',
-      colorMap: ProductCreatePageComponent.SERIAL_STATUS_COLOR_MAP,
-    },
-    badgeTransform: (value: SerialNumberStatus | string) =>
-      ProductCreatePageComponent.SERIAL_STATUS_LABELS[
-        value as SerialNumberStatus
-      ] ?? String(value ?? '-'),
-    detailKeys: [
-      { key: 'notes', label: 'Notas', icon: 'file-text' },
-    ],
-  };
-
-  /** Acciones por fila: editar / eliminar. */
-  readonly serialTableActions: TableAction[] = [
-    {
-      label: 'Editar',
-      icon: 'edit',
-      action: (item: SerialNumber) => this.onEditSerial(item),
-      variant: 'secondary',
-      tooltip: 'Editar serial, notas, costo o estado',
-    },
-    {
-      label: 'Eliminar',
-      icon: 'trash-2',
-      action: (item: SerialNumber) => void this.onDeleteSerial(item),
-      variant: 'danger',
-      tooltip: 'Eliminar serial',
-    },
-  ];
-
-  /** Expande/colapsa la sección; carga LAZY en la primera expansión. */
-  toggleSerialsSection(): void {
-    const next = !this.serialsSectionExpanded();
-    this.serialsSectionExpanded.set(next);
-    if (next && !this.serialsLoaded()) {
-      // Default: primera ubicación con stock disponible (o la primera).
-      const options = this.serialLocationOptions();
-      if (this.selectedSerialLocationId() == null && options.length > 0) {
-        const withStock = (this.product?.stock_levels ?? []).find(
-          (sl) => (sl.quantity_on_hand ?? 0) > 0,
-        );
-        this.selectedSerialLocationId.set(
-          withStock ? withStock.location_id : Number(options[0].value),
-        );
-      }
-      this.serialsLoaded.set(true);
-      this.loadProductSerials();
-    }
-  }
-
-  /** Carga la página actual de seriales del producto en la ubicación elegida. */
-  loadProductSerials(): void {
-    if (this.productId == null) return;
-    this.serialsLoading.set(true);
-
-    const query: Record<string, unknown> = {
-      product_id: this.productId,
-      page: this.serialsPage(),
-      limit: this.serialsLimit(),
-    };
-    const locId = this.selectedSerialLocationId();
-    if (locId != null) query['location_id'] = locId;
-    if (this.serialsStatusFilter() !== 'all') {
-      query['status'] = this.serialsStatusFilter();
-    }
-    if (this.serialsSearch().trim()) {
-      query['search'] = this.serialsSearch().trim();
-    }
-
+  loadSerialSummary(): void {
+    if (!this.isSerialized || this.productId == null) return;
     this.serialNumbersService
-      .listPaginated(query)
+      .summary({ product_id: this.productId })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (response) => {
-          this.productSerials.set(response.data ?? []);
-          this.serialsTotal.set(
-            response.meta?.pagination?.total ?? (response.data?.length ?? 0),
-          );
-          this.serialsLoading.set(false);
-        },
-        error: (error) => {
-          this.toastService.error(
-            typeof error === 'string'
-              ? error
-              : 'Error al cargar los números de serie',
-          );
-          this.serialsLoading.set(false);
+        next: (summary) => this.serialSummary.set(summary),
+        error: () => {
+          // Silencioso: el resumen es informativo; el gestor maneja sus errores.
+          this.serialSummary.set({
+            total: 0,
+            by_status: {},
+            warranty_expired: 0,
+            warranty_expiring_soon: 0,
+          });
         },
       });
-  }
-
-  /** Cambio de ubicación: resetea a la primera página y recarga. */
-  onSerialLocationChange(value: string | number | null): void {
-    this.selectedSerialLocationId.set(value == null ? null : Number(value));
-    this.serialsPage.set(1);
-    this.loadProductSerials();
-  }
-
-  /** Cambio del filtro de estado de la tabla. */
-  onSerialStatusFilterChange(value: string | number | null): void {
-    const v = value == null || value === '' ? 'all' : (value as SerialNumberStatus);
-    this.serialsStatusFilter.set(v);
-    this.serialsPage.set(1);
-    this.loadProductSerials();
-  }
-
-  /** Búsqueda por serial. */
-  onSerialSearchChange(term: string): void {
-    this.serialsSearch.set(term ?? '');
-    this.serialsPage.set(1);
-    this.loadProductSerials();
-  }
-
-  onSerialPageChange(page: number): void {
-    this.serialsPage.set(page);
-    this.loadProductSerials();
-  }
-
-  /** Abre el modal de edición precargado con los datos del serial. */
-  onEditSerial(serial: SerialNumber): void {
-    this.editingSerial.set(serial);
-    this.editSerialNumber.set(serial.serial_number ?? '');
-    this.editSerialNotes.set(serial.notes ?? '');
-    this.editSerialCost.set(serial.cost == null ? null : Number(serial.cost));
-    this.editSerialStatus.set(serial.status);
-    this.serialEditOpen.set(true);
-  }
-
-  /** Persiste cambios del serial (campos editables + estado si cambió). */
-  saveSerialEdit(): void {
-    const serial = this.editingSerial();
-    if (!serial) return;
-
-    const newSerial = this.editSerialNumber().trim();
-    if (!newSerial) {
-      this.toastService.error('El número de serie no puede estar vacío');
-      return;
-    }
-
-    const dto: { serial_number?: string; notes?: string; cost?: number } = {};
-    if (newSerial !== serial.serial_number) dto.serial_number = newSerial;
-    const newNotes = this.editSerialNotes().trim();
-    if (newNotes !== (serial.notes ?? '')) dto.notes = newNotes;
-    const newCost = this.editSerialCost();
-    const oldCost = serial.cost == null ? null : Number(serial.cost);
-    if (newCost != null && newCost !== oldCost) dto.cost = newCost;
-
-    const newStatus = this.editSerialStatus();
-    const statusChanged = newStatus !== serial.status;
-    const hasFieldChanges = Object.keys(dto).length > 0;
-
-    if (!hasFieldChanges && !statusChanged) {
-      this.serialEditOpen.set(false);
-      return;
-    }
-
-    this.serialEditSaving.set(true);
-
-    const update$ = hasFieldChanges
-      ? this.serialNumbersService.update(serial.id, dto)
-      : of(serial);
-
-    update$
-      .pipe(
-        switchMap((updated) =>
-          statusChanged
-            ? this.serialNumbersService.updateStatus(serial.id, newStatus)
-            : of(updated),
-        ),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe({
-        next: () => {
-          this.serialEditSaving.set(false);
-          this.serialEditOpen.set(false);
-          this.editingSerial.set(null);
-          this.toastService.success('Serial actualizado');
-          this.loadProductSerials();
-        },
-        error: (error) => {
-          this.serialEditSaving.set(false);
-          this.toastService.error(
-            typeof error === 'string' ? error : 'Error al actualizar el serial',
-          );
-        },
-      });
-  }
-
-  /** Selector de estado del modal de edición → signal tipada. */
-  onEditStatusChange(value: string | number | null): void {
-    if (value != null) {
-      this.editSerialStatus.set(value as SerialNumberStatus);
-    }
-  }
-
-  closeSerialEdit(): void {
-    this.serialEditOpen.set(false);
-    this.editingSerial.set(null);
-  }
-
-  /** Elimina un serial; maneja el 409 SERIAL_DELETE_BLOCKED del backend. */
-  async onDeleteSerial(serial: SerialNumber): Promise<void> {
-    const confirmed = await this.dialogService.confirm({
-      title: 'Eliminar número de serie',
-      message: `¿Eliminar el serial "${serial.serial_number}"? Esta acción no se puede deshacer.`,
-      confirmText: 'Eliminar',
-      cancelText: 'Cancelar',
-      confirmVariant: 'danger',
-    });
-    if (!confirmed) return;
-
-    this.serialNumbersService
-      .remove(serial.id)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.toastService.success('Serial eliminado');
-          // Si era el último de la página, retrocede una página.
-          if (this.productSerials().length === 1 && this.serialsPage() > 1) {
-            this.serialsPage.update((p) => p - 1);
-          }
-          this.loadProductSerials();
-        },
-        error: (error) => {
-          // El service ya extrae el mensaje del backend (incl. 409
-          // SERIAL_DELETE_BLOCKED) y lo emite como string.
-          this.toastService.error(
-            typeof error === 'string'
-              ? error
-              : 'No se pudo eliminar el serial',
-          );
-        },
-      });
-  }
-
-  /** Abre el modal de carga masiva (backfill) para la ubicación seleccionada. */
-  openSerialBulkModal(): void {
-    if (this.selectedSerialLocationId() == null) {
-      this.toastService.warning('Selecciona una ubicación primero');
-      return;
-    }
-    this.bulkModalOpen.set(true);
-  }
-
-  /** Tras una carga masiva exitosa: recarga tabla y contador. */
-  onBulkCompleted(): void {
-    this.serialsPage.set(1);
-    this.loadProductSerials();
   }
 }

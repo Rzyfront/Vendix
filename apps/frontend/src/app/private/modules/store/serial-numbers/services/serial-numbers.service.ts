@@ -60,8 +60,24 @@ export interface SerialNumberQuery {
   location_id?: number;
   status?: SerialNumberStatus;
   search?: string;
+  /** QUI-431 — inclusive lower bound for warranty_expiry (YYYY-MM-DD). */
+  warranty_expiry_from?: string;
+  /** QUI-431 — inclusive upper bound for warranty_expiry (YYYY-MM-DD). */
+  warranty_expiry_to?: string;
   page?: number;
   limit?: number;
+}
+
+/**
+ * QUI-431 — Aggregated counters for a product/location, served by
+ * GET `/store/inventory/serial-numbers/summary`. `by_status` is keyed by the
+ * raw `serial_number_status_enum` value (in_stock, sold, ...).
+ */
+export interface SerialSummary {
+  total: number;
+  by_status: Record<string, number>;
+  warranty_expired: number;
+  warranty_expiring_soon: number;
 }
 
 interface PaginatedApiResponse<T> {
@@ -167,12 +183,43 @@ export class SerialNumbersService {
     if (query.location_id != null) {
       params = params.set('location_id', String(query.location_id));
     }
+    if (query.warranty_expiry_from) {
+      params = params.set('warranty_expiry_from', query.warranty_expiry_from);
+    }
+    if (query.warranty_expiry_to) {
+      params = params.set('warranty_expiry_to', query.warranty_expiry_to);
+    }
 
     return this.http
       .get<
         PaginatedApiResponse<SerialNumber>
       >(`${this.apiUrl}${this.basePath}`, { params })
       .pipe(catchError(this.handleError));
+  }
+
+  /**
+   * QUI-431 — Aggregated counters (totals, by-status, warranty health) for a
+   * product and optional location. Returns the unwrapped `data` payload.
+   */
+  summary(
+    params: { product_id?: number; location_id?: number } = {},
+  ): Observable<SerialSummary> {
+    let httpParams = new HttpParams();
+    if (params.product_id != null) {
+      httpParams = httpParams.set('product_id', String(params.product_id));
+    }
+    if (params.location_id != null) {
+      httpParams = httpParams.set('location_id', String(params.location_id));
+    }
+
+    return this.http
+      .get<
+        ApiResponse<SerialSummary>
+      >(`${this.apiUrl}${this.basePath}/summary`, { params: httpParams })
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
   }
 
   /**
@@ -219,11 +266,17 @@ export class SerialNumbersService {
   }
 
   /**
-   * Update editable fields of a single serial (serial_number / notes / cost).
+   * Update editable fields of a single serial (serial_number / notes / cost /
+   * warranty_expiry). Pass `warranty_expiry: null` to clear the warranty date.
    */
   update(
     id: number,
-    dto: { serial_number?: string; notes?: string; cost?: number },
+    dto: {
+      serial_number?: string;
+      notes?: string;
+      cost?: number;
+      warranty_expiry?: string | null;
+    },
   ): Observable<SerialNumber> {
     return this.http
       .patch<

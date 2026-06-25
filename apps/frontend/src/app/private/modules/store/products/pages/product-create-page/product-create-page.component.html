@@ -1050,13 +1050,14 @@
           </div>
         </section>
 
-        <!-- ─── QUI-431: Gestión de números de serie (backfill) ─────────── -->
+        <!-- ─── QUI-431: Números de serie — resumen + acceso al gestor ──── -->
         @if (isSerialized) {
           <section
-            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm"
+            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
           >
-            @if (!isEditMode() || productId === null) {
-              <!-- Modo creación: aún no hay stock al cual asociar seriales. -->
+            <div
+              class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+            >
               <div class="flex items-start gap-2">
                 <app-icon
                   name="hash"
@@ -1067,126 +1068,86 @@
                   <h2 class="text-base font-bold text-gray-900">
                     Números de serie
                   </h2>
-                  <p class="text-xs text-gray-500 mt-1">
-                    Guarda el producto para gestionar sus números de serie.
+                  @if (isEditMode() && productId !== null) {
+                    <p class="text-xs text-gray-500 mt-0.5">
+                      Resumen del pool de seriales. Usa “Gestionar seriales”
+                      para registrar, editar o cargar en lote.
+                    </p>
+                  } @else {
+                    <p class="text-xs text-gray-500 mt-0.5">
+                      Guarda el producto para gestionar sus números de serie.
+                    </p>
+                  }
+                </div>
+              </div>
+
+              <app-button
+                variant="primary"
+                [disabled]="!isEditMode() || productId === null"
+                (clicked)="serialsManagerOpen.set(true)"
+              >
+                <div class="flex items-center gap-2">
+                  <app-icon
+                    slot="icon"
+                    name="settings"
+                    [size]="16"
+                  ></app-icon>
+                  <span>Gestionar seriales</span>
+                </div>
+              </app-button>
+            </div>
+
+            @if (isEditMode() && productId !== null) {
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <p
+                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5"
+                  >
+                    Total
+                  </p>
+                  <p class="text-lg font-bold text-text-primary">
+                    {{ serialSummary().total }}
+                  </p>
+                </div>
+                <div>
+                  <p
+                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5"
+                  >
+                    En stock
+                  </p>
+                  <p class="text-lg font-bold text-primary-700">
+                    {{ serialCountByStatus('in_stock') }}
+                  </p>
+                </div>
+                <div>
+                  <p
+                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5"
+                  >
+                    Vendidos
+                  </p>
+                  <p class="text-lg font-bold text-text-primary">
+                    {{ serialCountByStatus('sold') }}
+                  </p>
+                </div>
+                <div>
+                  <p
+                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5"
+                  >
+                    Garantía por vencer
+                  </p>
+                  <p
+                    class="text-lg font-bold"
+                    [class.text-amber-600]="
+                      serialSummary().warranty_expiring_soon > 0
+                    "
+                    [class.text-text-muted]="
+                      serialSummary().warranty_expiring_soon === 0
+                    "
+                  >
+                    {{ serialSummary().warranty_expiring_soon }}
                   </p>
                 </div>
               </div>
-            } @else {
-              <!-- Header colapsable -->
-              <button
-                type="button"
-                class="w-full flex items-center justify-between gap-3 text-left"
-                (click)="toggleSerialsSection()"
-              >
-                <div class="flex items-start gap-2 min-w-0">
-                  <app-icon
-                    name="hash"
-                    size="18"
-                    class="text-primary-600 mt-0.5 shrink-0"
-                  ></app-icon>
-                  <div class="min-w-0">
-                    <h2 class="text-base font-bold text-gray-900">
-                      Gestión de números de serie
-                    </h2>
-                    <p class="text-xs text-gray-500 mt-0.5">
-                      Registra y administra los seriales sobre el stock
-                      existente (no altera el inventario).
-                    </p>
-                  </div>
-                </div>
-                <div class="flex items-center gap-3 shrink-0">
-                  @if (serialsLoaded()) {
-                    <span
-                      class="inline-flex items-center rounded-full bg-primary-50 px-2.5 py-0.5 text-xs font-semibold text-primary-700"
-                    >
-                      {{ serialsTotal() }}
-                    </span>
-                  }
-                  <app-icon
-                    [name]="
-                      serialsSectionExpanded() ? 'chevron-up' : 'chevron-down'
-                    "
-                    size="20"
-                    class="text-gray-400"
-                  ></app-icon>
-                </div>
-              </button>
-
-              @if (serialsSectionExpanded()) {
-                <div class="mt-5 space-y-4">
-                  <!-- Controles: ubicación + búsqueda + filtro estado + cargar -->
-                  <div
-                    class="grid grid-cols-1 md:grid-cols-2 gap-3 md:items-end"
-                  >
-                    <app-selector
-                      label="Ubicación"
-                      [options]="serialLocationOptions()"
-                      [ngModel]="selectedSerialLocationId()"
-                      [ngModelOptions]="{ standalone: true }"
-                      (valueChange)="onSerialLocationChange($event)"
-                      placeholder="Selecciona una ubicación"
-                    ></app-selector>
-
-                    <app-selector
-                      label="Estado"
-                      [options]="serialStatusOptions"
-                      [ngModel]="
-                        serialsStatusFilter() === 'all'
-                          ? null
-                          : serialsStatusFilter()
-                      "
-                      [ngModelOptions]="{ standalone: true }"
-                      (valueChange)="onSerialStatusFilterChange($event)"
-                      placeholder="Todos los estados"
-                    ></app-selector>
-                  </div>
-
-                  <div class="flex items-end gap-3 flex-wrap">
-                    <div class="flex-1 min-w-[200px]">
-                      <app-input
-                        label="Buscar serial"
-                        [ngModel]="serialsSearch()"
-                        [ngModelOptions]="{ standalone: true }"
-                        (ngModelChange)="onSerialSearchChange($event)"
-                        placeholder="Buscar por número de serie..."
-                      ></app-input>
-                    </div>
-                    <app-button
-                      variant="primary"
-                      (clicked)="openSerialBulkModal()"
-                    >
-                      <div class="flex items-center gap-2">
-                        <app-icon
-                          slot="icon"
-                          name="upload-cloud"
-                          [size]="16"
-                        ></app-icon>
-                        <span>Cargar seriales</span>
-                      </div>
-                    </app-button>
-                  </div>
-
-                  <!-- Tabla paginada de seriales -->
-                  <app-responsive-data-view
-                    [data]="productSerials()"
-                    [columns]="serialTableColumns"
-                    [cardConfig]="serialCardConfig"
-                    [actions]="serialTableActions"
-                    [loading]="serialsLoading()"
-                    emptyMessage="No hay números de serie registrados para esta ubicación."
-                    emptyIcon="hash"
-                  ></app-responsive-data-view>
-
-                  <app-pagination
-                    [currentPage]="serialsPage()"
-                    [totalPages]="serialsTotalPages()"
-                    [total]="serialsTotal()"
-                    [limit]="serialsLimit()"
-                    (pageChange)="onSerialPageChange($event)"
-                  ></app-pagination>
-                </div>
-              }
             }
           </section>
         }
@@ -3813,76 +3774,10 @@
   (keep)="onVariantAiKeep($event)"
 ></app-product-image-ai-enhance-modal>
 
-<!-- ─── QUI-431: Carga masiva de seriales (backfill) ─────────────────── -->
-<app-serial-bulk-load-modal
-  [isOpen]="bulkModalOpen()"
-  (isOpenChange)="bulkModalOpen.set($event)"
-  mode="backfill"
+<!-- ─── QUI-431: Gestor completo de números de serie (modal LG) ──────── -->
+<app-product-serials-manager-modal
+  [(isOpen)]="serialsManagerOpen"
   [productId]="productId"
-  [locationId]="selectedSerialLocationId()"
-  [maxCount]="selectedLocationStock()"
-  (completed)="onBulkCompleted()"
-></app-serial-bulk-load-modal>
-
-<!-- ─── QUI-431: Edición de un serial individual ─────────────────────── -->
-<app-modal
-  [isOpen]="serialEditOpen()"
-  (isOpenChange)="serialEditOpen.set($event)"
-  (cancel)="closeSerialEdit()"
-  title="Editar número de serie"
-  subtitle="Actualiza el serial, costo, notas o estado"
-  size="md"
->
-  <div class="p-4 md:p-6 space-y-4">
-    <app-input
-      label="Número de serie"
-      [ngModel]="editSerialNumber()"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="editSerialNumber.set($event)"
-      placeholder="SN-0001"
-    ></app-input>
-
-    <app-input
-      label="Costo"
-      [currency]="true"
-      [ngModel]="editSerialCost()"
-      [ngModelOptions]="{ standalone: true }"
-      (ngModelChange)="editSerialCost.set($event)"
-      placeholder="0"
-    ></app-input>
-
-    <app-selector
-      label="Estado"
-      [options]="serialStatusOptions"
-      [ngModel]="editSerialStatus()"
-      [ngModelOptions]="{ standalone: true }"
-      (valueChange)="onEditStatusChange($event)"
-    ></app-selector>
-
-    <app-textarea
-      label="Notas"
-      [ngModel]="editSerialNotes()"
-      (ngModelChange)="editSerialNotes.set($event)"
-      [rows]="3"
-      placeholder="Notas opcionales (garantía, observaciones...)"
-    ></app-textarea>
-  </div>
-
-  <div slot="footer">
-    <div
-      class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
-    >
-      <app-button variant="outline" (clicked)="closeSerialEdit()">
-        Cancelar
-      </app-button>
-      <app-button
-        variant="primary"
-        [disabled]="serialEditSaving()"
-        [loading]="serialEditSaving()"
-        (clicked)="saveSerialEdit()"
-      >
-        Guardar
-      </app-button>
-    </div>
-  </div>
-</app-modal>
+  [stockLevels]="product?.stock_levels ?? []"
+  (changed)="loadSerialSummary()"
+/>

@@ -11,6 +11,7 @@ import {
   GetSerialNumbersDto,
   BulkBackfillSerialNumbersDto,
   PatchSerialNumberDto,
+  SummarySerialNumbersDto,
 } from '../dto/create-inventory-serial-number.dto';
 
 /**
@@ -69,6 +70,19 @@ export class InventorySerialNumbersService {
     if (filters.batch_id) where.batch_id = filters.batch_id;
     if (filters.location_id) where.location_id = filters.location_id;
     if (filters.status) where.status = filters.status;
+    // QUI-431 — warranty_expiry range filter (inclusive). Only the bounds that
+    // were sent are applied. warranty_expiry is a DateTime column; @IsDateString
+    // strings parse to UTC instants via new Date(...) (no tz drift for instants).
+    if (filters.warranty_expiry_from || filters.warranty_expiry_to) {
+      const warranty: Prisma.DateTimeFilter = {};
+      if (filters.warranty_expiry_from) {
+        warranty.gte = new Date(filters.warranty_expiry_from);
+      }
+      if (filters.warranty_expiry_to) {
+        warranty.lte = new Date(filters.warranty_expiry_to);
+      }
+      where.warranty_expiry = warranty;
+    }
     if (filters.search) {
       where.OR = [
         { serial_number: { contains: filters.search, mode: 'insensitive' } },
@@ -172,6 +186,77 @@ export class InventorySerialNumbersService {
         status: serial_status_enum.in_stock,
       },
     });
+  }
+
+  /**
+   * QUI-431 — Aggregate summary of the serial pool for the current store.
+   *
+   * Store scope is enforced by the scoped client (relational via
+   * inventory_locations.store_id), exactly like list(). Optional product_id /
+   * location_id narrow the base where. Returns:
+   *   - total: all serials matching the scope/filters
+   *   - by_status: count per serial_status_enum value (every key defaults to 0)
+   *   - warranty_expired: serials whose warranty_expiry < now
+   *   - warranty_expiring_soon: serials with now <= warranty_expiry <= now + 30d
+   *
+   * by_status + total come from a single groupBy(['status']); the two warranty
+   * tallies are scope-aware count() calls layered on the same base where.
+   */
+  async summary(
+    filters: SummarySerialNumbersDto,
+    tx?: Prisma.TransactionClient,
+  ): Promise<{
+    total: number;
+    by_status: Record<serial_status_enum, number>;
+    warranty_expired: number;
+    warranty_expiring_soon: number;
+  }> {
+    const prisma = this.client(tx);
+
+    const baseWhere: Prisma.inventory_serial_numbersWhereInput = {};
+    if (filters.product_id) baseWhere.product_id = filters.product_id;
+    if (filters.location_id) baseWhere.location_id = filters.location_id;
+
+    // Every enum key defaults to 0 so the shape is stable for the frontend.
+    const by_status: Record<serial_status_enum, number> = {
+      [serial_status_enum.in_stock]: 0,
+      [serial_status_enum.reserved]: 0,
+      [serial_status_enum.sold]: 0,
+      [serial_status_enum.returned]: 0,
+      [serial_status_enum.damaged]: 0,
+      [serial_status_enum.expired]: 0,
+      [serial_status_enum.in_transit]: 0,
+    };
+
+    const now = new Date();
+    const soon = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+
+    const [grouped, warranty_expired, warranty_expiring_soon] =
+      await Promise.all([
+        prisma.inventory_serial_numbers.groupBy({
+          by: ['status'],
+          where: baseWhere,
+          _count: true,
+        }),
+        prisma.inventory_serial_numbers.count({
+          where: { ...baseWhere, warranty_expiry: { lt: now } },
+        }),
+        prisma.inventory_serial_numbers.count({
+          where: { ...baseWhere, warranty_expiry: { gte: now, lte: soon } },
+        }),
+      ]);
+
+    let total = 0;
+    for (const row of grouped as Array<{
+      status: serial_status_enum;
+      _count: number;
+    }>) {
+      const count = typeof row._count === 'number' ? row._count : 0;
+      by_status[row.status] = count;
+      total += count;
+    }
+
+    return { total, by_status, warranty_expired, warranty_expiring_soon };
   }
 
   // ===========================================================================
@@ -461,6 +546,14 @@ export class InventorySerialNumbersService {
     }
     if (dto.notes !== undefined) data.notes = dto.notes;
     if (dto.cost !== undefined) data.cost = new Prisma.Decimal(dto.cost);
+    // QUI-431 — edit warranty_expiry. undefined => leave untouched; null/''
+    // => clear (NULL); a date string => persist as a Date instant.
+    if (dto.warranty_expiry !== undefined) {
+      data.warranty_expiry =
+        dto.warranty_expiry === null || dto.warranty_expiry === ''
+          ? null
+          : new Date(dto.warranty_expiry);
+    }
 
     try {
       // Scope-safe write: updateMany with the unique id, then re-read.

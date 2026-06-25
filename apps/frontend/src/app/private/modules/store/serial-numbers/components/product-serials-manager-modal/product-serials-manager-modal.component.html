@@ -1,0 +1,179 @@
+<!-- ─── QUI-431: Gestión total de números de serie de un producto ───────── -->
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="onModalOpenChange($event)"
+  title="Números de serie"
+  subtitle="Gestiona los seriales del producto por ubicación"
+  size="lg"
+>
+  <div class="space-y-4 p-1 md:p-2">
+    <!-- Filtros: ubicación + estado -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:items-end">
+      <app-selector
+        label="Ubicación"
+        [options]="locationOptions()"
+        [ngModel]="selectedLocationId()"
+        [ngModelOptions]="{ standalone: true }"
+        (valueChange)="onLocationChange($event)"
+        placeholder="Selecciona una ubicación"
+      ></app-selector>
+
+      <app-selector
+        label="Estado"
+        [options]="statusFilterOptions"
+        [ngModel]="statusFilter()"
+        [ngModelOptions]="{ standalone: true }"
+        (valueChange)="onStatusFilterChange($event)"
+        placeholder="Todos los estados"
+      ></app-selector>
+    </div>
+
+    <!-- Filtro: rango de garantía -->
+    <div class="flex flex-col gap-1">
+      <span class="text-xs font-medium text-gray-500 flex items-center gap-1.5">
+        <app-icon name="shield" [size]="14" class="text-gray-400"></app-icon>
+        Vencimiento de garantía
+      </span>
+      <app-date-range-picker
+        [initialFrom]="warrantyFrom()"
+        [initialTo]="warrantyTo()"
+        [showClear]="true"
+        (dateRangeChange)="onWarrantyRangeChange($event)"
+      ></app-date-range-picker>
+    </div>
+
+    <!-- Búsqueda + acciones -->
+    <div class="flex items-end gap-3 flex-wrap">
+      <div class="flex-1 min-w-[200px]">
+        <app-inputsearch
+          [ngModel]="searchTerm()"
+          [ngModelOptions]="{ standalone: true }"
+          placeholder="Buscar por número de serie..."
+          (searchChange)="onSearch($event)"
+        ></app-inputsearch>
+      </div>
+      <app-button variant="outline" (clicked)="openCreate()">
+        <div class="flex items-center gap-2">
+          <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+          <span>Agregar</span>
+        </div>
+      </app-button>
+      <app-button variant="primary" (clicked)="openBulkModal()">
+        <div class="flex items-center gap-2">
+          <app-icon slot="icon" name="upload-cloud" [size]="16"></app-icon>
+          <span>Cargar seriales</span>
+        </div>
+      </app-button>
+    </div>
+
+    <!-- Tabla paginada de seriales -->
+    <app-responsive-data-view
+      [data]="serials()"
+      [columns]="tableColumns"
+      [cardConfig]="cardConfig"
+      [actions]="tableActions"
+      [loading]="isLoading()"
+      emptyMessage="No hay números de serie registrados para esta ubicación."
+      emptyIcon="hash"
+    ></app-responsive-data-view>
+
+    <app-pagination
+      [currentPage]="page()"
+      [totalPages]="totalPages()"
+      [total]="total()"
+      [limit]="limit()"
+      (pageChange)="onPageChange($event)"
+    ></app-pagination>
+  </div>
+</app-modal>
+
+<!-- Carga masiva (backfill) — reutiliza el modal existente -->
+<app-serial-bulk-load-modal
+  [isOpen]="bulkModalOpen()"
+  (isOpenChange)="bulkModalOpen.set($event)"
+  mode="backfill"
+  [productId]="productId()"
+  [productVariantId]="productVariantId()"
+  [locationId]="selectedLocationId()"
+  [maxCount]="selectedLocationStock()"
+  (completed)="onBulkCompleted()"
+></app-serial-bulk-load-modal>
+
+<!-- Alta / edición de un serial individual -->
+<app-modal
+  [isOpen]="formOpen()"
+  (isOpenChange)="formOpen.set($event)"
+  (cancel)="closeForm()"
+  [title]="isEditMode() ? 'Editar número de serie' : 'Agregar número de serie'"
+  [subtitle]="
+    isEditMode()
+      ? 'Actualiza el serial, costo, estado, garantía o notas'
+      : 'Registra un serial sobre el stock existente'
+  "
+  size="md"
+>
+  <div class="p-4 md:p-6 space-y-4">
+    <app-input
+      label="Número de serie"
+      [ngModel]="formSerialNumber()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="formSerialNumber.set($event)"
+      placeholder="SN-0001"
+      [required]="true"
+    ></app-input>
+
+    <app-input
+      label="Costo"
+      [currency]="true"
+      [ngModel]="formCost()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="formCost.set($event)"
+      placeholder="0"
+    ></app-input>
+
+    @if (isEditMode()) {
+      <app-selector
+        label="Estado"
+        [options]="statusOptions"
+        [ngModel]="formStatus()"
+        [ngModelOptions]="{ standalone: true }"
+        (valueChange)="onFormStatusChange($event)"
+      ></app-selector>
+    }
+
+    <app-input
+      label="Vencimiento de garantía"
+      type="date"
+      [ngModel]="formWarranty()"
+      [ngModelOptions]="{ standalone: true }"
+      (ngModelChange)="onFormWarrantyChange($event)"
+      placeholder="YYYY-MM-DD"
+    ></app-input>
+
+    <app-textarea
+      label="Notas"
+      [ngModel]="formNotes()"
+      (ngModelChange)="formNotes.set($event)"
+      [rows]="3"
+      placeholder="Notas opcionales (observaciones...)"
+    ></app-textarea>
+  </div>
+
+  <div slot="footer">
+    <div
+      class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+    >
+      <app-button variant="outline" (clicked)="closeForm()">
+        Cancelar
+      </app-button>
+      <app-button
+        variant="primary"
+        [disabled]="formSaving()"
+        [loading]="formSaving()"
+        (clicked)="saveForm()"
+      >
+        Guardar
+      </app-button>
+    </div>
+  </div>
+</app-modal>
