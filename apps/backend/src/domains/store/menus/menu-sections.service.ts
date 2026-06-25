@@ -144,16 +144,21 @@ export class MenuSectionsService {
     if (section.menu_id !== menuId)
       throw new VendixHttpException(ErrorCodes.MENU_SECTION_NOT_FOUND);
 
-    // The product must exist in the same store AND be sellable.
+    // The product must exist in the same store. A carta is shown in the
+    // storefront, so a dish added to it has to be both sellable and
+    // available for ecommerce. Instead of rejecting products that lack
+    // either flag, we promote them to true (see promotion below).
     const product = await this.prisma.products.findFirst({
       where: { id: dto.product_id, store_id: storeId },
-      select: { id: true, is_sellable: true, state: true },
+      select: {
+        id: true,
+        is_sellable: true,
+        available_for_ecommerce: true,
+        state: true,
+      },
     });
     if (!product) {
       throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
-    }
-    if (!product.is_sellable) {
-      throw new VendixHttpException(ErrorCodes.MENU_PRODUCT_NOT_SELLABLE);
     }
 
     const dup = await this.prisma.menu_section_items.findFirst({
@@ -161,6 +166,20 @@ export class MenuSectionsService {
     });
     if (dup)
       throw new VendixHttpException(ErrorCodes.MENU_SECTION_ITEM_DUP);
+
+    // Promote storefront-visibility flags so the dish is actually buyable
+    // and shows up in the public carta/catalog. Only writes when needed and
+    // never demotes (true stays true). Scoped by store_id for safety.
+    if (!product.is_sellable || !product.available_for_ecommerce) {
+      await this.prisma.products.updateMany({
+        where: { id: product.id, store_id: storeId },
+        data: {
+          is_sellable: true,
+          available_for_ecommerce: true,
+          updated_at: new Date(),
+        },
+      });
+    }
 
     try {
       return await this.prisma.menu_section_items.create({

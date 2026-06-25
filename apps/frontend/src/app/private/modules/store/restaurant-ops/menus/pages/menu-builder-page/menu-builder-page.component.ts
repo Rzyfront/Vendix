@@ -237,28 +237,28 @@ export class MenuBuilderPageComponent implements OnInit {
   }
 
   private loadProducts(): void {
-    // Solo productos vendibles y activos: `is_active` NO existe en el
-    // ProductQueryDto del backend (con forbidNonWhitelisted dispara 400);
-    // los campos válidos son `state` e `is_sellable`.
+    // Mostramos productos activos que NO sean insumos crudos (is_ingredient
+    // false), incluidos los aún no vendibles: al agregarlos a la carta el
+    // backend promueve is_sellable + available_for_ecommerce a true. Nota:
+    // `is_active` NO existe en el ProductQueryDto (forbidNonWhitelisted -> 400),
+    // el campo válido es `state`.
     this.productsService
       .getProducts({
         limit: 200,
         state: ProductState.ACTIVE,
-        is_sellable: true,
+        is_ingredient: false,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (resp) => {
           this.productOptions.set(
-            (resp.data ?? [])
-              .filter((p) => (p as any).is_sellable !== false)
-              .map((p) => ({
-                id: p.id,
-                name: p.name,
-                base_price: p.base_price,
-                is_sellable: (p as any).is_sellable,
-                is_combo: (p as any).is_combo,
-              })),
+            (resp.data ?? []).map((p) => ({
+              id: p.id,
+              name: p.name,
+              base_price: p.base_price,
+              is_sellable: (p as any).is_sellable,
+              is_combo: (p as any).is_combo,
+            })),
           );
         },
         error: (e: unknown) =>
