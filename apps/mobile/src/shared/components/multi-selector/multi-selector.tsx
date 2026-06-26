@@ -158,8 +158,9 @@ const styles = StyleSheet.create({
   trigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 48,
+    minHeight: 40,
     paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
     paddingVertical: spacing[2],
     borderRadius: borderRadius.lg,
     borderWidth: 1,
