@@ -550,7 +550,6 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   </Pressable>
                 </View>
               </View>
-            </View>
 
             {/* Espacio destacado del Precio final (sin border, precio en color primary) */}
             <View
