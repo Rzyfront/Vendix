@@ -453,15 +453,24 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
 
           {/* Precios y Rentabilidad */}
           <Section title="Precios y Rentabilidad" subtitle={`Precio final estimado ${formatCurrency(finalPreview)}`} icon="dollar-sign">
-            <Input
-              label="Costo"
-              value={form.cost_price}
-              onChangeText={(value) => {
-                updateField('cost_price', value);
-                updatePriceFromCostMargin(value, form.profit_margin);
-              }}
-              keyboardType="decimal-pad"
-            />
+            <View>
+              <Input
+                label="Costo"
+                value={form.cost_price}
+                onChangeText={(value) => {
+                  updateField('cost_price', value);
+                  updatePriceFromCostMargin(value, form.profit_margin);
+                }}
+                keyboardType="decimal-pad"
+                rightIcon={
+                  form.cost_price ? (
+                    <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
+                      {formatCurrency(toNumber(form.cost_price) || 0).replace(/\s/g, '')}
+                    </Text>
+                  ) : null
+                }
+              />
+            </View>
             <Input
               label="Margen %"
               value={form.profit_margin}
@@ -471,16 +480,25 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               }}
               keyboardType="decimal-pad"
             />
-            <Input
-              label="Precio base"
-              value={form.base_price}
-              onChangeText={(value) => {
-                updateField('base_price', value);
-                updateMarginFromBase(value, form.cost_price);
-              }}
-              keyboardType="decimal-pad"
-              error={errors.base_price}
-            />
+            <View>
+              <Input
+                label="Precio base"
+                value={form.base_price}
+                onChangeText={(value) => {
+                  updateField('base_price', value);
+                  updateMarginFromBase(value, form.cost_price);
+                }}
+                keyboardType="decimal-pad"
+                error={errors.base_price}
+                rightIcon={
+                  form.base_price ? (
+                    <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
+                      {formatCurrency(toNumber(form.base_price) || 0).replace(/\s/g, '')}
+                    </Text>
+                  ) : null
+                }
+              />
+            </View>
             <Selector
               label="Unidad de venta"
               value={form.pricing_type}
@@ -491,22 +509,52 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               ]}
             />
             {taxes.length > 0 && (
-              <MultiSelector
-                label="Impuestos (IVA)"
-                values={form.tax_category_ids}
-                onChange={(v) => updateField('tax_category_ids', v)}
-                options={((taxes as TaxCategory[]) || []).map((t) => ({ label: t.name, value: t.id }))}
-                placeholder="Seleccionar impuestos"
-              />
-            )}
+              <View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[1], marginBottom: spacing[1.5] }}>
+                  <Text style={{
+                    fontSize: 10,
+                    fontWeight: typography.fontWeight.bold,
+                    fontFamily: typography.fontFamily,
+                    color: colorScales.gray[700],
+                    letterSpacing: 0.5,
+                    textTransform: 'uppercase',
+                  }}>Impuestos aplicables</Text>
+                  <Text style={{ color: colorScales.gray[400], fontSize: 10 }}>*</Text>
+                </View>
+                <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+                  <View style={{ flex: 1 }}>
+                    <MultiSelector
+                      values={form.tax_category_ids}
+                      onChange={(v) => updateField('tax_category_ids', v)}
+                      options={((taxes as TaxCategory[]) || []).map((t) => ({ label: t.name, value: t.id }))}
+                      placeholder="Seleccionar impuestos"
+                    />
+                  </View>
+                  <Pressable
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      {
+                        width: 40,
+                        height: 40,
+                        borderRadius: 10,
+                        borderWidth: 1.5,
+                        borderColor: colors.primary,
+                        backgroundColor: 'transparent',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      },
+                      pressed && { opacity: 0.7 },
+                    ]}
+                  >
+                    <Icon name="plus" size={18} color={colors.primary} />
+                  </Pressable>
+                </View>
+              </View>
+            </View>
 
-            {/* Espacio destacado del Precio final + formula */}
+            {/* Espacio destacado del Precio final (sin border, precio en color primary) */}
             <View
               style={{
-                backgroundColor: colors.primaryLight,
-                borderColor: colors.primary,
-                borderWidth: 1.5,
-                borderRadius: borderRadius.lg,
                 padding: spacing[4],
                 gap: spacing[1],
                 marginTop: spacing[1],
@@ -527,7 +575,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 style={{
                   fontSize: 28,
                   fontWeight: '800',
-                  color: colors.text.primary,
+                  color: colors.primary,
                 }}
               >
                 {formatCurrency(finalPreview)}
