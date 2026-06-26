@@ -529,7 +529,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     <MultiSelector
                       values={form.tax_category_ids}
                       onChange={(v) => updateField('tax_category_ids', v)}
-                      options={combinedTaxes.map((t) => ({ label: t.name, value: t.id }))}
+                      options={((taxes as TaxCategory[]) || []).map((t) => ({ label: t.name, value: t.id }))}
                       placeholder="Seleccionar impuestos"
                     />
                   </View>
