@@ -103,12 +103,13 @@ const styles = StyleSheet.create({
   trigger: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 48,
+    minHeight: 40,
     paddingHorizontal: spacing[3],
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[300],
-    backgroundColor: colors.inputBg,
+    paddingVertical: spacing[2],
+    borderRadius: 10,
+    borderWidth: 0,
+     
+    backgroundColor: colorScales.gray[50],
   },
   triggerPressed: {
     backgroundColor: colorScales.gray[50],
@@ -140,6 +141,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing[3],
     paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
     gap: spacing[3],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colorScales.gray[100],
