@@ -758,7 +758,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
   flex: { flex: 1 },
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colorScales.gray[50] },
-  content: { paddingHorizontal: spacing[3], paddingTop: spacing[1], paddingBottom: 100, gap: spacing[2] },
+  content: { paddingHorizontal: spacing[3], paddingTop: spacing[3], paddingBottom: 100, gap: spacing[2] },
   section: {
     backgroundColor: colors.card,
     borderRadius: 12,

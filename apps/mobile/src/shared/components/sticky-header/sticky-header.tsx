@@ -166,9 +166,13 @@ const styles = StyleSheet.create({
   wrapper: {
     backgroundColor: colors.card,
     paddingHorizontal: spacing[4],
+    paddingTop: spacing[2],
     paddingBottom: spacing[2],
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[200],
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    overflow: 'hidden',
     ...shadows.sm,
   },
   wrapperGlass: {
