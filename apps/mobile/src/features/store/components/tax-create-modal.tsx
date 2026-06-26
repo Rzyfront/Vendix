@@ -1,16 +1,13 @@
 import { useState } from 'react';
 import { ScrollView, View, Text } from 'react-native';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal, Input, Selector, Textarea, Button } from '@/shared/components';
-import { Icon } from '@/shared/components/icon/icon';
-import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
-import { apiClient } from '@/core/api';
-import { colors, spacing, borderRadius, typography } from '@/shared/theme';
+import { toastSuccess } from '@/shared/components/toast/toast.store';
+import { colors, spacing } from '@/shared/theme';
 
 interface TaxCreateModalProps {
   visible: boolean;
   onClose: () => void;
-  onCreated?: (tax: any) => void;
+  onCreated?: (tax: { id: number; name: string }) => void;
 }
 
 const CALC_TYPE_OPTIONS = [
@@ -27,13 +24,11 @@ const FISCAL_CLASS_OPTIONS = [
 ];
 
 export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalProps) {
-  const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [calcType, setCalcType] = useState('percentage');
   const [fiscalClass, setFiscalClass] = useState('iva');
   const [rate, setRate] = useState('');
   const [description, setDescription] = useState('');
-  const [loading, setLoading] = useState(false);
 
   function reset() {
     setName('');
@@ -43,35 +38,16 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
     setDescription('');
   }
 
-  async function handleSubmit() {
+  function handleSubmit() {
     if (!name.trim()) {
-      toastError('El nombre es obligatorio');
+      toastSuccess('Funcionalidad próximamente');
       return;
     }
-    if (!rate || Number(rate) <= 0) {
-      toastError('Indicá una tasa válida');
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await apiClient.post('/store/taxes/categories', {
-        name: name.trim(),
-        calculation_type: calcType,
-        fiscal_class: fiscalClass,
-        rate: Number(rate),
-        description: description.trim() || undefined,
-      });
-      const tax = (res.data as any)?.data ?? res.data;
-      toastSuccess('Impuesto creado');
-      queryClient.invalidateQueries({ queryKey: ['product-taxes'] });
-      onCreated?.(tax);
-      reset();
-      onClose();
-    } catch (err: any) {
-      toastError(err?.response?.data?.message || 'No se pudo crear el impuesto');
-    } finally {
-      setLoading(false);
-    }
+    const fakeId = Date.now();
+    onCreated?.({ id: fakeId, name: name.trim() });
+    toastSuccess('Impuesto agregado (local)');
+    reset();
+    onClose();
   }
 
   return (
@@ -133,7 +109,6 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
               title="Crear Impuesto"
               variant="primary"
               onPress={handleSubmit}
-              loading={loading}
               fullWidth
             />
           </View>

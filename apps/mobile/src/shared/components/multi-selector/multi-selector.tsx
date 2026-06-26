@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colorScales.gray[300],
-    backgroundColor: colors.inputBg,
+    backgroundColor: colorScales.gray[50],
     gap: spacing[2],
   },
   triggerPressed: {
