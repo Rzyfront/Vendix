@@ -552,10 +552,10 @@ export default function PopScreen() {
 
 const styles = StyleSheet.create({
   // Fondo de la app — mismo gris que customers.tsx
-  container: { flex: 1, backgroundColor: colorScales.gray[50] },
+  container: { flex: 1, backgroundColor: colors.background },
   scrollArea: { flex: 1 },
-  scrollContent: { paddingBottom: 70 },
-  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colorScales.gray[50] },
+  scrollContent: { paddingTop: 12, paddingBottom: 70 },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
   loadingText: { marginTop: 12, fontSize: 15, color: colorScales.gray[500] },
   // Modal — mismo overlay y card que customers.tsx
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: 16 },

@@ -1,4 +1,6 @@
 export type ProductState = 'active' | 'inactive' | 'archived';
+export type BrandState = 'active' | 'inactive';
+export type CategoryState = 'active' | 'inactive';
 export type PricingType = 'unit' | 'weight';
 export type ProductType = 'physical' | 'service';
 
@@ -75,14 +77,81 @@ export interface ProductCategory {
   image_url?: string | null;
   parent_id?: number | null;
   product_count?: number;
+  state?: CategoryState;
+  is_featured?: boolean;
+  store_id?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface Brand {
   id: number;
   name: string;
   slug: string;
+  description?: string | null;
   logo_url?: string | null;
   product_count?: number;
+  state?: BrandState;
+  is_featured?: boolean;
+  store_id?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CreateBrandDto {
+  name: string;
+  slug?: string;
+  description?: string;
+  logo_url?: string;
+  state?: BrandState;
+  is_featured?: boolean;
+}
+
+export type UpdateBrandDto = Partial<CreateBrandDto>;
+
+export interface BrandQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  state?: BrandState;
+  is_featured?: boolean;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+}
+
+export interface BrandStats {
+  total: number;
+  active: number;
+  inactive: number;
+  featured: number;
+}
+
+export interface CreateCategoryDto {
+  name: string;
+  slug?: string;
+  description?: string;
+  image_url?: string;
+  state?: CategoryState;
+  is_featured?: boolean;
+}
+
+export type UpdateCategoryDto = Partial<CreateCategoryDto>;
+
+export interface CategoryQuery {
+  page?: number;
+  limit?: number;
+  search?: string;
+  state?: CategoryState;
+  is_featured?: boolean;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+}
+
+export interface CategoryStats {
+  total: number;
+  active: number;
+  inactive: number;
+  featured: number;
 }
 
 export interface ProductTaxAssignment {
