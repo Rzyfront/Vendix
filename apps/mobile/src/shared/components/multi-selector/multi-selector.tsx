@@ -102,7 +102,7 @@ export function MultiSelector<T = string | number>({
             ))}
           </View>
         )}
-        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.text.secondary} />
+        <Icon name="filter" size={18} color={colorScales.gray[500]} />
       </Pressable>
 
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
