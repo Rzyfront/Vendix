@@ -508,7 +508,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 { label: 'Venta por peso (kg)', value: 'weight' },
               ]}
             />
-            {taxes.length > 0 && (
+            {true && (
               <View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[1], marginBottom: spacing[1.5] }}>
                   <Text style={{
@@ -550,6 +550,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   </Pressable>
                 </View>
               </View>
+            )}
 
             {/* Espacio destacado del Precio final (sin border, precio en color primary) */}
             <View
