@@ -409,10 +409,6 @@ import {
         color: #64748b;
         max-width: 540px;
       }
-        padding: 1.5rem;
-        max-width: 1440px;
-        margin: 0 auto;
-      }
 
       // CTA card (cross-tenant urgency)
       .cta-card {
