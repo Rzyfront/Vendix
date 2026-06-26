@@ -58,7 +58,7 @@ export function StickyHeader({
     <View
       style={[
         styles.wrapper,
-        { paddingTop: insets.top + spacing[1] },
+        { paddingTop: spacing[2] },
         isGlass && styles.wrapperGlass,
         style,
       ]}
