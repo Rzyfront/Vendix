@@ -24,6 +24,7 @@ import { InputButtons } from '@/shared/components/input-buttons/input-buttons';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { StickyHeader } from '@/shared/components/sticky-header/sticky-header';
 import { Textarea } from '@/shared/components/textarea/textarea';
+import { TaxCreateModal } from '@/features/store/components/tax-create-modal';
 import { Toggle } from '@/shared/components/toggle/toggle';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
@@ -137,6 +138,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ProductFormState>(initialForm);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [taxModalOpen, setTaxModalOpen] = useState(false);
 
   const { data: product, isLoading: productLoading } = useQuery({
     queryKey: ['product', productId],
@@ -531,6 +533,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     />
                   </View>
                   <Pressable
+                    onPress={() => setTaxModalOpen(true)}
                     hitSlop={6}
                     style={({ pressed }) => [
                       {
@@ -768,6 +771,16 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           </Section>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <TaxCreateModal
+        visible={taxModalOpen}
+        onClose={() => setTaxModalOpen(false)}
+        onCreated={(tax) => {
+          if (tax?.id) {
+            setForm((current) => ({ ...current, tax_category_ids: [...current.tax_category_ids, tax.id] }));
+          }
+        }}
+      />
     </View>
   );
 }
