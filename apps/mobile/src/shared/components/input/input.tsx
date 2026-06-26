@@ -7,6 +7,7 @@ interface InputProps extends TextInputProps {
   error?: string;
   helperText?: string;
   rightIcon?: React.ReactNode;
+  helpIcon?: React.ReactNode;
   style?: ViewStyle;
 }
 
@@ -22,6 +23,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing[1.5],
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
   },
   inputWrapper: {
     flexDirection: 'row',
@@ -71,6 +77,7 @@ export function Input({
   error,
   helperText,
   rightIcon,
+  helpIcon,
   style,
   ...props
 }: InputProps) {
@@ -84,7 +91,12 @@ export function Input({
 
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>{label}</Text>
+      {(label || helpIcon) && (
+        <View style={styles.labelRow}>
+          {label && <Text style={styles.label}>{label}</Text>}
+          {helpIcon}
+        </View>
+      )}
       <View style={[styles.inputWrapper, inputWrapperStyle, style]}>
         <TextInput
           style={styles.textInput}

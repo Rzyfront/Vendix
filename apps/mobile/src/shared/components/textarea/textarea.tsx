@@ -11,6 +11,8 @@ interface TextareaProps extends Omit<TextInputProps, 'multiline' | 'style'> {
   value: string;
   onChangeText: (value: string) => void;
   containerStyle?: ViewStyle;
+  helpIcon?: React.ReactNode;
+  rightIcon?: React.ReactNode;
 }
 
 export function Textarea({
@@ -22,6 +24,8 @@ export function Textarea({
   value,
   onChangeText,
   containerStyle,
+  helpIcon,
+  rightIcon,
   ...rest
 }: TextareaProps) {
   const [focused, setFocused] = useState(false);
@@ -29,7 +33,12 @@ export function Textarea({
 
   return (
     <View style={containerStyle}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {(label || helpIcon) && (
+        <View style={styles.labelRow}>
+          {label && <Text style={styles.label}>{label}</Text>}
+          {helpIcon}
+        </View>
+      )}
       <View
         style={[
           styles.wrapper,
@@ -51,9 +60,14 @@ export function Textarea({
             setFocused(false);
             rest.onBlur?.(e);
           }}
-          style={[styles.input, { minHeight }]}
+          style={[styles.input, { minHeight, paddingRight: rightIcon ? 32 : 0 }]}
           {...rest}
         />
+        {rightIcon && (
+          <View style={styles.rightIconWrapper} pointerEvents="box-none">
+            {rightIcon}
+          </View>
+        )}
       </View>
       <View style={styles.footer}>
         {(helperText || error) && (
@@ -73,10 +87,23 @@ export function Textarea({
 
 const styles = StyleSheet.create({
   label: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: '500',
-    color: colors.text.secondary,
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[700],
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
     marginBottom: spacing[1],
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+  },
+  rightIconWrapper: {
+    position: 'absolute',
+    right: spacing[2],
+    top: spacing[2],
   },
   wrapper: {
     borderWidth: 1,
