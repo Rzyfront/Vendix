@@ -143,7 +143,6 @@ export function MultiSelector<T = string | number>({
             );
           })}
         </View>
-      </View>
       </Modal>
     </View>
   );
