@@ -2,6 +2,7 @@ import {
   Component,
   inject,
   signal,
+  computed,
   DestroyRef,
   effect,
 } from '@angular/core';
@@ -16,6 +17,8 @@ import {
   IconComponent,
   StatsComponent,
   CardComponent,
+  ScrollableTabsComponent,
+  ScrollableTab,
 } from '../../../../shared/components';
 
 /**
@@ -41,6 +44,7 @@ import {
     IconComponent,
     StatsComponent,
     CardComponent,
+    ScrollableTabsComponent,
   ],
   template: `
     <div class="pqr-list-page">
@@ -152,31 +156,13 @@ import {
         ></app-stats>
       </div>
 
-      <div class="filter-chips">
-        <button
-          class="chip"
-          [class.chip--active]="quickFilter() === 'all'"
-          (click)="setQuickFilter('all')"
-        >
-          Todas <span class="chip__count">{{ stats().total }}</span>
-        </button>
-        <button
-          class="chip chip--warn"
-          [class.chip--active]="quickFilter() === 'overdue'"
-          (click)="setQuickFilter('overdue')"
-        >
-          <app-icon name="alert-triangle" [size]="14"></app-icon>
-          Vencidas <span class="chip__count">{{ stats().overdue }}</span>
-        </button>
-        <button
-          class="chip"
-          [class.chip--active]="quickFilter() === 'new'"
-          (click)="setQuickFilter('new')"
-        >
-          <app-icon name="inbox" [size]="14"></app-icon>
-          Sin asignar
-          <span class="chip__count">{{ stats().by_status?.NEW || 0 }}</span>
-        </button>
+      <!-- Quick filters — replaced chip row with scrollable tabs. -->
+      <div class="quick-tabs">
+        <app-scrollable-tabs
+          [tabs]="quickFilterTabs()"
+          [activeTab]="quickFilter()"
+          (tabChange)="setQuickFilter($event)"
+        />
       </div>
 
       <div class="filters-bar">
@@ -320,18 +306,18 @@ import {
         width: 56px;
         height: 56px;
         border-radius: 14px;
-        background: #ecfeff;
-        color: #0e7490;
+        background: #dcfce7;
+        color: #15803d;
         display: flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
-        border: 1px solid #cffafe;
+        border: 1px solid #bbf7d0;
       }
       .page-header__eyebrow {
         margin: 0 0 0.25rem;
         font-size: 0.75rem;
-        color: #0e7490;
+        color: #15803d;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -714,10 +700,23 @@ private loadOrgStores(): void {
       });
   }
 
-  setQuickFilter(filter: 'all' | 'overdue' | 'new') {
-    this.quickFilter.set(filter);
+  setQuickFilter(filter: string) {
+    this.quickFilter.set(filter as 'all' | 'overdue' | 'new');
     this.fetch();
   }
+
+  /**
+   * Quick filter tabs — drives the scrollable-tabs component
+   * (replaces the old chip row). The active tab id maps 1:1 to the
+   * setQuickFilter input.
+   */
+  quickFilterTabs = computed<ScrollableTab[]>(() => {
+    return [
+      { id: 'all', label: 'Todas', icon: 'inbox' },
+      { id: 'overdue', label: 'Vencidas', icon: 'alert-triangle' },
+      { id: 'new', label: 'Sin asignar', icon: 'inbox' },
+    ];
+  });
 
   applyFilters() {
     this.fetch();

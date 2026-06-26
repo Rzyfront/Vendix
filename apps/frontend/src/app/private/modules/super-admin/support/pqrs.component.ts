@@ -2,6 +2,7 @@ import {
   Component,
   inject,
   signal,
+  computed,
   DestroyRef,
   effect,
 } from '@angular/core';
@@ -15,6 +16,8 @@ import { environment } from '../../../../../environments/environment';
 import {
   IconComponent,
   StatsComponent,
+  ScrollableTabsComponent,
+  ScrollableTab,
 } from '../../../../shared/components';
 
 /**
@@ -43,6 +46,7 @@ import {
     RouterLink,
     IconComponent,
     StatsComponent,
+    ScrollableTabsComponent,
   ],
   template: `
     <div class="pqr-list-page">
@@ -155,43 +159,16 @@ import {
         ></app-stats>
       </div>
 
-      <!-- Quick filter chips — operator's primary tool -->
-      <div class="filter-chips">
-        <button
-          class="chip"
-          [class.chip--active]="quickFilter() === 'all'"
-          (click)="setQuickFilter('all')"
-        >
-          Todas
-          <span class="chip__count">{{ stats().total }}</span>
-        </button>
-        <button
-          class="chip chip--warn"
-          [class.chip--active]="quickFilter() === 'overdue'"
-          (click)="setQuickFilter('overdue')"
-        >
-          <app-icon name="alert-triangle" [size]="14"></app-icon>
-          Vencidas
-          <span class="chip__count">{{ stats().overdue }}</span>
-        </button>
-        <button
-          class="chip chip--warn"
-          [class.chip--active]="quickFilter() === 'expiring'"
-          (click)="setQuickFilter('expiring')"
-        >
-          <app-icon name="clock" [size]="14"></app-icon>
-          Por vencer (≤ 3 días)
-          <span class="chip__count">{{ expiringCount() }}</span>
-        </button>
-        <button
-          class="chip"
-          [class.chip--active]="quickFilter() === 'new'"
-          (click)="setQuickFilter('new')"
-        >
-          <app-icon name="inbox" [size]="14"></app-icon>
-          Sin asignar
-          <span class="chip__count">{{ stats().by_status?.NEW || 0 }}</span>
-        </button>
+      <!-- Quick filters — replaced chip row with scrollable tabs
+           (same component used by Inventario, Analíticas, etc).
+           The active filter is computed by id so the tab can drive
+           the same setQuickFilter handler the chips did. -->
+      <div class="quick-tabs">
+        <app-scrollable-tabs
+          [tabs]="quickFilterTabs()"
+          [activeTab]="quickFilter()"
+          (tabChange)="setQuickFilter($event)"
+        />
       </div>
 
       <!-- Filters bar (advanced) -->
@@ -380,18 +357,18 @@ import {
         width: 56px;
         height: 56px;
         border-radius: 14px;
-        background: #ecfeff;
-        color: #0e7490;
+        background: #dcfce7;
+        color: #15803d;
         display: flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
-        border: 1px solid #cffafe;
+        border: 1px solid #bbf7d0;
       }
       .page-header__eyebrow {
         margin: 0 0 0.25rem;
         font-size: 0.75rem;
-        color: #0e7490;
+        color: #15803d;
         font-weight: 600;
         text-transform: uppercase;
         letter-spacing: 0.04em;
@@ -957,6 +934,21 @@ export class SuperadminPqrsComponent {
     if (remaining <= 3) return { remaining, limit, status: 'warn' };
     return { remaining, limit, status: 'ok' };
   }
+
+  /**
+   * Quick filter tabs — replaces the old chip row. Each tab's `id`
+   * matches the value `setQuickFilter()` expects so the same handler
+   * drives the filtering regardless of UI shape.
+   */
+  quickFilterTabs = computed<ScrollableTab[]>(() => {
+    const s = this.stats();
+    return [
+      { id: 'all', label: 'Todas', icon: 'inbox' },
+      { id: 'overdue', label: 'Vencidas', icon: 'alert-triangle' },
+      { id: 'expiring', label: 'Por vencer', icon: 'clock' },
+      { id: 'new', label: 'Sin asignar', icon: 'inbox' },
+    ];
+  });
 
   /** Count of tickets in "expiring" state (1-3 days remaining). */
   expiringCount(): number {

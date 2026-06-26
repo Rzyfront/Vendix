@@ -1,7 +1,9 @@
 <section class="pqr-list-page">
   <!-- Page header — card pattern matching the rest of the admin
-       modules (Inventario, Analíticas, etc): icon-tile on the left,
-       title + subtitle in the middle, primary action on the right. -->
+       modules (Inventario, Analíticas, etc). Icon-tile + title/
+       subtitle on the left. The primary action lives inside the
+       conversational CTA card so the user has all the entry points
+       (filtros + acción) in the same visual zone. -->
   <header class="page-header">
     <div class="page-header__main">
       <div class="page-header__icon" aria-hidden="true">
@@ -16,13 +18,12 @@
         </p>
       </div>
     </div>
-    <button class="new-pqr-btn" type="button" (click)="openNewPqrModal()">
-      <app-icon name="plus" [size]="16"></app-icon>
-      Nueva solicitud
-    </button>
   </header>
 
-  <!-- Primary CTA card — conversational hub that answers "¿qué tengo que hacer hoy?" -->
+  <!-- Primary CTA card — conversational hub. Header row combines the
+       contextual message (left) with the quick filters and primary
+       action (right), so the user sees everything they need to do in
+       one visual zone. -->
   @if (stats(); as s) {
   <div
     class="cta-card"
@@ -41,106 +42,122 @@
           tienda, aparecerá aquí. Mientras tanto, todo en orden.
         </p>
       </div>
+      <button class="new-pqr-btn" type="button" (click)="openNewPqrModal()">
+        <app-icon name="plus" [size]="16"></app-icon>
+        Nueva solicitud
+      </button>
     </div>
     } @else {
     <div class="cta-card__main">
-      <div class="cta-card__icon">
-        <app-icon
-          [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-circle'"
-          [size]="28"
-        ></app-icon>
-      </div>
-      <div class="cta-card__copy">
-        <h2>
-          @if (overdueCount() > 0) {
-            Tienes {{ overdueCount() }} solicitud{{ overdueCount() === 1 ? '' : 'es' }}
-            con tiempo vencido
-          } @else if (pendingCount() > 0) {
-            Tienes {{ pendingCount() }} solicitud{{ pendingCount() === 1 ? '' : 'es' }}
-            pendiente{{ pendingCount() === 1 ? '' : 's' }} de respuesta
-          } @else {
-            ¡Todo al día con tus solicitudes!
+      <div class="cta-card__lead">
+        <div class="cta-card__icon">
+          <app-icon
+            [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-circle'"
+            [size]="28"
+          ></app-icon>
+        </div>
+        <div class="cta-card__copy">
+          <h2>
+            @if (overdueCount() > 0) {
+              Tienes {{ overdueCount() }} solicitud{{ overdueCount() === 1 ? '' : 'es' }}
+              con tiempo vencido
+            } @else if (pendingCount() > 0) {
+              Tienes {{ pendingCount() }} solicitud{{ pendingCount() === 1 ? '' : 'es' }}
+              pendiente{{ pendingCount() === 1 ? '' : 's' }} de respuesta
+            } @else {
+              ¡Todo al día con tus solicitudes!
+            }
+          </h2>
+          <p>
+            @if (overdueCount() > 0) {
+              Es importante responder pronto para evitar consecuencias legales.
+            } @else if (pendingCount() > 0) {
+              Cuando respondas, el solicitante recibirá un correo con tu mensaje.
+            } @else {
+              No tienes solicitudes pendientes en este momento.
+            }
+          </p>
+        </div>
+        <div class="cta-card__actions">
+          @if (pendingCount() > 0 && urgentPqrRoute(); as route) {
+          <a class="cta-card__action cta-card__action--ghost" [routerLink]="route">
+            Continuar conversación
+          </a>
           }
-        </h2>
-        <p>
-          @if (overdueCount() > 0) {
-            Es importante responder pronto para evitar consecuencias legales.
-          } @else if (pendingCount() > 0) {
-            Cuando respondas, el solicitante recibirá un correo con tu mensaje.
-          } @else {
-            No tienes solicitudes pendientes en este momento.
-          }
-        </p>
+          <button
+            class="new-pqr-btn"
+            type="button"
+            (click)="openNewPqrModal()"
+          >
+            <app-icon name="plus" [size]="16"></app-icon>
+            Nueva solicitud
+          </button>
+        </div>
       </div>
-      @if (pendingCount() > 0 && urgentPqrRoute(); as route) {
-        <a class="cta-card__action" [routerLink]="route">
-          Continuar conversación
-          <app-icon name="arrow-right" [size]="16"></app-icon>
-        </a>
-      }
+
+      <!-- Tabs for quick filters — replaces the older chip row. -->
+      <div class="cta-card__tabs">
+        <app-scrollable-tabs
+          [tabs]="quickFilterTabs()"
+          [activeTab]="quickFilter()"
+          (tabChange)="setQuickFilter($event)"
+        />
+      </div>
     </div>
     }
   </div>
   }
 
-  <!-- Filters — collapsed by default to keep the view calm -->
-  <details class="filters-section">
-    <summary>
-      <app-icon name="filter" [size]="16"></app-icon>
-      Filtros
-      @if (statusFilter() || typeFilter() || searchInput()) {
-      <span class="filters-section__badge">activos</span>
-      }
-    </summary>
-    <div class="filters-bar">
-      <div class="filter-group">
-        <label>Estado</label>
-        <select
-          [ngModel]="statusFilter()"
-          (ngModelChange)="setStatusFilter($event)"
-        >
-          <option value="">Todos</option>
-          <option value="NEW">Nuevo</option>
-          <option value="OPEN">Abierto</option>
-          <option value="IN_PROGRESS">En progreso</option>
-          <option value="WAITING_RESPONSE">Esperando respuesta</option>
-          <option value="RESOLVED">Resuelto</option>
-          <option value="CLOSED">Cerrado</option>
-          <option value="REOPENED">Reabierto</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <label>Tipo</label>
-        <select
-          [ngModel]="typeFilter()"
-          (ngModelChange)="setTypeFilter($event)"
-        >
-          <option value="">Todos</option>
-          <option value="PETITION">Petición</option>
-          <option value="COMPLAINT">Queja</option>
-          <option value="CLAIM">Reclamo</option>
-        </select>
-      </div>
-      <div class="filter-group filter-group--search">
-        <label>Buscar</label>
-        <div class="search-input">
-          <app-icon name="search" [size]="16"></app-icon>
-          <input
-            type="search"
-            placeholder="Asunto o número de ticket…"
-            [ngModel]="searchInput()"
-            (ngModelChange)="searchInput.set($event)"
-          />
-          @if (searchInput()) {
-          <button class="clear-btn" (click)="clearSearch()" aria-label="Limpiar">
-            ×
-          </button>
-          }
-        </div>
-      </div>
-      <span class="filters-hint">Los filtros se aplican automáticamente</span>
+  <!-- Filters bar — always visible, no collapse. Three compact
+       dropdowns (Estado / Tipo / Buscar) keep the operator's
+       attention in the same scroll as the queue. -->
+  <div class="filters-bar">
+    <div class="filter-group">
+      <label>Estado</label>
+      <select
+        [ngModel]="statusFilter()"
+        (ngModelChange)="setStatusFilter($event)"
+      >
+        <option value="">Todos</option>
+        <option value="NEW">Nuevo</option>
+        <option value="OPEN">Abierto</option>
+        <option value="IN_PROGRESS">En progreso</option>
+        <option value="WAITING_RESPONSE">Esperando respuesta</option>
+        <option value="RESOLVED">Resuelto</option>
+        <option value="CLOSED">Cerrado</option>
+        <option value="REOPENED">Reabierto</option>
+      </select>
     </div>
-  </details>
+    <div class="filter-group">
+      <label>Tipo</label>
+      <select
+        [ngModel]="typeFilter()"
+        (ngModelChange)="setTypeFilter($event)"
+      >
+        <option value="">Todos</option>
+        <option value="PETITION">Petición</option>
+        <option value="COMPLAINT">Queja</option>
+        <option value="CLAIM">Reclamo</option>
+      </select>
+    </div>
+    <div class="filter-group filter-group--search">
+      <label>Buscar</label>
+      <div class="search-input">
+        <app-icon name="search" [size]="16"></app-icon>
+        <input
+          type="search"
+          placeholder="Asunto o número de ticket…"
+          [ngModel]="searchInput()"
+          (ngModelChange)="searchInput.set($event)"
+        />
+        @if (searchInput()) {
+        <button class="clear-btn" (click)="clearSearch()" aria-label="Limpiar">
+          ×
+        </button>
+        }
+      </div>
+    </div>
+  </div>
 
   <!-- Loading + error states -->
   @if (loading()) {

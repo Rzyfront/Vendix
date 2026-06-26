@@ -13,6 +13,10 @@ import { PqrAdminService } from '../../services/pqr-admin.service';
 import { Pqr, PqrQuery, PqrStats, PqrType, PqrStatus, PqrPriority } from '../../models/pqr.model';
 import { PqrStatusPillComponent } from '../../components/pqr-status-pill.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import {
+  ScrollableTabsComponent,
+  ScrollableTab,
+} from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { PqrService } from '../../../../../../shared/services/pqr.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
@@ -33,6 +37,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
     DatePipe,
     PqrStatusPillComponent,
     IconComponent,
+    ScrollableTabsComponent,
   ],
   templateUrl: './pqr-list-page.component.html',
   styleUrls: ['./pqr-list-page.component.scss'],
