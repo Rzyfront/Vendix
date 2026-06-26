@@ -58,7 +58,7 @@ export function StickyHeader({
     <View
       style={[
         styles.wrapper,
-        { paddingTop: insets.top + spacing[2] },
+        { paddingTop: insets.top + spacing[1] },
         isGlass && styles.wrapperGlass,
         style,
       ]}
@@ -166,7 +166,7 @@ const styles = StyleSheet.create({
   wrapper: {
     backgroundColor: colors.card,
     paddingHorizontal: spacing[4],
-    paddingBottom: spacing[3],
+    paddingBottom: spacing[2],
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colorScales.gray[200],
     ...shadows.sm,
@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 44,
+    minHeight: 40,
     gap: spacing[2],
   },
   backButton: {
