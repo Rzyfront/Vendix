@@ -425,7 +425,7 @@ const DashboardScreen = () => {
               title="Tendencia de Ventas"
               right={
                 <FilterDropdown
-                  triggerIcon="sliders-horizontal"
+                  triggerIcon="sliders"
                   activeValue={preset}
                   sections={[
                     {

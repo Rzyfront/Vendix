@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Pressable, Text, View, StyleSheet, ScrollView, type ViewStyle } from 'react-native';
+import { Pressable, Text, View, StyleSheet, ScrollView, Modal, type ViewStyle } from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, borderRadius, typography, shadows } from '@/shared/theme';
 
@@ -61,11 +61,11 @@ export function FilterDropdown({
 
   const handleToggle = () => {
     if (!open && triggerRef.current) {
-      // Medir posición del trigger para posicionar el dropdown
+      // Medir posición del trigger para posicionar el dropdown absoluto
       triggerRef.current.measureInWindow((x, y, width, height) => {
         setPosition({
-          top: y + height + 6,
-          right: 16, // Se posiciona a 16px del borde derecho
+          top: y + height + 6,  // Justo debajo del botón + 6px de espacio
+          right: 16,              // Alineado a 16px del borde derecho de la pantalla
         });
         setOpen(true);
       });
@@ -81,77 +81,84 @@ export function FilterDropdown({
 
   return (
     <>
-      <Pressable
-        ref={triggerRef}
-        onPress={handleToggle}
-        style={({ pressed }) => [
-          styles.trigger,
-          pressed && styles.triggerPressed,
-          open && styles.triggerActive,
-          style,
-        ]}
-      >
-        <Icon name={triggerIcon} size={16} color={open ? colors.primary : colors.text.primary} />
-        {triggerLabel ? <Text style={styles.triggerLabel}>{triggerLabel}</Text> : null}
-        {activeCount > 0 ? (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{`${activeCount}`}</Text>
-          </View>
-        ) : null}
-      </Pressable>
+      <View style={styles.wrapper}>
+        <Pressable
+          ref={triggerRef}
+          onPress={handleToggle}
+          style={({ pressed }) => [
+            styles.trigger,
+            pressed && styles.triggerPressed,
+            open && styles.triggerActive,
+            style,
+          ]}
+        >
+          <Icon name={triggerIcon} size={16} color={open ? colors.primary : colors.text.primary} />
+          {triggerLabel ? <Text style={styles.triggerLabel}>{triggerLabel}</Text> : null}
+          {activeCount > 0 ? (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{`${activeCount}`}</Text>
+            </View>
+          ) : null}
+        </Pressable>
+      </View>
 
-      {open && (
-        <>
-          {/* Backdrop transparente para cerrar al tocar fuera */}
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={() => setOpen(false)}
-          />
-          {/* Dropdown */}
-          <View
-            style={[
-              styles.dropdown,
-              { top: position.top, right: position.right },
-            ]}
-          >
-            <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
-              {sections.map((section, sIdx) => (
-                <View key={`section-${sIdx}`} style={styles.section}>
-                  {section.label ? (
-                    <Text style={styles.sectionLabel}>{section.label}</Text>
-                  ) : null}
-                  {section.options.map((opt) => {
-                    const isActive = opt.value === activeValue;
-                    return (
-                      <Pressable
-                        key={opt.value}
-                        onPress={() => handleSelect(section, opt.value)}
-                        style={({ pressed }) => [
-                          styles.option,
-                          isActive && styles.optionActive,
-                          pressed && !isActive && styles.optionPressed,
-                        ]}
-                      >
-                        <Text style={[styles.optionText, isActive && styles.optionTextActive]}>
-                          {opt.label}
-                        </Text>
-                        {isActive ? (
-                          <Icon name="check" size={14} color={colors.primary} />
-                        ) : null}
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              ))}
-            </ScrollView>
-          </View>
-        </>
-      )}
+      {/* Dropdown como Modal nativo (siempre encima de todo) */}
+      <Modal
+        visible={open}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setOpen(false)}
+      >
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={() => setOpen(false)}
+        />
+        <View
+          style={[
+            styles.dropdownModal,
+            { top: position.top, right: position.right },
+          ]}
+        >
+          <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            {sections.map((section, sIdx) => (
+              <View key={`section-${sIdx}`} style={styles.section}>
+                {section.label ? (
+                  <Text style={styles.sectionLabel}>{section.label}</Text>
+                ) : null}
+                {section.options.map((opt) => {
+                  const isActive = opt.value === activeValue;
+                  return (
+                    <Pressable
+                      key={opt.value}
+                      onPress={() => handleSelect(section, opt.value)}
+                      style={({ pressed }) => [
+                        styles.option,
+                        isActive && styles.optionActive,
+                        pressed && !isActive && styles.optionPressed,
+                      ]}
+                    >
+                      <Text style={[styles.optionText, isActive && styles.optionTextActive]}>
+                        {opt.label}
+                      </Text>
+                      {isActive ? (
+                        <Icon name="check" size={14} color={colors.primary} />
+                      ) : null}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      </Modal>
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  wrapper: {
+    position: 'relative',
+  },
   trigger: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -162,7 +169,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colorScales.gray[200],
     backgroundColor: colors.card,
-    position: 'relative',
   },
   triggerPressed: {
     opacity: 0.7,
@@ -193,6 +199,9 @@ const styles = StyleSheet.create({
   },
   dropdown: {
     position: 'absolute',
+    top: '100%',
+    right: 0,
+    marginTop: 4,
     minWidth: 220,
     maxWidth: 320,
     backgroundColor: colors.card,
@@ -200,8 +209,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colorScales.gray[200],
     ...shadows.lg,
-    zIndex: 1000,
-    elevation: 12,
+    zIndex: 9999,
+    elevation: 24,
+  },
+  // Variante del dropdown usado dentro de un Modal nativo (sin position relative al padre)
+  dropdownModal: {
+    position: 'absolute',
+    minWidth: 220,
+    maxWidth: 320,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    ...shadows.lg,
+    zIndex: 9999,
+    elevation: 24,
   },
   scrollContent: {
     maxHeight: 320,
