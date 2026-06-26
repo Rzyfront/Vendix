@@ -777,7 +777,7 @@ const styles = StyleSheet.create({
   sectionSubtitle: { fontSize: typography.fontSize.xs, color: colorScales.gray[500], marginTop: 4 },
   sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
   sectionIcon: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
-  sectionBody: { padding: spacing[5], gap: spacing[3] },
+  sectionBody: { padding: spacing[5], gap: spacing[4] },
   chipBlock: { gap: spacing[2] },
   blockLabel: { fontSize: typography.fontSize.xs, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase', letterSpacing: 1 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing[2] },
