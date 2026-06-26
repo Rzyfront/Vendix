@@ -148,13 +148,11 @@ function ActionButton({ action }: { action: StickyHeaderAction }) {
       ) : (
         <>
           {action.icon && !action.iconRight && (
-            <Icon name={action.icon} size={16} color={textColor} style={{ marginRight: spacing[1] }} />
+            <Icon name={action.icon} size={18} color={textColor} />
           )}
-          <Text style={[styles.actionLabel, { color: textColor }]} numberOfLines={1}>
-            {action.label}
-          </Text>
+          {action.label ? <Text style={[styles.actionLabel, { color: textColor }]} numberOfLines={1}>{action.label}</Text> : null}
           {action.icon && action.iconRight && (
-            <Icon name={action.icon} size={16} color={textColor} style={{ marginLeft: spacing[1] }} />
+            <Icon name={action.icon} size={18} color={textColor} />
           )}
         </>
       )}
@@ -209,11 +207,11 @@ const styles = StyleSheet.create({
     gap: spacing[2],
   },
   actionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.lg,
   },
   actionPressed: {
     opacity: 0.7,
