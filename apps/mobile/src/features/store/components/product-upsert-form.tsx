@@ -391,7 +391,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       <StickyHeader
         title={mode === 'edit' ? 'Editar Producto' : 'Nuevo Producto'}
         showCloseButton={false}
-        backHref="/(store-admin)/products"
+        onBack={() => router.back()}
         actions={[
           { label: '', icon: 'x', variant: 'outline', onPress: () => router.back() },
           {
@@ -757,7 +757,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
   flex: { flex: 1 },
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colorScales.gray[50] },
-  content: { padding: spacing[4], paddingBottom: 120, gap: spacing[3] },
+  content: { padding: spacing[3], paddingBottom: 100, gap: spacing[2] },
   section: {
     backgroundColor: colors.card,
     borderRadius: 12,
