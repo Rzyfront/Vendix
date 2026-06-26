@@ -185,7 +185,11 @@ const styles = StyleSheet.create({
     gap: spacing[2],
   },
   backButton: {
-    padding: spacing[1],
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   titleBlock: {
     flex: 1,
@@ -205,11 +209,11 @@ const styles = StyleSheet.create({
     gap: spacing[2],
   },
   actionButton: {
-    flexDirection: 'row',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.lg,
+    justifyContent: 'center',
   },
   actionPressed: {
     opacity: 0.7,
