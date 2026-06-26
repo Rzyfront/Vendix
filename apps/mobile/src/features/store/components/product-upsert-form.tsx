@@ -387,37 +387,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
 
   return (
     <View style={styles.container}>
-      {/* Top bar — logo Vendix + breadcrumb + título + iconos (NO sticky) */}
-      <View style={styles.topBar}>
-        <View style={styles.topBarLeft}>
-          <View style={styles.topBarLogo}>
-            <Icon name="shopping-cart" size={20} color={colors.background} />
-          </View>
-          <View style={{ marginLeft: spacing[2], flex: 1 }}>
-            <Text style={styles.topBarBreadcrumb}>Productos / {mode === 'edit' ? 'Editar Producto' : 'Crear Producto'}</Text>
-            <Text style={styles.topBarTitle}>{mode === 'edit' ? 'Editar Producto' : 'Crear Producto'}</Text>
-          </View>
-        </View>
-        <View style={styles.topBarActions}>
-          <Pressable hitSlop={8} style={styles.topBarIconBtn}>
-            <Icon name="search" size={18} color={colorScales.gray[500]} />
-          </Pressable>
-          <View style={styles.topBarNotif}>
-            <Pressable hitSlop={8} style={styles.topBarIconBtn}>
-              <Icon name="bell" size={18} color={colorScales.gray[500]} />
-            </Pressable>
-            <View style={styles.topBarNotifBadge}>
-              <Text style={styles.topBarNotifText}>2</Text>
-            </View>
-          </View>
-          <View style={styles.topBarAvatar}>
-            <Text style={styles.topBarAvatarText}>VD</Text>
-            <View style={styles.topBarAvatarDot} />
-          </View>
-        </View>
-      </View>
-
-      {/* Header sticky — flecha + título + iconos (X / +) */}
+      {/* Header sticky — flecha + título + acciones iconos (X / +) */}
       <StickyHeader
         title={mode === 'edit' ? 'Editar Producto' : 'Nuevo Producto'}
         showCloseButton={false}
@@ -786,64 +756,6 @@ function ToggleRow({ label, value, onPress }: { label: string; value: boolean; o
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
   flex: { flex: 1 },
-  topBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
-  },
-  topBarLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  topBarLogo: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  topBarBreadcrumb: { fontSize: 11, color: colorScales.gray[500] },
-  topBarTitle: { fontSize: typography.fontSize.lg, fontWeight: '700', color: colorScales.gray[900] },
-  topBarActions: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
-  topBarIconBtn: { padding: spacing[1] },
-  topBarNotif: { position: 'relative' },
-  topBarNotifBadge: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    minWidth: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#EF4444',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  topBarNotifText: { color: colors.background, fontSize: 9, fontWeight: '700' },
-  topBarAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colorScales.green[100] ?? '#DCFCE7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  topBarAvatarText: { fontSize: 12, fontWeight: '700', color: colors.primary },
-  topBarAvatarDot: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colorScales.green[500] ?? '#22C55E',
-    borderWidth: 2,
-    borderColor: colors.background,
-  },
   loader: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colorScales.gray[50] },
   content: { padding: spacing[4], paddingBottom: 120, gap: spacing[3] },
   section: {

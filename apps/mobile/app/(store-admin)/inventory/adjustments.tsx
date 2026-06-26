@@ -20,29 +20,14 @@ import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { formatDate } from '@/shared/utils/date';
 import { spacing, borderRadius, colors, colorScales, typography, shadows } from '@/shared/theme';
 import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
-import { ADJUSTMENT_STATS, ADJUSTMENT_TYPE_MAP, ADJUSTMENT_TYPE_OPTIONS, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
+import { ADJUSTMENT_STATS, ADJUSTMENT_TYPE_OPTIONS, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
 
 const STATE_VARIANT: Record<AdjustmentState, 'warning' | 'success'> = {
   pending: 'warning',
   applied: 'success',
 };
 
-const REASON_CODE_LABELS: Record<string, string> = {
-  DAMAGED: 'Producto dañado',
-  LOST: 'Producto perdido',
-  THEFT: 'Robo confirmado',
-  EXPIRED: 'Producto vencido',
-  INV_COUNT: 'Conteo de inventario',
-  OTHER: 'Otro',
-};
-
-function AdjustmentCard({
-  item,
-  onView,
-}: {
-  item: StockAdjustment;
-  onView?: (item: StockAdjustment) => void;
-}) {
+function AdjustmentCard({ item }: { item: StockAdjustment }) {
   // Fallbacks seguros para evitar "[object Object]" si el backend devuelve un objeto en campos string
   const productName =
     typeof item.products?.name === 'string'
@@ -56,7 +41,6 @@ function AdjustmentCard({
       : 'Sin ubicación';
   const typeLabel = ADJUSTMENT_TYPE_LABELS[item.adjustment_type] ?? 'Ajuste';
   const dateLabel = formatDate(item.created_at);
-  const quantityChange = Number(item.quantity_change ?? 0);
   return (
     <View style={styles.card}>
       <View style={styles.cardBody}>
@@ -80,852 +64,16 @@ function AdjustmentCard({
           </View>
         </View>
 
-        {/* Fila 3: Footer con CAMBIO + botón (ver) (como la web) */}
+        {/* Fila 3: Footer con CAMBIO + pin (como la web) */}
         <View style={styles.cardFooter}>
           <View style={styles.cardFooterLeft}>
             <Text style={styles.cardFooterLabel}>CAMBIO</Text>
-            <Text style={styles.cardFooterValue}>{`${quantityChange}`}</Text>
+            <Text style={styles.cardFooterValue}>{Number(item.quantity_change ?? 0)}</Text>
           </View>
-          {onView && (
-            <Pressable
-              onPress={() => onView(item)}
-              hitSlop={8}
-              style={({ pressed }) => [styles.eyeBtn, pressed && { opacity: 0.6 }]}
-              accessibilityLabel="Ver detalle del ajuste"
-            >
-              <Icon name="eye" size={16} color={colors.primary} />
-            </Pressable>
-          )}
+          <Icon name="map-pin" size={16} color={colorScales.gray[500]} />
         </View>
       </View>
     </View>
-  );
-}
-
-/**
- * Adjustment detail popup — opened when the user taps the eye (ver) button on
- * an AdjustmentCard. Mirrors the web `app-adjustment-detail-modal` visual
- * contract: header with status badge, product/variant/location, before/after/
- * change breakdown, motivo, and contextual actions (Eliminar / Aprobar /
- * Cerrar) based on whether the adjustment is pending or already applied.
- */
-interface BulkResultItem {
-  row_number: number;
-  sku: string;
-  product_name?: string;
-  status: 'success' | 'error';
-  message?: string;
-  quantity_change?: number;
-}
-
-interface BulkUploadResult {
-  total_processed: number;
-  successful: number;
-  failed: number;
-  results: BulkResultItem[];
-}
-
-/**
- * BulkAdjustmentModal — wizard de 3 pasos idéntico al web:
- *  1) Configuración (ubicación + tipo + descripción)
- *  2) Subir archivo (drop zone xlsx/xls/csv)
- *  3) Resultado (Total / Exitosos / Fallidos + tabla)
- * Footer: Atrás / Cancelar-Cerrar / Siguiente / Subir y Aplicar.
- */
-function BulkAdjustmentModal({
-  visible,
-  onClose,
-  locations,
-  onCompleted,
-}: {
-  visible: boolean;
-  onClose: () => void;
-  locations: Array<{ value: number; label: string }>;
-  onCompleted?: () => void;
-}) {
-  const queryClient = useQueryClient();
-  const [step, setStep] = useState(1);
-  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
-  const [selectedAdjustmentType, setSelectedAdjustmentType] = useState<string>('count_variance');
-  const [description, setDescription] = useState<string>('');
-  const [selectedFile, setSelectedFile] = useState<{
-    uri: string;
-    name: string;
-    size?: number;
-    type?: string;
-  } | null>(null);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<BulkUploadResult | null>(null);
-  const [showTypeDropdown, setShowTypeDropdown] = useState(false);
-
-  const resetState = () => {
-    setStep(1);
-    setSelectedFile(null);
-    setUploadResult(null);
-    setIsUploading(false);
-    setIsDownloading(false);
-    setDescription('');
-    setShowTypeDropdown(false);
-  };
-
-  const handleClose = () => {
-    resetState();
-    onClose();
-  };
-
-  const handleDownloadTemplate = async () => {
-    setIsDownloading(true);
-    try {
-      const blob = await InventoryService.downloadAdjustmentTemplate(
-        selectedLocationId ?? undefined,
-      );
-      const url = (global as any).URL?.createObjectURL?.(blob);
-      // En React Native no hay URL.createObjectURL nativo. Usamos Linking/RNFS en runtime.
-      // Para simplicidad aquí guardamos el blob como data URI y lo dejamos listo.
-      if (url) {
-        const link = (global as any).document?.createElement?.('a');
-        if (link) {
-          link.href = url;
-          link.download = `plantilla_ajuste_inventario_${new Date().toISOString().split('T')[0]}.xlsx`;
-          link.click();
-          (global as any).URL.revokeObjectURL?.(url);
-        }
-      }
-      toastSuccess('Plantilla descargada');
-    } catch (e: any) {
-      toastError(e?.message || 'Error al descargar plantilla');
-    } finally {
-      setIsDownloading(false);
-    }
-  };
-
-  const handlePickFile = async () => {
-    try {
-      const DocumentPicker = await import('expo-document-picker');
-      const result = await DocumentPicker.getDocumentAsync({
-        type: [
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'application/vnd.ms-excel',
-          'text/csv',
-        ],
-        copyToCacheDirectory: true,
-      });
-      if (!result.canceled && result.assets[0]) {
-        const a = result.assets[0];
-        setSelectedFile({
-          uri: a.uri,
-          name: a.name,
-          size: a.size,
-          type: a.mimeType,
-        });
-      }
-    } catch (e: any) {
-      toastError('No se pudo seleccionar el archivo');
-    }
-  };
-
-  const handleUpload = async () => {
-    if (!selectedFile || !selectedLocationId) return;
-    setIsUploading(true);
-    setStep(3);
-    try {
-      const res = await InventoryService.uploadBulkAdjustments(
-        selectedFile,
-        selectedLocationId,
-        selectedAdjustmentType,
-        description || undefined,
-      );
-      setUploadResult(res);
-      queryClient.invalidateQueries({ queryKey: ['adjustments'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
-      if (res.failed === 0) {
-        toastSuccess(`${res.successful} ajustes aplicados exitosamente`);
-      } else {
-        toastError(`${res.successful} exitosos, ${res.failed} con errores`);
-      }
-      onCompleted?.();
-    } catch (e: any) {
-      toastError(e?.message || 'Error al procesar el archivo');
-      setStep(2);
-    } finally {
-      setIsUploading(false);
-    }
-  };
-
-  const formatFileSize = (bytes: number | undefined) => {
-    if (!bytes) return '';
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  };
-
-  const failedItems = uploadResult?.results.filter((r) => r.status === 'error') ?? [];
-  const typeOptions = [
-    { value: 'count_variance', label: 'Varianza de conteo' },
-    { value: 'manual_correction', label: 'Corrección manual' },
-    { value: 'damage', label: 'Daño' },
-    { value: 'loss', label: 'Pérdida' },
-    { value: 'theft', label: 'Robo / Hurto' },
-    { value: 'expiration', label: 'Vencimiento' },
-  ];
-
-  if (!visible) return null;
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={handleClose}>
-      <View style={bulkStyles.overlay}>
-        <View style={bulkStyles.modal}>
-          {/* Header */}
-          <View style={bulkStyles.header}>
-            <View style={{ flex: 1 }}>
-              <Text style={bulkStyles.title}>Ajuste Masivo de Inventario</Text>
-              <Text style={bulkStyles.subtitle}>
-                Suba un archivo Excel o CSV para ajustar el inventario de múltiples productos
-              </Text>
-            </View>
-            <Pressable onPress={handleClose} hitSlop={8} style={bulkStyles.closeBtn}>
-              <Icon name="x" size={22} color={colorScales.gray[500]} />
-            </Pressable>
-          </View>
-
-          {/* Step Indicator (1 — 2 — 3) */}
-          <View style={bulkStyles.stepsRow}>
-            {[1, 2, 3].map((s) => (
-              <View key={s} style={bulkStyles.stepRow}>
-                <View
-                  style={[
-                    bulkStyles.stepCircle,
-                    step >= s && bulkStyles.stepCircleActive,
-                  ]}
-                >
-                  {step > s ? (
-                    <Icon name="check" size={12} color={colors.background} />
-                  ) : (
-                    <Text
-                      style={[
-                        bulkStyles.stepNum,
-                        step >= s && bulkStyles.stepNumActive,
-                      ]}
-                    >
-                      {`${s}`}
-                    </Text>
-                  )}
-                </View>
-                {s < 3 && (
-                  <View
-                    style={[
-                      bulkStyles.stepLine,
-                      step > s && bulkStyles.stepLineDone,
-                    ]}
-                  />
-                )}
-              </View>
-            ))}
-          </View>
-
-          <ScrollView
-            style={bulkStyles.body}
-            contentContainerStyle={bulkStyles.bodyContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* STEP 1: Configuración */}
-            {step === 1 && (
-              <View style={bulkStyles.stepContent}>
-                <Text style={bulkStyles.sectionTitle}>Configuración</Text>
-
-                {/* Ubicación */}
-                <View>
-                  <Text style={bulkStyles.formLabel}>Ubicación / Bodega *</Text>
-                  <Pressable
-                    onPress={() => setShowTypeDropdown((v) => !v)}
-                    style={bulkStyles.selectTrigger}
-                  >
-                    <Text
-                      style={
-                        selectedLocationId
-                          ? bulkStyles.selectValue
-                          : bulkStyles.selectPlaceholder
-                      }
-                    >
-                      {selectedLocationId
-                        ? locations.find((l) => l.value === selectedLocationId)?.label
-                        : 'Seleccione una ubicación'}
-                    </Text>
-                    <Icon
-                      name={showTypeDropdown ? 'chevron-up' : 'chevron-down'}
-                      size={16}
-                      color={colorScales.gray[500]}
-                    />
-                  </Pressable>
-                  {showTypeDropdown && (
-                    <View style={bulkStyles.selectList}>
-                      {locations.length === 0 ? (
-                        <Text style={bulkStyles.selectEmpty}>No hay ubicaciones registradas</Text>
-                      ) : (
-                        locations.map((loc) => (
-                          <Pressable
-                            key={loc.value}
-                            onPress={() => {
-                              setSelectedLocationId(loc.value);
-                              setShowTypeDropdown(false);
-                            }}
-                            style={[
-                              bulkStyles.selectOption,
-                              selectedLocationId === loc.value && bulkStyles.selectOptionActive,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                bulkStyles.selectOptionText,
-                                selectedLocationId === loc.value && bulkStyles.selectOptionTextActive,
-                              ]}
-                            >
-                              {`${loc.label}`}
-                            </Text>
-                            {selectedLocationId === loc.value && (
-                              <Icon name="check" size={14} color={colors.primary} />
-                            )}
-                          </Pressable>
-                        ))
-                      )}
-                    </View>
-                  )}
-                </View>
-
-                {/* Tipo de ajuste (global) */}
-                <View>
-                  <Text style={bulkStyles.formLabel}>Tipo de ajuste (global)</Text>
-                  <View style={bulkStyles.typeGrid}>
-                    {typeOptions.map((t) => (
-                      <Pressable
-                        key={t.value}
-                        onPress={() => setSelectedAdjustmentType(t.value)}
-                        style={[
-                          bulkStyles.typeChip,
-                          selectedAdjustmentType === t.value && bulkStyles.typeChipActive,
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            bulkStyles.typeChipText,
-                            selectedAdjustmentType === t.value && bulkStyles.typeChipTextActive,
-                          ]}
-                        >
-                          {`${t.label}`}
-                        </Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-
-                {/* Descripción */}
-                <View>
-                  <Text style={bulkStyles.formLabel}>Descripción general (opcional)</Text>
-                  <TextInput
-                    style={bulkStyles.textArea}
-                    value={description}
-                    onChangeText={setDescription}
-                    placeholder="Ej: Conteo físico mensual de marzo"
-                    placeholderTextColor={colorScales.gray[400]}
-                    multiline
-                    numberOfLines={2}
-                  />
-                </View>
-
-                {/* Botón descargar plantilla */}
-                <View style={bulkStyles.templateRow}>
-                  <Pressable
-                    style={[
-                      bulkStyles.templateBtn,
-                      (!selectedLocationId || isDownloading) && bulkStyles.templateBtnDisabled,
-                    ]}
-                    onPress={handleDownloadTemplate}
-                    disabled={!selectedLocationId || isDownloading}
-                  >
-                    {isDownloading ? (
-                      <Spinner size="sm" />
-                    ) : (
-                      <Icon name="download" size={16} color={colors.primary} />
-                    )}
-                    <Text style={bulkStyles.templateBtnText}>
-                      {isDownloading ? 'Descargando…' : 'Descargar plantilla'}
-                    </Text>
-                  </Pressable>
-                  <Text style={bulkStyles.templateHint}>
-                    La plantilla incluirá los productos con stock en la ubicación seleccionada
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* STEP 2: Subir archivo */}
-            {step === 2 && (
-              <View style={bulkStyles.stepContent}>
-                <Text style={bulkStyles.sectionTitle}>Subir archivo</Text>
-
-                <Pressable
-                  style={[
-                    bulkStyles.dropZone,
-                    selectedFile && bulkStyles.dropZoneActive,
-                  ]}
-                  onPress={handlePickFile}
-                >
-                  {!selectedFile ? (
-                    <>
-                      <Icon
-                        name="upload-cloud"
-                        size={40}
-                        color={colorScales.gray[400]}
-                        style={{ alignSelf: 'center', marginBottom: 12 }}
-                      />
-                      <Text style={bulkStyles.dropZonePrimary}>
-                        Haga clic o arrastre un archivo aquí
-                      </Text>
-                      <Text style={bulkStyles.dropZoneSecondary}>
-                        Formatos aceptados: Excel (.xlsx, .xls) o CSV
-                      </Text>
-                    </>
-                  ) : (
-                    <>
-                      <Icon
-                        name="file-spreadsheet"
-                        size={40}
-                        color={colors.primary}
-                        style={{ alignSelf: 'center', marginBottom: 12 }}
-                      />
-                      <Text style={bulkStyles.fileName}>{`${selectedFile.name}`}</Text>
-                      <Text style={bulkStyles.fileSize}>
-                        {`${formatFileSize(selectedFile.size)}`}
-                      </Text>
-                      <Pressable
-                        onPress={() => setSelectedFile(null)}
-                        hitSlop={4}
-                        style={{ marginTop: 8 }}
-                      >
-                        <Text style={bulkStyles.removeFileLink}>Eliminar archivo</Text>
-                      </Pressable>
-                    </>
-                  )}
-                </Pressable>
-              </View>
-            )}
-
-            {/* STEP 3: Resultado */}
-            {step === 3 && (
-              <View style={bulkStyles.stepContent}>
-                <Text style={bulkStyles.sectionTitle}>Resultado</Text>
-
-                {isUploading ? (
-                  <View style={bulkStyles.uploadingContainer}>
-                    <Spinner size="lg" />
-                    <Text style={bulkStyles.uploadingText}>Procesando ajustes...</Text>
-                  </View>
-                ) : null}
-
-                {uploadResult && !isUploading && (
-                  <>
-                    {/* Summary cards */}
-                    <View style={bulkStyles.summaryGrid}>
-                      <View style={bulkStyles.summaryCard}>
-                        <Text style={bulkStyles.summaryValue}>{`${uploadResult.total_processed}`}</Text>
-                        <Text style={bulkStyles.summaryLabel}>Total</Text>
-                      </View>
-                      <View style={[bulkStyles.summaryCard, bulkStyles.summaryCardSuccess]}>
-                        <Text
-                          style={[
-                            bulkStyles.summaryValue,
-                            { color: colorScales.green[600] },
-                          ]}
-                        >
-                          {`${uploadResult.successful}`}
-                        </Text>
-                        <Text style={bulkStyles.summaryLabel}>Exitosos</Text>
-                      </View>
-                      <View style={[bulkStyles.summaryCard, bulkStyles.summaryCardError]}>
-                        <Text
-                          style={[
-                            bulkStyles.summaryValue,
-                            { color: colorScales.red[600] },
-                          ]}
-                        >
-                          {`${uploadResult.failed}`}
-                        </Text>
-                        <Text style={bulkStyles.summaryLabel}>Fallidos</Text>
-                      </View>
-                    </View>
-
-                    {/* Results table */}
-                    <View style={bulkStyles.tableContainer}>
-                      <View style={bulkStyles.tableHeader}>
-                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader]}>Fila</Text>
-                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader]}>SKU</Text>
-                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader]}>Producto</Text>
-                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader, bulkStyles.tableCellCenter]}>Cambio</Text>
-                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader, bulkStyles.tableCellCenter]}>Estado</Text>
-                      </View>
-                      <ScrollView style={{ maxHeight: 240 }} nestedScrollEnabled>
-                        {uploadResult.results.map((item) => (
-                          <View
-                            key={item.row_number}
-                            style={[
-                              bulkStyles.tableRow,
-                              item.status === 'error' && bulkStyles.tableRowError,
-                            ]}
-                          >
-                            <Text style={bulkStyles.tableCell}>{`${item.row_number}`}</Text>
-                            <Text style={bulkStyles.tableCellMono}>{`${item.sku}`}</Text>
-                            <Text style={bulkStyles.tableCell}>{`${item.product_name ?? '—'}`}</Text>
-                            <View style={bulkStyles.tableCellCenter}>
-                              {item.status === 'success' && item.quantity_change !== undefined ? (
-                                <Text
-                                  style={[
-                                    bulkStyles.tableCell,
-                                    {
-                                      color:
-                                        (item.quantity_change ?? 0) > 0
-                                          ? colorScales.green[600]
-                                          : (item.quantity_change ?? 0) < 0
-                                            ? colorScales.red[600]
-                                            : colorScales.gray[400],
-                                    },
-                                  ]}
-                                >
-                                  {`${(item.quantity_change ?? 0) > 0 ? '+' : ''}${item.quantity_change}`}
-                                </Text>
-                              ) : (
-                                <Text style={[bulkStyles.tableCell, { color: colorScales.gray[400] }]}>—</Text>
-                              )}
-                            </View>
-                            <View style={bulkStyles.tableCellCenter}>
-                              {item.status === 'success' ? (
-                                <View style={bulkStyles.badgeOk}>
-                                  <Text style={bulkStyles.badgeOkText}>OK</Text>
-                                </View>
-                              ) : (
-                                <View style={bulkStyles.badgeError}>
-                                  <Text style={bulkStyles.badgeErrorText}>Error</Text>
-                                </View>
-                              )}
-                            </View>
-                          </View>
-                        ))}
-                      </ScrollView>
-                    </View>
-
-                    {/* Error details */}
-                    {failedItems.length > 0 && (
-                      <View style={bulkStyles.errorBox}>
-                        <Text style={bulkStyles.errorTitle}>Errores encontrados:</Text>
-                        {failedItems.map((item) => (
-                          <Text key={item.row_number} style={bulkStyles.errorLine}>
-                            {`Fila ${item.row_number} (${item.sku}): ${item.message ?? 'Error desconocido'}`}
-                          </Text>
-                        ))}
-                      </View>
-                    )}
-                  </>
-                )}
-              </View>
-            )}
-          </ScrollView>
-
-          {/* Footer */}
-          <View style={bulkStyles.footer}>
-            <View style={bulkStyles.footerLeft}>
-              {step > 1 && step < 3 && (
-                <Pressable style={bulkStyles.outlineBtn} onPress={() => setStep(step - 1)}>
-                  <Text style={bulkStyles.outlineBtnText}>Atrás</Text>
-                </Pressable>
-              )}
-            </View>
-            <View style={bulkStyles.footerRight}>
-              <Pressable style={bulkStyles.outlineBtn} onPress={handleClose}>
-                <Text style={bulkStyles.outlineBtnText}>
-                  {step === 3 ? 'Cerrar' : 'Cancelar'}
-                </Text>
-              </Pressable>
-              {step === 1 && (
-                <Pressable
-                  style={[
-                    bulkStyles.primaryBtn,
-                    !selectedLocationId && bulkStyles.primaryBtnDisabled,
-                  ]}
-                  onPress={() => setStep(2)}
-                  disabled={!selectedLocationId}
-                >
-                  <Text style={bulkStyles.primaryBtnText}>Siguiente</Text>
-                </Pressable>
-              )}
-              {step === 2 && (
-                <Pressable
-                  style={[
-                    bulkStyles.primaryBtn,
-                    (!selectedFile || isUploading) && bulkStyles.primaryBtnDisabled,
-                  ]}
-                  onPress={handleUpload}
-                  disabled={!selectedFile || isUploading}
-                >
-                  {isUploading ? (
-                    <Spinner size="sm" />
-                  ) : (
-                    <Icon name="upload" size={16} color={colors.background} />
-                  )}
-                  <Text style={bulkStyles.primaryBtnText}>
-                    {isUploading ? 'Subiendo…' : 'Subir y Aplicar'}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
-function AdjustmentDetailModal({
-  adjustment,
-  onClose,
-  onApprove,
-  onDelete,
-  isSubmitting = false,
-}: {
-  adjustment: StockAdjustment | null;
-  onClose: () => void;
-  onApprove?: (a: StockAdjustment) => void;
-  onDelete?: (a: StockAdjustment) => void;
-  isSubmitting?: boolean;
-}) {
-  // Guard clause: don't render anything when there's no adjustment.
-  if (!adjustment) return null;
-  // Defensive: ensure the adjustment has the minimum shape required.
-  if (typeof adjustment !== 'object') return null;
-
-  const typeInfo =
-    ADJUSTMENT_TYPE_MAP && adjustment.adjustment_type
-      ? ADJUSTMENT_TYPE_MAP[adjustment.adjustment_type]
-      : undefined;
-  const isPending = !adjustment.approved_at;
-  const quantityBefore = Number(adjustment.quantity_before ?? 0) || 0;
-  const quantityAfter = Number(adjustment.quantity_after ?? 0) || 0;
-  const quantityChange = Number(adjustment.quantity_change ?? 0) || 0;
-  const productName =
-    typeof adjustment?.products?.name === 'string'
-      ? adjustment.products.name
-      : 'Producto';
-  const locationName =
-    typeof adjustment?.inventory_locations?.name === 'string'
-      ? adjustment.inventory_locations.name
-      : 'Sin ubicación';
-  const reasonLabel =
-    REASON_CODE_LABELS[adjustment.reason_code ?? ''] ??
-    adjustment.reason_code ??
-    '—';
-  const createdBy =
-    typeof adjustment?.created_by_user?.user_name === 'string'
-      ? adjustment.created_by_user.user_name
-      : '—';
-  const approvedBy =
-    typeof adjustment?.approved_by_user?.user_name === 'string'
-      ? adjustment.approved_by_user.user_name
-      : null;
-  const adjustmentId = adjustment?.id != null ? Number(adjustment.id) : 0;
-  const safeApprove = () => {
-    if (onApprove && adjustmentId > 0) onApprove(adjustment);
-  };
-  const safeDelete = () => {
-    if (onDelete && adjustmentId > 0) onDelete(adjustment);
-  };
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.detailOverlay}>
-        <View style={styles.detailModal}>
-          {/* Header */}
-          <View style={styles.detailHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.detailTitle}>Detalle del Ajuste</Text>
-              <Text style={styles.detailSubtitle} numberOfLines={1}>
-                {productName}
-              </Text>
-            </View>
-            <Pressable onPress={onClose} hitSlop={8} style={styles.detailCloseBtn}>
-              <Icon name="x" size={22} color={colorScales.gray[500]} />
-            </Pressable>
-          </View>
-
-          <ScrollView
-            style={styles.detailBody}
-            contentContainerStyle={styles.detailBodyContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Tipo badge */}
-            <View style={styles.detailTypeCard}>
-              <View style={styles.detailTypeIcon}>
-                <Icon
-                  name={(typeInfo && typeInfo.icon) || 'edit-2'}
-                  size={20}
-                  color={colors.primary}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.detailTypeLabel}>Tipo de Ajuste</Text>
-                <Text style={styles.detailTypeValue}>
-                  {(typeInfo && typeInfo.label) || 'Ajuste'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Ubicación */}
-            <View style={styles.detailSection}>
-              <View style={styles.detailSectionHeader}>
-                <Icon name="map-pin" size={14} color={colorScales.gray[500]} />
-                <Text style={styles.detailSectionTitle}>UBICACIÓN</Text>
-              </View>
-              <View style={styles.detailInfoCard}>
-                <Text style={styles.detailInfoPrimary}>{locationName}</Text>
-              </View>
-            </View>
-
-            {/* Cambio de Cantidad: Antes / Cambio / Después */}
-            <View style={styles.detailSection}>
-              <View style={styles.detailSectionHeader}>
-                <Icon name="hash" size={14} color={colorScales.gray[500]} />
-                <Text style={styles.detailSectionTitle}>CAMBIO DE CANTIDAD</Text>
-              </View>
-              <View style={styles.detailQuantityCard}>
-                <View style={styles.detailQuantityRow}>
-                  <View style={styles.detailQuantityCell}>
-                    <Text style={styles.detailQuantityLabel}>ANTES</Text>
-                    <Text style={styles.detailQuantityValue}>
-                      {`${quantityBefore}`}
-                    </Text>
-                  </View>
-                  <Icon
-                    name={quantityChange >= 0 ? 'trending-up' : 'trending-down'}
-                    size={20}
-                    color={quantityChange >= 0 ? colors.primary : colors.error}
-                  />
-                  <View style={styles.detailQuantityCell}>
-                    <Text style={styles.detailQuantityLabel}>CAMBIO</Text>
-                    <Text
-                      style={[
-                        styles.detailQuantityValue,
-                        {
-                          color: quantityChange >= 0 ? colors.primary : colors.error,
-                        },
-                      ]}
-                    >
-                      {quantityChange > 0 ? `+${quantityChange}` : `${quantityChange}`}
-                    </Text>
-                  </View>
-                  <Icon name="chevron-right" size={20} color={colorScales.gray[400]} />
-                  <View style={styles.detailQuantityCell}>
-                    <Text style={styles.detailQuantityLabel}>DESPUÉS</Text>
-                    <Text style={styles.detailQuantityValue}>
-                      {`${quantityAfter}`}
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            {/* Motivo */}
-            <View style={styles.detailSection}>
-              <View style={styles.detailSectionHeader}>
-                <Icon name="file-text" size={14} color={colorScales.gray[500]} />
-                <Text style={styles.detailSectionTitle}>MOTIVO</Text>
-              </View>
-              <View style={styles.detailInfoCard}>
-                <Text style={styles.detailInfoPrimary}>{`${reasonLabel}`}</Text>
-                {adjustment.description ? (
-                  <Text style={styles.detailInfoSecondary}>
-                    {`${adjustment.description}`}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
-
-            {/* Auditoría */}
-            <View style={styles.detailSection}>
-              <View style={styles.detailSectionHeader}>
-                <Icon name="users" size={14} color={colorScales.gray[500]} />
-                <Text style={styles.detailSectionTitle}>AUDITORÍA</Text>
-              </View>
-              <View style={styles.detailInfoCard}>
-                <View style={styles.detailAuditRow}>
-                  <View style={styles.detailAuditIcon}>
-                    <Icon name="user" size={14} color={colors.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.detailInfoLabel}>CREADO POR</Text>
-                    <Text style={styles.detailInfoPrimary}>{`${createdBy}`}</Text>
-                    <Text style={styles.detailInfoSecondary}>
-                      {`${formatDate(adjustment.created_at)}`}
-                    </Text>
-                  </View>
-                </View>
-                {approvedBy ? (
-                  <View style={[styles.detailAuditRow, { marginTop: spacing[2] }]}>
-                    <View style={styles.detailAuditIcon}>
-                      <Icon name="user-check" size={14} color={colors.success} />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.detailInfoLabel}>APROBADO POR</Text>
-                      <Text style={styles.detailInfoPrimary}>{`${approvedBy}`}</Text>
-                      <Text style={styles.detailInfoSecondary}>
-                        {adjustment.approved_at
-                          ? `${formatDate(adjustment.approved_at)}`
-                          : '—'}
-                      </Text>
-                    </View>
-                  </View>
-                ) : null}
-              </View>
-            </View>
-          </ScrollView>
-
-          {/* Footer: contextual actions */}
-          <View style={styles.detailFooter}>
-            {isPending ? (
-              <>
-                {onDelete && (
-                  <Pressable
-                    style={styles.detailDangerBtn}
-                    onPress={safeDelete}
-                    disabled={isSubmitting || adjustmentId <= 0}
-                  >
-                    <Text style={styles.detailDangerBtnText}>Eliminar</Text>
-                  </Pressable>
-                )}
-                <View style={{ width: spacing[2] }} />
-                {onApprove && (
-                  <Pressable
-                    style={styles.detailPrimaryBtn}
-                    onPress={safeApprove}
-                    disabled={isSubmitting || adjustmentId <= 0}
-                  >
-                    {isSubmitting ? (
-                      <Spinner size="sm" />
-                    ) : (
-                      <Icon name="check" size={16} color={colors.background} />
-                    )}
-                    <Text style={styles.detailPrimaryBtnText}>
-                      {isSubmitting ? 'Aprobando…' : 'Aprobar'}
-                    </Text>
-                  </Pressable>
-                )}
-              </>
-            ) : (
-              <Pressable style={styles.detailCancelBtn} onPress={onClose}>
-                <Text style={styles.detailCancelBtnText}>Cerrar</Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -934,8 +82,6 @@ export default function AdjustmentsScreen() {
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<AdjustmentType | 'all'>('all');
   const [modalVisible, setModalVisible] = useState(false);
-  const [detailAdjustment, setDetailAdjustment] = useState<StockAdjustment | null>(null);
-  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [createStep, setCreateStep] = useState<1 | 2 | 3>(1);
   const [confirmCreate, setConfirmCreate] = useState(false);
   const [showActions, setShowActions] = useState(false);
@@ -1037,49 +183,13 @@ export default function AdjustmentsScreen() {
       toastSuccess('Ajuste creado correctamente');
     },
     onError: (error: any) => {
-      // Log full error for debugging
-      console.error('[createAdjustment] Error:', {
-        status: error?.response?.status,
-        data: error?.response?.data,
-        message: error?.message,
-      });
-      const apiMessage =
+      const message =
         error?.response?.data?.message ||
         error?.response?.data?.error?.message ||
-        error?.response?.data?.error;
-      const errorCode =
-        error?.response?.data?.error_code ||
-        error?.response?.data?.errorCode;
-      const messageParts: string[] = [];
-      if (typeof apiMessage === 'string') messageParts.push(apiMessage);
-      else if (Array.isArray(apiMessage)) messageParts.push(apiMessage.join(', '));
-      if (errorCode) messageParts.push(`(${errorCode})`);
-      if (messageParts.length === 0 && error?.message) messageParts.push(error.message);
-      if (messageParts.length === 0) messageParts.push('Error desconocido al crear el ajuste');
-      toastError(messageParts.join(' '));
+        error?.message ||
+        'Error al crear el ajuste';
+      toastError(typeof message === 'string' ? message : 'Error al crear el ajuste');
     },
-  });
-
-  // Action mutations wired to AdjustmentDetailModal contextual buttons
-  const approveMutation = useMutation({
-    mutationFn: (id: number) => InventoryService.approveAdjustment(id, 0),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['adjustments'] });
-      queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
-      setDetailAdjustment(null);
-      toastSuccess('Ajuste aprobado');
-    },
-    onError: () => toastError('No se pudo aprobar el ajuste'),
-  });
-
-  const deleteAdjustmentMutation = useMutation({
-    mutationFn: (id: number) => InventoryService.deleteAdjustment(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['adjustments'] });
-      setDetailAdjustment(null);
-      toastSuccess('Ajuste eliminado');
-    },
-    onError: () => toastError('No se pudo eliminar el ajuste'),
   });
 
   const adjustments = data?.pages.flatMap((p) => p.data) ?? [];
@@ -1230,9 +340,7 @@ export default function AdjustmentsScreen() {
       <FlatList
         data={storeAdjustments}
         keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => (
-          <AdjustmentCard item={item} onView={setDetailAdjustment} />
-        )}
+        renderItem={({ item }) => <AdjustmentCard item={item} />}
         ListHeaderComponent={
           <View>
             {/* Search + Title row */}
@@ -1295,14 +403,7 @@ export default function AdjustmentsScreen() {
       </View>
 
       {/* Actions Dropdown */}
-      <Modal
-        visible={showActions}
-        transparent
-        animationType="fade"
-        presentationStyle="overFullScreen"
-        statusBarTranslucent
-        onRequestClose={() => setShowActions(false)}
-      >
+      <Modal visible={showActions} transparent animationType="fade" onRequestClose={() => setShowActions(false)}>
         <Pressable style={styles.dropdownBackdrop} onPress={() => setShowActions(false)} />
         <View style={[styles.dropdownPositioner, { top: actionsDropdownPos.top, right: actionsDropdownPos.right }]}>
           <View style={[styles.dropdownArrow, { marginRight: Math.max(actionsDropdownPos.right, 14) }]} />
@@ -1314,7 +415,7 @@ export default function AdjustmentsScreen() {
               <Text style={styles.dropdownItemPrimary}>Nuevo Ajuste</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
-            <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); setBulkUploadOpen(true); }}>
+            <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); /* bulk */ }}>
               <View style={styles.dropdownIconWrap}>
                 <Icon name="upload" size={18} color={colorScales.gray[500]} />
               </View>
@@ -1332,14 +433,7 @@ export default function AdjustmentsScreen() {
       </Modal>
 
       {/* Filter Dropdown */}
-      <Modal
-        visible={showFilters}
-        transparent
-        animationType="fade"
-        presentationStyle="overFullScreen"
-        statusBarTranslucent
-        onRequestClose={() => { setShowFilters(false); setShowTypeOptions(false); }}
-      >
+      <Modal visible={showFilters} transparent animationType="fade" onRequestClose={() => { setShowFilters(false); setShowTypeOptions(false); }}>
         <Pressable style={styles.dropdownBackdrop} onPress={() => { setShowFilters(false); setShowTypeOptions(false); }} />
         <View style={[styles.dropdownPositioner, { top: filterDropdownPos.top, right: filterDropdownPos.right }]}>
           <View style={[styles.dropdownArrow, { marginRight: Math.max(filterDropdownPos.right, 14) }]} />
@@ -1812,23 +906,6 @@ export default function AdjustmentsScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* Modal de detalle — abierto al pulsar el botón (ver) en una card */}
-      <AdjustmentDetailModal
-        adjustment={detailAdjustment}
-        onClose={() => setDetailAdjustment(null)}
-        onApprove={(a) => approveMutation.mutate(Number(a.id))}
-        onDelete={(a) => deleteAdjustmentMutation.mutate(Number(a.id))}
-        isSubmitting={approveMutation.isPending || deleteAdjustmentMutation.isPending}
-      />
-
-      {/* Modal de carga masiva — abierto desde acciones (+) → Carga Masiva */}
-      <BulkAdjustmentModal
-        visible={bulkUploadOpen}
-        onClose={() => setBulkUploadOpen(false)}
-        locations={LOCATIONS}
-        onCompleted={handleRefresh}
-      />
     </View>
   );
 }
@@ -1836,14 +913,21 @@ export default function AdjustmentsScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colorScales.gray[50] },
 
-  /* Card contenedor principal — invisible: la lista de ajustes se ve directamente
-     sobre el fondo de la pantalla sin contenedor visual */
+  /* Card contenedor principal — margen lateral + bottom + border radius + fondo blanco (alineado con la web) */
   cardContainer: {
     flex: 1,
     marginHorizontal: spacing[3],
     marginBottom: spacing[3],
-    backgroundColor: 'transparent',
-    overflow: 'visible',
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 3,
+    elevation: 1,
   },
 
   /* Stats: horizontal scroll — ancho completo, fondo transparente (gris de la pantalla) */
@@ -1981,247 +1065,21 @@ const styles = StyleSheet.create({
     fontWeight: '800' as any,
     color: colorScales.gray[900],
   },
-  /* Botón (ver) en el footer de la card — circular como en web */
-  eyeBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: borderRadius.md,
-    backgroundColor: colorScales.gray[100],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  /* Modal de detalle de ajuste — replica web app-adjustment-detail-modal */
-  detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: spacing[4] },
-  detailModal: {
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    width: '100%', maxWidth: 520, maxHeight: '90%',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8,
-  },
-  detailHeader: {
-    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
-    paddingHorizontal: spacing[4], paddingVertical: spacing[4], borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
-  },
-  detailTitle: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
-  detailSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 2 },
-  detailCloseBtn: { padding: spacing[1] },
-  detailBody: { flexGrow: 0, flexShrink: 1, maxHeight: 480 },
-  detailBodyContent: { padding: spacing[4], gap: spacing[4] },
-  detailTypeCard: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing[3],
-    padding: spacing[3], borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.green[200], backgroundColor: colorScales.green[50],
-  },
-  detailTypeIcon: {
-    width: 40, height: 40, borderRadius: borderRadius.md,
-    backgroundColor: colors.background, borderWidth: 1, borderColor: colorScales.green[200],
-    alignItems: 'center', justifyContent: 'center',
-  },
-  detailTypeLabel: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
-  detailTypeValue: { fontSize: typography.fontSize.base, fontWeight: '700' as any, color: colors.primary, marginTop: 2 },
-  detailSection: { gap: spacing[2] },
-  detailSectionHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing[1.5] },
-  detailSectionTitle: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
-  detailInfoCard: {
-    padding: spacing[3], borderRadius: borderRadius.lg,
-    borderWidth: 1, borderColor: colorScales.gray[200], backgroundColor: colors.background, gap: spacing[1],
-  },
-  detailInfoLabel: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
-  detailInfoPrimary: { fontSize: typography.fontSize.sm, fontWeight: '600' as any, color: colorScales.gray[900] },
-  detailInfoSecondary: { fontSize: typography.fontSize.xs, color: colorScales.gray[500], marginTop: 2 },
-  detailQuantityCard: { padding: spacing[4], borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200], backgroundColor: colorScales.gray[50] },
-  detailQuantityRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing[2] },
-  detailQuantityCell: { flex: 1, alignItems: 'center', gap: 2 },
-  detailQuantityLabel: { fontSize: 9, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5 },
-  detailQuantityValue: { fontSize: typography.fontSize.lg, fontWeight: '800' as any, color: colorScales.gray[900] },
-  detailAuditRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing[2] },
-  detailAuditIcon: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: colorScales.green[50],
-    alignItems: 'center', justifyContent: 'center',
-  },
-  detailFooter: {
-    flexDirection: 'row', paddingHorizontal: spacing[4], paddingTop: spacing[3], paddingBottom: spacing[4],
-    borderTopWidth: 1, borderTopColor: colorScales.gray[200], backgroundColor: colorScales.gray[50],
-  },
-  detailDangerBtn: { flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, borderWidth: 1.5, borderColor: colorScales.red[500], alignItems: 'center', justifyContent: 'center' },
-  detailDangerBtnText: { fontSize: 14, fontWeight: '700' as any, color: colorScales.red[600] },
-  detailCancelBtn: { flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, borderWidth: 1.5, borderColor: colorScales.gray[300], alignItems: 'center', justifyContent: 'center' },
-  detailCancelBtnText: { fontSize: 14, fontWeight: '700' as any, color: colorScales.gray[700] },
-  detailPrimaryBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing[2],
-    paddingVertical: 12, borderRadius: borderRadius.lg, backgroundColor: colors.primary,
-  },
-  detailPrimaryBtnText: { fontSize: 14, fontWeight: '700' as any, color: colors.background },
-
-  /* BulkAdjustmentModal — replica exacta del web app-bulk-adjustment-modal */
-});
-
-const bulkStyles = StyleSheet.create({
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: spacing[4] },
-  modal: {
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1, borderColor: colorScales.gray[200],
-    width: '100%', maxWidth: 640, maxHeight: '92%',
-    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8,
-  },
-  header: {
-    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
-    paddingHorizontal: spacing[5], paddingTop: spacing[5], paddingBottom: spacing[4],
-    borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
-  },
-  title: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
-  subtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 4 },
-  closeBtn: { padding: spacing[1] },
-
-  /* Step Indicator (1 — 2 — 3) */
-  stepsRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingVertical: spacing[4], backgroundColor: colorScales.gray[50],
-    gap: spacing[2],
-  },
-  stepRow: { flexDirection: 'row', alignItems: 'center' },
-  stepCircle: {
-    width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colorScales.gray[200],
-  },
-  stepCircleActive: { backgroundColor: colors.primary },
-  stepLine: { width: 48, height: 2, backgroundColor: colorScales.gray[200], marginHorizontal: spacing[2] },
-  stepLineDone: { backgroundColor: colors.primary },
-  stepNum: { fontSize: 13, fontWeight: '600' as any, color: colorScales.gray[500] },
-  stepNumActive: { color: colors.background, fontWeight: '700' as any },
-
-  body: { flexGrow: 0, flexShrink: 1, maxHeight: 520 },
-  bodyContent: { padding: spacing[5], gap: spacing[4] },
-  stepContent: { gap: spacing[4] },
-  sectionTitle: { fontSize: typography.fontSize.base, fontWeight: '700' as any, color: colorScales.gray[900] },
-
-  formLabel: { fontSize: 12, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5, marginBottom: spacing[1] },
-
-  /* Selector de ubicación */
-  selectTrigger: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingVertical: spacing[3], paddingHorizontal: spacing[3],
-    borderWidth: 1.5, borderColor: colors.primary, borderRadius: borderRadius.lg,
-    backgroundColor: colors.background,
-  },
-  selectValue: { flex: 1, fontSize: 14, fontWeight: '500' as any, color: colorScales.gray[900] },
-  selectPlaceholder: { flex: 1, fontSize: 14, color: colorScales.gray[400] },
-  selectList: { marginTop: 4, borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: borderRadius.lg, backgroundColor: colors.background, overflow: 'hidden' },
-  selectEmpty: { padding: spacing[3], textAlign: 'center' as any, fontSize: 12, color: colorScales.gray[500] },
-  selectOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing[3], paddingHorizontal: spacing[3], borderBottomWidth: 1, borderBottomColor: colorScales.gray[100] },
-  selectOptionActive: { backgroundColor: colorScales.green[50] },
-  selectOptionText: { fontSize: 14, color: colorScales.gray[700] },
-  selectOptionTextActive: { fontWeight: '600' as any, color: colors.primary },
-
-  /* Tipo de ajuste (chips) */
-  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing[2] },
-  typeChip: { paddingHorizontal: spacing[3], paddingVertical: spacing[2], borderRadius: borderRadius.full, borderWidth: 1, borderColor: colorScales.gray[300], backgroundColor: colors.background },
-  typeChipActive: { backgroundColor: colorScales.green[50], borderColor: colors.primary },
-  typeChipText: { fontSize: 12, fontWeight: '500' as any, color: colorScales.gray[700] },
-  typeChipTextActive: { color: colors.primary, fontWeight: '700' as any },
-
-  textArea: {
-    borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: borderRadius.lg,
-    paddingHorizontal: spacing[3], paddingVertical: spacing[2],
-    fontSize: 14, color: colorScales.gray[900], backgroundColor: colors.background,
-    minHeight: 56, textAlignVertical: 'top' as any,
-  },
-
-  /* Botón descargar plantilla */
-  templateRow: { gap: spacing[1] },
-  templateBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: spacing[2],
-    paddingVertical: spacing[2.5], paddingHorizontal: spacing[3],
-    borderWidth: 1.5, borderColor: colors.primary, borderRadius: borderRadius.lg,
-    alignSelf: 'flex-start' as any,
-  },
-  templateBtnDisabled: { opacity: 0.4 },
-  templateBtnText: { fontSize: 13, fontWeight: '600' as any, color: colors.primary },
-  templateHint: { fontSize: 11, color: colorScales.gray[500] },
-
-  /* Drop zone */
-  dropZone: {
-    borderWidth: 2, borderStyle: 'dashed' as any, borderColor: colorScales.gray[300],
-    borderRadius: borderRadius.lg, paddingVertical: spacing[8], paddingHorizontal: spacing[4],
-    alignItems: 'center' as any, backgroundColor: colors.background,
-  },
-  dropZoneActive: { borderColor: colors.primary, backgroundColor: colors.primaryLight ?? colorScales.green[50] },
-  dropZonePrimary: { fontSize: 14, fontWeight: '600' as any, color: colorScales.gray[700], textAlign: 'center' as any },
-  dropZoneSecondary: { fontSize: 12, color: colorScales.gray[400], marginTop: 4, textAlign: 'center' as any },
-  fileName: { fontSize: 14, fontWeight: '700' as any, color: colorScales.gray[900], textAlign: 'center' as any },
-  fileSize: { fontSize: 12, color: colorScales.gray[500], marginTop: 4, textAlign: 'center' as any },
-  removeFileLink: { fontSize: 12, color: colorScales.red[500], textDecorationLine: 'underline' as any },
-
-  /* Step 3: Uploading + Resultado */
-  uploadingContainer: { alignItems: 'center' as any, paddingVertical: spacing[8], gap: spacing[3] },
-  uploadingText: { fontSize: 14, fontWeight: '600' as any, color: colorScales.gray[900] },
-
-  summaryGrid: { flexDirection: 'row', gap: spacing[3] },
-  summaryCard: {
-    flex: 1, alignItems: 'center' as any, paddingVertical: spacing[3], paddingHorizontal: spacing[2],
-    backgroundColor: colorScales.gray[50], borderRadius: borderRadius.lg,
-  },
-  summaryCardSuccess: { backgroundColor: colorScales.green[50] },
-  summaryCardError: { backgroundColor: colorScales.red[50] },
-  summaryValue: { fontSize: typography.fontSize['2xl'], fontWeight: '800' as any, color: colorScales.gray[900] },
-  summaryLabel: { fontSize: 11, color: colorScales.gray[500], marginTop: 2 },
-
-  tableContainer: {
-    borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: borderRadius.lg, overflow: 'hidden' as any,
-  },
-  tableHeader: {
-    flexDirection: 'row', backgroundColor: colorScales.gray[50],
-    paddingVertical: spacing[2], paddingHorizontal: spacing[3],
-    borderBottomWidth: 1, borderBottomColor: colorScales.gray[200],
-  },
-  tableRow: {
-    flexDirection: 'row', paddingVertical: spacing[2], paddingHorizontal: spacing[3],
-    borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
-  },
-  tableRowError: { backgroundColor: colorScales.red[50] },
-  tableCell: { flex: 2, fontSize: 12, color: colorScales.gray[900] },
-  tableCellMono: { flex: 2, fontSize: 12, color: colorScales.gray[900], fontFamily: 'Courier' },
-  tableCellHeader: { fontWeight: '700' as any, color: colorScales.gray[600], textTransform: 'uppercase' as any, fontSize: 10, letterSpacing: 0.5 },
-  tableCellCenter: { flex: 1, alignItems: 'center' as any, justifyContent: 'center' as any },
-  badgeOk: { paddingHorizontal: spacing[2], paddingVertical: 2, borderRadius: 10, backgroundColor: colorScales.green[100] },
-  badgeOkText: { fontSize: 10, fontWeight: '700' as any, color: colorScales.green[800] },
-  badgeError: { paddingHorizontal: spacing[2], paddingVertical: 2, borderRadius: 10, backgroundColor: colorScales.red[100] },
-  badgeErrorText: { fontSize: 10, fontWeight: '700' as any, color: colorScales.red[800] },
-
-  errorBox: {
-    backgroundColor: colorScales.red[50], borderWidth: 1, borderColor: colorScales.red[200],
-    borderRadius: borderRadius.lg, padding: spacing[3], gap: 4,
-  },
-  errorTitle: { fontSize: 12, fontWeight: '700' as any, color: colorScales.red[800] },
-  errorLine: { fontSize: 11, color: colorScales.red[700] },
-
-  /* Footer */
-  footer: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing[2],
-    paddingHorizontal: spacing[4], paddingVertical: spacing[3],
-    backgroundColor: colorScales.gray[50], borderTopWidth: 1, borderTopColor: colorScales.gray[100],
-  },
-  footerLeft: { flexDirection: 'row' },
-  footerRight: { flexDirection: 'row', gap: spacing[2] },
-  outlineBtn: { paddingVertical: 10, paddingHorizontal: spacing[4], borderRadius: borderRadius.lg, borderWidth: 1.5, borderColor: colorScales.gray[300], alignItems: 'center' as any, justifyContent: 'center' as any },
-  outlineBtnText: { fontSize: 14, fontWeight: '700' as any, color: colorScales.gray[700] },
-  primaryBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing[2],
-    paddingVertical: 10, paddingHorizontal: spacing[4], borderRadius: borderRadius.lg, backgroundColor: colors.primary,
-  },
-  primaryBtnDisabled: { backgroundColor: colorScales.gray[200], opacity: 0.6 },
-  primaryBtnText: { fontSize: 14, fontWeight: '700' as any, color: colors.background },
 
   /* List */
   listContent: { paddingBottom: spacing[6] },
 
   /* Dropdowns (positioned near buttons) */
   dropdownBackdrop: { flex: 1 },
-  dropdownPositioner: { position: 'absolute', alignItems: 'flex-end' },
+  dropdownPositioner: {
+    position: 'absolute',
+    alignItems: 'flex-end',
+    // Render the dropdown above the backdrop and any sibling content.
+    // Without an explicit zIndex/elevation, the absolutely-positioned
+    // dropdown can render behind sibling Views on Android.
+    zIndex: 100,
+    elevation: 12,
+  },
   dropdownArrow: {
     width: 0, height: 0, borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 8,
     borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: colors.background,

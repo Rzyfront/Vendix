@@ -76,19 +76,14 @@ function buildInventoryStats(
 
 function normalizeTransfer(raw: Record<string, any>): StockTransfer {
   const status = raw.status === 'draft' ? 'pending' : raw.status;
-  const items = Array.isArray(raw.stock_transfer_items) ? raw.stock_transfer_items : [];
 
   return {
     id: String(raw.id),
-    transfer_number: raw.transfer_number ?? raw.code ?? undefined,
     origin_location_id: String(raw.origin_location_id ?? raw.from_location_id ?? ''),
     origin_location_name: raw.origin_location_name ?? raw.from_location?.name ?? 'Origen',
     destination_location_id: String(raw.destination_location_id ?? raw.to_location_id ?? ''),
     destination_location_name: raw.destination_location_name ?? raw.to_location?.name ?? 'Destino',
-    product_count: Number(raw.product_count ?? items.length ?? 0),
-    items_count: items.length || undefined,
-    transfer_date: raw.transfer_date ?? raw.created_at ?? undefined,
-    expected_date: raw.expected_date ?? undefined,
+    product_count: Number(raw.product_count ?? raw.stock_transfer_items?.length ?? 0),
     state: status ?? 'pending',
     created_at: raw.created_at ?? raw.transfer_date ?? new Date().toISOString(),
   };
@@ -365,42 +360,6 @@ export const InventoryService = {
     await apiClient.delete(endpoint);
   },
 
-  async downloadAdjustmentTemplate(locationId?: number): Promise<Blob> {
-    const params = locationId ? `?location_id=${locationId}` : '';
-    const res = await apiClient.get(
-      `${Endpoints.STORE.INVENTORY.ADJUSTMENTS.BULK_TEMPLATE}${params}`,
-      { responseType: 'blob' },
-    );
-    return res.data as Blob;
-  },
-
-  async uploadBulkAdjustments(
-    file: { uri: string; name: string; type?: string },
-    locationId: number,
-    adjustmentType: string,
-    description?: string,
-  ): Promise<{ total_processed: number; successful: number; failed: number; results: any[] }> {
-    const formData = new FormData();
-    // @ts-expect-error - React Native FormData accepts file objects
-    formData.append('file', {
-      uri: file.uri,
-      name: file.name,
-      type: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    });
-    formData.append('location_id', String(locationId));
-    formData.append('adjustment_type', adjustmentType);
-    if (description) formData.append('description', description);
-
-    const res = await apiClient.post(
-      Endpoints.STORE.INVENTORY.ADJUSTMENTS.BULK_UPLOAD,
-      formData,
-      {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      },
-    );
-    return unwrap<{ total_processed: number; successful: number; failed: number; results: any[] }>(res);
-  },
-
   async getTransfers(query?: TransferQuery): Promise<PaginatedResponse<StockTransfer>> {
     const params: Record<string, unknown> = {
       page: query?.page ?? 1,
@@ -418,27 +377,6 @@ export const InventoryService = {
 
   async createTransfer(dto: CreateTransferDto): Promise<StockTransfer> {
     const res = await apiClient.post(Endpoints.STORE.INVENTORY.TRANSFERS.CREATE, toStockTransferPayload(dto));
-    return normalizeTransfer(unwrap<Record<string, any>>(res));
-  },
-
-  async approveTransfer(id: string | number): Promise<StockTransfer> {
-    const endpoint = Endpoints.STORE.INVENTORY.TRANSFERS.APPROVE.replace(':id', String(id));
-    const res = await apiClient.patch(endpoint, {});
-    return normalizeTransfer(unwrap<Record<string, any>>(res));
-  },
-
-  async completeTransfer(
-    id: string | number,
-    items: Array<{ id: number; quantity_received: number }>,
-  ): Promise<StockTransfer> {
-    const endpoint = Endpoints.STORE.INVENTORY.TRANSFERS.COMPLETE.replace(':id', String(id));
-    const res = await apiClient.patch(endpoint, { items });
-    return normalizeTransfer(unwrap<Record<string, any>>(res));
-  },
-
-  async cancelTransfer(id: string | number): Promise<StockTransfer> {
-    const endpoint = Endpoints.STORE.INVENTORY.TRANSFERS.CANCEL.replace(':id', String(id));
-    const res = await apiClient.patch(endpoint, {});
     return normalizeTransfer(unwrap<Record<string, any>>(res));
   },
 
