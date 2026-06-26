@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Pressable, Text, View, StyleSheet, ScrollView, type ViewStyle } from 'react-native';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
-import { Modal } from '@/shared/components/modal/modal';
+import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
 import { Icon } from '@/shared/components/icon/icon';
 
 export interface SelectorOption<T = string | number> {
@@ -61,8 +61,8 @@ export function Selector<T = string | number>({
       </Pressable>
       {error && <Text style={styles.errorText}>{error}</Text>}
 
-      <Modal visible={open} onClose={() => setOpen(false)} title={label ?? 'Seleccionar'} showCloseButton>
-        <ScrollView style={styles.list}>
+      <BottomSheet visible={open} onClose={() => setOpen(false)} snapPoint="partial">
+        <View style={styles.list}>
           {options.map((opt) => {
             const isSelected = opt.value === value;
             return (
@@ -87,8 +87,8 @@ export function Selector<T = string | number>({
               </Pressable>
             );
           })}
-        </ScrollView>
-      </Modal>
+        </View>
+      </BottomSheet>
     </View>
   );
 }
