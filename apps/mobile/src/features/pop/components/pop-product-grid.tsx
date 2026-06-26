@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   Image,
   StyleSheet,
-  Dimensions,
+  useWindowDimensions,
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -25,10 +25,15 @@ interface PopProductGridProps {
   locationName?: string;
 }
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_GAP = 8;
-const PADDING = 16;
-const CARD_WIDTH = (SCREEN_WIDTH - PADDING * 2 - CARD_GAP) / 2;
+// Margen lateral del container + padding del grid + border del container.
+// El container ya descuenta el marginHorizontal: 12 (es decir, 24 a cada lado del padre).
+// Aquí solo descontamos: bordes del container (2) + padding del grid (24) + gap entre cards (8) = 34.
+const CONTAINER_BORDER = 2;     // 1 a cada lado
+const GRID_PADDING = 12;
+const CARD_WIDTH_DIVISOR = 2;
+// El cálculo real se hace dentro del componente con useWindowDimensions() para
+// que se actualice ante rotaciones o cambios de layout.
 
 export default function PopProductGrid({
   products,
@@ -39,6 +44,15 @@ export default function PopProductGrid({
   onBulkUpload,
   locationName,
 }: PopProductGridProps) {
+  const { width: SCREEN_WIDTH } = useWindowDimensions();
+  // Cálculo: ancho disponible dentro del container descontando:
+  // - 2 bordes laterales del container (1px cada uno)
+  // - 2 paddings del grid (12px cada lado)
+  // - 1 gap entre cards (8px)
+  // = 34 px descontados total
+  // Se reduce 2% adicional para cards más estrechas.
+  const CARD_WIDTH =
+    ((SCREEN_WIDTH - CONTAINER_BORDER - GRID_PADDING * 2 - CARD_GAP) / CARD_WIDTH_DIVISOR) * 0.98;
   const [search, setSearch] = useState('');
 
   const filtered = useMemo(() => {
@@ -59,7 +73,7 @@ export default function PopProductGrid({
     return (
       <TouchableOpacity
         key={item.id}
-        style={styles.card}
+        style={[styles.card, { width: CARD_WIDTH }]}
         onPress={() => onSelectProduct(item)}
         activeOpacity={0.7}
       >
@@ -146,12 +160,6 @@ export default function PopProductGrid({
             onBulkUpload={onBulkUpload}
           />
         </View>
-        {locationName ? (
-          <View style={styles.warehouseBadge}>
-            <Icon name="warehouse" size={14} color="#059669" />
-            <Text style={styles.warehouseBadgeText} numberOfLines={1}>{locationName}</Text>
-          </View>
-        ) : null}
       </View>
 
       {/* Product grid */}
@@ -178,29 +186,33 @@ export default function PopProductGrid({
 }
 
 const styles = StyleSheet.create({
-  // Contenedor principal — mismo estilo de card que customers.tsx
+  // Contenedor principal — color card (blanco puro) con espacio lateral
   container: {
     flex: 1,
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
+    marginHorizontal: 6,
+    backgroundColor: colors.card,
+    borderBottomLeftRadius: borderRadius.lg,
+    borderBottomRightRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colorScales.gray[200],
     ...shadows.sm,
   },
   stickyHeader: {
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[3],
-    paddingBottom: spacing[2],
+    paddingHorizontal: 6,
+    paddingTop: 6,
+    paddingBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[200],
-    backgroundColor: colors.background,
+    backgroundColor: colors.card,
   },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
   searchBox: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colorScales.gray[100],
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
     borderRadius: borderRadius.lg,
     paddingHorizontal: spacing[3],
     height: 44,
@@ -213,23 +225,8 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily,
     paddingVertical: 0,
   },
-  warehouseBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[1],
-    paddingHorizontal: spacing[2.5],
-    paddingVertical: spacing[1],
-    backgroundColor: colorScales.green[50],
-    borderRadius: borderRadius.full,
-    alignSelf: 'flex-start',
-    marginTop: spacing[2],
-    borderWidth: 1,
-    borderColor: colorScales.green[100],
-  },
-  warehouseBadgeText: { fontSize: 11, fontWeight: '600', color: colorScales.green[700], maxWidth: 120 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: CARD_GAP, padding: 12, paddingBottom: 24 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: CARD_GAP, padding: 8, paddingBottom: 24 },
   card: {
-    width: CARD_WIDTH,
     backgroundColor: colors.background,
     borderRadius: borderRadius.lg,
     marginBottom: spacing[2],

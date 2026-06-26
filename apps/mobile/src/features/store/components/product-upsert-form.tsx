@@ -139,6 +139,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const [form, setForm] = useState<ProductFormState>(initialForm);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [taxModalOpen, setTaxModalOpen] = useState(false);
+  const [localTaxes, setLocalTaxes] = useState<TaxCategory[]>([]);
 
   const { data: product, isLoading: productLoading } = useQuery({
     queryKey: ['product', productId],
@@ -528,7 +529,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     <MultiSelector
                       values={form.tax_category_ids}
                       onChange={(v) => updateField('tax_category_ids', v)}
-                      options={((taxes as TaxCategory[]) || []).map((t) => ({ label: t.name, value: t.id }))}
+                      options={combinedTaxes.map((t) => ({ label: t.name, value: t.id }))}
                       placeholder="Seleccionar impuestos"
                     />
                   </View>
@@ -778,6 +779,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
         onCreated={(tax) => {
           if (tax?.id) {
             setForm((current) => ({ ...current, tax_category_ids: [...current.tax_category_ids, tax.id] }));
+            setLocalTaxes((current) => [...current, tax]);
           }
         }}
       />
