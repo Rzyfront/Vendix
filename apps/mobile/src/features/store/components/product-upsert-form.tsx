@@ -423,24 +423,18 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           {/* Información General */}
           <Section title="Información General" subtitle="Datos visibles en punto de venta, catálogo e inventario" icon="info">
             <Input label="Nombre" value={form.name} onChangeText={(value) => updateField('name', value)} error={errors.name} />
-            <View style={{ flexDirection: 'row', gap: spacing[2] }}>
-              <View style={{ flex: 1 }}>
-                <Input
-                  label="SKU"
-                  value={form.sku}
-                  onChangeText={(value) => updateField('sku', value.toUpperCase())}
-                  autoCapitalize="characters"
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Input
-                  label="Código de barras"
-                  value={form.barcode}
-                  onChangeText={(value) => updateField('barcode', value)}
-                  placeholder="opcional"
-                />
-              </View>
-            </View>
+            <Input
+              label="SKU"
+              value={form.sku}
+              onChangeText={(value) => updateField('sku', value.toUpperCase())}
+              autoCapitalize="characters"
+            />
+            <Input
+              label="Código de barras"
+              value={form.barcode}
+              onChangeText={(value) => updateField('barcode', value)}
+              placeholder="opcional"
+            />
             <Input
               label="Slug (URL)"
               value={form.slug}
