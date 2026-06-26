@@ -163,6 +163,8 @@ export const Endpoints = {
         CREATE_DRAFT: '/store/inventory/adjustments/batch',
         APPROVE: '/store/inventory/adjustments/:id/approve',
         DELETE: '/store/inventory/adjustments/:id',
+        BULK_TEMPLATE: '/store/inventory/adjustments/bulk/template/download',
+        BULK_UPLOAD: '/store/inventory/adjustments/bulk/upload',
       },
       TRANSFERS: {
         LIST: '/store/stock-transfers',
