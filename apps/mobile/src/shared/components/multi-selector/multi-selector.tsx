@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, Text, View, StyleSheet, ScrollView, type ViewStyle } from 'react-native';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 import { Modal } from '@/shared/components/modal/modal';
@@ -40,6 +40,17 @@ export function MultiSelector<T = string | number>({
   style,
 }: MultiSelectorProps<T>) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<View>(null);
+
+  function measureTrigger() {
+    if (triggerRef.current) {
+      triggerRef.current.measureInWindow((x, y, w, h) => {
+        setPos({ top: y + h + 4, left: x, width: w });
+      });
+    }
+    setOpen(true);
+  }
 
   const selectedOptions = options.filter((o) => values.includes(o.value));
 
@@ -91,11 +102,12 @@ export function MultiSelector<T = string | number>({
             ))}
           </View>
         )}
-        <Icon name="chevron-down" size={18} color={colors.text.secondary} />
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.text.secondary} />
       </Pressable>
 
-      <Modal visible={open} onClose={() => setOpen(false)} title={label ?? 'Seleccionar'} showCloseButton>
-        <View style={styles.modalHeader}>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
+        <View style={styles.popoverHeader}>
           <Text style={styles.modalHint}>
             {values.length === 0
               ? 'Toca para agregar'
@@ -108,7 +120,7 @@ export function MultiSelector<T = string | number>({
             </Pressable>
           )}
         </View>
-        <ScrollView style={styles.list}>
+        <View style={styles.popover}>
           {options.map((opt) => {
             const isSelected = values.includes(opt.value);
             const isDisabled = !!max && !isSelected && values.length >= max;
@@ -130,7 +142,8 @@ export function MultiSelector<T = string | number>({
               </Pressable>
             );
           })}
-        </ScrollView>
+        </View>
+      </View>
       </Modal>
     </View>
   );
@@ -168,6 +181,13 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.5,
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
   chipsRow: {
     flex: 1,
