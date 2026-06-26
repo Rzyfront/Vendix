@@ -9,30 +9,9 @@ import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { PqrAdminService } from '../../services/pqr-admin.service';
-import {
-  PqrDetail,
-  PqrStatus,
-  PqrStatusUpdateDto,
-  PqrCommentCreateDto,
-} from '../../models/pqr.model';
+import { PqrDetail, PqrCommentCreateDto } from '../../models/pqr.model';
 import { PqrStatusPillComponent } from '../../components/pqr-status-pill.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
-
-interface StatusOption {
-  value: PqrStatus;
-  label: string;
-  notifyRequester: boolean;
-}
-
-const STATUS_OPTIONS: StatusOption[] = [
-  { value: 'NEW', label: 'Nuevo', notifyRequester: false },
-  { value: 'OPEN', label: 'Abierto', notifyRequester: false },
-  { value: 'IN_PROGRESS', label: 'En progreso', notifyRequester: false },
-  { value: 'WAITING_RESPONSE', label: 'Esperando respuesta', notifyRequester: false },
-  { value: 'RESOLVED', label: 'Respondida', notifyRequester: true },
-  { value: 'CLOSED', label: 'Cerrada', notifyRequester: true },
-  { value: 'REOPENED', label: 'Reabierta', notifyRequester: false },
-];
 
 /**
  * Admin detail view for a single PQR. Loads by `:id`, lets the operator
@@ -68,12 +47,6 @@ export class PqrDetailPageComponent {
   readonly isInternal = signal(true);
   readonly notifyRequester = signal(false);
 
-  // Status composer
-  readonly showStatusModal = signal(false);
-  readonly newStatus = signal<PqrStatus>('IN_PROGRESS');
-  readonly resolutionSummary = signal('');
-
-  readonly statusOptions = STATUS_OPTIONS;
   readonly id = computed(() => Number(this.route.snapshot.paramMap.get('id')));
 
   readonly canSubmitComment = computed(
@@ -109,48 +82,6 @@ export class PqrDetailPageComponent {
     } else {
       this.notifyRequester.set(false);
     }
-  }
-
-  openStatusModal() {
-    const current = this.detail()?.status;
-    if (current) this.newStatus.set(current === 'NEW' ? 'IN_PROGRESS' : current);
-    this.resolutionSummary.set('');
-    this.showStatusModal.set(true);
-  }
-
-  closeStatusModal() {
-    this.showStatusModal.set(false);
-  }
-
-  confirmStatusChange() {
-    const detail = this.detail();
-    if (!detail) return;
-    const target = this.newStatus();
-    const isTerminal =
-      target === 'RESOLVED' || target === 'CLOSED';
-
-    const dto: PqrStatusUpdateDto = {
-      status: target,
-      resolution_summary: isTerminal
-        ? this.resolutionSummary().trim() || undefined
-        : undefined,
-    };
-    this.submitting.set(true);
-    this.adminService.updateStatus(detail.id, dto).subscribe({
-      next: (res) => {
-        if (res.success) {
-          this.showStatusModal.set(false);
-          this.fetch(detail.id);
-        }
-        this.submitting.set(false);
-      },
-      error: (err) => {
-        this.errorMsg.set(
-          err?.error?.message ?? 'No se pudo actualizar el estado.',
-        );
-        this.submitting.set(false);
-      },
-    });
   }
 
   submitComment() {

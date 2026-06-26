@@ -10,8 +10,8 @@ import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
-import { RouterLink } from '@angular/router';
 import { environment } from '../../../../../environments/environment';
+import { RouterLink } from '@angular/router';
 import {
   IconComponent,
   StatsComponent,
@@ -170,6 +170,18 @@ import {
             <option value="CLAIM">Reclamo</option>
           </select>
         </div>
+        <div class="filter-group">
+          <label>Tienda</label>
+          <select
+            [ngModel]="storeFilter()"
+            (ngModelChange)="storeFilter.set($event); applyFilters()"
+          >
+            <option value="">Todas las tiendas</option>
+            @for (s of orgStores(); track s.id) {
+            <option [value]="s.id">{{ s.name }}</option>
+            }
+          </select>
+        </div>
         <div class="filter-group filter-group--search">
           <label>Buscar</label>
           <div class="search-input">
@@ -236,15 +248,7 @@ import {
               </td>
               <td>
                 <span class="status-pill" [attr.data-status]="t.status">
-                  {{
-                    ({
-                      NEW: 'Nuevo',
-                      OPEN: 'Abierto',
-                      IN_PROGRESS: 'En progreso',
-                      RESOLVED: 'Resuelto',
-                      CLOSED: 'Cerrado'
-                    })[t.status] || t.status
-                  }}
+                  {{ statusLabel(t.status) }}
                 </span>
               </td>
               <td class="muted">{{ t.created_at | date: 'shortDate' }}</td>
@@ -585,10 +589,16 @@ export class OrgAdminPqrsComponent {
 
   typeFilter = '';
   readonly searchInput = signal('');
+  // Store filter — org-admin can scope the PQR list to a single tienda
+  // inside the org. `orgStores` is hydrated on mount from /admin/stores
+  // so the dropdown reflects only the stores the org actually owns.
+  readonly storeFilter = signal<number | ''>('');
+  readonly orgStores = signal<Array<{ id: number; name: string }>>([]);
 
   constructor() {
     this.fetch();
     this.fetchStats();
+    this.loadOrgStores();
 
     // Debounced search
     effect((onCleanup) => {
@@ -598,6 +608,37 @@ export class OrgAdminPqrsComponent {
       }, 300);
       onCleanup(() => clearTimeout(timer));
     });
+  }
+
+  /**
+   * Loads the org's stores so the "Tienda" filter dropdown only
+   * shows stores the org actually owns. Without this the filter
+   * would be empty or surface other tenants' stores by accident.
+   */
+private loadOrgStores(): void {
+    // The org-admin stores endpoint lives at /organization/stores, NOT
+    // /admin/stores. The /admin/* path is reserved for the platform
+    // (super-admin) — using it here returned 404 + a red "Access
+    // denied" banner. `environment.apiUrl` is `${apiUrl}`, so the
+    // full URL is `${apiUrl}/organization/stores`.
+    this.http
+      .get<any>(`${environment.apiUrl}/organization/stores`, {
+        params: new HttpParams().set('limit', '100'),
+      })
+      .subscribe({
+        next: (res) => {
+          const list = (res?.data || []).map((s: any) => ({
+            id: s.id,
+            name: s.name,
+          }));
+          this.orgStores.set(list);
+        },
+        error: () => {
+          // Non-fatal — the filter falls back to "Todas las tiendas"
+          // which keeps the page usable even if the stores endpoint
+          // is down or the org has none.
+        },
+      });
   }
 
   setQuickFilter(filter: 'all' | 'overdue' | 'new') {
@@ -626,6 +667,23 @@ export class OrgAdminPqrsComponent {
         return 'Reclamo';
       default:
         return t;
+    }
+  }
+
+  statusLabel(status: string): string {
+    switch (status) {
+      case 'NEW':
+        return 'Nuevo';
+      case 'OPEN':
+        return 'Abierto';
+      case 'IN_PROGRESS':
+        return 'En progreso';
+      case 'RESOLVED':
+        return 'Resuelto';
+      case 'CLOSED':
+        return 'Cerrado';
+      default:
+        return status;
     }
   }
 
@@ -667,6 +725,8 @@ export class OrgAdminPqrsComponent {
     if (this.typeFilter) params = params.set('pqr_type', this.typeFilter);
     if (this.searchInput().trim())
       params = params.set('search', this.searchInput().trim());
+    if (this.storeFilter() !== '')
+      params = params.set('store_id', String(this.storeFilter()));
 
     this.http
       .get<any>(this.API_URL, { params })

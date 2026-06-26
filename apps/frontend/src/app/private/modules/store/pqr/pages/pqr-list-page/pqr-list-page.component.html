@@ -1,5 +1,21 @@
 <section class="pqr-list-page">
-  <!-- Primary CTA card — answers "what do I do today?" -->
+  <!-- Page header: title + primary action -->
+  <header class="page-header">
+    <div>
+      <p class="page-header__eyebrow">Soporte</p>
+      <h1 class="page-header__title">Mis Solicitudes</h1>
+      <p class="page-header__subtitle">
+        Crea y haz seguimiento a tus conversaciones con el equipo de soporte
+        de Vendix.
+      </p>
+    </div>
+    <button class="new-pqr-btn" type="button" (click)="openNewPqrModal()">
+      <app-icon name="plus" [size]="16"></app-icon>
+      Nueva solicitud
+    </button>
+  </header>
+
+  <!-- Primary CTA card — conversational hub that answers "¿qué tengo que hacer hoy?" -->
   @if (stats(); as s) {
   <div
     class="cta-card"
@@ -12,10 +28,10 @@
         <app-icon name="inbox" [size]="32"></app-icon>
       </div>
       <div>
-        <h2>Aún no tienes PQRs</h2>
+        <h2>Aún no tienes solicitudes</h2>
         <p>
           Cuando un visitante radique una petición, queja o reclamo desde tu
-          storefront, aparecerá aquí. Mientras tanto, todo en orden.
+          tienda, aparecerá aquí. Mientras tanto, todo en orden.
         </p>
       </div>
     </div>
@@ -23,37 +39,35 @@
     <div class="cta-card__main">
       <div class="cta-card__icon">
         <app-icon
-          [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-square'"
+          [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-circle'"
           [size]="28"
         ></app-icon>
       </div>
       <div class="cta-card__copy">
         <h2>
           @if (overdueCount() > 0) {
-            Tienes {{ overdueCount() }} PQR{{ overdueCount() === 1 ? '' : 's' }}
-            con SLA vencido
+            Tienes {{ overdueCount() }} solicitud{{ overdueCount() === 1 ? '' : 'es' }}
+            con tiempo vencido
           } @else if (pendingCount() > 0) {
-            Tienes {{ pendingCount() }} PQR{{ pendingCount() === 1 ? '' : 's' }}
-            sin responder
+            Tienes {{ pendingCount() }} solicitud{{ pendingCount() === 1 ? '' : 'es' }}
+            pendiente{{ pendingCount() === 1 ? '' : 's' }} de respuesta
           } @else {
-            Todas las PQRs están al día ✨
+            ¡Todo al día con tus solicitudes!
           }
         </h2>
         <p>
           @if (overdueCount() > 0) {
-            ⚠️ Riesgo de silencio administrativo. Responde hoy para evitar
-            consecuencias legales.
+            Es importante responder pronto para evitar consecuencias legales.
           } @else if (pendingCount() > 0) {
-            Mantén tu tiempo de respuesta dentro del término legal (15 días
-            hábiles para peticiones, 10 para quejas y reclamos).
+            Cuando respondas, el solicitante recibirá un correo con tu mensaje.
           } @else {
-            Buen trabajo. No tienes PQRs pendientes.
+            No tienes solicitudes pendientes en este momento.
           }
         </p>
       </div>
-      @if (pendingCount() > 0) {
-        <a class="cta-card__action" [routerLink]="['/admin/pqrs']">
-          Ver pendientes
+      @if (pendingCount() > 0 && urgentPqrRoute(); as route) {
+        <a class="cta-card__action" [routerLink]="route">
+          Continuar conversación
           <app-icon name="arrow-right" [size]="16"></app-icon>
         </a>
       }
@@ -121,15 +135,16 @@
     </div>
   </details>
 
-  <!-- Cards list — primary view for store owners -->
+  <!-- Loading + error states -->
   @if (loading()) {
-  <div class="loading-banner">Cargando…</div>
+  <div class="loading-banner">Cargando conversaciones…</div>
   }
 
   @if (errorMsg(); as msg) {
   <div class="error-banner">{{ msg }}</div>
   }
 
+  <!-- Conversation cards list -->
   <div class="cards-list">
     @for (t of tickets(); track t.id) {
     @let info = slaInfo(t);
@@ -177,10 +192,20 @@
 
         <h3 class="pqr-card__title">{{ t.title }}</h3>
 
+        <div class="pqr-card__last-response">
+          <app-icon
+            [name]="t.first_response_at ? 'message-circle' : 'message-square-dashed'"
+            [size]="14"
+          ></app-icon>
+          <span [class.is-muted]="!t.first_response_at">
+            {{ lastResponseLabel(t) }}
+          </span>
+        </div>
+
         <div class="pqr-card__footer">
           <span class="pqr-card__meta">
             <app-icon name="calendar" [size]="14"></app-icon>
-            {{ t.created_at | date: 'shortDate' }}
+            Radicada {{ t.created_at | date: 'shortDate' }}
           </span>
           <span class="pqr-card__status" [attr.data-status]="t.status">
             {{
@@ -200,10 +225,10 @@
       <a
         class="pqr-card__action"
         [routerLink]="['/admin/pqrs', t.id]"
-        title="Abrir y responder"
+        title="Ver la conversación completa"
       >
         <app-icon name="message-circle" [size]="16"></app-icon>
-        Responder
+        Ver conversación
       </a>
     </article>
     } @empty {
@@ -211,16 +236,16 @@
       <div class="empty-state__icon">
         <app-icon name="search-x" [size]="48"></app-icon>
       </div>
-      <h3>No hay PQRs con esos filtros</h3>
+      <h3>No hay solicitudes con esos filtros</h3>
       <p>
         @if (statusFilter() || typeFilter() || searchInput()) {
-          Prueba ajustando los filtros o
-          <button class="empty-state__reset" (click)="clearAllFilters()">
-            limpia los filtros
-          </button>
-          para ver todos.
+        Prueba ajustando los filtros o
+        <button class="empty-state__reset" (click)="clearAllFilters()">
+          limpia los filtros
+        </button>
+        para ver todas las conversaciones.
         } @else {
-          Cuando recibas nuevas peticiones, quejas o reclamos, aparecerán aquí.
+        Cuando recibas nuevas solicitudes, aparecerán aquí.
         }
       </p>
     </div>
@@ -257,7 +282,134 @@
     >
       Siguiente ›
     </button>
-    <span class="page-info">{{ total() }} resultados</span>
+    <span class="page-info">{{ total() }} conversaciones</span>
   </nav>
   }
 </section>
+
+<!-- ── Modal: Nueva solicitud ────────────────────────────────────────────── -->
+@if (showNewPqrModal()) {
+<div class="modal-overlay" (click)="closeNewPqrModal()">
+  <div class="modal" (click)="$event.stopPropagation()">
+    <header class="modal__header">
+      <h2>Nueva solicitud</h2>
+      <p class="modal__hint">
+        Cuéntanos qué necesitas y te responderemos por este medio y por
+        correo a <strong>{{ currentUserEmail() || 'tu email registrado' }}</strong>.
+      </p>
+    </header>
+
+    <form class="modal__body" (submit)="$event.preventDefault(); submitNewPqr()">
+      <!-- Tipo -->
+      <fieldset class="modal__field">
+        <legend>Tipo de solicitud</legend>
+        <div class="type-options">
+          @for (opt of newPqrTypeOptions; track opt.value) {
+          <label
+            class="type-option"
+            [class.type-option--active]="newPqrType() === opt.value"
+          >
+            <input
+              type="radio"
+              name="pqr_type"
+              [value]="opt.value"
+              [checked]="newPqrType() === opt.value"
+              (change)="newPqrType.set(opt.value)"
+            />
+            <span class="type-option__label">{{ opt.label }}</span>
+            <span class="type-option__hint">{{ opt.hint }}</span>
+          </label>
+          }
+        </div>
+      </fieldset>
+
+      <!-- Prioridad -->
+      <fieldset class="modal__field">
+        <legend>Prioridad</legend>
+        <div class="type-options type-options--priority">
+          @for (opt of newPqrPriorityOptions; track opt.value) {
+          <label
+            class="type-option"
+            [class.type-option--active]="newPqrPriority() === opt.value"
+            [attr.data-priority]="opt.value"
+          >
+            <input
+              type="radio"
+              name="pqr_priority"
+              [value]="opt.value"
+              [checked]="newPqrPriority() === opt.value"
+              (change)="newPqrPriority.set(opt.value)"
+            />
+            <span class="type-option__label">
+              <span class="priority-chip" [attr.data-priority]="opt.value">
+                {{ opt.value }}
+              </span>
+              {{ opt.label }}
+            </span>
+            <span class="type-option__hint">{{ opt.hint }}</span>
+          </label>
+          }
+        </div>
+      </fieldset>
+
+      <!-- Título -->
+      <label class="modal__field">
+        <span class="modal__label">Asunto</span>
+        <input
+          type="text"
+          class="modal__input"
+          placeholder="Resume tu solicitud en una línea"
+          maxlength="120"
+          [ngModel]="newPqrTitle()"
+          (ngModelChange)="newPqrTitle.set($event)"
+          name="title"
+          required
+        />
+      </label>
+
+      <!-- Descripción -->
+      <label class="modal__field">
+        <span class="modal__label">Detalle</span>
+        <textarea
+          rows="5"
+          class="modal__textarea"
+          placeholder="Cuéntanos con el mayor detalle posible qué pasó, qué necesitas o qué te gustaría cambiar…"
+          [ngModel]="newPqrDescription()"
+          (ngModelChange)="newPqrDescription.set($event)"
+          name="description"
+          required
+        ></textarea>
+        <span class="modal__counter">
+          {{ newPqrDescription().length }} caracteres
+        </span>
+      </label>
+
+      @if (newPqrError(); as err) {
+      <div class="modal__error">{{ err }}</div>
+      }
+
+      <div class="modal__actions">
+        <button
+          type="button"
+          class="ghost-btn"
+          (click)="closeNewPqrModal()"
+          [disabled]="newPqrSubmitting()"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          class="primary-btn"
+          [disabled]="!canSubmitNewPqr()"
+        >
+          {{
+            newPqrSubmitting()
+              ? 'Enviando…'
+              : 'Enviar solicitud'
+          }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+}

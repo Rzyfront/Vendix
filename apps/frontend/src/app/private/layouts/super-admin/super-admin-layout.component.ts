@@ -105,19 +105,34 @@ export class SuperAdminLayoutComponent {
 
   // --- Support tickets open count ---
   private readonly openTicketsCount = signal(0);
+  // --- Support PQRs open count (sibling badge on the same Soporte group) ---
+  private readonly openPqrsCount = signal(0);
 
   // --- Dynamic menu items with support badge ---
   readonly menuItems = computed<MenuItem[]>(() => {
-    const openCount = this.openTicketsCount();
-    const badge = openCount > 0 ? openCount.toString() : undefined;
+    const ticketsCount = this.openTicketsCount();
+    const pqrsCount = this.openPqrsCount();
+    const ticketsBadge = ticketsCount > 0 ? ticketsCount.toString() : undefined;
+    const pqrsBadge = pqrsCount > 0 ? pqrsCount.toString() : undefined;
+    // Sum of both children — used on the parent "Soporte" group so the
+    // operator sees at-a-glance how many items are pending across the
+    // support section, then drills into the right sub-view.
+    const groupTotal = ticketsCount + pqrsCount;
+    const groupBadge = groupTotal > 0 ? groupTotal.toString() : undefined;
     return this.baseMenuItems.map((item) => {
       if (item.label === 'Soporte' && item.children) {
         return {
           ...item,
-          badge,
-          children: item.children.map((child) =>
-            child.label === 'Tickets' ? { ...child, badge } : child,
-          ),
+          badge: groupBadge,
+          children: item.children.map((child) => {
+            if (child.label === 'Tickets') {
+              return { ...child, badge: ticketsBadge };
+            }
+            if (child.label === 'PQRs') {
+              return { ...child, badge: pqrsBadge };
+            }
+            return child;
+          }),
         };
       }
       return item;
@@ -404,6 +419,29 @@ export class SuperAdminLayoutComponent {
         },
         error: (err) => {
           console.error('Error loading support stats:', err);
+        },
+      });
+
+    // Load PQR stats — refresh every 60 seconds, sibling timer to the
+    // ticket one above so they don't share a single in-flight request
+    // (they're independent endpoints).
+    timer(0, 60000)
+      .pipe(
+        switchMap(() => this.supportService.getPqrStats()),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (stats: any) => {
+          const openCount =
+            (stats.by_status?.['NEW'] || 0) +
+            (stats.by_status?.['OPEN'] || 0) +
+            (stats.by_status?.['IN_PROGRESS'] || 0) +
+            (stats.by_status?.['WAITING_RESPONSE'] || 0) +
+            (stats.by_status?.['REOPENED'] || 0);
+          this.openPqrsCount.set(openCount);
+        },
+        error: (err) => {
+          console.error('Error loading PQR stats:', err);
         },
       });
   }

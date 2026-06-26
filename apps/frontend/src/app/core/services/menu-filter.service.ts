@@ -187,13 +187,18 @@ export class MenuFilterService {
 
     // Ayuda (padre + submódulos)
     Ayuda: 'help',
-    Soporte: ['help_support', 'settings_support'],
+    Soporte: ['help_support', 'settings_support', 'help_pqrs'],
     'Centro de Ayuda': 'help_center',
-    // Quejas y Reclamos (Peticiones, Quejas y Reclamos) — child of `help`.
+    // "Mis Solicitudes" (Peticiones, Quejas y Reclamos) — child of `help`.
     // The visible label is plain Spanish for end users; the underlying
     // `help_pqrs` key is kept for the panel_ui contract and the existing
     // merged config of users (no migration needed).
-    'Quejas y Reclamos': 'help_pqrs',
+    'Mis Solicitudes': 'help_pqrs',
+    // Same `help_pqrs` key for the PQR child as it appears in the
+    // org-admin and super-admin sidebars. Without this entry, the
+    // filter's Case 3 (no key) hides the entire parent group because
+    // the child never gets included.
+    PQRs: 'help_pqrs',
   };
 
   /**

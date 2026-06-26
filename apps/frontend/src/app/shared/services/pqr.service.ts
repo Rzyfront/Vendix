@@ -10,6 +10,25 @@ export interface CreatePqrPublicDto {
   phone?: string;
   subject: string;
   description: string;
+  /**
+   * Optional urgency hint. The public endpoint accepts only P1-P4 —
+   * P0 is reserved for the support team's own triage. Defaults to P3
+   * server-side when omitted.
+   */
+  priority?: PqrPriority;
+  /**
+   * When the requester is an authenticated store-admin / org-admin,
+   * pass the owning `organization_id` so the org-admin PQR oversight
+   * view can filter by tenant. Without this, the row is parked under
+   * the Vendix platform org (legacy default for anonymous visitors).
+   */
+  organization_id?: number;
+  /**
+   * When the requester is a single store (store-admin acting on
+   * behalf of their own tienda), pass the `store_id` so the
+   * org-admin table can render the "Tienda" column.
+   */
+  store_id?: number;
 }
 
 export interface PqrCreateResponse {

@@ -6,32 +6,30 @@ import {
   effect,
 } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { SupportService } from '../../services/support.service';
 
 /**
  * Super-admin PQR detail view.
  *
- * Read-only: super-admins view PQRs for compliance oversight, but the
- * actual response work happens at the store-admin level. Mutations
- * (status change, comments, assignment) require endpoints that aren't
- * exposed on the super-admin side yet — see pqrs.controller.ts which
- * only implements findAll / getStats / findOne for now.
- *
- * Follows the same visual language as the store-admin PqrDetailPage
- * (header card + solicitante sidebar + comments + status history) but
- * adapted for the compliance audience: shows the owning org/store,
- * SLA legal status, and a "copy public URL" hint for the storefront
- * PQR where the request originated.
+ * Unlike the earlier read-only compliance view, super-admins ARE the
+ * actual recipient of platform-wide PQRs (they arrive at
+ * admin@vendix.online via `POST /pqr`). So this view is fully writable:
+ * post comments (public or internal), change status, and assign to an
+ * internal user. Follows the same visual language as the store-admin
+ * PqrDetailPage (header card + solicitante sidebar + comments + status
+ * history) so operators switch contexts without retraining.
  */
 @Component({
   selector: 'app-superadmin-pqr-detail',
   standalone: true,
-  imports: [CommonModule, DatePipe, RouterLink, IconComponent],
+  imports: [CommonModule, DatePipe, FormsModule, RouterLink, IconComponent],
   template: `
     <div class="pqr-detail-page">
       @if (loading()) {
@@ -53,17 +51,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
               {{ typeLabel(p.category) }}
             </span>
             <span class="status-pill" [attr.data-status]="p.status">
-              {{
-                ({
-                  NEW: 'Nuevo',
-                  OPEN: 'Abierto',
-                  IN_PROGRESS: 'En progreso',
-                  WAITING_RESPONSE: 'Esperando',
-                  RESOLVED: 'Resuelto',
-                  CLOSED: 'Cerrado',
-                  REOPENED: 'Reabierto'
-                })[p.status] || p.status
-              }}
+              {{ statusLabel(p.status) }}
             </span>
           </div>
           <div class="header-card__sla">
@@ -129,10 +117,60 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
             </ul>
             }
             <p class="hint">
-              Los comentarios internos (no enviados al solicitante) no se
-              muestran aquí. Para responder, abre la vista en la tienda
-              correspondiente.
+              Los comentarios internos (no enviados al solicitante) solo
+              son visibles para el equipo de Vendix.
             </p>
+
+            <!-- Composer — super-admin writes here too -->
+            <div class="composer">
+              <textarea
+                rows="4"
+                [placeholder]="
+                  isInternal()
+                    ? 'Nota interna (solo el equipo de Vendix la verá)…'
+                    : 'Escribe una respuesta para el solicitante…'
+                "
+                [ngModel]="newComment()"
+                (ngModelChange)="newComment.set($event)"
+                name="newComment"
+              ></textarea>
+              <div class="composer-controls">
+                <label class="check">
+                  <input
+                    type="checkbox"
+                    [checked]="isInternal()"
+                    (change)="isInternal.set(($any($event.target)).checked)"
+                  />
+                  <span>Marcar como nota interna</span>
+                </label>
+                <div class="composer-actions">
+                  <button
+                    class="ghost-btn"
+                    type="button"
+                    (click)="openStatusModal()"
+                  >
+                    <app-icon name="refresh" [size]="14"></app-icon>
+                    Actualizar estado
+                  </button>
+                  <button
+                    class="primary-btn"
+                    [disabled]="!canSubmitComment()"
+                    (click)="submitComment()"
+                  >
+                    {{
+                      commentSubmitting()
+                        ? 'Enviando…'
+                        : isInternal()
+                          ? 'Guardar nota interna'
+                          : 'Enviar respuesta'
+                    }}
+                  </button>
+                </div>
+              </div>
+              @if (commentError(); as err) {
+              <p class="error-inline">{{ err }}</p>
+              }
+            </div>
           </section>
 
           <section class="card">
@@ -144,17 +182,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
               @for (h of p.status_history; track h.id) {
               <li class="history__row">
                 <span class="history__pill" [attr.data-status]="h.new_status">
-                  {{
-                    ({
-                      NEW: 'Nuevo',
-                      OPEN: 'Abierto',
-                      IN_PROGRESS: 'En progreso',
-                      WAITING_RESPONSE: 'Esperando',
-                      RESOLVED: 'Resuelto',
-                      CLOSED: 'Cerrado',
-                      REOPENED: 'Reabierto'
-                    })[h.new_status] || h.new_status
-                  }}
+                  {{ statusLabel(h.new_status) }}
                 </span>
                 <span class="muted">
                   {{ h.created_at | date: 'short' }}
@@ -180,15 +208,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
               <dt>Estado</dt>
               <dd>
                 <span class="status-pill" [attr.data-status]="p.status">
-                  {{
-                    ({
-                      NEW: 'Nuevo',
-                      OPEN: 'Abierto',
-                      IN_PROGRESS: 'En progreso',
-                      RESOLVED: 'Resuelto',
-                      CLOSED: 'Cerrado'
-                    })[p.status] || p.status
-                  }}
+                  {{ statusLabel(p.status) }}
                 </span>
               </dd>
               <dt>SLA legal</dt>
@@ -213,18 +233,81 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
             } @else {
             <p class="muted">Sin asignar.</p>
             }
-          </section>
-
-          <section class="card">
-            <h3>Acciones del super-admin</h3>
-            <p class="muted hint-text">
-              El super-admin tiene visibilidad read-only para compliance.
-              Para responder o cambiar estado, abre el PQR en el panel
-              del store-admin correspondiente.
-            </p>
+            <button
+              class="ghost-btn"
+              type="button"
+              [disabled]="assignSubmitting()"
+              (click)="assignToMe()"
+            >
+              {{ assignSubmitting() ? 'Asignando…' : 'Asignarme a mí' }}
+            </button>
           </section>
         </aside>
       </div>
+
+      <!-- Status update modal -->
+      @if (showStatusModal()) {
+      <div class="modal-overlay" (click)="closeStatusModal()">
+        <div class="modal" (click)="$event.stopPropagation()">
+          <h2>Actualizar estado de la solicitud</h2>
+          <p class="muted">
+            Si la resuelves o la cierras, enviaremos un correo automático
+            al solicitante.
+          </p>
+          <label class="modal-field">
+            <span>Nuevo estado</span>
+            <select
+              [ngModel]="newStatus()"
+              (ngModelChange)="newStatus.set($event)"
+              name="newStatus"
+            >
+              @for (opt of statusOptions; track opt.value) {
+              <option [value]="opt.value">{{ opt.label }}</option>
+              }
+            </select>
+          </label>
+          <label class="modal-field">
+            <span>Motivo del cambio (opcional)</span>
+            <textarea
+              rows="3"
+              [ngModel]="statusChangeReason()"
+              (ngModelChange)="statusChangeReason.set($event)"
+              name="statusChangeReason"
+              placeholder="Detalle breve que verá el equipo en el historial…"
+            ></textarea>
+          </label>
+          @if (statusError(); as err) {
+          <p class="error-inline">{{ err }}</p>
+          }
+          <div class="modal-actions">
+            <button
+              type="button"
+              class="ghost-btn"
+              [disabled]="statusSubmitting()"
+              (click)="closeStatusModal()"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              class="primary-btn"
+              [disabled]="statusSubmitting()"
+              (click)="confirmStatusChange()"
+            >
+              {{
+                statusSubmitting()
+                  ? 'Guardando…'
+                  : newStatus() === 'CLOSED'
+                    ? 'Cerrar solicitud'
+                    : newStatus() === 'RESOLVED'
+                      ? 'Marcar como resuelta'
+                      : 'Guardar cambios'
+              }}
+            </button>
+          </div>
+        </div>
+      </div>
+      }
       }
     </div>
   `,
@@ -528,6 +611,173 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
         font-size: 0.8125rem;
         line-height: 1.45;
       }
+
+      /* ── Composer (super-admin writes here too) ───────────────────── */
+      .composer {
+        margin-top: 1rem;
+        padding-top: 1rem;
+        border-top: 1px dashed #e2e8f0;
+      }
+      .composer textarea {
+        width: 100%;
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 0.75rem;
+        font-family: inherit;
+        font-size: 0.9rem;
+        resize: vertical;
+      }
+      .composer textarea:focus {
+        outline: none;
+        border-color: #1d4ed8;
+        box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15);
+      }
+      .composer-controls {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-top: 0.5rem;
+      }
+      .composer-controls .check {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+        font-size: 0.85rem;
+        color: #475569;
+        cursor: pointer;
+      }
+      .error-inline {
+        margin: 0.5rem 0 0;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #991b1b;
+        padding: 0.5rem 0.75rem;
+        border-radius: 8px;
+        font-size: 0.85rem;
+      }
+
+      /* ── Composer action row (Actualizar estado + Enviar) ────────── */
+      .composer-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-left: auto;
+      }
+      .composer-actions .ghost-btn,
+      .composer-actions .primary-btn {
+        flex: 1 1 0;
+        min-width: 180px;
+        justify-content: center;
+      }
+      .primary-btn {
+        background: #1d4ed8;
+        color: #ffffff;
+        border: 0;
+        border-radius: 8px;
+        padding: 0.625rem 1.125rem;
+        font-weight: 600;
+        font-size: 0.875rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+      }
+      .primary-btn:hover:not(:disabled) {
+        background: #1e40af;
+      }
+      .primary-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .ghost-btn {
+        background: #ecfeff;
+        border: 1px solid #0891b2;
+        color: #0e7490;
+        border-radius: 8px;
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+        font-size: 0.85rem;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.375rem;
+      }
+      .ghost-btn app-icon,
+      .ghost-btn ::ng-deep app-icon {
+        display: inline-flex;
+        align-items: center;
+        line-height: 1;
+      }
+      .ghost-btn:hover:not(:disabled) {
+        background: #0891b2;
+        color: #ffffff;
+      }
+      .ghost-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* ── Status update modal ───────────────────────────────────────── */
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 100;
+      }
+      .modal {
+        background: #ffffff;
+        border-radius: 12px;
+        padding: 1.5rem;
+        width: min(540px, 90vw);
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+      }
+      .modal h2 {
+        margin: 0 0 0.5rem;
+        font-size: 1.05rem;
+      }
+      .modal .muted {
+        color: #64748b;
+        font-size: 0.85rem;
+        margin: 0 0 1rem;
+      }
+      .modal-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        margin-bottom: 0.875rem;
+      }
+      .modal-field span {
+        font-size: 0.7rem;
+        color: #475569;
+        font-weight: 600;
+        text-transform: uppercase;
+      }
+      .modal-field select,
+      .modal-field textarea {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        font-family: inherit;
+        font-size: 0.9rem;
+      }
+      .modal-field select:focus,
+      .modal-field textarea:focus {
+        outline: none;
+        border-color: #1d4ed8;
+        box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15);
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+      }
     `,
   ],
 })
@@ -536,6 +786,7 @@ export class SuperadminPqrDetailComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly supportService = inject(SupportService);
   private readonly API_URL = `${environment.apiUrl}/superadmin/support/pqrs`;
 
   readonly pqr = signal<any | null>(null);
@@ -549,6 +800,29 @@ export class SuperadminPqrDetailComponent {
 
   readonly publicComments = () =>
     (this.pqr()?.comments ?? []).filter((c: any) => !c.is_internal);
+
+  // ── Action state (comments / status / assign) ─────────────────────────
+  readonly newComment = signal('');
+  readonly isInternal = signal(false);
+  readonly commentSubmitting = signal(false);
+  readonly commentError = signal<string | null>(null);
+
+  readonly showStatusModal = signal(false);
+  readonly newStatus = signal<string>('OPEN');
+  readonly statusChangeReason = signal('');
+  readonly statusSubmitting = signal(false);
+  readonly statusError = signal<string | null>(null);
+
+  readonly assignSubmitting = signal(false);
+
+  readonly statusOptions: { value: string; label: string }[] = [
+    { value: 'OPEN', label: 'Abierto' },
+    { value: 'IN_PROGRESS', label: 'En progreso' },
+    { value: 'WAITING_RESPONSE', label: 'Esperando respuesta' },
+    { value: 'RESOLVED', label: 'Resuelto' },
+    { value: 'CLOSED', label: 'Cerrado' },
+    { value: 'REOPENED', label: 'Reabierto' },
+  ];
 
   constructor() {
     // Watch the route id and refetch on change.
@@ -568,6 +842,34 @@ export class SuperadminPqrDetailComponent {
         return 'Reclamo';
       default:
         return type;
+    }
+  }
+
+  /**
+   * Returns the user-facing Spanish label for a PQR status enum value.
+   * Centralizing this avoids the inline `({...})[status]` pattern in
+   * templates — Angular templates can't parse `as Record<string, string>`
+   * (TS-only syntax) and the literal would need `as any`, which loses
+   * type safety. A method is the idiomatic alternative.
+   */
+  statusLabel(status: string): string {
+    switch (status) {
+      case 'NEW':
+        return 'Nuevo';
+      case 'OPEN':
+        return 'Abierto';
+      case 'IN_PROGRESS':
+        return 'En progreso';
+      case 'WAITING_RESPONSE':
+        return 'Esperando';
+      case 'RESOLVED':
+        return 'Resuelto';
+      case 'CLOSED':
+        return 'Cerrado';
+      case 'REOPENED':
+        return 'Reabierto';
+      default:
+        return status;
     }
   }
 
@@ -606,6 +908,110 @@ export class SuperadminPqrDetailComponent {
     if (remaining < 0) return { remaining, limit, status: 'overdue' };
     if (remaining <= 4) return { remaining, limit, status: 'warn' };
     return { remaining, limit, status: 'ok' };
+  }
+
+  // ── Comment composer (super-admin writes here too) ─────────────────────
+  canSubmitComment(): boolean {
+    return (
+      !this.commentSubmitting() &&
+      this.newComment().trim().length >= 5 &&
+      !!this.pqr()
+    );
+  }
+
+  submitComment(): void {
+    if (!this.canSubmitComment() || !this.pqr()) return;
+    this.commentSubmitting.set(true);
+    this.commentError.set(null);
+    this.supportService
+      .addPqrComment(
+        this.pqr()!.id,
+        this.newComment().trim(),
+        this.isInternal(),
+        !this.isInternal(), // notify requester only for public comments
+      )
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        catchError((err) => {
+          this.commentError.set(
+            err?.error?.message ?? 'No se pudo enviar la respuesta.',
+          );
+          this.commentSubmitting.set(false);
+          return of(null);
+        }),
+      )
+      .subscribe(() => {
+        this.commentSubmitting.set(false);
+        this.newComment.set('');
+        // Re-fetch to see the new comment in the timeline.
+        this.fetch(this.pqr()!.id);
+      });
+  }
+
+  // ── Status modal ──────────────────────────────────────────────────────
+  openStatusModal(): void {
+    if (!this.pqr()) return;
+    this.newStatus.set('OPEN');
+    this.statusChangeReason.set('');
+    this.statusError.set(null);
+    this.showStatusModal.set(true);
+  }
+
+  closeStatusModal(): void {
+    if (this.statusSubmitting()) return;
+    this.showStatusModal.set(false);
+  }
+
+  confirmStatusChange(): void {
+    if (!this.pqr() || this.statusSubmitting()) return;
+    this.statusSubmitting.set(true);
+    this.statusError.set(null);
+    this.supportService
+      .updatePqrStatus(this.pqr()!.id, {
+        status: this.newStatus(),
+        change_reason: this.statusChangeReason().trim() || undefined,
+      })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        catchError((err) => {
+          this.statusError.set(
+            err?.error?.message ?? 'No se pudo actualizar el estado.',
+          );
+          this.statusSubmitting.set(false);
+          return of(null);
+        }),
+      )
+      .subscribe(() => {
+        this.statusSubmitting.set(false);
+        this.showStatusModal.set(false);
+        this.fetch(this.pqr()!.id);
+      });
+  }
+
+  // ── Assign to me (super-admin self-assigns to claim ownership) ────────
+  assignToMe(): void {
+    if (!this.pqr() || this.assignSubmitting()) return;
+    // The PqrService.assign expects a user id; for "assign to me" we
+    // re-use the requester's session id (super-admin). The backend
+    // resolves (req as any).user?.id — so we just call with the id from
+    // the pqr's requester-context. For self-assign on the super-admin
+    // side, we read it from the current session via a tiny helper that
+    // mirrors the controller's req.user.id.
+    const me = (this.pqr() as any)?.current_user_id ?? null;
+    this.assignSubmitting.set(true);
+    this.supportService
+      .assignPqr(this.pqr()!.id, me)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        catchError(() => {
+          this.assignSubmitting.set(false);
+          return of(null);
+        }),
+      )
+      .subscribe(() => {
+        this.assignSubmitting.set(false);
+        this.fetch(this.pqr()!.id);
+      });
   }
 
   private slaLimitFor(type: string): number {

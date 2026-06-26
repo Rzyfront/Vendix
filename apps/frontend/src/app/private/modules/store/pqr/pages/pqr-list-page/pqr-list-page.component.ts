@@ -7,11 +7,14 @@ import {
 } from '@angular/core';
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { PqrAdminService } from '../../services/pqr-admin.service';
-import { Pqr, PqrQuery, PqrStats, PqrType, PqrStatus } from '../../models/pqr.model';
+import { Pqr, PqrQuery, PqrStats, PqrType, PqrStatus, PqrPriority } from '../../models/pqr.model';
 import { PqrStatusPillComponent } from '../../components/pqr-status-pill.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { PqrService } from '../../../../../../shared/services/pqr.service';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 /**
  * Admin list page for PQRs (Peticiones / Quejas / Reclamos).
@@ -36,6 +39,9 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 })
 export class PqrListPageComponent {
   private readonly adminService = inject(PqrAdminService);
+  private readonly pqrService = inject(PqrService);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly router = inject(Router);
 
   readonly query = signal<PqrQuery>({ page: 1, limit: 20 });
   readonly tickets = signal<Pqr[]>([]);
@@ -51,6 +57,33 @@ export class PqrListPageComponent {
 
   readonly totalPages = computed(() => this.meta()?.pages ?? 1);
   readonly total = computed(() => this.meta()?.total ?? 0);
+
+  /**
+   * Returns the PQR with the highest urgency from the current list.
+   * Drives the primary CTA card "Continuar conversación" — the user
+   * lands directly on the conversation that needs attention first.
+   *
+   * TODO(human): implement the urgency selection logic.
+   *
+   * Consider:
+   *   - Overdue PQRs first (legal risk under Colombian PQR regulation).
+   *   - Then pending PQRs by age (oldest first → highest staleness risk).
+   *   - Tiebreaker: COMPLAINT/CLAIM before PETITION (tighter SLA: 10d vs 15d).
+   *
+   * Use `this.slaInfo(pqr)` to classify a ticket as 'ok' | 'warn' | 'overdue'.
+   * Return the Pqr object, or null if `this.tickets()` is empty.
+   *
+   * Stub: returns null so the CTA hides its action button until implemented.
+   */
+  readonly mostUrgentPqr = computed<Pqr | null>(() => {
+    return null;
+  });
+
+  /** RouterLink for the CTA action — points at the most urgent PQR. */
+  readonly urgentPqrRoute = computed<string[] | null>(() => {
+    const pqr = this.mostUrgentPqr();
+    return pqr ? ['/admin/pqrs', String(pqr.id)] : null;
+  });
 
   constructor() {
     // Auto-refetch whenever query changes.
@@ -229,6 +262,170 @@ export class PqrListPageComponent {
       default:
         return 15;
     }
+  }
+
+  // ── "New PQR" modal state ────────────────────────────────────────────────
+  //
+  // The store-admin can also create PQRs of their own (e.g. escalations to
+  // Vendix Corp support). Pre-fills requester info from the auth facade so
+  // they don't have to type their name/email again. Uses the public
+  // `PqrService.createPublic()` endpoint — same channel visitors use, but
+  // surfaced inside the store-admin panel.
+
+  readonly showNewPqrModal = signal(false);
+  readonly newPqrType = signal<PqrType>('PETITION');
+  readonly newPqrTitle = signal('');
+  readonly newPqrDescription = signal('');
+  readonly newPqrPriority = signal<PqrPriority>('P3');
+  readonly newPqrSubmitting = signal(false);
+  readonly newPqrError = signal<string | null>(null);
+
+  /** Authenticated user's email — pre-fills the requester field. */
+  readonly currentUserEmail = toSignal(this.authFacade.userEmail$, {
+    initialValue: '',
+  });
+  /** Authenticated user's name — pre-fills the requester field. */
+  readonly currentUserName = toSignal(this.authFacade.userName$, {
+    initialValue: '',
+  });
+
+  readonly newPqrTypeOptions: { value: PqrType; label: string; hint: string }[] =
+    [
+      {
+        value: 'PETITION',
+        label: 'Petición',
+        hint: 'Consulta, solicitud o requerimiento de información.',
+      },
+      {
+        value: 'COMPLAINT',
+        label: 'Queja',
+        hint: 'Inconformidad con un servicio o proceso de Vendix.',
+      },
+      {
+        value: 'CLAIM',
+        label: 'Reclamo',
+        hint: 'Solicitud de revisión por algo que afectó tu operación.',
+      },
+    ];
+
+  /**
+   * Priority options shown in the New PQR modal. P0 is intentionally
+   * excluded — the public endpoint only accepts P1-P4, reserving P0 for
+   * the support team's own triage based on production impact.
+   */
+  readonly newPqrPriorityOptions: {
+    value: PqrPriority;
+    label: string;
+    hint: string;
+  }[] = [
+    {
+      value: 'P1',
+      label: 'Urgente',
+      hint: 'Afecta ventas o clientes en producción ahora mismo.',
+    },
+    {
+      value: 'P2',
+      label: 'Alta',
+      hint: 'Bloquea una operación importante pero tiene workaround.',
+    },
+    {
+      value: 'P3',
+      label: 'Normal',
+      hint: 'Necesita respuesta pronto, sin bloqueo inmediato.',
+    },
+    {
+      value: 'P4',
+      label: 'Baja',
+      hint: 'Mejora o pregunta sin impacto en el día a día.',
+    },
+  ];
+
+  openNewPqrModal(): void {
+    this.newPqrType.set('PETITION');
+    this.newPqrTitle.set('');
+    this.newPqrDescription.set('');
+    this.newPqrPriority.set('P3');
+    this.newPqrError.set(null);
+    this.showNewPqrModal.set(true);
+  }
+
+  closeNewPqrModal(): void {
+    if (this.newPqrSubmitting()) return;
+    this.showNewPqrModal.set(false);
+  }
+
+  canSubmitNewPqr(): boolean {
+    return (
+      !this.newPqrSubmitting() &&
+      this.newPqrTitle().trim().length >= 5 &&
+      this.newPqrDescription().trim().length >= 10 &&
+      !!this.currentUserEmail()
+    );
+  }
+
+  submitNewPqr(): void {
+    if (!this.canSubmitNewPqr()) return;
+    this.newPqrSubmitting.set(true);
+    this.newPqrError.set(null);
+    this.pqrService
+      .createPublic({
+        pqr_type: this.newPqrType(),
+        name: this.currentUserName() || this.currentUserEmail(),
+        email: this.currentUserEmail(),
+        subject: this.newPqrTitle().trim(),
+        description: this.newPqrDescription().trim(),
+        priority: this.newPqrPriority(),
+        // Pass tenant context so the row lands under the requester's
+        // org/store, not under the Vendix platform org (which would
+        // hide it from the org-admin PQR oversight view).
+        organization_id: this.authFacade.userOrganization()?.id ?? undefined,
+        store_id: this.authFacade.userStore()?.id ?? undefined,
+      })
+      .subscribe({
+        next: (res) => {
+          this.newPqrSubmitting.set(false);
+          this.showNewPqrModal.set(false);
+          if (res.success && res.data?.ticket_number) {
+            this.router.navigate(['/admin/pqrs', res.data.ticket_number]);
+          }
+        },
+        error: (err) => {
+          this.newPqrSubmitting.set(false);
+          this.newPqrError.set(
+            err?.error?.message ??
+              'No se pudo enviar la solicitud. Intenta de nuevo.',
+          );
+        },
+      });
+  }
+
+  /**
+   * Returns a human-friendly label describing the last response on a PQR,
+   * shown in the card list to give the owner context about which
+   * conversations are stale and which are active.
+   *
+   * - "Sin respuesta aún" — no `first_response_at` yet.
+   * - "Última respuesta: hoy/ayer/hace N días" — recent (< 30 days).
+   * - "Última respuesta: {día} {mes}" — older (absolute short date).
+   */
+  lastResponseLabel(pqr: Pqr): string {
+    const firstResponse = pqr.first_response_at;
+    if (!firstResponse) return 'Sin respuesta aún';
+
+    const date = new Date(firstResponse);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) return 'Última respuesta: hoy';
+    if (diffDays === 1) return 'Última respuesta: ayer';
+    if (diffDays < 30) return `Última respuesta: hace ${diffDays} días`;
+
+    const months = [
+      'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+      'jul', 'ago', 'sep', 'oct', 'nov', 'dic',
+    ];
+    return `Última respuesta: ${date.getDate()} ${months[date.getMonth()]}`;
   }
 
   pageNumbers = computed(() => {

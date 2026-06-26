@@ -45,15 +45,26 @@ export class AdminPqrController {
   @ApiResponse({ status: 200, description: 'PQRs retrieved successfully' })
   async findAll(@Query() query: PqrQueryDto) {
     const orgId = RequestContextService.getOrganizationId();
+    // Match PQRs that belong to the requesting org OR are legacy rows
+    // parked under the platform org (`orgVendix`). The legacy branch
+    // exists because pre-fix PQRs were created with `organization_id =
+    // orgVendix` regardless of who submitted them — the org-admin
+    // would otherwise see an empty queue. A data migration can drop
+    // the `OR` branch once all legacy rows are re-tagged with their
+    // real `organization_id`.
     const where: any = {
-      organization_id: orgId,
       tags: { has: 'pqr' },
+      OR: [
+        { organization_id: orgId },
+        { organization: { is_platform: true } },
+      ],
     };
     if (query.status) where.status = query.status;
     if (query.pqr_type) where.category = query.pqr_type;
     if (query.priority) where.priority = query.priority;
     if (query.assigned_to_user_id)
       where.assigned_to_user_id = query.assigned_to_user_id;
+    if (query.store_id) where.store_id = query.store_id;
     if (query.search) {
       where.OR = [
         { title: { contains: query.search, mode: 'insensitive' } },

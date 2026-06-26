@@ -733,7 +733,7 @@ export class StoreAdminLayoutComponent {
           route: '/admin/help/support',
         },
         {
-          label: 'Quejas y Reclamos',
+          label: 'Mis Solicitudes',
           icon: 'message-square',
           route: '/admin/pqrs',
         },

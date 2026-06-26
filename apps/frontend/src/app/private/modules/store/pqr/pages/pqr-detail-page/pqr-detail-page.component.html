@@ -37,9 +37,14 @@
       }
     </div>
     <div class="ticket-actions">
-      <button class="primary-btn" (click)="openStatusModal()">
-        Cambiar estado
-      </button>
+      <!-- The store-admin only reads and replies to PQRs. Status changes
+           (resolving, closing, reopening) are driven by the Vendix
+           support team responding to the ticket. See super-admin view
+           for the writable counterpart. -->
+      <span class="status-managed-by-team">
+        <app-icon name="info" [size]="14"></app-icon>
+        Estado gestionado por el equipo de soporte de Vendix
+      </span>
     </div>
   </header>
 
@@ -57,15 +62,23 @@
         <p class="muted">No hay comentarios aún.</p>
         }
         @for (c of d.comments; track c.id) {
-        <div class="comment" [class.comment--public]="!c.is_internal">
+        <div
+          class="comment"
+          [class.comment--public]="!c.is_internal"
+          [class.comment--internal]="c.is_internal"
+          [class.comment--from-customer]="!c.is_internal && c.author_email === d.requester_email"
+          [class.comment--from-team]="!c.is_internal && c.author_email && c.author_email !== d.requester_email"
+        >
           <header class="comment-header">
             <strong>{{ c.author_name }}</strong>
             <span class="comment-meta">
               {{ c.author_type }} · {{ c.created_at | date: 'medium' }}
-              @if (!c.is_internal) {
-              <span class="badge badge--public">Visible al solicitante</span>
+              @if (c.is_internal) {
+              <span class="badge badge--internal">Nota interna</span>
+              } @else if (c.author_email === d.requester_email) {
+              <span class="badge badge--from-customer">Mensaje del solicitante</span>
               } @else {
-              <span class="badge badge--internal">Interno</span>
+              <span class="badge badge--from-team">Tu respuesta</span>
               }
             </span>
           </header>
@@ -77,7 +90,11 @@
         <div class="composer">
           <textarea
             rows="4"
-            placeholder="Escribe una respuesta o nota interna…"
+            [placeholder]="
+              isInternal()
+                ? 'Escribe una nota interna (solo la verá tu equipo)…'
+                : 'Escribe una respuesta para el solicitante…'
+            "
             [ngModel]="newComment()"
             (ngModelChange)="newComment.set($event)"
           ></textarea>
@@ -88,7 +105,7 @@
                 [checked]="isInternal()"
                 (change)="onIsInternalChange(($any($event.target)).checked)"
               />
-              <span>Comentario interno (no se envía al solicitante)</span>
+              <span>Marcar como nota interna (no se envía al solicitante)</span>
             </label>
             @if (isInternal()) {
             <label class="check">
@@ -97,7 +114,7 @@
                 [checked]="notifyRequester()"
                 (change)="notifyRequester.set(($any($event.target)).checked)"
               />
-              <span>Notificar al solicitante por email</span>
+              <span>Notificar al solicitante por email de todos modos</span>
             </label>
             }
             <button
@@ -105,7 +122,13 @@
               [disabled]="!canSubmitComment()"
               (click)="submitComment()"
             >
-              {{ submitting() ? 'Enviando…' : 'Publicar comentario' }}
+              {{
+                submitting()
+                  ? 'Enviando…'
+                  : isInternal()
+                    ? 'Guardar nota interna'
+                    : 'Enviar respuesta'
+              }}
             </button>
           </div>
         </div>
@@ -154,50 +177,5 @@
       </article>
     </aside>
   </div>
-
-  <!-- Status change modal -->
-  @if (showStatusModal()) {
-  <div class="modal-overlay" (click)="closeStatusModal()">
-    <div class="modal" (click)="$event.stopPropagation()">
-      <h2>Cambiar estado del PQR</h2>
-      <p class="muted">
-        Cambiar a <strong>Respondida</strong> o <strong>Cerrada</strong>
-        enviará un email automático al solicitante.
-      </p>
-      <label class="modal-field">
-        <span>Estado</span>
-        <select
-          [ngModel]="newStatus()"
-          (ngModelChange)="newStatus.set($event)"
-        >
-          @for (opt of statusOptions; track opt.value) {
-          <option [value]="opt.value">{{ opt.label }}</option>
-          }
-        </select>
-      </label>
-      @if (newStatus() === 'RESOLVED' || newStatus() === 'CLOSED') {
-      <label class="modal-field">
-        <span>Resumen de la resolución (opcional)</span>
-        <textarea
-          rows="4"
-          [ngModel]="resolutionSummary()"
-          (ngModelChange)="resolutionSummary.set($event)"
-          placeholder="Detalle breve que verá el solicitante en el email…"
-        ></textarea>
-      </label>
-      }
-      <div class="modal-actions">
-        <button class="ghost-btn" (click)="closeStatusModal()">Cancelar</button>
-        <button
-          class="primary-btn"
-          [disabled]="submitting()"
-          (click)="confirmStatusChange()"
-        >
-          {{ submitting() ? 'Guardando…' : 'Confirmar cambio' }}
-        </button>
-      </div>
-    </div>
-  </div>
-  }
 }
 </section>

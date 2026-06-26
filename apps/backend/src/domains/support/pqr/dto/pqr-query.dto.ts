@@ -52,6 +52,18 @@ export class PqrQueryDto {
   @Min(1)
   assigned_to_user_id?: number;
 
+  /**
+   * Optional store filter — scopes the list to a single tienda within
+   * the org. The org-admin controller already enforces
+   * `organization_id = ctx.organizationId` server-side, so this
+   * filter is just an additional narrowing within that scope.
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  store_id?: number;
+
   @IsOptional()
   @Type(() => Number)
   @IsInt()

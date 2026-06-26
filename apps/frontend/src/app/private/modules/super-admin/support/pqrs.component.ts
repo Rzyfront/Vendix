@@ -15,7 +15,6 @@ import { environment } from '../../../../../environments/environment';
 import {
   IconComponent,
   StatsComponent,
-  CardComponent,
 } from '../../../../shared/components';
 
 /**
@@ -44,7 +43,6 @@ import {
     RouterLink,
     IconComponent,
     StatsComponent,
-    CardComponent,
   ],
   template: `
     <div class="pqr-list-page">
@@ -267,17 +265,7 @@ import {
               </td>
               <td>
                 <span class="status-pill" [attr.data-status]="t.status">
-                  {{
-                    ({
-                      NEW: 'Nuevo',
-                      OPEN: 'Abierto',
-                      IN_PROGRESS: 'En progreso',
-                      WAITING_RESPONSE: 'Esperando',
-                      RESOLVED: 'Resuelto',
-                      CLOSED: 'Cerrado',
-                      REOPENED: 'Reabierto'
-                    })[t.status] || t.status
-                  }}
+                  {{ statusLabel(t.status) }}
                 </span>
               </td>
               <td class="muted">{{ t.created_at | date: 'shortDate' }}</td>
@@ -858,6 +846,34 @@ export class SuperadminPqrsComponent {
   }
 
   /**
+   * Returns the user-facing Spanish label for a PQR status enum value.
+   * Used by the status pill column — keeping it as a method avoids the
+   * `as Record<string, string>` cast inside the template (Angular's
+   * template parser doesn't accept TS-only `as` syntax on inline
+   * object literals).
+   */
+  statusLabel(status: string): string {
+    switch (status) {
+      case 'NEW':
+        return 'Nuevo';
+      case 'OPEN':
+        return 'Abierto';
+      case 'IN_PROGRESS':
+        return 'En progreso';
+      case 'WAITING_RESPONSE':
+        return 'Esperando';
+      case 'RESOLVED':
+        return 'Resuelto';
+      case 'CLOSED':
+        return 'Cerrado';
+      case 'REOPENED':
+        return 'Reabierto';
+      default:
+        return status;
+    }
+  }
+
+  /**
    * SLA computation — same Colombian regulatory limits as the
    * store-admin view. PETITION: 15 business days (Ley 1755/2015 art. 14).
    * COMPLAINT / CLAIM: 10 business days (Ley 1474/2011 art. 55).
@@ -952,7 +968,11 @@ export class SuperadminPqrsComponent {
         } else if (this.quickFilter() === 'expiring') {
           data = data.filter((t: any) => this.slaInfo(t).status === 'warn');
         } else if (this.quickFilter() === 'new') {
-          data = data.filter((t: any) => t.status === 'NEW');
+          // Chip label is "Sin asignar" — match the operator's mental model:
+          // a PQR with no `assigned_to_user_id` yet. We keep the internal
+          // value as `'new'` to stay backwards-compatible with the URL
+          // (a follow-up could rename to `'unassigned'`).
+          data = data.filter((t: any) => !t.assigned_to);
         }
 
         this.tickets.set(data);

@@ -103,13 +103,33 @@ export class PqrService {
    * admin inbox (admin@vendix.online) via the email service listener.
    */
   async createPublic(dto: CreatePqrPublicDto, ip: string) {
-    // 1. Resolve Vendix platform org + the anon-pqr user (created by seeder)
-    const orgVendix = await this.globalPrisma.organizations.findFirst({
-      where: { is_platform: true },
-    });
-    if (!orgVendix) {
-      throw new VendixHttpException(ErrorCodes.SUP_PQR_001);
+    // 1. Resolve the owning organization.
+    //
+    // Two flows reach this endpoint:
+    //   a) Anonymous storefront visitor — no session, no org context.
+    //      The ticket is parked under the platform org `orgVendix` so
+    //      the super-admin can still triage it. (Legacy default.)
+    //   b) Authenticated store-admin / org-admin / super-admin — the
+    //      DTO carries `organization_id` (and optionally `store_id`).
+    //      We honor that and the org-admin PQR view can then filter
+    //      by `organization_id` without leaking cross-tenant data.
+    let owningOrgId: number;
+    if (dto.organization_id) {
+      owningOrgId = dto.organization_id;
+    } else {
+      const orgVendix = await this.globalPrisma.organizations.findFirst({
+        where: { is_platform: true },
+      });
+      if (!orgVendix) {
+        throw new VendixHttpException(ErrorCodes.SUP_PQR_001);
+      }
+      owningOrgId = orgVendix.id;
     }
+    // 2. Resolve the requesting user. When `organization_id` is set
+    //    we still attribute the action to `anon-pqr` because the
+    //    visitor email lives in the description (legacy workaround);
+    //    for authenticated flows a future change can pass the real
+    //    `user_id` here. Leaving the seeder user keeps the FK happy.
     const anonUser = await this.globalPrisma.users.findFirst({
       where: { email: 'anon-pqr@vendix.online' },
     });
@@ -118,7 +138,7 @@ export class PqrService {
     }
 
     // 2. Generate a PQR-prefixed ticket number (PQR-{orgId}-{counter})
-    const ticketNumber = await this.generatePqrNumber(orgVendix.id);
+    const ticketNumber = await this.generatePqrNumber(owningOrgId);
 
     // 3. Build the description with metadata (PQR type + IP + contact)
     const description = this.formatDescription(dto);
@@ -126,18 +146,22 @@ export class PqrService {
     // 4. Map PQR type → ticket category enum (PETITION, COMPLAINT, CLAIM)
     const category = this.mapPqrType(dto.pqr_type);
 
-    // 5. Create the ticket scoped to the Vendix org. PQRs are platform-wide
-    // (not per-store), so we use the org-scoped prisma client. We pass the
-    // vendix platform org id as organization_id explicitly.
+    // 5. Create the ticket. `organization_id` is the requester's org
+    // (or `orgVendix` for anonymous visitors). `store_id` is set when
+    // the requester is a single store — the org-admin table uses this
+    // to render the "Tienda" column without a fragile join.
     const ticket = await this.globalPrisma.support_tickets.create({
       data: {
         ticket_number: ticketNumber,
-        organization_id: orgVendix.id,
+        organization_id: owningOrgId,
+        store_id: dto.store_id ?? null,
         created_by_user_id: anonUser.id,
         title: dto.subject,
         description,
         category,
-        priority: ticket_priority_enum.P3,
+        // Use the requester's urgency hint when present (validated to
+        // P1-P4 by the DTO), otherwise default to P3 (medium).
+        priority: dto.priority ?? ticket_priority_enum.P3,
         status: ticket_status_enum.NEW,
         source_channel: 'public_form',
         tags: ['pqr', dto.pqr_type.toLowerCase(), `ip:${ip}`],

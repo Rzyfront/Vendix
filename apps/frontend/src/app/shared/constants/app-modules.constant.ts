@@ -672,9 +672,9 @@ export const APP_MODULES: {
         },
         {
           key: 'help_pqrs',
-          label: 'Quejas y Reclamos',
+          label: 'Mis Solicitudes',
           description:
-            'Peticiones, quejas y reclamos recibidos de los clientes',
+            'Conversaciones y solicitudes radicadas por tus clientes desde la tienda',
         },
         {
           key: 'help_center',

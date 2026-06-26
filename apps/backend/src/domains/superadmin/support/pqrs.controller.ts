@@ -1,10 +1,15 @@
 import {
+  Body,
   Controller,
   Get,
   Param,
+  Patch,
+  Post,
   Query,
+  UnauthorizedException,
   UseGuards,
   ParseIntPipe,
+  Req,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -12,12 +17,17 @@ import {
   ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
+import { Request } from 'express';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { PqrService } from '../../support/pqr/pqr.service';
 import { PqrQueryDto } from '../../support/pqr/dto/pqr-query.dto';
+import { UpdatePqrStatusDto } from '../../support/pqr/dto/update-pqr-status.dto';
+import { AssignPqrDto } from '../../support/pqr/dto/assign-pqr.dto';
+import { AddPqrCommentDto } from '../../support/pqr/dto/add-pqr-comment.dto';
 
 /**
  * Superadmin PQR Controller
@@ -41,7 +51,10 @@ import { PqrQueryDto } from '../../support/pqr/dto/pqr-query.dto';
 @UseGuards(RolesGuard)
 @Roles(UserRole.SUPER_ADMIN)
 export class SuperadminPqrsController {
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    private readonly pqrService: PqrService,
+  ) {}
 
   /**
    * List all PQRs across the platform.
@@ -245,5 +258,66 @@ export class SuperadminPqrsController {
     }
 
     return { success: true, data: ticket };
+  }
+
+  /**
+   * Add a comment to a PQR. Mirrors `POST /store/support/pqr/:id/comments`
+   * but for the super-admin actor. Comments can be public (visible to the
+   * requester) or internal (scratchpad). Public comments trigger an
+   * email to the requester with the response — this is the channel
+   * super-admins use to actually answer the platform-wide PQRs that
+   * arrive via `POST /pqr` (since those land at admin@vendix.online).
+   */
+  @Post(':id/comments')
+  @ApiOperation({ summary: 'Add a comment to a PQR (super-admin)' })
+  @ApiResponse({ status: 201, description: 'Comment added' })
+  async addComment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AddPqrCommentDto,
+    @Req() req: Request,
+  ) {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('Missing authenticated user');
+    }
+    return this.pqrService.adminAddComment(id, dto, userId);
+  }
+
+  /**
+   * Update the status of a PQR. Triggers status_history entries and the
+   * standard email side-effects (notify requester when resolving/closing).
+   */
+  @Patch(':id/status')
+  @ApiOperation({ summary: 'Update PQR status (super-admin)' })
+  @ApiResponse({ status: 200, description: 'Status updated' })
+  async updateStatus(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePqrStatusDto,
+    @Req() req: Request,
+  ) {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('Missing authenticated user');
+    }
+    return this.pqrService.adminUpdateStatus(id, dto, userId);
+  }
+
+  /**
+   * Assign a PQR to a Vendix internal user (super-admin or operator).
+   * Used for routing platform PQRs to the right on-call person.
+   */
+  @Patch(':id/assign')
+  @ApiOperation({ summary: 'Assign a PQR to an internal user (super-admin)' })
+  @ApiResponse({ status: 200, description: 'PQR assigned' })
+  async assign(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignPqrDto,
+    @Req() req: Request,
+  ) {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('Missing authenticated user');
+    }
+    return this.pqrService.adminAssign(id, dto, userId);
   }
 }
