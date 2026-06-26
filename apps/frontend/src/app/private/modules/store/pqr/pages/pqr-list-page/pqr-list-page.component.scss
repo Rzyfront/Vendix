@@ -4,14 +4,47 @@
   margin: 0 auto;
 }
 
-// ─── Page header (title + primary action) ────────────────────────────────
+// ─── Page header (card pattern: icon-tile + title/subtitle + action) ─
+//
+// Mirrors the rest of the admin modules (Inventario, Analíticas,
+// Reportes): a square icon-tile on the left, title + subtitle in the
+// middle, and the primary action on the right. The icon-tile uses the
+// same teal palette as the sidebars / badges to stay coherent.
 .page-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   margin-bottom: 1.5rem;
   flex-wrap: wrap;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+
+  &__main {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-width: 0;
+  }
+
+  &__icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    background: #ecfeff;
+    color: #0e7490;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid #cffafe;
+  }
+
+  &__copy {
+    min-width: 0;
+  }
 
   &__eyebrow {
     margin: 0 0 0.25rem;

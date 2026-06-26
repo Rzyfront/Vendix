@@ -46,6 +46,24 @@ import {
   ],
   template: `
     <div class="pqr-list-page">
+      <!-- Page header — card pattern (icon-tile + title/subtitle +
+           action). Matches Inventario / Analíticas. -->
+      <header class="page-header">
+        <div class="page-header__main">
+          <div class="page-header__icon" aria-hidden="true">
+            <app-icon name="message-square" [size]="24"></app-icon>
+          </div>
+          <div class="page-header__copy">
+            <p class="page-header__eyebrow">Soporte</p>
+            <h1 class="page-header__title">PQRs</h1>
+            <p class="page-header__subtitle">
+              Vista global de Peticiones, Quejas y Reclamos en todas las
+              tiendas de la plataforma.
+            </p>
+          </div>
+        </div>
+      </header>
+
       <!-- Top CTA — cross-tenant urgency -->
       <div
         class="cta-card"
@@ -337,6 +355,60 @@ import {
     `
       :host {
         display: block;
+      }
+
+      // Page header — card pattern matching Inventario / Analíticas.
+      .page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 1.25rem 1.5rem;
+      }
+      .page-header__main {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        min-width: 0;
+      }
+      .page-header__icon {
+        width: 56px;
+        height: 56px;
+        border-radius: 14px;
+        background: #ecfeff;
+        color: #0e7490;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        border: 1px solid #cffafe;
+      }
+      .page-header__eyebrow {
+        margin: 0 0 0.25rem;
+        font-size: 0.75rem;
+        color: #0e7490;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .page-header__title {
+        margin: 0;
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #0f172a;
+        line-height: 1.2;
+      }
+      .page-header__subtitle {
+        margin: 0.25rem 0 0;
+        font-size: 0.9rem;
+        color: #64748b;
+        max-width: 540px;
+      }
         padding: 1.5rem;
         max-width: 1440px;
         margin: 0 auto;

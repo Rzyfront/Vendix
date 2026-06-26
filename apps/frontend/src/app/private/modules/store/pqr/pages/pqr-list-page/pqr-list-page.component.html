@@ -1,13 +1,20 @@
 <section class="pqr-list-page">
-  <!-- Page header: title + primary action -->
+  <!-- Page header — card pattern matching the rest of the admin
+       modules (Inventario, Analíticas, etc): icon-tile on the left,
+       title + subtitle in the middle, primary action on the right. -->
   <header class="page-header">
-    <div>
-      <p class="page-header__eyebrow">Soporte</p>
-      <h1 class="page-header__title">Mis Solicitudes</h1>
-      <p class="page-header__subtitle">
-        Crea y haz seguimiento a tus conversaciones con el equipo de soporte
-        de Vendix.
-      </p>
+    <div class="page-header__main">
+      <div class="page-header__icon" aria-hidden="true">
+        <app-icon name="message-square" [size]="24"></app-icon>
+      </div>
+      <div class="page-header__copy">
+        <p class="page-header__eyebrow">Soporte</p>
+        <h1 class="page-header__title">Mis Solicitudes</h1>
+        <p class="page-header__subtitle">
+          Crea y haz seguimiento a tus conversaciones con el equipo de soporte
+          de Vendix.
+        </p>
+      </div>
     </div>
     <button class="new-pqr-btn" type="button" (click)="openNewPqrModal()">
       <app-icon name="plus" [size]="16"></app-icon>
