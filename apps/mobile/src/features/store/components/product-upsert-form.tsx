@@ -453,42 +453,34 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
 
           {/* Precios y Rentabilidad */}
           <Section title="Precios y Rentabilidad" subtitle={`Precio final estimado ${formatCurrency(finalPreview)}`} icon="dollar-sign">
-            <View style={{ flexDirection: 'row', gap: spacing[2] }}>
-              <View style={{ flex: 1 }}>
-                <Input
-                  label="Costo"
-                  value={form.cost_price}
-                  onChangeText={(value) => {
-                    updateField('cost_price', value);
-                    updatePriceFromCostMargin(value, form.profit_margin);
-                  }}
-                  keyboardType="decimal-pad"
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Input
-                  label="Margen %"
-                  value={form.profit_margin}
-                  onChangeText={(value) => {
-                    updateField('profit_margin', value);
-                    updatePriceFromCostMargin(form.cost_price, value);
-                  }}
-                  keyboardType="decimal-pad"
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Input
-                  label="Precio base"
-                  value={form.base_price}
-                  onChangeText={(value) => {
-                    updateField('base_price', value);
-                    updateMarginFromBase(value, form.cost_price);
-                  }}
-                  keyboardType="decimal-pad"
-                  error={errors.base_price}
-                />
-              </View>
-            </View>
+            <Input
+              label="Costo"
+              value={form.cost_price}
+              onChangeText={(value) => {
+                updateField('cost_price', value);
+                updatePriceFromCostMargin(value, form.profit_margin);
+              }}
+              keyboardType="decimal-pad"
+            />
+            <Input
+              label="Margen %"
+              value={form.profit_margin}
+              onChangeText={(value) => {
+                updateField('profit_margin', value);
+                updatePriceFromCostMargin(form.cost_price, value);
+              }}
+              keyboardType="decimal-pad"
+            />
+            <Input
+              label="Precio base"
+              value={form.base_price}
+              onChangeText={(value) => {
+                updateField('base_price', value);
+                updateMarginFromBase(value, form.cost_price);
+              }}
+              keyboardType="decimal-pad"
+              error={errors.base_price}
+            />
             <Selector
               label="Unidad de venta"
               value={form.pricing_type}
@@ -498,33 +490,56 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 { label: 'Venta por peso (kg)', value: 'weight' },
               ]}
             />
-            {/* Formula banner — cost × (1 + margin%) = final */}
+            {taxes.length > 0 && (
+              <MultiSelector
+                label="Impuestos (IVA)"
+                values={form.tax_category_ids}
+                onChange={(v) => updateField('tax_category_ids', v)}
+                options={((taxes as TaxCategory[]) || []).map((t) => ({ label: t.name, value: t.id }))}
+                placeholder="Seleccionar impuestos"
+              />
+            )}
+
+            {/* Espacio destacado del Precio final + formula */}
             <View
               style={{
-                backgroundColor: colorScales.gray[50],
-                padding: spacing[3],
-                borderRadius: borderRadius.md,
+                backgroundColor: colors.primaryLight,
+                borderColor: colors.primary,
+                borderWidth: 1.5,
+                borderRadius: borderRadius.lg,
+                padding: spacing[4],
+                gap: spacing[1],
                 marginTop: spacing[1],
               }}
             >
               <Text
                 style={{
-                  fontSize: typography.fontSize.xs,
-                  fontFamily: typography.fontFamily,
+                  fontSize: 10,
+                  fontWeight: '700',
                   color: colors.text.secondary,
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
                 }}
               >
-                {`costo × (1 + margen%) = precio final`}
+                Precio final estimado
               </Text>
               <Text
                 style={{
-                  fontSize: typography.fontSize.sm,
-                  fontWeight: '700',
+                  fontSize: 28,
+                  fontWeight: '800',
                   color: colors.text.primary,
-                  marginTop: 2,
                 }}
               >
-                {`${form.cost_price || '0'} × (1 + ${form.profit_margin || '0'}%) = ${formatCurrency(finalPreview)}`}
+                {formatCurrency(finalPreview)}
+              </Text>
+              <Text
+                style={{
+                  fontSize: typography.fontSize.xs,
+                  color: colors.text.secondary,
+                  marginTop: spacing[1],
+                }}
+              >
+                {`${formatCurrency(toNumber(form.cost_price) || 0)} × (1 + ${form.profit_margin || '0'}%) = ${formatCurrency(finalPreview)}`}
               </Text>
             </View>
             <View style={{ height: spacing[2] }} />
