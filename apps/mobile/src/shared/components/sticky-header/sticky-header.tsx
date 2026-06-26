@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     paddingHorizontal: spacing[4],
     paddingBottom: spacing[2],
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[200],
     ...shadows.sm,
   },

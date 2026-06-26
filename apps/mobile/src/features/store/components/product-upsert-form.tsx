@@ -390,6 +390,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       {/* Header sticky — flecha + título + acciones iconos (X / +) */}
       <StickyHeader
         title={mode === 'edit' ? 'Editar Producto' : 'Nuevo Producto'}
+        subtitle={undefined}
         showCloseButton={false}
         onBack={() => router.back()}
         actions={[
