@@ -33,50 +33,14 @@
   />
   }
 
-  <!-- Stat cards — same pattern as super-admin and org-admin views
-       so the user has a single mental model for "PQR health at a
-       glance". The `stats()` signal is populated on mount (via
-       adminService.getStats) and refreshed after every status mutation. -->
-  @if (stats() && stats()!.total > 0) {
-  <div class="stats-container">
-    <app-stats
-      title="Total PQRs"
-      [value]="stats()!.total"
-      smallText="Todas tus peticiones, quejas y reclamos"
-      iconName="message-square"
-      iconBgColor="bg-blue-100"
-      iconColor="text-blue-600"
-    ></app-stats>
-    <app-stats
-      title="Últimas 24h"
-      [value]="stats()!.recent_24h"
-      smallText="PQRs radicadas recientemente"
-      iconName="clock"
-      iconBgColor="bg-violet-100"
-      iconColor="text-violet-600"
-    ></app-stats>
-    <app-stats
-      title="Vencidas"
-      [value]="overdueCount()"
-      smallText="SLA legal agotado"
-      iconName="alert-triangle"
-      iconBgColor="bg-red-100"
-      iconColor="text-red-600"
-    ></app-stats>
-    <app-stats
-      title="Nuevas"
-      [value]="stats()!.by_status?.['NEW'] || 0"
-      smallText="Sin asignar a tienda"
-      iconName="inbox"
-      iconBgColor="bg-amber-100"
-      iconColor="text-amber-600"
-    ></app-stats>
-  </div>
-  }
-
   <!-- Primary CTA card — conversational hub. Header row combines the
        contextual message (left) with the primary action on the right
-       (matches the page-header pattern used by Ventas / Reportes). -->
+       (matches the page-header pattern used by Ventas / Reportes).
+
+       Order matches the super-admin PQR view: sticky-header → CTA →
+       stats cards. Placing the stats below the CTA keeps the
+       conversational prompt (and its "Continuar conversación" shortcut)
+       at eye-level for the operator's first scroll position. -->
   @if (stats(); as s) {
   <div
     class="cta-card"
@@ -145,6 +109,51 @@
       </div>
     </div>
     }
+  </div>
+  }
+
+  <!-- Stat cards — same pattern as super-admin and org-admin views
+       so the user has a single mental model for "PQR health at a
+       glance". Rendered AFTER the CTA card (matches the super-admin
+       order: sticky → CTA → stats) so the conversational prompt sits
+       at the operator's first scroll position and the metrics land
+       right below, still above the fold on most viewports. The
+       `stats()` signal is populated on mount (via adminService.getStats)
+       and refreshed after every status mutation. -->
+  @if (stats() && stats()!.total > 0) {
+  <div class="stats-container">
+    <app-stats
+      title="Total PQRs"
+      [value]="stats()!.total"
+      smallText="Todas tus peticiones, quejas y reclamos"
+      iconName="message-square"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    ></app-stats>
+    <app-stats
+      title="Últimas 24h"
+      [value]="stats()!.recent_24h"
+      smallText="PQRs radicadas recientemente"
+      iconName="clock"
+      iconBgColor="bg-violet-100"
+      iconColor="text-violet-600"
+    ></app-stats>
+    <app-stats
+      title="Vencidas"
+      [value]="overdueCount()"
+      smallText="SLA legal agotado"
+      iconName="alert-triangle"
+      iconBgColor="bg-red-100"
+      iconColor="text-red-600"
+    ></app-stats>
+    <app-stats
+      title="Nuevas"
+      [value]="stats()!.by_status?.['NEW'] || 0"
+      smallText="Sin asignar a tienda"
+      iconName="inbox"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+    ></app-stats>
   </div>
   }
 
