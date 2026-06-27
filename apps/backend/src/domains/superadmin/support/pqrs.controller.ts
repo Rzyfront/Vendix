@@ -284,6 +284,38 @@ export class SuperadminPqrsController {
   }
 
   /**
+   * Edit a comment's content. Server-side: only the original author
+   * can edit (SUP_COMMENT_002 → 403 otherwise) so attribution stays
+   * truthful. Appends a status_history row noting the change so the
+   * History card surfaces "Comentario editado por X" with the byte
+   * delta in change_notes.
+   */
+  @Patch(':id/comments/:commentId')
+  @ApiOperation({ summary: 'Edit a comment (author only)' })
+  @ApiResponse({ status: 200, description: 'Comment edited' })
+  @ApiResponse({
+    status: 403,
+    description: 'Only the original author can edit the comment',
+  })
+  async editComment(
+    @Param('id', ParseIntPipe) id: number,
+    @Param('commentId', ParseIntPipe) commentId: number,
+    @Body() dto: { content: string },
+    @Req() req: Request,
+  ) {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('Missing authenticated user');
+    }
+    return this.pqrService.adminUpdateComment(
+      id,
+      commentId,
+      dto.content,
+      userId,
+    );
+  }
+
+  /**
    * Update the status of a PQR. Triggers status_history entries and the
    * standard email side-effects (notify requester when resolving/closing).
    */
@@ -319,5 +351,43 @@ export class SuperadminPqrsController {
       throw new UnauthorizedException('Missing authenticated user');
     }
     return this.pqrService.adminAssign(id, dto, userId);
+  }
+
+  /**
+   * Edit the title / description / requester fields of a PQR.
+   *
+   * Super-admin callers can edit at any status (no NEW-only guard) —
+   * the support team is the source of truth for these rows and may
+   * need to correct contact data or typo'd titles even mid-flight.
+   * Each edit still inserts a row in `support_status_history` so the
+   * History card surfaces "Editó X → Y" with the diff.
+   */
+  @Patch(':id/content')
+  @ApiOperation({
+    summary: 'Edit PQR content fields (super-admin — no status guard)',
+  })
+  @ApiResponse({ status: 200, description: 'Content edited' })
+  async editContent(
+    @Param('id', ParseIntPipe) id: number,
+    @Body()
+    dto: {
+      title?: string;
+      description?: string;
+      requester_first_name?: string;
+      requester_last_name?: string;
+      requester_email?: string;
+      requester_phone?: string;
+      requester_document_type?: string;
+      requester_document_num?: string;
+    },
+    @Req() req: Request,
+  ) {
+    const userId = (req as any).user?.id;
+    if (!userId) {
+      throw new UnauthorizedException('Missing authenticated user');
+    }
+    return this.pqrService.editContent(id, dto, userId, {
+      bypassStatusGuard: true,
+    });
   }
 }

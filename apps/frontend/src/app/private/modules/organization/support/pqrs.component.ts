@@ -16,10 +16,9 @@ import { RouterLink } from '@angular/router';
 import {
   IconComponent,
   StatsComponent,
-  CardComponent,
-  ScrollableTabsComponent,
-  ScrollableTab,
+  StickyHeaderComponent,
 } from '../../../../shared/components';
+import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
 /**
  * Org-admin PQR list page.
@@ -43,29 +42,26 @@ import {
     RouterLink,
     IconComponent,
     StatsComponent,
-    CardComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
   ],
   template: `
     <div class="pqr-list-page">
-      <!-- Page header — card pattern matching the rest of the admin
-           modules. Icon-tile + title/subtitle on the left, action on
-           the right. -->
-      <header class="page-header">
-        <div class="page-header__main">
-          <div class="page-header__icon" aria-hidden="true">
-            <app-icon name="headset" [size]="24"></app-icon>
-          </div>
-          <div class="page-header__copy">
-            <p class="page-header__eyebrow">Soporte</p>
-            <h1 class="page-header__title">PQRs</h1>
-            <p class="page-header__subtitle">
-              Seguimiento de las solicitudes de todas las tiendas de tu
-              organización.
-            </p>
-          </div>
-        </div>
-      </header>
+      <!-- Sticky header — same component used by the Reportes →
+           Ventas view. Renders the filter tabs at the top, the
+           section icon + sub-title on the left, and (optionally)
+           actions on the right. Single visual pattern across admin
+           modules so users don't relearn navigation per page. -->
+      <app-sticky-header
+        title="PQRs"
+        subtitle="Vista agregada por organización"
+        icon="headset"
+        variant="glass"
+        [showBackButton]="false"
+        [tabs]="quickFilterTabs()"
+        [activeTab]="quickFilter()"
+        tabsAriaLabel="Filtros de PQR"
+        (tabChanged)="setQuickFilter($event)"
+      />
 
       <!-- Cross-store CTA -->
       <div
@@ -156,14 +152,7 @@ import {
         ></app-stats>
       </div>
 
-      <!-- Quick filters — replaced chip row with scrollable tabs. -->
-      <div class="quick-tabs">
-        <app-scrollable-tabs
-          [tabs]="quickFilterTabs()"
-          [activeTab]="quickFilter()"
-          (tabChange)="setQuickFilter($event)"
-        />
-      </div>
+      <!-- Quick filters now live in the StickyHeader above. -->
 
       <div class="filters-bar">
         <div class="filter-group">
@@ -281,60 +270,6 @@ import {
     `
       :host {
         display: block;
-      }
-
-      // Page header — card pattern matching Inventario / Analíticas
-      .page-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-bottom: 1.5rem;
-        flex-wrap: wrap;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        padding: 1.25rem 1.5rem;
-      }
-      .page-header__main {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        min-width: 0;
-      }
-      .page-header__icon {
-        width: 56px;
-        height: 56px;
-        border-radius: 14px;
-        background: #dcfce7;
-        color: #15803d;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        border: 1px solid #bbf7d0;
-      }
-      .page-header__eyebrow {
-        margin: 0 0 0.25rem;
-        font-size: 0.75rem;
-        color: #15803d;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .page-header__title {
-        margin: 0;
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #0f172a;
-        line-height: 1.2;
-      }
-      .page-header__subtitle {
-        margin: 0.25rem 0 0;
-        font-size: 0.9rem;
-        color: #64748b;
-        max-width: 540px;
-      }
         padding: 1.5rem;
         max-width: 1440px;
         margin: 0 auto;
@@ -359,8 +294,8 @@ import {
         width: 48px;
         height: 48px;
         border-radius: 14px;
-        background: #eff6ff;
-        color: #1d4ed8;
+        background: #dcfce7;
+        color: #15803d;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -421,9 +356,9 @@ import {
         cursor: pointer;
       }
       .chip--active {
-        background: #0f172a;
+        background: #16a34a;
         color: #fff;
-        border-color: #0f172a;
+        border-color: #16a34a;
       }
       .chip--active .chip__count {
         background: rgba(255, 255, 255, 0.2);
@@ -562,8 +497,8 @@ import {
         font-weight: 600;
       }
       .type-tag[data-type='PETITION'] {
-        background: #eef2ff;
-        color: #4338ca;
+        background: #dcfce7;
+        color: #15803d;
       }
       .type-tag[data-type='COMPLAINT'] {
         background: #fed7aa;
@@ -620,7 +555,7 @@ import {
       .empty-state__reset {
         background: none;
         border: 0;
-        color: #1d4ed8;
+        color: #15803d;
         font-weight: 600;
         cursor: pointer;
         margin-left: 0.5rem;
@@ -701,16 +636,22 @@ private loadOrgStores(): void {
   }
 
   setQuickFilter(filter: string) {
-    this.quickFilter.set(filter as 'all' | 'overdue' | 'new');
+    // StickyHeaderComponent emits tabChanged as plain `string`; narrow
+    // it to the local union so the rest of the method stays type-safe.
+    // Anything unrecognised falls back to 'all' so a misconfigured
+    // StickyHeaderTab can't poison component state.
+    const next: 'all' | 'overdue' | 'new' =
+      filter === 'overdue' || filter === 'new' ? filter : 'all';
+    this.quickFilter.set(next);
     this.fetch();
   }
 
   /**
-   * Quick filter tabs — drives the scrollable-tabs component
-   * (replaces the old chip row). The active tab id maps 1:1 to the
+   * Quick filter tabs — drives the StickyHeaderComponent tab strip
+   * at the top of the page. The active tab id maps 1:1 to the
    * setQuickFilter input.
    */
-  quickFilterTabs = computed<ScrollableTab[]>(() => {
+  quickFilterTabs = computed<StickyHeaderTab[]>(() => {
     return [
       { id: 'all', label: 'Todas', icon: 'inbox' },
       { id: 'overdue', label: 'Vencidas', icon: 'alert-triangle' },

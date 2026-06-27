@@ -14,6 +14,8 @@ import { catchError, of } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { SupportService } from '../../services/support.service';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
 /**
  * Super-admin PQR detail view.
@@ -29,7 +31,7 @@ import { SupportService } from '../../services/support.service';
 @Component({
   selector: 'app-superadmin-pqr-detail',
   standalone: true,
-  imports: [CommonModule, DatePipe, FormsModule, RouterLink, IconComponent],
+  imports: [CommonModule, DatePipe, FormsModule, RouterLink, IconComponent, ButtonComponent],
   template: `
     <div class="pqr-detail-page">
       @if (loading()) {
@@ -75,6 +77,17 @@ import { SupportService } from '../../services/support.service';
           </div>
         </div>
         <h1 class="header-card__title">{{ p.title }}</h1>
+        <div class="header-card__actions">
+          <app-button
+            variant="outline"
+            size="xsm"
+            customClasses="!rounded-lg !h-9 !px-3"
+            (clicked)="openEditModal()"
+          >
+            <app-icon name="edit-2" slot="icon" size="14"></app-icon>
+            Editar contenido
+          </app-button>
+        </div>
         <div class="header-card__meta">
           <app-icon name="calendar" [size]="14"></app-icon>
           Radicado {{ p.created_at | date: 'medium' }}
@@ -110,8 +123,63 @@ import { SupportService } from '../../services/support.service';
                 <div class="comment__head">
                   <strong>{{ c.author_name || c.author_type }}</strong>
                   <span class="muted">{{ c.created_at | date: 'short' }}</span>
+                  <!-- Edit button only visible to the comment author.
+                       Backend enforces the same rule (SUP_COMMENT_002
+                       → 403) so hiding it here is just UX, not
+                       security. -->
+                  @if (canEditComment(c)) {
+                  @if (editingCommentId() !== c.id) {
+                  <button
+                    type="button"
+                    class="comment-edit-btn"
+                    (click)="startEditComment(c)"
+                    title="Editar tu comentario"
+                  >
+                    <app-icon name="edit-2" [size]="12"></app-icon>
+                    Editar
+                  </button>
+                  }
+                  }
                 </div>
+                @if (editingCommentId() === c.id) {
+                <!-- Inline edit form replaces the comment body. -->
+                <div class="comment-edit-form">
+                  <textarea
+                    rows="3"
+                    class="comment-edit-input"
+                    [ngModel]="editCommentContent()"
+                    (ngModelChange)="editCommentContent.set($event)"
+                    name="editCommentContent"
+                  ></textarea>
+                  @if (editCommentError(); as err) {
+                  <p class="comment-edit-error">{{ err }}</p>
+                  }
+                  <div class="comment-edit-actions">
+                    <button
+                      type="button"
+                      class="ghost-btn"
+                      [disabled]="editCommentSaving()"
+                      (click)="cancelEditComment()"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      class="primary-btn"
+                      [disabled]="!canSaveEditComment()"
+                      (click)="saveEditComment(c.id)"
+                    >
+                      {{
+                        editCommentSaving()
+                          ? 'Guardando…'
+                          : 'Guardar'
+                      }}
+                    </button>
+                  </div>
+                </div>
+                } @else {
                 <p class="comment__body">{{ c.content }}</p>
+                }
               </li>
               }
             </ul>
@@ -198,9 +266,60 @@ import { SupportService } from '../../services/support.service';
         </div>
 
         <aside class="layout__side">
-          <section class="card">
+          <section class="card requester-card">
             <h3>Solicitante</h3>
-            <dl class="kv">
+            <div class="requester-header">
+              <div class="avatar" aria-hidden="true">
+                {{ requesterInitials() }}
+              </div>
+              <div class="requester-name-block">
+                <span class="requester-name">{{
+                  requesterDisplayName() || '—'
+                }}</span>
+                <span class="requester-subtitle">{{
+                  typeLabel(p.category)
+                }}</span>
+              </div>
+            </div>
+            <dl>
+              <dt>Nombre</dt>
+              <dd>{{ p.requester_first_name || '—' }}</dd>
+              <dt>Apellido</dt>
+              <dd>{{ p.requester_last_name || '—' }}</dd>
+              <dt>Email</dt>
+              <dd>
+                @if (p.requester_email) {
+                <a [href]="'mailto:' + p.requester_email">{{
+                  p.requester_email
+                }}</a>
+                } @else {
+                <span class="placeholder">No registrado</span>
+                }
+              </dd>
+              <dt>Teléfono</dt>
+              <dd>
+                @if (p.requester_phone) {
+                {{ p.requester_phone }}
+                } @else {
+                <span class="placeholder">No registrado</span>
+                }
+              </dd>
+              <dt>Tipo de documento</dt>
+              <dd>
+                @if (p.requester_document_type) {
+                {{ documentTypeLabel(p.requester_document_type) }}
+                } @else {
+                <span class="placeholder">No registrado</span>
+                }
+              </dd>
+              <dt>Número</dt>
+              <dd>
+                @if (p.requester_document_num) {
+                {{ p.requester_document_num }}
+                } @else {
+                <span class="placeholder">No registrado</span>
+                }
+              </dd>
               <dt>Organización</dt>
               <dd>{{ p.organization?.name || '—' }}</dd>
               <dt>Tienda</dt>
@@ -308,6 +427,143 @@ import { SupportService } from '../../services/support.service';
         </div>
       </div>
       }
+
+      <!-- Content edit modal — super-admin can correct title /
+           description / requester fields at any status. Each save
+           inserts a row in support_status_history so the History
+           card surfaces the diff. -->
+      @if (showEditModal()) {
+      <div class="modal-overlay" (click)="closeEditModal()">
+        <div
+          class="modal modal--wide"
+          (click)="$event.stopPropagation()"
+        >
+          <h2>Editar contenido de la solicitud</h2>
+          <p class="modal-hint">
+            Los cambios quedan registrados en el historial con autor y
+            timestamp. Como super-admin puedes editar en cualquier estado.
+          </p>
+          <label class="modal-field">
+            <span>Asunto</span>
+            <input
+              type="text"
+              class="modal-input"
+              [ngModel]="editTitle()"
+              (ngModelChange)="editTitle.set($event)"
+              maxlength="255"
+              name="editTitle"
+            />
+          </label>
+          <label class="modal-field">
+            <span>Descripción</span>
+            <textarea
+              rows="5"
+              class="modal-input"
+              [ngModel]="editDescription()"
+              (ngModelChange)="editDescription.set($event)"
+              maxlength="5000"
+              name="editDescription"
+            ></textarea>
+          </label>
+          <fieldset class="modal-field modal-field--grouped">
+            <legend class="modal-field__legend">Datos del solicitante</legend>
+            <div class="modal-row">
+              <label class="modal-field modal-field--half">
+                <span>Nombre</span>
+                <input
+                  type="text"
+                  class="modal-input"
+                  [ngModel]="editRequesterFirstName()"
+                  (ngModelChange)="editRequesterFirstName.set($event)"
+                  name="editFirstName"
+                />
+              </label>
+              <label class="modal-field modal-field--half">
+                <span>Apellido</span>
+                <input
+                  type="text"
+                  class="modal-input"
+                  [ngModel]="editRequesterLastName()"
+                  (ngModelChange)="editRequesterLastName.set($event)"
+                  name="editLastName"
+                />
+              </label>
+            </div>
+            <div class="modal-row">
+              <label class="modal-field modal-field--half">
+                <span>Email</span>
+                <input
+                  type="email"
+                  class="modal-input"
+                  [ngModel]="editRequesterEmail()"
+                  (ngModelChange)="editRequesterEmail.set($event)"
+                  name="editEmail"
+                />
+              </label>
+              <label class="modal-field modal-field--half">
+                <span>Teléfono</span>
+                <input
+                  type="tel"
+                  class="modal-input"
+                  [ngModel]="editRequesterPhone()"
+                  (ngModelChange)="editRequesterPhone.set($event)"
+                  name="editPhone"
+                />
+              </label>
+            </div>
+            <div class="modal-row">
+              <label class="modal-field modal-field--half">
+                <span>Tipo documento</span>
+                <select
+                  class="modal-input"
+                  [ngModel]="editRequesterDocType()"
+                  (ngModelChange)="editRequesterDocType.set($event)"
+                  name="editDocType"
+                >
+                  <option value="">—</option>
+                  <option value="CC">Cédula de ciudadanía (CC)</option>
+                  <option value="CE">Cédula de extranjería (CE)</option>
+                  <option value="NIT">NIT</option>
+                  <option value="PA">Pasaporte (PA)</option>
+                </select>
+              </label>
+              <label class="modal-field modal-field--half">
+                <span>Número</span>
+                <input
+                  type="text"
+                  class="modal-input"
+                  [ngModel]="editRequesterDocNum()"
+                  (ngModelChange)="editRequesterDocNum.set($event)"
+                  name="editDocNum"
+                  maxlength="50"
+                />
+              </label>
+            </div>
+          </fieldset>
+          @if (editError(); as err) {
+          <p class="error-inline">{{ err }}</p>
+          }
+          <div class="modal-actions">
+            <button
+              type="button"
+              class="ghost-btn"
+              [disabled]="editSubmitting()"
+              (click)="closeEditModal()"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              class="primary-btn"
+              [disabled]="!canSubmitEdit()"
+              (click)="submitEdit()"
+            >
+              {{ editSubmitting() ? 'Guardando…' : 'Guardar cambios' }}
+            </button>
+          </div>
+        </div>
+      </div>
+      }
       }
     </div>
   `,
@@ -346,7 +602,7 @@ import { SupportService } from '../../services/support.service';
         display: inline-flex;
         align-items: center;
         gap: 0.375rem;
-        color: #1d4ed8;
+        color: #15803d;
         text-decoration: none;
         font-size: 0.875rem;
         font-weight: 500;
@@ -470,8 +726,8 @@ import { SupportService } from '../../services/support.service';
         font-size: 0.75rem;
         font-weight: 600;
         &[data-type='PETITION'] {
-          background: #eef2ff;
-          color: #4338ca;
+          background: #dcfce7;
+          color: #15803d;
         }
         &[data-type='COMPLAINT'] {
           background: #fed7aa;
@@ -499,7 +755,7 @@ import { SupportService } from '../../services/support.service';
         color: #475569;
         &[data-status='NEW'] {
           background: #dbeafe;
-          color: #1e40af;
+          color: #15803d;
         }
         &[data-status='RESOLVED'],
         &[data-status='CLOSED'] {
@@ -538,6 +794,71 @@ import { SupportService } from '../../services/support.service';
           color: #1e293b;
           font-size: 0.875rem;
           white-space: pre-wrap;
+        }
+      }
+
+      // Per-comment edit (response correction). The button only
+      // shows for the author; the inline form replaces the body when
+      // editingCommentId() matches this comment's id.
+      .comment-edit-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        background: transparent;
+        border: 1px solid #16a34a;
+        color: #15803d;
+        padding: 0.125rem 0.5rem;
+        border-radius: 6px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background-color 0.15s ease, color 0.15s ease;
+
+        &:hover {
+          background: #16a34a;
+          color: #ffffff;
+        }
+      }
+      .comment-edit-form {
+        margin-top: 0.5rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+
+        .comment-edit-input {
+          width: 100%;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          padding: 0.625rem 0.75rem;
+          font-family: inherit;
+          font-size: 0.875rem;
+          resize: vertical;
+          min-height: 80px;
+
+          &:focus {
+            outline: none;
+            border-color: #16a34a;
+            box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+          }
+        }
+        .comment-edit-error {
+          margin: 0;
+          padding: 0.375rem 0.625rem;
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          color: #991b1b;
+          border-radius: 6px;
+          font-size: 0.75rem;
+        }
+        .comment-edit-actions {
+          display: flex;
+          gap: 0.375rem;
+          justify-content: flex-end;
+        }
+        .comment-edit-actions .ghost-btn,
+        .comment-edit-actions .primary-btn {
+          padding: 0.375rem 0.75rem;
+          font-size: 0.8125rem;
         }
       }
 
@@ -629,8 +950,8 @@ import { SupportService } from '../../services/support.service';
       }
       .composer textarea:focus {
         outline: none;
-        border-color: #1d4ed8;
-        box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15);
+        border-color: #16a34a;
+        box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
       }
       .composer-controls {
         display: flex;
@@ -671,7 +992,7 @@ import { SupportService } from '../../services/support.service';
         justify-content: center;
       }
       .primary-btn {
-        background: #1d4ed8;
+        background: #16a34a;
         color: #ffffff;
         border: 0;
         border-radius: 8px;
@@ -682,18 +1003,19 @@ import { SupportService } from '../../services/support.service';
         display: inline-flex;
         align-items: center;
         gap: 0.375rem;
+        box-shadow: 0 1px 2px rgba(22, 163, 74, 0.2);
       }
       .primary-btn:hover:not(:disabled) {
-        background: #1e40af;
+        background: #15803d;
       }
       .primary-btn:disabled {
         opacity: 0.5;
         cursor: not-allowed;
       }
       .ghost-btn {
-        background: #ecfeff;
-        border: 1px solid #0891b2;
-        color: #0e7490;
+        background: #ffffff;
+        border: 1px solid #16a34a;
+        color: #15803d;
         border-radius: 8px;
         padding: 0.5rem 1rem;
         font-weight: 600;
@@ -710,7 +1032,7 @@ import { SupportService } from '../../services/support.service';
         line-height: 1;
       }
       .ghost-btn:hover:not(:disabled) {
-        background: #0891b2;
+        background: #16a34a;
         color: #ffffff;
       }
       .ghost-btn:disabled {
@@ -736,6 +1058,196 @@ import { SupportService } from '../../services/support.service';
         max-height: 90vh;
         overflow-y: auto;
         box-shadow: 0 20px 50px rgba(15, 23, 42, 0.25);
+
+        // Wider variant for the content-edit modal — needs space for
+        // side-by-side Nombre/Apellido, Email/Teléfono rows.
+        &--wide {
+          width: min(720px, 92vw);
+        }
+      }
+
+      // Edit modal — new layout primitives that aren't covered by
+      // the generic .modal-field (which is single-column).
+      .modal-input {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        font-family: inherit;
+        font-size: 0.9rem;
+        background: #ffffff;
+        // Fixed height so text/email/tel/select all line up.
+        height: 40px;
+        box-sizing: border-box;
+
+        &:focus {
+          outline: none;
+          border-color: #16a34a;
+          box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+        }
+      }
+      .modal-hint {
+        margin: 0 0 1rem;
+        padding: 0.625rem 0.75rem;
+        background: #fef3c7;
+        border: 1px solid #fde68a;
+        border-radius: 8px;
+        color: #92400e;
+        font-size: 0.8125rem;
+        line-height: 1.45;
+      }
+      .modal-field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+
+        &--half {
+          margin-top: 0;
+        }
+
+        &--grouped {
+          border: 1px dashed #d1fae5;
+          border-radius: 10px;
+          padding: 0.75rem 1rem 1rem;
+          margin: 0 0 1rem;
+          background: #f0fdf4;
+
+          > legend {
+            padding: 0 0.5rem;
+            color: #15803d;
+            font-weight: 600;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+          }
+        }
+
+        &__legend {
+          padding: 0 0.5rem;
+          font-size: 0.7rem;
+          color: #15803d;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.02em;
+        }
+      }
+      .modal-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.625rem;
+        margin-top: 0.625rem;
+
+        @media (max-width: 540px) {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      // Header-card action row (the "Editar contenido" button on
+      // the right side of the title).
+      .header-card__actions {
+        margin-top: 0.75rem;
+        display: flex;
+        gap: 0.5rem;
+      }
+
+      // ─── Solicitante card — matches the store-admin visual pattern ───
+      // Avatar + name block at the top (separated by a border from the
+      // structured key-value pairs below). The dl drops the default
+      // grid layout (110px label | value) in favor of stacked labels
+      // (uppercase, small, green) + value (readable size) for a
+      // cleaner info hierarchy.
+      .requester-card {
+        .requester-header {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          padding-bottom: 1rem;
+          margin-bottom: 1rem;
+          border-bottom: 1px solid #f1f5f9;
+
+          .avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #16a34a, #15803d);
+            color: #ffffff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.95rem;
+            letter-spacing: 0.02em;
+            flex-shrink: 0;
+            box-shadow: 0 2px 6px rgba(22, 163, 74, 0.18);
+          }
+
+          .requester-name-block {
+            flex: 1;
+            min-width: 0;
+
+            .requester-name {
+              display: block;
+              font-size: 0.95rem;
+              font-weight: 600;
+              color: #0f172a;
+              line-height: 1.25;
+            }
+
+            .requester-subtitle {
+              display: block;
+              font-size: 0.75rem;
+              color: #15803d;
+              font-weight: 600;
+              text-transform: uppercase;
+              letter-spacing: 0.04em;
+              margin-top: 0.125rem;
+            }
+          }
+        }
+
+        // Override the generic .kv grid — switch to a stacked
+        // definition-list (label above value) for a more legible
+        // vertical rhythm inside the narrow sidebar column.
+        > dl {
+          display: block;
+          margin: 0;
+          font-size: 0.9rem;
+
+          dt {
+            display: block;
+            margin-top: 0.75rem;
+            margin-bottom: 0.125rem;
+            font-size: 0.7rem;
+            color: #64748b;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+
+            &:first-of-type {
+              margin-top: 0;
+            }
+          }
+
+          dd {
+            display: block;
+            margin: 0;
+            color: #1e293b;
+            word-break: break-word;
+
+            a {
+              color: #15803d;
+              text-decoration: none;
+
+              &:hover {
+                text-decoration: underline;
+              }
+            }
+
+            .placeholder {
+              color: #cbd5e1;
+              font-style: italic;
+            }
+          }
+        }
       }
       .modal h2 {
         margin: 0 0 0.5rem;
@@ -769,8 +1281,8 @@ import { SupportService } from '../../services/support.service';
       .modal-field select:focus,
       .modal-field textarea:focus {
         outline: none;
-        border-color: #1d4ed8;
-        box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.15);
+        border-color: #16a34a;
+        box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
       }
       .modal-actions {
         display: flex;
@@ -787,6 +1299,7 @@ export class SuperadminPqrDetailComponent {
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
   private readonly supportService = inject(SupportService);
+  private readonly authFacade = inject(AuthFacade);
   private readonly API_URL = `${environment.apiUrl}/superadmin/support/pqrs`;
 
   readonly pqr = signal<any | null>(null);
@@ -814,6 +1327,28 @@ export class SuperadminPqrDetailComponent {
   readonly statusError = signal<string | null>(null);
 
   readonly assignSubmitting = signal(false);
+
+  // ── Per-comment edit state ─────────────────────────────────────────
+  // Each comment has its own edit form. `editingCommentId` holds the
+  // id of the comment currently being edited (null when none).
+  readonly editingCommentId = signal<number | null>(null);
+  readonly editCommentContent = signal('');
+  readonly editCommentSaving = signal(false);
+  readonly editCommentError = signal<string | null>(null);
+
+  // ── Content edit modal (super-admin can correct title / description /
+  //    requester_* fields at any status, with audit trail) ─────────────
+  readonly showEditModal = signal(false);
+  readonly editTitle = signal('');
+  readonly editDescription = signal('');
+  readonly editRequesterFirstName = signal('');
+  readonly editRequesterLastName = signal('');
+  readonly editRequesterEmail = signal('');
+  readonly editRequesterPhone = signal('');
+  readonly editRequesterDocType = signal('');
+  readonly editRequesterDocNum = signal('');
+  readonly editSubmitting = signal(false);
+  readonly editError = signal<string | null>(null);
 
   readonly statusOptions: { value: string; label: string }[] = [
     { value: 'OPEN', label: 'Abierto' },
@@ -843,6 +1378,68 @@ export class SuperadminPqrDetailComponent {
       default:
         return type;
     }
+  }
+
+  /**
+   * Renders a Colombian document type code (CC, CE, NIT, PA, …) into
+   * a human-readable Spanish label. Unknown codes fall through to the
+   * raw code so an unsupported value still renders something instead
+   * of an empty string.
+   */
+  documentTypeLabel(code: string): string {
+    const map: Record<string, string> = {
+      CC: 'Cédula de ciudadanía',
+      CE: 'Cédula de extranjería',
+      NIT: 'NIT',
+      PA: 'Pasaporte',
+      TI: 'Tarjeta de identidad',
+      RC: 'Registro civil',
+    };
+    return map[code.toUpperCase()] ?? code;
+  }
+
+  /**
+   * Returns the requester name to display in the avatar + name block.
+   * Falls back to "—" when the stored `name` is empty OR duplicates the
+   * email (legacy data created via the public form when structured
+   * name fields were not yet captured — the DTO stored the email as
+   * the name fallback).
+   */
+  requesterDisplayName(): string {
+    const p = this.pqr();
+    if (!p) return '';
+    // Prefer the new structured fields over the legacy `requester_name`.
+    const firstName = (p.requester_first_name ?? '').trim();
+    const lastName = (p.requester_last_name ?? '').trim();
+    if (firstName || lastName) {
+      return `${firstName} ${lastName}`.trim();
+    }
+    // Fallback to legacy fields.
+    const name = (p.requester_name ?? '').trim();
+    const email = (p.requester_email ?? '').trim();
+    if (!name || name === email) return '';
+    return name;
+  }
+
+  /**
+   * Returns the 1–2 letter initials shown in the circular avatar.
+   * Derives from the display name (preferred) or the email local-part
+   * as a final fallback. Returns "?" when no source is available.
+   */
+  requesterInitials(): string {
+    const p = this.pqr();
+    if (!p) return '?';
+    const name = this.requesterDisplayName();
+    if (name) {
+      const parts = name.split(/\s+/).filter(Boolean);
+      if (parts.length >= 2) {
+        return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+      }
+      return name.slice(0, 2).toUpperCase();
+    }
+    const email = (p.requester_email ?? '').trim();
+    if (email) return email.slice(0, 1).toUpperCase();
+    return '?';
   }
 
   /**
@@ -1024,6 +1621,142 @@ export class SuperadminPqrDetailComponent {
       default:
         return 15;
     }
+  }
+
+  // ── Content edit (title / description / requester_*) ─────────────────
+  /**
+   * Opens the edit modal pre-filled with the current PQR values. The
+   * super-admin can edit at any status (no NEW-only guard) since the
+   * support team is the source of truth for these rows.
+   */
+  openEditModal(): void {
+    const p = this.pqr();
+    if (!p) return;
+    this.editTitle.set(p.title ?? '');
+    this.editDescription.set(p.description ?? '');
+    this.editRequesterFirstName.set(p.requester_first_name ?? '');
+    this.editRequesterLastName.set(p.requester_last_name ?? '');
+    this.editRequesterEmail.set(p.requester_email ?? '');
+    this.editRequesterPhone.set(p.requester_phone ?? '');
+    this.editRequesterDocType.set(p.requester_document_type ?? '');
+    this.editRequesterDocNum.set(p.requester_document_num ?? '');
+    this.editError.set(null);
+    this.showEditModal.set(true);
+  }
+
+  closeEditModal(): void {
+    if (this.editSubmitting()) return;
+    this.showEditModal.set(false);
+  }
+
+  canSubmitEdit(): boolean {
+    return (
+      !this.editSubmitting() &&
+      this.editTitle().trim().length >= 5 &&
+      this.editDescription().trim().length >= 10
+    );
+  }
+
+  submitEdit(): void {
+    if (!this.canSubmitEdit() || !this.pqr()) return;
+    this.editSubmitting.set(true);
+    this.editError.set(null);
+    this.http
+      .patch<any>(`${this.API_URL}/${this.pqr()!.id}/content`, {
+        title: this.editTitle().trim(),
+        description: this.editDescription().trim(),
+        requester_first_name: this.editRequesterFirstName().trim() || undefined,
+        requester_last_name: this.editRequesterLastName().trim() || undefined,
+        requester_email: this.editRequesterEmail().trim() || undefined,
+        requester_phone: this.editRequesterPhone().trim() || undefined,
+        requester_document_type: this.editRequesterDocType() || undefined,
+        requester_document_num: this.editRequesterDocNum().trim() || undefined,
+      })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        catchError((err) => {
+          this.editError.set(
+            err?.error?.message ?? 'No se pudo guardar la edición.',
+          );
+          this.editSubmitting.set(false);
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (!res) return;
+        this.editSubmitting.set(false);
+        this.showEditModal.set(false);
+        // Re-fetch so the diff shows in the History card and the
+        // detail page reflects the new values.
+        this.fetch(this.pqr()!.id);
+      });
+  }
+
+  // ── Per-comment edit (response correction) ─────────────────────────
+  /**
+   * True when:
+   *   1. The current user wrote this comment (author-only — enforced
+   *      again on the backend with SUP_COMMENT_002 → 403), AND
+   *   2. The comment is internal (not sent to the requester) — public
+   *      responses are immutable once delivered because the customer
+   *      already received the email; editing would create a
+   *      compliance discrepancy with what's in the requester's inbox.
+   *      Backend enforces (2) with SUP_COMMENT_003.
+   */
+  canEditComment(c: { author_id?: number; is_internal?: boolean }): boolean {
+    const me = this.authFacade.userId();
+    return !!me && c.author_id === me && c.is_internal === true;
+  }
+
+  startEditComment(c: { id: number; content: string }): void {
+    this.editingCommentId.set(c.id);
+    this.editCommentContent.set(c.content ?? '');
+    this.editCommentError.set(null);
+  }
+
+  cancelEditComment(): void {
+    if (this.editCommentSaving()) return;
+    this.editingCommentId.set(null);
+    this.editCommentContent.set('');
+    this.editCommentError.set(null);
+  }
+
+  canSaveEditComment(): boolean {
+    return (
+      !this.editCommentSaving() &&
+      this.editCommentContent().trim().length >= 2
+    );
+  }
+
+  saveEditComment(commentId: number): void {
+    if (!this.canSaveEditComment() || !this.pqr()) return;
+    this.editCommentSaving.set(true);
+    this.editCommentError.set(null);
+    this.http
+      .patch<any>(
+        `${this.API_URL}/${this.pqr()!.id}/comments/${commentId}`,
+        { content: this.editCommentContent().trim() },
+      )
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        catchError((err) => {
+          this.editCommentError.set(
+            err?.error?.message ??
+              'No se pudo guardar la edición del comentario.',
+          );
+          this.editCommentSaving.set(false);
+          return of(null);
+        }),
+      )
+      .subscribe((res) => {
+        if (!res?.success) return;
+        this.editCommentSaving.set(false);
+        this.editingCommentId.set(null);
+        this.editCommentContent.set('');
+        // Re-fetch so the conversation list + history card reflect
+        // the new content + audit row.
+        this.fetch(this.pqr()!.id);
+      });
   }
 }
 

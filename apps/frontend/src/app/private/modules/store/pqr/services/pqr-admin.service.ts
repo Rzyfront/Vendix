@@ -93,4 +93,46 @@ export class PqrAdminService {
       dto,
     );
   }
+
+  /**
+   * Edit a comment's content. Server-side: only the original author
+   * can edit (SUP_COMMENT_002 → 403 otherwise) so attribution stays
+   * truthful. Re-fetches the PQR on success so the conversation
+   * list and history card refresh together.
+   */
+  editComment(
+    id: number,
+    commentId: number,
+    dto: { content: string },
+  ): Observable<{ success: boolean; data: PqrComment }> {
+    return this.http.patch<{ success: boolean; data: PqrComment }>(
+      `${this.apiUrl}/${id}/comments/${commentId}`,
+      dto,
+    );
+  }
+
+  /**
+   * Edit title / description / requester_* fields of a PQR. Server-side
+   * guard: only allowed while status === 'NEW' (the support team hasn't
+   * picked it up yet). The backend returns 400 SUP_PQR_006 once the
+   * ticket has progressed.
+   */
+  editContent(
+    id: number,
+    patch: {
+      title?: string;
+      description?: string;
+      requester_first_name?: string;
+      requester_last_name?: string;
+      requester_email?: string;
+      requester_phone?: string;
+      requester_document_type?: string;
+      requester_document_num?: string;
+    },
+  ): Observable<{ success: boolean; data: { id: number; changed: number } }> {
+    return this.http.patch<{ success: boolean; data: { id: number; changed: number } }>(
+      `${this.apiUrl}/${id}/content`,
+      patch,
+    );
+  }
 }

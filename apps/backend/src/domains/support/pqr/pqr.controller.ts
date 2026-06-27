@@ -34,11 +34,29 @@ export class PqrController {
       req.socket?.remoteAddress ||
       'unknown';
 
-    const ticket = await this.pqrService.createPublic(dto, ip);
+    // The DomainResolverMiddleware already mapped the incoming hostname
+    // (e.g. nike.vendix.com) to its store + org via the public_domains
+    // table. Use that as a fallback so anonymous PQRs submitted from a
+    // storefront are correctly tagged with the source tienda — without
+    // this, the PQR would land under the platform org with store_id =
+    // null and the org-admin "Tienda" filter would silently skip it.
+    // Authenticated callers can still override by passing
+    // `organization_id` / `store_id` explicitly in the DTO.
+    const domainContext = req['domain_context'] as
+      | { store_id?: number; organization_id?: number }
+      | undefined;
+    const enrichedDto = {
+      ...dto,
+      store_id: dto.store_id ?? domainContext?.store_id,
+      organization_id: dto.organization_id ?? domainContext?.organization_id,
+    };
+
+    const ticket = await this.pqrService.createPublic(enrichedDto, ip);
 
     return {
       success: true,
       data: {
+        id: ticket.id,
         ticket_number: ticket.ticket_number,
         message:
           'Hemos recibido tu PQR. Te responderemos pronto a ' + dto.email + '.',

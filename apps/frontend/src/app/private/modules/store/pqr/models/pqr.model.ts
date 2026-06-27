@@ -74,9 +74,18 @@ export interface PqrStatusHistoryEntry {
  */
 export interface PqrDetail extends Pqr {
   description: string;
+  // Legacy fields (still populated for rows that pre-date the
+  // schema migration; new rows populate the structured fields
+  // below instead).
   requester_name: string;
   requester_email: string;
   requester_phone?: string;
+  // Structured requester fields (post-migration). The detail page
+  // shows these directly instead of parsing the description block.
+  requester_first_name?: string;
+  requester_last_name?: string;
+  requester_document_type?: string;
+  requester_document_num?: string;
   comments: PqrComment[];
   status_history: PqrStatusHistoryEntry[];
 }

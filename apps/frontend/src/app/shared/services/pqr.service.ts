@@ -29,11 +29,29 @@ export interface CreatePqrPublicDto {
    * org-admin table can render the "Tienda" column.
    */
   store_id?: number;
+  /**
+   * Structured requester fields — preferred over the legacy `name` +
+   * `email` + `phone` triplet. When populated, the backend stores
+   * them in dedicated columns so the detail page renders them
+   * directly. Legacy callers (public storefront, ecommerce) keep
+   * working — the backend fills the structured columns from the
+   * legacy `name` / `email` / `phone` as fallback.
+   */
+  requester_first_name?: string;
+  requester_last_name?: string;
+  requester_email?: string;
+  requester_phone?: string;
+  requester_document_type?: string;
+  requester_document_num?: string;
 }
 
 export interface PqrCreateResponse {
   success: boolean;
   data: {
+    // Numeric id is used by the store-admin navigation to the detail
+    // page (route param `:id`). ticket_number is the human-readable
+    // format shown to the user (PQR-{orgId}-{counter}).
+    id: number;
     ticket_number: string;
     message: string;
   };

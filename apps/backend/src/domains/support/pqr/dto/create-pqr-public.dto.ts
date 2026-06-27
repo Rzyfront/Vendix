@@ -85,4 +85,49 @@ export class CreatePqrPublicDto {
   @IsOptional()
   @IsInt()
   store_id?: number;
+
+  /**
+   * Structured requester fields — preferred over the legacy `name`
+   * + `email` + `phone` triplet. When all of these are provided, the
+   * backend stores them in dedicated columns and the detail page
+   * shows them in the Solicitante card instead of falling back to
+   * the parsed description metadata. Legacy rows that only carry
+   * `name` + `email` keep working through the parseRequester()
+   * fallback in the service.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  requester_first_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  requester_last_name?: string;
+
+  @IsOptional()
+  @IsEmail()
+  requester_email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  requester_phone?: string;
+
+  /**
+   * Colombian document types most common for a PQR requester. Not
+   * enforced as enum yet — open string to keep room for edge cases
+   * (NIT, pasaporte, etc.) without a schema migration. Common values
+   * the UI will offer: 'CC' (cédula), 'CE' (cédula extranjería),
+   * 'NIT', 'PA' (pasaporte).
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  requester_document_type?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  requester_document_num?: string;
 }

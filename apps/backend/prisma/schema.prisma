@@ -3895,6 +3895,21 @@ model support_tickets {
   tags                    String[]                 @default([])
   created_at              DateTime?                @default(now()) @db.Timestamp(6)
   updated_at              DateTime?                @default(now()) @db.Timestamp(6)
+
+  // ── Requester contact fields ─────────────────────────────────────────
+  // Structured columns for the visitor who filed the PQR. Replaces the
+  // legacy "encode name/email/phone inside the description text"
+  // workaround that made `parseRequester()` necessary on every read.
+  // Optional + nullable so legacy rows (pre-migration) and anonymous
+  // submissions from the public storefront (which previously only
+  // collected email) keep working without backfill.
+  requester_first_name    String?                  @db.VarChar(100)
+  requester_last_name     String?                  @db.VarChar(100)
+  requester_email         String?                  @db.VarChar(255)
+  requester_phone         String?                  @db.VarChar(50)
+  requester_document_type String?                  @db.VarChar(20)
+  requester_document_num  String?                  @db.VarChar(50)
+
   organization            organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                   stores?                  @relation(fields: [store_id], references: [id], onDelete: Cascade)
   attachments             support_attachments[]

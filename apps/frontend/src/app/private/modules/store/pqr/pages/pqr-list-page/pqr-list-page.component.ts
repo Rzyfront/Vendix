@@ -13,10 +13,12 @@ import { PqrAdminService } from '../../services/pqr-admin.service';
 import { Pqr, PqrQuery, PqrStats, PqrType, PqrStatus, PqrPriority } from '../../models/pqr.model';
 import { PqrStatusPillComponent } from '../../components/pqr-status-pill.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import {
-  ScrollableTabsComponent,
-  ScrollableTab,
-} from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+  StickyHeaderComponent,
+  StickyHeaderTab,
+  StickyHeaderActionButton,
+} from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { PqrService } from '../../../../../../shared/services/pqr.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
@@ -37,7 +39,8 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
     DatePipe,
     PqrStatusPillComponent,
     IconComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
+    StatsComponent,
   ],
   templateUrl: './pqr-list-page.component.html',
   styleUrls: ['./pqr-list-page.component.scss'],
@@ -62,6 +65,57 @@ export class PqrListPageComponent {
 
   readonly totalPages = computed(() => this.meta()?.pages ?? 1);
   readonly total = computed(() => this.meta()?.total ?? 0);
+
+  // Quick filter state — drives the StickyHeader tabs at the top.
+  // Uses the same StickyHeaderComponent that powers the Reportes
+  // module's navigation (Resumen de Ventas / Por Producto / …) so
+  // the user sees a single visual pattern across admin modules:
+  // glass surface, left-aligned tab strip, animated green underline
+  // on the active tab, primary action on the right.
+  readonly quickFilter = signal<'all' | 'overdue' | 'pending' | 'new'>('all');
+
+  readonly quickFilterTabs = computed<StickyHeaderTab[]>(() => [
+    { id: 'all', label: 'Todas', icon: 'inbox' },
+    { id: 'overdue', label: 'Vencidas', icon: 'alert-triangle' },
+    { id: 'pending', label: 'Pendientes', icon: 'clock' },
+    { id: 'new', label: 'Nuevas', icon: 'plus' },
+  ]);
+
+  // Primary action rendered in the sticky-header's right slot. The
+  // "+ Nueva solicitud" lives here (not in the CTA card) so it stays
+  // visible regardless of how many PQRs are pending — same pattern as
+  // "Ver Analítica" on the Reportes → Ventas view.
+  readonly stickyHeaderActions = computed<StickyHeaderActionButton[]>(() => [
+    {
+      id: 'new-pqr',
+      label: 'Nueva solicitud',
+      variant: 'primary',
+      icon: 'plus',
+    },
+  ]);
+
+  setQuickFilter(value: string) {
+    // StickyHeaderComponent emits tabChanged as plain `string`; narrow
+    // it to the local union so the rest of the method stays type-safe.
+    // Anything unrecognised falls back to 'all' so a misconfigured
+    // StickyHeaderTab can't poison component state.
+    const filter: 'all' | 'overdue' | 'pending' | 'new' =
+      value === 'overdue' || value === 'pending' || value === 'new'
+        ? value
+        : 'all';
+    this.quickFilter.set(filter);
+    this.query.update((q) => ({ ...q, page: 1 }));
+  }
+
+  /**
+   * Action button click handler for the sticky-header's right slot.
+   * Currently only one action: open the "New PQR" modal.
+   */
+  onStickyHeaderAction(actionId: string): void {
+    if (actionId === 'new-pqr') {
+      this.openNewPqrModal();
+    }
+  }
 
   /**
    * Returns the PQR with the highest urgency from the current list.
@@ -183,8 +237,23 @@ export class PqrListPageComponent {
     this.errorMsg.set(null);
     this.adminService.list(q).subscribe({
       next: (res) => {
-        this.tickets.set(res.data);
-        this.meta.set(res.meta);
+        // Quick filter is a client-side post-filter (mirrors super-admin)
+        // so the backend stays platform-neutral and we don't need a new
+        // endpoint per filter combination. When active, we override the
+        // server pagination meta — the filtered set is what the user
+        // actually sees, so showing the original server `total` would be
+        // confusing.
+        const filter = this.quickFilter();
+        let data = res.data;
+        if (filter !== 'all') {
+          data = data.filter((t) => this.matchesQuickFilter(t, filter));
+        }
+        this.tickets.set(data);
+        this.meta.set(
+          filter === 'all'
+            ? res.meta
+            : { total: data.length, page: 1, limit: data.length, pages: 1 },
+        );
         this.loading.set(false);
       },
       error: (err) => {
@@ -194,6 +263,27 @@ export class PqrListPageComponent {
         this.loading.set(false);
       },
     });
+  }
+
+  /** Predicate used by fetch() to apply the active quick filter. */
+  private matchesQuickFilter(
+    t: Pqr,
+    filter: 'overdue' | 'pending' | 'new',
+  ): boolean {
+    switch (filter) {
+      case 'overdue':
+        return this.slaInfo(t).status === 'overdue';
+      case 'pending':
+        return (
+          t.status === 'NEW' ||
+          t.status === 'OPEN' ||
+          t.status === 'IN_PROGRESS' ||
+          t.status === 'WAITING_RESPONSE' ||
+          t.status === 'REOPENED'
+        );
+      case 'new':
+        return t.status === 'NEW';
+    }
   }
 
   typeLabel(t: PqrType): string {
@@ -285,6 +375,17 @@ export class PqrListPageComponent {
   readonly newPqrSubmitting = signal(false);
   readonly newPqrError = signal<string | null>(null);
 
+  // ── Requester fields captured by the modal ───────────────────────────
+  // Pre-filled from the auth facade (the store-admin's own profile)
+  // so they don't have to retype their own name/email — but editable
+  // when the store-admin is filing on behalf of a customer.
+  readonly newPqrRequesterFirstName = signal('');
+  readonly newPqrRequesterLastName = signal('');
+  readonly newPqrRequesterEmail = signal('');
+  readonly newPqrRequesterPhone = signal('');
+  readonly newPqrRequesterDocType = signal<'CC' | 'CE' | 'NIT' | 'PA' | ''>('');
+  readonly newPqrRequesterDocNum = signal('');
+
   /** Authenticated user's email — pre-fills the requester field. */
   readonly currentUserEmail = toSignal(this.authFacade.userEmail$, {
     initialValue: '',
@@ -351,6 +452,22 @@ export class PqrListPageComponent {
     this.newPqrDescription.set('');
     this.newPqrPriority.set('P3');
     this.newPqrError.set(null);
+
+    // Pre-fill requester fields from the store-admin's own profile so
+    // they only need to edit when filing on behalf of a customer.
+    // The split helper turns "Andres Meza" into ["Andres", "Meza"].
+    // The `?? ''` is defensive: authFacade.userName$ can emit undefined
+    // if the user record doesn't have a name set, and `.trim()` on
+    // undefined would throw — better to coerce to empty string.
+    const fullName = (this.currentUserName() ?? '').trim();
+    const [first = '', ...rest] = fullName.split(/\s+/);
+    this.newPqrRequesterFirstName.set(first);
+    this.newPqrRequesterLastName.set(rest.join(' '));
+    this.newPqrRequesterEmail.set(this.currentUserEmail() ?? '');
+    this.newPqrRequesterPhone.set('');
+    this.newPqrRequesterDocType.set('');
+    this.newPqrRequesterDocNum.set('');
+
     this.showNewPqrModal.set(true);
   }
 
@@ -364,7 +481,9 @@ export class PqrListPageComponent {
       !this.newPqrSubmitting() &&
       this.newPqrTitle().trim().length >= 5 &&
       this.newPqrDescription().trim().length >= 10 &&
-      !!this.currentUserEmail()
+      this.newPqrRequesterFirstName().trim().length >= 2 &&
+      this.newPqrRequesterLastName().trim().length >= 2 &&
+      this.newPqrRequesterEmail().trim().length >= 5
     );
   }
 
@@ -375,8 +494,12 @@ export class PqrListPageComponent {
     this.pqrService
       .createPublic({
         pqr_type: this.newPqrType(),
-        name: this.currentUserName() || this.currentUserEmail(),
-        email: this.currentUserEmail(),
+        // Legacy fields still required by the public endpoint's auth
+        // layer; the backend uses them as fallback when the structured
+        // requester_* fields below aren't populated.
+        name:
+          `${this.newPqrRequesterFirstName()} ${this.newPqrRequesterLastName()}`.trim(),
+        email: this.newPqrRequesterEmail().trim(),
         subject: this.newPqrTitle().trim(),
         description: this.newPqrDescription().trim(),
         priority: this.newPqrPriority(),
@@ -385,13 +508,30 @@ export class PqrListPageComponent {
         // hide it from the org-admin PQR oversight view).
         organization_id: this.authFacade.userOrganization()?.id ?? undefined,
         store_id: this.authFacade.userStore()?.id ?? undefined,
+        // Structured requester fields — preferred over the legacy
+        // `name`/`email`/`phone` triplet. The backend stores them in
+        // dedicated columns so the Solicitante card on the detail
+        // page shows them without parsing the description.
+        requester_first_name: this.newPqrRequesterFirstName().trim(),
+        requester_last_name: this.newPqrRequesterLastName().trim(),
+        requester_email: this.newPqrRequesterEmail().trim(),
+        requester_phone: this.newPqrRequesterPhone().trim() || undefined,
+        requester_document_type:
+          this.newPqrRequesterDocType() || undefined,
+        requester_document_num:
+          this.newPqrRequesterDocNum().trim() || undefined,
       })
       .subscribe({
         next: (res) => {
           this.newPqrSubmitting.set(false);
           this.showNewPqrModal.set(false);
-          if (res.success && res.data?.ticket_number) {
-            this.router.navigate(['/admin/pqrs', res.data.ticket_number]);
+          if (res.success && res.data?.id) {
+            // Navigate to detail by numeric id (matches the :id route
+            // param). Previously used ticket_number (string like
+            // "PQR-6-00001") which `Number()` parsed to NaN and left
+            // the detail page blank because the fetch() guard never
+            // fired.
+            this.router.navigate(['/admin/pqrs', res.data.id]);
           }
         },
         error: (err) => {

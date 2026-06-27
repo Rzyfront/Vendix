@@ -51,8 +51,24 @@
   <div class="layout-grid">
     <!-- Left: description + comments -->
     <div class="main-column">
-      <article class="card">
-        <h3>Descripción del solicitante</h3>
+      <article class="card description-card">
+        <div class="description-card__header">
+          <h3>Descripción del solicitante</h3>
+          <!-- Edit content — only while status === 'NEW' (before support
+               picks it up). Once status advances, the audit trail is
+               the source of truth and the backend rejects the edit
+               (400 SUP_PQR_006). -->
+          @if (canEditContent()) {
+          <button
+            type="button"
+            class="edit-content-btn"
+            (click)="openEditModal()"
+          >
+            <app-icon name="edit-2" [size]="14"></app-icon>
+            Editar contenido
+          </button>
+          }
+        </div>
         <pre class="description-block">{{ d.description }}</pre>
       </article>
 
@@ -80,9 +96,55 @@
               } @else {
               <span class="badge badge--from-team">Tu respuesta</span>
               }
+              <!-- Per-comment edit button — only visible to the author.
+                   Backend enforces the same rule with SUP_COMMENT_002. -->
+              @if (canEditComment(c) && editingCommentId() !== c.id) {
+              <button
+                type="button"
+                class="comment-edit-btn"
+                (click)="startEditComment(c)"
+                title="Editar tu comentario"
+              >
+                <app-icon name="edit-2" [size]="12"></app-icon>
+                Editar
+              </button>
+              }
             </span>
           </header>
+          @if (editingCommentId() === c.id) {
+          <div class="comment-edit-form">
+            <textarea
+              rows="3"
+              class="comment-edit-input"
+              [ngModel]="editCommentContent()"
+              (ngModelChange)="editCommentContent.set($event)"
+              name="editCommentContent"
+            ></textarea>
+            @if (editCommentError(); as err) {
+            <p class="comment-edit-error">{{ err }}</p>
+            }
+            <div class="comment-edit-actions">
+              <button
+                type="button"
+                class="ghost-btn"
+                [disabled]="editCommentSaving()"
+                (click)="cancelEditComment()"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                class="primary-btn"
+                [disabled]="!canSaveEditComment()"
+                (click)="saveEditComment(c.id)"
+              >
+                {{ editCommentSaving() ? 'Guardando…' : 'Guardar' }}
+              </button>
+            </div>
+          </div>
+          } @else {
           <p class="comment-body">{{ c.content }}</p>
+          }
         </div>
         }
 
@@ -137,21 +199,60 @@
 
     <!-- Right: requester + history -->
     <aside class="side-column">
-      <article class="card">
+      <article class="card requester-card">
         <h3>Solicitante</h3>
+        <div class="requester-header">
+          <div class="avatar" aria-hidden="true">
+            {{ requesterInitials() }}
+          </div>
+          <div class="requester-name-block">
+            <span class="requester-name">{{
+              requesterDisplayName() || '—'
+            }}</span>
+            <span class="requester-subtitle">{{
+              typeLabel(d.pqr_type)
+            }}</span>
+          </div>
+        </div>
         <dl>
           <dt>Nombre</dt>
-          <dd>{{ d.requester_name || '—' }}</dd>
+          <dd>{{ d.requester_first_name || '—' }}</dd>
+          <dt>Apellido</dt>
+          <dd>{{ d.requester_last_name || '—' }}</dd>
           <dt>Email</dt>
           <dd>
+            @if (d.requester_email) {
             <a [href]="'mailto:' + d.requester_email">{{
               d.requester_email
             }}</a>
+            } @else {
+            <span class="placeholder">No registrado</span>
+            }
           </dd>
-          @if (d.requester_phone) {
           <dt>Teléfono</dt>
-          <dd>{{ d.requester_phone }}</dd>
-          }
+          <dd>
+            @if (d.requester_phone) {
+            {{ d.requester_phone }}
+            } @else {
+            <span class="placeholder">No registrado</span>
+            }
+          </dd>
+          <dt>Tipo de documento</dt>
+          <dd>
+            @if (d.requester_document_type) {
+            {{ documentTypeLabel(d.requester_document_type) }}
+            } @else {
+            <span class="placeholder">No registrado</span>
+            }
+          </dd>
+          <dt>Número</dt>
+          <dd>
+            @if (d.requester_document_num) {
+            {{ d.requester_document_num }}
+            } @else {
+            <span class="placeholder">No registrado</span>
+            }
+          </dd>
         </dl>
       </article>
 
@@ -177,5 +278,142 @@
       </article>
     </aside>
   </div>
+
+  <!-- Content edit modal — opens when "Editar contenido" is clicked.
+       Visible only when canEditContent() is true (server enforces the
+       same guard, this is just for UX). -->
+  @if (showEditModal()) {
+  <div class="modal-overlay" (click)="closeEditModal()">
+    <div
+      class="modal modal--wide"
+      (click)="$event.stopPropagation()"
+    >
+      <h2>Editar contenido de la solicitud</h2>
+      <p class="modal-hint">
+        Solo puedes editar mientras el estado sea <strong>NUEVO</strong>.
+        Una vez que soporte tome la solicitud, los cambios quedan en el
+        historial y no se pueden revertir desde aquí.
+      </p>
+      <label class="modal-field">
+        <span>Asunto</span>
+        <input
+          type="text"
+          class="modal-input"
+          [ngModel]="editTitle()"
+          (ngModelChange)="editTitle.set($event)"
+          maxlength="255"
+          name="editTitle"
+        />
+      </label>
+      <label class="modal-field">
+        <span>Descripción</span>
+        <textarea
+          rows="5"
+          class="modal-input modal-textarea"
+          [ngModel]="editDescription()"
+          (ngModelChange)="editDescription.set($event)"
+          maxlength="5000"
+          name="editDescription"
+        ></textarea>
+      </label>
+      <fieldset class="modal-field modal-field--grouped">
+        <legend>Datos del solicitante</legend>
+        <div class="modal-row">
+          <label class="modal-subfield">
+            <span>Nombre</span>
+            <input
+              type="text"
+              class="modal-input"
+              [ngModel]="editRequesterFirstName()"
+              (ngModelChange)="editRequesterFirstName.set($event)"
+              name="editFirstName"
+            />
+          </label>
+          <label class="modal-subfield">
+            <span>Apellido</span>
+            <input
+              type="text"
+              class="modal-input"
+              [ngModel]="editRequesterLastName()"
+              (ngModelChange)="editRequesterLastName.set($event)"
+              name="editLastName"
+            />
+          </label>
+        </div>
+        <div class="modal-row">
+          <label class="modal-subfield">
+            <span>Email</span>
+            <input
+              type="email"
+              class="modal-input"
+              [ngModel]="editRequesterEmail()"
+              (ngModelChange)="editRequesterEmail.set($event)"
+              name="editEmail"
+            />
+          </label>
+          <label class="modal-subfield">
+            <span>Teléfono</span>
+            <input
+              type="tel"
+              class="modal-input"
+              [ngModel]="editRequesterPhone()"
+              (ngModelChange)="editRequesterPhone.set($event)"
+              name="editPhone"
+            />
+          </label>
+        </div>
+        <div class="modal-row">
+          <label class="modal-subfield">
+            <span>Tipo documento</span>
+            <select
+              class="modal-input"
+              [ngModel]="editRequesterDocType()"
+              (ngModelChange)="editRequesterDocType.set($event)"
+              name="editDocType"
+            >
+              <option value="">Seleccione tipo de documento</option>
+              <option value="CC">Cédula de ciudadanía (CC)</option>
+              <option value="CE">Cédula de extranjería (CE)</option>
+              <option value="NIT">NIT</option>
+              <option value="PA">Pasaporte (PA)</option>
+            </select>
+          </label>
+          <label class="modal-subfield">
+            <span>Número de documento</span>
+            <input
+              type="text"
+              class="modal-input"
+              [ngModel]="editRequesterDocNum()"
+              (ngModelChange)="editRequesterDocNum.set($event)"
+              name="editDocNum"
+              maxlength="50"
+            />
+          </label>
+        </div>
+      </fieldset>
+      @if (editError(); as err) {
+      <p class="edit-error">{{ err }}</p>
+      }
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="ghost-btn"
+          [disabled]="editSubmitting()"
+          (click)="closeEditModal()"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="primary-btn"
+          [disabled]="!canSubmitEdit()"
+          (click)="submitEdit()"
+        >
+          {{ editSubmitting() ? 'Guardando…' : 'Guardar cambios' }}
+        </button>
+      </div>
+    </div>
+  </div>
+  }
 }
 </section>

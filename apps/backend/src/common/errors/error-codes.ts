@@ -330,6 +330,16 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Comment not found',
   },
+  SUP_COMMENT_002: {
+    code: 'SUP_COMMENT_002',
+    httpStatus: 403,
+    devMessage: 'Only the comment author can edit it',
+  },
+  SUP_COMMENT_003: {
+    code: 'SUP_COMMENT_003',
+    httpStatus: 403,
+    devMessage: 'Public comments cannot be edited (already sent to requester)',
+  },
   SUP_ORG_001: {
     code: 'SUP_ORG_001',
     httpStatus: 404,

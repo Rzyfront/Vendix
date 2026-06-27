@@ -4,73 +4,6 @@
   margin: 0 auto;
 }
 
-// ─── Page header (card pattern: icon-tile + title/subtitle + action) ─
-//
-// Mirrors the rest of the admin modules (Inventario, Analíticas,
-// Reportes): a square icon-tile on the left, title + subtitle in the
-// middle, and the primary action on the right. The icon-tile uses the
-// same teal palette as the sidebars / badges to stay coherent.
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
-  flex-wrap: wrap;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  padding: 1.25rem 1.5rem;
-
-  &__main {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    min-width: 0;
-  }
-
-  &__icon {
-    width: 56px;
-    height: 56px;
-    border-radius: 14px;
-    background: #dcfce7;
-    color: #15803d;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    border: 1px solid #bbf7d0;
-  }
-
-  &__copy {
-    min-width: 0;
-  }
-
-  &__eyebrow {
-    margin: 0 0 0.25rem;
-    font-size: 0.75rem;
-    color: #15803d;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  &__title {
-    margin: 0;
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #0f172a;
-    line-height: 1.2;
-  }
-
-  &__subtitle {
-    margin: 0.25rem 0 0;
-    font-size: 0.9rem;
-    color: #64748b;
-    max-width: 540px;
-  }
-}
-
 .new-pqr-btn {
   display: inline-flex;
   align-items: center;
@@ -122,8 +55,35 @@
   &__main {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    justify-content: space-between;
+    gap: 1.5rem;
     width: 100%;
+    flex-wrap: wrap;
+  }
+
+  // Left column — icon + dynamic headline (mirrors the page-header
+  // layout from Ventas / Reportes so the user has a single visual
+  // pattern for "section title with an action on the right").
+  &__lead {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  // Right column — contextual secondary action ("Continuar
+  // conversación" when there's a pending urgent PQR). The primary
+  // action ("+ Nueva solicitud") lives in the StickyHeader at the
+  // top of the page so it stays accessible from anywhere on the
+  // view, not gated behind the CTA card.
+  &__actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    flex: 0 0 auto;
   }
 
   &__icon {
@@ -176,7 +136,7 @@
     text-decoration: none;
     transition: background 0.15s, transform 0.05s;
     flex-shrink: 0;
-    box-shadow: 0 1px 2px rgba(8, 145, 178, 0.18);
+    box-shadow: 0 1px 2px rgba(8, 145, 78, 0.18);
 
     &:hover {
       background: #15803d;
@@ -189,6 +149,22 @@
 
     &:hover app-icon {
       transform: translateX(2px);
+    }
+
+    // Secondary action — outlined, low-emphasis. Used by "Continuar
+    // conversación" so the primary "+ Nueva solicitud" button keeps
+    // visual weight in the right column.
+    &--ghost {
+      background: transparent;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+      box-shadow: none;
+
+      &:hover {
+        background: #dcfce7;
+        color: #15803d;
+        transform: translateY(-1px);
+      }
     }
   }
 
@@ -295,6 +271,11 @@
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   margin-top: 0.5rem;
+  // Visual gap from the cards list below — matches the spacing the
+  // super-admin view gets from its `.pqr-list-page { gap: 1rem }`
+  // flex-column parent. Without this the first card hugs the
+  // filters bar with no breathing room.
+  margin-bottom: 1.25rem;
 
   .filter-group {
     display: flex;
@@ -731,6 +712,111 @@
   }
 }
 
+// ─── New PQR modal — grouped fields for requester data ────────────────
+//
+// The "Datos del solicitante" fieldset splits into rows of sub-fields
+// (Nombre+Apellido, Email+Teléfono, Tipo+Numero). When the global
+// .modal__field styles don't define .modal__row / .modal__subfield,
+// the form collapses to a single column. We define them here so the
+// modal keeps its two-column rhythm on wide screens while collapsing
+// to a single column under 540px.
+.modal__field--grouped {
+  // Green dashed border (brand color) without a tinted background —
+  // transparent lets the modal's white surface show through so the
+  // group reads as a structured region, not a colored panel.
+  border: 1px dashed #16a34a;
+  border-radius: 10px;
+  padding: 0.75rem 1rem 1rem;
+  margin: 0;
+  background: transparent;
+
+  legend {
+    padding: 0 0.5rem;
+    color: #15803d;
+    font-weight: 600;
+  }
+}
+
+.modal__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.625rem;
+  margin-top: 0.625rem;
+
+  &:first-of-type {
+    margin-top: 0.25rem;
+  }
+
+  @media (max-width: 540px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.modal__input {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+  background: #ffffff;
+  // Fixed height so text/email/tel/select all line up.
+  height: 40px;
+  box-sizing: border-box;
+  // Prevent grid items from overflowing their column when the content
+  // (especially <select> with the native chevron) takes up more space
+  // than the column allows.
+  min-width: 0;
+  width: 100%;
+
+  &:focus {
+    outline: none;
+    border-color: #16a34a;
+    box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+  }
+
+  // Strip the native <select> chrome (browser-default chevron + the
+  // inconsistent OS-specific padding) so it lines up visually with the
+  // <input> siblings. The custom chevron below uses an inline SVG
+  // background-image sized to match the input's 40px height.
+  //
+  // Selectors use the tag-prefix form (`select.modal__input`) instead
+  // of the SCSS `&` parent-ref because `&` only works at the START
+  // of a compound selector — `select&` is a parse error.
+}
+
+// Override <select> chrome so it matches <input> dimensions exactly.
+select.modal__input {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2315803d' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 0.75rem center;
+  background-size: 12px 12px;
+  padding-right: 2.25rem;
+}
+
+.modal__subfield {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  // Prevent grid items from overflowing their column when the content
+  // is wider than expected (long emails, document numbers, etc.).
+  min-width: 0;
+
+  > span {
+    font-size: 0.7rem;
+    color: #475569;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+
+  &--wide {
+    grid-column: 1 / -1;
+  }
+}
+
 // ─── New PQR modal ───────────────────────────────────────────────────────
 //
 // Reuses the public `POST /pqr` channel so the store-admin can escalate
@@ -744,7 +830,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  // Bumped from 100 to 9999 — the sticky-header component uses
+  // `position: sticky; z-index: var(--z-fixed)` which creates its
+  // own stacking context. Without a higher z-index the modal would
+  // render BEHIND the sticky header (the user clicks the button, the
+  // modal opens but is hidden, they think "nothing happens").
+  z-index: 9999;
   padding: 1rem;
 }
 
@@ -965,3 +1056,4 @@
     color: #475569;
   }
 }
+// ─── Stat cards (PQR health at a glance) ──────────────────────────────

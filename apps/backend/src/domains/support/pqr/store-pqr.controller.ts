@@ -9,6 +9,15 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import {
+  IsEmail,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
+import {
   ApiBearerAuth,
   ApiOperation,
   ApiResponse,
@@ -24,6 +33,56 @@ import { UpdatePqrDto } from './dto/update-pqr.dto';
 import { UpdatePqrStatusDto } from './dto/update-pqr-status.dto';
 import { AddPqrCommentDto } from './dto/add-pqr-comment.dto';
 import { AssignPqrDto } from './dto/assign-pqr.dto';
+
+/**
+ * DTO for `PATCH /store/support/pqr/:id/content`. Every field is
+ * optional — only the fields included in the body are updated. The
+ * service diffs each included field against the current row and
+ * skips no-op patches (no audit row written if nothing changed).
+ */
+export class EditPqrContentDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(5)
+  @MaxLength(255)
+  title?: string;
+
+  @IsOptional()
+  @IsString()
+  @MinLength(20)
+  @MaxLength(5000)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  requester_first_name?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  requester_last_name?: string;
+
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(255)
+  requester_email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  requester_phone?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  requester_document_type?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  requester_document_num?: string;
+}
 
 /**
  * Store-admin endpoints for managing PQRs.
@@ -78,6 +137,50 @@ export class StorePqrController {
     return this.pqrService.adminUpdate(+id, dto, userId);
   }
 
+  /**
+   * Allows the store-admin to fix typos in the title / description /
+   * requester fields of a PQR they just created. Guarded server-side:
+   * the ticket must still be in `NEW` status (not yet picked up by
+   * the support team). Returns 400 SUP_PQR_006 if the status has
+   * progressed.
+   *
+   * Why a separate endpoint from the generic `update`: content edits
+   * carry an audit-trail cost (status_history row per edit) that
+   * priority/assignee changes don't, and the auth is per-field
+   * (requesters can only edit their own contact data).
+   */
+  @Patch(':id/content')
+  @Permissions('store:support:pqr:update')
+  @ApiOperation({
+    summary:
+      'Edit title / description / requester fields (only while status = NEW)',
+  })
+  @ApiResponse({ status: 200, description: 'Content edited successfully' })
+  @ApiResponse({
+    status: 400,
+    description: 'Ticket has progressed past NEW — edits no longer allowed',
+  })
+  editContent(
+    @Param('id') id: string,
+    @Body() dto: EditPqrContentDto,
+  ) {
+    const userId = this.requireUserId();
+    return this.pqrService.editContent(
+      +id,
+      {
+        title: dto.title,
+        description: dto.description,
+        requester_first_name: dto.requester_first_name,
+        requester_last_name: dto.requester_last_name,
+        requester_email: dto.requester_email,
+        requester_phone: dto.requester_phone,
+        requester_document_type: dto.requester_document_type,
+        requester_document_num: dto.requester_document_num,
+      },
+      userId,
+    );
+  }
+
   @Patch(':id/status')
   @Permissions('store:support:pqr:status')
   @ApiOperation({ summary: 'Change PQR status (triggers email on RESOLVED/CLOSED)' })
@@ -115,6 +218,34 @@ export class StorePqrController {
   ) {
     const userId = this.requireUserId();
     return this.pqrService.adminAddComment(+id, dto, userId);
+  }
+
+  /**
+   * Edit a comment's content. Server-side: only the original author
+   * can edit (SUP_COMMENT_002 → 403) so attribution stays truthful.
+   * Appends a status_history row noting the change so the History
+   * card surfaces "Comentario editado por X" with the byte delta.
+   */
+  @Patch(':id/comments/:commentId')
+  @Permissions('store:support:pqr:comment')
+  @ApiOperation({ summary: 'Edit a comment (author only)' })
+  @ApiResponse({ status: 200, description: 'Comment edited' })
+  @ApiResponse({
+    status: 403,
+    description: 'Only the original author can edit the comment',
+  })
+  editComment(
+    @Param('id') id: string,
+    @Param('commentId') commentId: string,
+    @Body() dto: { content: string },
+  ) {
+    const userId = this.requireUserId();
+    return this.pqrService.adminUpdateComment(
+      +id,
+      +commentId,
+      dto.content,
+      userId,
+    );
   }
 
   /**

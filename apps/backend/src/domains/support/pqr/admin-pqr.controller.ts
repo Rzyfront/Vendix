@@ -36,7 +36,7 @@ import { PqrQueryDto } from './dto/pqr-query.dto';
 @ApiBearerAuth()
 @Controller('admin/support/pqr')
 @UseGuards(RolesGuard)
-@Roles(UserRole.ADMIN)
+@Roles(UserRole.ADMIN, UserRole.OWNER)
 export class AdminPqrController {
   constructor(private readonly prisma: GlobalPrismaService) {}
 
@@ -45,19 +45,18 @@ export class AdminPqrController {
   @ApiResponse({ status: 200, description: 'PQRs retrieved successfully' })
   async findAll(@Query() query: PqrQueryDto) {
     const orgId = RequestContextService.getOrganizationId();
-    // Match PQRs that belong to the requesting org OR are legacy rows
-    // parked under the platform org (`orgVendix`). The legacy branch
-    // exists because pre-fix PQRs were created with `organization_id =
-    // orgVendix` regardless of who submitted them — the org-admin
-    // would otherwise see an empty queue. A data migration can drop
-    // the `OR` branch once all legacy rows are re-tagged with their
-    // real `organization_id`.
+    // Strict org scope: only show PQRs that belong to the caller's
+    // organization. We deliberately don't include platform-org PQRs
+    // (orgVendix) here — those belong to the super-admin's inbox,
+    // not the org-admin. orgVendix is the platform admin account,
+    // not a tenant, so it shouldn't appear in a tenant's view at all.
+    // Legacy rows that had organization_id = orgVendix were an artifact
+    // of the pre-fix createPublic flow; after the domain-context fix
+    // new PQRs get tagged with the right org_id, so the OR clause is
+    // no longer needed and was actively misleading.
     const where: any = {
+      organization_id: orgId,
       tags: { has: 'pqr' },
-      OR: [
-        { organization_id: orgId },
-        { organization: { is_platform: true } },
-      ],
     };
     if (query.status) where.status = query.status;
     if (query.pqr_type) where.category = query.pqr_type;
@@ -91,6 +90,12 @@ export class AdminPqrController {
         skip,
         include: {
           store: { select: { id: true, name: true, slug: true } },
+          // Load the org so the frontend can render the org name in
+          // the "Tienda" column when `store_id` is null (typical of
+          // legacy PQRs created via the public storefront form,
+          // which were parked under the platform org without a
+          // store context).
+          organization: { select: { id: true, name: true } },
           assigned_to: {
             select: {
               id: true,
@@ -115,7 +120,13 @@ export class AdminPqrController {
   @ApiOperation({ summary: 'Org-scoped PQR statistics' })
   async getStats() {
     const orgId = RequestContextService.getOrganizationId();
-    const where = { organization_id: orgId, tags: { has: 'pqr' } };
+    // Strict org scope — same as findAll. orgVendix PQRs are
+    // super-admin territory and shouldn't bleed into the org-admin's
+    // stats card.
+    const where = {
+      organization_id: orgId,
+      tags: { has: 'pqr' },
+    };
 
     const [
       total,

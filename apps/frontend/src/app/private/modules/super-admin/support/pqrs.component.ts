@@ -16,9 +16,9 @@ import { environment } from '../../../../../environments/environment';
 import {
   IconComponent,
   StatsComponent,
-  ScrollableTabsComponent,
-  ScrollableTab,
+  StickyHeaderComponent,
 } from '../../../../shared/components';
+import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
 /**
  * Super-admin global PQRs page (compliance / oversight view).
@@ -46,27 +46,26 @@ import {
     RouterLink,
     IconComponent,
     StatsComponent,
-    ScrollableTabsComponent,
+    StickyHeaderComponent,
   ],
   template: `
     <div class="pqr-list-page">
-      <!-- Page header — card pattern (icon-tile + title/subtitle +
-           action). Matches Inventario / Analíticas. -->
-      <header class="page-header">
-        <div class="page-header__main">
-          <div class="page-header__icon" aria-hidden="true">
-            <app-icon name="message-square" [size]="24"></app-icon>
-          </div>
-          <div class="page-header__copy">
-            <p class="page-header__eyebrow">Soporte</p>
-            <h1 class="page-header__title">PQRs</h1>
-            <p class="page-header__subtitle">
-              Vista global de Peticiones, Quejas y Reclamos en todas las
-              tiendas de la plataforma.
-            </p>
-          </div>
-        </div>
-      </header>
+      <!-- Sticky header — same component used by the Reportes →
+           Ventas view. Renders the filter tabs at the top, the
+           section icon + sub-title on the left, and (optionally)
+           actions on the right. Single visual pattern across admin
+           modules so users don't relearn navigation per page. -->
+      <app-sticky-header
+        title="PQRs"
+        subtitle="Vista global de la plataforma"
+        icon="message-square"
+        variant="glass"
+        [showBackButton]="false"
+        [tabs]="quickFilterTabs()"
+        [activeTab]="quickFilter()"
+        tabsAriaLabel="Filtros de PQR"
+        (tabChanged)="setQuickFilter($event)"
+      />
 
       <!-- Top CTA — cross-tenant urgency -->
       <div
@@ -159,17 +158,7 @@ import {
         ></app-stats>
       </div>
 
-      <!-- Quick filters — replaced chip row with scrollable tabs
-           (same component used by Inventario, Analíticas, etc).
-           The active filter is computed by id so the tab can drive
-           the same setQuickFilter handler the chips did. -->
-      <div class="quick-tabs">
-        <app-scrollable-tabs
-          [tabs]="quickFilterTabs()"
-          [activeTab]="quickFilter()"
-          (tabChange)="setQuickFilter($event)"
-        />
-      </div>
+      <!-- Quick filters now live in the StickyHeader above. -->
 
       <!-- Filters bar (advanced) -->
       <div class="filters-bar">
@@ -243,7 +232,13 @@ import {
               </td>
               <td class="title-cell">{{ t.title }}</td>
               <td>
-                <span class="store-name">{{ t.store?.name || t.organization?.name || '—' }}</span>
+                <!-- Show the store name when present. t.store is null
+                     for legacy PQRs created via the public storefront
+                     form (no tenant context). We deliberately don't
+                     fall back to the organization name because for the
+                     platform org (orgVendix) it would misleadingly show
+                     "Vendix Corp" as if it were a tienda. -->
+                <span class="store-name">{{ t.store?.name || '—' }}</span>
               </td>
               <td>
                 <span class="sla-badge" [attr.data-status]="info.status">
@@ -334,59 +329,6 @@ import {
         display: block;
       }
 
-      // Page header — card pattern matching Inventario / Analíticas.
-      .page-header {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        margin-bottom: 1.5rem;
-        flex-wrap: wrap;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        padding: 1.25rem 1.5rem;
-      }
-      .page-header__main {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        min-width: 0;
-      }
-      .page-header__icon {
-        width: 56px;
-        height: 56px;
-        border-radius: 14px;
-        background: #dcfce7;
-        color: #15803d;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        border: 1px solid #bbf7d0;
-      }
-      .page-header__eyebrow {
-        margin: 0 0 0.25rem;
-        font-size: 0.75rem;
-        color: #15803d;
-        font-weight: 600;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-      }
-      .page-header__title {
-        margin: 0;
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: #0f172a;
-        line-height: 1.2;
-      }
-      .page-header__subtitle {
-        margin: 0.25rem 0 0;
-        font-size: 0.9rem;
-        color: #64748b;
-        max-width: 540px;
-      }
-
       // CTA card (cross-tenant urgency)
       .cta-card {
         background: #ffffff;
@@ -405,8 +347,8 @@ import {
           width: 48px;
           height: 48px;
           border-radius: 14px;
-          background: #eff6ff;
-          color: #1d4ed8;
+          background: #dcfce7;
+          color: #15803d;
           display: flex;
           align-items: center;
           justify-content: center;
@@ -541,8 +483,8 @@ import {
           select:focus,
           input:focus {
             outline: none;
-            border-color: #3b82f6;
-            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+            border-color: #16a34a;
+            box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
           }
           &--search {
             flex: 1;
@@ -692,7 +634,7 @@ import {
         .empty-state__reset {
           background: none;
           border: 0;
-          color: #1d4ed8;
+          color: #15803d;
           font-weight: 600;
           cursor: pointer;
           margin-left: 0.5rem;
@@ -708,8 +650,8 @@ import {
         font-size: 0.7rem;
         font-weight: 600;
         &[data-type='PETITION'] {
-          background: #eef2ff;
-          color: #4338ca;
+          background: #dcfce7;
+          color: #15803d;
         }
         &[data-type='COMPLAINT'] {
           background: #fed7aa;
@@ -755,7 +697,7 @@ import {
         color: #475569;
         &[data-status='NEW'] {
           background: #dbeafe;
-          color: #1e40af;
+          color: #15803d;
         }
         &[data-status='RESOLVED'],
         &[data-status='CLOSED'] {
@@ -846,7 +788,19 @@ export class SuperadminPqrsComponent {
     });
   }
 
-  setQuickFilter(filter: 'all' | 'overdue' | 'expiring' | 'new') {
+  setQuickFilter(filter: string) {
+    // ScrollableTabsComponent emits tabChange as plain `string`; narrow
+    // it to the local union so the rest of the method stays type-safe.
+    // Unrecognised ids are ignored so a misconfigured ScrollableTab
+    // can't poison component state.
+    if (
+      filter !== 'all' &&
+      filter !== 'overdue' &&
+      filter !== 'expiring' &&
+      filter !== 'new'
+    ) {
+      return;
+    }
     this.quickFilter.set(filter);
     this.page.set(1);
     this.fetch();
@@ -936,12 +890,12 @@ export class SuperadminPqrsComponent {
   }
 
   /**
-   * Quick filter tabs — replaces the old chip row. Each tab's `id`
-   * matches the value `setQuickFilter()` expects so the same handler
-   * drives the filtering regardless of UI shape.
+   * Quick filter tabs — drives the StickyHeaderComponent tab strip
+   * at the top of the page. Each tab's `id` matches the value
+   * `setQuickFilter()` expects so the same handler drives the
+   * filtering regardless of UI shape.
    */
-  quickFilterTabs = computed<ScrollableTab[]>(() => {
-    const s = this.stats();
+  quickFilterTabs = computed<StickyHeaderTab[]>(() => {
     return [
       { id: 'all', label: 'Todas', icon: 'inbox' },
       { id: 'overdue', label: 'Vencidas', icon: 'alert-triangle' },

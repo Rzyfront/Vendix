@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
+import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { CreatePqrPublicDto } from './dto/create-pqr-public.dto';
 import { PqrQueryDto } from './dto/pqr-query.dto';
@@ -140,8 +141,12 @@ export class PqrService {
     // 2. Generate a PQR-prefixed ticket number (PQR-{orgId}-{counter})
     const ticketNumber = await this.generatePqrNumber(owningOrgId);
 
-    // 3. Build the description with metadata (PQR type + IP + contact)
-    const description = this.formatDescription(dto);
+    // 3. The description column now stores ONLY the visitor's typed
+    // message. Legacy rows still carry the metadata block at the top
+    // (parseRequester reads it on the read path). New rows get clean
+    // prose so the detail page description card reads naturally
+    // without the `**Tipo:** ... **Nombre:** ... ---` header.
+    const description = dto.description;
 
     // 4. Map PQR type → ticket category enum (PETITION, COMPLAINT, CLAIM)
     const category = this.mapPqrType(dto.pqr_type);
@@ -150,6 +155,11 @@ export class PqrService {
     // (or `orgVendix` for anonymous visitors). `store_id` is set when
     // the requester is a single store — the org-admin table uses this
     // to render the "Tienda" column without a fragile join.
+    // Requester contact data lands in dedicated columns (when provided)
+    // so the detail page can render the Solicitante card without
+    // parsing the description. Legacy `name` / `email` / `phone` on
+    // the DTO still work — they're the fallback when the structured
+    // fields aren't sent.
     const ticket = await this.globalPrisma.support_tickets.create({
       data: {
         ticket_number: ticketNumber,
@@ -165,6 +175,13 @@ export class PqrService {
         status: ticket_status_enum.NEW,
         source_channel: 'public_form',
         tags: ['pqr', dto.pqr_type.toLowerCase(), `ip:${ip}`],
+        // Structured requester fields (preferred path)
+        requester_first_name: dto.requester_first_name ?? null,
+        requester_last_name: dto.requester_last_name ?? null,
+        requester_email: dto.requester_email ?? dto.email,
+        requester_phone: dto.requester_phone ?? dto.phone ?? null,
+        requester_document_type: dto.requester_document_type ?? null,
+        requester_document_num: dto.requester_document_num ?? null,
       },
     });
     this.logger.log(
@@ -260,13 +277,17 @@ export class PqrService {
    * organization since PQRs are platform-wide, not per-store.
    */
   async adminFindAll(query: PqrQueryDto) {
-    const orgVendix = await this.getPlatformOrgOrThrow();
+    const callerOrgId = RequestContextService.getOrganizationId();
 
+    // Strict org scope — only show PQRs from the caller's org.
+    // PQRs tagged with the platform org (orgVendix) belong to the
+    // super-admin's inbox and should NOT show up in the store-admin
+    // view even if they were created from the store's storefront
+    // (the storefront's domain context resolves the right org_id
+    // post-fix; legacy orgVendix-tagged rows were an artifact of
+    // the pre-fix createPublic flow).
     const where: Prisma.support_ticketsWhereInput = {
-      organization_id: orgVendix.id,
-      // PQR filter: only tickets that originated from the public PQR form.
-      // tags contains 'pqr' (set in createPublic). This prevents mixing
-      // regular store support tickets with PQRs in the admin view.
+      organization_id: callerOrgId,
       tags: { has: 'pqr' },
     };
 
@@ -319,9 +340,10 @@ export class PqrService {
   }
 
   async adminGetStats() {
-    const orgVendix = await this.getPlatformOrgOrThrow();
+    const callerOrgId = RequestContextService.getOrganizationId();
+    // Strict org scope — same as adminFindAll.
     const where: Prisma.support_ticketsWhereInput = {
-      organization_id: orgVendix.id,
+      organization_id: callerOrgId,
       tags: { has: 'pqr' },
     };
 
@@ -371,10 +393,14 @@ export class PqrService {
   }
 
   async adminFindOne(id: number) {
-    const orgVendix = await this.getPlatformOrgOrThrow();
+    const callerOrgId = RequestContextService.getOrganizationId();
 
     const ticket = await this.globalPrisma.support_tickets.findFirst({
-      where: { id, organization_id: orgVendix.id, tags: { has: 'pqr' } },
+      where: {
+        id,
+        organization_id: callerOrgId,
+        tags: { has: 'pqr' },
+      },
       include: {
         assigned_to: {
           select: {
@@ -419,25 +445,192 @@ export class PqrService {
 
     const requester = this.parseRequester(ticket.description);
 
+    // Prefer the structured requester columns when they're populated
+    // (rows created after the schema migration). Legacy rows fall back
+    // to the parsed values from the description block.
+    const firstName = ticket.requester_first_name?.trim() || '';
+    const lastName = ticket.requester_last_name?.trim() || '';
+    const structuredName =
+      [firstName, lastName].filter(Boolean).join(' ').trim() ||
+      ticket.requester_email?.trim() ||
+      '';
+    const email =
+      ticket.requester_email?.trim() ||
+      requester.email ||
+      '';
+    const phone = ticket.requester_phone?.trim() || requester.phone;
+
     return {
       success: true,
       data: {
         ...this.toAdminView(ticket),
         description: ticket.description,
-        requester_name: requester.name,
-        requester_email: requester.email,
-        requester_phone: requester.phone,
+        requester_name: structuredName || requester.name,
+        requester_first_name: firstName || undefined,
+        requester_last_name: lastName || undefined,
+        requester_email: email,
+        requester_phone: phone,
+        requester_document_type:
+          ticket.requester_document_type?.trim() || undefined,
+        requester_document_num:
+          ticket.requester_document_num?.trim() || undefined,
         comments: ticket.comments,
         status_history: ticket.status_history,
       },
     };
   }
 
+  /**
+   * Allows the store-admin to fix typos in title / description /
+   * requester fields of a PQR they just created. Guarded by status:
+   * once the support team has picked it up (status !== NEW), edits
+   * are blocked so the audit trail stays clean and the SLA timer
+   * doesn't get reset by accidental saves. Super-admin callers set
+   * `bypassStatusGuard: true` — the support team is the source of
+   * truth for these rows and may need to correct contact data even
+   * after the ticket is in flight.
+   *
+   * Audit: inserts a row in `support_status_history` with the diff so
+   * the History card on the detail page can render "Editó X → Y" with
+   * the original values. The diff uses simple `field: 'old' → 'new'`
+   * lines joined by `; `.
+   */
+  async editContent(
+    id: number,
+    patch: {
+      title?: string;
+      description?: string;
+      requester_first_name?: string | null;
+      requester_last_name?: string | null;
+      requester_email?: string | null;
+      requester_phone?: string | null;
+      requester_document_type?: string | null;
+      requester_document_num?: string | null;
+    },
+    userId: number,
+    opts: { bypassStatusGuard?: boolean } = {},
+  ) {
+    const orgVendix = await this.getPlatformOrgOrThrow();
+    const callerOrgId = RequestContextService.getOrganizationId();
+
+    const ticket = await this.globalPrisma.support_tickets.findFirst({
+      where: {
+        id,
+        tags: { has: 'pqr' },
+        OR: [
+          callerOrgId ? { organization_id: callerOrgId } : undefined,
+          { organization_id: orgVendix.id },
+        ].filter(Boolean) as Prisma.support_ticketsWhereInput[],
+      },
+    });
+    if (!ticket) {
+      throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
+    }
+    // Hard guard: editing is only allowed while the ticket hasn't
+    // been touched by the support team. Once they reply or change
+    // status, the ticket becomes part of an SLA-tracked conversation
+    // and arbitrary edits would corrupt the audit trail. Super-admin
+    // callers can opt out because they ARE the support team.
+    if (!opts.bypassStatusGuard && ticket.status !== ticket_status_enum.NEW) {
+      throw new VendixHttpException(ErrorCodes.SUP_PQR_006);
+    }
+
+    // Compute a compact diff for the audit log before applying the
+    // update — old vs new per changed field, skipping no-op patches.
+    const changes: string[] = [];
+    if (patch.title !== undefined && patch.title !== ticket.title) {
+      changes.push(`title: "${ticket.title}" → "${patch.title}"`);
+    }
+    if (
+      patch.description !== undefined &&
+      patch.description !== ticket.description
+    ) {
+      changes.push(`description: ${ticket.description.length} → ${patch.description.length} chars`);
+    }
+    const fieldPairs: Array<[string, string | null | undefined]> = [
+      ['requester_first_name', ticket.requester_first_name],
+      ['requester_last_name', ticket.requester_last_name],
+      ['requester_email', ticket.requester_email],
+      ['requester_phone', ticket.requester_phone],
+      ['requester_document_type', ticket.requester_document_type],
+      ['requester_document_num', ticket.requester_document_num],
+    ];
+    for (const [field, oldVal] of fieldPairs) {
+      const newVal = patch[field as keyof typeof patch] as string | null | undefined;
+      const normalized = newVal === undefined ? oldVal : newVal;
+      if (normalized !== oldVal) {
+        changes.push(`${field}: "${oldVal ?? ''}" → "${normalized ?? ''}"`);
+      }
+    }
+
+    if (changes.length === 0) {
+      return { success: true, data: { id, changed: 0 } };
+    }
+
+    const updated = await this.globalPrisma.support_tickets.update({
+      where: { id },
+      data: {
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.description !== undefined
+          ? { description: patch.description }
+          : {}),
+        ...(patch.requester_first_name !== undefined
+          ? { requester_first_name: patch.requester_first_name }
+          : {}),
+        ...(patch.requester_last_name !== undefined
+          ? { requester_last_name: patch.requester_last_name }
+          : {}),
+        ...(patch.requester_email !== undefined
+          ? { requester_email: patch.requester_email }
+          : {}),
+        ...(patch.requester_phone !== undefined
+          ? { requester_phone: patch.requester_phone }
+          : {}),
+        ...(patch.requester_document_type !== undefined
+          ? { requester_document_type: patch.requester_document_type }
+          : {}),
+        ...(patch.requester_document_num !== undefined
+          ? { requester_document_num: patch.requester_document_num }
+          : {}),
+        updated_at: new Date(),
+      },
+    });
+
+    // Audit: status doesn't change, but we record the content edit as
+    // a status_history entry so the History card surfaces "Edited by X
+    // at Y" with the diff in change_notes. Same row schema re-used so
+    // we don't need a parallel edit_log table.
+    await this.globalPrisma.support_status_history.create({
+      data: {
+        ticket_id: id,
+        old_status: ticket.status,
+        new_status: ticket.status,
+        change_reason: 'Edición de contenido por el solicitante',
+        change_notes: changes.join('; '),
+        changed_by_user_id: userId,
+      },
+    });
+
+    this.logger.log(
+      `PQR ${updated.ticket_number} content edited by user ${userId} (${changes.length} field${changes.length === 1 ? '' : 's'})`,
+    );
+
+    return { success: true, data: { id, changed: changes.length } };
+  }
+
   async adminUpdate(id: number, dto: UpdatePqrDto, userId: number) {
     const orgVendix = await this.getPlatformOrgOrThrow();
+    const callerOrgId = RequestContextService.getOrganizationId();
 
     const existing = await this.globalPrisma.support_tickets.findFirst({
-      where: { id, organization_id: orgVendix.id, tags: { has: 'pqr' } },
+      where: {
+        id,
+        tags: { has: 'pqr' },
+        OR: [
+          callerOrgId ? { organization_id: callerOrgId } : undefined,
+          { organization_id: orgVendix.id },
+        ].filter(Boolean) as Prisma.support_ticketsWhereInput[],
+      },
       select: { id: true },
     });
     if (!existing) {
@@ -592,6 +785,93 @@ export class PqrService {
     return { success: true, data: this.toAdminView(updated) };
   }
 
+  /**
+   * Updates a comment's content. Restricted to the original author —
+   * super-admin / store-admin can't edit each other's comments to keep
+   * the conversation attribution intact. The audit row records who
+   * edited and when so the History card surfaces the change.
+   */
+  async adminUpdateComment(
+    id: number,
+    commentId: number,
+    content: string,
+    userId: number,
+  ) {
+    const orgVendix = await this.getPlatformOrgOrThrow();
+    const callerOrgId = RequestContextService.getOrganizationId();
+
+    // Ticket scope — same OR clause as the rest of the admin endpoints
+    // so we can find the comment regardless of whether the PQR was
+    // tagged with the caller's org or the platform org.
+    const ticket = await this.globalPrisma.support_tickets.findFirst({
+      where: {
+        id,
+        tags: { has: 'pqr' },
+        OR: [
+          callerOrgId ? { organization_id: callerOrgId } : undefined,
+          { organization_id: orgVendix.id },
+        ].filter(Boolean) as Prisma.support_ticketsWhereInput[],
+      },
+      select: { id: true, ticket_number: true },
+    });
+    if (!ticket) {
+      throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
+    }
+
+    const comment = await this.globalPrisma.support_comments.findUnique({
+      where: { id: commentId },
+    });
+    if (!comment || comment.ticket_id !== id) {
+      throw new VendixHttpException(ErrorCodes.SUP_COMMENT_001);
+    }
+
+    // Authorship gate — only the original author can edit. Prevents a
+    // store-admin from rewriting a super-admin's response (or vice
+    // versa). The support_status_history row that follows records the
+    // edit so the History card stays truthful.
+    if (comment.author_id !== userId) {
+      throw new VendixHttpException(ErrorCodes.SUP_COMMENT_002);
+    }
+
+    // Immutability gate — public comments (sent to the requester via
+    // email) cannot be edited because the customer already received
+    // the original text. Allowing edits would create a discrepancy
+    // between what the customer has in their inbox and what's on
+    // record (a compliance issue under Colombian PQR regulation).
+    // Internal notes (not sent to anyone) remain editable.
+    if (!comment.is_internal) {
+      throw new VendixHttpException(ErrorCodes.SUP_COMMENT_003);
+    }
+
+    const updated = await this.globalPrisma.support_comments.update({
+      where: { id: commentId },
+      data: {
+        content,
+        updated_at: new Date(),
+      },
+    });
+
+    // Append a status_history row noting the edit. We piggyback on the
+    // existing schema (no separate edit_log table) — the History card
+    // surfaces "Comentario editado por X a las Y" via change_reason.
+    await this.globalPrisma.support_status_history.create({
+      data: {
+        ticket_id: id,
+        old_status: undefined,
+        new_status: undefined,
+        change_reason: `Comentario editado por ${comment.author_name ?? `Admin #${userId}`}`,
+        change_notes: `${comment.content.length} → ${content.length} chars`,
+        changed_by_user_id: userId,
+      },
+    });
+
+    this.logger.log(
+      `Comment ${commentId} on PQR ${ticket.ticket_number} edited by user ${userId}`,
+    );
+
+    return { success: true, data: updated };
+  }
+
   async adminAddComment(
     id: number,
     dto: AddPqrCommentDto,
@@ -693,9 +973,12 @@ export class PqrService {
         break; // stop at separator
       }
     }
-    if (!email) {
-      throw new VendixHttpException(ErrorCodes.SUP_PQR_007);
-    }
+    // No longer throw on missing legacy email — new PQRs (post-fix)
+    // don't encode the requester block in the description because the
+    // data lives in dedicated columns (requester_email etc.). The
+    // caller falls back to those columns when this returns empty
+    // values, so an empty result is the correct "use the columns"
+    // signal here.
     return { name, email, phone };
   }
 
