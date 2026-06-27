@@ -52,14 +52,14 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
            actions on the right. Single visual pattern across admin
            modules so users don't relearn navigation per page. -->
       <app-sticky-header
-        title="PQRs"
+        title="PQRS"
         subtitle="Vista agregada por organización"
         icon="headset"
         variant="glass"
         [showBackButton]="false"
         [tabs]="quickFilterTabs()"
         [activeTab]="quickFilter()"
-        tabsAriaLabel="Filtros de PQR"
+        tabsAriaLabel="Filtros de PQRS"
         (tabChanged)="setQuickFilter($event)"
       />
 
@@ -75,7 +75,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
             <app-icon name="inbox" [size]="32"></app-icon>
           </div>
           <div class="cta-card__copy">
-            <h2>Sin PQRs en tus tiendas</h2>
+            <h2>Sin PQRS en tus tiendas</h2>
             <p>
               Cuando un visitante radique una petición, queja o reclamo en
               cualquier tienda de tu organización, aparecerá aquí.
@@ -93,13 +93,13 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
           <div class="cta-card__copy">
             <h2>
               @if (overdueCount() > 0) {
-                {{ overdueCount() }} PQR{{ overdueCount() === 1 ? '' : 's' }}
+                {{ overdueCount() }} PQRS
                 con SLA vencido en tus tiendas
               } @else if (stats().recent_24h > 0) {
-                {{ stats().recent_24h }} PQR{{ stats().recent_24h === 1 ? '' : 's' }}
+                {{ stats().recent_24h }} PQRS
                 radicadas en las últimas 24h
               } @else {
-                Todas las tiendas al día con PQRs
+                Todas las tiendas al día con PQRS
               }
             </h2>
             <p>
@@ -109,7 +109,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
                 Monitorea la respuesta de cada tienda para evitar
                 acumulación de SLA.
               } @else {
-                Sin PQRs pendientes de revisión.
+                Sin PQRS pendientes de revisión.
               }
             </p>
           </div>
@@ -119,7 +119,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
 
       <div class="stats-container">
         <app-stats
-          title="Total PQRs"
+          title="Total PQRS"
           [value]="stats().total"
           smallText="Todas las tiendas"
           iconName="message-square"
@@ -129,7 +129,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         <app-stats
           title="Últimas 24h"
           [value]="stats().recent_24h"
-          smallText="PQRs recientes"
+          smallText="PQRS recientes"
           iconName="clock"
           iconBgColor="bg-violet-100"
           iconColor="text-violet-600"
@@ -156,7 +156,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
 
       <div class="filters-bar">
         <div class="filter-group">
-          <label>Tipo</label>
+          <label>Tipo de solicitud</label>
           <select [(ngModel)]="typeFilter" (change)="applyFilters()">
             <option value="">Todos</option>
             <option value="PETITION">Petición</option>
@@ -251,12 +251,12 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
             <tr>
               <td colspan="7" class="empty-state">
                 @if (quickFilter() !== 'all' || typeFilter || searchInput()) {
-                  No hay PQRs con esos filtros.
+                  No hay PQRS con esos filtros.
                   <button class="empty-state__reset" (click)="clearAllFilters()">
                     Limpiar filtros
                   </button>
                 } @else {
-                  Sin PQRs en tus tiendas.
+                  Sin PQRS en tus tiendas.
                 }
               </td>
             </tr>
@@ -747,7 +747,7 @@ private loadOrgStores(): void {
         takeUntilDestroyed(this.destroyRef),
         catchError((err) => {
           this.errorMsg.set(
-            err?.error?.message ?? 'No se pudo cargar la lista de PQRs.',
+            err?.error?.message ?? 'No se pudo cargar la lista de PQRS.',
           );
           this.loading.set(false);
           return of(null);

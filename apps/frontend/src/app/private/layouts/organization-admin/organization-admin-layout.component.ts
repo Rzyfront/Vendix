@@ -205,7 +205,7 @@ export class OrganizationAdminLayoutComponent {
       alwaysVisible: true,
       children: [
         {
-          label: 'PQRs',
+          label: 'PQRS',
           icon: 'message-square',
           route: '/admin/support/pqrs',
           alwaysVisible: true,

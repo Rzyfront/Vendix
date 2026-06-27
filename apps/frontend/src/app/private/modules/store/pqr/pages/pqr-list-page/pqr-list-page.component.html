@@ -14,7 +14,7 @@
     [showBackButton]="false"
     [tabs]="quickFilterTabs()"
     [activeTab]="quickFilter()"
-    tabsAriaLabel="Filtros de PQR"
+    tabsAriaLabel="Filtros de PQRS"
     (tabChanged)="setQuickFilter($event)"
     [actions]="stickyHeaderActions()"
     (actionClicked)="onStickyHeaderAction($event)"
@@ -123,7 +123,7 @@
   @if (stats() && stats()!.total > 0) {
   <div class="stats-container">
     <app-stats
-      title="Total PQRs"
+      title="Total PQRS"
       [value]="stats()!.total"
       smallText="Todas tus peticiones, quejas y reclamos"
       iconName="message-square"
@@ -133,7 +133,7 @@
     <app-stats
       title="Últimas 24h"
       [value]="stats()!.recent_24h"
-      smallText="PQRs radicadas recientemente"
+      smallText="PQRS radicadas recientemente"
       iconName="clock"
       iconBgColor="bg-violet-100"
       iconColor="text-violet-600"
@@ -178,7 +178,7 @@
       </select>
     </div>
     <div class="filter-group">
-      <label>Tipo</label>
+      <label>Tipo de solicitud</label>
       <select
         [ngModel]="typeFilter()"
         (ngModelChange)="setTypeFilter($event)"

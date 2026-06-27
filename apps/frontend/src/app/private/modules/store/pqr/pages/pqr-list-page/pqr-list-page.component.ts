@@ -258,7 +258,7 @@ export class PqrListPageComponent {
       },
       error: (err) => {
         this.errorMsg.set(
-          err?.error?.message ?? 'No se pudo cargar la lista de PQRs.',
+          err?.error?.message ?? 'No se pudo cargar la lista de PQRS.',
         );
         this.loading.set(false);
       },

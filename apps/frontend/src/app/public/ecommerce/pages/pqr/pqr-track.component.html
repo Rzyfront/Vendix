@@ -1,6 +1,6 @@
 <section class="pqr-track">
   <header class="hero">
-    <h1>Consultar estado de PQR</h1>
+    <h1>Consultar estado de PQRS</h1>
     <p class="lead">
       Ingresa tu número de ticket para ver el estado y las respuestas
       públicas que el equipo de Vendix haya publicado.
@@ -10,7 +10,7 @@
   <div class="search-bar">
     <input
       type="search"
-      placeholder="Ej: PQR-1-00001"
+      placeholder="Ej: PQRS-1-00001"
       [ngModel]="queryInput()"
       (ngModelChange)="queryInput.set($event.target.value)"
       (keydown.enter)="search()"
@@ -84,7 +84,7 @@
       }
     </section>
 
-    <a routerLink="/pqr" class="cta">Radicar otro PQR</a>
+    <a routerLink="/pqr" class="cta">Radicar otro PQRS</a>
   </article>
   }
   }

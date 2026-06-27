@@ -50,7 +50,7 @@
         </button>
       </div>
       @if (hasError('pqr_type', 'required')) {
-      <p class="error-text">Selecciona el tipo de PQR.</p>
+      <p class="error-text">Selecciona el tipo de PQRS.</p>
       }
     </div>
 
@@ -126,7 +126,7 @@
 
     <!-- Descripción -->
     <div class="field" [class.field--error]="hasError('description', 'required') || hasError('description', 'minlength')">
-      <label for="pqr-description">Describe tu PQR *</label>
+      <label for="pqr-description">Describe tu PQRS *</label>
       <textarea
         id="pqr-description"
         formControlName="description"
@@ -159,7 +159,7 @@
         class="primary-btn"
         [disabled]="form.invalid || state() === 'submitting'"
       >
-        {{ state() === 'submitting' ? 'Enviando…' : 'Radicar PQR' }}
+        {{ state() === 'submitting' ? 'Enviando…' : 'Radicar PQRS' }}
       </button>
       <p class="legal-note">
         Al enviar este formulario aceptas que te contactemos por el correo

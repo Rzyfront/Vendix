@@ -122,7 +122,7 @@ export class PqrSubmitComponent {
         this.state.set('error');
         this.serverError.set(
           err?.error?.message ??
-            'No pudimos enviar tu PQR. Intenta de nuevo en un momento.',
+            'No pudimos enviar tu PQRS. Intenta de nuevo en un momento.',
         );
       },
     });

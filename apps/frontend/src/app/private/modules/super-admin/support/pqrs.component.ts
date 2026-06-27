@@ -56,14 +56,14 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
            actions on the right. Single visual pattern across admin
            modules so users don't relearn navigation per page. -->
       <app-sticky-header
-        title="PQRs"
+        title="PQRS"
         subtitle="Vista global de la plataforma"
         icon="message-square"
         variant="glass"
         [showBackButton]="false"
         [tabs]="quickFilterTabs()"
         [activeTab]="quickFilter()"
-        tabsAriaLabel="Filtros de PQR"
+        tabsAriaLabel="Filtros de PQRS"
         (tabChanged)="setQuickFilter($event)"
       />
 
@@ -79,7 +79,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
             <app-icon name="inbox" [size]="32"></app-icon>
           </div>
           <div class="cta-card__copy">
-            <h2>Sin PQRs radicadas en la plataforma</h2>
+            <h2>Sin PQRS radicadas en la plataforma</h2>
             <p>
               Cuando un visitante publique una petición, queja o reclamo
               desde cualquier storefront, aparecerá aquí.
@@ -97,24 +97,24 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
           <div class="cta-card__copy">
             <h2>
               @if (overdueCount() > 0) {
-                {{ overdueCount() }} PQR{{ overdueCount() === 1 ? '' : 's' }}
+                {{ overdueCount() }} PQRS
                 con SLA vencido en la plataforma
               } @else if (stats().recent_24h > 0) {
-                {{ stats().recent_24h }} PQR{{ stats().recent_24h === 1 ? '' : 's' }}
+                {{ stats().recent_24h }} PQRS
                 radicadas en las últimas 24h
               } @else {
-                Plataforma al día con PQRs
+                Plataforma al día con PQRS
               }
             </h2>
             <p>
               @if (overdueCount() > 0) {
-                ⚠️ Riesgo regulatorio: las PQRs vencidas pueden derivar en
+                ⚠️ Riesgo regulatorio: las PQRS vencidas pueden derivar en
                 silencio administrativo a favor del reclamante.
               } @else if (stats().recent_24h > 0) {
                 Monitorea la respuesta de cada tienda para evitar acumulación
                 de SLA.
               } @else {
-                Sin PQRs pendientes de revisión.
+                Sin PQRS pendientes de revisión.
               }
             </p>
           </div>
@@ -125,7 +125,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
       <!-- Stats grid — kept compact for cross-tenant scan -->
       <div class="stats-container">
         <app-stats
-          title="Total PQRs"
+          title="Total PQRS"
           [value]="stats().total"
           smallText="Todas las peticiones, quejas y reclamos"
           iconName="message-square"
@@ -135,7 +135,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         <app-stats
           title="Últimas 24h"
           [value]="stats().recent_24h"
-          smallText="PQRs radicadas recientemente"
+          smallText="PQRS radicadas recientemente"
           iconName="clock"
           iconBgColor="bg-violet-100"
           iconColor="text-violet-600"
@@ -163,7 +163,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
       <!-- Filters bar (advanced) -->
       <div class="filters-bar">
         <div class="filter-group">
-          <label>Tipo</label>
+          <label>Tipo de solicitud</label>
           <select [(ngModel)]="typeFilter" (change)="applyFilters()">
             <option value="">Todos</option>
             <option value="PETITION">Petición</option>
@@ -274,12 +274,12 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
             <tr>
               <td colspan="8" class="empty-state">
                 @if (quickFilter() !== 'all' || typeFilter || searchInput()) {
-                  No hay PQRs con esos filtros.
+                  No hay PQRS con esos filtros.
                   <button class="empty-state__reset" (click)="clearAllFilters()">
                     Limpiar filtros
                   </button>
                 } @else {
-                  Sin PQRs en la plataforma.
+                  Sin PQRS en la plataforma.
                 }
               </td>
             </tr>
@@ -966,7 +966,7 @@ export class SuperadminPqrsComponent {
         takeUntilDestroyed(this.destroyRef),
         catchError((err) => {
           this.errorMsg.set(
-            err?.error?.message ?? 'No se pudo cargar la lista de PQRs.',
+            err?.error?.message ?? 'No se pudo cargar la lista de PQRS.',
           );
           this.loading.set(false);
           return of(null);

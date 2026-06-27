@@ -1073,20 +1073,20 @@ export class BreadcrumbService {
     },
     {
       path: '/super-admin/support/pqrs',
-      title: 'PQRs',
+      title: 'PQRS',
       parent: 'Soporte',
       icon: 'message-square',
     },
     {
       path: '/super-admin/support/pqrs/:id',
-      title: 'Detalle de PQR',
-      parent: 'PQRs',
+      title: 'Detalle de PQRS',
+      parent: 'PQRS',
       icon: 'message-square',
     },
     // Org-admin aggregated PQR oversight across all stores in the org.
     {
       path: '/admin/support/pqrs',
-      title: 'PQRs',
+      title: 'PQRS',
       parent: 'Atención al cliente',
       icon: 'message-square',
     },

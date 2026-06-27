@@ -1479,7 +1479,7 @@ export class SuperadminPqrDetailComponent {
         takeUntilDestroyed(this.destroyRef),
         catchError((err) => {
           this.errorMsg.set(
-            err?.error?.message ?? 'No se pudo cargar el PQR.',
+            err?.error?.message ?? 'No se pudo cargar el PQRS.',
           );
           this.loading.set(false);
           return of(null);

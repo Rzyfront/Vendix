@@ -128,7 +128,7 @@ export class SuperAdminLayoutComponent {
             if (child.label === 'Tickets') {
               return { ...child, badge: ticketsBadge };
             }
-            if (child.label === 'PQRs') {
+            if (child.label === 'PQRS') {
               return { ...child, badge: pqrsBadge };
             }
             return child;
@@ -300,7 +300,7 @@ export class SuperAdminLayoutComponent {
             route: '/super-admin/support/tickets',
           },
           {
-            label: 'PQRs',
+            label: 'PQRS',
             icon: 'message-square',
             route: '/super-admin/support/pqrs',
           },
