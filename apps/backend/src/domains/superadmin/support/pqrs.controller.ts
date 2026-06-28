@@ -18,6 +18,7 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Request } from 'express';
+import { ticket_category_enum } from '@prisma/client';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
@@ -33,11 +34,14 @@ import { AddPqrCommentDto } from '../../support/pqr/dto/add-pqr-comment.dto';
  * Superadmin PQR Controller
  *
  * Provides global visibility into Peticiones, Quejas y Reclamos (PQRs)
- * across the entire platform. Required because PQRs are platform-scoped
- * (all PQRs live under the Vendix orgVendix organization in
- * `support_tickets`, discriminated by `tags: { has: 'pqr' }`) and
- * super-admins need compliance oversight without going through each
- * tenant.
+ * across the entire platform. PQRS rows are discriminated from generic
+ * support tickets by `category` (one of PETITION | COMPLAINT | CLAIM |
+ * SUGGESTION in the `ticket_category_enum`), NOT by a tag. The
+ * `category` check is more robust than `tags: { has: 'pqr' }` because:
+ *  - It's set declaratively in schema.prisma → always populated.
+ *  - It's an enum → indexed, type-safe, can't drift to typos.
+ *  - It survives migrations / seeders / manual fixes that might miss
+ *    the legacy tag-population step.
  *
  * The super-admin Soporte/Tickets view excludes PQRs to keep the two
  * domains separate (see support.service.ts findAll comment). This
@@ -221,8 +225,22 @@ export class SuperadminPqrsController {
   @ApiResponse({ status: 200, description: 'PQR retrieved successfully' })
   @ApiResponse({ status: 404, description: 'PQR not found' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    const ticket = await this.prisma.support_tickets.findUnique({
-      where: { id },
+    const ticket = await this.prisma.support_tickets.findFirst({
+      where: {
+        id,
+        // Discriminate PQR rows by the category enum, NOT by the
+        // legacy `tags: { has: 'pqr' }` check (see class-level
+        // comment for the why). Covers PETITION / COMPLAINT / CLAIM /
+        // SUGGESTION — the four values that mapPqrType emits.
+        category: {
+          in: [
+            ticket_category_enum.PETITION,
+            ticket_category_enum.COMPLAINT,
+            ticket_category_enum.CLAIM,
+            ticket_category_enum.SUGGESTION,
+          ],
+        },
+      },
       include: {
         organization: { select: { id: true, name: true, slug: true } },
         store: { select: { id: true, name: true, slug: true } },
@@ -253,7 +271,7 @@ export class SuperadminPqrsController {
       },
     });
 
-    if (!ticket || !(ticket.tags || []).includes('pqr')) {
+    if (!ticket) {
       throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
     }
 

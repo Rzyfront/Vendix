@@ -323,7 +323,8 @@ export const ErrorCodes = {
   SUP_TICKET_001: {
     code: 'SUP_TICKET_001',
     httpStatus: 404,
-    devMessage: 'Ticket not found',
+    devMessage:
+      'No encontramos esta solicitud. Es posible que haya sido eliminada o que el enlace sea incorrecto.',
   },
   SUP_COMMENT_001: {
     code: 'SUP_COMMENT_001',
