@@ -9,6 +9,14 @@
 // that stays legible at all sizes.
 
 .help-center {
+  // The PublicHeaderComponent above is `position: fixed; top: 0;
+  // z-index: 50` with ~64px of height. The page body would
+  // otherwise start at top:0 and the sticky header would visually
+  // cover the H1. A 4rem top padding clears the header without
+  // introducing a visual gap on desktop (where the hero has its
+  // own breathing room).
+  padding-top: 4rem;
+
   // Soft green-tinted background that reads as a 'product
   // surface' rather than a generic FAQ template. Two layered
   // radial blooms at top and bottom add subtle depth.
