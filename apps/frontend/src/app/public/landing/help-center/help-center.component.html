@@ -1,4 +1,19 @@
 <section class="help-center min-h-screen bg-[var(--color-background)] text-[var(--color-text-primary)]">
+  <!-- Top bar with back button — gives identity (logo) and a clear
+       exit so the page doesn't feel like a dead-end documentation
+       view. Sticky on scroll so the user always has an escape hatch. -->
+  <div class="help-center__topbar">
+    <a routerLink="/" class="help-center__back" aria-label="Volver al inicio">
+      <app-icon name="arrow-left" [size]="18" color="currentColor"></app-icon>
+      <span>Volver</span>
+    </a>
+    <div class="help-center__brand">
+      <img src="vlogo.png" alt="Vendix" class="help-center__brand-logo" />
+      <span class="help-center__brand-name">Vendix</span>
+    </div>
+    <div class="help-center__topbar-spacer"></div>
+  </div>
+
   <!-- Hero -->
   <div class="help-center__hero">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl text-center">
@@ -143,5 +158,15 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Botón de regresar al final — alternativa al del topbar para
+       usuarios que llegan al fondo de la página y no quieren
+       scrollear de vuelta. Mismo destino, contexto distinto. -->
+  <div class="help-center__footer-nav">
+    <a routerLink="/" class="help-center__back help-center__back--centered">
+      <app-icon name="arrow-left" [size]="18" color="currentColor"></app-icon>
+      <span>Volver al inicio de Vendix</span>
+    </a>
   </div>
 </section>

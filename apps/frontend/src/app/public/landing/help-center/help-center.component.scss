@@ -8,9 +8,73 @@
 // to feel like a knowledge base rather than a marketing page.
 
 .help-center {
+  // ── Topbar (back + brand) ─────────────────────────────────
+  &__topbar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--color-outline-variant, #dce2f3);
+  }
+
+  &__topbar-spacer {
+    width: 1px;
+    flex-shrink: 0;
+  }
+
+  &__back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+    color: var(--color-text-secondary, #3c4a42);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: background-color 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: var(--color-surface-container-low, #f0f3ff);
+      color: var(--color-primary, #2f6f4e);
+    }
+
+    &--centered {
+      display: inline-flex;
+      margin: 0 auto;
+    }
+  }
+
+  &__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  &__brand-logo {
+    width: 28px;
+    height: 28px;
+    object-fit: contain;
+  }
+
+  &__brand-name {
+    font-weight: 600;
+    color: var(--color-primary, #2f6f4e);
+    font-size: 0.95rem;
+  }
+
   // ── Hero ───────────────────────────────────────────────────────
   &__hero {
-    padding: 6rem 0 3rem;
+    padding: 4rem 0 3rem;
     text-align: center;
     background: linear-gradient(
       to bottom,
@@ -302,7 +366,12 @@
 
   // ── CTA ──────────────────────────────────────────────────────
   &__cta {
-    padding: 2.5rem 0 6rem;
+    padding: 2.5rem 0 3rem;
+  }
+
+  &__footer-nav {
+    padding: 0 0 6rem;
+    text-align: center;
   }
 
   &__cta-card {
