@@ -1,4 +1,4 @@
-import { Component, signal, computed, inject } from '@angular/core';
+import { Component, signal, computed, inject, ElementRef, ViewChild, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -58,6 +58,12 @@ interface PopularArticle {
 })
 export class HelpCenterComponent {
   private readonly authFacade = inject(AuthFacade);
+
+  /** Ref to the FAQ section so we can scroll to it when a category
+   *  is selected — otherwise the user clicks a chip and sees no
+   *  feedback except the section count changing. */
+  @ViewChild('faqSection', { read: ElementRef })
+  faqSectionRef?: ElementRef<HTMLElement>;
 
   /** Search input bound to the search box. */
   readonly searchQuery = signal('');
@@ -201,9 +207,23 @@ export class HelpCenterComponent {
   readonly filteredFaqCount = computed(() => this.filteredFaqs().length);
 
   /** Toggle a category chip on/off. Clicking the same chip again
-   *  clears the filter. */
+   *  clears the filter. When activating, smooth-scroll to the FAQ
+   *  section so the user sees the filtered results immediately. */
   selectCategory(id: FaqItem['category']): void {
+    const wasActive = this.selectedCategory() === id;
     this.selectedCategory.update((current) => (current === id ? null : id));
+    if (!wasActive) {
+      // Wait one frame so the filtered DOM is in place, then scroll
+      // smoothly to the FAQ list. offsetTop accounts for the sticky
+      // topbar (h-14 ≈ 56px) so the heading isn't hidden under it.
+      setTimeout(() => {
+        const el = this.faqSectionRef?.nativeElement;
+        if (el) {
+          const top = el.getBoundingClientRect().top + window.scrollY - 72;
+          window.scrollTo({ top, behavior: 'smooth' });
+        }
+      }, 50);
+    }
   }
 
   /** Clear all active filters at once. */
