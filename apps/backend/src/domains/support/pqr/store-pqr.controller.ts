@@ -153,12 +153,13 @@ export class StorePqrController {
   @Permissions('store:support:pqr:update')
   @ApiOperation({
     summary:
-      'Edit title / description / requester fields (only while status = NEW)',
+      'Editar asunto / descripción / datos del solicitante (solo mientras el estado sea NUEVO)',
   })
-  @ApiResponse({ status: 200, description: 'Content edited successfully' })
+  @ApiResponse({ status: 200, description: 'Contenido editado correctamente' })
   @ApiResponse({
     status: 400,
-    description: 'Ticket has progressed past NEW — edits no longer allowed',
+    description:
+      'La solicitud ya pasó del estado NUEVO y no se puede editar',
   })
   editContent(
     @Param('id') id: string,
@@ -209,9 +210,9 @@ export class StorePqrController {
   @Permissions('store:support:pqr:comment')
   @ApiOperation({
     summary:
-      'Add a comment to a PQR. Internal comments stay admin-only; public comments trigger an email to the requester.',
+      'Agregar un comentario a una PQRS. Los comentarios internos solo los ve el equipo de soporte; los comentarios públicos envían un correo al solicitante.',
   })
-  @ApiResponse({ status: 201, description: 'Comment added successfully' })
+  @ApiResponse({ status: 201, description: 'Comentario agregado correctamente' })
   addComment(
     @Param('id') id: string,
     @Body() dto: AddPqrCommentDto,
@@ -232,7 +233,7 @@ export class StorePqrController {
   @ApiResponse({ status: 200, description: 'Comment edited' })
   @ApiResponse({
     status: 403,
-    description: 'Only the original author can edit the comment',
+    description: 'Solo el autor original del comentario puede editarlo',
   })
   editComment(
     @Param('id') id: string,

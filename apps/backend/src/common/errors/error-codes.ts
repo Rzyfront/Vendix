@@ -328,17 +328,20 @@ export const ErrorCodes = {
   SUP_COMMENT_001: {
     code: 'SUP_COMMENT_001',
     httpStatus: 404,
-    devMessage: 'Comment not found',
+    devMessage:
+      'No encontramos este comentario. Es posible que haya sido eliminado.',
   },
   SUP_COMMENT_002: {
     code: 'SUP_COMMENT_002',
     httpStatus: 403,
-    devMessage: 'Only the comment author can edit it',
+    devMessage:
+      'Solo el autor del comentario puede editarlo. Si necesitas corregir algo, responde con un nuevo comentario.',
   },
   SUP_COMMENT_003: {
     code: 'SUP_COMMENT_003',
     httpStatus: 403,
-    devMessage: 'Public comments cannot be edited (already sent to requester)',
+    devMessage:
+      'Este comentario ya fue enviado al solicitante, así que no se puede editar para mantener la coherencia con el correo original. Responde con un nuevo comentario si necesitas agregar algo.',
   },
   SUP_ORG_001: {
     code: 'SUP_ORG_001',
@@ -353,37 +356,44 @@ export const ErrorCodes = {
   SUP_PQR_001: {
     code: 'SUP_PQR_001',
     httpStatus: 500,
-    devMessage: 'PQR platform organization missing — run seeders',
+    devMessage:
+      'Falta la organización plataforma de PQRS en la base de datos. Ejecuta los seeders para configurarla.',
   },
   SUP_PQR_002: {
     code: 'SUP_PQR_002',
     httpStatus: 500,
-    devMessage: 'PQR anonymous user missing — run seeders',
+    devMessage:
+      'Falta el usuario anónimo de PQRS en la base de datos. Ejecuta los seeders para configurarlo.',
   },
   SUP_PQR_003: {
     code: 'SUP_PQR_003',
     httpStatus: 404,
-    devMessage: 'PQR ticket not found',
+    devMessage:
+      'No encontramos esta solicitud. Es posible que haya sido eliminada o que el enlace sea incorrecto.',
   },
   SUP_PQR_004: {
     code: 'SUP_PQR_004',
     httpStatus: 403,
-    devMessage: 'PQR access denied',
+    devMessage:
+      'No tienes permisos para acceder a esta solicitud. Verifica que pertenezca a tu tienda u organización.',
   },
   SUP_PQR_005: {
     code: 'SUP_PQR_005',
     httpStatus: 429,
-    devMessage: 'PQR rate limit exceeded',
+    devMessage:
+      'Has enviado demasiadas solicitudes en poco tiempo. Espera unos minutos antes de intentar de nuevo.',
   },
   SUP_PQR_006: {
     code: 'SUP_PQR_006',
     httpStatus: 400,
-    devMessage: 'PQR invalid status transition',
+    devMessage:
+      'No se puede cambiar al estado solicitado desde el estado actual de la solicitud.',
   },
   SUP_PQR_007: {
     code: 'SUP_PQR_007',
     httpStatus: 422,
-    devMessage: 'PQR requester email could not be parsed from description',
+    devMessage:
+      'No pudimos identificar el correo del solicitante en la solicitud. Pídele que registre la solicitud de nuevo con sus datos completos.',
   },
 
   // Organization

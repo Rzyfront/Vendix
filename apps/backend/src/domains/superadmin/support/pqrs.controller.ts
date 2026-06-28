@@ -278,7 +278,9 @@ export class SuperadminPqrsController {
   ) {
     const userId = (req as any).user?.id;
     if (!userId) {
-      throw new UnauthorizedException('Missing authenticated user');
+      throw new UnauthorizedException(
+        'Tu sesión expiró o no se reconoce al usuario autenticado. Vuelve a iniciar sesión e intenta de nuevo.',
+      );
     }
     return this.pqrService.adminAddComment(id, dto, userId);
   }
@@ -305,7 +307,9 @@ export class SuperadminPqrsController {
   ) {
     const userId = (req as any).user?.id;
     if (!userId) {
-      throw new UnauthorizedException('Missing authenticated user');
+      throw new UnauthorizedException(
+        'Tu sesión expiró o no se reconoce al usuario autenticado. Vuelve a iniciar sesión e intenta de nuevo.',
+      );
     }
     return this.pqrService.adminUpdateComment(
       id,
@@ -329,7 +333,9 @@ export class SuperadminPqrsController {
   ) {
     const userId = (req as any).user?.id;
     if (!userId) {
-      throw new UnauthorizedException('Missing authenticated user');
+      throw new UnauthorizedException(
+        'Tu sesión expiró o no se reconoce al usuario autenticado. Vuelve a iniciar sesión e intenta de nuevo.',
+      );
     }
     return this.pqrService.adminUpdateStatus(id, dto, userId);
   }
@@ -348,7 +354,9 @@ export class SuperadminPqrsController {
   ) {
     const userId = (req as any).user?.id;
     if (!userId) {
-      throw new UnauthorizedException('Missing authenticated user');
+      throw new UnauthorizedException(
+        'Tu sesión expiró o no se reconoce al usuario autenticado. Vuelve a iniciar sesión e intenta de nuevo.',
+      );
     }
     return this.pqrService.adminAssign(id, dto, userId);
   }
@@ -384,7 +392,9 @@ export class SuperadminPqrsController {
   ) {
     const userId = (req as any).user?.id;
     if (!userId) {
-      throw new UnauthorizedException('Missing authenticated user');
+      throw new UnauthorizedException(
+        'Tu sesión expiró o no se reconoce al usuario autenticado. Vuelve a iniciar sesión e intenta de nuevo.',
+      );
     }
     return this.pqrService.editContent(id, dto, userId, {
       bypassStatusGuard: true,
