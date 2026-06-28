@@ -1,4 +1,5 @@
 import { Component, OnInit, inject, effect } from '@angular/core';
+import { RouterLink } from '@angular/router';
 
 import { ConfigFacade } from '../../../../core/store/config';
 import { ThemeService } from '../../../../core/services';
@@ -13,7 +14,8 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
   imports: [
     LandingLayoutComponent,
     DynamicHeroCarouselComponent,
-    IconComponent
+    IconComponent,
+    RouterLink,
 ],
   template: `
     <app-landing-layout [brandName]="storeName" [logoUrl]="branding?.logo?.url">
@@ -124,6 +126,25 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
             ></div>
           </div>
         </section>
+      <!-- Footer — single line of legal/links. Currently exposes the
+           PQR channel so visitors can find the complaint form
+           (Ley 1482/2011 requires easy access to grievance
+           channels). If the layout gains a richer footer in the
+           future, move this content into a dedicated component. -->
+      <footer class="pqr-footer">
+        <div class="pqr-footer__inner">
+          <span class="pqr-footer__brand">{{ storeName }}</span>
+          <nav class="pqr-footer__links" aria-label="Atención al cliente">
+            <a routerLink="/pqr" class="pqr-footer__link">
+              <app-icon name="message-square-warning" [size]="14"></app-icon>
+              Radica una PQR
+            </a>
+          </nav>
+          <span class="pqr-footer__legal">
+            © {{ year }} {{ storeName }}
+          </span>
+        </div>
+      </footer>
       </app-landing-layout>
     `,
   styleUrls: ['./store-landing.component.scss'],
@@ -136,6 +157,9 @@ export class StoreLandingComponent implements OnInit {
   features: any[] = [];
   heroSlides: any[] = [];
   customLayout = false;
+  // Computed once at component init. Cheap, doesn't need to react
+  // to clock changes mid-session.
+  readonly year = new Date().getFullYear();
 
   private configFacade = inject(ConfigFacade);
   private themeService = inject(ThemeService);

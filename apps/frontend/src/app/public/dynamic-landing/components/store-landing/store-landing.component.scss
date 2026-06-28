@@ -3,3 +3,63 @@
 .store-landing-container {
   // Legacy support if needed
 }
+
+// ── Footer ─────────────────────────────────────────────────────────
+// Single-row footer that lives at the very bottom of the public
+// landing. Hosts the PQR link so visitors always have an entry
+// point to the complaint channel — Ley 1482/2011 (Colombia)
+// requires customer grievance channels to be "easily
+// accessible". A footer link is the lowest-friction way to
+// satisfy that without re-shaping the entire landing layout.
+.pqr-footer {
+  background: var(--color-text-primary, #0f172a);
+  color: rgba(255, 255, 255, 0.85);
+  padding: 1rem 1.5rem;
+  font-size: 0.8rem;
+
+  &__inner {
+    max-width: 1280px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  &__brand {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  &__links {
+    display: flex;
+    gap: 1rem;
+  }
+
+  &__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    color: rgba(255, 255, 255, 0.85);
+    text-decoration: none;
+    padding: 0.375rem 0.75rem;
+    border-radius: 6px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #16a34a;
+      outline-offset: 2px;
+    }
+  }
+
+  &__legal {
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 0.75rem;
+  }
+}
