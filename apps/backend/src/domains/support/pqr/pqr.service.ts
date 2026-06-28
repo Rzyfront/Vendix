@@ -575,13 +575,17 @@ export class PqrService {
         success: true as const,
         data: {
           ...this.toAdminView(ticket),
-          requester_first_name: firstName,
-          requester_last_name: lastName,
+          description: ticket.description,
+          requester_name: structuredName || requester.name,
+          requester_first_name: firstName || undefined,
+          requester_last_name: lastName || undefined,
           requester_full_name: structuredName,
           requester_email: email,
           requester_phone: phone,
-          requester_document_type: ticket.requester_document_type ?? null,
-          requester_document_num: ticket.requester_document_num ?? null,
+          requester_document_type:
+            ticket.requester_document_type?.trim() || undefined,
+          requester_document_num:
+            ticket.requester_document_num?.trim() || undefined,
           comments: ticket.comments,
           status_history: ticket.status_history,
         },
