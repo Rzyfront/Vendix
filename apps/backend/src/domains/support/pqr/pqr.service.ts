@@ -47,6 +47,12 @@ export interface PqrResponseSentEvent {
   comment_content: string;
   author_name: string;
   new_status?: ticket_status_enum;
+  /** Structured requester contact. Email is the canonical field
+   *  used by listeners to send the response notification. Falls
+   *  back to parsing `description` for legacy tickets that
+   *  pre-date the structured columns. */
+  requester_email?: string;
+  requester_name?: string;
 }
 
 /**
@@ -877,6 +883,11 @@ export class PqrService {
         description: ticket.description,
         comment_content: dto.resolution_summary || '',
         author_name: 'Equipo Vendix',
+        requester_email: ticket.requester_email ?? null,
+        requester_name:
+          (ticket.requester_first_name ?? '') +
+          ' ' +
+          (ticket.requester_last_name ?? ''),
         new_status: dto.status,
       } satisfies PqrResponseSentEvent);
     }
@@ -1099,6 +1110,11 @@ export class PqrService {
         comment_content: dto.content,
         author_name: authorName,
         new_status: ticket.status,
+        requester_email: ticket.requester_email ?? null,
+        requester_name:
+          (ticket.requester_first_name ?? '') +
+          ' ' +
+          (ticket.requester_last_name ?? ''),
       } satisfies PqrResponseSentEvent);
     }
 

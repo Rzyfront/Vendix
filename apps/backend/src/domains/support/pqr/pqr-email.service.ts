@@ -47,7 +47,16 @@ export class PqrEmailService {
    */
   @OnEvent('pqr.response_sent')
   async handlePqrResponseSent(payload: PqrResponseSentEvent) {
-    const contact = this.parseRequester(payload.description);
+    // Prefer the structured requester contact emitted by PqrService
+    // (the canonical source since migration 20260628101500). Falls
+    // back to parsing the description for legacy tickets that
+    // pre-date the structured columns.
+    const contact = payload.requester_email
+      ? {
+          email: payload.requester_email,
+          name: payload.requester_name?.trim() ?? '',
+        }
+      : this.parseRequester(payload.description);
     if (!contact?.email) {
       this.logger.warn(
         `PQR ${payload.ticket_number}: cannot notify requester — no email parsed from description`,
