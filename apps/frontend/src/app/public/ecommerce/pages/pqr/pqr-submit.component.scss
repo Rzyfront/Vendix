@@ -285,36 +285,37 @@
 }
 
 .primary-btn {
-  background: #2f6f4e;
+  // Matches the store-admin "Enviar respuesta" / "Nueva solicitud"
+  // button exactly: same green (#16a34a), same border-radius (8px),
+  // same shadow treatment. The public form should feel like the
+  // exact same product, not a different one.
+  background: #16a34a;
   color: #ffffff;
   border: 0;
-  border-radius: 12px;
-  padding: 0.875rem 1.75rem;
+  border-radius: 8px;
+  padding: 0.625rem 1.5rem;
   font-weight: 600;
-  font-size: 1rem;
+  font-size: 0.95rem;
   cursor: pointer;
   align-self: stretch;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  box-shadow: 0 2px 8px rgba(47, 111, 78, 0.2);
-  transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.2);
+  transition: background-color 0.15s ease;
 
   &:hover:not(:disabled) {
-    background: #1b5132;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(47, 111, 78, 0.3);
+    background: #15803d;
   }
 
   &:active:not(:disabled) {
-    transform: translateY(0);
+    background: #14532d;
   }
 
   &:disabled {
-    opacity: 0.55;
+    opacity: 0.5;
     cursor: not-allowed;
-    box-shadow: none;
   }
 }
 
