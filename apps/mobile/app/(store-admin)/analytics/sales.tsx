@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import Svg, { Path, Circle, Defs, LinearGradient as SvgLinearGradient, Stop } from 'react-native-svg';
@@ -9,12 +9,15 @@ import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { PullToRefresh } from '@/shared/components/pull-to-refresh/pull-to-refresh';
-import { DateRangeFilter, type DateRangeFilterValue, type DatePreset } from '@/shared/components/date-range-filter/date-range-filter';
-import { ExportButton } from '@/shared/components/export-button/export-button';
+import { ScrollableTabs, type ScrollableTab } from '@/shared/components/scrollable-tabs';
+import { AnalyticsPeriodCard } from '@/shared/components/analytics-period-card/analytics-period-card';
+import { AnalyticsViewsCard } from '@/shared/components/analytics-views-card/analytics-views-card';
+import { type DateRangeFilterValue } from '@/shared/components/date-range-filter/date-range-filter';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { AnalyticsDetailService, AnalyticsService } from '@/features/store/services';
-import { colors, colorScales, spacing, borderRadius, typography, shadows } from '@/shared/theme';
+import { getQuickLinks, SALES_VIEWS } from '@/features/store/data/sales-views';
+import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 
 const styles = StyleSheet.create({
   root: {
@@ -25,63 +28,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[4],
     paddingTop: spacing[2],
   },
-  // Header — web parity: flex items-center gap-2.5 (10px) con icon-box 40x40
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing[2.5],
     marginBottom: spacing[4],
-  },
-  headerIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: borderRadius.lg,
-    backgroundColor: colors.background,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...shadows.sm,
   },
   headerTextWrap: {
     flex: 1,
     minWidth: 0,
   },
+  headerBreadcrumb: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: colorScales.gray[400],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
   headerTitle: {
-    fontSize: typography.fontSize.base,
+    fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
-    color: colors.text.primary,
-    lineHeight: 18,
+    color: colorScales.gray[900],
+    lineHeight: 22,
   },
-  headerSubtitle: {
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.medium,
-    color: colors.text.secondary,
-    marginTop: 2,
-  },
-  // Sticky filter bar — web parity: bg-white, border-b, rounded-lg, mx-1, mb-4,
-  // flex items-center justify-between gap-3
-  filterBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing[3],
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[3],
-    backgroundColor: colors.card,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.cardBorder,
-    borderRadius: borderRadius.lg,
-    marginHorizontal: spacing[1],
+  // Wrapper inferior para que el border-bottom visual (debajo de los tabs)
+  // se mantenga al migrar a ScrollableTabs (que ya no incluye border inferior).
+  tabsWrapper: {
     marginBottom: spacing[4],
-    // sombra más visible en mobile (web: shadow-[0_2px_8px_rgba(0,0,0,0.07)])
-    ...shadows.sm,
-  },
-  filterBarActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    flexShrink: 0,
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
   },
   statsGridOverride: {
     paddingHorizontal: 0,
@@ -100,51 +75,6 @@ const styles = StyleSheet.create({
     height: 220,
     paddingVertical: spacing[2],
   },
-  // Vistas de Ventas — web parity: grid grid-cols-2 md:grid-cols-4 gap-3 mt-3
-  viewsCard: {
-    marginBottom: spacing[4],
-  },
-  viewsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[3],
-    marginTop: spacing[3],
-  },
-  viewItem: {
-    width: '47%', // 2 cols con gap-3 (12px) — calc mobile
-  },
-  viewButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2.5],
-    padding: spacing[3],
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colors.cardBorder,
-    backgroundColor: colors.card,
-    minHeight: 64,
-  },
-  viewIconBox: {
-    width: 36,
-    height: 36,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  viewTextWrap: {
-    flex: 1,
-    minWidth: 0,
-  },
-  viewTitle: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colors.text.primary,
-  },
-  viewDescription: {
-    fontSize: typography.fontSize.xs,
-    color: colors.text.secondary,
-    marginTop: 2,
-  },
 });
 
 function defaultDateRange(): DateRangeFilterValue {
@@ -157,73 +87,20 @@ function defaultDateRange(): DateRangeFilterValue {
   return { start_date: start, end_date: today, preset: 'thisMonth' };
 }
 
-// Vistas de Ventas — paridad con web (analytics-registry.ts → category 'sales').
-// Solo "Resumen de Ventas" implementado en mobile por ahora; el resto navega a
-// pantallas que se crearán en tasks posteriores.
-const SALES_VIEWS: Array<{
-  key: string;
-  title: string;
-  description: string;
-  icon: string;
-  route: string;
-  available: boolean;
-  color: { bg: string; fg: string };
-}> = [
-  {
-    key: 'sales_summary',
-    title: 'Resumen de Ventas',
-    description: 'Ingresos totales y KPIs',
-    icon: 'bar-chart-3',
-    route: '/analytics/sales',
-    available: true,
-    color: { bg: colorScales.green[50], fg: colorScales.green[600] },
-  },
-  {
-    key: 'sales_by_product',
-    title: 'Por Producto',
-    description: 'Ranking de más vendidos',
-    icon: 'package',
-    route: '/analytics/sales/by-product',
-    available: false,
-    color: { bg: colorScales.blue[50], fg: colorScales.blue[600] },
-  },
-  {
-    key: 'sales_by_category',
-    title: 'Por Categoría',
-    description: 'Distribución por categoría',
-    icon: 'tags',
-    route: '/analytics/sales/by-category',
-    available: false,
-    color: { bg: colorScales.purple[50], fg: colorScales.purple[600] },
-  },
-  {
-    key: 'sales_trends',
-    title: 'Tendencias',
-    description: 'Evolución temporal',
-    icon: 'activity',
-    route: '/analytics/sales/trends',
-    available: false,
-    color: { bg: colorScales.orange[50], fg: colorScales.orange[600] },
-  },
-  {
-    key: 'sales_by_customer',
-    title: 'Por Cliente',
-    description: 'Top clientes por volumen',
-    icon: 'user-round',
-    route: '/analytics/sales/by-customer',
-    available: false,
-    color: { bg: colorScales.amber[50], fg: colorScales.amber[600] },
-  },
-  {
-    key: 'sales_by_payment',
-    title: 'Por Método de Pago',
-    description: 'Distribución por forma de pago',
-    icon: 'credit-card',
-    route: '/analytics/sales/by-payment',
-    available: false,
-    color: { bg: colorScales.red[50], fg: colorScales.red[600] },
-  },
-];
+// Quick Links — paridad web (sales-by-product.component.ts → salesViews).
+// En la página de Resumen de Ventas se excluye `sales_summary` (la página actual)
+// para no mostrar un link que navega a sí misma. Mismo patrón que web:
+// `getViewsByCategory('sales').filter(v => v.key !== <current_view_key>)`.
+const QUICK_LINKS = getQuickLinks('sales_summary');
+
+// Tabs del menú horizontal — incluye la vista actual (que se renderiza como
+// tab activo, no como link). Componente compartido ScrollableTabs ya tiene
+// auto-scroll al tab activo (paridad con web scroll-snap-align: center).
+const SALES_TABS: ScrollableTab[] = SALES_VIEWS.map((v) => ({
+  id: v.key,
+  label: v.title,
+  icon: v.icon,
+}));
 
 const SalesScreen = () => {
   const router = useRouter();
@@ -233,7 +110,7 @@ const SalesScreen = () => {
   const apiRange = useMemo(() => ({
     start_date: dateRange.start_date,
     end_date: dateRange.end_date,
-    preset: dateRange.preset as DatePreset,
+    preset: dateRange.preset as any,
   }), [dateRange]);
 
   // Resumen de KPIs (4 stats)
@@ -278,28 +155,34 @@ const SalesScreen = () => {
     <View style={styles.root}>
       <PullToRefresh refreshing={refreshing} onRefresh={onRefresh}>
         <View style={styles.inner}>
-          {/* Header — web parity */}
+          {/* Header — web parity 6.png */}
           <View style={styles.header}>
-            <View style={styles.headerIconBox}>
-              <Icon name="dollar-sign" size={18} color={colors.primary} />
-            </View>
             <View style={styles.headerTextWrap}>
-              <Text style={styles.headerTitle} numberOfLines={1}>
-                Analíticas y Reportes de Ventas
+              <Text style={styles.headerBreadcrumb}>
+                Ventas  /  Resumen de Ventas
               </Text>
-              <Text style={styles.headerSubtitle} numberOfLines={1}>
-                Filtra, analiza y exporta reportes especializados
+              <Text style={styles.headerTitle} numberOfLines={1}>
+                Resumen de Ventas
               </Text>
             </View>
           </View>
 
-          {/* Sticky filter bar — web parity */}
-          <View style={styles.filterBar}>
-            <View style={{ flex: 1 }} />
-            <View style={styles.filterBarActions}>
-              <DateRangeFilter value={dateRange} onChange={setDateRange} />
-              <ExportButton onPress={handleExport} />
-            </View>
+          {/* Menú horizontal de pestañas (Tabs) — paridad web 6.png.
+              Componente compartido ScrollableTabs: auto-scroll al tab activo
+              (paridad con web scroll-snap-align: center) y pill indicator
+              inferior con el color de acento. */}
+          <View style={styles.tabsWrapper}>
+            <ScrollableTabs
+              tabs={SALES_TABS}
+              activeTab="sales_summary"
+              accentColor={colorScales.green[600]}
+              onTabChange={(key) => {
+                const view = SALES_VIEWS.find((v) => v.key === key);
+                if (!view || view.key === 'sales_summary') return;
+                if (view.available) router.push(view.route as any);
+                else toastError('Próximamente: esta vista estará disponible');
+              }}
+            />
           </View>
 
           {loadingSummary ? (
@@ -308,15 +191,13 @@ const SalesScreen = () => {
             </View>
           ) : summary ? (
             <>
-              {/* 4 stats — paridad exacta con web.
-                  Nota: NO pasamos `trend` (mobile usa `description` con formato
-                  completo "+X.X% vs período anterior" idéntico a web smallText). */}
+              {/* 4 stats — paridad exacta con web 6.png. */}
               <StatsGrid
                 style={styles.statsGridOverride}
                 items={[
                   {
                     label: 'Ingresos Totales',
-                    value: formatCurrency(summary.total_revenue),
+                    value: formatCurrency(summary.total_revenue).replace('$ ', '$'),
                     icon: <Icon name="dollar-sign" size={14} color={colorScales.green[600]} />,
                     iconBg: colorScales.green[100],
                     iconColor: colorScales.green[600],
@@ -324,6 +205,7 @@ const SalesScreen = () => {
                       summary.revenue_growth != null
                         ? `${summary.revenue_growth >= 0 ? '+' : ''}${summary.revenue_growth.toFixed(1)}% vs período anterior`
                         : undefined,
+                    descriptionColor: colorScales.green[600],
                   },
                   {
                     label: 'Total Órdenes',
@@ -335,14 +217,16 @@ const SalesScreen = () => {
                       summary.orders_growth != null
                         ? `${summary.orders_growth >= 0 ? '+' : ''}${summary.orders_growth.toFixed(1)}% vs período anterior`
                         : undefined,
+                    descriptionColor: colorScales.green[600],
                   },
                   {
                     label: 'Ticket Promedio',
-                    value: formatCurrency(summary.average_order_value || 0),
+                    value: formatCurrency(summary.average_order_value || 0).replace('$ ', '$'),
                     icon: <Icon name="receipt" size={14} color={colorScales.purple[600]} />,
                     iconBg: colorScales.purple[100],
                     iconColor: colorScales.purple[600],
                     description: 'Valor promedio por orden',
+                    descriptionColor: colorScales.green[600],
                   },
                   {
                     label: 'Unidades Vendidas',
@@ -351,8 +235,20 @@ const SalesScreen = () => {
                     iconBg: colorScales.orange[100],
                     iconColor: colorScales.orange[600],
                     description: 'Total en el período',
+                    descriptionColor: colorScales.green[600],
                   },
                 ]}
+              />
+
+              {/* Tarjeta de Filtros de Período — paridad web (idéntica en todas las
+                  vistas de analytics: sales/summary, by-product, by-category, etc.).
+                  Componente reutilizable con DateRangeFilter + 2 DatePickerField +
+                  ExportButton. Layout responsive (DESDE/HASTA wrappean en
+                  pantallas estrechas gracias a flexWrap + minWidth 130). */}
+              <AnalyticsPeriodCard
+                value={dateRange}
+                onChange={setDateRange}
+                onExport={handleExport}
               />
 
               {/* Gráfico de Tendencia de Ingresos — web parity (echarts line+area) */}
@@ -375,47 +271,16 @@ const SalesScreen = () => {
                   )}
                 </Card.Body>
               </Card>
+
+              {/* Vistas de Ventas — paridad web (sales-by-product.component.ts →
+                  <app-card> con grid grid-cols-2 md:grid-cols-4 de <app-analytics-card>).
+                  Componente compartido AnalyticsViewsCard con grid responsive
+                  (2 cols móvil / 4 cols tablet+). */}
+              <AnalyticsViewsCard views={QUICK_LINKS} />
             </>
           ) : (
             <EmptyState title="Sin datos" description="No hay datos de ventas para este período" />
           )}
-
-          {/* Vistas de Ventas — web parity (analytics-registry.ts category 'sales') */}
-          <Card style={styles.viewsCard}>
-            <Card.Header title="Vistas de Ventas" />
-            <Card.Body>
-              <View style={styles.viewsGrid}>
-                {SALES_VIEWS.map((view) => (
-                  <View key={view.key} style={styles.viewItem}>
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.viewButton,
-                        !view.available && { opacity: 0.5 },
-                        pressed && view.available && { opacity: 0.7 },
-                      ]}
-                      onPress={() => {
-                        if (view.available) router.push(view.route as any);
-                        else toastError('Próximamente: esta vista estará disponible');
-                      }}
-                      disabled={!view.available}
-                    >
-                      <View style={[styles.viewIconBox, { backgroundColor: view.color.bg }]}>
-                        <Icon name={view.icon as any} size={16} color={view.color.fg} />
-                      </View>
-                      <View style={styles.viewTextWrap}>
-                        <Text style={styles.viewTitle} numberOfLines={1}>
-                          {view.title}
-                        </Text>
-                        <Text style={styles.viewDescription} numberOfLines={2}>
-                          {view.description}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  </View>
-                ))}
-              </View>
-            </Card.Body>
-          </Card>
         </View>
       </PullToRefresh>
     </View>

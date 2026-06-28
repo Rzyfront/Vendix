@@ -6,8 +6,8 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
-  StyleSheet,
   Image,
+  StyleSheet,
   Animated,
   Dimensions,
 } from 'react-native';
@@ -39,8 +39,16 @@ import {
   ShippingModal,
   PosCustomItemModal,
   PosPaymentModal,
+  PosOrderCreateModal,
+  PosCashOpenModal,
+  PosCashCloseModal,
+  PosCashMovementModal,
+  PosCashDetailModal,
 } from '@/features/pos/components';
-import { toastSuccess, toastError, toastWarning, toastInfo } from '@/shared/components/toast/toast.store';
+import { CashRegisterService } from '@/features/pos/services/cash-register.service';
+import { useCashRegisterStore } from '@/features/pos/store/cash-register.store';
+import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
+import { useResponsive } from '@/shared/hooks';
 import type {
   CreatePosPaymentDto,
   PaymentMethod,
@@ -61,7 +69,7 @@ const productCardStyles = StyleSheet.create({
     width: PRODUCT_CARD_WIDTH,
     backgroundColor: colors.background,
     borderRadius: borderRadius.xl,
-    padding: spacing[2], // paridad web: `p-2 sm:p-3`
+    padding: spacing[3],
     marginBottom: spacing[3],
     borderWidth: 1,
     borderColor: colorScales.gray[100],
@@ -96,10 +104,8 @@ const productCardStyles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    // Paridad web: tile 48×48 con `bg-primary/10` (en lugar de icon suelto).
-    backgroundColor: 'rgba(34, 197, 94, 0.10)',
-    borderRadius: borderRadius.md,
-    margin: '30%', // centra un tile ~40% del área
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
   },
   badgesContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -130,14 +136,18 @@ const productCardStyles = StyleSheet.create({
     fontFamily: typography.fontFamily,
     color: '#FFFFFF',
   },
+  nameContainer: {
+    height: 38,
+    marginTop: spacing[1.5],
+    justifyContent: 'flex-start',
+  },
   // Nombre — paridad web `text-xs sm:text-sm font-medium line-clamp-2`.
-  // En mobile-first sólo usamos 2 líneas + font xs.
   name: {
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.medium as any,
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold as any,
     fontFamily: typography.fontFamily,
-    color: colorScales.gray[900],
-    lineHeight: 16,
+    color: colorScales.gray[800],
+    lineHeight: 18,
   },
   namePressed: {
     color: colors.primary, // paridad web `group-hover:text-primary`
@@ -147,15 +157,16 @@ const productCardStyles = StyleSheet.create({
   description: {
     fontSize: typography.fontSize.xs,
     fontFamily: typography.fontFamily,
-    color: colorScales.gray[500],
+    color: colorScales.gray[50],
     lineHeight: 14,
     marginTop: 2,
   },
   row: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: spacing[1],
+    marginTop: spacing[2],
+    height: 38,
   },
   priceContainer: {
     flexDirection: 'column',
@@ -169,7 +180,7 @@ const productCardStyles = StyleSheet.create({
   },
   // Precio — paridad web `text-xs sm:text-sm font-bold text-text-primary`.
   price: {
-    fontSize: typography.fontSize.xs,
+    fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
@@ -198,6 +209,48 @@ const productCardStyles = StyleSheet.create({
     fontFamily: typography.fontFamily,
     lineHeight: 14,
     marginTop: 1,
+  },
+  addToCartBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  addToCartBtnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.92 }],
+  },
+  addToCartBtnDisabled: {
+    backgroundColor: colorScales.gray[200],
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  cartIconContainer: {
+    position: 'relative',
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plusBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    width: 12,
+    height: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary,
   },
 });
 
@@ -316,10 +369,13 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing[3],
     paddingVertical: spacing[3],
-    paddingHorizontal: spacing[2],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
+    paddingHorizontal: spacing[3],
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: borderRadius.lg, // rounded-xl web
+    marginBottom: spacing[2], // gap-2 web
   },
   flex1: { flex: 1 },
   variantName: {
@@ -758,6 +814,93 @@ const s = StyleSheet.create({
   discountSection: {
     marginTop: spacing[4],
   },
+  // ─── VariantPicker — Modal centrado (paridad web) ────────────────────────
+  // Reemplaza el BottomSheet anterior. Layout replica `fixed inset-0 z-50
+  // flex items-center justify-center` de apps/frontend pos-variant-selector.
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing[4],
+  },
+  modalBackdropLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 448, // web max-w-md (28rem = 448px)
+    maxHeight: '80%',
+    backgroundColor: colors.card,
+    borderRadius: 16, // rounded-2xl web
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    overflow: 'hidden',
+    // shadow-2xl web (~25px blur, 10% black)
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    paddingHorizontal: spacing[5],
+    paddingVertical: spacing[4],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  variantListContent: {
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[3],
+  },
+  variantRowPressed: {
+    backgroundColor: colorScales.gray[50],
+    borderColor: colors.primary,
+  },
+  variantRowDisabled: {
+    opacity: 0.5,
+  },
+  // Thumbnail 56×56 (paridad web `w-14 h-14 rounded-lg bg-muted/50`).
+  variantThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  variantThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  // Precio compareAt (line-through) — paridad web `text-[10px] text-text-muted line-through`.
+  variantComparePrice: {
+    fontSize: 10,
+    color: colorScales.gray[400],
+    textDecorationLine: 'line-through',
+  },
 });
 
 async function searchCustomers(query: string): Promise<PosCustomer[]> {
@@ -863,9 +1006,11 @@ function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary
 const ProductCard = ({
   product,
   onPress,
+  width,
 }: {
   product: Product;
   onPress: (product: Product) => void;
+  width: number;
 }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const [pressed, setPressed] = useState(false);
@@ -951,6 +1096,7 @@ const ProductCard = ({
         onPressOut={isUnavailable ? undefined : handlePressOut}
         style={[
           productCardStyles.card,
+          { width, height: width + 92 },
           pressed && productCardStyles.cardPressed,
           isUnavailable && { opacity: 0.6 },
         ]}
@@ -995,13 +1141,15 @@ const ProductCard = ({
         </View>
 
         {/* Product Name — 2 líneas con line-clamp-2 (paridad web) */}
-        <Text
-          style={[productCardStyles.name, pressed && productCardStyles.namePressed]}
-          numberOfLines={2}
-          ellipsizeMode="tail"
-        >
-          {product.name}
-        </Text>
+        <View style={productCardStyles.nameContainer}>
+          <Text
+            style={[productCardStyles.name, pressed && productCardStyles.namePressed]}
+            numberOfLines={2}
+            ellipsizeMode="tail"
+          >
+            {product.name}
+          </Text>
+        </View>
 
         {/* Description — oculta en mobile (paridad web `hidden sm:block`) */}
 
@@ -1034,6 +1182,25 @@ const ProductCard = ({
               </Text>
             )}
           </View>
+
+          {/* Dynamic round add-to-cart button */}
+          <Pressable
+            style={({ pressed: btnPressed }) => [
+              productCardStyles.addToCartBtn,
+              btnPressed && productCardStyles.addToCartBtnPressed,
+              isUnavailable && productCardStyles.addToCartBtnDisabled,
+            ]}
+            onPress={isUnavailable ? undefined : () => onPress(product)}
+          >
+            <View style={productCardStyles.cartIconContainer}>
+              <Icon name="shopping-cart" size={13} color={isUnavailable ? colorScales.gray[400] : '#FFFFFF'} />
+              {!isUnavailable && (
+                <View style={productCardStyles.plusBadge}>
+                  <Icon name="plus" size={8} color={colors.primary} />
+                </View>
+              )}
+            </View>
+          </Pressable>
         </View>
 
         {/* Bottom row (SKU + + button) — ELIMINADO en mobile.
@@ -1055,17 +1222,42 @@ const VariantPicker = ({
   onSelect: (variant: ProductVariant) => void;
   onClose: () => void;
 }) => {
-  if (!product) return null;
+  if (!product || !visible) return null;
 
+  // Paridad web (pos-variant-selector.component.ts):
+  //   <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+  //     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+  //     <div class="relative bg-surface rounded-2xl shadow-2xl border w-full max-w-md max-h-[80vh]">
+  //       <header> + <variant-list>
+  // Mobile replica con position absolute (RN Web soporta fixed/absolute vía styles).
   return (
-    <BottomSheet visible={visible} onClose={onClose} snapPoint="partial" scrollable={false}>
-      <View style={[s.containerPad, s.sheetFlex]}>
-        <Text style={s.sectionTitle}>Seleccionar Variante</Text>
-        <Text style={s.sectionSubtitle}>{product.name}</Text>
+    <View style={s.modalBackdrop} pointerEvents="auto">
+      {/* Backdrop clickeable cierra modal (parity web `(click)="onBackdropClick"`). */}
+      <Pressable style={s.modalBackdropLayer} onPress={onClose} />
+      {/* Contenido del modal — stopPropagation evita cierre al click interno. */}
+      <View style={s.modalContent}>
+        {/* Header */}
+        <View style={s.modalHeader}>
+          <View style={s.flex1}>
+            <Text style={s.sectionTitle}>Seleccionar variante</Text>
+            <Text style={s.sectionSubtitle} numberOfLines={1}>{product.name}</Text>
+          </View>
+          <Pressable
+            onPress={onClose}
+            style={({ pressed }) => [s.modalCloseBtn, pressed && { opacity: 0.7 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Cerrar selector de variante"
+          >
+            <Icon name="x" size={18} color={colorScales.gray[500]} />
+          </Pressable>
+        </View>
+
+        {/* Variant List — parity web `@for (variant of variants())`. */}
         <FlatList
           data={product.product_variants || []}
           keyExtractor={(item) => item.id.toString()}
           style={s.sheetFlex}
+          contentContainerStyle={s.variantListContent}
           renderItem={({ item }) => {
             const hasSale = item.is_on_sale === true && item.sale_price != null;
             const displayPrice = hasSale ? item.sale_price! : (item.price_override != null ? item.price_override : product.final_price);
@@ -1076,14 +1268,46 @@ const VariantPicker = ({
             return (
               <Pressable
                 onPress={() => onSelect(item)}
+                disabled={isUnavailable}
                 style={({ pressed }) => [
                   s.variantRow,
-                  pressed ? { backgroundColor: colorScales.gray[50] } : undefined,
+                  pressed && !isUnavailable ? s.variantRowPressed : undefined,
+                  isUnavailable ? s.variantRowDisabled : undefined,
                 ]}
               >
+                {/* Thumbnail 56×56 — paridad web `w-14 h-14 rounded-lg bg-muted/50`.
+                    El backend POS devuelve `variant.image_url` plano (NO `image.url`),
+                    así que ese campo es la fuente de verdad. Si está ausente,
+                    fallback al join `variant.image?.url` (forma legacy), luego al
+                    producto padre, y por último ícono package. */}
+                <View style={s.variantThumb}>
+                  {item.image_url ? (
+                    <Image
+                      source={{ uri: item.image_url }}
+                      style={s.variantThumbImg}
+                      resizeMode="cover"
+                    />
+                  ) : item.image?.url ? (
+                    <Image
+                      source={{ uri: item.image.url }}
+                      style={s.variantThumbImg}
+                      resizeMode="cover"
+                    />
+                  ) : product.image_url ? (
+                    <Image
+                      source={{ uri: product.image_url }}
+                      style={s.variantThumbImg}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Icon name="package" size={20} color={colorScales.gray[400]} />
+                  )}
+                </View>
+
+                {/* Variant Info */}
                 <View style={s.flex1}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={s.variantName}>
+                    <Text style={s.variantName} numberOfLines={1}>
                       {item.name || item.attributes || item.sku}
                     </Text>
                     {hasSale && (
@@ -1092,13 +1316,15 @@ const VariantPicker = ({
                   </View>
                   <Text style={s.skuText}>SKU: {item.sku}</Text>
                 </View>
+
+                {/* Price & Stock */}
                 <View style={s.itemsEnd}>
                   {hasSale && comparePrice != null ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                       <Text style={[s.variantPrice, { color: colors.error }]}>
                         {formatCurrency(displayPrice)}
                       </Text>
-                      <Text style={{ fontSize: 10, color: colorScales.gray[400], textDecorationLine: 'line-through' }}>
+                      <Text style={s.variantComparePrice}>
                         {formatCurrency(comparePrice)}
                       </Text>
                     </View>
@@ -1110,7 +1336,9 @@ const VariantPicker = ({
                   {isUnavailable ? (
                     <Text style={[s.outOfStockText, { color: colors.error }]}>Agotado</Text>
                   ) : (
-                    <Text style={[s.stockText, { color: colorScales.gray[500] }]}>Stock: {item.stock_quantity}</Text>
+                    <Text style={[s.stockText, { color: colorScales.gray[500] }]}>
+                      Stock: {item.stock_quantity}
+                    </Text>
                   )}
                 </View>
               </Pressable>
@@ -1119,7 +1347,7 @@ const VariantPicker = ({
           ItemSeparatorComponent={() => <View style={s.separator} />}
         />
       </View>
-    </BottomSheet>
+    </View>
   );
 };
 
@@ -2033,7 +2261,22 @@ const PosLoaderSpinner = () => {
 };
 
 const PosScreen = () => {
+  const { width: windowWidth } = useResponsive();
   const [search, setSearch] = useState('');
+
+  const numColumns = useMemo(() => {
+    if (windowWidth < 640) return 2;
+    if (windowWidth < 768) return 3;
+    if (windowWidth < 1024) return 4;
+    if (windowWidth < 1280) return 5;
+    return 6;
+  }, [windowWidth]);
+
+  const cardWidth = useMemo(() => {
+    const totalGaps = (numColumns - 1) * GRID_COLUMN_GAP;
+    const padding = GRID_HORIZONTAL_PADDING * 2;
+    return (windowWidth - padding - totalGaps) / numColumns;
+  }, [windowWidth, numColumns]);
   const [showVariants, setShowVariants] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showCart, setShowCart] = useState(false);
@@ -2046,6 +2289,25 @@ const PosScreen = () => {
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
+  // Cash register modals (paridad web `pos-header-dropdown.component`).
+  const [showCashOpenModal, setShowCashOpenModal] = useState(false);
+  const [showCashCloseModal, setShowCashCloseModal] = useState(false);
+  const [showCashMovementModal, setShowCashMovementModal] = useState(false);
+  const [showCashDetailModal, setShowCashDetailModal] = useState(false);
+  // Modal-resumen "Crear orden" — paridad web `pos-order-create-modal`.
+  // Aparece antes de persistir el borrador (paridad del annotation 5 del POS).
+  const [showOrderCreateModal, setShowOrderCreateModal] = useState(false);
+
+  // Sesión activa de caja — query al backend y mirror en el store global.
+  const { data: cashSession } = useQuery({
+    queryKey: ['cash-session-active'],
+    queryFn: () => CashRegisterService.getActiveSession(),
+    refetchOnWindowFocus: true,
+  });
+  const setActiveCashSession = useCashRegisterStore((s) => s.setActiveSession);
+  useEffect(() => {
+    setActiveCashSession(cashSession ?? null);
+  }, [cashSession, setActiveCashSession]);
 
   // Cierra TODOS los modales del checkout flow. Útil cuando el usuario
   // presiona X en cualquier paso del flujo y quiere volver limpio a la
@@ -2056,11 +2318,40 @@ const PosScreen = () => {
     setShowShippingModal(false);
     setShowCustomItemModal(false);
     setShowCustomerModal(false);
+    setShowOrderCreateModal(false);
   }, []);
-  const [activeFilters, setActiveFilters] = useState({
+  const [activeFilters, setActiveFilters] = useState<{
+    category_id: string;
+    brand_id: string;
+    min_price: string;
+    max_price: string;
+    in_stock: boolean;
+    sort_by: '' | 'name' | 'price' | 'stock' | 'createdAt';
+    sort_order: 'asc' | 'desc';
+  }>({
     category_id: '',
     brand_id: '',
+    min_price: '',
+    max_price: '',
+    in_stock: false,
+    sort_by: '',
+    sort_order: 'asc',
   });
+
+  /**
+   * Número de filtros activos para pintar la badge sobre el botón filter.
+   * Paridad web `activeFiltersCount` getter en `pos-product-search.component.ts`.
+   */
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (activeFilters.category_id) n++;
+    if (activeFilters.brand_id) n++;
+    if (activeFilters.min_price) n++;
+    if (activeFilters.max_price) n++;
+    if (activeFilters.in_stock) n++;
+    if (activeFilters.sort_by) n++;
+    return n;
+  }, [activeFilters]);
   const [orderNumber, setOrderNumber] = useState('');
   const [receiptData, setReceiptData] = useState<{
     items: any[];
@@ -2084,6 +2375,14 @@ const PosScreen = () => {
         limit: 50,
         state: 'active',
         include_variants: true,
+        // Paridad web `pos-product-search.component` — el backend actual
+        // puede ignorar min_price/max_price/in_stock/sort_by (DTO no los
+        // declara); la app aplica fallback local en `productList` abajo.
+        min_price: activeFilters.min_price ? Number(activeFilters.min_price) : undefined,
+        max_price: activeFilters.max_price ? Number(activeFilters.max_price) : undefined,
+        in_stock: activeFilters.in_stock || undefined,
+        sort_by: activeFilters.sort_by || undefined,
+        sort_order: activeFilters.sort_by ? activeFilters.sort_order : undefined,
       };
 
       if (search) {
@@ -2104,10 +2403,78 @@ const PosScreen = () => {
     },
   });
 
+  /**
+   * Fallback cliente para los filtros que el backend actual no aplica:
+   * - inStock
+   * - minPrice / maxPrice
+   * - sortBy + sortOrder
+   *
+   * El día que el backend respete estos params, este bloque se mantiene
+   * inerte (no rompe nada). Paridad 1:1 con el comportamiento web.
+   */
   const productList = useMemo(() => {
     if (!products) return [];
-    return Array.isArray(products) ? products : (products as any).data || [];
-  }, [products]);
+    const raw = Array.isArray(products) ? products : (products as any).data || [];
+    let list = raw;
+
+    // Stock filter — backend puede no aplicar.
+    if (activeFilters.in_stock) {
+      list = list.filter((p: Product) => {
+        if (p.product_variants?.length) {
+          return p.product_variants.some((v) => (v.stock_quantity ?? 0) > 0);
+        }
+        return (p.stock_quantity ?? 0) > 0;
+      });
+    }
+
+    // Price range filter — backend puede no aplicar.
+    const minP = activeFilters.min_price ? Number(activeFilters.min_price) : undefined;
+    const maxP = activeFilters.max_price ? Number(activeFilters.max_price) : undefined;
+    if (minP !== undefined || maxP !== undefined) {
+      list = list.filter((p: Product) => {
+        const price = Number(p.final_price ?? p.base_price ?? 0);
+        if (minP !== undefined && price < minP) return false;
+        if (maxP !== undefined && price > maxP) return false;
+        return true;
+      });
+    }
+
+    // Sort.
+    if (activeFilters.sort_by) {
+      const dir = activeFilters.sort_order === 'desc' ? -1 : 1;
+      const sorted = [...list].sort((a: Product, b: Product) => {
+        switch (activeFilters.sort_by) {
+          case 'name':
+            return dir * (a.name || '').localeCompare(b.name || '');
+          case 'price':
+            return (
+              dir *
+              (Number(a.final_price ?? a.base_price ?? 0) -
+                Number(b.final_price ?? b.base_price ?? 0))
+            );
+          case 'stock': {
+            const stockA = a.product_variants?.length
+              ? Math.max(...a.product_variants.map((v) => v.stock_quantity ?? 0))
+              : (a.stock_quantity ?? 0);
+            const stockB = b.product_variants?.length
+              ? Math.max(...b.product_variants.map((v) => v.stock_quantity ?? 0))
+              : (b.stock_quantity ?? 0);
+            return dir * (stockA - stockB);
+          }
+          case 'createdAt':
+            return (
+              dir *
+              (new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+            );
+          default:
+            return 0;
+        }
+      });
+      list = sorted;
+    }
+
+    return list;
+  }, [products, activeFilters]);
 
   const handleProductPress = useCallback(
     (product: Product) => {
@@ -2249,15 +2616,15 @@ const PosScreen = () => {
     useCartStore.getState().addCustomItem(data);
   }, []);
 
-  // "Crear" — paridad web: abre `pos-order-create-modal` (fulfillment + KDS
-  // guard). En Fase 1 sólo se valida el carrito y se notifica; la lógica
-  // completa con selector consumo/entrega + KDS fire se implementa en Fase 4.
+  // "Crear" — paridad web: abre `pos-order-create-modal` (resumen + cliente).
+  // El modal dispara el POST contra `OrderService.processPosPayment` con
+  // `requires_payment: false` (mismo path que el "Guardar" del payment modal).
   const handleCreate = useCallback(() => {
     if (summary.totalItems === 0) {
       toastWarning('El carrito está vacío');
       return;
     }
-    toastWarning('Próximamente: Crear pedido (fulfillment + KDS)');
+    setShowOrderCreateModal(true);
   }, [summary.totalItems]);
 
   // CTA primario del footer — despacha según el modo activo.
@@ -2317,6 +2684,14 @@ const PosScreen = () => {
         onOpenCustomer={() => setShowCustomerModal(true)}
         onClearCustomer={handleClearCustomer}
         onChangeMode={handleChangeMode}
+        cashSession={cashSession ?? null}
+        // TODO: leer de store_settings (feature flag `cash_register_enabled`).
+        // Mientras tanto asumimos habilitado — paridad con `cashRegisterEnabled()` web.
+        showCashOpenButton
+        onOpenCashRegister={() => setShowCashOpenModal(true)}
+        onOpenCashDetail={() => setShowCashDetailModal(true)}
+        onOpenCashMovement={() => setShowCashMovementModal(true)}
+        onOpenCashClose={() => setShowCashCloseModal(true)}
       />
 
       {/* Search Bar - Con filtros y cliente como web */}
@@ -2324,7 +2699,9 @@ const PosScreen = () => {
         onSearch={setSearch}
         onOpenFilters={() => setShowFilters(true)}
         onOpenAdd={() => setShowCustomerModal(true)}
-        selectedCustomer={null}
+        selectedCustomer={customer}
+        activeFiltersCount={activeFilterCount}
+        filtersOpen={showFilters}
       />
 
       {/* Product Grid - paridad web pos-product-selection.component */}
@@ -2363,9 +2740,10 @@ const PosScreen = () => {
         </View>
       ) : (
         <FlatList
+          key={`products-grid-${numColumns}`}
           data={productList}
           keyExtractor={(item) => item.id.toString()}
-          numColumns={2}
+          numColumns={numColumns}
           columnWrapperStyle={{ gap: GRID_COLUMN_GAP }}
           contentContainerStyle={{
             paddingTop: spacing[3],
@@ -2374,7 +2752,7 @@ const PosScreen = () => {
           }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
-            <ProductCard product={item} onPress={handleProductPress} />
+            <ProductCard product={item} onPress={handleProductPress} width={cardWidth} />
           )}
         />
       )}
@@ -2417,8 +2795,7 @@ const PosScreen = () => {
         }}
         onCreate={() => {
           setShowCartModal(false);
-          // TODO: abrir PosOrderCreateModal cuando el componente exista.
-          toastInfo('Crear pedido: módulo en desarrollo');
+          setShowOrderCreateModal(true);
         }}
         onShipping={() => {
           setShowCartModal(false);
@@ -2463,6 +2840,13 @@ const PosScreen = () => {
         }}
       />
 
+      {/* Order Create Modal — modal-resumen antes de persistir el borrador.
+          Paridad web: apps/frontend/.../pos-order-create-modal.component.ts */}
+      <PosOrderCreateModal
+        visible={showOrderCreateModal}
+        onClose={() => setShowOrderCreateModal(false)}
+      />
+
       {/* Success Modal */}
       <SuccessModal
         visible={showSuccess}
@@ -2475,7 +2859,7 @@ const PosScreen = () => {
       <PosFilterDropdown
         visible={showFilters}
         onClose={() => setShowFilters(false)}
-        onApplyFilters={(filters: any) => setActiveFilters(filters)}
+        onApplyFilters={(filters) => setActiveFilters(filters)}
         currentFilters={activeFilters}
       />
 
@@ -2515,6 +2899,30 @@ const PosScreen = () => {
           }
         }}
         onAdd={handleAddCustomItem}
+      />
+
+      {/* Cash Register Modals — paridad con `pos-header-dropdown.component.ts` web.
+          Los 4 modales leen/escriben del `useCashRegisterStore` y revalidan
+          `['cash-session-active']` al cerrarse para que el badge del header
+          refleje el nuevo estado de la sesión. */}
+      <PosCashOpenModal
+        visible={showCashOpenModal}
+        onClose={() => setShowCashOpenModal(false)}
+      />
+      <PosCashDetailModal
+        visible={showCashDetailModal}
+        onClose={() => setShowCashDetailModal(false)}
+        session={cashSession ?? null}
+      />
+      <PosCashMovementModal
+        visible={showCashMovementModal}
+        onClose={() => setShowCashMovementModal(false)}
+        session={cashSession ?? null}
+      />
+      <PosCashCloseModal
+        visible={showCashCloseModal}
+        onClose={() => setShowCashCloseModal(false)}
+        session={cashSession ?? null}
       />
     </View>
   );

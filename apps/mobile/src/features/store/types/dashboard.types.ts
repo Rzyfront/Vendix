@@ -29,8 +29,16 @@ export interface SalesSummary {
   average_order_value: number;
   total_units_sold: number;
   total_customers: number;
+  // Ganancia neta del período (Ingresos − Costos − Gastos). Web parity
+  // con apps/frontend store/dashboard: stat "Ganancias".
+  total_profit?: number;
+  // Gastos operativos del período (POS, compras, gastos varios). Web parity:
+  // stat "Gastos". Si el backend aún no expone el campo, llega undefined.
+  total_expenses?: number;
   revenue_growth?: number;
   orders_growth?: number;
+  profit_growth?: number;
+  expenses_growth?: number;
 }
 
 export interface SalesTrend {
@@ -70,4 +78,44 @@ export interface DateRange {
   start_date: string;
   end_date: string;
   preset?: DatePreset;
+}
+
+export interface SalesByProduct {
+  product_id: number;
+  product_name: string;
+  sku: string;
+  image_url?: string;
+  units_sold: number;
+  revenue: number;
+  average_price: number;
+  profit_margin?: number;
+}
+
+// Paridad con web: apps/frontend/.../sales-analytics.interface.ts → SalesByCategory
+export interface SalesByCategory {
+  category_id: number;
+  category_name: string;
+  units_sold: number;
+  revenue: number;
+  percentage_of_total: number;
+}
+
+// Paridad con web: apps/frontend/.../sales-analytics.interface.ts → SalesByCustomer
+export interface SalesByCustomer {
+  customer_id: number;
+  customer_name: string;
+  email: string;
+  total_orders: number;
+  total_spent: number;
+  average_order_value: number;
+  last_order_date: string | null;
+}
+
+// Paridad con web: apps/frontend/.../sales-analytics.interface.ts → SalesByPaymentMethod
+export interface SalesByPaymentMethod {
+  payment_method: string;
+  display_name: string;
+  transaction_count: number;
+  total_amount: number;
+  percentage: number;
 }

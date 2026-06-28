@@ -8,6 +8,7 @@ export interface StatsGridItem {
   value: string | number;
   icon?: ReactNode | string;
   description?: string;
+  descriptionColor?: string;
   iconBg?: string;
   iconColor?: string;
   trend?: { value: number; positive: boolean };
@@ -63,6 +64,7 @@ export function StatsGrid({ items, style }: StatsGridProps) {
               value={item.value}
               icon={item.icon}
               description={item.description}
+              descriptionColor={item.descriptionColor}
               iconBg={item.iconBg}
               iconColor={item.iconColor}
               trend={item.trend}

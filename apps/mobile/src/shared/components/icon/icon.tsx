@@ -425,6 +425,10 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   calculator: Calculator,
   wallet: Wallet,
   'bar-chart': BarChart3,
+  // lucide-react-native no tiene `BarChart3` (web-only); el visual es idéntico a
+  // `ChartBar` (4 barras verticales). Mantenemos el nombre web `bar-chart-3`
+  // en el iconMap para paridad con apps/frontend (lucide-react).
+  'bar-chart-3': ChartBar,
   settings: Settings,
   shield: Shield,
   bot: Bot,
@@ -808,15 +812,22 @@ interface IconProps {
   name: string;
   size?: number;
   color?: string;
+  strokeWidth?: number;
   style?: StyleProp<ViewStyle>;
 }
 
 export type IconName = keyof typeof iconMap;
 
-export function Icon({ name, size = 24, color = colors.text.primary, style }: IconProps) {
+export function Icon({
+  name,
+  size = 24,
+  color = colors.text.primary,
+  strokeWidth = 2,
+  style,
+}: IconProps) {
   const LucideIcon = iconMap[name];
   if (!LucideIcon) {
     return <View style={[{ width: size, height: size }, style]} />;
   }
-  return <LucideIcon size={size} color={color} strokeWidth={2} style={style} />;
+  return <LucideIcon size={size} color={color} strokeWidth={strokeWidth} style={style} />;
 }

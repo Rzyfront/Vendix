@@ -194,7 +194,7 @@ export default function Orders() {
   });
 
   const orders = data?.pages.flatMap((page) => page.data) ?? [];
-  const totalItems = data?.pages[0]?.meta?.total ?? orders.length;
+  const totalItems = data?.pages[0]?.pagination?.total ?? orders.length;
 
   // toastError fuera del render para evitar warning React cuando algo falle.
   useEffect(() => {
@@ -295,51 +295,56 @@ export default function Orders() {
               ]}
             />
 
-            {/* Search + OptionsDropdown + Sin envío — paridad web */}
-            <View style={styles.searchRow}>
-              <View style={styles.searchBar}>
-                <SearchBar
-                  value={search}
-                  onChangeText={setSearch}
-                  onClear={() => setSearch('')}
-                  placeholder="Buscar órdenes..."
+            {/* Search section — paridad web (orders-list.component.html)
+                Mobile layout (flex-col en web): Title arriba, search row abajo. */}
+            <View style={styles.searchSection}>
+              {/* Title count — paridad con orders-list.component.html línea 8-10
+                  Web mobile: text-[13px] font-bold text-gray-600 tracking-wide */}
+              <Text style={styles.titleCount}>
+                Órdenes ({totalItems})
+              </Text>
+
+              {/* Search + OptionsDropdown + Sin envío — paridad web */}
+              <View style={styles.searchRow}>
+                <View style={styles.searchBar}>
+                  <SearchBar
+                    value={search}
+                    onChangeText={setSearch}
+                    onClear={() => setSearch('')}
+                    placeholder="Buscar órdenes..."
+                  />
+                </View>
+
+                <OptionsDropdown
+                  filters={ORDER_FILTERS}
+                  actions={ORDER_ACTIONS}
+                  filterValues={filterValues}
+                  isLoading={ordersLoading}
+                  onFilterChange={handleFilterChange}
+                  onActionClick={handleActionClick}
+                  onClearAllFilters={handleClearAllFilters}
                 />
+
+                {/* Sin envío — toggle (paridad con orders-list.component.html línea 35) */}
+                <Pressable
+                  onPress={() => setMissingShipping((v) => !v)}
+                  hitSlop={4}
+                  style={({ pressed }) => [
+                    styles.missingShippingButton,
+                    missingShipping ? styles.missingShippingActive : styles.missingShippingInactive,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Icon name="package" size={14} color={missingShipping ? colorScales.amber[700] : colorScales.gray[500]} />
+                  <Text style={[
+                    styles.missingShippingText,
+                    missingShipping ? styles.missingShippingTextActive : styles.missingShippingTextInactive,
+                  ]}>
+                    Sin envío
+                  </Text>
+                </Pressable>
               </View>
-
-              <OptionsDropdown
-                filters={ORDER_FILTERS}
-                actions={ORDER_ACTIONS}
-                filterValues={filterValues}
-                isLoading={ordersLoading}
-                onFilterChange={handleFilterChange}
-                onActionClick={handleActionClick}
-                onClearAllFilters={handleClearAllFilters}
-              />
-
-              {/* Sin envío — toggle (paridad con orders-list.component.html línea 35) */}
-              <Pressable
-                onPress={() => setMissingShipping((v) => !v)}
-                hitSlop={4}
-                style={({ pressed }) => [
-                  styles.missingShippingButton,
-                  missingShipping ? styles.missingShippingActive : styles.missingShippingInactive,
-                  pressed && { opacity: 0.7 },
-                ]}
-              >
-                <Icon name="package" size={14} color={missingShipping ? colorScales.amber[700] : colorScales.gray[500]} />
-                <Text style={[
-                  styles.missingShippingText,
-                  missingShipping ? styles.missingShippingTextActive : styles.missingShippingTextInactive,
-                ]}>
-                  Sin envío
-                </Text>
-              </Pressable>
             </View>
-
-            {/* Title count — paridad con orders-list.component.html línea 9 */}
-            <Text style={styles.titleCount}>
-              Órdenes ({totalItems})
-            </Text>
           </View>
         }
         ListEmptyComponent={
@@ -379,12 +384,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  // Search section — paridad con orders-list.component.html
+  // Web mobile layout: flex-col → title (top) + search row (bottom).
+  searchSection: {
+    gap: spacing[2],
+    marginBottom: spacing[2],
+  },
   // Search row — paridad con orders-list.component.html línea 13-44
   searchRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing[2],
-    marginBottom: spacing[2],
   },
   searchBar: {
     flex: 1,
@@ -418,12 +428,12 @@ const styles = StyleSheet.create({
     color: colorScales.gray[500],
   },
   // Title count — paridad con orders-list.component.html línea 8-10
+  // Web mobile: text-[13px] font-bold text-gray-600 tracking-wide
   titleCount: {
-    fontSize: typography.fontSize.sm,
+    fontSize: 13,
     fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[600],
-    letterSpacing: 0.3,
-    marginBottom: spacing[2],
+    letterSpacing: 0.5,
   },
   loadingContainer: {
     alignItems: 'center',

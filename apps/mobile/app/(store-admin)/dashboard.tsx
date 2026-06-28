@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
-import { View, ScrollView, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
@@ -8,21 +8,27 @@ import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { PullToRefresh } from '@/shared/components/pull-to-refresh/pull-to-refresh';
+import { OptionsDropdown, type FilterConfig, type FilterValues } from '@/shared/components/options-dropdown/options-dropdown';
 import { toastError } from '@/shared/components/toast/toast.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { DashboardService, AnalyticsService } from '@/features/store/services';
 import type { DatePreset } from '@/features/store/types';
+import { DashboardTrendChart } from '@/features/store/components/dashboard-trend-chart';
+import { DashboardChannelPie } from '@/features/store/components/dashboard-channel-pie';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
-import { TrendChartFallback, ChannelListFallback } from '@/shared/components/chart/chart-fallback';
 
-const PRESETS: { label: string; value: DatePreset }[] = [
-  { label: 'Hoy', value: 'today' },
-  { label: 'Ayer', value: 'yesterday' },
-  { label: 'Esta Semana', value: 'thisWeek' },
-  { label: 'Semana Pasada', value: 'lastWeek' },
-  { label: 'Este Mes', value: 'thisMonth' },
-  { label: 'Mes Pasado', value: 'lastMonth' },
-  { label: 'Este Año', value: 'thisYear' },
+// Paridad exacta con web (dashboard.component.ts → presetOptions).
+// Se usa en el OptionsDropdown dentro del chart card header.
+const PRESET_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'today', label: 'Hoy' },
+  { value: 'yesterday', label: 'Ayer' },
+  { value: 'thisWeek', label: 'Esta Semana' },
+  { value: 'lastWeek', label: 'Semana Pasada' },
+  { value: 'thisMonth', label: 'Este Mes' },
+  { value: 'lastMonth', label: 'Mes Pasado' },
+  { value: 'thisYear', label: 'Este Año' },
+  { value: 'lastYear', label: 'Año Pasado' },
+  { value: 'custom', label: 'Personalizado' },
 ];
 
 const styles = StyleSheet.create({
@@ -34,33 +40,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[4],
     paddingTop: spacing[2],
     paddingBottom: spacing[6],
-  },
-  presetScroll: {
-    marginBottom: spacing[4],
-  },
-  presetActive: {
-    marginRight: spacing[2],
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-    backgroundColor: colors.primary,
-  },
-  presetInactive: {
-    marginRight: spacing[2],
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-    backgroundColor: colors.card,
-  },
-  presetTextActive: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colors.background,
-  },
-  presetTextInactive: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colors.text.primary,
   },
   loaderContainer: {
     alignItems: 'center',
@@ -75,25 +54,16 @@ const styles = StyleSheet.create({
   chartCard: {
     marginBottom: spacing[4],
   },
-  chartRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing[1],
-  },
-  chartLabel: {
-    fontSize: typography.fontSize.sm,
-    color: colors.text.secondary,
-  },
-  chartValue: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colors.text.primary,
+  // Web parity: p-4 — paridad con `<div class="p-4 flex-1">` del chart card body
+  chartBody: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[4],
   },
   alertsCard: {
     marginBottom: spacing[4],
   },
   alertsBody: {
+    padding: spacing[3],
     gap: spacing[2],
   },
   alertCallout: {
@@ -120,33 +90,6 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
     flex: 1,
-  },
-  chartContainer: {
-    minHeight: 120,
-  },
-  channelRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[3],
-    marginBottom: spacing[2],
-  },
-  channelDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  channelLabel: {
-    flex: 1,
-    fontSize: typography.fontSize.sm,
-    color: colors.text.primary,
-  },
-  channelValue: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colors.text.primary,
-  },
-  alertPressable: {
-    cursor: 'pointer',
   },
   quickLinksCard: {
     marginBottom: spacing[4],
@@ -233,7 +176,7 @@ const DashboardScreen = () => {
 
   const { data: trends, refetch: refetchTrends } = useQuery({
     queryKey: ['sales-trends', preset],
-    queryFn: () => AnalyticsService.getSalesTrends(dateRange),
+    queryFn: () => AnalyticsService.getSalesTrends(dateRange, 'day'),
   });
 
   const { data: stats, refetch: refetchStats } = useQuery({
@@ -257,14 +200,14 @@ const DashboardScreen = () => {
     setRefreshing(false);
   }, [refetchSummary, refetchTrends, refetchStats, refetchInventory]);
 
-  const chartData = useMemo(() => {
-    if (!trends?.length) return [];
-    return trends.map((t) => ({
-      x: t.period.slice(5),
-      revenue: t.revenue,
-      orders: t.orders,
-    }));
-  }, [trends]);
+  // Web parity: etiqueta legible del rango seleccionado (paridad con `dateRangeLabel` web)
+  const dateRangeLabel = useMemo(() => {
+    const fmt = (iso: string) => {
+      const d = new Date(iso + 'T12:00:00');
+      return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
+    };
+    return `${fmt(dateRange.start_date)} - ${fmt(dateRange.end_date)}`;
+  }, [dateRange]);
 
   const alerts = useMemo(() => {
     const items: {
@@ -323,19 +266,6 @@ const DashboardScreen = () => {
     return items;
   }, [stats, inventory]);
 
-  const channelChartData = useMemo(() => {
-    if (!channelData?.length) return null;
-    const channelColors: Record<string, string> = {
-      pos: colorScales.blue[400],
-      ecommerce: colorScales.green[400],
-    };
-    return channelData.slice(0, 3).map((c) => ({
-      value: c.revenue,
-      color: channelColors[c.channel.toLowerCase()] || colorScales.gray[400],
-      label: c.channel,
-    }));
-  }, [channelData]);
-
   const quickLinks = [
     { label: 'Resumen de Ventas', icon: 'trending-up', route: '/analytics/sales' },
     { label: 'Ventas por Producto', icon: 'package', route: '/analytics/products' },
@@ -346,6 +276,32 @@ const DashboardScreen = () => {
     { label: 'Compras', icon: 'shopping-bag', route: '/inventory/pop' },
   ];
 
+  // Paridad con web (dashboard.component.ts → dateFilters / dateFilterValues).
+  // OptionsDropdown para filtrar el período del chart — se muestra en el chart card header.
+  const dateFilters = useMemo<FilterConfig[]>(
+    () => [
+      {
+        key: 'preset',
+        label: 'Período',
+        type: 'select',
+        options: PRESET_OPTIONS,
+        placeholder: 'Seleccionar período',
+      },
+    ],
+    [],
+  );
+
+  const dateFilterValues = useMemo<FilterValues>(
+    () => ({ preset }),
+    [preset],
+  );
+
+  const onDateFilterChange = useCallback((values: FilterValues) => {
+    const next = values['preset'] as DatePreset | null;
+    if (!next) return;
+    setPreset(next);
+  }, []);
+
   // toastError fuera del render para evitar warning React.
   useEffect(() => {
     if (summaryError) toastError('Error cargando datos del dashboard');
@@ -355,22 +311,6 @@ const DashboardScreen = () => {
     <View style={styles.root}>
       <PullToRefresh refreshing={refreshing} onRefresh={onRefresh}>
         <View style={styles.inner}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
-            {PRESETS.map((p) => (
-              <Pressable
-                key={p.value}
-                onPress={() => setPreset(p.value)}
-                style={preset === p.value ? styles.presetActive : styles.presetInactive}
-              >
-                <Text
-                  style={preset === p.value ? styles.presetTextActive : styles.presetTextInactive}
-                >
-                  {p.label}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
           {summaryLoading ? (
             <View style={styles.loaderContainer}>
               <Spinner />
@@ -383,7 +323,7 @@ const DashboardScreen = () => {
                   label: 'Ingresos',
                   value: formatCurrency(summary.total_revenue),
                   icon: <Icon name="dollar-sign" size={14} color={colors.primary} />,
-                  iconBg: '#e8f8f0',
+                  iconBg: `${colors.primary}1A`,
                   iconColor: colors.primary,
                   trend:
                     summary.revenue_growth != null
@@ -391,31 +331,37 @@ const DashboardScreen = () => {
                       : undefined,
                 },
                 {
+                  label: 'Ganancias',
+                  value: formatCurrency(summary.total_profit ?? 0),
+                  icon: <Icon name="trending-up" size={14} color={colors.success} />,
+                  iconBg: `${colors.success}1A`,
+                  iconColor: colors.success,
+                  trend:
+                    summary.profit_growth != null
+                      ? { value: summary.profit_growth, positive: summary.profit_growth >= 0 }
+                      : undefined,
+                },
+                {
                   label: 'Órdenes',
                   value: summary.total_orders.toLocaleString(),
-                  icon: <Icon name="shopping-cart" size={14} color={colorScales.blue[500]} />,
-                  iconBg: colorScales.blue[50],
-                  iconColor: colorScales.blue[500],
+                  icon: <Icon name="shopping-cart" size={14} color={colorScales.emerald[600]} />,
+                  iconBg: `${colorScales.emerald[600]}1A`,
+                  iconColor: colorScales.emerald[600],
                   trend:
                     summary.orders_growth != null
                       ? { value: summary.orders_growth, positive: summary.orders_growth >= 0 }
                       : undefined,
                 },
                 {
-                  label: 'Ticket Prom.',
-                  value: formatCurrency(summary.average_order_value || 0),
-                  icon: <Icon name="receipt" size={14} color={colorScales.blue[600]} />,
-                  iconBg: colorScales.blue[50],
-                  iconColor: colorScales.blue[600],
-                  description: `${summary.total_units_sold || 0} uds. vendidas`,
-                },
-                {
-                  label: 'Clientes',
-                  value: (summary.total_customers || 0).toLocaleString(),
-                  icon: <Icon name="users" size={14} color={colorScales.amber[600]} />,
-                  iconBg: colorScales.amber[50],
-                  iconColor: colorScales.amber[600],
-                  description: 'clientes únicos',
+                  label: 'Gastos',
+                  value: formatCurrency(summary.total_expenses ?? 0),
+                  icon: <Icon name="credit-card" size={14} color={colorScales.cyan[500]} />,
+                  iconBg: `${colorScales.cyan[500]}1A`,
+                  iconColor: colorScales.cyan[500],
+                  trend:
+                    summary.expenses_growth != null
+                      ? { value: summary.expenses_growth, positive: summary.expenses_growth >= 0 }
+                      : undefined,
                 },
               ]}
             />
@@ -423,26 +369,40 @@ const DashboardScreen = () => {
             <EmptyState title="Sin datos" description="No hay datos de ventas" />
           )}
 
+          {/* Tendencia de Ventas — paridad con web (smooth area + bar dual-axis) */}
           <Card style={styles.chartCard}>
-            <Card.Header title="Tendencia de Ventas" />
-            <Card.Body>
-              {chartData.length > 0 ? (
-                <View style={styles.chartContainer}>
-                  <TrendChartFallback data={chartData} />
-                </View>
+            <Card.Header
+              title="Tendencia de Ventas"
+              subtitle={dateRangeLabel}
+              right={
+                <OptionsDropdown
+                  filters={dateFilters}
+                  filterValues={dateFilterValues}
+                  filtersTitle="Período"
+                  showActions={false}
+                  debounceMs={0}
+                  onFilterChange={onDateFilterChange}
+                />
+              }
+            />
+            <Card.Body style={styles.chartBody}>
+              {trends && trends.length > 0 ? (
+                <DashboardTrendChart data={trends} />
               ) : (
-                <EmptyState title="Sin datos" description="Sin datos de tendencia" />
+                <EmptyState title="No hay datos de ventas" description="Realiza ventas para ver las tendencias" />
               )}
             </Card.Body>
           </Card>
 
-          {channelChartData && (
+          {/* Ventas por Canal — paridad con web (rose pie chart) */}
+          {channelData && channelData.length > 0 && (
             <Card style={styles.chartCard}>
-              <Card.Header title="Ventas por Canal" />
-              <Card.Body>
-                <View style={styles.chartContainer}>
-                  <ChannelListFallback data={channelChartData} />
-                </View>
+              <Card.Header
+                title="Ventas por Canal"
+                subtitle="Distribución del período"
+              />
+              <Card.Body style={styles.chartBody}>
+                <DashboardChannelPie channels={channelData} />
               </Card.Body>
             </Card>
           )}

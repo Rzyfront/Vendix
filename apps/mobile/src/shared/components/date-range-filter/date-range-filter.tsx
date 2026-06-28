@@ -1,8 +1,17 @@
-import { useState, useCallback } from 'react';
-import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
-import { Modal } from '@/shared/components/modal/modal';
+import { useState, useCallback, useMemo, useRef } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Dimensions,
+  type View as ViewType,
+} from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
-import { colors, spacing, borderRadius, typography, colorScales } from '@/shared/theme';
+import { DatePickerField } from '@/shared/components/date-picker-field/date-picker-field';
+import { colors, colorScales, spacing, borderRadius, typography, shadows } from '@/shared/theme';
 
 // ─────────────────────────────────────────────
 // Tipos — paridad con web (DateRangeFilter en
@@ -29,6 +38,12 @@ export interface DateRangeFilterValue {
 interface DateRangeFilterProps {
   value: DateRangeFilterValue;
   onChange: (value: DateRangeFilterValue) => void;
+  /**
+   * Muestra el date input inline (al lado del selector de preset).
+   * Default `true`. Pasar `false` cuando la pantalla ya tiene sus propios
+   * DatePickerField para DESDE/HASTA y solo quiere el selector de período.
+   */
+  showDateInput?: boolean;
 }
 
 const PRESETS: { value: DatePreset; label: string }[] = [
@@ -42,11 +57,28 @@ const PRESETS: { value: DatePreset; label: string }[] = [
   { value: 'lastYear', label: 'Año Pasado' },
 ];
 
+// ── Layout tokens (paridad con options-dropdown) ─────────────────────────
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_MARGIN = 12;
+const POPOVER_WIDTH = Math.min(220, SCREEN_WIDTH - SCREEN_MARGIN * 2);
+const POPOVER_GAP = 4;
+
 const styles = StyleSheet.create({
-  // Trigger — web parity: input-style pill, sm size
-  trigger: {
+  // Container — paridad web: flex row (sm:flex-row items-center gap-3).
+  // Sin `flex: 1` (que estiraría verticalmente dentro del column flex del padre):
+  // usamos width 100% para que ocupe todo el ancho del periodField.
+  container: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing[2],
+    width: '100%',
+    flexWrap: 'wrap',
+  },
+  // Selector pill — web parity: app-selector size="sm"  →  h-8 rounded-md border
+  selector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: spacing[2],
     paddingHorizontal: spacing[3],
     height: 36,
@@ -54,97 +86,100 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.cardBorder,
     backgroundColor: colors.card,
+    minWidth: 110,
+    flexShrink: 1,
+    flexGrow: 1,
   },
-  triggerLabel: {
+  selectorPressed: { opacity: 0.85 },
+  selectorText: {
+    flex: 1,
     fontSize: typography.fontSize.sm,
     color: colors.text.primary,
     fontWeight: typography.fontWeight.medium,
   },
-  // Modal body
-  sectionTitle: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.semibold,
-    color: colorScales.gray[900],
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[4],
-    paddingBottom: spacing[2],
-  },
-  presetGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing[2],
-    paddingHorizontal: spacing[4],
-  },
-  presetChip: {
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
+  // Annotation 1: badge "Hoy 28/06" cuando preset=thisMonth.
+  todayBadge: {
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
     borderRadius: borderRadius.full,
+    backgroundColor: colorScales.green[50],
+    borderWidth: 1,
+    borderColor: colorScales.green[200],
+  },
+  todayBadgeText: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.green[700],
+  },
+  // Date input wrapper — envuelve el DatePickerField reutilizable.
+  // flexBasis + flexGrow (sin `flex: 1`) para que tome el resto del row en horizontal
+  // sin estirarse verticalmente dentro del column flex del padre.
+  dateInput: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: 130,
+    minWidth: 110,
+  },
+  // Popover (NO fullScreen modal — transparente, posicionado bajo el trigger)
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.30)',
+  },
+  popover: {
+    position: 'absolute',
+    width: POPOVER_WIDTH,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
     borderWidth: 1,
     borderColor: colors.cardBorder,
-    backgroundColor: colors.card,
+    overflow: 'hidden',
+    ...shadows.lg,
   },
-  presetChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  presetChipText: {
-    fontSize: typography.fontSize.sm,
-    color: colors.text.primary,
-    fontWeight: typography.fontWeight.medium,
-  },
-  presetChipTextActive: {
-    color: colors.background,
-  },
-  dateRow: {
+  popoverHeader: {
     flexDirection: 'row',
-    gap: spacing[3],
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[2],
-  },
-  dateField: {
-    flex: 1,
-  },
-  dateLabel: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[500],
-    marginBottom: spacing[1],
-    fontWeight: typography.fontWeight.medium,
-  },
-  dateInput: {
-    height: 40,
-    borderWidth: 1,
-    borderColor: colors.inputBorder,
-    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: spacing[3],
-    backgroundColor: colors.inputBg,
-    fontSize: typography.fontSize.sm,
-    color: colors.text.primary,
+    paddingVertical: spacing[2.5],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
   },
-  footer: {
+  popoverTitle: {
+    fontSize: 11,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  popoverList: {
+    paddingVertical: spacing[1],
+    maxHeight: 320,
+  },
+  presetItem: {
     flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[3],
     gap: spacing[2],
   },
-  applyButton: {
-    flex: 1,
-    height: 44,
-    borderRadius: borderRadius.md,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+  presetItemPressed: {
+    backgroundColor: colorScales.gray[50],
   },
-  applyButtonText: {
+  presetItemActive: {
+    backgroundColor: colors.primaryLight,
+  },
+  presetItemLabel: {
+    flex: 1,
     fontSize: typography.fontSize.sm,
+    color: colors.text.primary,
+    fontWeight: typography.fontWeight.medium,
+  },
+  presetItemLabelActive: {
+    color: colors.primary,
     fontWeight: typography.fontWeight.semibold,
-    color: colors.background,
   },
 });
-
-function fmtDate(iso: string): string {
-  // YYYY-MM-DD → DD/MM/YYYY (corto, mobile-friendly)
-  if (!iso || iso.length < 10) return iso;
-  const [y, m, d] = iso.split('-');
-  return `${d}/${m}/${y}`;
-}
 
 function presetLabel(preset: DatePreset): string {
   return PRESETS.find((p) => p.value === preset)?.label ?? 'Personalizado';
@@ -193,111 +228,155 @@ function presetToDateRange(preset: DatePreset): DateRangeFilterValue | null {
   return { start_date: toIso(start), end_date: toIso(end), preset };
 }
 
-export function DateRangeFilter({ value, onChange }: DateRangeFilterProps) {
+interface TriggerPos { x: number; y: number; width: number; height: number; }
+
+export function DateRangeFilter({ value, onChange, showDateInput = true }: DateRangeFilterProps) {
   const [open, setOpen] = useState(false);
-  const [draftPreset, setDraftPreset] = useState<DatePreset>(value.preset);
-  const [draftStart, setDraftStart] = useState<string>(value.start_date);
-  const [draftEnd, setDraftEnd] = useState<string>(value.end_date);
+  const [triggerPos, setTriggerPos] = useState<TriggerPos | null>(null);
+  const triggerRef = useRef<ViewType>(null);
 
-  const openModal = useCallback(() => {
-    setDraftPreset(value.preset);
-    setDraftStart(value.start_date);
-    setDraftEnd(value.end_date);
-    setOpen(true);
-  }, [value]);
-
-  const onPresetSelect = useCallback((preset: DatePreset) => {
-    setDraftPreset(preset);
-    const range = presetToDateRange(preset);
-    if (range) {
-      setDraftStart(range.start_date);
-      setDraftEnd(range.end_date);
-    }
-  }, []);
-
-  const onApply = useCallback(() => {
-    onChange({
-      start_date: draftStart,
-      end_date: draftEnd || draftStart,
-      preset: draftPreset,
+  const onOpen = useCallback(() => {
+    if (open) { setOpen(false); return; }
+    triggerRef.current?.measureInWindow((x, y, width, height) => {
+      setTriggerPos({ x, y, width, height });
+      setOpen(true);
     });
-    setOpen(false);
-  }, [draftPreset, draftStart, draftEnd, onChange]);
+  }, [open]);
 
-  const triggerLabel =
-    value.preset === 'custom' || value.start_date !== value.end_date
-      ? `${fmtDate(value.start_date)} → ${fmtDate(value.end_date)}`
-      : presetLabel(value.preset);
+  const onClose = useCallback(() => setOpen(false), []);
+
+  // Dropdown positioning — paridad con options-dropdown
+  const popoverPos = useMemo(() => {
+    if (!open || !triggerPos) return null;
+    let left = triggerPos.x;
+    if (left + POPOVER_WIDTH > SCREEN_WIDTH - SCREEN_MARGIN) {
+      left = SCREEN_WIDTH - POPOVER_WIDTH - SCREEN_MARGIN;
+    }
+    if (left < SCREEN_MARGIN) left = SCREEN_MARGIN;
+    const top = triggerPos.y + triggerPos.height + POPOVER_GAP;
+    return { top, left };
+  }, [open, triggerPos]);
+
+  const onPresetSelect = useCallback(
+    (preset: DatePreset) => {
+      const range = presetToDateRange(preset);
+      if (range) {
+        onChange(range);
+        setOpen(false);
+      }
+    },
+    [onChange],
+  );
+
+  const onDateChange = useCallback(
+    (date: string) => {
+      // Web parity: web input.date define start_date=end_date=date y preserva el preset.
+      onChange({
+        start_date: date,
+        end_date: date,
+        preset: value.preset === 'custom' ? value.preset : value.preset,
+      });
+    },
+    [onChange, value.preset],
+  );
+
+  // Annotation 1 (web parity): el pill muestra el NOMBRE del preset (no el rango
+  // completo, eso ya lo refleja el date input). Cuando el preset es `thisMonth`,
+  // además se agrega un badge "Hoy dd/mm" porque end_date = hoy (la persona
+  // eligió "este mes, hasta hoy").
+  const presetName = presetLabel(value.preset);
+  const todayLabel = useMemo(() => {
+    if (value.preset !== 'thisMonth') return null;
+    const t = new Date();
+    const dd = String(t.getDate()).padStart(2, '0');
+    const mm = String(t.getMonth() + 1).padStart(2, '0');
+    return `Hoy ${dd}/${mm}`;
+  }, [value.preset]);
 
   return (
-    <>
+    <View style={styles.container}>
+      {/* Preset selector — abre popover (NO fullScreen modal) */}
       <Pressable
-        style={({ pressed }) => [styles.trigger, pressed && { opacity: 0.7 }]}
-        onPress={openModal}
+        ref={triggerRef}
+        onPress={onOpen}
         hitSlop={4}
+        accessibilityLabel="Selector de período"
+        style={({ pressed }) => [styles.selector, pressed && styles.selectorPressed]}
       >
         <Icon name="calendar" size={14} color={colors.text.secondary} />
-        <Text style={styles.triggerLabel} numberOfLines={1}>
-          {triggerLabel}
+        <Text style={styles.selectorText} numberOfLines={1}>
+          {presetName}
         </Text>
+        {todayLabel && (
+          <View style={styles.todayBadge}>
+            <Text style={styles.todayBadgeText}>{todayLabel}</Text>
+          </View>
+        )}
         <Icon name="chevron-down" size={12} color={colors.text.secondary} />
       </Pressable>
 
+      {/* Date input — paridad web: <app-input type="date">.
+          Usa DatePickerField reutilizable (pill + popover con presets + date input).
+          Oculto cuando showDateInput={false} (la pantalla ya tiene sus propios
+          DatePickerField para DESDE/HASTA). */}
+      {showDateInput && (
+        <View style={styles.dateInput}>
+          <DatePickerField
+            value={value.start_date}
+            onChange={onDateChange}
+            accessibilityLabel="Fecha desde (selector de período)"
+          />
+        </View>
+      )}
+
+      {/* Popover — transparente sobre el contenido, NO modal fullScreen */}
       <Modal
         visible={open}
-        onClose={() => setOpen(false)}
-        title="Seleccionar período"
-        showFooter
-        footer={
-          <View style={styles.footer}>
-            <Pressable style={styles.applyButton} onPress={onApply}>
-              <Text style={styles.applyButtonText}>Aplicar</Text>
-            </Pressable>
-          </View>
-        }
+        transparent
+        animationType="fade"
+        onRequestClose={onClose}
+        statusBarTranslucent
       >
-        <Text style={styles.sectionTitle}>Período predefinido</Text>
-        <View style={styles.presetGrid}>
-          {PRESETS.map((p) => {
-            const active = draftPreset === p.value;
-            return (
-              <Pressable
-                key={p.value}
-                style={[styles.presetChip, active && styles.presetChipActive]}
-                onPress={() => onPresetSelect(p.value)}
-              >
-                <Text style={[styles.presetChipText, active && styles.presetChipTextActive]}>
-                  {p.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        <Text style={styles.sectionTitle}>Rango personalizado</Text>
-        <View style={styles.dateRow}>
-          <View style={styles.dateField}>
-            <Text style={styles.dateLabel}>Desde</Text>
-            {/* @ts-expect-error — RN Web supports type="date" on TextInput via inputMode */}
-            <TextInput
-              value={draftStart}
-              onChangeText={(v) => { setDraftStart(v); setDraftPreset('custom'); }}
-              placeholder="YYYY-MM-DD"
-              style={styles.dateInput}
-            />
-          </View>
-          <View style={styles.dateField}>
-            <Text style={styles.dateLabel}>Hasta</Text>
-            {/* @ts-expect-error — RN Web supports type="date" on TextInput via inputMode */}
-            <TextInput
-              value={draftEnd}
-              onChangeText={(v) => { setDraftEnd(v); setDraftPreset('custom'); }}
-              placeholder="YYYY-MM-DD"
-              style={styles.dateInput}
-            />
-          </View>
-        </View>
+        <Pressable style={styles.backdrop} onPress={onClose}>
+          {popoverPos && (
+            <Pressable
+              style={[styles.popover, { top: popoverPos.top, left: popoverPos.left }]}
+              onPress={(e) => e.stopPropagation?.()}
+            >
+              <View style={styles.popoverHeader}>
+                <Text style={styles.popoverTitle}>Período predefinido</Text>
+              </View>
+              <ScrollView style={styles.popoverList} showsVerticalScrollIndicator={false}>
+                {PRESETS.map((p) => {
+                  const active = value.preset === p.value;
+                  return (
+                    <Pressable
+                      key={p.value}
+                      onPress={() => onPresetSelect(p.value)}
+                      style={({ pressed }) => [
+                        styles.presetItem,
+                        pressed && styles.presetItemPressed,
+                        active && styles.presetItemActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.presetItemLabel,
+                          active && styles.presetItemLabelActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {p.label}
+                      </Text>
+                      {active && <Icon name="check" size={14} color={colors.primary} />}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </Pressable>
+          )}
+        </Pressable>
       </Modal>
-    </>
+    </View>
   );
 }

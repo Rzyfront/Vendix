@@ -124,6 +124,20 @@ export const colorScales = {
     800: '#065F46',
     900: '#064E3B',
   },
+  // Cyan scale — parity con web (--color-accent: #06b6d4).
+  // Usado por "Ticket Prom." en dashboard store-admin (web usa text-accent).
+  cyan: {
+    50: '#ECFEFF',
+    100: '#CFFAFE',
+    200: '#A5F3FC',
+    300: '#67E8F9',
+    400: '#22D3EE',
+    500: '#06B6D4',
+    600: '#0891B2',
+    700: '#0E7490',
+    800: '#155E75',
+    900: '#164E63',
+  },
 } as const;
 
 export type ColorScales = typeof colorScales;

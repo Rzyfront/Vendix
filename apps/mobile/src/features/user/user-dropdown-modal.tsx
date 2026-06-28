@@ -23,8 +23,7 @@ import { performStoreSwitch } from '@/core/auth/store-switcher';
 import { colors, colorScales, spacing, typography, borderRadius, motion } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 import { AnimatedPressable } from '@/shared/components/animated-pressable';
-import { toastError, toastInfo } from '@/shared/components/toast/toast.store';
-import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
+import { toastInfo } from '@/shared/components/toast/toast.store';
 
 interface UserDropdownModalProps {
   visible: boolean;
@@ -46,11 +45,7 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
   const user = useAuthStore((s) => s.user);
   const userSettings = useAuthStore((s) => s.user_settings);
   const defaultPanelUi = useAuthStore((s) => s.default_panel_ui);
-  const storeId = useTenantStore((s) => s.storeId);
-  const storeName = useTenantStore((s) => s.storeName);
-  const storeSlug = useTenantStore((s) => s.storeSlug);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
 
   // Fetch fresh user settings so the module count is real
   const { data: freshSettings } = useQuery({
@@ -221,36 +216,9 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
     }, 100);
   };
 
-  const performSwitch = async () => {
-    if (!storeSlug) return;
-    setIsProcessing(true);
-    try {
-      await performStoreSwitch({ kind: 'STORE_ADMIN', storeSlug, storeName: storeName ?? undefined });
-      setShowConfirm(false);
-      onClose();
-    } catch {
-      // toastError ya emitido por el helper
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleGoToStore = () => {
-    // Sin storeSlug no hay tienda a la que volver — solo cerramos el modal.
-    if (!storeSlug) {
-      onClose();
-      return;
-    }
-    setShowConfirm(true);
-  };
-
   const canSwitchToOrganization = (): boolean => {
     const hasOrgRoles = !!(user?.roles?.includes('owner') || user?.roles?.includes('admin') || user?.roles?.includes('super_admin'));
     return hasOrgRoles && !isOrgAdmin;
-  };
-
-  const canSwitchToStore = (): boolean => {
-    return isOrgAdmin && !!storeSlug;
   };
 
   const menuOptions: MenuOption[] = [
@@ -264,12 +232,6 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
       icon: 'user-cog',
       action: handleGoToSettings,
       badge: newModuleCount > 0 ? newModuleCount : undefined,
-    },
-    {
-      label: storeName ? `Volver a ${storeName}` : 'Volver a tienda',
-      icon: 'arrow-left',
-      action: handleGoToStore,
-      condition: canSwitchToStore,
     },
     {
       label: 'Administrar Organización',
@@ -363,16 +325,6 @@ export function UserDropdownModal({ visible, onClose, variant = 'store' }: UserD
           </TouchableWithoutFeedback>
         </View>
       </TouchableWithoutFeedback>
-      <ConfirmDialog
-        visible={showConfirm}
-        onClose={() => setShowConfirm(false)}
-        onConfirm={performSwitch}
-        title="Cambiar al entorno de la tienda"
-        message={`¿Deseas cambiar al entorno de administración de la tienda "${storeName ?? storeSlug}"?\n\nSerás redirigido al panel de administración de STORE_ADMIN para esta tienda específica.`}
-        confirmLabel="Cambiar de entorno"
-        cancelLabel="Cancelar"
-        loading={isProcessing}
-      />
     </RNModal>
   );
 }

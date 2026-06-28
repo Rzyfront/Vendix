@@ -718,7 +718,7 @@ export default function OrgDashboard() {
       value: stats?.stats?.total_stores?.value ?? 0,
       description: `${stats?.stats?.total_stores?.sub_value ?? 0} nuevas este mes`,
       icon: 'store',
-      iconBg: 'rgba(22,163,74,0.10)',
+      iconBg: `${colors.primary}1A`, // primary + 10% alpha (parity web bg-primary/10)
       iconColor: colors.primary,
     },
     {
@@ -726,24 +726,24 @@ export default function OrgDashboard() {
       value: stats?.stats?.active_users?.value ?? 0,
       description: `${stats?.stats?.active_users?.sub_value ?? 0} en línea ahora`,
       icon: 'users',
-      iconBg: 'rgba(59,130,246,0.10)',
-      iconColor: '#3b82f6',
+      iconBg: `${colorScales.emerald[600]}1A`, // emerald-600 + 10% alpha (parity web bg-secondary/10 con --color-secondary: #2f6f4e)
+      iconColor: colorScales.emerald[600],
     },
     {
       label: 'Pedidos Mensuales',
       value: stats?.stats?.monthly_orders?.value ?? 0,
       description: `${stats?.stats?.monthly_orders?.sub_value ?? 0} pedidos hoy`,
       icon: 'shopping-cart',
-      iconBg: 'rgba(251,146,60,0.10)',
-      iconColor: '#fb923c',
+      iconBg: `${colors.warning}1A`, // warning + 10% alpha (parity web bg-warning/10)
+      iconColor: colors.warning,
     },
     {
       label: 'Ganancia',
       value: formatCurrency(stats?.stats?.revenue?.value ?? 0),
       description: `${formatSignedCurrency(revenueDiff)} vs mes anterior`,
       icon: 'dollar-sign',
-      iconBg: revenueDiff >= 0 ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
-      iconColor: revenueDiff >= 0 ? '#16a34a' : '#dc2626',
+      iconBg: revenueDiff >= 0 ? `${colors.success}1A` : `${colors.error}1A`,
+      iconColor: revenueDiff >= 0 ? colors.success : colors.error,
     },
   ].map((s) => ({ ...s, loading: statsLoading }));
 

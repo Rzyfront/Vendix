@@ -15,6 +15,7 @@ interface StatsCardProps extends ViewProps {
   value: string | number;
   icon?: ReactNode | string;
   description?: string;
+  descriptionColor?: string;
   iconBg?: string;
   iconColor?: string;
   trend?: { value: number; positive: boolean };
@@ -121,6 +122,7 @@ export function StatsCard({
   value,
   icon,
   description,
+  descriptionColor,
   iconBg = '#dbeafe',
   iconColor = '#2563eb',
   trend,
@@ -196,7 +198,7 @@ export function StatsCard({
           {value}
         </Text>
         {description && (
-          <Text style={styles.description} numberOfLines={1}>
+          <Text style={[styles.description, descriptionColor ? { color: descriptionColor } : null]} numberOfLines={1}>
             {description}
           </Text>
         )}

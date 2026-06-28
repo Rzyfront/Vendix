@@ -7,6 +7,10 @@ import type {
   SalesByChannel,
   InventorySummary,
   DateRange,
+  SalesByProduct,
+  SalesByCategory,
+  SalesByCustomer,
+  SalesByPaymentMethod,
 } from '../types';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
@@ -56,5 +60,34 @@ export const AnalyticsService = {
   async getInventorySummary(): Promise<InventorySummary> {
     const res = await apiClient.get(Endpoints.STORE.ANALYTICS.INVENTORY_SUMMARY);
     return unwrap<InventorySummary>(res);
+  },
+
+  async getSalesByProduct(range?: DateRange): Promise<SalesByProduct[]> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES}/by-product${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesByProduct[]>(res);
+  },
+
+  async getSalesByCategory(range?: DateRange): Promise<SalesByCategory[]> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES}/by-category${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesByCategory[]>(res);
+  },
+
+  async getSalesByCustomer(range?: DateRange): Promise<SalesByCustomer[]> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES}/by-customer${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesByCustomer[]>(res);
+  },
+
+  async getSalesByPaymentMethod(range?: DateRange): Promise<SalesByPaymentMethod[]> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    // Backend path real: /store/analytics/sales/by-payment-method (ver apps/backend/.../analytics.controller.ts:94)
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES}/by-payment-method${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesByPaymentMethod[]>(res);
   },
 };
