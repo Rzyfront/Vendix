@@ -401,17 +401,34 @@ export class HelpCenterComponent {
     });
   });
 
-  /** Filtered FAQs. */
+  /** Filtered FAQs.
+   *  - No filter active → one representative question per
+   *    category (a "preview" view, not a full dump). This keeps
+   *    the FAQ section digestible: 6 questions instead of 34.
+   *  - Any filter active (category or search) → full match
+   *    list for the selected context.
+   */
   readonly filteredFaqs = computed<FaqItem[]>(() => {
     const q = this.normalizedQuery();
     const cat = this.selectedCategory();
-    if (!q && !cat) return this.faqs();
+
+    // Filtered view: full match list
+    if (q || cat) {
+      return this.faqs().filter((f) => {
+        if (cat && f.category !== cat) return false;
+        if (q) {
+          const haystack = `${f.question} ${f.answer}`.toLowerCase();
+          if (!haystack.includes(q)) return false;
+        }
+        return true;
+      });
+    }
+
+    // Preview view: first question per category (6 cards)
+    const seen = new Set<FaqItem['category']>();
     return this.faqs().filter((f) => {
-      if (cat && f.category !== cat) return false;
-      if (q) {
-        const haystack = `${f.question} ${f.answer}`.toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
+      if (seen.has(f.category)) return false;
+      seen.add(f.category);
       return true;
     });
   });
