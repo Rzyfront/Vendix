@@ -15,6 +15,7 @@ import {
 } from '../../../../shared/services/pqr.service';
 import { PqrStatusPillComponent } from '../../../../private/modules/store/pqr/components/pqr-status-pill.component';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { PublicHeaderComponent } from '../../../landing/components/public-header/public-header.component';
 
 type TrackState = 'idle' | 'loading' | 'loaded' | 'not_found' | 'error';
 
@@ -33,6 +34,7 @@ type TrackState = 'idle' | 'loading' | 'loaded' | 'not_found' | 'error';
     DatePipe,
     PqrStatusPillComponent,
     IconComponent,
+    PublicHeaderComponent,
   ],
   templateUrl: './pqr-track.component.html',
   styleUrls: ['./pqr-track.component.scss'],
