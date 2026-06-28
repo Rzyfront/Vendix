@@ -5,6 +5,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { PublicHeaderComponent } from '../../../../landing/components/public-header/public-header.component';
 import {
   FormBuilder,
   FormGroup,
