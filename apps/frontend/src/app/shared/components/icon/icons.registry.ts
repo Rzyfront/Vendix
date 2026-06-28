@@ -268,6 +268,8 @@ import {
   LayoutList,
   Split,
   Square,
+  StickyNote,
+  NotebookPen,
   Table,
   Utensils,
   OctagonX,
@@ -314,6 +316,8 @@ import {
   Handshake,
   Music2,
   Navigation,
+  // Serial-numbers module icon
+  Fingerprint,
 } from 'lucide-angular';
 
 /**
@@ -662,6 +666,8 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'layout-list': LayoutList,
   'split': Split,
   'square': Square,
+  'sticky-note': StickyNote,
+  'notebook-pen': NotebookPen,
   'table': Table,
   'utensils': Utensils,
   'x-octagon': OctagonX,
@@ -718,6 +724,9 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'handshake': Handshake,
   'music-2': Music2,
   'navigation': Navigation,
+
+  // Serial-numbers module icon
+  'fingerprint': Fingerprint,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

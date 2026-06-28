@@ -8,7 +8,7 @@
   <!-- Section Navigation (mobile: compact horizontal scroll, desktop: hidden) -->
   <div class="sticky top-[41px] z-10 bg-background py-1.5 md:static md:bg-transparent md:py-0 lg:hidden">
     <app-scrollable-tabs
-      [tabs]="sections"
+      [tabs]="sections()"
       [activeTab]="activeSection()"
       size="md"
       ariaLabel="Secciones de configuración"
@@ -106,6 +106,36 @@
           <div class="section-body">
             <app-operations-settings-form [settings]="settings().operations || { default_preparation_time_minutes: 15, ticket_closing_hour: 3 }"
               (settingsChange)="onSectionChange('operations', $event)" />
+          </div>
+        </section>
+
+        <!-- Restaurant (Mesas) Section — restaurant industry only -->
+        @if (isRestaurant()) {
+          <section id="section-restaurant" class="settings-section">
+            <div class="section-header">
+              <div class="section-icon section-icon--teal">
+                <app-icon name="utensils" size="18"></app-icon>
+              </div>
+              <h2 class="section-title">Mesas</h2>
+            </div>
+            <div class="section-body">
+              <app-restaurant-settings-form [settings]="settings().restaurant || { enable_table_checkout: false }"
+                (settingsChange)="onSectionChange('restaurant', $event)" />
+            </div>
+          </section>
+        }
+
+        <!-- Dispatch Section -->
+        <section id="section-dispatch" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--teal">
+              <app-icon name="truck" size="18"></app-icon>
+            </div>
+            <h2 class="section-title">Despacho y Logística</h2>
+          </div>
+          <div class="section-body">
+            <app-dispatch-settings-form [settings]="settings().dispatch || { order_state_update_mode: 'on_close' }"
+              (settingsChange)="onSectionChange('dispatch', $event)" />
           </div>
         </section>
 

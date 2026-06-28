@@ -91,7 +91,7 @@ export class PosOrderService {
       requires_payment: false,
       cash_register_session_id: activeSession?.id ?? undefined,
       seller_user_id: createdBy,
-      internal_notes: cartState.notes,
+      notes: cartState.notes,
       update_inventory: true,
       coupon_id: this.extractCouponId(cartState),
       coupon_code: this.extractCouponCode(cartState),
@@ -245,7 +245,7 @@ export class PosOrderService {
       payment_reference: request.reference,
       cash_register_session_id: activeSession?.id ?? undefined,
       seller_user_id: request.sellerUserId || 'current_user',
-      internal_notes: request.notes || '',
+      notes: request.notes || '',
       update_inventory: true,
       coupon_id: (request as any).coupon_id,
       coupon_code: (request as any).coupon_code,
@@ -357,7 +357,7 @@ export class PosOrderService {
       status: backendOrder.state,
       paymentStatus: backendOrder.payment_status,
       payments: [],
-      notes: backendOrder.internal_notes || '',
+      notes: backendOrder.notes || '',
       createdAt: new Date(backendOrder.created_at),
       updatedAt: new Date(backendOrder.updated_at),
       createdBy: backendOrder.created_by,
@@ -1036,6 +1036,15 @@ export class PosOrderService {
       applied_price_tier_id: isCustomItem
         ? undefined
         : item.applied_price_tier_id ?? undefined,
+      // QUI-431 — serials for serialized products. `serial_ids` are existing
+      // pool rows; `serial_numbers` are free-text the backend resolves/creates.
+      // Both are ignored by the backend for non-serialized products.
+      serial_ids:
+        !isCustomItem && item.serial_ids?.length ? item.serial_ids : undefined,
+      serial_numbers:
+        !isCustomItem && item.serial_numbers?.length
+          ? item.serial_numbers
+          : undefined,
     };
   }
 

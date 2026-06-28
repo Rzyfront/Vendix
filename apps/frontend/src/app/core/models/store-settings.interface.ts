@@ -16,6 +16,8 @@ export interface StoreSettings {
   receipts: ReceiptsSettings;
   app: AppSettings;
   operations?: OperationsSettings;
+  dispatch?: DispatchSettings;
+  restaurant?: RestaurantSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
 }
@@ -77,6 +79,35 @@ export interface OperationsSettings {
    * Mirrors backend `operations.ticket_closing_hour`. Default 3 (3 AM).
    */
   ticket_closing_hour?: number;
+}
+
+/**
+ * When an order is dispatched on a route, controls when its state advances to
+ * "delivered".
+ * - `live`: the order is marked delivered as soon as each route stop is settled.
+ * - `on_close`: the order only advances when the route sheet is closed/settled
+ *   (current behavior).
+ * Mirrors backend `store_settings.settings.dispatch.order_state_update_mode`.
+ * Default `on_close`.
+ */
+export type OrderStateUpdateMode = 'live' | 'on_close';
+
+export interface DispatchSettings {
+  order_state_update_mode: OrderStateUpdateMode;
+}
+
+/**
+ * Restaurant-specific store settings. Only relevant when the store's
+ * `general.industries` includes `'restaurant'`. Mirrors backend
+ * `store_settings.settings.restaurant`.
+ */
+export interface RestaurantSettings {
+  /**
+   * When `true`, the table view exposes a checkout action so the bill can be
+   * settled directly from the table. When `false`, the table view only shows
+   * the payment status. Default `false`.
+   */
+  enable_table_checkout: boolean;
 }
 
 export interface CheckoutSettings {

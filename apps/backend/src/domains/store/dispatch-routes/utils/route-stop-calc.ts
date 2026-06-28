@@ -13,6 +13,15 @@ export interface RouteStopInvoiceInput {
   payment_date?: Date | string | null;
 }
 
+/**
+ * Minimal order shape used to resolve the CURRENT payment status of a regular
+ * order linked to the dispatch note. `remaining_balance` arrives as a Prisma
+ * Decimal / string / number — always coerce with `Number()`.
+ */
+export interface RouteStopOrderInput {
+  remaining_balance?: number | string | null;
+}
+
 /** Minimal dispatch-note shape consumed by the calculators. */
 export interface RouteStopNoteInput {
   id: number;
@@ -25,6 +34,13 @@ export interface RouteStopNoteInput {
    */
   needs_collection?: boolean | null;
   invoice?: RouteStopInvoiceInput | null;
+  /**
+   * Linked regular order. When present, its CURRENT `remaining_balance === 0`
+   * marks the note as prepaid (already paid). Used by `resolveIsPrepaid` so the
+   * prepaid status is DERIVED from the live payment state on read instead of
+   * being frozen at stop-creation time.
+   */
+  order?: RouteStopOrderInput | null;
 }
 
 /** Per-stop sequence/flag input (mirrors CreateDispatchRouteStopDto subset). */
@@ -200,26 +216,41 @@ export function buildRouteReconciliation(
 /**
  * Resolve whether a dispatch note is prepaid (i.e. does NOT need collection).
  *
- * Rule (safe default = COD):
- *   1. If the note explicitly declares `needs_collection === true` → COD, NOT prepaid.
- *   2. If the note has a paid invoice (legacy heuristic) → prepaid.
- *   3. Otherwise (no explicit flag, no paid invoice) → COD, NOT prepaid.
+ * DERIVED on read from the CURRENT payment state — never from a frozen boolean
+ * persisted on the stop. This is the root-cause fix for the bug where a paid
+ * order kept `is_prepaid=false` (frozen at stop creation) and got charged again
+ * in route.
  *
- * This avoids the previous bug where a `null` needs_collection would fall into
- * the invoice fallback and (correctly) mark a note without an invoice as COD, but
- * a stray explicit `false` would silently mark it as prepaid. Now the invoice is
- * authoritative for the prepaid classification: only an actually paid invoice
- * makes a stop prepaid. An explicit `needs_collection: true` short-circuits any
- * invoice fallback to force the COD path.
+ * Rule (safe default = COD):
+ *   1. `needs_collection === true` → COD, NOT prepaid (explicit operator intent
+ *      wins over everything else).
+ *   2. Regular order with `remaining_balance === 0` → prepaid (already paid).
+ *   3. Regular order with `remaining_balance > 0` → COD, NOT prepaid.
+ *   4. Paid invoice (`invoice.payment_date` present) → prepaid (sales-order /
+ *      legacy path; sales_orders have no remaining_balance, so the invoice is
+ *      authoritative there).
+ *   5. Otherwise (no order balance signal, no paid invoice) → COD, NOT prepaid.
+ *
+ * `remaining_balance` arrives as Prisma Decimal / string / number — coerced via
+ * `Number()`.
  */
 export function resolveIsPrepaid(note: {
   needs_collection?: boolean | null;
   invoice?: { payment_date?: Date | string | null } | null;
+  order?: { remaining_balance?: number | string | null } | null;
 }): boolean {
-  // Explicit COD wins: even if the note somehow has a paid invoice, the operator
+  // (1) Explicit COD wins: even if the note somehow looks paid, the operator
   // asked for cash-on-route collection.
   if (note.needs_collection === true) return false;
-  // Legacy/invoice-based heuristic: only a paid invoice classifies as prepaid.
+
+  // (2)/(3) Regular order: the live remaining_balance is authoritative. A zero
+  // balance means the order is fully paid → prepaid; a positive balance means
+  // there is cash to collect on delivery → COD.
+  if (note.order != null && note.order.remaining_balance != null) {
+    return Number(note.order.remaining_balance) === 0;
+  }
+
+  // (4) Sales-order / legacy path: only a paid invoice classifies as prepaid.
   return !!(note.invoice && note.invoice.payment_date);
 }
 
@@ -296,6 +327,47 @@ export interface RouteLiveTotals {
   total_prepaid: number;
   /** Sum of grand_total of non-prepaid stops (the COD target). */
   total_to_collect: number;
+}
+
+/**
+ * Minimal stop shape carrying the linked dispatch_note's payment signals,
+ * consumed by {@link deriveStopIsPrepaid}. The note must be loaded with
+ * `needs_collection`, `invoice.payment_date` and `order.remaining_balance`.
+ *
+ * `payment_date` / `remaining_balance` are typed loosely (`unknown`) so callers
+ * can pass Prisma `Decimal` / `Date` columns directly without coupling this
+ * pure module to the Prisma client types. `resolveIsPrepaid` coerces them via
+ * `Number()` / truthiness.
+ */
+export interface DerivableStopInput {
+  dispatch_note?: {
+    needs_collection?: boolean | null;
+    invoice?: { payment_date?: unknown } | null;
+    order?: { remaining_balance?: unknown } | null;
+  } | null;
+}
+
+/**
+ * Derive the CURRENT `is_prepaid` value for a route stop from the live payment
+ * state of its linked dispatch_note / order — NOT from the persisted
+ * `dispatch_route_stops.is_prepaid` boolean (which is frozen at stop creation).
+ *
+ * Single source of truth for every read path (route response, totals, close
+ * cash filter, settle event gate, PDF). When the note is missing (defensive),
+ * falls back to `false` (COD) so nothing is silently treated as prepaid.
+ */
+export function deriveStopIsPrepaid(stop: DerivableStopInput): boolean {
+  const note = stop.dispatch_note;
+  if (!note) return false;
+  return resolveIsPrepaid({
+    needs_collection: note.needs_collection,
+    invoice: note.invoice
+      ? { payment_date: note.invoice.payment_date as Date | string | null }
+      : null,
+    order: note.order
+      ? { remaining_balance: note.order.remaining_balance as number | string | null }
+      : null,
+  });
 }
 
 /**

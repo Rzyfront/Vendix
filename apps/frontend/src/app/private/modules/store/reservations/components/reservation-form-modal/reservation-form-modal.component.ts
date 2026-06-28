@@ -1,4 +1,4 @@
-import { Component, input, output, signal, computed, inject } from '@angular/core';
+import { Component, input, output, signal, computed, inject, DestroyRef } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -15,9 +15,10 @@ import {
 } from '../../../../../../shared/components';
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
-import { AvailabilitySlot, CreateBookingDto } from '../../interfaces/reservation.interface';
+import { AvailabilitySlot, Booking, CreateBookingDto } from '../../interfaces/reservation.interface';
+import { CalendarWeekViewComponent, FreeSlot } from '../calendar/calendar-week-view/calendar-week-view.component';
 import { environment } from '../../../../../../../environments/environment';
-import { debounceTime, Subject, switchMap, of } from 'rxjs';
+import { debounceTime, Subject, switchMap, of, forkJoin, finalize } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
@@ -33,6 +34,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
     ToggleComponent,
     InputComponent,
     SelectorComponent,
+    CalendarWeekViewComponent,
     DecimalPipe,
   ],
   templateUrl: './reservation-form-modal.component.html',
@@ -42,6 +44,7 @@ export class ReservationFormModalComponent {
   private http = inject(HttpClient);
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   // Inputs / Outputs
   readonly isOpen = input<boolean>(false);
@@ -78,6 +81,9 @@ export class ReservationFormModalComponent {
   availableSlots = signal<AvailabilitySlot[]>([]);
   selectedSlot = signal<AvailabilitySlot | null>(null);
   loadingSlots = signal(false);
+  // Calendar view (replaces the flat slot grid): busy bookings + free overlay.
+  bookingsByDate = signal<Record<string, Booking[]>>({});
+  freeSlotsByDate = signal<Record<string, FreeSlot[]>>({});
 
   // Time (manual or from slot)
   startTime = signal('');
@@ -310,30 +316,118 @@ export class ReservationFormModalComponent {
     const date = this.selectedDate();
     if (!productId || !date) return;
 
+    const providerId = this.selectedProvider()?.id;
+    const variantId = this.selectedVariant()?.id;
+
+    // Load both free slots (for the green overlay) and busy bookings (red
+    // blocks) for the selected week. We pick a Monday-aligned range so the
+    // week-view gets a full grid even when the selected date is mid-week.
+    const range = this.getWeekRange(date);
+
     this.loadingSlots.set(true);
-    this.reservationsService.getAvailability(
-      productId,
-      date,
-      date,
-      this.selectedProvider()?.id,
-      this.selectedVariant()?.id,
-    )
+
+    // forkJoin fires once when both requests complete; `finalize` turns off the
+    // spinner reliably (success OR failure) without the brittle `setTimeout`.
+    // Both observables are scoped to the component's DestroyRef so they
+    // auto-unsubscribe if the modal closes mid-request.
+    forkJoin({
+      availability: this.reservationsService.getAvailability(
+        productId, range.from, range.to, providerId, variantId,
+      ),
+      calendar: this.reservationsService.getCalendar(range.from, range.to, productId),
+    })
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loadingSlots.set(false)),
+      )
       .subscribe({
-        next: (slots) => {
-          this.availableSlots.set(slots.filter(s => s.total_available > 0));
-          this.loadingSlots.set(false);
+        next: ({ availability, calendar: byDate }) => {
+          this.availableSlots.set(
+            (availability ?? []).filter(s => s.total_available > 0),
+          );
+          this.freeSlotsByDate.set(this.groupAvailabilityByDate(availability ?? []));
+          this.bookingsByDate.set(byDate ?? {});
         },
         error: () => {
           this.availableSlots.set([]);
-          this.loadingSlots.set(false);
+          this.freeSlotsByDate.set({});
+          this.bookingsByDate.set({});
         },
       });
+  }
+
+  /**
+   * Build a `Record<YYYY-MM-DD, FreeSlot[]>` map from the flat availability
+   * list. Each `AvailabilitySlot` already encodes the booking duration, so we
+   * just trim to `HH:mm` strings and group.
+   */
+  private groupAvailabilityByDate(
+    slots: AvailabilitySlot[],
+  ): Record<string, FreeSlot[]> {
+    const out: Record<string, FreeSlot[]> = {};
+    for (const slot of slots ?? []) {
+      if (!slot?.date || !slot?.start_time || !slot?.end_time) continue;
+      (out[slot.date] ??= []).push({
+        start: String(slot.start_time).substring(0, 5),
+        end: String(slot.end_time).substring(0, 5),
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Monday-aligned week containing `date` (YYYY-MM-DD). The calendar week-view
+   * always renders Mon→Sun so we mirror that here.
+   */
+  private getWeekRange(date: string): { from: string; to: string } {
+    const d = new Date(date + 'T12:00:00');
+    const day = d.getDay(); // 0=Sun ... 6=Sat
+    const offsetToMonday = (day + 6) % 7;
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - offsetToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const fmt = (x: Date) =>
+      `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+    return { from: fmt(monday), to: fmt(sunday) };
   }
 
   selectSlot(slot: AvailabilitySlot): void {
     this.selectedSlot.set(slot);
     this.startTime.set(slot.start_time);
     this.endTime.set(slot.end_time);
+  }
+
+  /**
+   * Bridge between the calendar's `slotClicked` event (which fires for both
+   * free and busy clicks) and the wizard's slot model. We synthesize an
+   * `AvailabilitySlot`-like object so `selectSlot()` keeps working unchanged.
+   */
+  onCalendarSlotPicked(event: { date: string; time: string }): void {
+    // Compute the service-aware end time so the next-step guard passes.
+    const startMinutes = (() => {
+      const [h, m] = event.time.split(':').map(Number);
+      return h * 60 + m;
+    })();
+    const duration = this.selectedService()?.service_duration_minutes || 60;
+    const endMin = startMinutes + duration;
+    const endH = Math.floor(endMin / 60) % 24;
+    const endM = endMin % 60;
+    const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+
+    // Update the date signal too so the right-side preview reflects the pick.
+    this.selectedDate.set(event.date);
+    this.startTime.set(event.time);
+    this.endTime.set(endTime);
+
+    // Build a synthetic slot matching the shape `selectSlot` expects.
+    const synthetic: AvailabilitySlot = {
+      date: event.date,
+      start_time: event.time,
+      end_time: endTime,
+      total_available: 1,
+    } as AvailabilitySlot;
+    this.selectedSlot.set(synthetic);
   }
 
   onCustomerSearch(query: string): void {
@@ -454,5 +548,23 @@ export class ReservationFormModalComponent {
 
   getChannelLabel(): string {
     return this.channelOptions.find(c => c.value === this.selectedChannel())?.label || this.selectedChannel();
+  }
+
+  /**
+   * Today (calendar day, midnight) for the calendar view's default anchor.
+   * Used when the wizard hasn't yet picked a date.
+   */
+  readonly today = (() => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  })();
+
+  /**
+   * Helper used by the template: convert a `YYYY-MM-DD` string into a
+   * `Date` anchored at midday to avoid TZ rollover artefacts.
+   */
+  parseAsDate(dateStr: string): Date {
+    return new Date(dateStr + 'T12:00:00');
   }
 }

@@ -7,6 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { DatePipe, NgClass } from '@angular/common';
 import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { ModalComponent } from '../../../../../../shared/components';
@@ -14,7 +15,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../shared/components';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
-import { Order, PayOrderDto, PaymentType } from '../../interfaces/order.interface';
+import { Order, PayOrderDto } from '../../interfaces/order.interface';
 import { StorePaymentMethod } from '../../../settings/payments/interfaces/payment-methods.interface';
 
 interface PaymentMethodDisplay {
@@ -56,15 +57,20 @@ export class OrderPaymentModalComponent {
   // ── Signal Outputs ──────────────────────────────────────────
   isOpenChange = output<boolean>();
   closed = output<void>();
-  paymentSubmitted = output<PayOrderDto & { reference?: string }>();
+  paymentSubmitted = output<PayOrderDto>();
 
   // ── Internal State ──────────────────────────────────────────
   selectedMethod = signal<PaymentMethodDisplay | null>(null);
   cashReceived = signal<number>(0);
   change = signal<number>(0);
-  paymentType = signal<PaymentType>('direct');
-  isProcessing = signal(false);
+  isProcessing = input<boolean>(false);
   referenceControl = new FormControl('');
+  // Bridge the FormControl value into a signal so `canProcess` (a computed)
+  // recalculates when the user types. Reading FormControl.value directly inside a
+  // computed does not create a reactive dependency under zoneless change detection.
+  private referenceValue = toSignal(this.referenceControl.valueChanges, {
+    initialValue: this.referenceControl.value ?? '',
+  });
 
   // ── Credit State ──────────────────────────────────────────
   customAmount = signal<number>(0);
@@ -89,6 +95,14 @@ export class OrderPaymentModalComponent {
       if (pre && this.isOpen()) {
         this.selectedInstallmentId.set(pre.id);
         this.customAmount.set(Number(pre.remaining_balance));
+      }
+    });
+
+    // Preselecciona el primer método cuando el modal abre y hay métodos
+    effect(() => {
+      const methods = this.displayMethods();
+      if (this.isOpen() && methods.length > 0 && !this.selectedMethod()) {
+        this.selectPaymentMethod(methods[0]);
       }
     });
   }
@@ -133,7 +147,7 @@ export class OrderPaymentModalComponent {
     }
 
     if (method.requiresReference) {
-      const ref = this.referenceControl.value;
+      const ref = this.referenceValue();
       return !!ref && ref.trim().length >= 4;
     }
 
@@ -195,10 +209,6 @@ export class OrderPaymentModalComponent {
     this.calculateChange();
   }
 
-  selectPaymentType(type: PaymentType): void {
-    this.paymentType.set(type);
-  }
-
   selectInstallment(installment: any): void {
     this.selectedInstallmentId.set(installment.id);
     this.customAmount.set(Number(installment.remaining_balance));
@@ -213,13 +223,13 @@ export class OrderPaymentModalComponent {
     const method = this.selectedMethod();
     if (!method || !this.canProcess()) return;
 
-    this.isProcessing.set(true);
-
-    const dto: PayOrderDto & { reference?: string } = {
+    const dto: PayOrderDto = {
       store_payment_method_id: Number(method.id),
-      payment_type: this.paymentType(),
+      payment_type: 'direct',
       ...(method.type === 'cash' ? { amount_received: this.cashReceived() } : {}),
-      ...(method.requiresReference ? { reference: this.referenceControl.value || undefined } : {}),
+      ...(method.requiresReference && this.referenceControl.value?.trim()
+        ? { payment_reference: this.referenceControl.value.trim() }
+        : {}),
     };
 
     if (this.isCreditOrder()) {
@@ -259,8 +269,6 @@ export class OrderPaymentModalComponent {
     this.selectedMethod.set(null);
     this.cashReceived.set(0);
     this.change.set(0);
-    this.paymentType.set('direct');
-    this.isProcessing.set(false);
     this.referenceControl.reset();
     this.customAmount.set(0);
     this.selectedInstallmentId.set(null);

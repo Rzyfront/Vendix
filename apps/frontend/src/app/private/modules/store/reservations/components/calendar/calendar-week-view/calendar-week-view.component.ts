@@ -2,6 +2,18 @@ import { Component, input, output, computed, signal, DestroyRef, inject } from '
 
 import { Booking } from '../../../interfaces/reservation.interface';
 
+/**
+ * A free slot = a time range where the provider has capacity and no booking.
+ * Sourced from `GET /store/reservations/availability/:productId`.
+ * Used to overlay green "available" blocks on top of the busy booking blocks.
+ */
+export interface FreeSlot {
+  /** "HH:mm" */
+  start: string;
+  /** "HH:mm" */
+  end: string;
+}
+
 interface WeekDay {
   date: string;
   name: string;
@@ -20,6 +32,11 @@ export class CalendarWeekViewComponent {
   private readonly destroyRef = inject(DestroyRef);
 
   readonly bookingsByDate = input.required<Record<string, Booking[]>>();
+  /**
+   * Optional free-slot overlay per date (`YYYY-MM-DD` → FreeSlot[]).
+   * Default `{}` keeps backward compat with callers that only pass bookings.
+   */
+  readonly freeSlotsByDate = input<Record<string, FreeSlot[]>>({});
   readonly currentDate = input.required<Date>();
 
   readonly slotClicked = output<{ date: string; time: string }>();
@@ -81,6 +98,10 @@ export class CalendarWeekViewComponent {
     return this.bookingsByDate()[dateStr] || [];
   }
 
+  getFreeSlotsForDate(dateStr: string): FreeSlot[] {
+    return this.freeSlotsByDate()[dateStr] || [];
+  }
+
   getBlockTop(booking: Booking): number {
     const startMinutes = this.parseTimeToMinutes(booking.start_time);
     return ((startMinutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
@@ -92,9 +113,30 @@ export class CalendarWeekViewComponent {
     return ((endMinutes - startMinutes) / this.TOTAL_MINUTES) * 100;
   }
 
+  getFreeSlotTop(slot: FreeSlot): number {
+    const startMinutes = this.parseTimeToMinutes(slot.start);
+    return ((startMinutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
+  }
+
+  getFreeSlotHeight(slot: FreeSlot): number {
+    const startMinutes = this.parseTimeToMinutes(slot.start);
+    const endMinutes = this.parseTimeToMinutes(slot.end);
+    return Math.max(
+      ((endMinutes - startMinutes) / this.TOTAL_MINUTES) * 100,
+      1.2, // ensure even 15-min slots remain clickable
+    );
+  }
+
   onBookingClick(event: MouseEvent, booking: Booking): void {
     event.stopPropagation();
     this.bookingClicked.emit(booking);
+  }
+
+  onFreeSlotClick(event: MouseEvent, dateStr: string, slot: FreeSlot): void {
+    event.stopPropagation();
+    // Emit the slot's start time as the picked time — the parent decides
+    // whether to open the quick-book modal, the wizard, or just select it.
+    this.slotClicked.emit({ date: dateStr, time: slot.start });
   }
 
   onColumnClick(event: MouseEvent, dateStr: string): void {

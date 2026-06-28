@@ -8,12 +8,23 @@ export interface StatsGridItem {
   value: string | number;
   icon?: ReactNode | string;
   description?: string;
+<<<<<<< HEAD
   descriptionColor?: string;
   iconBg?: string;
   iconColor?: string;
   trend?: { value: number; positive: boolean };
   /** When true, renders a skeleton placeholder instead of value. */
   loading?: boolean;
+=======
+  /** Highlighted secondary text rendered with brand color (emerald by default). */
+  smallText?: string;
+  smallTextColor?: string;
+  iconBg?: string;
+  iconColor?: string;
+  trend?: { value: number; positive: boolean };
+  /** Render the card without background, border, or shadow. */
+  bare?: boolean;
+>>>>>>> origin/dev
 }
 
 interface StatsGridProps {
@@ -21,8 +32,11 @@ interface StatsGridProps {
   style?: ViewStyle;
 }
 
+<<<<<<< HEAD
 const CARD_WIDTH = 160;
 
+=======
+>>>>>>> origin/dev
 const styles = StyleSheet.create({
   container: {
     backgroundColor: 'transparent',
@@ -35,7 +49,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[4],
   },
   item: {
-    width: CARD_WIDTH,
+    // Width is auto so the card sizes itself by content while the parent
+    // ScrollView enables horizontal overflow when needed. Replaces the
+    // previous fixed CARD_WIDTH (150) that was narrower than the inner
+    // StatsCard (160), causing visible misalignment.
   },
 });
 
@@ -64,12 +81,21 @@ export function StatsGrid({ items, style }: StatsGridProps) {
               value={item.value}
               icon={item.icon}
               description={item.description}
+<<<<<<< HEAD
               descriptionColor={item.descriptionColor}
               iconBg={item.iconBg}
               iconColor={item.iconColor}
               trend={item.trend}
               loading={item.loading}
               enterIndex={index}
+=======
+              smallText={item.smallText}
+              smallTextColor={item.smallTextColor}
+              iconBg={item.iconBg}
+              iconColor={item.iconColor}
+              trend={item.trend}
+              bare={item.bare}
+>>>>>>> origin/dev
             />
           </View>
         ))}

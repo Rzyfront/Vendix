@@ -57,7 +57,8 @@ type HomeSectionKey =
   | 'welcome'
   | 'categories'
   | 'brands'
-  | 'featured_products';
+  | 'featured_products'
+  | 'menus';
 
 interface HomeSectionAdminItem {
   key: HomeSectionKey;
@@ -116,6 +117,16 @@ const HOME_SECTION_ITEMS: HomeSectionAdminItem[] = [
     defaultOrder: 50,
     hasLimit: true,
     limitMax: 48,
+  },
+  {
+    key: 'menus',
+    label: 'Cartas',
+    description:
+      'Cartas del restaurante con sus platos disponibles según el horario.',
+    icon: 'book-open',
+    defaultOrder: 60,
+    hasLimit: false,
+    limitMax: 1,
   },
 ];
 
@@ -179,14 +190,26 @@ export class EcommerceComponent {
     { initialValue: this.settingsForm.getRawValue() },
   );
 
+  /** La sección "Cartas" solo aplica a tiendas de industria restaurant. */
+  readonly isRestaurant = computed<boolean>(() => {
+    const settings: any = this.store.selectSignal(selectStoreSettings)();
+    const industries: string[] = settings?.general?.industries ?? [];
+    return Array.isArray(industries) && industries.includes('restaurant');
+  });
+
   readonly orderedHomeSections = computed<HomeSectionAdminItem[]>(() => {
     const sections = this.formValueSignal()?.home_sections ?? {};
-    return HOME_SECTION_ITEMS.map((section) => ({
-      ...section,
-      defaultOrder: Number(
-        sections?.[section.key]?.sort_order ?? section.defaultOrder,
-      ),
-    })).sort((a, b) => a.defaultOrder - b.defaultOrder);
+    const isRestaurant = this.isRestaurant();
+    return HOME_SECTION_ITEMS.filter(
+      (section) => section.key !== 'menus' || isRestaurant,
+    )
+      .map((section) => ({
+        ...section,
+        defaultOrder: Number(
+          sections?.[section.key]?.sort_order ?? section.defaultOrder,
+        ),
+      }))
+      .sort((a, b) => a.defaultOrder - b.defaultOrder);
   });
 
   readonly primaryColor = computed(
@@ -417,6 +440,15 @@ export class EcommerceComponent {
           subtitle: ['Selección especial de la tienda'],
           limit: [16, [Validators.min(1), Validators.max(48)]],
           sort_order: [50, [Validators.min(1)]],
+        }),
+        menus: this.fb.group({
+          enabled: [false],
+          title: ['Nuestras cartas'],
+          subtitle: ['Descubre los platos disponibles según el horario'],
+          // hide = solo platos disponibles ahora; badge = mostrar todos con
+          // "Disponible a las HH:mm" en los que están fuera de horario.
+          availability_display: ['hide'],
+          sort_order: [60, [Validators.min(1)]],
         }),
       }),
 

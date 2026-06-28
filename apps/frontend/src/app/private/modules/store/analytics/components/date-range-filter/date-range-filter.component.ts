@@ -33,17 +33,32 @@ type DatePreset =
           [ngModel]="selectedPreset()"
           (ngModelChange)="onPresetChange($event)"
           size="sm"
-          placeholder="Período"
+          label="Período"
+          placeholder="Selecciona un período"
         ></app-selector>
       </div>
 
-      <!-- Date Input -->
+      <!-- Start date -->
       <div class="w-full sm:w-40 flex-shrink-0">
         <app-input
           type="date"
           size="sm"
-          [ngModel]="selectedDate()"
-          (ngModelChange)="onDateChange($event)"
+          [label]="'Desde'"
+          [ngModel]="startDate()"
+          (ngModelChange)="onStartDateChange($event)"
+          [max]="endDate() || undefined"
+        ></app-input>
+      </div>
+
+      <!-- End date -->
+      <div class="w-full sm:w-40 flex-shrink-0">
+        <app-input
+          type="date"
+          size="sm"
+          [label]="'Hasta'"
+          [ngModel]="endDate()"
+          (ngModelChange)="onEndDateChange($event)"
+          [min]="startDate() || undefined"
         ></app-input>
       </div>
     </div>
@@ -56,7 +71,8 @@ export class DateRangeFilterComponent {
   valueChange = output<DateRangeFilter>();
 
   selectedPreset = signal<DatePreset>('thisMonth');
-  selectedDate = signal<string>('');
+  startDate = signal<string>('');
+  endDate = signal<string>('');
 
   presetOptions: SelectorOption[] = [
     { value: 'today', label: 'Hoy' },
@@ -77,7 +93,10 @@ export class DateRangeFilterComponent {
         this.selectedPreset.set(v.preset as DatePreset);
       }
       if (v?.start_date) {
-        this.selectedDate.set(v.start_date);
+        this.startDate.set(v.start_date);
+      }
+      if (v?.end_date) {
+        this.endDate.set(v.end_date);
       }
     });
   }
@@ -86,18 +105,34 @@ export class DateRangeFilterComponent {
     this.selectedPreset.set(preset as DatePreset);
     const range = this.getDateRange(preset as DatePreset);
     if (range) {
-      this.selectedDate.set(range.start_date);
+      this.startDate.set(range.start_date);
+      this.endDate.set(range.end_date);
       this.dateRangeSync.setDateRange(range);
       this.valueChange.emit(range);
     }
   }
 
-  onDateChange(date: string): void {
-    this.selectedDate.set(date);
+  onStartDateChange(date: string): void {
+    this.startDate.set(date);
+    // Clamp end_date if it is now before start_date.
+    const end = this.endDate();
+    const clampedEnd = end && end < date ? date : end;
+    if (clampedEnd !== end) {
+      this.endDate.set(clampedEnd!);
+    }
+    this.emitRange('custom');
+  }
+
+  onEndDateChange(date: string): void {
+    this.endDate.set(date);
+    this.emitRange('custom');
+  }
+
+  private emitRange(preset: DateRangeFilter['preset']): void {
     const range: DateRangeFilter = {
-      start_date: date,
-      end_date: date,
-      preset: this.selectedPreset(),
+      start_date: this.startDate(),
+      end_date: this.endDate(),
+      preset,
     };
     this.dateRangeSync.setDateRange(range);
     this.valueChange.emit(range);

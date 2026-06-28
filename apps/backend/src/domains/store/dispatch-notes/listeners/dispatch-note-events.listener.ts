@@ -1,7 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import {
+  serial_status_enum,
+  sales_document_item_type_enum,
+} from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 
 interface DispatchNoteEvent {
   dispatch_note_id: number;
@@ -22,6 +27,9 @@ export class DispatchNoteEventsListener {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly stockLevelManager: StockLevelManager,
+    // QUI-431 — optional so the existing unit spec (2-arg construction) keeps
+    // compiling/working: when absent (tests), the serial side-effects no-op.
+    private readonly serials?: InventorySerialNumbersService,
   ) {}
 
   // ─── CONFIRMED ──────────────────────────────────────────────
@@ -108,39 +116,72 @@ export class DispatchNoteEventsListener {
         return;
       }
 
-      // 1. Deduct stock for each item
-      for (const item of dispatch_note.dispatch_note_items) {
-        const location_id =
-          item.location_id || dispatch_note.dispatch_location_id;
+      // Única fuente de verdad: la reserva. Si ya fue consumida (por
+      // order-flow finished o un re-disparo de este evento), NO se vuelve a
+      // deducir el stock. Espejo de order-flow.service.ts:241-253. Cuenta las
+      // reservas 'active' de la referencia del pedido (sales_order_id ->
+      // order_id -> dispatch_note.id para remisiones standalone).
+      const reservationRefId =
+        dispatch_note.sales_order_id ??
+        dispatch_note.order_id ??
+        dispatch_note.id;
+      const activeReservations = await this.prisma
+        .withoutScope()
+        .stock_reservations.count({
+          where: {
+            reserved_for_type: 'order',
+            reserved_for_id: reservationRefId,
+            status: 'active',
+          },
+        });
 
-        if (!location_id) continue;
+      // 1. Deduct stock for each item — SOLO si todavía hay reservas activas.
+      // Si activeReservations === 0, el stock ya se dedujo por otro camino (o
+      // es un re-disparo) y deducir aquí sería un doble consumo prohibido.
+      if (activeReservations > 0) {
+        for (const item of dispatch_note.dispatch_note_items) {
+          const location_id =
+            item.location_id || dispatch_note.dispatch_location_id;
 
-        try {
-          await this.stockLevelManager.updateStock({
-            product_id: item.product_id,
-            variant_id: item.product_variant_id ?? undefined,
-            location_id,
-            quantity_change: -item.dispatched_quantity,
-            movement_type: 'stock_out',
-            reason: `Despacho remisión #${event.dispatch_number}`,
-            create_movement: true,
-            validate_availability: false, // Already confirmed/reserved
-          });
-        } catch (err) {
-          this.logger.error(
-            `[delivered] Failed to deduct stock for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
-          );
+          if (!location_id) continue;
+
+          try {
+            await this.stockLevelManager.updateStock({
+              product_id: item.product_id,
+              variant_id: item.product_variant_id ?? undefined,
+              location_id,
+              quantity_change: -item.dispatched_quantity,
+              movement_type: 'stock_out',
+              reason: `Despacho remisión #${event.dispatch_number}`,
+              create_movement: true,
+              validate_availability: false, // Already confirmed/reserved
+            });
+          } catch (err) {
+            this.logger.error(
+              `[delivered] Failed to deduct stock for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
+            );
+          }
         }
+      } else {
+        this.logger.log(
+          `[delivered] Dispatch note #${event.dispatch_number}: reservas ya consumidas (activeReservations=0) — se omite deducción de stock para evitar doble consumo`,
+        );
       }
 
       // 2. Handle sales order integration
       if (dispatch_note.sales_order_id) {
         try {
-          // Release stock reservations made by the sales order
+          // Release stock reservations made by the sales order. Step 1 above
+          // already decremented quantity_on_hand for every located item, so we
+          // MUST pass decrementOnHand:false here to avoid deducting the same
+          // stock twice (single source of truth = the reservation, consumed
+          // exactly once). Mirrors the order_id branch below.
           await this.stockLevelManager.releaseReservationsByReference(
             'order',
             dispatch_note.sales_order_id,
             'consumed',
+            undefined,
+            { decrementOnHand: false },
           );
 
           // Check if all items of the SO have been fully dispatched
@@ -192,6 +233,16 @@ export class DispatchNoteEventsListener {
           );
         }
       }
+
+      // 3. QUI-431 — serial lifecycle: the serials reserved + linked at confirm
+      // are now sold. Transition reserved → sold for every serial linked to
+      // this remisión's items. Idempotent (transition is a no-op when already
+      // in the target status) and isolated: a serial failure never blocks the
+      // stock flow above (already committed).
+      await this.markDispatchSerialsSold(
+        dispatch_note.dispatch_note_items.map((i) => i.id),
+        event.dispatch_number,
+      );
 
       this.logger.log(
         `[delivered] Dispatch note #${event.dispatch_number} processed — stock deducted`,
@@ -246,6 +297,17 @@ export class DispatchNoteEventsListener {
         }
         // If linked to a sales order OR an order, we do NOT release their
         // reservations — they belong to that order's own lifecycle.
+
+        // QUI-431 — serial lifecycle: revert the serials reserved at confirm
+        // back to in_stock and unlink them, so they rejoin the sellable pool
+        // and can be dispatched again. Runs for ALL voided-while-confirmed
+        // notes (standalone or order-linked): the serial reservation + junction
+        // link belong to THIS remisión regardless of how the stock reservation
+        // is owned.
+        await this.revertDispatchSerialsToStock(
+          dispatch_note.dispatch_note_items.map((i) => i.id),
+          event.dispatch_number,
+        );
       }
 
       if (dispatch_note.delivered_at != null) {
@@ -460,6 +522,114 @@ export class DispatchNoteEventsListener {
           `[checkOrderStatus] Order #${order_id} marked as shipped`,
         );
       }
+    }
+  }
+
+  // ─── SERIAL LIFECYCLE (QUI-431) ─────────────────────────────
+
+  /**
+   * Load the serial pool ids linked to a set of dispatch_note_items via the
+   * polymorphic junction `sales_document_serials`
+   * (document_item_type = 'dispatch_note_item'). Returns [] when no serials are
+   * linked (the common case: no serialized goods on the remisión).
+   */
+  private async getLinkedDispatchSerialIds(
+    dispatch_note_item_ids: number[],
+  ): Promise<number[]> {
+    if (dispatch_note_item_ids.length === 0) return [];
+    const links = await this.prisma.sales_document_serials.findMany({
+      where: {
+        document_item_type: sales_document_item_type_enum.dispatch_note_item,
+        document_item_id: { in: dispatch_note_item_ids },
+      },
+      select: { serial_number_id: true },
+    });
+    return links.map((l) => l.serial_number_id);
+  }
+
+  /**
+   * deliver: transition every serial linked to this remisión reserved → sold.
+   * All transitions share ONE $transaction so the serial states move
+   * atomically; `transition()` no-ops when a serial is already `sold` (so a
+   * re-fired delivered event is safe). Isolated from the stock flow: failures
+   * are logged, never re-thrown (the stock side is already committed).
+   */
+  private async markDispatchSerialsSold(
+    dispatch_note_item_ids: number[],
+    dispatch_number: string,
+  ): Promise<void> {
+    if (!this.serials) return; // unit-test construction (no serial service)
+    try {
+      const serialIds = await this.getLinkedDispatchSerialIds(
+        dispatch_note_item_ids,
+      );
+      if (serialIds.length === 0) return;
+
+      await this.prisma.$transaction(async (tx) => {
+        for (const serial_id of serialIds) {
+          await this.serials!.transition(
+            serial_id,
+            serial_status_enum.sold,
+            tx,
+          );
+        }
+      });
+
+      this.logger.log(
+        `[delivered] Dispatch note #${dispatch_number}: ${serialIds.length} serial(s) marked sold`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[delivered] Failed to transition serials to sold for dispatch note #${dispatch_number}: ${err.message}`,
+      );
+    }
+  }
+
+  /**
+   * void: transition every serial linked to this remisión reserved → in_stock
+   * and unlink it (delete the junction row) so it rejoins the sellable pool and
+   * can be re-dispatched. All in ONE $transaction. Isolated: failures logged,
+   * never re-thrown.
+   */
+  private async revertDispatchSerialsToStock(
+    dispatch_note_item_ids: number[],
+    dispatch_number: string,
+  ): Promise<void> {
+    if (!this.serials) return; // unit-test construction (no serial service)
+    try {
+      const serialIds = await this.getLinkedDispatchSerialIds(
+        dispatch_note_item_ids,
+      );
+      if (serialIds.length === 0) return;
+
+      await this.prisma.$transaction(async (tx) => {
+        for (const serial_id of serialIds) {
+          await this.serials!.transition(
+            serial_id,
+            serial_status_enum.in_stock,
+            tx,
+          );
+        }
+        // Unlink: delete the junction rows for these dispatch lines so the
+        // serial is free to be linked to a future remisión (the
+        // @@unique([document_item_type, serial_number_id]) guard otherwise
+        // blocks re-dispatch).
+        await tx.sales_document_serials.deleteMany({
+          where: {
+            document_item_type:
+              sales_document_item_type_enum.dispatch_note_item,
+            document_item_id: { in: dispatch_note_item_ids },
+          },
+        });
+      });
+
+      this.logger.log(
+        `[voided] Dispatch note #${dispatch_number}: ${serialIds.length} serial(s) reverted to in_stock and unlinked`,
+      );
+    } catch (err: any) {
+      this.logger.error(
+        `[voided] Failed to revert serials for dispatch note #${dispatch_number}: ${err.message}`,
+      );
     }
   }
 }

@@ -88,42 +88,83 @@ export class NotificationsPushService implements OnModuleInit {
 
       if (push_subs.length === 0) return;
 
-      const payload = JSON.stringify({
-        title,
-        body,
-        data: { ...data, type },
-      });
-
-      const send_promises = push_subs.map(async (sub: any) => {
-        try {
-          await webpush.sendNotification(
-            {
-              endpoint: sub.endpoint,
-              keys: { p256dh: sub.p256dh, auth: sub.auth },
-            },
-            payload,
-          );
-        } catch (err: any) {
-          // 410 Gone or 404 — subscription expired, clean it up
-          if (err.statusCode === 410 || err.statusCode === 404) {
-            this.logger.log(`Removing expired push subscription #${sub.id}`);
-            await this.global_prisma.push_subscriptions
-              .delete({
-                where: { id: sub.id },
-              })
-              .catch(() => {});
-          } else {
-            this.logger.warn(
-              `Push failed for subscription #${sub.id}: ${err.message}`,
-            );
-          }
-        }
-      });
-
-      await Promise.allSettled(send_promises);
+      await this.deliverPushes(push_subs, title, body, type, data);
     } catch (error: any) {
       this.logger.error(`[sendToStore] Failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Send push notification to a single user within a store. Used for
+   * targeted notifications (e.g. "your appointment is starting now" → only
+   * the assigned provider, never the whole store).
+   * Fire-and-forget — never throws.
+   */
+  async sendToUser(
+    store_id: number,
+    user_id: number,
+    type: string,
+    title: string,
+    body: string,
+    data?: any,
+  ): Promise<void> {
+    if (!this.vapid_configured) return;
+
+    try {
+      const push_subs = await this.global_prisma.push_subscriptions.findMany({
+        where: { store_id, user_id },
+      });
+
+      if (push_subs.length === 0) return;
+
+      await this.deliverPushes(push_subs, title, body, type, data);
+    } catch (error: any) {
+      this.logger.error(`[sendToUser] Failed: ${error.message}`);
+    }
+  }
+
+  /**
+   * Shared web-push delivery loop used by both `sendToStore` and `sendToUser`.
+   * Always wrapped in `Promise.allSettled` — a single bad subscription does
+   * not abort the rest.
+   */
+  private async deliverPushes(
+    push_subs: any[],
+    title: string,
+    body: string,
+    type: string,
+    data?: any,
+  ): Promise<void> {
+    const payload = JSON.stringify({
+      title,
+      body,
+      data: { ...data, type },
+    });
+
+    const send_promises = push_subs.map(async (sub: any) => {
+      try {
+        await webpush.sendNotification(
+          {
+            endpoint: sub.endpoint,
+            keys: { p256dh: sub.p256dh, auth: sub.auth },
+          },
+          payload,
+        );
+      } catch (err: any) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          this.logger.log(`Removing expired push subscription #${sub.id}`);
+          await this.global_prisma.push_subscriptions
+            .delete({ where: { id: sub.id } })
+            .catch(() => {});
+        } else {
+          this.logger.warn(
+            `Push failed for subscription #${sub.id}: ${err.message}`,
+          );
+        }
+      }
+    });
+
+    await Promise.allSettled(send_promises);
   }
 
   /**

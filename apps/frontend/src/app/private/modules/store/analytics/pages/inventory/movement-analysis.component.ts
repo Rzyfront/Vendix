@@ -28,6 +28,7 @@ import {
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { compactCountAxis, truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-movement-analysis',
@@ -97,7 +98,7 @@ import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.
           </div>
         </div>
 
-        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+        <div class="flex items-end gap-2 md:gap-3 shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -328,14 +329,14 @@ onDateRangeChange(range: DateRangeFilter): void {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
         min: 0,
         splitNumber: 5,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11 },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: borderColor } },
       },
       series: [

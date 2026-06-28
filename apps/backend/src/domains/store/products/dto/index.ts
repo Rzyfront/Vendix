@@ -528,6 +528,11 @@ export class UpdateProductDto {
   track_inventory?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  requires_serial_numbers?: boolean;
+
+  @IsOptional()
   @IsNumber({ maxDecimalPlaces: 2 })
   @Type(() => Number)
   @Min(0, { message: 'El precio no puede ser negativo' })

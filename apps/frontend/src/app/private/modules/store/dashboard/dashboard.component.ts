@@ -13,8 +13,8 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { OptionsDropdownComponent } from '../../../../shared/components/options-dropdown/options-dropdown.component';
 import { FilterConfig, FilterValues } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
-import { toLocalDateString, getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../shared/utils/date.util';
-import { AnalyticsService } from '../analytics/services/analytics.service';
+import { toLocalDateString, getDefaultEndDate, formatChartPeriod } from '../../../../shared/utils/date.util';
+import { AnalyticsService, ProfitLossSummary } from '../analytics/services/analytics.service';
 import { DateRangeFilter } from '../analytics/interfaces/analytics.interface';
 import {
   SalesSummary,
@@ -75,6 +75,15 @@ const QUICK_LINKS: QuickLink[] = [
           [loading]="loading()"
         />
         <app-stats
+          title="Ganancias"
+          [value]="formatCurrency(profitLoss()?.bottom_line?.net_profit || 0)"
+          [smallText]="getMarginText(profitLoss()?.bottom_line?.net_margin)"
+          iconName="trending-up"
+          iconBgColor="bg-success/10"
+          iconColor="text-success"
+          [loading]="loading()"
+        />
+        <app-stats
           title="Órdenes"
           [value]="summary()?.total_orders || 0"
           [smallText]="getGrowthText(summary()?.orders_growth)"
@@ -84,21 +93,12 @@ const QUICK_LINKS: QuickLink[] = [
           [loading]="loading()"
         />
         <app-stats
-          title="Ticket Prom."
-          [value]="formatCurrency(summary()?.average_order_value || 0)"
-          [smallText]="(summary()?.total_units_sold || 0) + ' uds. vendidas'"
-          iconName="receipt"
-          iconBgColor="bg-accent/10"
-          iconColor="text-accent"
-          [loading]="loading()"
-        />
-        <app-stats
-          title="Clientes"
-          [value]="summary()?.total_customers || 0"
-          smallText="clientes únicos"
-          iconName="users"
-          iconBgColor="bg-warning/10"
-          iconColor="text-warning"
+          title="Gastos"
+          [value]="formatCurrency(profitLoss()?.operating_expenses || 0)"
+          smallText="gastos operativos"
+          iconName="trending-down"
+          iconBgColor="bg-error/10"
+          iconColor="text-error"
           [loading]="loading()"
         />
       </div>
@@ -212,7 +212,7 @@ const QUICK_LINKS: QuickLink[] = [
               @if (dispatchPendingCount() > 0) {
                 <div
                   class="flex items-center gap-3 p-3 bg-primary/10 rounded-lg cursor-pointer hover:bg-primary/15 transition-colors"
-                  (click)="navigateTo('/admin/orders/sales?status=processing&delivery=home_delivery')"
+                  (click)="navigateTo('/admin/orders/sales?dispatchable=true')"
                 >
                   <div class="flex-shrink-0 w-7 h-7 bg-primary/20 rounded-full flex items-center justify-center">
                     <app-icon name="truck" [size]="14" class="text-primary"></app-icon>
@@ -304,7 +304,7 @@ export class DashboardComponent {
   storeId = signal<string | null>(null);
 
   // Date range
-  selectedPreset = signal<string>('thisMonth');
+  selectedPreset = signal<string>('today');
   customStartDate = signal<string>('');
   customEndDate = signal<string>('');
 
@@ -342,9 +342,9 @@ export class DashboardComponent {
   });
 
   dateRange = signal<DateRangeFilter>({
-    start_date: getDefaultStartDate(),
+    start_date: getDefaultEndDate(),
     end_date: getDefaultEndDate(),
-    preset: 'thisMonth',
+    preset: 'today',
   });
 
   // Loading states
@@ -355,7 +355,9 @@ export class DashboardComponent {
 
   // Data
   summary = signal<SalesSummary | null>(null);
+  profitLoss = signal<ProfitLossSummary | null>(null);
   trends = signal<SalesTrend[]>([]);
+  trendGranularity = signal<'hour' | 'day'>('day');
   channels = signal<SalesByChannel[]>([]);
   lowStockCount = signal(0);
   outOfStockCount = signal(0);
@@ -437,9 +439,21 @@ export class DashboardComponent {
         },
       });
 
-    // 2. Sales trends → trend chart
+    // 1b. Profit & Loss → cards Ganancias + Gastos
     this.analyticsService
-      .getSalesTrends({ ...query, granularity: 'day' })
+      .getProfitLossSummary(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => this.profitLoss.set(response.data),
+        error: () => { /* ganancias/gastos no críticos para el resto del dashboard */ },
+      });
+
+    // 2. Sales trends → trend chart (hourly when viewing "today", else daily)
+    const trendGranularity: 'hour' | 'day' =
+      this.selectedPreset() === 'today' ? 'hour' : 'day';
+    this.trendGranularity.set(trendGranularity);
+    this.analyticsService
+      .getSalesTrends({ ...query, granularity: trendGranularity })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
@@ -502,7 +516,7 @@ export class DashboardComponent {
     const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
 
-    const labels = trends.map((t) => formatChartPeriod(t.period, 'day'));
+    const labels = trends.map((t) => formatChartPeriod(t.period, this.trendGranularity()));
     const revenues = trends.map((t) => t.revenue);
     const orders = trends.map((t) => t.orders);
 
@@ -651,6 +665,11 @@ export class DashboardComponent {
     if (growth === undefined || growth === null) return '';
     const sign = growth >= 0 ? '+' : '';
     return `${sign}${growth.toFixed(1)}% vs mes ant.`;
+  }
+
+  getMarginText(margin?: number): string {
+    if (margin === undefined || margin === null) return '';
+    return `${margin.toFixed(1)}% margen`;
   }
 
   navigateTo(path: string): void {

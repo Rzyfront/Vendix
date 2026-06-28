@@ -19,7 +19,7 @@ import {
   FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { Subject, debounceTime } from 'rxjs';
+import { debounceTime } from 'rxjs';
 import { Store } from '@ngrx/store';
 import * as fromAuth from '../../../../../../core/store/auth';
 import { environment } from '../../../../../../../environments/environment';
@@ -46,6 +46,10 @@ import {
 import { PaymentRequest } from '../../models/payment.model';
 import { CurrencyInputDirective } from '../../../../../../shared/directives/currency-input.directive';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
+import { PosCustomerSelectorComponent } from '../pos-customer-selector/pos-customer-selector.component';
+
+/** Vistas internas del envío con navegación drill-in (vista enfocada). */
+export type ShippingView = 'overview' | 'method' | 'address';
 
 @Component({
   selector: 'app-pos-shipping-modal',
@@ -60,6 +64,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
     SelectorComponent,
     CurrencyPipe,
     CurrencyInputDirective,
+    PosCustomerSelectorComponent,
   ],
   templateUrl: './pos-shipping-modal.component.html',
   styles: [
@@ -599,151 +604,96 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
       .sale-type-name { display: block; font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
       .sale-type-desc { display: block; font-size: 11px; color: var(--color-text-muted); margin-top: 2px; }
 
-      /* Customer section */
-      .selected-customer {
+      /* Drill-in summary rows (overview) */
+      .drill-row {
         display: flex;
         align-items: center;
         gap: 12px;
-        padding: 12px;
-        background: rgba(var(--color-success-rgb), 0.1);
-        border-radius: 10px;
+        width: 100%;
+        text-align: left;
+        margin-top: 16px;
+        padding: 14px;
+        border: 1px solid var(--color-border);
+        border-radius: 12px;
+        background: var(--color-surface);
+        cursor: pointer;
+        transition: all 0.2s;
       }
 
-      .customer-avatar {
+      .drill-row:first-of-type { margin-top: 16px; }
+      .drill-row:hover { border-color: var(--color-primary); }
+
+      .drill-row-icon {
         width: 36px;
         height: 36px;
-        border-radius: 50%;
-        background: var(--color-success);
-        color: white;
+        border-radius: 10px;
+        background: rgba(var(--color-primary-rgb), 0.08);
+        color: var(--color-primary);
         display: flex;
         align-items: center;
         justify-content: center;
         flex-shrink: 0;
       }
 
-      .customer-info { flex: 1; min-width: 0; }
-      .customer-name { display: block; font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
-      .customer-email { display: block; font-size: 11px; color: var(--color-text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .drill-row-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+      .drill-row-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.3px; color: var(--color-text-muted); }
+      .drill-row-value { font-size: 13px; font-weight: 600; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .drill-row-chevron { color: var(--color-text-muted); flex-shrink: 0; }
 
-      .change-customer-btn {
-        width: 32px;
-        height: 32px;
-        border-radius: 8px;
-        border: none;
-        background: var(--color-surface);
-        color: var(--color-text-muted);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s;
-        flex-shrink: 0;
-      }
-
-      .change-customer-btn:hover { color: var(--color-primary); }
-
-      .select-customer-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        width: 100%;
-        padding: 14px;
-        border: 2px dashed var(--color-border);
-        border-radius: 12px;
-        background: transparent;
-        color: var(--color-text-muted);
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s;
-      }
-
-      .select-customer-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
-
-      .customer-selector { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-border); }
-
-      .selector-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 12px;
-      }
-
-      .selector-header span { font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--color-text-muted); }
-      .selector-header button { background: none; border: none; color: var(--color-text-muted); cursor: pointer; padding: 4px; }
-
-      .search-results { display: flex; flex-direction: column; gap: 8px; max-height: 150px; overflow-y: auto; margin-top: 12px; }
-
-      .customer-result {
+      /* Drill-in focused views (method / address) */
+      .drill-view {
+        margin-top: 8px;
         display: flex;
         flex-direction: column;
-        padding: 12px;
+        gap: 12px;
+        border-radius: 12px;
+      }
+
+      .drill-header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 4px;
+      }
+
+      .drill-back-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px 6px 8px;
         border: 1px solid var(--color-border);
         border-radius: 10px;
         background: var(--color-surface);
+        color: var(--color-text-secondary);
+        font-size: 13px;
+        font-weight: 600;
         cursor: pointer;
         transition: all 0.2s;
-        text-align: left;
-        width: 100%;
+        flex-shrink: 0;
       }
 
-      .customer-result:hover { border-color: var(--color-primary); }
-      .result-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
-      .result-email { font-size: 11px; color: var(--color-text-secondary); }
+      .drill-back-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
 
-      .create-customer-action { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border); }
+      .drill-footer { display: flex; margin-top: 4px; }
 
-      .create-customer-btn {
-        width: 100%;
+      .drill-done-btn {
         display: flex;
         align-items: center;
         justify-content: center;
         gap: 8px;
+        width: 100%;
         padding: 12px;
+        border: none;
+        border-radius: 10px;
         background: var(--color-primary);
         color: white;
-        border: none;
-        border-radius: 8px;
         font-size: 14px;
         font-weight: 600;
         cursor: pointer;
         transition: filter 0.2s;
       }
 
-      .create-customer-btn:hover { filter: brightness(1.1); }
-
-      .create-customer-form { margin-top: 12px; display: flex; flex-direction: column; gap: 12px; }
-      .create-customer-form h5 { font-size: 14px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
-
-      .form-actions { display: flex; gap: 8px; margin-top: 8px; }
-
-      .btn-create {
-        flex: 1;
-        padding: 10px;
-        background: var(--color-primary);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: filter 0.2s;
-      }
-
-      .btn-create:hover { filter: brightness(1.1); }
-
-      .btn-cancel {
-        flex: 1;
-        padding: 10px;
-        background: var(--color-surface);
-        color: var(--color-text-primary);
-        border: 1px solid var(--color-border);
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-      }
+      .drill-done-btn:hover { filter: brightness(1.05); }
 
       /* Delivery Notes */
       .delivery-notes { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--color-border); }
@@ -861,6 +811,10 @@ export class PosShippingModalComponent {
   @ViewChild('customerSection') customerSection!: ElementRef;
   @ViewChild('paymentSection') paymentSection!: ElementRef;
 
+  // Shared customer selector (inline panel) — used to reset on modal close
+  @ViewChild(PosCustomerSelectorComponent)
+  customerSelector?: PosCustomerSelectorComponent;
+
   // Validation warning flash state
   validationWarningSection: 'shipping-method' | 'address' | 'customer' | 'payment' | null = null;
   validationWarningMessage = '';
@@ -884,6 +838,9 @@ export class PosShippingModalComponent {
   readonly calculatedShippingCost = signal<number | null>(null);
   readonly manualCostOverride = signal<boolean>(false);
   readonly isCalculatingShipping = signal<boolean>(false);
+
+  // Drill-in view state (method/address focused views; overview keeps total visible)
+  readonly shippingView = signal<ShippingView>('overview');
 
   // Payment state
   paymentMode: PosShippingPaymentMode = 'on_delivery';
@@ -909,12 +866,6 @@ export class PosShippingModalComponent {
   ];
   defaultPaymentForm: 'contado' | 'credito' = 'contado';
 
-  // Customer state
-  showCustomerSelector = false;
-  customerSearchResults: PosCustomer[] = [];
-  showCreateCustomerForm = false;
-  isSearchingCustomer = false;
-
   // Processing
   isProcessing = false;
 
@@ -929,11 +880,9 @@ export class PosShippingModalComponent {
 
   // Forms
   addressForm: FormGroup;
-  customerForm: FormGroup;
   paymentForm: FormGroup;
 
   currencySymbol: any;
-private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime customer search stream
 
   get addressLine1Control(): FormControl {
     return this.addressForm.get('address_line1') as FormControl;
@@ -957,22 +906,6 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
 
   get referenceControl(): FormControl {
     return this.paymentForm.get('reference') as FormControl;
-  }
-
-  get customerEmailControl(): FormControl {
-    return this.customerForm.get('email') as FormControl;
-  }
-
-  get customerFirstNameControl(): FormControl {
-    return this.customerForm.get('firstName') as FormControl;
-  }
-
-  get customerLastNameControl(): FormControl {
-    return this.customerForm.get('lastName') as FormControl;
-  }
-
-  get customerPhoneControl(): FormControl {
-    return this.customerForm.get('phone') as FormControl;
   }
 
   get customerDisplayName(): string {
@@ -1016,11 +949,6 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
       city: ['', Validators.required],
       state_province: [''],
       delivery_notes: [''] });
-    this.customerForm = this.fb.group({
-      email: ['', [Validators.required, Validators.email]],
-      firstName: ['', [Validators.required, Validators.minLength(2)]],
-      lastName: ['', [Validators.required, Validators.minLength(2)]],
-      phone: [''] });
     this.paymentForm = this.fb.group({
       cashReceived: [0, [Validators.required, Validators.min(0)]],
       reference: [''] });
@@ -1054,6 +982,7 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     this.paymentModeCollapsed = false;
     this.paymentMethodCollapsed = false;
     this.selectedShippingMethod.set(null);
+    this.shippingView.set('overview');
     this.shippingCost.set(0);
     this.calculatedShippingCost.set(null);
     this.manualCostOverride.set(false);
@@ -1062,9 +991,7 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     this.cashReceived = 0;
     this.cashChange = 0;
     this.isProcessing = false;
-    this.showCustomerSelector = false;
-    this.customerSearchResults = [];
-    this.showCreateCustomerForm = false;
+    this.customerSelector?.reset();
     this.selectedCustomerAddressId.set(null);
     this.cities.set([]);
     this.selectedDepartmentId.set(null);
@@ -1085,7 +1012,6 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     }
     this.addressForm.reset();
     this.paymentForm.reset();
-    this.customerForm.reset();
   }
 
   private loadShippingMethods(): void {
@@ -1124,11 +1050,20 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
           this.calculateShippingCost();
         }
       });
+  }
 
-    // Debounced customer search (300ms)
-    this.customerSearchSubject
-      .pipe(takeUntilDestroyed(this.destroyRef), debounceTime(300))
-      .subscribe((query) => this.executeCustomerSearch(query));
+  // --- Drill-in view navigation ---
+
+  goToMethod(): void {
+    this.shippingView.set('method');
+  }
+
+  goToAddress(): void {
+    this.shippingView.set('address');
+  }
+
+  backToShippingOverview(): void {
+    this.shippingView.set('overview');
   }
 
   // --- Shipping Methods ---
@@ -1138,8 +1073,12 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     if (method.type === 'pickup') {
       this.shippingCost.set(0);
       this.calculatedShippingCost.set(0);
+      // No address needed for pickup → back to overview.
+      this.shippingView.set('overview');
     } else {
       this.calculateShippingCost();
+      // UX nicety: jump straight into capturing the delivery address.
+      this.shippingView.set('address');
     }
   }
 
@@ -1356,54 +1295,24 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
 
   // --- Customer ---
 
-  openCustomerSelector(): void {
-    this.showCustomerSelector = true;
-    this.showCreateCustomerForm = false;
-  }
-
-  closeCustomerSelector(): void {
-    this.showCustomerSelector = false;
-    this.showCreateCustomerForm = false;
-    this.customerSearchResults = [];
-  }
-
   navigateToShippingSettings(): void {
     this.onModalClosed();
     this.router.navigate(['/admin/settings/shipping']);
   }
 
-  onCustomerSearch(query: string): void {
-    this.customerSearchSubject.next(query);
-  }
-
-  private executeCustomerSearch(query: string): void {
-    if (query && query.trim().length >= 2) {
-      this.isSearchingCustomer = true;
-      this.customerService
-        .searchCustomers({ query: query.trim(), limit: 10 })
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (response) => {
-            this.customerSearchResults = response.data || [];
-            this.isSearchingCustomer = false;
-          },
-          error: () => {
-            this.customerSearchResults = [];
-            this.isSearchingCustomer = false;
-            this.toastService.show({
-              variant: 'error',
-              title: 'Error',
-              description: 'Error al buscar clientes' });
-          } });
-    } else {
-      this.customerSearchResults = [];
-    }
-  }
-
+  /** Host contract: bubble selection to parent and pre-fill the address. */
   async selectCustomer(customer: PosCustomer): Promise<void> {
     this.customerSelected.emit(customer);
-    this.closeCustomerSelector();
     await this.applyCustomerAddress(customer);
+  }
+
+  /** (customerCleared) handler: reset address auto-fill when customer is removed. */
+  clearCustomer(): void {
+    this.selectedCustomerAddressId.set(null);
+    this.addressForm.reset();
+    this.selectedDepartmentId.set(null);
+    this.selectedCityId.set(null);
+    this.cities.set([]);
   }
 
   private async applyCustomerAddress(customer: PosCustomer): Promise<void> {
@@ -1466,40 +1375,6 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
       .subscribe((refreshed) => {
         if (refreshed) void this.applyCustomerAddress(refreshed);
       });
-  }
-
-  onCreateCustomer(): void {
-    if (this.customerForm.valid) {
-      const formValue = this.customerForm.value;
-      this.isSearchingCustomer = true;
-
-      this.customerService
-        .createQuickCustomer({
-          email: formValue.email,
-          first_name: formValue.firstName,
-          last_name: formValue.lastName,
-          phone: formValue.phone || undefined })
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (customer) => {
-            this.isSearchingCustomer = false;
-            this.customerSelected.emit(customer);
-            this.closeCustomerSelector();
-            this.toastService.success('Cliente creado correctamente');
-          },
-          error: (error) => {
-            this.isSearchingCustomer = false;
-            this.toastService.show({
-              variant: 'error',
-              title: 'Error',
-              description: error.error?.message || error.message || 'Error al crear cliente' });
-          } });
-    } else {
-      Object.keys(this.customerForm.controls).forEach((key) => {
-        this.customerForm.get(key)?.markAsTouched();
-      });
-      this.toastService.info('Por favor completa los campos requeridos');
-    }
   }
 
   // --- Validation & Confirm ---
@@ -1568,6 +1443,15 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     this.validationWarningSection = null;
     if (this.validationWarningTimeout) {
       clearTimeout(this.validationWarningTimeout);
+    }
+
+    // Drill into the focused view that owns the warned section so its ref renders.
+    if (section === 'shipping-method') {
+      this.shippingView.set('method');
+    } else if (section === 'address') {
+      this.shippingView.set('address');
+    } else if (section === 'payment') {
+      this.shippingView.set('overview');
     }
 
     setTimeout(() => {

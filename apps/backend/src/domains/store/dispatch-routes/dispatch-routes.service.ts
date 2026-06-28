@@ -20,6 +20,8 @@ import {
   buildStopsData,
   computeRouteTotals,
   buildRouteReconciliation,
+  deriveStopIsPrepaid,
+  resolveIsPrepaid,
   RouteReconciliation,
   ReconciliationStopInput,
   RouteStopNoteInput,
@@ -55,7 +57,21 @@ const DISPATCH_ROUTE_INCLUDE = {
           grand_total: true,
           status: true,
           sales_order_id: true,
+          order_id: true,
+          // Live payment signals → DERIVED is_prepaid on read (never the frozen
+          // persisted stop boolean).
+          needs_collection: true,
+          // Delivery-address snapshot for the planilla per-stop address.
+          customer_address: true,
           sales_order: { select: { id: true, order_number: true, status: true } },
+          invoice: { select: { payment_date: true } },
+          order: {
+            select: {
+              id: true,
+              remaining_balance: true,
+              shipping_address_snapshot: true,
+            },
+          },
           // Withholding-agent flag drives the UI banner + the backend
           // re-validation in route-flow.service.settleStop().
           customer: { select: { is_withholding_agent: true } },
@@ -84,30 +100,102 @@ export class DispatchRoutesService {
     return store_id;
   }
 
-  async create(dto: CreateDispatchRouteDto) {
-    const store_id = this.getStoreId();
-    const user_id = RequestContextService.getContext()?.user_id;
-
-    // Validate driver: si es externo, requiere nombre + cédula; si es interno, FK users.
-    // Es mutuamente excluyente: no se permite mandar ambos (driver_user_id y external_*).
-    if (dto.driver_user_id && (dto.external_driver_name || dto.external_driver_id_number)) {
+  /**
+   * Validate the driver/assistant block and defensively sanitize `assistants`.
+   *
+   * Shared by `create()` and `update()` so both entry points enforce the same
+   * invariants (the frontend wizard already prevents these cases, but the
+   * backend must not trust the client). On success it MUTATES `dto.assistants`
+   * to the cleaned array (same behaviour create() relied on before).
+   *
+   * Rules enforced:
+   * 1. Internal (`driver_user_id`) and external (`external_driver_*`) driver are
+   *    mutually exclusive — they cannot both be present.
+   * 2. When `requireDriver` is true (create), a complete driver must be
+   *    provided: if `is_primary_driver_external` the external name + id_number
+   *    are required, otherwise `driver_user_id` is required. On a partial
+   *    update (`requireDriver = false`) this presence requirement is skipped so
+   *    a PATCH that doesn't touch driver fields stays valid.
+   * 3. The driver (`driver_user_id`) cannot also appear as an assistant
+   *    (`assistants[].user_id`) — checked AFTER sanitizing assistants.
+   *
+   * @param requireDriver when true (create) enforce that a driver is present.
+   */
+  private validateDriverAndAssistants(
+    dto: CreateDispatchRouteDto | UpdateDispatchRouteDto,
+    requireDriver: boolean,
+  ): void {
+    // (1) Internal vs external driver mutual exclusion.
+    if (
+      dto.driver_user_id &&
+      (dto.external_driver_name || dto.external_driver_id_number)
+    ) {
       throw new BadRequestException(
         'Conductor interno y externo son mutuamente excluyentes',
       );
     }
-    if (dto.is_primary_driver_external) {
-      if (!dto.external_driver_name || !dto.external_driver_id_number) {
-        throw new BadRequestException(
-          'Conductor externo requiere external_driver_name y external_driver_id_number',
-        );
+
+    // (2) On create, a complete driver must be provided.
+    if (requireDriver) {
+      if (dto.is_primary_driver_external) {
+        if (!dto.external_driver_name || !dto.external_driver_id_number) {
+          throw new BadRequestException(
+            'Conductor externo requiere external_driver_name y external_driver_id_number',
+          );
+        }
+      } else {
+        if (!dto.driver_user_id) {
+          throw new BadRequestException(
+            'Conductor interno requiere driver_user_id',
+          );
+        }
       }
-    } else {
-      if (!dto.driver_user_id) {
+    }
+
+    // Sanitize `assistants` defensive pass (DTO already validates shape with
+    // class-validator; this catches any item missing both user_id and external
+    // fields that would otherwise persist as `[]` on the JSONB column).
+    if (dto.assistants && Array.isArray(dto.assistants)) {
+      const cleaned: any[] = [];
+      for (const a of dto.assistants) {
+        if (!a || typeof a !== 'object') continue;
+        const obj = a as Record<string, unknown>;
+        const hasUser = typeof obj.user_id === 'number' && obj.user_id > 0;
+        const hasExt =
+          typeof obj.external_name === 'string' &&
+          obj.external_name.length > 0 &&
+          typeof obj.external_id_number === 'string' &&
+          obj.external_id_number.length > 0;
+        if (!hasUser && !hasExt) continue; // skip invalid items silently
+        cleaned.push(obj);
+      }
+      dto.assistants = cleaned;
+    }
+
+    // (3) The driver cannot also be listed as an assistant (checked after the
+    // sanitize pass so released/invalid items don't trigger a false positive).
+    if (dto.driver_user_id && Array.isArray(dto.assistants)) {
+      const driverIsAssistant = dto.assistants.some(
+        (a) =>
+          a &&
+          typeof a === 'object' &&
+          (a as Record<string, unknown>).user_id === dto.driver_user_id,
+      );
+      if (driverIsAssistant) {
         throw new BadRequestException(
-          'Conductor interno requiere driver_user_id',
+          'El conductor no puede figurar también como auxiliar',
         );
       }
     }
+  }
+
+  async create(dto: CreateDispatchRouteDto) {
+    const store_id = this.getStoreId();
+    const user_id = RequestContextService.getContext()?.user_id;
+
+    // Validate driver (mutual exclusion + required driver) and sanitize
+    // assistants (mutates dto.assistants). create() always requires a driver.
+    this.validateDriverAndAssistants(dto, true);
 
     // Validate that all dispatch_notes exist, belong to this store, and are not already in another route
     const note_ids = dto.stops.map((s) => s.dispatch_note_id);
@@ -151,26 +239,6 @@ export class DispatchRoutesService {
       throw new BadRequestException(
         `Las remisiones ${blocking.map((s) => s.dispatch_note_id).join(', ')} ya pertenecen a una planilla activa (estado: ${blocking.map((s) => s.route.status).join(', ')})`,
       );
-    }
-
-    // Sanitize `assistants` defensive pass (DTO already validates shape with
-    // class-validator; this catches any item missing both user_id and external
-    // fields that would otherwise persist as `[]` on the JSONB column).
-    if (dto.assistants && Array.isArray(dto.assistants)) {
-      const cleaned: any[] = [];
-      for (const a of dto.assistants) {
-        if (!a || typeof a !== 'object') continue;
-        const obj = a as Record<string, unknown>;
-        const hasUser = typeof obj.user_id === 'number' && obj.user_id > 0;
-        const hasExt =
-          typeof obj.external_name === 'string' &&
-          obj.external_name.length > 0 &&
-          typeof obj.external_id_number === 'string' &&
-          obj.external_id_number.length > 0;
-        if (!hasUser && !hasExt) continue; // skip invalid items silently
-        cleaned.push(obj);
-      }
-      dto.assistants = cleaned;
     }
 
     // Validate vehicle
@@ -329,12 +397,16 @@ export class DispatchRoutesService {
     // Surface `customer.is_withholding_agent` as a top-level
     // `customer_is_withholding_agent` on each stop's dispatch_note for
     // legacy UI consumers. The nested `customer` object remains the
-    // source of truth.
+    // source of truth. We ALSO overwrite each stop's `is_prepaid` with the
+    // DERIVED value (live note/order payment state) so the frontend reflects
+    // the real prepaid status instead of the frozen persisted boolean.
     const stops_with_alias = (route.stops ?? []).map((stop: any) => {
       const dn = stop.dispatch_note ?? null;
-      if (!dn) return stop;
+      const is_prepaid = deriveStopIsPrepaid(stop);
+      if (!dn) return { ...stop, is_prepaid };
       return {
         ...stop,
+        is_prepaid,
         dispatch_note: {
           ...dn,
           customer_is_withholding_agent:
@@ -494,12 +566,20 @@ export class DispatchRoutesService {
     );
     const new_stops_data = buildStopsData(new_stop_inputs, new_notes_by_id);
 
-    // Recompute route totals over the COMPLETE set (existing + new). Existing
-    // stops contribute their persisted is_prepaid + the note's grand_total.
+    // Recompute route totals over the COMPLETE set (existing + new). is_prepaid
+    // is DERIVED from each note's live payment state (needs_collection +
+    // invoice.payment_date + order.remaining_balance), not the frozen persisted
+    // stop boolean — so the recomputed totals match the read-path derivation.
     const existing_note_ids_list = route.stops.map((s) => s.dispatch_note_id);
     const existing_notes_full = await this.prisma.dispatch_notes.findMany({
       where: { id: { in: existing_note_ids_list }, store_id },
-      select: { id: true, grand_total: true, needs_collection: true },
+      select: {
+        id: true,
+        grand_total: true,
+        needs_collection: true,
+        invoice: { select: { payment_date: true } },
+        order: { select: { remaining_balance: true } },
+      },
     });
     const all_notes_by_id = new Map<number, RouteStopNoteInput>(
       new_notes.map((n) => [n.id, n]),
@@ -507,18 +587,23 @@ export class DispatchRoutesService {
     for (const n of existing_notes_full) all_notes_by_id.set(n.id, n);
 
     const all_stops_data = [
-      ...route.stops.map((s) => ({
-        dispatch_note_id: s.dispatch_note_id,
-        stop_sequence: s.stop_sequence,
-        is_extra_route: false,
-        is_prepaid: s.is_prepaid,
-        collected_amount: 0,
-        anticipo_amount: 0,
-        change_amount: 0,
-        withholding_amount: 0,
-        credit_amount: 0,
-        notes: null,
-      })),
+      ...route.stops.map((s) => {
+        const note = all_notes_by_id.get(s.dispatch_note_id);
+        return {
+          dispatch_note_id: s.dispatch_note_id,
+          stop_sequence: s.stop_sequence,
+          is_extra_route: false,
+          // DERIVE from the live note payment state instead of the frozen
+          // persisted stop boolean, so totals match the read-path derivation.
+          is_prepaid: note ? resolveIsPrepaid(note) : s.is_prepaid,
+          collected_amount: 0,
+          anticipo_amount: 0,
+          change_amount: 0,
+          withholding_amount: 0,
+          credit_amount: 0,
+          notes: null,
+        };
+      }),
       ...new_stops_data,
     ];
     const { total_to_collect, total_prepaid } = computeRouteTotals(
@@ -554,6 +639,11 @@ export class DispatchRoutesService {
         'Solo se pueden editar planillas en estado borrador',
       );
     }
+
+    // Validate driver block + sanitize assistants. Partial update: the
+    // mutual-exclusion and driver-vs-assistant checks only apply to the fields
+    // actually present, and a complete driver is NOT required (requireDriver=false).
+    this.validateDriverAndAssistants(dto, false);
 
     return this.prisma.$transaction(async (tx) => {
       // Update stops if provided
@@ -682,6 +772,8 @@ export class DispatchRoutesService {
         grand_total: true,
         status: true,
         needs_collection: true,
+        customer_address: true,
+        order: { select: { shipping_address_snapshot: true } },
       },
     });
     return notes
@@ -693,6 +785,8 @@ export class DispatchRoutesService {
         grand_total: n.grand_total,
         status: n.status,
         needs_collection: n.needs_collection,
+        customer_address: n.customer_address,
+        shipping_address_snapshot: n.order?.shipping_address_snapshot ?? null,
       }));
   }
 }

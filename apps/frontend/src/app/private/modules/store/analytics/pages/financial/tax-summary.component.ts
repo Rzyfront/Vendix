@@ -16,6 +16,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-tax-summary',
@@ -104,7 +105,7 @@ import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.
           </div>
         </div>
 
-        <div class="flex items-center gap-2 md:gap-3 flex-shrink-0">
+        <div class="flex items-end gap-2 md:gap-3 flex-shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -294,7 +295,7 @@ export class TaxSummaryComponent implements OnInit {
         type: 'category',
         data: taxCategories,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
@@ -302,7 +303,7 @@ export class TaxSummaryComponent implements OnInit {
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (v: number) => this.currencyService.format(Math.round(v), 0),
+          formatter: (v: number) => this.currencyService.formatChartAxis(v),
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },

@@ -16,6 +16,7 @@ import { getViewsByCategory, AnalyticsView } from '../../config/analytics-regist
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-profit-loss',
@@ -103,7 +104,7 @@ import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.
           </div>
         </div>
 
-        <div class="flex items-center gap-2 md:gap-3 flex-shrink-0">
+        <div class="flex items-end gap-2 md:gap-3 flex-shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -289,14 +290,14 @@ export class ProfitLossComponent implements OnInit {
         type: 'category',
         data: ['Ingresos', 'COGS', 'Reembolsos', 'Gastos Operativos'],
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (v: number) => this.currencyService.format(Math.round(v), 0),
+          formatter: (v: number) => this.currencyService.formatChartAxis(v),
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
@@ -360,14 +361,14 @@ export class ProfitLossComponent implements OnInit {
         type: 'category',
         data: ['Ganancia Bruta', 'Reembolsos', 'Gastos', 'Ganancia Neta'],
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (val: string) => truncateLabel(val, 14) },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => this.currencyService.formatChartAxis(v) },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
       series: [

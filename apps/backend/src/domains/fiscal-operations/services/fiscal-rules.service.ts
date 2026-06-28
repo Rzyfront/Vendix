@@ -22,6 +22,10 @@ export class FiscalRulesService {
     const where: Prisma.fiscal_rule_setsWhereInput = {
       country_code: 'CO',
       year,
+      // Archived rule sets must not appear in admin list views. Mirrors the
+      // pattern used by products/brands/categories. The query DTO has no
+      // explicit `include_archived` flag, so this is unconditional.
+      status: { not: 'archived' },
       ...(query.rule_type ? { rule_type: query.rule_type } : {}),
       OR: [
         { organization_id: null, accounting_entity_id: null },

@@ -4,6 +4,7 @@ import {
   Get,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -12,6 +13,7 @@ import { TableSessionsService } from './table-sessions.service';
 import {
   OpenTableSessionDto,
   AddItemsToTableSessionDto,
+  AssignCustomerDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -21,15 +23,16 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  *
  * REST seam for the `table_sessions` domain (open checks).
  *
- *   POST /api/store/table-sessions              open session (creates order draft)
- *   GET  /api/store/table-sessions/:id          session detail with current draft order
- *   POST /api/store/table-sessions/:id/add-items append items to the draft order
- *   POST /api/store/table-sessions/:id/close    close the session (NOT the order)
+ *   POST  /api/store/table-sessions              open session (creates order draft)
+ *   GET   /api/store/table-sessions/:id          session detail with current draft order
+ *   POST  /api/store/table-sessions/:id/add-items append items to the draft order
+ *   PATCH /api/store/table-sessions/:id/customer assign/detach the order customer
+ *   POST  /api/store/table-sessions/:id/close    close the session (NOT the order)
  *
  * Permission policy:
  *   - GET detail  → store:table_sessions:read
  *   - POST open   → store:table_sessions:create
- *   - POST add-items / close → store:table_sessions:update
+ *   - POST add-items / PATCH customer / close → store:table_sessions:update
  */
 @Controller('store/table-sessions')
 @UseGuards(PermissionsGuard)
@@ -92,6 +95,33 @@ export class TableSessionsController {
     } catch (error: any) {
       return this.responseService.error(
         error.message || 'Error al agregar items a la cuenta',
+        error.response?.message || error.message,
+        error.status || 400,
+        error.error_code,
+      );
+    }
+  }
+
+  @Patch(':id/customer')
+  @Permissions('store:table_sessions:update')
+  async assignCustomer(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignCustomerDto,
+  ) {
+    try {
+      const result = await this.tableSessionsService.assignCustomer(
+        id,
+        dto.customer_id,
+      );
+      return this.responseService.updated(
+        result,
+        dto.customer_id == null
+          ? 'Cliente desasignado de la cuenta'
+          : 'Cliente asignado a la cuenta',
+      );
+    } catch (error: any) {
+      return this.responseService.error(
+        error.message || 'Error al asignar el cliente a la cuenta',
         error.response?.message || error.message,
         error.status || 400,
         error.error_code,

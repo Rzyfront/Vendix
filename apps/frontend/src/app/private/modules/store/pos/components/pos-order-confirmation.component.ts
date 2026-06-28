@@ -425,7 +425,13 @@ effect(() => {
 	          item.applied_price_tier_name ||
 	          null,
 	        isPackageUnit: !!item.is_package_unit || !!unitsPerPackage,
-	        unitsPerPackage };
+	        unitsPerPackage,
+	        serials: (() => {
+	          const raw = item.serial_numbers_snapshot ?? item.serials ?? item.serial_numbers ?? null;
+	          if (Array.isArray(raw)) return raw.map((s: any) => String(s).trim()).filter((s: string) => s.length > 0);
+	          if (typeof raw === 'string' && raw.trim().length > 0) return raw.split(',').map((s) => s.trim()).filter((s) => s.length > 0);
+	          return undefined;
+	        })() };
 	    });
 
     // Totals come directly from the backend response (source of truth).
@@ -501,7 +507,8 @@ effect(() => {
 	        weight_unit: item.weight_unit || undefined,
 	        appliedPriceTierName: item.appliedPriceTierName,
 	        isPackageUnit: item.isPackageUnit,
-	        unitsPerPackage: item.unitsPerPackage })),
+	        unitsPerPackage: item.unitsPerPackage,
+	        serials: item.serials })),
       subtotal: this.orderSubtotal,
       tax: this.orderTax,
       discount: this.orderDiscount,

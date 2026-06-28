@@ -55,6 +55,9 @@ export interface Product {
   is_available?: boolean;
   effective_track_inventory?: boolean;
   track_inventory?: boolean;
+  // QUI-431 — when true, each unit sold must carry a unique serial number.
+  // The POS opens a serial-selection modal before adding the product to cart.
+  requires_serial_numbers?: boolean;
   minStock: number;
   min_stock_level?: number | null;
   reorder_point?: number | null;
@@ -523,6 +526,9 @@ export class PosProductService {
         is_available: productIsAvailable,
         effective_track_inventory: effectiveTrackInventory ?? true,
         track_inventory: product.track_inventory,
+        // QUI-431 — surfaced so the POS opens the serial-selection modal for
+        // serialized products before adding them to the cart.
+        requires_serial_numbers: product.requires_serial_numbers === true,
         minStock: this.resolveLowStockThreshold(product),
         min_stock_level: product.min_stock_level ?? null,
         reorder_point: product.reorder_point ?? null,

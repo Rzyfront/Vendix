@@ -150,6 +150,16 @@ export class CashSettlementService {
   }
 
   async emitCreditSale(input: CreditSaleInput) {
+    // Sin crédito / pago parcial en ruta: el pago es total o no hay pago. La
+    // liquidación de paradas ya nunca produce credit_amount > 0, así que esta
+    // rama queda muerta. La protegemos como defensa en profundidad para que un
+    // monto residual jamás genere un accounts_receivable ni emita
+    // 'credit_sale.created' por una venta a crédito en ruta. NO toca las demás
+    // emisiones (payment.received / refund.completed / withholding).
+    if (!(input.amount > 0)) {
+      return null;
+    }
+
     const store = await this.prisma.stores.findUnique({
       where: { id: input.store_id },
       select: { organization_id: true },

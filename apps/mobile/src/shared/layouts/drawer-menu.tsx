@@ -185,7 +185,15 @@ const storeMenuItems: MenuItem[] = [
   { label: 'Panel Principal', icon: 'home', href: '/(store-admin)/dashboard' },
   { label: 'Punto de venta', icon: 'store', href: '/(store-admin)/pos' },
   { label: 'Órdenes', icon: 'shopping-cart', href: '/(store-admin)/orders' },
-  { label: 'Productos', icon: 'package', href: '/(store-admin)/products' },
+  {
+    label: 'Productos',
+    icon: 'package',
+    children: [
+      { label: 'Lista', icon: 'list', href: '/(store-admin)/products' },
+      { label: 'Marcas', icon: 'tag', href: '/(store-admin)/products/brands' },
+      { label: 'Categorías', icon: 'layers', href: '/(store-admin)/products/categories' },
+    ],
+  },
   {
     label: 'Inventario', icon: 'warehouse', href: '/(store-admin)/inventory/pop',
     children: [

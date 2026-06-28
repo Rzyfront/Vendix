@@ -458,6 +458,26 @@
                             Este bloque no usa cantidad de elementos.
                           </div>
                         }
+                        @if (section.key === 'menus') {
+                          <div class="md:col-span-3">
+                            <label
+                              class="mb-1 block text-xs font-medium text-gray-600"
+                            >
+                              Platos fuera de horario
+                            </label>
+                            <select
+                              formControlName="availability_display"
+                              class="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:border-primary-400 focus:outline-none"
+                            >
+                              <option value="hide">
+                                Ocultar (solo lo disponible ahora)
+                              </option>
+                              <option value="badge">
+                                Mostrar con "Disponible a las…"
+                              </option>
+                            </select>
+                          </div>
+                        }
                       </div>
                     </div>
                   </div>

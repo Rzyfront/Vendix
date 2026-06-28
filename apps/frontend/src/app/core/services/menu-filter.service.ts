@@ -87,6 +87,7 @@ export class MenuFilterService {
     Proveedores: 'inventory_suppliers',
     Movimientos: 'inventory_movements',
     Transferencias: 'inventory_transfers',
+    'Números de Serie': 'inventory_serials',
 
     // STORE_ADMIN - Clientes (padre + submódulos)
     Clientes: 'customers',

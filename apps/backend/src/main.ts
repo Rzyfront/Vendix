@@ -108,6 +108,7 @@ async function bootstrap() {
     'https://d1y0m1duatgngc.cloudfront.net',
     ...additionalStaticOrigins,
   ];
+  
 
   // Allow any subdomain for multi-tenant (HTTP and HTTPS)
   // Modified to be more permissive with protocol and subdomains

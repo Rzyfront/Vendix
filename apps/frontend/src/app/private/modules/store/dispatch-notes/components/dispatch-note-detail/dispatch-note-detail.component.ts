@@ -80,7 +80,7 @@ export class DispatchNoteDetailComponent {
       { id: 'confirm', label: 'Confirmar', variant: 'primary', icon: 'check', visible: status === 'draft' },
       { id: 'deliver', label: 'Entregar', variant: 'primary', icon: 'truck', visible: status === 'confirmed' },
       { id: 'invoice', label: 'Facturar', variant: 'primary', icon: 'file-plus', visible: status === 'delivered' },
-      { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer', visible: ['delivered', 'invoiced'].includes(status) },
+      { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer', visible: ['confirmed', 'delivered', 'invoiced'].includes(status) },
       { id: 'void', label: 'Anular', variant: 'outline-danger', icon: 'x-circle', visible: status === 'confirmed' },
     ];
   });
@@ -95,6 +95,61 @@ export class DispatchNoteDetailComponent {
       red: { bg: 'bg-red-100', text: 'text-red-500' },
     };
     return map[color] || map['gray'];
+  });
+
+  // ── Cliente / dirección de entrega ─────────────────
+  /**
+   * Normaliza `customer_address` (puede llegar como string o como objeto
+   * Address) a líneas legibles. Evita el bug silencioso de renderizar
+   * `[object Object]` cuando el backend envía la dirección estructurada.
+   */
+  readonly customerAddressLines = computed<string[]>(() => {
+    const a = this.dispatch_note().customer_address as
+      | string
+      | {
+          address_line1?: string;
+          address_line2?: string;
+          city?: string;
+          state_province?: string;
+          postal_code?: string;
+          country_code?: string;
+          phone_number?: string;
+        }
+      | null
+      | undefined;
+    if (!a) return [];
+    if (typeof a === 'string') {
+      const trimmed = a.trim();
+      return trimmed ? [trimmed] : [];
+    }
+    const street = [a.address_line1, a.address_line2].filter(Boolean).join(', ');
+    const locality = [a.city, a.state_province, a.postal_code].filter(Boolean).join(', ');
+    const country = a.country_code || '';
+    return [street, locality, country].filter((l) => !!l && l.trim().length > 0);
+  });
+
+  readonly hasCustomerAddress = computed<boolean>(() => this.customerAddressLines().length > 0);
+
+  // ── Ruta activa (planilla) ─────────────────────────
+  /**
+   * Asignación activa de la remisión a una planilla de ruta: el primer stop
+   * cuyo `route` está presente y cuyo estado NO es `released`. Devuelve `null`
+   * cuando la remisión no está actualmente en una ruta (sin asignar o liberada
+   * y nunca reasignada). Replica el patrón `activeRoute` de la lista de
+   * remisiones para ofrecer navegación a la planilla.
+   */
+  readonly activeRoute = computed<{ id: number; route_number: string } | null>(() => {
+    const stop = (this.dispatch_note().dispatch_route_stops ?? []).find(
+      (s) => s.status !== 'released' && !!s.route,
+    );
+    return stop?.route
+      ? { id: stop.route.id, route_number: stop.route.route_number }
+      : null;
+  });
+
+  readonly customerPhone = computed<string>(() => {
+    const a = this.dispatch_note().customer_address as { phone_number?: string } | string | null | undefined;
+    return a && typeof a === 'object' ? a.phone_number || '' : '';
   });
 
   // ── Items for ResponsiveDataView ────────────────────
@@ -216,6 +271,11 @@ export class DispatchNoteDetailComponent {
   // ── Navigation ──────────────────────────────────────
   goToOrder(orderId: number): void {
     this.router.navigate(['/admin/orders', orderId]);
+  }
+
+  /** Navega al detalle de la planilla (ruta) asignada a la remisión. */
+  goToRoute(routeId: number): void {
+    this.router.navigate(['/admin/orders/planillas', routeId]);
   }
 
   // ── Utility methods ─────────────────────────────────

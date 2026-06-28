@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { RouteFlowService } from './route-flow.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException } from '@common/errors';
 
 describe('RouteFlowService — settleStop (cash settlement event fan-out)', () => {
   let service: RouteFlowService;
@@ -38,6 +39,11 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       grand_total: new Prisma.Decimal(200),
       customer_id: 42,
       sales_order_id: 5000,
+      // Default remisión status. settleStop transitions confirmed → delivered;
+      // dispatch() confirms draft → confirmed. Keep 'confirmed' as the default
+      // so the pre-existing settle tests still pass unchanged.
+      status: 'confirmed',
+      order_id: null,
       sales_order: { id: 5000, order_number: 'SO-1', status: 'confirmed' },
     },
     ...overrides,
@@ -67,6 +73,24 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       },
       dispatch_route_stop_history: {
         create: jest.fn(),
+      },
+      // dispatch_notes is touched by markDispatchNoteDeliveredInTx (settle) and
+      // the confirm-on-dispatch path. Echo back the merged row so the tx body
+      // resolves; tests assert on the call args, not the return shape.
+      dispatch_notes: {
+        update: jest
+          .fn()
+          .mockImplementation((a: any) => ({ id: a.where.id, ...a.data })),
+      },
+      // store_settings drives the `dispatch.order_state_update_mode` lookup at
+      // the top of settleStop. Default: no row → merge defaults → 'on_close'.
+      store_settings: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
+      // orders is only touched by advanceOrderToDelivered (live mode).
+      orders: {
+        findFirst: jest.fn(),
+        updateMany: jest.fn(),
       },
       // $transaction executes the callback with the same mock acting as `tx`.
       $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
@@ -142,43 +166,24 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
     );
   });
 
-  // ── b) CRÉDITO (partial) ───────────────────────────────────────────
-  it('b) credit stop (partial collection): emits credit_sale with amount = net - total_paid - withholding', async () => {
+  // ── b) PARCIAL DESHABILITADO ───────────────────────────────────────
+  it('b) partial result is rejected: throws DISPATCH_ROUTE_PARTIAL_DISABLED and never settles', async () => {
     prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
     prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
 
-    // net=200, collected=120 → credit_amount = 200 - 120 - 0 = 80
-    await service.settleStop(ROUTE_ID, STOP_ID, {
-      result: 'partial',
-      collected_amount: 120,
-      payment_method: 'cash',
-    } as any);
+    // No hay crédito / pago parcial en ruta: el pago es total o no hay pago.
+    await expect(
+      service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'partial',
+        collected_amount: 120,
+        payment_method: 'cash',
+      } as any),
+    ).rejects.toBeInstanceOf(VendixHttpException);
 
-    expect(cashSettlementMock.emitCreditSale).toHaveBeenCalledTimes(1);
-    expect(cashSettlementMock.emitCreditSale).toHaveBeenCalledWith(
-      expect.objectContaining({
-        store_id: STORE_ID,
-        route_id: ROUTE_ID,
-        stop_id: STOP_ID,
-        customer_id: 42,
-        amount: 80,
-      }),
-    );
-    // Partial collection still triggers a payment for the collected portion.
-    expect(cashSettlementMock.emitPaymentReceived).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: 120 }),
-    );
-
-    expect(prismaMock.dispatch_route_stops.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: 'partial',
-          result: 'partial',
-          collected_amount: 120,
-          credit_amount: 80,
-        }),
-      }),
-    );
+    // The stop is never updated and no credit-sale / payment is emitted.
+    expect(prismaMock.dispatch_route_stops.update).not.toHaveBeenCalled();
+    expect(cashSettlementMock.emitCreditSale).not.toHaveBeenCalled();
+    expect(cashSettlementMock.emitPaymentReceived).not.toHaveBeenCalled();
   });
 
   // ── c) RETENCIÓN (withholding) ─────────────────────────────────────
@@ -256,6 +261,162 @@ describe('RouteFlowService — settleStop (cash settlement event fan-out)', () =
       expect.objectContaining({
         data: expect.objectContaining({ status: 'delivered' }),
       }),
+    );
+  });
+
+  // ── e) LIVE order-state mode ───────────────────────────────────────
+  it('e) live mode + linked COD order (shipped): advances order shipped→delivered on settle', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
+      buildStop({
+        dispatch_note: { ...buildStop().dispatch_note, order_id: 7777 },
+      }),
+    );
+    prismaMock.store_settings.findFirst.mockResolvedValue({
+      settings: { dispatch: { order_state_update_mode: 'live' } },
+    });
+    prismaMock.orders.findFirst.mockResolvedValue({ id: 7777, state: 'shipped' });
+
+    await service.settleStop(ROUTE_ID, STOP_ID, {
+      result: 'delivered',
+      collected_amount: 200,
+      payment_method: 'cash',
+    } as any);
+
+    // The COD order is advanced shipped → delivered inside the settle tx.
+    expect(prismaMock.orders.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: 7777,
+          store_id: STORE_ID,
+          state: 'shipped',
+        }),
+        data: expect.objectContaining({ state: 'delivered' }),
+      }),
+    );
+  });
+
+  // ── f) ON_CLOSE mode (default): order state untouched at settle ─────
+  it('f) on_close mode (default) + linked COD order: does NOT advance order state on settle', async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
+      buildStop({
+        dispatch_note: { ...buildStop().dispatch_note, order_id: 7777 },
+      }),
+    );
+    // store_settings default mock → null → 'on_close'.
+    prismaMock.orders.findFirst.mockResolvedValue({ id: 7777, state: 'shipped' });
+
+    await service.settleStop(ROUTE_ID, STOP_ID, {
+      result: 'delivered',
+      collected_amount: 200,
+      payment_method: 'cash',
+    } as any);
+
+    // Legacy behavior: order state advances only at route close, not at settle.
+    expect(prismaMock.orders.updateMany).not.toHaveBeenCalled();
+  });
+
+  // ── g) DELIVERED → remisión transitions to 'delivered' + emits event ─
+  it("g) result 'delivered' on a confirmed note: updates dispatch_note → delivered and emits dispatch_note.delivered", async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
+
+    await service.settleStop(ROUTE_ID, STOP_ID, {
+      result: 'delivered',
+      collected_amount: 200,
+      payment_method: 'cash',
+    } as any);
+
+    // The remisión is transitioned to 'delivered' inside the settle tx.
+    expect(prismaMock.dispatch_notes.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 900 },
+        data: expect.objectContaining({ status: 'delivered' }),
+      }),
+    );
+    // The delivered event is emitted post-commit for the inventory primitive.
+    expect(eventEmitterMock.emit).toHaveBeenCalledWith(
+      'dispatch_note.delivered',
+      expect.objectContaining({ dispatch_note_id: 900 }),
+    );
+  });
+
+  // ── h) PARTIAL → rejected, never delivers the remisión ─────────────
+  it("h) result 'partial' is rejected: does NOT transition the remisión to delivered nor emit the event", async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
+
+    // Partial is disabled: the whole settle is aborted before any side effect.
+    await expect(
+      service.settleStop(ROUTE_ID, STOP_ID, {
+        result: 'partial',
+        collected_amount: 120,
+        payment_method: 'cash',
+      } as any),
+    ).rejects.toBeInstanceOf(VendixHttpException);
+
+    const deliveredUpdate = prismaMock.dispatch_notes.update.mock.calls.find(
+      (c: any[]) => c[0]?.data?.status === 'delivered',
+    );
+    expect(deliveredUpdate).toBeUndefined();
+    expect(eventEmitterMock.emit).not.toHaveBeenCalledWith(
+      'dispatch_note.delivered',
+      expect.anything(),
+    );
+  });
+
+  // ── i) REJECTED → does NOT deliver the remisión ────────────────────
+  it("i) result 'rejected': does NOT transition the remisión to delivered nor emit the event", async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(buildStop());
+
+    // rejected has no coverage requirement; collected=0 keeps cash emits silent.
+    await service.settleStop(ROUTE_ID, STOP_ID, {
+      result: 'rejected',
+      collected_amount: 0,
+      payment_method: 'cash',
+    } as any);
+
+    // No dispatch_note.update with status: 'delivered'.
+    const deliveredUpdate = prismaMock.dispatch_notes.update.mock.calls.find(
+      (c: any[]) => c[0]?.data?.status === 'delivered',
+    );
+    expect(deliveredUpdate).toBeUndefined();
+    // No delivered event emitted.
+    expect(eventEmitterMock.emit).not.toHaveBeenCalledWith(
+      'dispatch_note.delivered',
+      expect.anything(),
+    );
+  });
+
+  // ── j) IDEMPOTENT: note already 'delivered' → no re-transition/re-emit ─
+  it("j) note already 'delivered' + result 'delivered': idempotent, no re-update to delivered nor re-emit", async () => {
+    prismaMock.dispatch_routes.findFirst.mockResolvedValue(buildRoute());
+    // settleStop throws if stop.status === 'delivered', so keep the stop
+    // 'in_progress' but the dispatch_note already 'delivered'.
+    prismaMock.dispatch_route_stops.findFirst.mockResolvedValue(
+      buildStop({
+        status: 'in_progress',
+        dispatch_note: { ...buildStop().dispatch_note, status: 'delivered' },
+      }),
+    );
+
+    await service.settleStop(ROUTE_ID, STOP_ID, {
+      result: 'delivered',
+      collected_amount: 200,
+      payment_method: 'cash',
+    } as any);
+
+    // Idempotent: the helper returns null for an already-delivered note, so no
+    // dispatch_notes.update with status delivered and no delivered event.
+    const deliveredUpdate = prismaMock.dispatch_notes.update.mock.calls.find(
+      (c: any[]) => c[0]?.data?.status === 'delivered',
+    );
+    expect(deliveredUpdate).toBeUndefined();
+    expect(eventEmitterMock.emit).not.toHaveBeenCalledWith(
+      'dispatch_note.delivered',
+      expect.anything(),
     );
   });
 });

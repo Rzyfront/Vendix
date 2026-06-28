@@ -1,0 +1,191 @@
+<div class="customer-selector" [class.compact]="compact()">
+  <!-- ══════════════════ OVERVIEW ══════════════════ -->
+  @if (view() === 'overview') {
+    @if (selectedCustomer(); as customer) {
+      <!-- Cliente seleccionado: tarjeta resumen -->
+      <div class="selected-customer">
+        <div class="customer-avatar">
+          <app-icon name="user" [size]="18" color="#ffffff"></app-icon>
+        </div>
+        <div class="customer-info">
+          <span class="customer-name">
+            {{ customer.first_name }} {{ customer.last_name }}
+          </span>
+          <span class="customer-email">
+            {{ customer.email || customer.phone || '—' }}
+          </span>
+        </div>
+        <button
+          type="button"
+          class="change-customer-btn"
+          (click)="goToSearch()"
+          aria-label="Cambiar cliente"
+        >
+          <app-icon name="pencil" [size]="16"></app-icon>
+        </button>
+      </div>
+
+      @if (allowAnonymous()) {
+        <div class="create-customer-action">
+          <app-button variant="ghost" size="sm" (clicked)="clearCustomer()">
+            <app-icon name="user-x" [size]="16" slot="icon"></app-icon>
+            Quitar cliente / venta anónima
+          </app-button>
+        </div>
+      }
+    } @else {
+      <!-- Sin cliente: prompt con dos acciones -->
+      <div class="overview-empty">
+        <button type="button" class="select-customer-btn" (click)="goToSearch()">
+          <app-icon name="search" [size]="18"></app-icon>
+          Buscar cliente
+        </button>
+        <button type="button" class="select-customer-btn" (click)="goToCreate()">
+          <app-icon name="user-plus" [size]="18"></app-icon>
+          Crear cliente
+        </button>
+      </div>
+    }
+  }
+
+  <!-- ══════════════════ SEARCH ══════════════════ -->
+  @if (view() === 'search') {
+    <div class="selector-header">
+      <button type="button" class="back-btn" (click)="back()">
+        <app-icon name="arrow-left" [size]="16"></app-icon>
+        Volver
+      </button>
+      <span>Buscar cliente</span>
+    </div>
+
+    <app-inputsearch
+      placeholder="Buscar por nombre, email o documento..."
+      [debounceTime]="300"
+      (search)="onSearch($event)"
+      (enter)="onSearchEnter()"
+      (clear)="onClear()"
+    ></app-inputsearch>
+
+    @if (isSearching()) {
+      <div class="search-loading">
+        <div class="spinner"></div>
+        <span>Buscando…</span>
+      </div>
+    }
+
+    @if (!isSearching() && results().length > 0) {
+      <div class="search-results">
+        @for (customer of results(); track customer.id) {
+          <button
+            type="button"
+            class="customer-result"
+            (click)="selectCustomer(customer)"
+          >
+            <span class="result-name">
+              {{ customer.first_name }} {{ customer.last_name }}
+            </span>
+            <span class="result-email">
+              {{ customer.email || customer.phone || '—' }}
+              @if (customer.document_number) {
+                · {{ customer.document_type || 'Doc' }}: {{ customer.document_number }}
+              }
+            </span>
+          </button>
+        }
+      </div>
+    }
+
+    @if (!isSearching() && searchPerformed() && results().length === 0) {
+      <div class="no-results">
+        <app-icon name="user-x" [size]="32" color="var(--color-text-muted)"></app-icon>
+        <p>No se encontraron clientes con esos criterios</p>
+      </div>
+    }
+
+    <div class="create-customer-action">
+      <app-button variant="outline" size="sm" (clicked)="goToCreate(lastQuery())">
+        <app-icon name="user-plus" [size]="16" slot="icon"></app-icon>
+        Crear nuevo cliente
+      </app-button>
+    </div>
+  }
+
+  <!-- ══════════════════ CREATE ══════════════════ -->
+  @if (view() === 'create') {
+    <div class="selector-header">
+      <button type="button" class="back-btn" (click)="back()">
+        <app-icon name="arrow-left" [size]="16"></app-icon>
+        Volver
+      </button>
+      <span>Crear cliente</span>
+    </div>
+
+    <form [formGroup]="form" class="create-customer-form" (ngSubmit)="onCreate()">
+      <app-input
+        formControlName="email"
+        label="Email"
+        placeholder="cliente@ejemplo.com"
+        type="email"
+        [size]="'md'"
+      ></app-input>
+
+      <div class="form-row">
+        <app-input
+          formControlName="firstName"
+          label="Nombre *"
+          placeholder="Juan"
+          type="text"
+          [size]="'md'"
+        ></app-input>
+        <app-input
+          formControlName="lastName"
+          label="Apellido *"
+          placeholder="Pérez"
+          type="text"
+          [size]="'md'"
+        ></app-input>
+      </div>
+
+      <app-input
+        formControlName="phone"
+        label="Teléfono"
+        placeholder="+57 300 123 4567"
+        type="tel"
+        [size]="'md'"
+      ></app-input>
+
+      <div class="form-row">
+        <app-selector
+          formControlName="documentType"
+          label="Tipo Doc."
+          [options]="documentTypeOptions"
+          [size]="'md'"
+          [placeholder]="'Seleccionar'"
+        ></app-selector>
+        <app-input
+          formControlName="documentNumber"
+          label="Número *"
+          placeholder="1023456789"
+          type="text"
+          [size]="'md'"
+        ></app-input>
+      </div>
+
+      <div class="form-actions">
+        <app-button variant="secondary" size="md" type="button" (clicked)="back()">
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          size="md"
+          type="submit"
+          [loading]="creating()"
+          [disabled]="!canCreate()"
+        >
+          <app-icon name="save" [size]="16" slot="icon"></app-icon>
+          Crear cliente
+        </app-button>
+      </div>
+    </form>
+  }
+</div>

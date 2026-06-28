@@ -35,7 +35,10 @@ export type DispatchMethod = 'with-note' | 'without-note';
           (click)="selected.emit('with-note')"
           class="w-full text-left rounded-xl border border-border bg-surface hover:border-primary-600 hover:bg-primary-50 transition-colors p-4 flex items-start gap-3"
         >
-          <div class="flex h-10 w-10 items-center justify-center rounded-full bg-primary-50 text-primary-600 flex-shrink-0">
+          <div
+            class="flex h-10 w-10 items-center justify-center rounded-[0.625rem] flex-shrink-0"
+            style="color: var(--color-primary); background: rgba(var(--color-primary-rgb, 126, 215, 165), 0.1); border: 1px solid rgba(var(--color-primary-rgb, 126, 215, 165), 0.18);"
+          >
             <app-icon name="file-text" [size]="20"></app-icon>
           </div>
           <div class="min-w-0">
@@ -53,11 +56,13 @@ export type DispatchMethod = 'with-note' | 'without-note';
           (click)="selected.emit('without-note')"
           class="w-full text-left rounded-xl border border-border bg-surface hover:border-primary-600 hover:bg-primary-50 transition-colors p-4 flex items-start gap-3"
         >
-          <div class="flex h-10 w-10 items-center justify-center rounded-full bg-muted text-text-secondary flex-shrink-0">
+          <div
+            class="flex h-10 w-10 items-center justify-center rounded-[0.625rem] bg-slate-100 border border-slate-200 text-slate-600 flex-shrink-0"
+          >
             <app-icon name="truck" [size]="20"></app-icon>
           </div>
           <div class="min-w-0">
-            <div class="font-semibold">Sin remisión</div>
+            <div class="font-semibold">Envío directo sin remisión</div>
             <div class="text-sm text-text-secondary">
               Marca la orden como enviada sin generar ningún documento de
               despacho.

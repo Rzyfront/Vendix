@@ -50,6 +50,14 @@ interface RouteForPdf {
       dispatch_number: string;
       customer_name?: string | null;
       grand_total: any;
+      // Delivery-address snapshot (JSON). Falls back to the order's shipping
+      // snapshot. Both carry the `addresses` column names (address_line1,
+      // state_province, country_code, ...).
+      customer_address?: any;
+      order?: {
+        shipping_address_snapshot?: any;
+        addresses_orders_shipping_address_idToaddresses?: any;
+      } | null;
     } | null;
   }>;
 }
@@ -72,7 +80,24 @@ const fmtDate = (d: Date | null | undefined) => {
   });
 };
 
-const MARGIN = 40;
+/**
+ * Format a delivery-address JSON snapshot into a one-line string for the PDF.
+ * Tolerant of both `addresses` column names (address_line1, state_province) and
+ * legacy DTO names (address_line_1, state); returns '' when nothing usable.
+ */
+const formatPdfAddress = (addr: any): string => {
+  if (!addr || typeof addr !== 'object') return '';
+  const line1 = addr.address_line1 ?? addr.address_line_1 ?? addr.line1 ?? addr.address ?? '';
+  const line2 = addr.address_line2 ?? addr.address_line_2 ?? '';
+  const city = addr.city ?? '';
+  const state = addr.state_province ?? addr.state ?? '';
+  return [line1, line2, city, state]
+    .map((p) => (p ?? '').toString().trim())
+    .filter(Boolean)
+    .join(', ');
+};
+
+const MARGIN = 24; // thin margin to maximize printable width
 const PAGE_WIDTH = 612; // Letter
 const PAGE_HEIGHT = 792;
 
@@ -198,9 +223,9 @@ export class PdfExportService {
     doc.fillColor('black');
     doc.moveDown(0.2);
 
-    // Column layout (sums to the printable width = PAGE_WIDTH - 2*MARGIN = 532).
+    // Column layout (sums to the printable width = PAGE_WIDTH - 2*MARGIN = 564).
     // [#, Remisión, Cliente/Dirección, A cobrar, Entrega, Recaudo, Recaudado $]
-    const col_widths = [20, 70, 132, 70, 50, 50, 140];
+    const col_widths = [22, 74, 150, 74, 52, 52, 140];
     const aligns: Array<'left' | 'right' | 'center'> = [
       'center',
       'left',
@@ -221,7 +246,7 @@ export class PdfExportService {
     ];
 
     const startX = MARGIN;
-    const ROW_H = 22;
+    const ROW_H = 28; // taller row: customer name + delivery address on 2 lines
     let y = doc.y;
 
     // Header row
@@ -297,8 +322,33 @@ export class PdfExportService {
     doc.text(dn?.dispatch_number || '—', x, y + 4, { width: col_widths[1], align: aligns[1] });
     x += col_widths[1];
 
-    // Col 2: customer / address
-    doc.text(customer, x, y + 4, { width: col_widths[2], align: aligns[2] });
+    // Col 2: customer name (line 1) + delivery address (line 2, gray, ellipsis).
+    // No address for released/rejected stops (nothing to deliver there).
+    const addressStr =
+      is_released || is_rejected
+        ? ''
+        : formatPdfAddress(
+            dn?.customer_address ??
+              dn?.order?.shipping_address_snapshot ??
+              dn?.order?.addresses_orders_shipping_address_idToaddresses,
+          );
+    doc.font('Helvetica').fontSize(9).fillColor('black');
+    doc.text(customer, x, y + 2, {
+      width: col_widths[2],
+      align: aligns[2],
+      lineBreak: false,
+      ellipsis: true,
+    });
+    if (addressStr) {
+      doc.font('Helvetica').fontSize(7).fillColor('#555');
+      doc.text(addressStr, x, y + 14, {
+        width: col_widths[2],
+        align: aligns[2],
+        lineBreak: false,
+        ellipsis: true,
+      });
+      doc.font('Helvetica').fontSize(9).fillColor('black');
+    }
     x += col_widths[2];
 
     // Col 3: A cobrar
@@ -453,16 +503,23 @@ export class PdfExportService {
 
   private drawFooter(doc: PDFKit.PDFDocument) {
     const range = doc.bufferedPageRange();
+    const generated = `Generado el ${new Date().toLocaleString('es-CO')}`;
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
+      // Writing inside the bottom-margin band makes PDFKit auto-append a blank
+      // page and pushes the footer onto it. Temporarily zero the bottom margin
+      // (and disable line wrapping) so the footer stays on its own page.
+      const prev_bottom = doc.page.margins.bottom;
+      doc.page.margins.bottom = 0;
       doc.font('Helvetica').fontSize(8).fillColor('#666');
       doc.text(
-        `Generado el ${new Date().toLocaleString('es-CO')} — Página ${i + 1} de ${range.count}`,
+        `${generated} — Página ${i + 1} de ${range.count}`,
         MARGIN,
-        PAGE_HEIGHT - 30,
-        { width: PAGE_WIDTH - MARGIN * 2, align: 'center' },
+        PAGE_HEIGHT - 20,
+        { width: PAGE_WIDTH - MARGIN * 2, align: 'center', lineBreak: false },
       );
       doc.fillColor('black');
+      doc.page.margins.bottom = prev_bottom;
     }
   }
 

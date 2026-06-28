@@ -7,6 +7,7 @@ import {
   DestroyRef,
   signal,
   computed,
+  viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -39,9 +40,9 @@ import {
   PosPaymentService,
   PaymentMethod,
 } from '../services/pos-payment.service';
-import { PosCustomerService } from '../services/pos-customer.service';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosFulfillmentSelectorComponent, FulfillmentType } from './pos-fulfillment-selector.component';
+import { PosCustomerSelectorComponent } from './pos-customer-selector/pos-customer-selector.component';
 import { PosOpenTableModalComponent, } from './pos-open-table-modal.component';
 import { OpenTableSessionResult } from '../services/pos-restaurant-integration.service';
 import { PosWalletService, WalletInfo } from '../services/pos-wallet.service';
@@ -82,6 +83,7 @@ interface PaymentState {
     CurrencyPipe,
     CurrencyInputDirective,
     PosFulfillmentSelectorComponent,
+    PosCustomerSelectorComponent,
     PosOpenTableModalComponent,
   ],
   templateUrl: './pos-payment-interface.component.html',
@@ -655,261 +657,14 @@ interface PaymentState {
         margin-top: 2px;
       }
 
-      /* Selected Customer */
-      .selected-customer {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 12px;
-        background: rgba(var(--color-success-rgb), 0.1);
-        border-radius: 10px;
-        margin-top: 12px;
-      }
-
-      .customer-avatar {
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        background: var(--color-success);
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-      }
-
-      .customer-info {
-        flex: 1;
-        min-width: 0;
-      }
-
-      .customer-name {
-        display: block;
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--color-text-primary);
-      }
-
-      .customer-email {
-        display: block;
-        font-size: 11px;
-        color: var(--color-text-secondary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .change-customer-btn {
-        width: 32px;
-        height: 32px;
-        border-radius: 8px;
-        border: none;
-        background: var(--color-surface);
-        color: var(--color-text-muted);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s;
-        flex-shrink: 0;
-      }
-
-      .change-customer-btn:hover {
-        color: var(--color-primary);
-      }
-
-      /* Select Customer Button */
-      .select-customer-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        width: 100%;
-        padding: 14px;
-        border: 2px dashed var(--color-border);
-        border-radius: 12px;
-        background: transparent;
-        color: var(--color-text-muted);
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s;
-        margin-top: 12px;
-      }
-
-      .select-customer-btn:hover {
-        border-color: var(--color-primary);
-        color: var(--color-primary);
-      }
-
-      /* Customer Selector */
-      .customer-selector {
-        margin-top: 16px;
-        padding-top: 16px;
-        border-top: 1px solid var(--color-border);
-      }
-
-      .selector-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 12px;
-      }
-
-      .selector-header span {
-        font-size: 12px;
-        font-weight: 600;
-        text-transform: uppercase;
-        color: var(--color-text-muted);
-      }
-
-      .selector-header button {
-        background: none;
-        border: none;
-        color: var(--color-text-muted);
-        cursor: pointer;
-        padding: 4px;
-      }
-
-      .search-results {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        max-height: 150px;
-        overflow-y: auto;
-        margin-top: 12px;
-      }
-
-      .customer-result {
-        display: flex;
-        flex-direction: column;
-        padding: 12px;
-        border: 1px solid var(--color-border);
-        border-radius: 10px;
-        background: var(--color-surface);
-        cursor: pointer;
-        transition: all 0.2s;
-        text-align: left;
-        width: 100%;
-      }
-
-      .customer-result:hover {
-        border-color: var(--color-primary);
-      }
-
-      .result-name {
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--color-text-primary);
-      }
-
-      .result-email {
-        font-size: 11px;
-        color: var(--color-text-secondary);
-      }
-
-      .no-results {
-        text-align: center;
-        padding: 16px;
-      }
-
-      .no-results p {
-        font-size: 13px;
-        color: var(--color-text-secondary);
-        margin: 0 0 8px 0;
-      }
-
-      .no-results button {
-        background: none;
-        border: none;
-        color: var(--color-primary);
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-      }
-
-      /* Create Customer Action - Always visible */
-      .create-customer-action {
-        margin-top: 12px;
-        padding-top: 12px;
-        border-top: 1px solid var(--color-border);
-      }
-
-      .create-customer-btn {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 12px;
-        background: var(--color-primary);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: filter 0.2s;
-      }
-
-      .create-customer-btn:hover {
-        filter: brightness(1.1);
-      }
-
-      /* Create Customer Form */
-      .create-customer-form {
-        margin-top: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-
-      .create-customer-form h5 {
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--color-text-primary);
-        margin: 0;
-      }
+      /* Customer-selector styles (search/create/summary) ahora viven en
+         pos-customer-selector.component.scss. Aquí solo conservamos las
+         clases compartidas por otras secciones del modal. */
 
       .form-row {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 8px;
-      }
-
-      .form-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 8px;
-      }
-
-      .btn-create {
-        flex: 1;
-        padding: 10px;
-        background: var(--color-primary);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: filter 0.2s;
-      }
-
-      .btn-create:hover {
-        filter: brightness(1.1);
-      }
-
-      .btn-cancel {
-        flex: 1;
-        padding: 10px;
-        background: var(--color-surface);
-        color: var(--color-text-primary);
-        border: 1px solid var(--color-border);
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
       }
 
       /* Footer */
@@ -1520,6 +1275,9 @@ export class PosPaymentInterfaceComponent {
   /** Bug 1 (Fase K): emitted when the inline picker opens a session. */
   readonly tableSessionOpened = output<OpenTableSessionResult>();
 
+  /** Panel inline de selección de cliente (buscar/crear). Se resetea al cerrar el modal. */
+  private readonly customerSelector = viewChild(PosCustomerSelectorComponent);
+
   paymentMethods = signal<PaymentMethod[]>([]);
   paymentForm: FormGroup;
   /** Fulfillment type selected for this payment. Defaults to 'entrega' so
@@ -1632,21 +1390,6 @@ export class PosPaymentInterfaceComponent {
   // Currency symbol (computed signal from CurrencyFormatService)
   currencySymbol: any;
 
-  // Document type options for customer creation
-  documentTypeOptions = [
-    { value: 'dni', label: 'DNI' },
-    { value: 'passport', label: 'Pasaporte' },
-    { value: 'cedula', label: 'Cédula' },
-    { value: 'other', label: 'Otro' },
-  ];
-
-  // Customer management within modal
-  showCustomerSelector = signal(false);
-  customerSearchResults = signal<PosCustomer[]>([]);
-  customerSearchQuery = signal('');
-  isSearchingCustomer = signal(false);
-  showCreateCustomerForm = signal(false);
-
   // Credit configuration state
   creditNumInstallments = signal(3);
   creditFrequency = signal<'weekly' | 'biweekly' | 'monthly'>('monthly');
@@ -1678,8 +1421,6 @@ export class PosPaymentInterfaceComponent {
     { value: 'monthly' as const, label: 'Mensual' },
   ];
 
-  customerForm: FormGroup;
-
   // quickCashAmounts = [10, 20, 50, 100]; // Removed as per new requirement
   get cashReceivedControl(): FormControl {
     return this.paymentForm.get('cashReceived') as FormControl;
@@ -1689,30 +1430,6 @@ export class PosPaymentInterfaceComponent {
     return this.paymentForm.get('reference') as FormControl;
   }
 
-  get customerEmailControl(): FormControl {
-    return this.customerForm.get('email') as FormControl;
-  }
-
-  get customerFirstNameControl(): FormControl {
-    return this.customerForm.get('firstName') as FormControl;
-  }
-
-  get customerLastNameControl(): FormControl {
-    return this.customerForm.get('lastName') as FormControl;
-  }
-
-  get customerPhoneControl(): FormControl {
-    return this.customerForm.get('phone') as FormControl;
-  }
-
-  get customerDocumentTypeControl(): FormControl {
-    return this.customerForm.get('documentType') as FormControl;
-  }
-
-  get customerDocumentNumberControl(): FormControl {
-    return this.customerForm.get('documentNumber') as FormControl;
-  }
-
   get customerDisplayName(): string {
     if (!this.cartState()?.customer) {
       return 'Seleccionar cliente';
@@ -1720,10 +1437,6 @@ export class PosPaymentInterfaceComponent {
     const firstName = this.cartState()!.customer?.first_name || '';
     const lastName = this.cartState()!.customer?.last_name || '';
     return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
-  }
-
-  get customerEmail(): string {
-    return this.cartState()?.customer?.email || '';
   }
 
   /**
@@ -1755,7 +1468,6 @@ export class PosPaymentInterfaceComponent {
 
   private fb = inject(FormBuilder);
   private paymentService = inject(PosPaymentService);
-  private customerService = inject(PosCustomerService);
 private restaurantIntegration = inject(PosRestaurantIntegrationService);
   private toastService = inject(ToastService);
   private router = inject(Router);
@@ -1764,7 +1476,6 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
 
   constructor() {
     this.paymentForm = this.createPaymentForm();
-    this.customerForm = this.createCustomerForm();
     // Exponer el símbolo de moneda para usar en el template
     this.currencySymbol = this.currencyService.currencySymbol;
 
@@ -1830,17 +1541,6 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     return this.fb.group({
       cashReceived: [0, [Validators.required, Validators.min(0)]],
       reference: [''],
-    });
-  }
-
-  private createCustomerForm(): FormGroup {
-    return this.fb.group({
-      email: ['', [Validators.email]],
-      firstName: ['', [Validators.required, Validators.minLength(2)]],
-      lastName: ['', [Validators.required, Validators.minLength(2)]],
-      phone: [''],
-      documentType: [''],
-      documentNumber: ['', [Validators.required]],
     });
   }
 
@@ -1970,11 +1670,21 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
 
     this.paymentState.update(s => ({ ...s, selectedMethod: method }));
     this.paymentMethodCollapsed.set(true);
-    this.paymentForm.reset();
-    this.paymentState.update(s => ({ ...s, change: 0 }));
+
+    // Reset only the reference; do NOT blanket-reset the form, which would null
+    // cashReceived and flash a false "Faltan: $X" before the debounced
+    // valueChanges fires (it skips null). Keep paymentState in sync synchronously.
+    this.referenceControl.setValue('');
+    this.paymentState.update(s => ({ ...s, change: 0, reference: '' }));
 
     if (method.type === 'cash') {
-      this.cashReceivedControl.setValue(this.cartState()?.summary?.total || 0);
+      const total = this.cartState()?.summary?.total || 0;
+      this.cashReceivedControl.setValue(total);
+      this.paymentState.update(s => ({ ...s, cashReceived: total }));
+      this.calculateChange();
+    } else {
+      this.cashReceivedControl.setValue(0);
+      this.paymentState.update(s => ({ ...s, cashReceived: 0 }));
     }
   }
 
@@ -2001,11 +1711,6 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
   setFullAmount(): void {
     const total = this.cartState()?.summary?.total || 0;
     this.setCashAmount(total);
-  }
-
-  setHalfAmount(): void {
-    const total = this.cartState()?.summary?.total || 0;
-    this.setCashAmount(total / 2);
   }
 
   appendNumber(num: number): void {
@@ -2485,11 +2190,7 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
       paymentForm: this.defaultPaymentForm(),
     });
     this.paymentForm.reset();
-    this.customerForm.reset();
-    this.showCustomerSelector.set(false);
-    this.customerSearchResults.set([]);
-    this.customerSearchQuery.set('');
-    this.showCreateCustomerForm.set(false);
+    this.customerSelector()?.reset();
     this.paymentFormCollapsed.set(false);
     this.paymentMethodCollapsed.set(false);
     // Reset Wompi state
@@ -2513,16 +2214,8 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     // does not overwrite it during the same session.
     this.userOverrideAnonymous.set(enabled);
     this.paymentState.update(s => ({ ...s, isAnonymousSale: enabled }));
-    if (enabled) {
-      // When switching to anonymous, clear customer selector
-      this.showCustomerSelector.set(false);
-      this.showCreateCustomerForm.set(false);
-    } else {
-      // When switching to customer sale, show customer selector if no customer selected
-      if (!this.cartState()?.customer) {
-        this.showCustomerSelector.set(true);
-      }
-    }
+    // El panel <app-pos-customer-selector> gestiona su propia vista
+    // (overview/search/create); no hace falta forzarla desde aquí.
   }
 
   setPaymentForm(form: 'contado' | 'credito'): void {
@@ -2532,9 +2225,6 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
     if (form === 'credito') {
       // Crédito requiere cliente — deshabilitar venta anónima
       this.paymentState.update(s => ({ ...s, isAnonymousSale: false }));
-      if (!this.cartState()?.customer) {
-        this.showCustomerSelector.set(true);
-      }
       this.updateCreditCalculations();
     }
   }
@@ -2714,110 +2404,27 @@ private restaurantIntegration = inject(PosRestaurantIntegrationService);
   }
 
   // Customer Management Methods
-  openCustomerSelector(): void {
-    this.showCustomerSelector.set(true);
-    this.showCreateCustomerForm.set(false);
-    this.paymentState.update(s => ({ ...s, isAnonymousSale: false }));
-  }
+  //
+  // Buscar/crear cliente vive ahora en <app-pos-customer-selector> (panel
+  // inline). El selector emite (customerSelected) cuando el usuario elige o
+  // crea un cliente; aquí solo sincronizamos el estado del anfitrión y
+  // re-emitimos al padre (pos.component → cartService.setCustomer), que es la
+  // fuente de verdad del cliente en el carrito.
 
-  closeCustomerSelector(): void {
-    this.showCustomerSelector.set(false);
-    this.showCreateCustomerForm.set(false);
-    this.customerSearchResults.set([]);
-    this.customerSearchQuery.set('');
-  }
-
-  onCustomerSearch(query: string): void {
-    this.customerSearchQuery.set(query);
-    if (query && query.trim().length >= 2) {
-      this.isSearchingCustomer.set(true);
-
-      this.customerService
-        .searchCustomers({ query: query.trim(), limit: 10 })
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (response) => {
-            this.customerSearchResults.set(response.data || []);
-            this.isSearchingCustomer.set(false);
-          },
-          error: (error) => {
-            console.error('Error searching customers:', error);
-            this.customerSearchResults.set([]);
-            this.isSearchingCustomer.set(false);
-            this.toastService.show({
-              variant: 'error',
-              title: 'Error',
-              description: 'Error al buscar clientes',
-            });
-          },
-        });
-    } else {
-      this.customerSearchResults.set([]);
-      this.isSearchingCustomer.set(false);
-    }
-  }
-
+  /** Cliente elegido/creado en el selector inline. */
   selectCustomer(customer: PosCustomer): void {
-    // Emit event to parent to update cart customer
+    // Asegurar que la venta deje de ser anónima al asignar un cliente.
+    this.userOverrideAnonymous.set(false);
+    this.paymentState.update((s) => ({ ...s, isAnonymousSale: false }));
+    // Re-emitir al padre para que actualice el carrito (fuente de verdad).
     this.customerSelected.emit(customer);
-    this.closeCustomerSelector();
   }
 
-  switchToCreateCustomer(): void {
-    this.showCreateCustomerForm.set(true);
-    this.customerSearchResults.set([]);
-  }
-
-  switchToCustomerSearch(): void {
-    this.showCreateCustomerForm.set(false);
-  }
-
-  onCreateCustomer(): void {
-    if (this.customerForm.valid) {
-      const formValue = this.customerForm.value;
-
-      const customerRequest = {
-        email: formValue.email,
-        first_name: formValue.firstName,
-        last_name: formValue.lastName,
-        phone: formValue.phone || undefined,
-        document_type: formValue.documentType || undefined,
-        document_number: formValue.documentNumber || undefined,
-      };
-
-      this.isSearchingCustomer.set(true);
-
-      this.customerService
-        .createQuickCustomer(customerRequest)
-        .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (customer) => {
-            this.isSearchingCustomer.set(false);
-            this.customerSelected.emit(customer);
-            this.closeCustomerSelector();
-            this.toastService.success('Cliente creado correctamente');
-          },
-          error: (error) => {
-            this.isSearchingCustomer.set(false);
-            console.error('Error creating customer:', error);
-            this.toastService.show({
-              variant: 'error',
-              title: 'Error',
-              description:
-                error.error?.message ||
-                error.message ||
-                'Error al crear cliente',
-            });
-          },
-        });
-    } else {
-      // Mark all fields as touched to show validation errors
-      Object.keys(this.customerForm.controls).forEach((key) => {
-        const control = this.customerForm.get(key);
-        control?.markAsTouched();
-      });
-      this.toastService.info('Por favor completa los campos requeridos');
-    }
+  /** "Quitar cliente / venta anónima" desde el selector inline. */
+  onCustomerCleared(): void {
+    // Mismo contrato que el toggle "Venta Anónima": marca override de usuario
+    // y pone el estado en anónimo.
+    this.toggleAnonymousSale(true);
   }
 
   // Getter for insufficient amount

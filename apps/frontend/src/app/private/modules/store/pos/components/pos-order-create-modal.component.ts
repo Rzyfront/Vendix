@@ -11,33 +11,25 @@ import {
   DestroyRef,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import {
-  FormBuilder,
-  FormControl,
-  FormGroup,
-  ReactiveFormsModule,
-  Validators,
-} from '@angular/forms';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import {
   ButtonComponent,
   ModalComponent,
   IconComponent,
-  InputComponent,
-  SelectorComponent,
   ToastService,
 } from '../../../../../shared/components';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
 import { PosRestaurantIntegrationService } from '../services/pos-restaurant-integration.service';
 import { PosCartService, CartState, CartItem } from '../services/pos-cart.service';
 import { PosPaymentService } from '../services/pos-payment.service';
-import { PosCustomer, PosCustomerService } from '../services/pos-customer.service';
+import { PosCustomer } from '../services/pos-customer.service';
 import {
   PosFulfillmentSelectorComponent,
   FulfillmentType,
 } from './pos-fulfillment-selector.component';
 import { PosOpenTableModalComponent } from './pos-open-table-modal.component';
+import { PosCustomerSelectorComponent } from './pos-customer-selector/pos-customer-selector.component';
 
 export interface PosOrderCreateResult {
   order: any;
@@ -68,14 +60,12 @@ export interface PosOrderCreateResult {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    ReactiveFormsModule,
     ButtonComponent,
     ModalComponent,
     IconComponent,
-    InputComponent,
-    SelectorComponent,
     PosFulfillmentSelectorComponent,
     PosOpenTableModalComponent,
+    PosCustomerSelectorComponent,
   ],
   template: `
     <app-modal
@@ -250,100 +240,17 @@ export interface PosOrderCreateResult {
             </button>
           </div>
 
-          <!-- Cliente seleccionado -->
-          @if (!isAnonymousSale() && selectedCustomer(); as customer) {
-            <div class="selected-customer">
-              <div class="customer-avatar">
-                <app-icon name="user-check" [size]="16"></app-icon>
-              </div>
-              <div class="customer-info">
-                <span class="customer-name">{{ customerLabel() }}</span>
-                @if (customer.email) {
-                  <span class="customer-email">{{ customer.email }}</span>
-                }
-              </div>
-              <button
-                type="button"
-                class="change-customer-btn"
-                (click)="openCustomerSelector()"
-                aria-label="Cambiar cliente"
-              >
-                <app-icon name="edit-2" [size]="14"></app-icon>
-              </button>
-            </div>
-          }
-
-          <!-- CTA para abrir el selector inline -->
-          @if (!isAnonymousSale() && !selectedCustomer() && !showCustomerSelector()) {
-            <button
-              type="button"
-              class="select-customer-btn"
-              (click)="openCustomerSelector()"
-            >
-              <app-icon name="user-plus" [size]="18"></app-icon>
-              <span>Seleccionar Cliente</span>
-            </button>
-          }
-
-          <!-- Panel selector inline: búsqueda + crear cliente -->
-          @if (showCustomerSelector()) {
-            <div class="customer-selector">
-              <div class="selector-header">
-                <span>Buscar Cliente</span>
-                <button type="button" (click)="closeCustomerSelector()">
-                  <app-icon name="x" [size]="16"></app-icon>
-                </button>
-              </div>
-
-              <app-input
-                [placeholder]="'Buscar por nombre, email o documento...'"
-                [size]="'sm'"
-                (inputChange)="onCustomerSearch($event)"
-              ></app-input>
-
-              @if (!showCreateCustomerForm() && customerSearchResults().length > 0) {
-                <div class="search-results">
-                  @for (customer of customerSearchResults(); track customer) {
-                    <button
-                      type="button"
-                      class="customer-result"
-                      (click)="selectCustomer(customer)"
-                    >
-                      <span class="result-name">{{ customer.first_name }} {{ customer.last_name }}</span>
-                      <span class="result-email">{{ customer.email }}</span>
-                    </button>
-                  }
-                </div>
-              }
-
-              @if (!showCreateCustomerForm()) {
-                <div class="create-customer-action">
-                  <button type="button" class="create-customer-btn" (click)="switchToCreateCustomer()">
-                    <app-icon name="user-plus" [size]="16"></app-icon>
-                    <span>Crear nuevo cliente</span>
-                  </button>
-                </div>
-              }
-
-              @if (showCreateCustomerForm()) {
-                <div class="create-customer-form">
-                  <h5>Nuevo Cliente</h5>
-                  <app-input [formControl]="customerEmailControl" [label]="'Email'" [placeholder]="'correo@ejemplo.com'" [size]="'sm'"></app-input>
-                  <div class="form-row">
-                    <app-input [formControl]="customerFirstNameControl" [label]="'Nombre'" [placeholder]="'Juan'" [size]="'sm'"></app-input>
-                    <app-input [formControl]="customerLastNameControl" [label]="'Apellido'" [placeholder]="'Pérez'" [size]="'sm'"></app-input>
-                  </div>
-                  <app-input [formControl]="customerPhoneControl" [label]="'Teléfono'" [placeholder]="'+1 234 5678'" [size]="'sm'"></app-input>
-                  <div class="form-row">
-                    <app-selector [formControl]="customerDocumentTypeControl" [label]="'Tipo Doc.'" [placeholder]="'Seleccionar'" [size]="'sm'" [options]="documentTypeOptions"></app-selector>
-                    <app-input [formControl]="customerDocumentNumberControl" [label]="'Número Doc.'" [placeholder]="'12345678'" [size]="'sm'"></app-input>
-                  </div>
-                  <div class="form-actions">
-                    <button type="button" class="btn-create" (click)="onCreateCustomer()">Crear</button>
-                    <button type="button" class="btn-cancel" (click)="switchToCustomerSearch()">Cancelar</button>
-                  </div>
-                </div>
-              }
+          <!-- Selector de cliente inline compartido (overview + drill-in
+               buscar/crear). Solo se muestra en modo "Con Cliente"; el
+               toggle de venta anónima lo gobierna el anfitrión. -->
+          @if (!isAnonymousSale()) {
+            <div class="customer-selector-wrap">
+              <app-pos-customer-selector
+                [selectedCustomer]="selectedCustomer()"
+                [allowAnonymous]="false"
+                (customerSelected)="selectCustomer($event)"
+                (customerCleared)="onCustomerCleared()"
+              ></app-pos-customer-selector>
             </div>
           }
         </section>
@@ -649,247 +556,21 @@ export interface PosOrderCreateResult {
         margin-top: 2px;
       }
 
-      .selected-customer {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 12px;
-        background: rgba(var(--color-success-rgb), 0.1);
-        border-radius: 10px;
-        margin-top: 12px;
-      }
-
-      .customer-avatar {
-        width: 36px;
-        height: 36px;
-        border-radius: 50%;
-        background: var(--color-success);
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-      }
-
-      .customer-info {
-        flex: 1;
-        min-width: 0;
-      }
-
-      .customer-name {
-        display: block;
-        font-size: 13px;
-        font-weight: 600;
-        color: var(--color-text-primary);
-      }
-
-      .customer-email {
-        display: block;
-        font-size: 11px;
-        color: var(--color-text-secondary);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      .change-customer-btn {
-        width: 32px;
-        height: 32px;
-        border-radius: 8px;
-        border: none;
-        background: var(--color-surface);
-        color: var(--color-text-muted);
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: all 0.2s;
-        flex-shrink: 0;
-      }
-
-      .change-customer-btn:hover {
-        color: var(--color-primary);
-      }
-
-      .select-customer-btn {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        width: 100%;
-        padding: 14px;
-        border: 2px dashed var(--color-border);
-        border-radius: 12px;
-        background: transparent;
-        color: var(--color-text-muted);
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        transition: all 0.2s;
-        margin-top: 12px;
-      }
-
-      .select-customer-btn:hover {
-        border-color: var(--color-primary);
-        color: var(--color-primary);
-      }
-
-      /* Panel selector inline: búsqueda + crear cliente. */
-      .customer-selector {
+      /* El selector de cliente inline compartido trae su propio scss
+         (búsqueda, creación, tarjeta de cliente). Aquí solo separamos el
+         panel del toggle de venta anónima. */
+      .customer-selector-wrap {
         margin-top: 16px;
         padding-top: 16px;
         border-top: 1px solid var(--color-border);
-      }
-
-      .selector-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 12px;
-      }
-
-      .selector-header span {
-        font-size: 12px;
-        font-weight: 600;
-        text-transform: uppercase;
-        color: var(--color-text-muted);
-      }
-
-      .selector-header button {
-        background: none;
-        border: none;
-        color: var(--color-text-muted);
-        cursor: pointer;
-        padding: 4px;
-      }
-
-      .search-results {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        max-height: 150px;
-        overflow-y: auto;
-        margin-top: 12px;
-      }
-
-      .customer-result {
-        display: flex;
-        flex-direction: column;
-        padding: 12px;
-        border: 1px solid var(--color-border);
-        border-radius: 10px;
-        background: var(--color-surface);
-        cursor: pointer;
-        transition: all 0.2s;
-        text-align: left;
-        width: 100%;
-      }
-
-      .customer-result:hover {
-        border-color: var(--color-primary);
-      }
-
-      .result-name {
-        font-size: 13px;
-        font-weight: 500;
-        color: var(--color-text-primary);
-      }
-
-      .result-email {
-        font-size: 11px;
-        color: var(--color-text-secondary);
-      }
-
-      .create-customer-action {
-        margin-top: 12px;
-        padding-top: 12px;
-        border-top: 1px solid var(--color-border);
-      }
-
-      .create-customer-btn {
-        width: 100%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 12px;
-        background: var(--color-primary);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: filter 0.2s;
-      }
-
-      .create-customer-btn:hover {
-        filter: brightness(1.1);
-      }
-
-      .create-customer-form {
-        margin-top: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-      }
-
-      .create-customer-form h5 {
-        font-size: 14px;
-        font-weight: 600;
-        color: var(--color-text-primary);
-        margin: 0;
-      }
-
-      .form-row {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: 8px;
-      }
-
-      .form-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 8px;
-      }
-
-      .btn-create {
-        flex: 1;
-        padding: 10px;
-        background: var(--color-primary);
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 600;
-        cursor: pointer;
-        transition: filter 0.2s;
-      }
-
-      .btn-create:hover {
-        filter: brightness(1.1);
-      }
-
-      .btn-cancel {
-        flex: 1;
-        padding: 10px;
-        background: var(--color-surface);
-        color: var(--color-text-primary);
-        border: 1px solid var(--color-border);
-        border-radius: 8px;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
       }
     `,
   ],
 })
 export class PosOrderCreateModalComponent {
   private readonly destroyRef = inject(DestroyRef);
-  private readonly fb = inject(FormBuilder);
   private readonly cartService = inject(PosCartService);
   private readonly paymentService = inject(PosPaymentService);
-  private readonly posCustomerService = inject(PosCustomerService);
   private readonly integration = inject(PosRestaurantIntegrationService);
   private readonly toastService = inject(ToastService);
   private readonly store = inject(Store);
@@ -918,51 +599,11 @@ export class PosOrderCreateModalComponent {
   readonly submitting = signal(false);
   readonly openTablePicker = signal(false);
 
-  // Selección de cliente inline (espejo del modal de cobro). El picker
-  // separado (pos-customer-modal) fue reemplazado por este panel embebido.
+  // Selección de cliente inline delegada a PosCustomerSelectorComponent.
+  // El anfitrión solo gobierna el toggle de venta anónima vs con cliente.
   /** UI-only: cuando es `true` la orden queda como Consumidor Final
    *  (sin cliente en el carrito). No tiene flag de backend. */
   readonly isAnonymousSale = signal(true);
-  readonly showCustomerSelector = signal(false);
-  readonly showCreateCustomerForm = signal(false);
-  readonly customerSearchResults = signal<PosCustomer[]>([]);
-  readonly customerSearchQuery = signal('');
-  readonly isSearchingCustomer = signal(false);
-
-  readonly documentTypeOptions = [
-    { value: 'dni', label: 'DNI' },
-    { value: 'passport', label: 'Pasaporte' },
-    { value: 'cedula', label: 'Cédula' },
-    { value: 'other', label: 'Otro' },
-  ];
-
-  readonly customerForm: FormGroup = this.fb.group({
-    email: ['', [Validators.email]],
-    firstName: ['', [Validators.required, Validators.minLength(2)]],
-    lastName: ['', [Validators.required, Validators.minLength(2)]],
-    phone: [''],
-    documentType: [''],
-    documentNumber: ['', [Validators.required]],
-  });
-
-  get customerEmailControl(): FormControl {
-    return this.customerForm.get('email') as FormControl;
-  }
-  get customerFirstNameControl(): FormControl {
-    return this.customerForm.get('firstName') as FormControl;
-  }
-  get customerLastNameControl(): FormControl {
-    return this.customerForm.get('lastName') as FormControl;
-  }
-  get customerPhoneControl(): FormControl {
-    return this.customerForm.get('phone') as FormControl;
-  }
-  get customerDocumentTypeControl(): FormControl {
-    return this.customerForm.get('documentType') as FormControl;
-  }
-  get customerDocumentNumberControl(): FormControl {
-    return this.customerForm.get('documentNumber') as FormControl;
-  }
 
   constructor() {
     // Reset the local state every time the modal is reopened.
@@ -973,15 +614,9 @@ export class PosOrderCreateModalComponent {
           this.openTablePicker.set(false);
           this.fulfillment.set(this.hasOpenTableSession() ? 'consumo' : 'entrega');
           this.integration.resetPreparedFired();
-          // Reset del selector de cliente inline.
-          this.showCustomerSelector.set(false);
-          this.showCreateCustomerForm.set(false);
-          this.customerSearchResults.set([]);
-          this.customerSearchQuery.set('');
-          this.isSearchingCustomer.set(false);
-          this.customerForm.reset();
           // Si el carrito ya trae cliente, abrir en modo "Con Cliente";
-          // de lo contrario, por defecto Consumidor Final (anónima).
+          // de lo contrario, por defecto Consumidor Final (anónima). El
+          // estado interno del selector lo reinicia el propio componente.
           this.isAnonymousSale.set(!this.selectedCustomer());
         });
       }
@@ -1056,113 +691,35 @@ export class PosOrderCreateModalComponent {
     return name || c.email || 'Cliente';
   });
 
-  // ─── Selección de cliente inline (espejo del modal de cobro) ───────
+  // ─── Selección de cliente inline (delegada al selector compartido) ──
   /**
    * Alterna entre venta anónima (Consumidor Final) y venta con cliente.
    * Al pasar a anónima limpia el cliente del carrito; al pasar a "Con
-   * Cliente" sin cliente seleccionado abre el panel de búsqueda.
+   * Cliente" deja que el selector compartido muestre su vista overview.
    */
   toggleAnonymousSale(enabled: boolean): void {
     this.isAnonymousSale.set(enabled);
-    if (enabled) {
-      this.showCustomerSelector.set(false);
-      this.showCreateCustomerForm.set(false);
-      if (this.selectedCustomer()) {
-        this.cartService
-          .setCustomer(null)
-          .pipe(takeUntilDestroyed(this.destroyRef))
-          .subscribe({ next: () => undefined, error: () => undefined });
-      }
-    } else if (!this.selectedCustomer()) {
-      this.showCustomerSelector.set(true);
-    }
-  }
-
-  openCustomerSelector(): void {
-    this.isAnonymousSale.set(false);
-    this.showCustomerSelector.set(true);
-    this.showCreateCustomerForm.set(false);
-  }
-
-  closeCustomerSelector(): void {
-    this.showCustomerSelector.set(false);
-    this.showCreateCustomerForm.set(false);
-    this.customerSearchResults.set([]);
-    this.customerSearchQuery.set('');
-  }
-
-  onCustomerSearch(query: string): void {
-    this.customerSearchQuery.set(query);
-    if (query && query.trim().length >= 2) {
-      this.isSearchingCustomer.set(true);
-      this.posCustomerService
-        .searchCustomers({ query: query.trim(), limit: 10 })
+    if (enabled && this.selectedCustomer()) {
+      this.cartService
+        .setCustomer(null)
         .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe({
-          next: (response) => {
-            this.customerSearchResults.set(response.data || []);
-            this.isSearchingCustomer.set(false);
-          },
-          error: () => {
-            this.customerSearchResults.set([]);
-            this.isSearchingCustomer.set(false);
-            this.toastService.error('Error al buscar clientes');
-          },
-        });
-    } else {
-      this.customerSearchResults.set([]);
-      this.isSearchingCustomer.set(false);
+        .subscribe({ next: () => undefined, error: () => undefined });
     }
   }
 
+  /**
+   * Recibe el cliente elegido/creado dentro del selector compartido y lo
+   * persiste en el carrito (este modal es dueño del carrito, no emite a un
+   * padre). `successMsg` queda implícito: el propio selector ya notifica al
+   * crear; aquí solo confirmamos la asignación.
+   */
   selectCustomer(customer: PosCustomer): void {
     this.assignCustomerToCart(customer, 'Cliente asignado');
-    this.closeCustomerSelector();
   }
 
-  switchToCreateCustomer(): void {
-    this.showCreateCustomerForm.set(true);
-    this.customerSearchResults.set([]);
-  }
-
-  switchToCustomerSearch(): void {
-    this.showCreateCustomerForm.set(false);
-  }
-
-  onCreateCustomer(): void {
-    if (!this.customerForm.valid) {
-      Object.keys(this.customerForm.controls).forEach((key) =>
-        this.customerForm.get(key)?.markAsTouched(),
-      );
-      this.toastService.info('Por favor completa los campos requeridos');
-      return;
-    }
-
-    const formValue = this.customerForm.value;
-    const customerRequest = {
-      email: formValue.email,
-      first_name: formValue.firstName,
-      last_name: formValue.lastName,
-      phone: formValue.phone || undefined,
-      document_type: formValue.documentType || undefined,
-      document_number: formValue.documentNumber || undefined,
-    };
-
-    this.isSearchingCustomer.set(true);
-    this.posCustomerService
-      .createQuickCustomer(customerRequest)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (customer) => {
-          this.isSearchingCustomer.set(false);
-          this.assignCustomerToCart(customer, 'Cliente creado correctamente');
-          this.closeCustomerSelector();
-        },
-        error: (error) => {
-          this.isSearchingCustomer.set(false);
-          this.toastService.error(this.toastError(error, 'Error al crear cliente'));
-        },
-      });
+  /** El selector pidió quitar el cliente → venta anónima + limpiar carrito. */
+  onCustomerCleared(): void {
+    this.toggleAnonymousSale(true);
   }
 
   /** Persiste el cliente elegido/creado en el carrito (el modal de

@@ -58,7 +58,9 @@ import {
       <!-- Cart Header & Summary Section (Fixed at top) -->
       <div class="flex-none bg-surface border-b border-border shadow-sm">
         <!-- Header Row -->
-        <div class="px-5 py-3 border-b border-border/50">
+        <div
+          class="px-5 py-3 border-b border-border/50 flex items-center justify-between gap-2"
+        >
           <h2
             class="text-base font-bold text-text-primary flex items-center gap-2"
           >
@@ -69,6 +71,26 @@ import {
             ></app-icon>
             Carrito ({{ cartState().items.length }})
           </h2>
+
+          <!--
+            Staff-only order note. Small state icon-button: gray when empty,
+            green when a note exists. Opens a modal to edit it. The note is
+            internal (set at creation), never shown to the customer.
+          -->
+          <button
+            type="button"
+            (click)="orderNoteModalOpen.set(true)"
+            class="staff-note-btn relative w-8 h-8 rounded-md flex items-center justify-center transition-colors"
+            [class]="
+              hasStaffNote()
+                ? 'text-green-600 bg-green-50 hover:bg-green-100'
+                : 'text-text-secondary hover:text-text-primary hover:bg-muted/40'
+            "
+            aria-label="Nota de la orden"
+          >
+            <span class="ai-tooltip">Nota de la orden</span>
+            <app-icon name="notebook-pen" [size]="16"></app-icon>
+          </button>
         </div>
 
         <!-- Totals Row (High Contrast) -->
@@ -371,15 +393,15 @@ import {
                 <div
                   class="row-span-1 w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
                 >
-                  @if (item.product.image_url || item.product.image) {
+                  @if (item.variant_image_url || item.product.image_url || item.product.image) {
                     <img
-                      [src]="item.product.image_url || item.product.image"
+                      [src]="item.variant_image_url || item.product.image_url || item.product.image"
                       [alt]="item.product.name"
                       class="absolute inset-0 w-full h-full object-cover"
                       (error)="handleImageError($event)"
                     />
                   }
-                  @if (!item.product.image_url && !item.product.image) {
+                  @if (!item.variant_image_url && !item.product.image_url && !item.product.image) {
                     <div
                       class="absolute inset-0 flex items-center justify-center text-text-secondary"
                     >
@@ -667,6 +689,52 @@ import {
         </app-button>
       </div>
     </app-modal>
+
+    <!--
+      Staff-only order note modal. Internal instruction for the team, set at
+      creation and never shown to the customer. Bound directly to
+      cartState().notes via onStaffNoteChange -> PosCartService.updateNotes.
+    -->
+    <app-modal
+      [isOpen]="orderNoteModalOpen()"
+      title="Nota de la orden"
+      size="sm"
+      (closed)="orderNoteModalOpen.set(false)"
+    >
+      <div class="space-y-2">
+        <textarea
+          [ngModel]="cartState().notes"
+          (ngModelChange)="onStaffNoteChange($event)"
+          maxlength="500"
+          rows="4"
+          placeholder="Instrucción interna para el equipo, no se envía al cliente"
+          class="w-full px-3 py-2 text-sm border border-border bg-surface rounded-md text-text-primary placeholder:text-text-secondary/60 focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary resize-none"
+        ></textarea>
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] text-text-secondary">
+            Instrucción interna para el equipo, no se envía al cliente.
+          </span>
+          <span class="text-[11px] text-text-secondary">
+            {{ (cartState().notes || '').length }}/500
+          </span>
+        </div>
+      </div>
+
+      <div
+        slot="footer"
+        class="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"
+      >
+        <app-button
+          class="w-full sm:w-auto"
+          variant="primary"
+          size="md"
+          customClasses="min-w-[120px]"
+          (clicked)="orderNoteModalOpen.set(false)"
+        >
+          Aceptar
+        </app-button>
+      </div>
+    </app-modal>
   `,
   styles: [
     `
@@ -760,6 +828,54 @@ import {
 
       .shipping-btn:hover:not(:disabled) {
         opacity: 1;
+      }
+
+      /* ── System AI tooltip (same pattern as ai-generate-btn) ── */
+      .ai-tooltip {
+        position: absolute;
+        top: calc(100% + 8px);
+        right: 0;
+        padding: 6px 12px;
+        border-radius: 8px;
+        background: linear-gradient(
+          135deg,
+          rgba(var(--color-primary-rgb), 0.85) 0%,
+          rgba(var(--color-primary-rgb), 0.95) 50%,
+          rgba(var(--color-primary-rgb), 0.85) 100%
+        );
+        background-size: 200% 200%;
+        animation: ai-shimmer 3s ease-in-out infinite;
+        color: white;
+        font-size: 11px;
+        white-space: nowrap;
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 0.2s ease,
+          transform 0.2s ease;
+        transform: translateY(-4px);
+        border: 1px solid rgba(255, 255, 255, 0.2);
+        box-shadow:
+          0 4px 12px rgba(0, 0, 0, 0.25),
+          inset 0 1px 1px rgba(255, 255, 255, 0.15);
+        z-index: 20;
+      }
+
+      .staff-note-btn:hover .ai-tooltip {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      @keyframes ai-shimmer {
+        0% {
+          background-position: 0% 50%;
+        }
+        50% {
+          background-position: 100% 50%;
+        }
+        100% {
+          background-position: 0% 50%;
+        }
       }
     `,
   ] })
@@ -1254,6 +1370,25 @@ private cartService = inject(PosCartService);
     }
   }
 
+
+  /**
+   * Whether the staff-note modal is open. Opened from the small state
+   * icon-button in the cart header (gray when empty, green when a note
+   * exists); independent of cart state so typing never closes it.
+   */
+  readonly orderNoteModalOpen = signal(false);
+
+  /** True when the current cart already carries a staff note (drives the header icon color). */
+  readonly hasStaffNote = computed(() => (this.cartState().notes ?? '').length > 0);
+
+  /**
+   * Update the staff-only note for the current cart.
+   * Delegates to PosCartService.updateNotes so the value flows through
+   * the same signal store used by PosOrderService.
+   */
+  onStaffNoteChange(notes: string): void {
+    this.cartService.updateNotes(notes ?? '').subscribe();
+  }
 
   proceedToPayment(): void {
     const currentState = this.cartService.getCurrentState();

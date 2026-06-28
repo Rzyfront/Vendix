@@ -44,6 +44,10 @@ import {
   PosPreparedChoiceModalComponent,
   PreparedChoice,
 } from './pos-prepared-choice-modal/pos-prepared-choice-modal.component';
+import { PosSerialSelectionModalComponent } from './pos-serial-selection-modal/pos-serial-selection-modal.component';
+import { MultiSelectorOption } from '../../../../../shared/components/multi-selector/multi-selector.component';
+import { SerialNumbersService } from '../../serial-numbers/services/serial-numbers.service';
+import { PosCashRegisterService } from '../services/pos-cash-register.service';
 import { StockSourcingSuggestionResponse } from '../models/sourcing.model';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -70,6 +74,7 @@ import {
     PosVariantSelectorComponent,
     PosStockSourcingModalComponent,
     PosPreparedChoiceModalComponent,
+    PosSerialSelectionModalComponent,
     BadgeComponent,
   ],
   schemas: [NO_ERRORS_SCHEMA],
@@ -468,6 +473,17 @@ import {
       [product]="preparedChoiceProduct()"
       (decided)="onPreparedChoice($event)"
     ></app-pos-prepared-choice-modal>
+
+    <!-- QUI-431: serial-number selection for serialized products -->
+    <app-pos-serial-selection-modal
+      [isOpen]="serialModalOpen()"
+      [productName]="serialModalProductName()"
+      [quantity]="serialModalQuantity()"
+      [options]="serialModalOptions()"
+      [loading]="serialModalLoading()"
+      (confirmed)="onSerialConfirmed($event)"
+      (cancelled)="onSerialCancelled()"
+    ></app-pos-serial-selection-modal>
   `,
   styles: [
     `
@@ -611,6 +627,8 @@ export class PosProductSelectionComponent {
   private currencyService = inject(CurrencyFormatService);
   private scaleService = inject(PosScaleService);
   private restaurantIntegration = inject(PosRestaurantIntegrationService);
+  private serialNumbersService = inject(SerialNumbersService);
+  private cashRegisterService = inject(PosCashRegisterService);
 
   constructor() {
     this.checkAuthState();
@@ -1003,6 +1021,10 @@ export class PosProductSelectionComponent {
       return;
     }
 
+    // QUI-431: serialized products NO longer capture serials at the POS.
+    // The serial numbers are now registered when the dispatch remission is
+    // confirmed, so the add proceeds directly without opening the (kept, but
+    // unused-here) serial-selection modal and without aborting on cancel.
     this.addingToCart.add(product.id);
 
     this.cartService
@@ -1171,6 +1193,104 @@ export class PosProductSelectionComponent {
     if (resolver) resolver(result.choice);
   }
 
+  // ─── QUI-431: serial-number selection for serialized products ───────────────
+  /** True when the serial-selection modal is visible. */
+  readonly serialModalOpen = signal(false);
+  /** Product name shown in the serial modal. */
+  readonly serialModalProductName = signal<string>('');
+  /** Quantity of serials the line requires. */
+  readonly serialModalQuantity = signal<number>(1);
+  /** Available in_stock serials (id + serial) as selector options. */
+  readonly serialModalOptions = signal<MultiSelectorOption[]>([]);
+  /** True while the available-serials request is loading. */
+  readonly serialModalLoading = signal(false);
+  /** Resolver captured at open time; invoked with the cashier's choice or null. */
+  private serialResolver:
+    | ((result: { serialIds: number[]; freeTextSerials: string[] } | null) => void)
+    | null = null;
+
+  /**
+   * Opens the serial-selection modal for a serialized product and resolves with
+   * the cashier's choice (pool ids + free-text) or null if cancelled. The pool
+   * is fetched from the active cash-register session's location; when no
+   * location is resolvable, the modal still allows free-text entry.
+   */
+  private askSerialSelection(
+    product: any,
+    quantity: number,
+    variantId?: number,
+  ): Promise<{ serialIds: number[]; freeTextSerials: string[] } | null> {
+    return new Promise((resolve) => {
+      this.serialResolver = resolve;
+      this.serialModalProductName.set(String(product?.name ?? ''));
+      this.serialModalQuantity.set(quantity > 0 ? quantity : 1);
+      this.serialModalOptions.set([]);
+      this.serialModalOpen.set(true);
+
+      const productId = Number(product?.id);
+      // The register's location override is the POS source-of-truth location for
+      // the in_stock pool lookup. Falls back to the register's nested location id.
+      const session = this.cashRegisterService.getActiveSessionSnapshot();
+      const locationId =
+        session?.register?.location_id ?? session?.register?.location?.id ?? null;
+
+      // Pool lookup needs both product and location; without a location we keep
+      // the modal open in free-text-only mode (backend resolves/creates rows).
+      if (!Number.isFinite(productId) || locationId == null) {
+        return;
+      }
+
+      this.serialModalLoading.set(true);
+      this.serialNumbersService
+        .listAvailable({
+          product_id: productId,
+          location_id: locationId,
+          product_variant_id: variantId,
+        })
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (serials) => {
+            this.serialModalOptions.set(
+              serials.map((s) => ({
+                value: s.id,
+                label: s.serial_number,
+              })),
+            );
+            this.serialModalLoading.set(false);
+          },
+          error: () => {
+            // Non-fatal: fall back to free-text entry only.
+            this.serialModalOptions.set([]);
+            this.serialModalLoading.set(false);
+          },
+        });
+    });
+  }
+
+  /** Modal callback — resolve with the cashier's selection and close. */
+  onSerialConfirmed(result: {
+    serialIds: number[];
+    freeTextSerials: string[];
+  }): void {
+    const resolver = this.serialResolver;
+    this.serialResolver = null;
+    this.serialModalOpen.set(false);
+    if (resolver) resolver(result);
+  }
+
+  /** Modal callback — cashier cancelled; resolve with null (abort add). */
+  onSerialCancelled(): void {
+    const resolver = this.serialResolver;
+    this.serialResolver = null;
+    this.serialModalOpen.set(false);
+    if (resolver) resolver(null);
+  }
+
+  /** True when the product requires per-unit serial numbers. */
+  private requiresSerials(product: any): boolean {
+    return product?.requires_serial_numbers === true;
+  }
+
   private async addToCartNormal(product: any): Promise<void> {
     if (product.track_inventory !== false) {
       if (product.stock > 0 && this.isProductLowStock(product)) {
@@ -1221,6 +1341,11 @@ export class PosProductSelectionComponent {
       if (choice === 'cancel') return;
       skipKds = choice === 'stock';
     }
+
+    // QUI-431: serialized products NO longer capture serials at the POS.
+    // The serial numbers are now registered when the dispatch remission is
+    // confirmed, so the add proceeds directly without opening the (kept, but
+    // unused-here) serial-selection modal and without aborting on cancel.
 
     // Regular unit product
     this.addingToCart.add(product.id);

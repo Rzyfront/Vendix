@@ -80,11 +80,19 @@ export const Endpoints = {
     },
     CATEGORIES: {
       LIST: '/store/categories',
+      GET: '/store/categories/:id',
       CREATE: '/store/categories',
+      UPDATE: '/store/categories/:id',
+      DELETE: '/store/categories/:id',
+      UPLOAD_IMAGE: '/store/categories/upload-image',
     },
     BRANDS: {
       LIST: '/store/brands',
+      GET: '/store/brands/:id',
       CREATE: '/store/brands',
+      UPDATE: '/store/brands/:id',
+      DELETE: '/store/brands/:id',
+      UPLOAD_LOGO: '/store/brands/upload-logo',
     },
     TAXES: {
       LIST: '/store/taxes',
@@ -170,7 +178,12 @@ export const Endpoints = {
       STATS: '/store/inventory/stats',
       ADJUSTMENTS: {
         LIST: '/store/inventory/adjustments',
-        CREATE: '/store/inventory/adjustments',
+        CREATE: '/store/inventory/adjustments/batch-complete',
+        CREATE_DRAFT: '/store/inventory/adjustments/batch',
+        APPROVE: '/store/inventory/adjustments/:id/approve',
+        DELETE: '/store/inventory/adjustments/:id',
+        BULK_TEMPLATE: '/store/inventory/adjustments/bulk/template/download',
+        BULK_UPLOAD: '/store/inventory/adjustments/bulk/upload',
       },
       TRANSFERS: {
         LIST: '/store/stock-transfers',

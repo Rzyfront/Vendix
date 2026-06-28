@@ -148,10 +148,14 @@ export class PosTicketService {
       const displayTaxId = ticketData.customer.name
         ? ticketData.customer.taxId || ''
         : '000';
+      // Delivery address line, only rendered when present (counter POS sales
+      // have no shipping address and must not show an empty line).
+      const shippingAddress = ticketData.customer.shippingAddress;
       html += `
         <div style="margin-bottom: 15px;">
           <p style="margin: 2px 0; font-size: 12px;"><strong>Cliente:</strong> ${displayName}</p>
           ${displayTaxId ? `<p style="margin: 2px 0; font-size: 12px;"><strong>Cédula:</strong> ${displayTaxId}</p>` : ''}
+          ${shippingAddress ? `<p style="margin: 2px 0; font-size: 12px;"><strong>Dirección de entrega:</strong> ${shippingAddress}</p>` : ''}
         </div>
         <hr style="border: 1px dashed #000; margin: 10px 0;">
       `;
@@ -175,9 +179,13 @@ export class PosTicketService {
         item.isPackageUnit && item.unitsPerPackage
           ? `<br><span style="font-size: 10px; color: #1d4ed8;">x ${item.unitsPerPackage} unid c/u</span>`
           : '';
+      const serialLine =
+        Array.isArray(item.serials) && item.serials.length
+          ? `<br><span style="font-size: 10px; color: #6b7280;">Serial: ${item.serials.join(', ')}</span>`
+          : '';
       html += `
         <tr>
-          <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}</td>
+          <td style="padding: 2px; vertical-align: top;">${item.name}${tierLine}${packageLine}${serialLine}</td>
           <td style="text-align: center; padding: 2px;">${qtyDisplay}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.unitPrice)}${isWeightItem ? '/' + (item.weight_unit || 'kg') : ''}</td>
           <td style="text-align: right; padding: 2px;">${this.currencyService.format(item.totalPrice)}</td>

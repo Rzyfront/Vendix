@@ -63,19 +63,60 @@
   <!-- Items -->
   <ul class="kds-card__items">
     @for (item of ticket().items; track trackByItemId($index, item)) {
-      <li class="kds-card__item">
+      <li
+        class="kds-card__item"
+        [class.kds-card__item--no-recipe]="!itemHasRecipe(item)"
+      >
         <div class="kds-card__item-line">
           <span class="kds-card__qty">×{{ item.quantity }}</span>
           <span class="kds-card__name">
             {{ item.product?.name || ('Producto #' + item.product_id) }}
           </span>
+          <!-- Per-dish status: recipe-readiness takes priority over the
+               urgency tier (a recipe-less dish can't be cooked anyway). -->
+          @if (!itemHasRecipe(item)) {
+            <app-badge variant="warning" size="xs" title="Este plato no tiene receta activa">
+              <app-icon name="alert-triangle" [size]="10" /> Sin receta
+            </app-badge>
+          } @else if (itemUrgency(item) === 'danger') {
+            <app-badge variant="error" size="xs" [attr.title]="'Tiempo objetivo ' + itemPrepMinutes(item) + ' min superado'">
+              <app-icon name="alert-triangle" [size]="10" /> Vencido
+            </app-badge>
+          } @else if (itemUrgency(item) === 'warning') {
+            <app-badge variant="warning" size="xs" [attr.title]="'Tiempo objetivo ' + itemPrepMinutes(item) + ' min'">
+              <app-icon name="clock" [size]="10" /> Demorado
+            </app-badge>
+          }
         </div>
+        @if (!itemHasRecipe(item)) {
+          <!-- Direct shortcut to create the recipe for THIS dish.
+               stopPropagation so it never opens the detail modal. -->
+          <div class="kds-card__item-cta" (click)="$event.stopPropagation()">
+            <app-button
+              variant="outline"
+              size="xsm"
+              (clicked)="onCreateRecipe(item)"
+            >
+              <app-icon slot="icon" name="plus" [size]="12" />
+              Crear receta
+            </app-button>
+          </div>
+        }
         @if (item.notes) {
           <p class="kds-card__notes">{{ item.notes }}</p>
         }
       </li>
     }
   </ul>
+
+  <!-- Recipe-block banner: shown while the ticket is still pending and at
+       least one dish lacks a recipe. Explains why "Iniciar" is disabled and
+       points at the per-dish "Crear receta" CTA above. -->
+  @if (ticket().status === 'pending' && hasRecipeLessItem()) {
+    <app-alert-banner variant="warning" icon="alert-triangle" role="status">
+      Falta receta — no se puede iniciar
+    </app-alert-banner>
+  }
 
   <!-- Actions (stopPropagation so clicking a button here does NOT
        open the detail modal; the click is meant for the action). -->
@@ -86,8 +127,9 @@
         size="xsm"
         [fullWidth]="true"
         (clicked)="onStart()"
-        [disabled]="isMutating()"
+        [disabled]="isMutating() || !canStart()"
         [loading]="isMutating()"
+        [attr.title]="canStart() ? null : 'Falta una receta activa en uno o más platos'"
       >
         <app-icon slot="icon" name="play" [size]="14" />
         Iniciar

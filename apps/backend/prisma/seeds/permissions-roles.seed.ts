@@ -777,6 +777,12 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/dispatch-notes/:id/invoice',
       method: 'POST',
     },
+    {
+      name: 'store:dispatch_notes:print',
+      description: 'Imprimir PDF de remisión',
+      path: '/api/store/dispatch-notes/:id/pdf',
+      method: 'POST',
+    },
 
     // Planillas de Despacho (Rutas DSD)
     {
@@ -4110,6 +4116,7 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:dispatch_notes:deliver') ||
       p.name.includes('store:dispatch_notes:void') ||
       p.name.includes('store:dispatch_notes:invoice') ||
+      p.name.includes('store:dispatch_notes:print') ||
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:reviews:moderate') ||
       p.name === 'store:payroll:advances:read' ||
@@ -4144,6 +4151,11 @@ export async function seedPermissionsAndRoles(
     (p) =>
       p.name.includes('store:orders:create') ||
       p.name.includes('store:orders:read') ||
+      // POS order flow (pay / ship / deliver / fast-track / cancel). The
+      // substring 'store:orders:create' above does NOT match
+      // 'store:orders:order_flow:create', so list these explicitly.
+      p.name === 'store:orders:order_flow:create' ||
+      p.name === 'store:orders:order_flow:read' ||
       p.name.includes('store:payments:process') ||
       p.name.includes('store:products:read') ||
       p.name.includes('store:categories:read') ||
@@ -4163,6 +4175,7 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:dispatch_notes:create') ||
       p.name.includes('store:dispatch_notes:read') ||
       p.name.includes('store:dispatch_notes:read:one') ||
+      p.name.includes('store:dispatch_notes:print') ||
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:data_collection:submissions:read') ||
       p.name.includes('store:customers:history:read') ||
@@ -4246,6 +4259,11 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:orders:create') ||
       p.name.includes('store:orders:read') ||
       p.name.includes('store:orders:read:one') ||
+      // POS order flow (pay / ship / deliver / fast-track / cancel). The
+      // substring 'store:orders:create' above does NOT match
+      // 'store:orders:order_flow:create', so list these explicitly.
+      p.name === 'store:orders:order_flow:create' ||
+      p.name === 'store:orders:order_flow:read' ||
       // Cupones - leer y validar
       p.name.includes('store:coupons:read') ||
       p.name.includes('store:coupons:read:one') ||
@@ -4280,6 +4298,7 @@ export async function seedPermissionsAndRoles(
       p.name.includes('store:dispatch_notes:read:one') ||
       p.name.includes('store:dispatch_notes:confirm') ||
       p.name.includes('store:dispatch_notes:deliver') ||
+      p.name.includes('store:dispatch_notes:print') ||
       // Reseñas - solo lectura
       p.name.includes('store:reviews:read') ||
       p.name.includes('store:reviews:read:one') ||
@@ -4289,6 +4308,8 @@ export async function seedPermissionsAndRoles(
       // Inventario - solo lectura de stock
       p.name.includes('store:inventory:stock_levels:read') ||
       p.name.includes('store:inventory:locations:read') ||
+      // Seriales - lectura (POS lista seriales disponibles al vender productos serializados)
+      p.name === 'store:inventory:serial_numbers:read' ||
       // Ecommerce - solo lectura
       p.name.includes('store:ecommerce:read') ||
       // Configuración de tienda - solo lectura

@@ -1,85 +1,107 @@
 import {
   Component,
+  computed,
   inject,
   input,
   output,
   signal,
 } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 
 import {
   IconComponent,
   ButtonComponent,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { DispatchNoteWizardService, WizardCreateAction } from '../../services/dispatch-note-wizard.service';
+import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import {
+  DispatchNoteWizardService,
+  WizardTerminalAction,
+} from '../../services/dispatch-note-wizard.service';
 import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
 
+/**
+ * Review step (ref 2026-06-25, plan wizard remisión order-first).
+ *
+ * Shows 4 read-only sections (Orden / Ítems / Detalles / Ruta) plus a
+ * totals bar and a radio group for the terminal action
+ * (draft / confirm_route / deliver). The wizard's "Siguiente" button is
+ * hidden at step 4 — the footer "Crear" button mirrors the terminal
+ * action label.
+ */
 @Component({
   selector: 'app-dispatch-wizard-review-step',
   standalone: true,
-  imports: [
-    IconComponent,
-    ButtonComponent,
-    CurrencyPipe,
-  ],
+  imports: [IconComponent, ButtonComponent, CurrencyPipe, FormsModule],
   template: `
     <div class="space-y-2.5">
       @if (!created()) {
-        <!-- Customer Section -->
-        <section class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3">
+        <!-- Order Section -->
+        <section
+          class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3"
+        >
           <div class="flex items-center justify-between mb-1.5">
-            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Cliente</h4>
+            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              Orden
+            </h4>
             <button
               type="button"
-              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded transition-colors hover:bg-[var(--color-primary-light)]"
+              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
               (click)="goToStep.emit(0)"
-              aria-label="Editar cliente"
             >
               Editar
             </button>
           </div>
-          @if (wizardService.customer(); as customer) {
+          @if (wizardService.selectedOrder(); as order) {
             <p class="text-sm text-[var(--color-text-primary)] truncate">
-              <span class="font-medium">{{ customer.first_name }} {{ customer.last_name }}</span><!--
-              -->@if (customer.phone) {
-                <span class="text-[var(--color-text-muted)]"> · {{ customer.phone }}</span>
-              }<!--
-              -->@if (customer.document_number) {
-                <span class="text-[var(--color-text-muted)]"> · {{ customer.document_number }}</span>
+              <span class="font-medium">#{{ order.order_number }}</span>
+              @if (wizardService.customer(); as c) {
+                <span class="text-[var(--color-text-muted)]">
+                  · {{ c.first_name }} {{ c.last_name }}
+                </span>
               }
             </p>
-            @if (customer.email) {
-              <p class="text-xs text-[var(--color-text-muted)] truncate mt-0.5">{{ customer.email }}</p>
-            }
+            <p class="text-xs text-[var(--color-text-muted)] mt-0.5">
+              {{ order.grand_total | currency }} · {{ order.state }}
+            </p>
           }
         </section>
 
-        <!-- Products Section -->
-        <section class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3">
+        <!-- Items Section -->
+        <section
+          class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3"
+        >
           <div class="flex items-center justify-between mb-1.5">
             <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
-              Productos ({{ wizardService.items().length }})
+              Ítems ({{ wizardService.items().length }})
             </h4>
             <button
               type="button"
-              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded transition-colors hover:bg-[var(--color-primary-light)]"
+              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
               (click)="goToStep.emit(1)"
-              aria-label="Editar productos"
             >
               Editar
             </button>
           </div>
 
           <div class="rounded-md overflow-hidden border border-[var(--color-border)]">
-            @for (item of wizardService.items(); track item.product_id + '-' + (item.product_variant_id || 0); let idx = $index) {
+            @for (item of wizardService.items(); track item.order_item_id; let idx = $index) {
               <div
                 class="flex items-center gap-2 px-2.5 py-1.5 text-sm"
                 [class]="idx % 2 === 0 ? 'bg-[var(--color-surface)]' : 'bg-[var(--color-surface-elevated)]'"
               >
                 <div class="flex-1 min-w-0 truncate">
-                  <span class="font-medium text-[var(--color-text-primary)]">{{ item.product_name }}</span>
-                  @if (item.variant_name) {
-                    <span class="text-xs text-[var(--color-text-muted)]"> · {{ item.variant_name }}</span>
+                  <span class="font-medium text-[var(--color-text-primary)]">
+                    {{ item.product_name }}
+                  </span>
+                  @if (item.requires_serial_numbers) {
+                    <span
+                      class="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full
+                             bg-amber-100 text-amber-800 text-[10px] font-medium"
+                    >
+                      <app-icon name="hash" [size]="9"></app-icon>
+                      S/N
+                    </span>
                   }
                 </div>
                 <span class="text-xs text-[var(--color-text-secondary)] whitespace-nowrap shrink-0">
@@ -88,86 +110,149 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
                 <span class="font-medium text-[var(--color-text-primary)] whitespace-nowrap shrink-0 min-w-[4.5rem] text-right">
                   {{ (item.unit_price * item.dispatched_quantity) | currency }}
                 </span>
-                @if (item.discount_amount > 0) {
-                  <span class="text-xs text-[var(--color-error)] whitespace-nowrap shrink-0">
-                    -{{ (item.discount_amount * item.dispatched_quantity) | currency }}
-                  </span>
-                }
               </div>
             }
           </div>
         </section>
 
         <!-- Details Section -->
-        <section class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3">
+        <section
+          class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3"
+        >
           <div class="flex items-center justify-between mb-1.5">
-            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">Detalles</h4>
+            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              Detalles
+            </h4>
             <button
               type="button"
-              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded transition-colors hover:bg-[var(--color-primary-light)]"
+              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
               (click)="goToStep.emit(2)"
-              aria-label="Editar detalles"
             >
               Editar
             </button>
           </div>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-sm">
-            <div class="flex items-center gap-1.5">
-              <app-icon name="calendar" [size]="13" color="var(--color-text-muted)"></app-icon>
-              <span class="text-[var(--color-text-muted)]">Emision:</span>
-              <span class="text-[var(--color-text-primary)] font-medium">{{ wizardService.details().emission_date }}</span>
-            </div>
-
+          <div class="text-sm text-[var(--color-text-primary)]">
+            <p>
+              <span class="text-[var(--color-text-muted)]">Bodega:</span>
+              {{ wizardService.details().dispatch_location_name || '—' }}
+            </p>
             @if (wizardService.details().agreed_delivery_date) {
-              <div class="flex items-center gap-1.5">
-                <app-icon name="calendar" [size]="13" color="var(--color-text-muted)"></app-icon>
-                <span class="text-[var(--color-text-muted)]">Entrega:</span>
-                <span class="text-[var(--color-text-primary)] font-medium">{{ wizardService.details().agreed_delivery_date }}</span>
-              </div>
+              <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">
+                Entrega acordada: {{ wizardService.details().agreed_delivery_date }}
+              </p>
             }
-
-            @if (wizardService.details().dispatch_location_name) {
-              <div class="flex items-center gap-1.5 sm:col-span-2">
-                <app-icon name="map-pin" [size]="13" color="var(--color-text-muted)"></app-icon>
-                <span class="text-[var(--color-text-muted)]">Ubicacion:</span>
-                <span class="text-[var(--color-text-primary)] font-medium truncate">{{ wizardService.details().dispatch_location_name }}</span>
-              </div>
+            @if (wizardService.details().notes) {
+              <p class="text-xs text-[var(--color-text-muted)] mt-1 italic line-clamp-2">
+                {{ wizardService.details().notes }}
+              </p>
             }
           </div>
+        </section>
 
-          @if (wizardService.details().notes) {
-            <div class="mt-2 pt-2 border-t border-[var(--color-border)]">
-              <p class="text-xs text-[var(--color-text-muted)] font-medium mb-0.5">Notas</p>
-              <p class="text-sm text-[var(--color-text-secondary)] whitespace-pre-line line-clamp-3">{{ wizardService.details().notes }}</p>
-            </div>
-          }
-
-          @if (wizardService.details().internal_notes) {
-            <div class="mt-1.5 pt-1.5 border-t border-dashed border-[var(--color-border)]">
-              <p class="text-xs text-[var(--color-text-muted)] font-medium mb-0.5">Notas internas</p>
-              <p class="text-sm text-[var(--color-text-secondary)] whitespace-pre-line italic line-clamp-2">{{ wizardService.details().internal_notes }}</p>
-            </div>
-          }
+        <!-- Route Section -->
+        <section
+          class="border-l-2 border-[var(--color-primary)] rounded-r-lg bg-[var(--color-surface)] p-3"
+        >
+          <div class="flex items-center justify-between mb-1.5">
+            <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+              Ruta
+            </h4>
+            <button
+              type="button"
+              class="text-xs font-medium text-[var(--color-primary)] hover:underline px-2 py-1 rounded hover:bg-[var(--color-primary-light)]"
+              (click)="goToStep.emit(3)"
+            >
+              Editar
+            </button>
+          </div>
+          <p class="text-sm text-[var(--color-text-primary)]">
+            @switch (wizardService.routeMode()) {
+              @case ('none') { Sin ruta (entrega directa) }
+              @case ('existing') {
+                #{{ wizardService.selectedRouteId() }}
+              }
+              @case ('new') {
+                @if (wizardService.newRouteDraft(); as draft) {
+                  Nueva planilla · {{ draft.planned_date }} · #{{ draft.driver_user_id }}
+                } @else {
+                  Nueva planilla (borrador)
+                }
+              }
+            }
+          </p>
         </section>
 
         <!-- Totals Bar -->
-        <section class="rounded-lg overflow-hidden border border-[var(--color-primary)] bg-[var(--color-primary-light)]">
-          <div class="px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-[var(--color-text-secondary)] border-b border-[var(--color-border)]">
-            <span>Subtotal: <span class="font-medium text-[var(--color-text-primary)]">{{ wizardService.totals().subtotal | currency }}</span></span>
+        <section
+          class="rounded-lg overflow-hidden border border-[var(--color-primary)] bg-[var(--color-primary-light)]"
+        >
+          <div
+            class="px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-[var(--color-text-secondary)] border-b border-[var(--color-border)]"
+          >
+            <span
+              >Subtotal:
+              <span class="font-medium text-[var(--color-text-primary)]">
+                {{ wizardService.totals().subtotal | currency }}
+              </span></span
+            >
             @if (wizardService.totals().discount > 0) {
-              <span>Desc: <span class="font-medium text-[var(--color-error)]">-{{ wizardService.totals().discount | currency }}</span></span>
+              <span
+                >Desc:
+                <span class="font-medium text-[var(--color-error)]">
+                  -{{ wizardService.totals().discount | currency }}
+                </span></span
+              >
             }
             @if (wizardService.totals().tax > 0) {
-              <span>Imp: <span class="font-medium text-[var(--color-text-primary)]">{{ wizardService.totals().tax | currency }}</span></span>
+              <span
+                >Imp:
+                <span class="font-medium text-[var(--color-text-primary)]">
+                  {{ wizardService.totals().tax | currency }}
+                </span></span
+              >
             }
           </div>
           <div class="px-3 py-2.5 flex items-center justify-between">
             <span class="text-sm font-semibold text-[var(--color-text-primary)]">Total</span>
-            <span class="text-xl font-bold text-[var(--color-primary)]">{{ wizardService.totals().grandTotal | currency }}</span>
+            <span class="text-xl font-bold text-[var(--color-primary)]">
+              {{ wizardService.totals().grandTotal | currency }}
+            </span>
           </div>
         </section>
 
+        <!-- Terminal action radio group -->
+        <section class="rounded-lg border border-[var(--color-border)] p-3 space-y-1.5">
+          <p class="text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)]">
+            Acción terminal
+          </p>
+          @for (opt of availableTerminalOptions(); track opt.value) {
+            <label
+              class="flex items-start gap-2 p-2 rounded-md cursor-pointer transition-colors"
+              [class]="
+                wizardService.terminalAction() === opt.value
+                  ? 'bg-[var(--color-primary-light)]'
+                  : 'hover:bg-[var(--color-surface-elevated)]'
+              "
+            >
+              <input
+                type="radio"
+                name="terminal-action"
+                [value]="opt.value"
+                [ngModel]="wizardService.terminalAction()"
+                (ngModelChange)="wizardService.setTerminalAction($event)"
+                class="mt-0.5"
+              />
+              <div>
+                <p class="text-sm font-medium text-[var(--color-text-primary)]">
+                  {{ opt.label }}
+                </p>
+                <p class="text-[11px] text-[var(--color-text-muted)]">
+                  {{ opt.description }}
+                </p>
+              </div>
+            </label>
+          }
+        </section>
       } @else {
         <!-- Success State -->
         <div class="text-center py-6 space-y-3">
@@ -195,14 +280,18 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
           </div>
 
           <div class="flex flex-row gap-2 justify-center pt-2">
-            <app-button variant="outline" size="sm" (clicked)="viewDetail.emit(createdNote()!.id)">
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="viewDetail.emit(createdNote()!.id)"
+            >
               Ver detalle
             </app-button>
             <app-button variant="outline" size="sm" (clicked)="createAnother.emit()">
               Crear otra
             </app-button>
             <app-button variant="primary" size="sm" (clicked)="printNote.emit(createdNote()!)">
-              <app-icon name="printer" [size]="14" slot="icon" ></app-icon>
+              <app-icon name="printer" [size]="14" slot="icon"></app-icon>
               Imprimir
             </app-button>
           </div>
@@ -228,11 +317,12 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
 })
 export class ReviewStepComponent {
   readonly wizardService = inject(DispatchNoteWizardService);
+  private readonly authFacade = inject(AuthFacade);
 
   // Inputs
   readonly created = input<boolean>(false);
   readonly createdNote = input<DispatchNote | null>(null);
-  readonly completedAction = input<WizardCreateAction>('draft');
+  readonly completedAction = input<WizardTerminalAction>('draft');
 
   // Outputs
   readonly goToStep = output<number>();
@@ -240,11 +330,53 @@ export class ReviewStepComponent {
   readonly createAnother = output<void>();
   readonly printNote = output<DispatchNote>();
 
+  readonly terminalOptions: Array<{
+    value: WizardTerminalAction;
+    label: string;
+    description: string;
+  }> = [
+    {
+      value: 'draft',
+      label: 'Crear como borrador',
+      description: 'La remisión queda pendiente de confirmación.',
+    },
+    {
+      value: 'confirm_route',
+      label: 'Confirmar y asignar a ruta',
+      description: 'Si hay seriales, se solicitan antes de confirmar.',
+    },
+    {
+      value: 'deliver',
+      label: 'Confirmar y entregar',
+      description: 'Entrega inmediata tras verificar seriales.',
+    },
+  ];
+
+  /**
+   * Terminal options filtradas por permiso (ref 2026-06-25).
+   * 'draft' siempre disponible; 'confirm_route' requiere
+   * store:dispatch_notes:confirm; 'deliver' requiere
+   * store:dispatch_notes:deliver. Defensa-en-profundidad: el backend
+   * también valida estos permisos en confirm()/deliver().
+   */
+  readonly availableTerminalOptions = computed(() => {
+    const canConfirm = this.authFacade.hasPermission('store:dispatch_notes:confirm');
+    const canDeliver = this.authFacade.hasPermission('store:dispatch_notes:deliver');
+    return this.terminalOptions.filter((opt) => {
+      if (opt.value === 'confirm_route') return canConfirm;
+      if (opt.value === 'deliver') return canDeliver;
+      return true;
+    });
+  });
+
   get successTitle(): string {
     switch (this.completedAction()) {
-      case 'confirm': return 'Remision creada y confirmada';
-      case 'invoice': return 'Remision facturada';
-      default: return 'Remision creada';
+      case 'confirm_route':
+        return 'Remisión confirmada y asignada';
+      case 'deliver':
+        return 'Remisión entregada';
+      default:
+        return 'Remisión creada';
     }
   }
 }

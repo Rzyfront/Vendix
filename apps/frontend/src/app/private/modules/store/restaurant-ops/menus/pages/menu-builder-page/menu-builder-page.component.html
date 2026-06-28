@@ -1,5 +1,40 @@
 <div class="w-full overflow-x-hidden">
-  @if (menu(); as m) {
+  @if (isCreateMode()) {
+    <app-sticky-header
+      title="Nueva carta"
+      subtitle="Dale un nombre para empezar a agregar secciones, platos y horarios"
+      icon="book-open"
+      variant="glass"
+      [showBackButton]="true"
+      [backRoute]="'/admin/restaurant-ops/menus'"
+    />
+    <div class="p-2 md:p-6">
+      <app-card
+        title="Nueva carta"
+        subtitle="El nombre identifica la carta (Almuerzo, Cena, Carta principal…)"
+        [padding]="true"
+      >
+        <div class="flex flex-col md:flex-row gap-2 md:items-end max-w-xl">
+          <app-input
+            class="flex-1"
+            [type]="'text'"
+            placeholder="Ej: Almuerzo, Cena, Carta principal"
+            [ngModel]="newMenuName()"
+            (ngModelChange)="newMenuName.set($event)"
+            (keyup.enter)="createMenu()"
+          />
+          <app-button
+            variant="primary"
+            [disabled]="isSaving() || !newMenuName().trim()"
+            (clicked)="createMenu()"
+          >
+            <app-icon slot="icon" name="plus" [size]="16" />
+            Crear carta
+          </app-button>
+        </div>
+      </app-card>
+    </div>
+  } @else if (menu(); as m) {
     <app-sticky-header
       [title]="m.name"
       [subtitle]="'Carta · ' + m.sections.length + ' secciones · ' + totalProductsInMenu() + ' productos'"
@@ -10,7 +45,7 @@
     />
 
     <div class="p-2 md:p-6 space-y-6">
-      <app-card title="Secciones" subtitle="Reordena con las flechas o haz clic en el nombre para renombrar" [padding]="true">
+      <app-card title="Secciones" subtitle="Reordena con las flechas o haz clic en el nombre para renombrar" [padding]="true" [overflow]="'visible'">
         <div class="flex flex-col md:flex-row gap-2 mb-4 md:items-end">
           <app-input
             class="flex-1"
@@ -114,8 +149,9 @@
             <div class="flex flex-col md:flex-row gap-2 md:items-end">
               <app-selector
                 class="flex-1"
-                placeholder="Selecciona un producto…"
+                placeholder="Busca y selecciona un producto…"
                 [options]="productSelectorOptions()"
+                [searchable]="true"
                 [ngModel]="newItemProductId()"
                 (ngModelChange)="onProductSelect($event)"
               />

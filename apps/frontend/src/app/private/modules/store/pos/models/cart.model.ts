@@ -24,6 +24,14 @@ export interface CartItem {
   variant_sku?: string;
   variant_attributes?: string;
   variant_display_name?: string;
+  /**
+   * Image URL of the selected variant, captured from `PosProductVariant.image_url`
+   * at add-to-cart time. Used by the POS cart templates as the primary image
+   * source before falling back to the parent product's image. Falls back to
+   * `product.image_url` when the variant has no own image (most seed variants
+   * have `image_id = null` in the DB).
+   */
+  variant_image_url?: string;
   // Weight product fields
   weight?: number;
   weight_unit?: 'kg' | 'g' | 'lb';
@@ -46,6 +54,14 @@ export interface CartItem {
   // no DB migration is required. Defaults to false (legacy
   // behaviour: send to kitchen).
   skipKds?: boolean;
+  // QUI-431 — Serial numbers chosen by the cashier for a serialized
+  // product (`requires_serial_numbers=true`). `serial_ids` are existing
+  // pool rows picked from the selector; `serial_numbers` are free-text
+  // entries the backend resolves-or-creates as real pool rows at payment.
+  // Both are threaded onto the POS order line and sent to the backend on
+  // checkout. Ignored for non-serialized products.
+  serial_ids?: number[];
+  serial_numbers?: string[];
 }
 
 export interface CartDiscount {
@@ -121,6 +137,11 @@ export interface AddToCartRequest {
    * inventory and have stock > 0.
    */
   skipKds?: boolean;
+  // QUI-431 — Pre-selected serials for serialized products. The POS opens a
+  // selector modal before calling addToCart and passes the cashier's choice
+  // here. `serial_ids` are pool rows; `serial_numbers` are free-text entries.
+  serial_ids?: number[];
+  serial_numbers?: string[];
 }
 
 export interface AddCustomItemRequest {

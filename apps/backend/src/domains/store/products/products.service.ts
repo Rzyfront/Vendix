@@ -960,13 +960,29 @@ export class ProductsService {
     const context = RequestContextService.getContext();
     // store_id check is handled by StorePrismaService
 
-    const where: Prisma.productsWhereInput = {
+    // Estado: el query param `state` (vía UI o API) tiene prioridad sobre
+    // el default. Si el usuario filtra explícitamente por "Archivado",
+    // ese filtro debe aplicarse aunque el default sea "excluir archivados".
+    //
+    // Bug previo: la lógica con `state: include_inactive ? undefined : { not: 'archived' }`
+    // + spread `...(state && { state })` no se propagaba correctamente en
+    // todos los casos, así que filtrar por "Archivado" devolvía 0 productos.
+    //
+    // Fix: calcular el state explícitamente basado en la prioridad.
+    let effectiveState: ProductState | { not: ProductState } | undefined;
+    if (state) {
+      effectiveState = state;
+    } else if (pos_optimized) {
+      effectiveState = ProductState.ACTIVE;
+    } else if (include_inactive) {
+      effectiveState = undefined;
+    } else {
+      effectiveState = { not: ProductState.ARCHIVED };
+    }
+
+    const where = {
       // Auto-scoped by StorePrismaService
-      state: pos_optimized
-        ? ProductState.ACTIVE
-        : include_inactive
-          ? undefined
-          : { not: 'archived' }, // Excluir archivados por defecto
+      state: effectiveState,
       ...(barcode && {
         // Búsqueda exacta por código de barras para POS.
         // Resuelve por barcode a nivel de producto O de cualquier variante.
@@ -983,7 +999,6 @@ export class ProductsService {
             { sku: { contains: search, mode: 'insensitive' } },
           ],
         }),
-      ...(state && { state }),
       ...(brand_id && { brand_id }),
       ...(category_id && {
         product_categories: {
@@ -995,7 +1010,7 @@ export class ProductsService {
       ...(requires_booking !== undefined && { requires_booking }),
       ...(is_sellable !== undefined && { is_sellable }),
       ...(is_batch_produced !== undefined && { is_batch_produced }),
-    };
+    } as Prisma.productsWhereInput;
 
     // Resolve POS stock scope so we can constrain the stock_levels includes at
     // the Prisma layer (server-side filtering) instead of post-filtering rows.
@@ -1240,6 +1255,10 @@ export class ProductsService {
             pricing_type: String(product.pricing_type),
             product_type: product.product_type,
             track_inventory: product.track_inventory,
+            // El POS lee este flag para abrir el modal obligatorio de captura
+            // de seriales; sin exponerlo aquí, el modal nunca se dispara y la
+            // venta de entrega directa procede sin verificar el serial.
+            requires_serial_numbers: product.requires_serial_numbers,
             available_for_ecommerce: product.available_for_ecommerce,
             is_featured: product.is_featured,
             allow_pos_price_override: product.allow_pos_price_override,
@@ -1394,6 +1413,10 @@ export class ProductsService {
           is_combo: product.is_combo,
           is_batch_produced: product.is_batch_produced,
           track_inventory: product.track_inventory,
+          // El POS lee este flag para abrir el modal obligatorio de captura
+          // de seriales; sin exponerlo aquí, el modal nunca se dispara y la
+          // venta de entrega directa procede sin verificar el serial.
+          requires_serial_numbers: product.requires_serial_numbers,
           available_for_ecommerce: product.available_for_ecommerce,
           is_featured: product.is_featured,
           allow_pos_price_override: product.allow_pos_price_override,
@@ -1528,7 +1551,9 @@ export class ProductsService {
         },
         stock_levels: {
           select: {
+            location_id: true,
             product_variant_id: true,
+            quantity_on_hand: true,
             quantity_available: true,
             quantity_reserved: true,
             reorder_point: true,
@@ -1630,6 +1655,10 @@ export class ProductsService {
       stock_uom_id: product.stock_uom_id,
       purchase_uom_id: product.purchase_uom_id,
       track_inventory: product.track_inventory,
+      // Flag de seriales. Se persiste vía `...productData` en update y vía el
+      // bloque explícito en create, pero el form de edición lo lee de ESTE
+      // mapeo de detalle al recargar; sin exponerlo aquí parecía "no guardarse".
+      requires_serial_numbers: product.requires_serial_numbers,
       available_for_ecommerce: product.available_for_ecommerce,
       is_featured: product.is_featured,
       allow_pos_price_override: product.allow_pos_price_override,

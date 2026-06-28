@@ -13,6 +13,8 @@ import {
   FontsSettingsDto,
   PublicationSettingsDto,
   OperationsSettingsDto,
+  DispatchSettingsDto,
+  RestaurantSettingsDto,
   PanelUISettingsDto,
   AccountingFlowsSettingsDto,
   ModuleFlowsSettingsDto,
@@ -86,6 +88,18 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => OperationsSettingsDto)
   operations?: OperationsSettingsDto;
+
+  @ApiProperty({ type: DispatchSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => DispatchSettingsDto)
+  dispatch?: DispatchSettingsDto;
+
+  @ApiProperty({ type: RestaurantSettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => RestaurantSettingsDto)
+  restaurant?: RestaurantSettingsDto;
 
   @ApiProperty({ type: PanelUISettingsDto, required: false })
   @IsOptional()

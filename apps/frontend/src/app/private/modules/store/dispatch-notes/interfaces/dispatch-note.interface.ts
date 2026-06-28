@@ -144,6 +144,31 @@ export interface CreateDispatchNoteDto {
 }
 
 /**
+ * QUI-431 — Mirror of backend `ConfirmDispatchNoteItemSerialsDto`. Maps a
+ * serialized dispatch-note line to the serials that satisfy it. For each
+ * serialized line the backend requires exactly `dispatched_quantity` valid
+ * serials (pool-resolved `serial_ids` + free-text `serial_numbers`); otherwise
+ * it raises `SERIAL_REQUIRED_001` and leaves the note in draft.
+ */
+export interface ConfirmDispatchNoteItemSerialsDto {
+  /** The `dispatch_note_items.id` of the serialized line. */
+  dispatch_note_item_id: number;
+  /** In_stock pool serial ids picked for this line. */
+  serial_ids?: number[];
+  /** Free-text serials (resolved-or-created by the backend) for this line. */
+  serial_numbers?: string[];
+}
+
+/**
+ * QUI-431 — Mirror of backend `ConfirmDispatchNoteDto`. Body for
+ * `POST /store/dispatch-notes/:id/confirm`. When the note has no serialized
+ * lines, `item_serials` is omitted and the body is `{}`.
+ */
+export interface ConfirmDispatchNoteDto {
+  item_serials?: ConfirmDispatchNoteItemSerialsDto[];
+}
+
+/**
  * Mirror of backend `CreateFromOrderItemDto` (apps/backend/.../dto/create-from-order.dto.ts).
  * Items are keyed by `order_item_id` + the quantity to dispatch.
  */

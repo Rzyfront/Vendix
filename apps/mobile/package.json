@@ -3,9 +3,9 @@
   "version": "0.0.1",
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
+    "start": "node --env-file=.env.web scripts/expo-dev.js",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
     "web": "expo start --web",
     "prebuild": "expo prebuild",
     "build:preview": "expo export",
@@ -27,7 +27,6 @@
     "expo-document-picker": "~14.0.8",
     "expo-file-system": "~19.0.23",
     "expo-font": "~14.0.12",
-    "expo-haptics": "~15.0.8",
     "expo-image-picker": "~17.0.11",
     "expo-linking": "~8.0.12",
     "expo-print": "~15.0.8",
@@ -53,6 +52,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "babel-plugin-module-resolver": "^5.0.3",
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"
   },

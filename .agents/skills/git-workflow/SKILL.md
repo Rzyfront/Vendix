@@ -6,7 +6,7 @@ description: >
 license: Apache-2.0
 metadata:
   author: rzyfront
-  version: "2.0"
+  version: "2.1"
   scope: [root]
   auto_invoke:
     - "git commit, git push, create PR, create branch"
@@ -16,6 +16,7 @@ metadata:
     - "Pulling the latest Engram memories (engram sync --import) before starting work"
     - "Saving an Engram memory before pushing non-trivial changes"
     - "Running an automated code review (pr-code-review) on a PR before merging"
+    - "Linking a PR to its Linear issue when opening a PR to dev"
 ---
 
 ## When to Use
@@ -228,6 +229,27 @@ gh pr merge <N>   # without a prior pr-code-review pass and APPROVE
 
 **Why:** Unreviewed PRs accumulate tech debt, security holes, and cross-domain breakage. The 80% threshold is the floor — teams should aim higher.
 
+### RULE 9: Link the PR to its Linear Issue (SUGGESTED — ask, don't block)
+
+**At the end of the PR flow** (right after opening — or just before opening — a PR to `dev`), check whether the change maps to a Linear issue and, if so, document it in the PR. This is a **suggestion with confirmation**, never a blocker: if the user says no, continue normally.
+
+**Flow:**
+
+1. **Ask the user:** "¿Este cambio corresponde a un issue/ticket de Linear?"
+2. **If the user says yes:**
+   - Invoke the **`linear-issues`** skill (`search` action) to find it — build the term from the PR title / branch name / key changes. If the user already gives a `QUI-XXX`, resolve that directly.
+   - Show the candidate(s) and confirm the right one with the user. Never guess silently.
+   - **Document it in the PR body** — add a `## Linear` section with `QUI-XXX — title — url` using `gh pr edit <N> --body` (or include it when running `gh pr create`).
+3. **If the user says no** (or there is no issue): continue without linking — do not invent an issue.
+
+```markdown
+## Linear
+- QUI-418 — FIX/ Error al aprobar reseña [ecommerce]
+  https://linear.app/quickss/issue/QUI-418
+```
+
+**Why:** Linking the PR to its issue closes the loop — reviewers see the context, and the merge step (`pr-code-review`) can move that issue to **In Review** automatically. Do NOT call the Linear API from here directly; delegate every Linear call to the `linear-issues` skill.
+
 ---
 
 ---
@@ -263,6 +285,12 @@ About to push or open a PR?
   → Run the pr-code-review skill on the diff (or ask the agent to).
   → If the review posts findings → address them in the branch, re-review.
   → If the review is >= 80% clean → APPROVE → merge.
+
+Did I just open a PR to dev?  (RULE 9 — suggested)
+  → Ask: "¿Este cambio corresponde a un issue/ticket de Linear?"
+      → Yes → linear-issues (search) → confirm match → document it in the
+              PR body (## Linear: QUI-XXX — title — url) via gh pr edit.
+      → No  → Continue without linking.
 
 Does any output have an AI signature/footer?
   → ALWAYS remove. No exceptions. Applies to commits, PRs, reviews, comments — everything.
@@ -328,6 +356,13 @@ engram save "..." "..." --type <type> --project vendix  # Save a memory
 # PR review
 gh pr review <N> --repo OWNER/REPO                     # Post a review (use pr-code-review first)
 gh pr merge <N> --repo OWNER/REPO                      # Only after review >= 80% clean
+
+# Link a PR to its Linear issue (RULE 9 — after asking the user)
+gh pr edit <N> --repo OWNER/REPO --body "$(gh pr view <N> --json body --jq .body)
+
+## Linear
+- QUI-XXX — <title>
+  https://linear.app/quickss/issue/QUI-XXX"        # delegate the search to linear-issues
 
 # Day-to-day
 git checkout -b feature/name                           # Create new branch

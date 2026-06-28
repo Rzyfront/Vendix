@@ -7,11 +7,16 @@ import {
   Param,
   Delete,
   Query,
+  Res,
   UseGuards,
   ParseIntPipe,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { DispatchNotesService } from './dispatch-notes.service';
 import { DispatchNoteFlowService } from './dispatch-note-flow/dispatch-note-flow.service';
+import { DispatchNotePdfService } from './pdf/dispatch-note-pdf.service';
 import {
   CreateDispatchNoteDto,
   UpdateDispatchNoteDto,
@@ -20,6 +25,7 @@ import {
   CreateFromOrderDto,
   VoidDispatchNoteDto,
   DeliverDispatchNoteDto,
+  ConfirmDispatchNoteDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -31,6 +37,7 @@ export class DispatchNotesController {
   constructor(
     private readonly dispatchNotesService: DispatchNotesService,
     private readonly dispatchNoteFlowService: DispatchNoteFlowService,
+    private readonly dispatchNotePdfService: DispatchNotePdfService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -179,8 +186,11 @@ export class DispatchNotesController {
 
   @Post(':id/confirm')
   @Permissions('store:dispatch_notes:confirm')
-  async confirm(@Param('id', ParseIntPipe) id: number) {
-    const result = await this.dispatchNoteFlowService.confirm(id);
+  async confirm(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ConfirmDispatchNoteDto,
+  ) {
+    const result = await this.dispatchNoteFlowService.confirm(id, dto);
     return this.responseService.success(
       result,
       'Remisión confirmada exitosamente',
@@ -221,5 +231,21 @@ export class DispatchNotesController {
       result,
       'Remisión facturada exitosamente',
     );
+  }
+
+  @Post(':id/pdf')
+  @HttpCode(HttpStatus.OK)
+  @Permissions('store:dispatch_notes:print')
+  async generatePdf(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
+    const buffer = await this.dispatchNotePdfService.generatePdf(id);
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `inline; filename="remision-${id}.pdf"`,
+      'Content-Length': buffer.length.toString(),
+    });
+    res.end(buffer);
   }
 }

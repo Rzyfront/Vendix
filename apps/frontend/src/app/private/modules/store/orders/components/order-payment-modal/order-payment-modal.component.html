@@ -210,63 +210,8 @@
       }
     </section>
 
-    <!-- RIGHT: Payment Type -->
+    <!-- RIGHT: Summary -->
     <section class="payment-section">
-      <div class="section-header">
-        <app-icon name="settings" [size]="16" class="section-icon"></app-icon>
-        <h2 class="section-title">Tipo de Pago</h2>
-      </div>
-
-      <div class="flex flex-col gap-3">
-        <!-- Direct Payment -->
-        <button
-          type="button"
-          class="payment-type-btn"
-          [class.selected]="paymentType() === 'direct'"
-          (click)="selectPaymentType('direct')"
-        >
-          <div class="radio-indicator">
-            @if (paymentType() === 'direct') {
-              <div class="radio-dot"></div>
-            }
-          </div>
-          <app-icon name="banknote" [size]="20"></app-icon>
-          <div class="type-info">
-            <span class="type-name">Directo (inmediato)</span>
-            <span class="type-desc">El pago se registra como completado</span>
-          </div>
-        </button>
-
-        <!-- Online Payment -->
-        <button
-          type="button"
-          class="payment-type-btn"
-          [class.selected]="paymentType() === 'online'"
-          (click)="selectPaymentType('online')"
-        >
-          <div class="radio-indicator">
-            @if (paymentType() === 'online') {
-              <div class="radio-dot"></div>
-            }
-          </div>
-          <app-icon name="globe" [size]="20"></app-icon>
-          <div class="type-info">
-            <span class="type-name">En Linea (pendiente)</span>
-            <span class="type-desc">La orden quedara en pago pendiente</span>
-          </div>
-        </button>
-      </div>
-
-      <!-- Info banner for online -->
-      @if (paymentType() === 'online') {
-        <div class="mt-4 bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-3">
-          <app-icon name="info" [size]="16" class="text-blue-600 mt-0.5"></app-icon>
-          <span class="text-xs text-blue-700">
-            El pago en linea dejara la orden en estado <strong>Pago Pendiente</strong> hasta que se confirme.
-          </span>
-        </div>
-      }
-
       <!-- Selected Method Summary -->
       @if (selectedMethod(); as method) {
         <div class="mt-6 p-4 bg-[var(--color-surface)] rounded-xl border border-border">
@@ -275,10 +220,6 @@
             <div class="flex justify-between">
               <span class="text-text-secondary">Metodo</span>
               <span class="font-semibold">{{ method.display_name }}</span>
-            </div>
-            <div class="flex justify-between">
-              <span class="text-text-secondary">Tipo</span>
-              <span class="font-semibold">{{ paymentType() === 'direct' ? 'Directo' : 'En Linea' }}</span>
             </div>
             @if (method.type === 'cash' && cashReceived() > 0) {
               <div class="flex justify-between">

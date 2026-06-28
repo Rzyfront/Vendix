@@ -101,9 +101,19 @@
                   }
                 }
                 @case ('missing') {
-                  <p class="text-[11px] italic text-[var(--color-text-secondary)]">
-                    Receta no disponible.
-                  </p>
+                  <div class="flex items-center justify-between gap-2">
+                    <p class="text-[11px] italic text-[var(--color-text-secondary)]">
+                      Sin receta activa.
+                    </p>
+                    <app-button
+                      variant="outline"
+                      size="xsm"
+                      (clicked)="onCreateRecipe(item)"
+                    >
+                      <app-icon slot="icon" name="plus" [size]="12" />
+                      Crear receta
+                    </app-button>
+                  </div>
                 }
                 @case ('error') {
                   <p class="text-[11px] italic text-[var(--color-text-secondary)]">
@@ -146,7 +156,13 @@
         <app-button variant="outline-danger" (clicked)="onCancel()" [disabled]="isMutating()">
           <app-icon slot="icon" name="x" [size]="14" /> Cancelar
         </app-button>
-        <app-button variant="primary" (clicked)="onStart()" [disabled]="isMutating()" [loading]="isMutating()">
+        <app-button
+          variant="primary"
+          (clicked)="onStart()"
+          [disabled]="isMutating() || !canStart()"
+          [loading]="isMutating()"
+          [attr.title]="canStart() ? null : 'Falta una receta activa en uno o más platos'"
+        >
           <app-icon slot="icon" name="play" [size]="14" /> Iniciar
         </app-button>
       } @else if (t.status === 'in_preparation') {

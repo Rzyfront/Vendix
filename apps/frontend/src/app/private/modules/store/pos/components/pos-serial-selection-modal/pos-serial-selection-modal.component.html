@@ -1,0 +1,95 @@
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="onCancel()"
+  size="md"
+>
+  <div slot="header" class="flex items-center gap-2">
+    <app-icon name="fingerprint" [size]="20" class="text-primary" />
+    <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
+      Seleccionar números de serie
+    </h3>
+  </div>
+
+  <div class="space-y-4">
+    <div
+      class="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[var(--color-surface-alt)] border border-[var(--color-border)]"
+    >
+      <div class="min-w-0">
+        <p class="text-sm font-semibold text-[var(--color-text-primary)] truncate">
+          {{ productName() }}
+        </p>
+        <p class="text-[11px] text-[var(--color-text-secondary)]">
+          Requiere {{ quantity() }}
+          {{ quantity() === 1 ? 'número de serie' : 'números de serie' }}
+        </p>
+      </div>
+      <span
+        class="text-xs font-semibold px-2 py-0.5 rounded-md"
+        [style.color]="canConfirm() ? '#16a34a' : '#b45309'"
+        [style.backgroundColor]="canConfirm() ? '#dcfce7' : '#fef3c7'"
+      >
+        {{ totalSelected() }} / {{ quantity() }}
+      </span>
+    </div>
+
+    @if (loading()) {
+      <div class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] py-2">
+        <app-icon name="loader-2" [size]="16" [spin]="true" />
+        Cargando seriales disponibles...
+      </div>
+    } @else {
+      @if (options().length > 0) {
+        <app-multi-selector
+          label="Seriales en stock"
+          placeholder="Busca y selecciona seriales del inventario"
+          [options]="options()"
+          [ngModel]="selectedSerialIds()"
+          (valueChange)="onSelectionChange($event)"
+          [ngModelOptions]="{ standalone: true }"
+        ></app-multi-selector>
+      } @else {
+        <p class="text-[12px] text-[var(--color-text-secondary)]">
+          No hay seriales en stock registrados para este producto. Ingresa los
+          números de serie manualmente.
+        </p>
+      }
+
+      <div>
+        <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
+          Seriales manuales (opcional)
+        </label>
+        <textarea
+          rows="3"
+          class="w-full px-3 py-2 text-sm border border-[var(--color-border)] rounded-lg
+                 bg-[var(--color-surface)] text-[var(--color-text-primary)]
+                 focus:outline-none focus:ring-2 focus:ring-primary-400"
+          placeholder="Un serial por línea o separados por coma"
+          [ngModel]="freeText()"
+          (ngModelChange)="onFreeTextChange($event)"
+          [ngModelOptions]="{ standalone: true }"
+        ></textarea>
+        <p class="text-[11px] text-[var(--color-text-secondary)] mt-1">
+          Los seriales manuales se registran en el inventario al cobrar.
+        </p>
+      </div>
+
+      @if (!canConfirm()) {
+        <p class="text-[11px] text-amber-600">
+          Selecciona o ingresa al menos {{ quantity() }}
+          {{ quantity() === 1 ? 'serial' : 'seriales' }} para continuar.
+        </p>
+      }
+    }
+  </div>
+
+  <div slot="footer" class="flex justify-end gap-2">
+    <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
+    <app-button
+      variant="primary"
+      [disabled]="!canConfirm() || loading()"
+      (clicked)="onConfirm()"
+    >
+      Confirmar
+    </app-button>
+  </div>
+</app-modal>

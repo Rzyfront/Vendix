@@ -195,9 +195,14 @@ export class MarketingAdCreativesController {
   )
   generateStream(
     @Param('id', ParseIntPipe) id: number,
-    @Query('request_id') requestId?: string,
+    @Req() req: Request,
   ): Observable<MessageEvent> {
-    return this.adCreativesService.streamGenerate(id, requestId);
+    const requestId =
+      typeof req.query.request_id === 'string'
+        ? req.query.request_id
+        : undefined;
+    const correction = String(req.query.correction ?? '');
+    return this.adCreativesService.streamGenerate(id, requestId, correction);
   }
 
   @Get(':id')

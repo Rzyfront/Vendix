@@ -94,7 +94,10 @@ export class ProductListComponent {
         { value: '', label: 'Todos los Estados' },
         { value: ProductState.ACTIVE, label: 'Activo' },
         { value: ProductState.INACTIVE, label: 'Inactivo' },
-        { value: ProductState.ARCHIVED, label: 'Archivado' },
+        // Archived is intentionally omitted from the filter dropdown per the
+        // "Datos archivados" issue: archived data must not be visible or
+        // filterable from the admin UI. Admins can still access archived
+        // products via direct URL (`/admin/products/:id`) to restore them.
       ],
     },
     {

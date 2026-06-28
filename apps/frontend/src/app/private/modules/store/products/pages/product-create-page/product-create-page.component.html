@@ -1040,8 +1040,117 @@
               "
             >
             </app-setting-toggle>
+
+            <app-setting-toggle
+              formControlName="requires_serial_numbers"
+              label="Requerir número de serie"
+              description="Cada unidad vendida deberá tener un número de serie único (garantía, postventa, trazabilidad)."
+            >
+            </app-setting-toggle>
           </div>
         </section>
+
+        <!-- ─── QUI-431: Números de serie — resumen + acceso al gestor ──── -->
+        @if (isSerialized) {
+          <section
+            class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
+          >
+            <div
+              class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+            >
+              <div class="flex items-start gap-2">
+                <app-icon
+                  name="hash"
+                  size="18"
+                  class="text-primary-600 mt-0.5"
+                ></app-icon>
+                <div>
+                  <h2 class="text-base font-bold text-gray-900">
+                    Números de serie
+                  </h2>
+                  @if (isEditMode() && productId !== null) {
+                    <p class="text-xs text-gray-500 mt-0.5">
+                      Resumen del pool de seriales. Usa “Gestionar seriales”
+                      para registrar, editar o cargar en lote.
+                    </p>
+                  } @else {
+                    <p class="text-xs text-gray-500 mt-0.5">
+                      Guarda el producto para gestionar sus números de serie.
+                    </p>
+                  }
+                </div>
+              </div>
+
+              <app-button
+                variant="primary"
+                [disabled]="!isEditMode() || productId === null"
+                (clicked)="serialsManagerOpen.set(true)"
+              >
+                <div class="flex items-center gap-2">
+                  <app-icon
+                    slot="icon"
+                    name="settings"
+                    [size]="16"
+                  ></app-icon>
+                  <span>Gestionar seriales</span>
+                </div>
+              </app-button>
+            </div>
+
+            @if (isEditMode() && productId !== null) {
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <p
+                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5"
+                  >
+                    Total
+                  </p>
+                  <p class="text-lg font-bold text-text-primary">
+                    {{ serialSummary().total }}
+                  </p>
+                </div>
+                <div>
+                  <p
+                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5"
+                  >
+                    En stock
+                  </p>
+                  <p class="text-lg font-bold text-primary-700">
+                    {{ serialCountByStatus('in_stock') }}
+                  </p>
+                </div>
+                <div>
+                  <p
+                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5"
+                  >
+                    Vendidos
+                  </p>
+                  <p class="text-lg font-bold text-text-primary">
+                    {{ serialCountByStatus('sold') }}
+                  </p>
+                </div>
+                <div>
+                  <p
+                    class="text-[10px] text-text-muted uppercase font-bold tracking-wider mb-0.5"
+                  >
+                    Garantía por vencer
+                  </p>
+                  <p
+                    class="text-lg font-bold"
+                    [class.text-amber-600]="
+                      serialSummary().warranty_expiring_soon > 0
+                    "
+                    [class.text-text-muted]="
+                      serialSummary().warranty_expiring_soon === 0
+                    "
+                  >
+                    {{ serialSummary().warranty_expiring_soon }}
+                  </p>
+                </div>
+              </div>
+            }
+          </section>
+        }
 
         <!-- Compra online — oculta en insumos no vendibles (no se venden online) -->
         @if (isEditMode() && !isPureIngredient()) {
@@ -3664,3 +3773,11 @@
   (replace)="onVariantAiReplace($event)"
   (keep)="onVariantAiKeep($event)"
 ></app-product-image-ai-enhance-modal>
+
+<!-- ─── QUI-431: Gestor completo de números de serie (modal LG) ──────── -->
+<app-product-serials-manager-modal
+  [(isOpen)]="serialsManagerOpen"
+  [productId]="productId"
+  [stockLevels]="product?.stock_levels ?? []"
+  (changed)="loadSerialSummary()"
+/>

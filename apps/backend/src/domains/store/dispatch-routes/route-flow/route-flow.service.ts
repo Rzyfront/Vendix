@@ -21,7 +21,11 @@ import {
   SettleStopDto,
   VoidDispatchRouteDto,
 } from '../dto';
-import { aggregateRouteTotals } from '../utils/route-stop-calc';
+import {
+  aggregateRouteTotals,
+  deriveStopIsPrepaid,
+} from '../utils/route-stop-calc';
+import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
 
 const ROUTE_INCLUDE = {
   vehicle: true,
@@ -43,7 +47,36 @@ const ROUTE_INCLUDE = {
           sales_order_id: true,
           // COD link: the real orders.id whose state/balance the route drives.
           order_id: true,
+          // needs_collection + invoice.payment_date + order.remaining_balance
+          // feed the DERIVED is_prepaid (never trust the frozen stop boolean).
+          needs_collection: true,
+          // Delivery-address snapshot for the planilla per-stop address + the
+          // dispatch-time address gate.
+          customer_address: true,
           sales_order: { select: { id: true, order_number: true, status: true } },
+          invoice: { select: { payment_date: true } },
+          // Live payment status of a regular order (remaining_balance) drives
+          // the derived prepaid resolution; the snapshot is the address fallback.
+          order: {
+            select: {
+              id: true,
+              remaining_balance: true,
+              shipping_address_snapshot: true,
+              // Live shipping-address relation: 3rd fallback for the per-stop
+              // address (legacy remisiones created before the snapshot exist
+              // with customer_address = null).
+              addresses_orders_shipping_address_idToaddresses: {
+                select: {
+                  address_line1: true,
+                  address_line2: true,
+                  city: true,
+                  state_province: true,
+                  country_code: true,
+                  postal_code: true,
+                },
+              },
+            },
+          },
         },
       },
     },
@@ -68,13 +101,98 @@ export class RouteFlowService {
     return store_id;
   }
 
+  /**
+   * Read the store's `dispatch.order_state_update_mode` setting in a
+   * tenant-safe way. Uses `findFirst({ where: { store_id } })` (never
+   * `findUnique`, whose WhereUniqueInput breaks under the scope merge) and
+   * merges with defaults so a missing JSON key falls back to `'on_close'`
+   * (the legacy behavior). Read once per settle, not per stop.
+   */
+  private async getOrderStateUpdateMode(
+    store_id: number,
+  ): Promise<'live' | 'on_close'> {
+    try {
+      const row = await this.prisma.store_settings.findFirst({
+        where: { store_id },
+        select: { settings: true },
+      });
+      const settings = mergeStoreSettingsWithDefaults(row?.settings);
+      return settings.dispatch?.order_state_update_mode ?? 'on_close';
+    } catch {
+      // A settings read failure must NEVER break route settlement. Fall back to
+      // the legacy behavior (advance the order state only at route close).
+      return 'on_close';
+    }
+  }
+
   private async getRoute(id: number, store_id: number) {
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id },
       include: ROUTE_INCLUDE,
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
-    return route;
+    return this.withDerivedStopPrepaid(route);
+  }
+
+  /**
+   * Overwrite each stop's `is_prepaid` with the value DERIVED from the linked
+   * note/order live payment state. The persisted `dispatch_route_stops.is_prepaid`
+   * is frozen at stop creation and must NOT be trusted on read — a paid order
+   * keeps `false` and would be charged again. Every read path (totals, close
+   * cash filter, settle gate, PDF, route response) consumes the result of
+   * `getRoute`, so deriving here keeps all of them consistent.
+   */
+  private withDerivedStopPrepaid<
+    R extends {
+      stops: Array<{
+        is_prepaid: boolean;
+        dispatch_note?: {
+          needs_collection?: boolean | null;
+          invoice?: { payment_date: Date | null } | null;
+          order?: { remaining_balance: Prisma.Decimal | null } | null;
+        } | null;
+      }>;
+    },
+  >(route: R): R {
+    return {
+      ...route,
+      stops: route.stops.map((stop) => ({
+        ...stop,
+        is_prepaid: deriveStopIsPrepaid(stop),
+      })),
+    };
+  }
+
+  /**
+   * Whether a stop carries a usable delivery address. Checks, in order: the
+   * remisión's `customer_address` snapshot, the order's
+   * `shipping_address_snapshot` fallback, and the order's live shipping-address
+   * relation (3rd fallback for legacy remisiones created before the snapshot).
+   * This MUST mirror the PDF's address-resolution chain so the dispatch gate
+   * never blocks a stop whose address the planilla would happily render. A JSON
+   * blob (or the live address row) counts when it has a non-empty
+   * `address_line1` (or legacy `line1`/`address`) string.
+   */
+  private stopHasDeliveryAddress(
+    customerAddress: Prisma.JsonValue | null | undefined,
+    orderSnapshot: Prisma.JsonValue | null | undefined,
+    liveAddress?: Prisma.JsonValue | Record<string, unknown> | null,
+  ): boolean {
+    return (
+      this.jsonAddressHasLine(customerAddress) ||
+      this.jsonAddressHasLine(orderSnapshot) ||
+      this.jsonAddressHasLine(liveAddress as Prisma.JsonValue)
+    );
+  }
+
+  /** True when a JSON address blob carries a non-empty address line. */
+  private jsonAddressHasLine(value: Prisma.JsonValue | null | undefined): boolean {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return false;
+    }
+    const a = value as Record<string, unknown>;
+    const line1 = a.address_line1 ?? a.line1 ?? a.address;
+    return typeof line1 === 'string' && line1.trim().length > 0;
   }
 
   /**
@@ -109,6 +227,34 @@ export class RouteFlowService {
     await tx.orders.updateMany({
       where: { id: order_id, store_id, state: 'processing' },
       data: { state: 'shipped', updated_at: new Date() },
+    });
+  }
+
+  /**
+   * Advance a linked COD order `shipped → delivered` ONLY. Used for the
+   * `dispatch.order_state_update_mode = 'live'` setting so the order reflects
+   * "entregada" the moment a stop is settled, instead of waiting for the route
+   * close. Idempotent and store-scoped: if the order is not in `shipped`
+   * (not yet shipped, already delivered/finished, cancelled, etc.) this is a
+   * no-op. The route close (`advanceOrderToFinished`) still walks
+   * delivered → finished afterwards, so it composes with the live update.
+   */
+  private async advanceOrderToDelivered(
+    tx: Prisma.TransactionClient,
+    store_id: number,
+    order_id: number,
+  ): Promise<void> {
+    const order = await tx.orders.findFirst({
+      where: { id: order_id, store_id },
+      select: { id: true, state: true },
+    });
+    if (!order) return;
+    // Only `shipped → delivered` is valid here. Any other state is a no-op so
+    // re-settling never throws and never skips ahead to finished.
+    if (order.state !== 'shipped') return;
+    await tx.orders.updateMany({
+      where: { id: order_id, store_id, state: 'shipped' },
+      data: { state: 'delivered', updated_at: new Date() },
     });
   }
 
@@ -148,6 +294,74 @@ export class RouteFlowService {
   }
 
   /**
+   * Transition the linked dispatch_note → 'delivered' inside the settle
+   * transaction, mirroring the canonical `DispatchNoteFlowService.deliver`
+   * field writes (delivered_by_user_id, delivered_at, actual_delivery_date).
+   *
+   * Idempotent: if the note is already past 'confirmed'
+   * (delivered/invoiced/voided) it is a no-op and returns `null` so the caller
+   * does NOT re-emit the `dispatch_note.delivered` event. A note still in
+   * 'draft' is confirmed-on-the-fly (sets confirmed_at/confirmed_by_user_id)
+   * to honor the VALID_TRANSITIONS contract (draft → ... → delivered).
+   *
+   * Returns the post-commit event payload (or null), so the caller can emit
+   * `dispatch_note.delivered` AFTER the transaction commits — the listener
+   * re-reads the note and must see status:'delivered' already persisted before
+   * it fires the inventory primitive.
+   */
+  private async markDispatchNoteDeliveredInTx(
+    tx: Prisma.TransactionClient,
+    note: {
+      id: number;
+      dispatch_number: string;
+      status: string;
+      sales_order_id: number | null;
+      order_id: number | null;
+    },
+    store_id: number,
+    user_id: number | undefined,
+  ): Promise<{
+    dispatch_note_id: number;
+    dispatch_number: string;
+    store_id: number;
+    sales_order_id: number | null;
+    order_id: number | null;
+  } | null> {
+    // Terminal / already-delivered states: no re-transition, no re-emit.
+    if (
+      note.status === 'delivered' ||
+      note.status === 'invoiced' ||
+      note.status === 'voided'
+    ) {
+      return null;
+    }
+
+    await tx.dispatch_notes.update({
+      where: { id: note.id },
+      data: {
+        status: 'delivered',
+        delivered_by_user_id: user_id,
+        delivered_at: new Date(),
+        actual_delivery_date: new Date(),
+        updated_at: new Date(),
+        // A note still in 'draft' must be confirmed-on-the-fly so the
+        // draft → confirmed → delivered invariant holds end-to-end.
+        ...(note.status === 'draft'
+          ? { confirmed_at: new Date(), confirmed_by_user_id: user_id }
+          : {}),
+      },
+    });
+
+    return {
+      dispatch_note_id: note.id,
+      dispatch_number: note.dispatch_number,
+      store_id,
+      sales_order_id: note.sales_order_id,
+      order_id: note.order_id,
+    };
+  }
+
+  /**
    * Transition a route: draft → dispatched.
    * Locks the stops (no more add/remove) and sets dispatch_started_at.
    */
@@ -179,6 +393,42 @@ export class RouteFlowService {
       );
     }
 
+    // Per-stop delivery-address gate (defense in depth): sub-task 2 already
+    // blocks createFromOrder/createFromSalesOrder when the order has no address,
+    // but legacy remisiones (created before this rule) may still lack one. We
+    // require every stop to carry a delivery address (customer_address snapshot
+    // or the order's shipping_address_snapshot fallback) before dispatching.
+    const stopsWithoutAddress = route.stops.filter(
+      (stop) =>
+        !this.stopHasDeliveryAddress(
+          stop.dispatch_note?.customer_address,
+          stop.dispatch_note?.order?.shipping_address_snapshot,
+          stop.dispatch_note?.order
+            ?.addresses_orders_shipping_address_idToaddresses,
+        ),
+    );
+    if (stopsWithoutAddress.length > 0) {
+      const numbers = stopsWithoutAddress
+        .map((s) => s.dispatch_note?.dispatch_number || `#${s.dispatch_note_id}`)
+        .join(', ');
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_STOP_NO_ADDRESS,
+        `Las siguientes remisiones no tienen dirección de entrega: ${numbers}`,
+        { dispatch_numbers: numbers },
+      );
+    }
+
+    // Accumulate confirm-on-dispatch payloads so we can emit
+    // `dispatch_note.confirmed` AFTER the transaction commits (the reservation
+    // listener re-reads the note and must see status:'confirmed' persisted).
+    const confirmedEventPayloads: Array<{
+      dispatch_note_id: number;
+      dispatch_number: string;
+      store_id: number;
+      sales_order_id: number | null;
+      order_id: number | null;
+    }> = [];
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const updated_route = await tx.dispatch_routes.update({
         where: { id },
@@ -197,10 +447,41 @@ export class RouteFlowService {
         if (order_id) {
           await this.advanceOrderToShipped(tx, store_id, order_id);
         }
+
+        // Reserve-invariant: every DISPATCHED remisión must be at least
+        // 'confirmed' so its stock reservation exists (handleConfirmed reserves
+        // only standalone notes). This makes the anti double-deduction gate
+        // consistent: by the time a stop settles to 'delivered', the note has a
+        // reservation to consume. If all notes already arrive confirmed, no-op.
+        const note = stop.dispatch_note;
+        if (note?.status === 'draft') {
+          await tx.dispatch_notes.update({
+            where: { id: note.id },
+            data: {
+              status: 'confirmed',
+              confirmed_by_user_id: user_id,
+              confirmed_at: new Date(),
+              updated_at: new Date(),
+            },
+          });
+          confirmedEventPayloads.push({
+            dispatch_note_id: note.id,
+            dispatch_number: note.dispatch_number,
+            store_id,
+            sales_order_id: note.sales_order_id,
+            order_id: note.order_id,
+          });
+        }
       }
 
       return updated_route;
     });
+
+    // Post-commit: emit one `dispatch_note.confirmed` per note confirmed above
+    // so the reservation listener sees the persisted 'confirmed' status.
+    for (const payload of confirmedEventPayloads) {
+      this.eventEmitter.emit('dispatch_note.confirmed', payload);
+    }
 
     this.eventEmitter.emit('dispatch_route.dispatched', {
       route_id: id,
@@ -211,7 +492,7 @@ export class RouteFlowService {
     });
 
     this.logger.log(`Planilla #${id} despachada con ${updated.stops.length} paradas`);
-    return updated;
+    return this.withDerivedStopPrepaid(updated);
   }
 
   /**
@@ -277,6 +558,9 @@ export class RouteFlowService {
       );
     }
 
+    // Read the COD order-state update mode once per settle (not per stop).
+    const orderStateUpdateMode = await this.getOrderStateUpdateMode(store_id);
+
     const stop = await this.prisma.dispatch_route_stops.findFirst({
       where: { id: stopId, route_id: id },
       include: {
@@ -287,7 +571,19 @@ export class RouteFlowService {
             grand_total: true,
             customer_id: true,
             sales_order_id: true,
+            // Current remisión status — drives the idempotent transition to
+            // 'delivered' (and confirmed-on-the-fly for draft) in
+            // markDispatchNoteDeliveredInTx.
+            status: true,
+            // COD link: the real orders.id whose state the route drives. Needed
+            // for the `live` order_state_update_mode (advance to delivered here).
+            order_id: true,
+            // Live payment signals so the prepaid gate below is DERIVED (never
+            // the frozen stop.is_prepaid boolean).
+            needs_collection: true,
             sales_order: { select: { id: true, order_number: true, status: true } },
+            invoice: { select: { payment_date: true } },
+            order: { select: { remaining_balance: true } },
             // For withholding-agent validation: a retenedor cliente must
             // arrive at 'delivered' or 'partial' WITH a populated
             // withholding_breakdown, otherwise the fiscal accounting will
@@ -304,6 +600,20 @@ export class RouteFlowService {
       throw new BadRequestException(`La parada ya está '${stop.status}'`);
     }
 
+    // No hay entregas parciales / crédito en ruta: el pago es TOTAL o no hay
+    // pago. Entregada ⇒ pagada al 100% (o prepaga). Resultados válidos:
+    // 'delivered', 'rejected', 'released'. 'partial' queda deshabilitado.
+    if ((dto.result as string) === 'partial') {
+      throw new VendixHttpException(
+        ErrorCodes.DISPATCH_ROUTE_PARTIAL_DISABLED,
+        "Las entregas parciales no están habilitadas en ruta: el pago debe ser total. Marca la parada como entregada (pago completo) o rechazada.",
+      );
+    }
+
+    // DERIVED prepaid for this stop from the live note/order payment state.
+    // Never trust the persisted (frozen) stop.is_prepaid for the COD logic.
+    const stopIsPrepaid = deriveStopIsPrepaid(stop);
+
     // Withholding-agent guard: if the customer is a retenedor, the operator
     // must register the breakdown (retefuente / reteiva / reteica) and the
     // withholding_amount must match the sum of the breakdown. The frontend
@@ -319,7 +629,7 @@ export class RouteFlowService {
       Number(breakdown?.retefuente || 0) +
       Number(breakdown?.reteiva || 0) +
       Number(breakdown?.reteica || 0);
-    if (isWithholdingAgent && (dto.result === 'delivered' || dto.result === 'partial')) {
+    if (isWithholdingAgent && dto.result === 'delivered') {
       if (withholdingAmount <= 0 || !breakdown || breakdownSum <= 0) {
         throw new BadRequestException(
           `El cliente es agente retenedor: la liquidación requiere un desglose de retención (retefuente / reteiva / reteica) con suma > 0.`,
@@ -343,21 +653,31 @@ export class RouteFlowService {
     const total_paid = collected + anticipo;
 
     if (dto.result === 'delivered') {
-      // Must cover full net (or be is_prepaid)
-      if (!stop.is_prepaid && total_paid + withholding < net) {
+      // Must cover full net (or be prepaid)
+      if (!stopIsPrepaid && total_paid + withholding < net) {
         throw new BadRequestException(
           `Suma de collected + anticipo + withholding (${total_paid + withholding}) es menor que el total de la remisión (${net})`,
         );
       }
     }
 
-    // Compute credit amount for partial
-    let credit_amount = 0;
-    if (dto.result === 'partial') {
-      credit_amount = Math.max(0, net - total_paid - withholding);
-    }
+    // Sin crédito en ruta: el pago es total o no hay pago. `credit_amount`
+    // permanece en 0 siempre (la columna se conserva en el schema, pero ya no
+    // se usa). `anticipo_amount` deja de funcionar como pago parcial.
+    const credit_amount = 0;
 
     const from_status = stop.status;
+
+    // Captured inside the tx, emitted AFTER commit so the listener that reacts
+    // to `dispatch_note.delivered` (inventory primitive) re-reads the note and
+    // sees status:'delivered' already persisted. `null` ⇒ no transition, no emit.
+    let deliveredEventPayload: {
+      dispatch_note_id: number;
+      dispatch_number: string;
+      store_id: number;
+      sales_order_id: number | null;
+      order_id: number | null;
+    } | null = null;
 
     const updated = await this.prisma.$transaction(async (tx) => {
       const updated_stop = await tx.dispatch_route_stops.update({
@@ -399,12 +719,36 @@ export class RouteFlowService {
       // Keep parent totals in sync so the detail page reflects live "Recaudado".
       await this.refreshRouteTotals(tx, id);
 
+      // Live order-state mode: reflect the COD order as "delivered" the moment
+      // the stop is settled as delivered (pago total). `rejected` is excluded
+      // (a refused delivery does not deliver the order). The walk to `finished`
+      // still happens at route close. No-op for `on_close` mode.
+      if (orderStateUpdateMode === 'live') {
+        const order_id = stop.dispatch_note?.order_id;
+        if (order_id && dto.result === 'delivered') {
+          await this.advanceOrderToDelivered(tx, store_id, order_id);
+        }
+      }
+
+      // Sync the remisión with the route close-out: a stop settled as delivered
+      // (pago total) drives its dispatch_note → 'delivered' (idempotent).
+      // rejected/released do NOT deliver the note. The event is emitted AFTER
+      // the tx commits (see deliveredEventPayload below).
+      if (dto.result === 'delivered') {
+        deliveredEventPayload = await this.markDispatchNoteDeliveredInTx(
+          tx,
+          stop.dispatch_note as any,
+          store_id,
+          user_id,
+        );
+      }
+
       return updated_stop;
     });
 
     // Emit domain events to drive accounting / AR / notifications.
-    // Only for non-prepaid stops with actual collection.
-    if (!stop.is_prepaid) {
+    // Only for non-prepaid stops with actual collection (DERIVED prepaid).
+    if (!stopIsPrepaid) {
       if (collected > 0 || anticipo > 0) {
         await this.cashSettlement.emitPaymentReceived({
           store_id,
@@ -471,6 +815,13 @@ export class RouteFlowService {
           user_id,
         });
       }
+    }
+
+    // Post-commit: drive the remisión-delivered listener (inventory primitive).
+    // MUST be after the $transaction so the note's 'delivered' status is already
+    // committed when the listener re-reads it.
+    if (deliveredEventPayload) {
+      this.eventEmitter.emit('dispatch_note.delivered', deliveredEventPayload);
     }
 
     this.logger.log(
@@ -577,7 +928,16 @@ export class RouteFlowService {
         change_amount: true,
         withholding_amount: true,
         credit_amount: true,
-        dispatch_note: { select: { grand_total: true } },
+        dispatch_note: {
+          select: {
+            grand_total: true,
+            // Live payment signals so is_prepaid is DERIVED, not the frozen
+            // persisted boolean (mirrors getRoute / withDerivedStopPrepaid).
+            needs_collection: true,
+            invoice: { select: { payment_date: true } },
+            order: { select: { remaining_balance: true } },
+          },
+        },
       },
     });
 
@@ -585,7 +945,7 @@ export class RouteFlowService {
     // (which expects number | string | null) accepts them.
     const totals = aggregateRouteTotals(
       stops.map((s) => ({
-        is_prepaid: s.is_prepaid,
+        is_prepaid: deriveStopIsPrepaid(s),
         collected_amount: s.collected_amount == null ? 0 : Number(s.collected_amount),
         anticipo_amount: s.anticipo_amount == null ? 0 : Number(s.anticipo_amount),
         change_amount: s.change_amount == null ? 0 : Number(s.change_amount),
@@ -675,27 +1035,16 @@ export class RouteFlowService {
         include: ROUTE_INCLUDE,
       });
 
-      // COD: finish each linked order that was DELIVERED and fully COLLECTED.
-      // Delivered = stop result in {delivered, partial}. Collected = the COD
-      // order has no outstanding balance (settled via paso 7) OR the stop is
-      // prepaid. remaining_balance is read live from the order (the COD payment
-      // listener already decremented it on settleStop). Idempotent + scoped.
+      // COD: finish each linked order whose stop was ENTREGADA. Con la regla
+      // "entregada = pagada al 100% (o prepaga)" ya no hay gate de recaudo: toda
+      // parada con result='delivered' sincroniza su orden shipped → delivered →
+      // finished. Esto cierra el gap donde las órdenes se quedaban en 'shipped'.
+      // rejected/released NO avanzan. `advanceOrderToFinished` es idempotente
+      // (no-op si la orden ya está en/past target) y store-scoped.
       for (const stop of updated_route.stops) {
         const order_id = stop.dispatch_note?.order_id;
         if (!order_id) continue;
-        const delivered =
-          stop.result === 'delivered' || stop.result === 'partial';
-        if (!delivered) continue;
-
-        let collected = stop.is_prepaid === true;
-        if (!collected) {
-          const order = await tx.orders.findFirst({
-            where: { id: order_id, store_id },
-            select: { remaining_balance: true },
-          });
-          collected = order ? Number(order.remaining_balance) <= 0 : false;
-        }
-        if (!collected) continue;
+        if (stop.result !== 'delivered') continue;
 
         await this.advanceOrderToFinished(tx, store_id, order_id);
       }
@@ -719,7 +1068,7 @@ export class RouteFlowService {
     this.logger.log(
       `Planilla #${id} cerrada. Recaudado=${total_collected} Variance=${cash_variance}`,
     );
-    return updated;
+    return this.withDerivedStopPrepaid(updated);
   }
 
   /**
@@ -797,7 +1146,7 @@ export class RouteFlowService {
     });
 
     this.logger.log(`Planilla #${id} anulada: ${dto.reason}`);
-    return updated;
+    return this.withDerivedStopPrepaid(updated);
   }
 
   async generatePdf(id: number): Promise<Buffer> {

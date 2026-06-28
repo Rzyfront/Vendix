@@ -11,6 +11,8 @@ import { PosSettingsForm } from './components/pos-settings-form/pos-settings-for
 import { ReceiptsSettingsForm } from './components/receipts-settings-form/receipts-settings-form.component';
 import { AppSettingsForm } from './components/app-settings-form/app-settings-form.component';
 import { OperationsSettingsForm } from './components/operations-settings-form/operations-settings-form.component';
+import { DispatchSettingsForm } from './components/dispatch-settings-form/dispatch-settings-form.component';
+import { RestaurantSettingsForm } from './components/restaurant-settings-form/restaurant-settings-form.component';
 import { LucideAngularModule } from "lucide-angular";
 import { IconComponent } from '../../../../../shared/components/index';
 import { ScrollableTabsComponent } from '../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
@@ -33,6 +35,8 @@ import { firstValueFrom } from 'rxjs';
     ReceiptsSettingsForm,
     AppSettingsForm,
     OperationsSettingsForm,
+    DispatchSettingsForm,
+    RestaurantSettingsForm,
     ScrollableTabsComponent,
     StickyHeaderComponent
 ],
@@ -63,15 +67,31 @@ export class GeneralSettingsComponent implements OnInit {
   pendingAppLogo = signal<{ file: File; preview: string } | null>(null);
   pendingAppFavicon = signal<{ file: File; preview: string } | null>(null);
 
-  readonly sections = [
-    { id: 'identity', label: 'Identidad', icon: 'user' },
-    { id: 'branding', label: 'Marca', icon: 'palette' },
-    { id: 'inventory', label: 'Inventario', icon: 'package' },
-    { id: 'operations', label: 'Operaciones', icon: 'clock' },
-    { id: 'notifications', label: 'Alertas', icon: 'bell' },
-    { id: 'pos', label: 'POS', icon: 'monitor' },
-    { id: 'receipts', label: 'Recibos', icon: 'file-text' },
-  ];
+  /**
+   * True when the active store is a restaurant. Gates the "Mesas" settings
+   * section (tab + form). Source of truth is the industries cascade resolved
+   * by `AuthFacade.isRestaurant` (settings → login → []).
+   */
+  readonly isRestaurant = this.authFacade.isRestaurant;
+
+  readonly sections = computed(() => {
+    const base = [
+      { id: 'identity', label: 'Identidad', icon: 'user' },
+      { id: 'branding', label: 'Marca', icon: 'palette' },
+      { id: 'inventory', label: 'Inventario', icon: 'package' },
+      { id: 'operations', label: 'Operaciones', icon: 'clock' },
+      { id: 'dispatch', label: 'Despacho', icon: 'truck' },
+      { id: 'notifications', label: 'Alertas', icon: 'bell' },
+      { id: 'pos', label: 'POS', icon: 'monitor' },
+      { id: 'receipts', label: 'Recibos', icon: 'file-text' },
+    ];
+    if (this.isRestaurant()) {
+      // Insert "Mesas" right after "Operaciones" for restaurants only.
+      const dispatchIndex = base.findIndex((s) => s.id === 'dispatch');
+      base.splice(dispatchIndex, 0, { id: 'restaurant', label: 'Mesas', icon: 'utensils' });
+    }
+    return base;
+  });
 
   readonly badgeText = computed(() =>
     this.hasUnsavedChanges() ? 'Pendiente de Guardar' : 'Sincronizado'
@@ -229,7 +249,7 @@ export class GeneralSettingsComponent implements OnInit {
       }
 
       const knownSections: (keyof StoreSettings)[] = [
-        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'panel_ui',
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'restaurant', 'panel_ui',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {

@@ -45,10 +45,14 @@ export function buildSlides(input: BuildSlidesInput): WeeklySlide[] {
   });
 
   // 2. Sales (revenue + ticket)
+  // El reporte cuenta solo órdenes en estado terminal (delivered/finished),
+  // por eso puede diferir del dashboard en vivo (que incluye 'shipped'). El
+  // subtítulo lo deja explícito para no confundir al owner.
   slides.push({
     id: 'sales',
     kind: 'sales',
     title: 'Tus ventas de la semana',
+    subtitle: 'Solo órdenes entregadas o finalizadas',
     payload: {
       total_revenue: metrics.total_revenue,
       total_orders: metrics.total_orders,
@@ -99,7 +103,9 @@ export function buildSlides(input: BuildSlidesInput): WeeklySlide[] {
     payload: {
       channels: metrics.channel_breakdown.map((c) => ({
         ...c,
-        display_name: c.display_name || CHANNEL_LABELS[c.channel] || c.channel,
+        // El servicio rellena display_name con el enum crudo ('pos', ...), así
+        // que el mapa de etiquetas legibles debe tener prioridad sobre él.
+        display_name: CHANNEL_LABELS[c.channel] || c.display_name || c.channel,
       })),
       tier,
     },

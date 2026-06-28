@@ -142,10 +142,13 @@ export class EcommerceReviewsService {
     const context = RequestContextService.getContext()!;
     const user_id = context.user_id!;
 
-    // Check if user has a delivered/finished order with this product
-    // EcommercePrismaService scopes orders by store_id + customer_id automatically
+    // Check if THIS USER has a delivered/finished order with this product.
+    // EcommercePrismaService scopes orders by store_id automatically, but
+    // the user/customer check must be applied here — otherwise ANY delivered
+    // order for the product (from any customer) would validate the review.
     const order = await this.prisma.orders.findFirst({
       where: {
+        user_id,
         state: { in: ['delivered', 'finished'] },
         order_items: { some: { product_id: productId } },
       },

@@ -784,6 +784,32 @@ export const ErrorCodes = {
     devMessage: 'Stock transfer not found',
   },
 
+  // Serial number tracking (QUI-431)
+  SERIAL_REQUIRED_001: {
+    code: 'SERIAL_REQUIRED_001',
+    httpStatus: 400,
+    devMessage:
+      'This product requires serial numbers; the provided serials do not match the requested quantity',
+  },
+  SERIAL_PARITY_001: {
+    code: 'SERIAL_PARITY_001',
+    httpStatus: 409,
+    devMessage:
+      'Serial number parity violation: in-stock serial count does not match stock on hand for this product/location',
+  },
+  SERIAL_DUP_001: {
+    code: 'SERIAL_DUP_001',
+    httpStatus: 409,
+    devMessage:
+      'Serial number already committed to this document type (duplicate sale detected)',
+  },
+  SERIAL_DELETE_BLOCKED_409: {
+    code: 'SERIAL_DELETE_BLOCKED_409',
+    httpStatus: 409,
+    devMessage:
+      'Cannot delete this serial: it is not in_stock or it is already linked to a sales/dispatch document',
+  },
+
   // Cash Registers
   CR_FIND_001: {
     code: 'CR_FIND_001',
@@ -1943,6 +1969,30 @@ export const ErrorCodes = {
     code: 'DSP_ROUTE_STOP_CONFLICT_001',
     httpStatus: 409,
     devMessage: 'Dispatch note is already assigned to this route',
+  },
+  DISPATCH_NOTE_NO_SHIPPING_ADDRESS: {
+    code: 'DISPATCH_NOTE_NO_SHIPPING_ADDRESS',
+    httpStatus: 400,
+    devMessage:
+      'The order has no shipping address; a dispatch note (remisión) cannot be generated without a delivery address',
+  },
+  DISPATCH_NOTE_INSUFFICIENT_STOCK: {
+    code: 'DISPATCH_NOTE_INSUFFICIENT_STOCK',
+    httpStatus: 400,
+    devMessage:
+      'Insufficient stock at the resolved location for one or more dispatch note items',
+  },
+  DISPATCH_ROUTE_STOP_NO_ADDRESS: {
+    code: 'DISPATCH_ROUTE_STOP_NO_ADDRESS',
+    httpStatus: 400,
+    devMessage:
+      'One or more route stops have no delivery address; the route cannot be dispatched',
+  },
+  DISPATCH_ROUTE_PARTIAL_DISABLED: {
+    code: 'DISPATCH_ROUTE_PARTIAL_DISABLED',
+    httpStatus: 400,
+    devMessage:
+      'Partial deliveries are not enabled on dispatch routes; payment must be total (delivered) or the stop must be rejected/released',
   },
 
   // MCP (Model Context Protocol)

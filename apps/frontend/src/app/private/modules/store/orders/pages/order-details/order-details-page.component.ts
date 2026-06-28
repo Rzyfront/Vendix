@@ -1,12 +1,17 @@
-import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormControl, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { DomSanitizer, SafeResourceUrl } from '@angular/platform-browser';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin, firstValueFrom } from 'rxjs';
-import { StoreOrdersService } from '../../services/store-orders.service';
+import { switchMap } from 'rxjs/operators';
+import {
+  StoreOrdersService,
+  CreateAddressPayload,
+} from '../../services/store-orders.service';
 import { GenerateDispatchWizardComponent } from '../../components/generate-dispatch-wizard/generate-dispatch-wizard.component';
+import { ShippingAddressModalComponent } from '../../components/shipping-address-modal/shipping-address-modal.component';
 import {
   DispatchMethodSelectorModalComponent,
   DispatchMethod,
@@ -52,6 +57,9 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { PosTicketService } from '../../../pos/services/pos-ticket.service';
 import { TicketData, TicketItem } from '../../../pos/models/ticket.model';
 import { parseVariantAttributes, VariantAttribute } from '../../../../../../shared/utils';
+import { DispatchNotesService } from '../../../dispatch-notes/services/dispatch-notes.service';
+import { DispatchNote } from '../../../dispatch-notes/interfaces/dispatch-note.interface';
+import { STATUS_LABELS as DISPATCH_NOTE_STATUS_LABELS } from '../../../dispatch-notes/constants/dispatch-note.constants';
 
 export interface LifecycleStep {
   key: string;
@@ -86,6 +94,7 @@ interface PaymentReceiptPreview {
     TimelineComponent,
     GenerateDispatchWizardComponent,
     DispatchMethodSelectorModalComponent,
+    ShippingAddressModalComponent,
     NgClass,
   ],
   templateUrl: './order-details-page.component.html',
@@ -136,6 +145,12 @@ export class OrderDetailsPageComponent {
     () => this.appliedPromotions().length > 0 || this.appliedCoupons().length > 0,
   );
   orderRefunds = signal<RefundRecord[]>([]);
+  /**
+   * Bug 4 — dispatch notes (remisiones) generated from this order, loaded from
+   * `GET /store/dispatch-notes/by-order/:orderId`. Drives the
+   * "Despacho / Remisiones" traceability card.
+   */
+  dispatchNotes = signal<DispatchNote[]>([]);
   private rawTimeline = signal<any[]>([]);
   isLoading = signal(false);
   error: string | null = null;
@@ -154,6 +169,22 @@ export class OrderDetailsPageComponent {
   showDispatchModal = signal(false);
   /** Chooser modal: "con remisión" vs "sin remisión" (single dispatch entry). */
   showDispatchSelector = signal(false);
+  /**
+   * Post-generación de remisión: modal "Remisión generada" cuando la remisión
+   * quedó asignada a una ruta (planilla). Ofrece navegar a la remisión o a la
+   * ruta. Cuando NO hay ruta, se usa el `dialogService.confirm` clásico (solo
+   * "Ver remisión"). El contexto guarda el id de la remisión y, si aplica, el
+   * id de la ruta activa para construir la navegación.
+   */
+  showDispatchGeneratedModal = signal(false);
+  dispatchGeneratedContext = signal<{ dispatchNoteId: number; routeId: number | null }>({
+    dispatchNoteId: 0,
+    routeId: null,
+  });
+  /** A3-edit: modal de captura de dirección de envío en página. */
+  showShippingAddressModal = signal(false);
+  /** True mientras se persiste la dirección (POST address + PATCH order). */
+  savingShippingAddress = signal(false);
 
   // Processing state
   isProcessingAction = signal(false);
@@ -439,6 +470,35 @@ export class OrderDetailsPageComponent {
     return needsShipping && !o.shipping_method_id && !terminal;
   });
 
+  // ── Dirección de entrega obligatoria (gate de despacho) ────────
+  //
+  // A diferencia del retiro en tienda (pickup) o la entrega directa en
+  // mostrador (direct_delivery), un envío a domicilio (home_delivery) NO se
+  // puede despachar sin una dirección de entrega del cliente. Estos computed
+  // alimentan el alert visible en "Acciones" y el guard de `openDispatchSelector`.
+  readonly requiresShippingAddress = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    return (o.delivery_type || 'direct_delivery') === 'home_delivery';
+  });
+
+  readonly hasShippingAddress = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    return (
+      !!o.addresses_orders_shipping_address_idToaddresses ||
+      !!o.shipping_address_id ||
+      !!(o as { shipping_address_snapshot?: unknown }).shipping_address_snapshot
+    );
+  });
+
+  readonly blockedByMissingAddress = computed<boolean>(() => {
+    const o = this.order();
+    if (!o) return false;
+    const terminal = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'].includes(o.state);
+    return this.requiresShippingAddress() && !this.hasShippingAddress() && !terminal;
+  });
+
   readonly canFastTrack = computed(() => {
     const o = this.order();
     if (!o) return false;
@@ -538,6 +598,19 @@ export class OrderDetailsPageComponent {
     const isPickup = delivery === 'pickup';
     const hasPaid = this.hasSuccessfulPayment();
     const actions: OrderActionConfig[] = [];
+
+    // Gate de dirección: para envíos a domicilio sin dirección, mostrar un
+    // alert persistente. El botón de despacho sigue visible pero su handler
+    // (openDispatchSelector) bloquea con un toast hasta que haya dirección.
+    if (this.blockedByMissingAddress()) {
+      actions.push({
+        id: 'address-info',
+        type: 'alert',
+        color: 'warning',
+        icon: 'map-pin',
+        label: 'Esta orden no tiene dirección de entrega. Agrégala antes de despachar.',
+      } as OrderActionConfig);
+    }
 
     switch (state) {
       // `draft` (POS counter orders before confirmation) behaves exactly like
@@ -940,6 +1013,8 @@ export class OrderDetailsPageComponent {
   // dispatch them from this page).
   private kitchenTicketsService = inject(KitchenTicketsService);
   private sanitizer = inject(DomSanitizer);
+  // Bug 4 — traceability order → dispatch note → route.
+  private dispatchNotesService = inject(DispatchNotesService);
 
   constructor() {
     this.currencySymbol = this.currencyService.currencySymbol;
@@ -971,7 +1046,9 @@ export class OrderDetailsPageComponent {
 
     this.fastTrackForm = this.fb.group({
       payment: this.fb.group({
-        payment_method_id: this.fb.control<number | null>(null),
+        // Holds the StorePaymentMethod.id (string) selected via [ngValue]="pm.id";
+        // coerced to number for store_payment_method_id at submit time.
+        payment_method_id: this.fb.control<string | null>(null),
         amount: this.fb.control<number | null>(null),
         reference: this.fb.control<string>(''),
       }),
@@ -990,6 +1067,23 @@ export class OrderDetailsPageComponent {
       this.orderId = params.get('id');
       if (this.orderId) {
         this.loadData();
+      }
+    });
+
+    // Bug 2 — preselect the first payment method in the fast-track modal.
+    // paymentMethods() loads async, so we cannot set it in openFastTrackModal().
+    // This effect reacts to the methods list, the modal being open, and the
+    // order's payment state (hasSuccessfulPayment reads the order() signal),
+    // patching the control only while it is still empty.
+    effect(() => {
+      const methods = this.paymentMethods();
+      if (
+        this.showFastTrackModal() &&
+        !this.hasSuccessfulPayment() &&
+        methods.length > 0 &&
+        this.fastTrackForm.get('payment')?.get('payment_method_id')?.value == null
+      ) {
+        this.fastTrackForm.get('payment')?.patchValue({ payment_method_id: methods[0].id });
       }
     });
   }
@@ -1064,6 +1158,9 @@ export class OrderDetailsPageComponent {
 
           // Load refund history
           this.loadRefunds();
+
+          // Bug 4 — load dispatch notes (remisiones) for traceability.
+          this.loadDispatchNotes();
         },
         error: (err) => {
           console.error('Error loading order data:', err);
@@ -1257,11 +1354,87 @@ export class OrderDetailsPageComponent {
    * straight away. This is what collapses the old two-button UX into one flow.
    */
   openDispatchSelector(): void {
+    // Gate obligatorio: un envío a domicilio sin dirección no se puede
+    // despachar. Avisar y ofrecer capturar la dirección antes de continuar.
+    if (this.blockedByMissingAddress()) {
+      this.toastService.warning(
+        'Esta orden no tiene dirección de entrega. Agrega una dirección antes de despachar.',
+      );
+      this.promptAddShippingAddress();
+      return;
+    }
     if (!this.canGenerateRemision()) {
       this.startShipWithoutNote();
       return;
     }
     this.showDispatchSelector.set(true);
+  }
+
+  /** Nombre del cliente para el subtítulo del modal de dirección. */
+  readonly shippingAddressCustomerName = computed<string>(() => {
+    const o = this.order() as
+      | {
+          customer?: { name?: string; first_name?: string; last_name?: string };
+          customer_name?: string;
+        }
+      | null;
+    if (!o) return '';
+    return (
+      o.customer?.name ||
+      o.customer_name ||
+      [o.customer?.first_name, o.customer?.last_name].filter(Boolean).join(' ') ||
+      ''
+    );
+  });
+
+  /**
+   * Captura de dirección de entrega en página para una orden sin dirección.
+   * Abre el modal de captura; al confirmar se crea la dirección vinculada al
+   * cliente (`POST /store/addresses`) y se asigna a la orden
+   * (`PATCH /store/orders/:id { shipping_address_id }`) en
+   * {@link onShippingAddressSubmit}. Reemplaza el antiguo redireccionamiento al
+   * POS (que sigue disponible vía {@link editOrderInPos}).
+   */
+  promptAddShippingAddress(): void {
+    if (!this.order()) return;
+    this.showShippingAddressModal.set(true);
+  }
+
+  /**
+   * Persiste la dirección capturada en el modal: crea la dirección del cliente
+   * y la asigna como destino de envío de la orden, refrescando el estado con la
+   * orden ya actualizada que devuelve el PATCH.
+   */
+  onShippingAddressSubmit(payload: CreateAddressPayload): void {
+    const order = this.order();
+    if (!order || this.savingShippingAddress()) return;
+    this.savingShippingAddress.set(true);
+    this.ordersService
+      .createCustomerAddress(payload)
+      .pipe(
+        switchMap((address) =>
+          this.ordersService.updateOrderShippingAddress(
+            String(order.id),
+            Number(address.id),
+          ),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (updated: any) => {
+          const data = updated?.data ?? updated;
+          if (data) this.order.set(data);
+          this.savingShippingAddress.set(false);
+          this.showShippingAddressModal.set(false);
+          this.toastService.success('Dirección de entrega asignada a la orden');
+        },
+        error: (err: unknown) => {
+          this.savingShippingAddress.set(false);
+          const message =
+            err instanceof Error ? err.message : 'No se pudo asignar la dirección';
+          this.toastService.error(message);
+        },
+      });
   }
 
   /** Route the chooser outcome to the wizard or the plain ship flow. */
@@ -1345,22 +1518,67 @@ export class OrderDetailsPageComponent {
     });
   }
 
-  private promptViewDispatchNote(dispatchNoteId: number): void {
-    this.dialogService
-      .confirm({
-        title: 'Remision generada',
-        message: 'La remision se creo correctamente. Deseas verla ahora?',
-        confirmText: 'Ver remision',
-        cancelText: 'Seguir aqui',
-        confirmVariant: 'primary',
-      })
-      .then((confirmed: boolean) => {
-        if (confirmed) {
-          this.router.navigate(['/admin/orders/dispatch-notes', dispatchNoteId]);
-        } else {
-          this.loadData();
-        }
-      });
+  private async promptViewDispatchNote(dispatchNoteId: number): Promise<void> {
+    // La remisión recién creada puede haber quedado asignada a una ruta
+    // (planilla) en la misma transacción. Para ofrecer "Ver ruta" necesitamos
+    // sus `dispatch_route_stops`, que el evento del wizard no entrega (solo el
+    // id), así que los traemos puntualmente. El fetch es best-effort: si falla,
+    // caemos al flujo clásico de solo "Ver remisión".
+    let routeId: number | null = null;
+    try {
+      const note = await firstValueFrom(
+        this.dispatchNotesService.getDispatchNote(dispatchNoteId),
+      );
+      routeId = this.activeRoute(note)?.id ?? null;
+    } catch {
+      routeId = null;
+    }
+
+    if (routeId != null) {
+      // Hay ruta activa: el dialog de 2 botones no alcanza para 3 acciones, así
+      // que usamos un app-modal pequeño con dos navegaciones + cerrar.
+      this.dispatchGeneratedContext.set({ dispatchNoteId, routeId });
+      this.showDispatchGeneratedModal.set(true);
+      return;
+    }
+
+    // Sin ruta: comportamiento clásico (solo "Ver remisión").
+    const confirmed = await this.dialogService.confirm({
+      title: 'Remision generada',
+      message: 'La remision se creo correctamente. Deseas verla ahora?',
+      confirmText: 'Ver remision',
+      cancelText: 'Seguir aqui',
+      confirmVariant: 'primary',
+    });
+    if (confirmed) {
+      this.router.navigate(['/admin/orders/dispatch-notes', dispatchNoteId]);
+    } else {
+      this.loadData();
+    }
+  }
+
+  /** Navega a la remisión generada y cierra el modal de confirmación. */
+  goToGeneratedDispatchNote(): void {
+    const { dispatchNoteId } = this.dispatchGeneratedContext();
+    this.showDispatchGeneratedModal.set(false);
+    if (dispatchNoteId) {
+      this.router.navigate(['/admin/orders/dispatch-notes', dispatchNoteId]);
+    }
+  }
+
+  /** Navega a la ruta (planilla) de la remisión generada y cierra el modal. */
+  goToGeneratedDispatchRoute(): void {
+    const { routeId } = this.dispatchGeneratedContext();
+    this.showDispatchGeneratedModal.set(false);
+    if (routeId != null) {
+      this.router.navigate(['/admin/orders/planillas', routeId]);
+    }
+  }
+
+  /** Cierra el modal "Remisión generada" y refresca la orden. */
+  dismissDispatchGeneratedModal(): void {
+    this.showDispatchGeneratedModal.set(false);
+    this.loadData();
   }
 
   openDeliverModal(): void {
@@ -1618,17 +1836,21 @@ export class OrderDetailsPageComponent {
   submitFastTrack(): void {
     if (!this.orderId) return;
 
-    const paymentGroup = this.fastTrackForm.get('payment')!.value as { payment_method_id: number | null; amount: number | null; reference: string };
+    const paymentGroup = this.fastTrackForm.get('payment')!.value as { payment_method_id: string | null; amount: number | null; reference: string };
     const shipGroup = this.fastTrackForm.get('ship')!.value as Record<string, unknown>;
     const deliverGroup = this.fastTrackForm.get('deliver')!.value as Record<string, unknown>;
 
     const dto: FastTrackOrderDto = {};
     if (!this.hasSuccessfulPayment() && paymentGroup.payment_method_id) {
+      // PayOrderDto expects store_payment_method_id (number), payment_type
+      // and amount_received/payment_reference — NOT the legacy
+      // payment_method_id/amount/reference names. POS flow defaults to 'direct'.
       dto.payment = {
-        payment_method_id: Number(paymentGroup.payment_method_id),
-        amount: Number(paymentGroup.amount) || undefined,
-        reference: paymentGroup.reference || undefined,
-      } as any;
+        store_payment_method_id: Number(paymentGroup.payment_method_id),
+        payment_type: 'direct',
+        amount_received: Number(paymentGroup.amount) || undefined,
+        payment_reference: paymentGroup.reference || undefined,
+      };
     }
     const shipClean = this.compactObject(shipGroup);
     if (Object.keys(shipClean).length) dto.ship = shipClean as any;
@@ -1829,6 +2051,10 @@ export class OrderDetailsPageComponent {
     const user = this.authFacade.getCurrentUser();
     const cashierName = user ? `${user.first_name} ${user.last_name}` : 'Administrador';
 
+    // Delivery address from the order's shipping address (may be undefined for
+    // counter POS sales without a shipping address).
+    const shippingAddress = this.formatShippingAddress(orderData);
+
     return {
       id: orderData.order_number || 'N/A',
       date: new Date(orderData.created_at || Date.now()),
@@ -1847,8 +2073,9 @@ export class OrderDetailsPageComponent {
             name: `${orderData.users.first_name || ''} ${orderData.users.last_name || ''}`.trim() || 'Consumidor Final',
             email: orderData.users.email,
             phone: orderData.users.phone,
+            shippingAddress,
           }
-        : { name: 'Consumidor Final' },
+        : { name: 'Consumidor Final', shippingAddress },
       store: orderData.stores
         ? {
             name: orderData.stores.name,
@@ -1860,6 +2087,71 @@ export class OrderDetailsPageComponent {
           }
         : undefined,
     };
+  }
+
+  /**
+   * Build a single-line delivery address from the order's shipping address
+   * relation. Returns `undefined` when there is no address (e.g. counter POS
+   * sales) so the ticket omits the line entirely. Empty parts are skipped.
+   */
+  private formatShippingAddress(orderData: Order): string | undefined {
+    const addr = orderData.addresses_orders_shipping_address_idToaddresses;
+    if (!addr) return undefined;
+    const parts = [
+      addr.address_line1,
+      addr.address_line2,
+      addr.city,
+      addr.state_province,
+    ]
+      .map((p) => (p ?? '').trim())
+      .filter((p) => p.length > 0);
+    return parts.length > 0 ? parts.join(', ') : undefined;
+  }
+
+  // ── Bug 4: order → dispatch note → route traceability ──────
+
+  /**
+   * Load the dispatch notes (remisiones) for the current order. Failures are
+   * non-fatal: the card simply stays hidden. Called from `loadData()`.
+   */
+  private loadDispatchNotes(): void {
+    if (!this.orderId) return;
+    const numericOrderId = Number(this.orderId);
+    if (!Number.isFinite(numericOrderId)) return;
+    this.dispatchNotesService
+      .getByOrder(numericOrderId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (notes) => this.dispatchNotes.set(Array.isArray(notes) ? notes : []),
+        error: () => this.dispatchNotes.set([]),
+      });
+  }
+
+  /** Human label for a dispatch-note status (reuses the shared constant). */
+  dispatchNoteStatusLabel(note: DispatchNote): string {
+    return DISPATCH_NOTE_STATUS_LABELS[note.status] || note.status;
+  }
+
+  /**
+   * Active route assignment of a dispatch note: the first stop whose route is
+   * present and whose status is not `released`. Returns `null` when the note
+   * is not currently on a route.
+   */
+  activeRoute(note: DispatchNote): { id: number; route_number: string } | null {
+    const stop = (note.dispatch_route_stops ?? []).find(
+      (s) => s.status !== 'released' && !!s.route,
+    );
+    return stop?.route ? { id: stop.route.id, route_number: stop.route.route_number } : null;
+  }
+
+  /** Navigate to the dispatch-note (remisión) detail page. */
+  viewDispatchNote(note: DispatchNote): void {
+    this.router.navigate(['/admin/orders/dispatch-notes', note.id]);
+  }
+
+  /** Navigate to the dispatch route (planilla) detail page. */
+  viewDispatchRoute(routeId: number): void {
+    this.router.navigate(['/admin/orders/planillas', routeId]);
   }
 
   goBack(): void {
@@ -2247,6 +2539,18 @@ export class OrderDetailsPageComponent {
     );
     if (inFlight) return inFlight;
     return items[0]; // items are pre-sorted desc by the backend include
+  }
+
+  /**
+   * Restaurant Suite — KDS deep-link: navega al board del KDS abriendo el
+   * modal de ESTE ticket (`?ticket=<kitchen_ticket_id>`). Disparado al
+   * clickear el badge "Cocina: <estado>" de un plato disparado a cocina.
+   */
+  openKdsTicket(ks: { kitchen_ticket_id?: number } | null): void {
+    if (!ks?.kitchen_ticket_id) return;
+    void this.router.navigate(['/admin/restaurant-ops/kds'], {
+      queryParams: { ticket: ks.kitchen_ticket_id },
+    });
   }
 
   // ─── Plan KDS fire-flows (F3): per-plate selection ───────────

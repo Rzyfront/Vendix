@@ -25,6 +25,7 @@ import {
   getDefaultEndDate,
   formatChartPeriod} from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 import {
   SalesTrend,
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
@@ -104,7 +105,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
             </p>
           </div>
         </div>
-        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+        <div class="flex items-end gap-2 md:gap-3 shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -341,7 +342,7 @@ onDateRangeChange(range: DateRangeFilter): void {
           min: 0,
           splitNumber: 5,
           axisLine: { show: false },
-          axisLabel: { color: '#6b7280' },
+          axisLabel: { color: '#6b7280', formatter: (v: number) => compactCountAxis(v) },
           splitLine: { show: false }},
       ],
       series: [

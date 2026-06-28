@@ -150,14 +150,38 @@
             <span class="text-sm font-bold text-[var(--color-text-primary)]">Cliente</span>
           </div>
 
-          <div class="space-y-2">
-            <p class="text-sm font-semibold text-[var(--color-text-primary)]">{{ dispatch_note().customer_name }}</p>
-            @if (dispatch_note().customer_tax_id) {
-              <p class="text-sm text-[var(--color-text-secondary)]">NIT/CC: {{ dispatch_note().customer_tax_id }}</p>
-            }
-            @if (dispatch_note().customer_address) {
-              <p class="text-sm text-[var(--color-text-secondary)]">{{ dispatch_note().customer_address }}</p>
-            }
+          <div class="space-y-3">
+            <div>
+              <p class="text-sm font-semibold text-[var(--color-text-primary)]">{{ dispatch_note().customer_name }}</p>
+              @if (dispatch_note().customer_tax_id) {
+                <p class="text-sm text-[var(--color-text-secondary)]">NIT/CC: {{ dispatch_note().customer_tax_id }}</p>
+              }
+              @if (customerPhone()) {
+                <p class="text-sm text-[var(--color-text-secondary)] flex items-center gap-1.5 mt-0.5">
+                  <app-icon name="phone" [size]="13"></app-icon>
+                  {{ customerPhone() }}
+                </p>
+              }
+            </div>
+
+            <!-- Dirección de entrega (¿dónde es?) -->
+            <div class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+              <div class="flex items-center gap-1.5 mb-1.5">
+                <app-icon name="map-pin" [size]="14" class="text-primary-600"></app-icon>
+                <span class="text-[11px] font-bold uppercase tracking-wide text-[var(--color-text-secondary)]">
+                  Dirección de entrega
+                </span>
+              </div>
+              @if (hasCustomerAddress()) {
+                <div class="space-y-0.5">
+                  @for (line of customerAddressLines(); track line) {
+                    <p class="text-sm text-[var(--color-text-primary)] leading-snug">{{ line }}</p>
+                  }
+                </div>
+              } @else {
+                <p class="text-xs text-[var(--color-text-secondary)] italic">Sin dirección registrada en la remisión.</p>
+              }
+            </div>
           </div>
         </app-card>
 
@@ -198,6 +222,19 @@
                   class="inline-flex items-center gap-1 font-medium text-primary-600 hover:text-primary-700 hover:underline"
                 >
                   Ver orden #{{ dispatch_note().order_id }}
+                  <app-icon name="external-link" [size]="14"></app-icon>
+                </button>
+              </div>
+            }
+            @if (activeRoute(); as route) {
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-[var(--color-text-secondary)]">Ruta</span>
+                <button
+                  type="button"
+                  (click)="goToRoute(route.id)"
+                  class="inline-flex items-center gap-1 font-medium text-primary-600 hover:text-primary-700 hover:underline"
+                >
+                  Ver ruta {{ route.route_number }}
                   <app-icon name="external-link" [size]="14"></app-icon>
                 </button>
               </div>

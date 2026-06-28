@@ -49,6 +49,7 @@ import { WalletPaymentProcessor } from '../wallet/services/wallet-payment.proces
 import { PaymentLinksModule } from '../payment-links/payment-links.module';
 import { InvoiceDataRequestsModule } from '../invoicing/invoice-data-requests/invoice-data-requests.module';
 import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
+import { InventorySerialNumbersModule } from '../inventory/serial-numbers/inventory-serial-numbers.module';
 
 @Module({
   imports: [
@@ -72,6 +73,7 @@ import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module'
     CashRegistersModule,
     InvoiceDataRequestsModule,
     WithholdingTaxModule,
+    InventorySerialNumbersModule,
   ],
   controllers: [
     PaymentsController,

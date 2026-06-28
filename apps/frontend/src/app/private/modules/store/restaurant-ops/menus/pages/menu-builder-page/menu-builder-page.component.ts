@@ -34,6 +34,7 @@ import {
 } from '../../interfaces';
 import { MenusService } from '../../services';
 import { ProductsService } from '../../../../products/services/products.service';
+import { ProductState } from '../../../../products/interfaces/product.interface';
 
 const DAY_LABELS = [
   'Domingo',
@@ -81,6 +82,12 @@ export class MenuBuilderPageComponent implements OnInit {
   readonly menu = signal<MenuFull | null>(null);
   readonly isLoading = signal(false);
   readonly dayLabels = DAY_LABELS;
+
+  /** Modo creación: la ruta `new` no trae `:id`. El builder renderiza un
+   * formulario de nombre y, al guardar, crea la carta y pasa a modo edición. */
+  readonly isCreateMode = signal(false);
+  readonly isSaving = signal(false);
+  readonly newMenuName = signal('');
 
   readonly newSectionName = signal('');
   readonly newItemProductId = signal<number | null>(null);
@@ -167,13 +174,47 @@ export class MenuBuilderPageComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    const id = Number(this.route.snapshot.paramMap.get('id') ?? 0);
-    if (!id) {
-      this.router.navigate(['/admin/restaurant-ops/menus']);
+    const idParam = this.route.snapshot.paramMap.get('id');
+    const id = Number(idParam);
+    // Sin `:id` válido ⇒ ruta `new` ⇒ modo creación (no rebotar al listado).
+    if (!idParam || Number.isNaN(id) || id <= 0) {
+      this.isCreateMode.set(true);
+      this.loadProducts();
       return;
     }
+    this.isCreateMode.set(false);
     this.loadMenu(id);
     this.loadProducts();
+  }
+
+  /** Crea la carta desde el formulario de modo creación y pasa a edición. */
+  createMenu(): void {
+    const name = this.newMenuName().trim();
+    if (!name) {
+      this.toastService.error('El nombre de la carta es obligatorio');
+      return;
+    }
+    this.isSaving.set(true);
+    this.menusService
+      .create({ name, is_active: true })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (created) => {
+          this.isSaving.set(false);
+          this.toastService.success('Carta creada');
+          // Reemplaza la URL: el builder se recrea en modo edición y carga la carta.
+          this.router.navigate(
+            ['/admin/restaurant-ops/menus', created.id, 'edit'],
+            { replaceUrl: true },
+          );
+        },
+        error: (e: unknown) => {
+          this.isSaving.set(false);
+          this.toastService.error(
+            typeof e === 'string' ? e : 'Error al crear la carta',
+          );
+        },
+      });
   }
 
   private loadMenu(id: number): void {
@@ -196,8 +237,17 @@ export class MenuBuilderPageComponent implements OnInit {
   }
 
   private loadProducts(): void {
+    // Mostramos productos activos que NO sean insumos crudos (is_ingredient
+    // false), incluidos los aún no vendibles: al agregarlos a la carta el
+    // backend promueve is_sellable + available_for_ecommerce a true. Nota:
+    // `is_active` NO existe en el ProductQueryDto (forbidNonWhitelisted -> 400),
+    // el campo válido es `state`.
     this.productsService
-      .getProducts({ limit: 200, is_active: true } as any)
+      .getProducts({
+        limit: 200,
+        state: ProductState.ACTIVE,
+        is_ingredient: false,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (resp) => {
@@ -211,7 +261,10 @@ export class MenuBuilderPageComponent implements OnInit {
             })),
           );
         },
-        error: () => undefined,
+        error: (e: unknown) =>
+          this.toastService.error(
+            typeof e === 'string' ? e : 'Error al cargar los productos',
+          ),
       });
   }
 

@@ -123,6 +123,7 @@ export class OrdersService {
             billing_address_id: createOrderDto.billing_address_id,
             shipping_address_id: createOrderDto.shipping_address_id,
             internal_notes: createOrderDto.internal_notes,
+            notes: createOrderDto.notes,
             updated_at: new Date(),
             order_items: {
               create: await Promise.all(
@@ -293,7 +294,16 @@ export class OrdersService {
     // Auto-scoped query
     const where: Prisma.ordersWhereInput = {
       ...(search && {
-        OR: [{ order_number: { contains: search, mode: 'insensitive' } }],
+        // Search by order number OR by customer (first_name, last_name, email).
+        // Customer is reached via orders.users (customer_id). Guest orders
+        // (customer_id null) are not matched by this branch — their name lives
+        // in shipping_address_snapshot JSON (search fragile, out of scope).
+        OR: [
+          { order_number: { contains: search, mode: 'insensitive' } },
+          { users: { first_name: { contains: search, mode: 'insensitive' } } },
+          { users: { last_name: { contains: search, mode: 'insensitive' } } },
+          { users: { email: { contains: search, mode: 'insensitive' } } },
+        ],
       }),
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
@@ -302,6 +312,18 @@ export class OrdersService {
         shipping_method_id: null,
         delivery_type: { not: 'direct_delivery' },
         state: { notIn: ['finished', 'cancelled', 'refunded'] },
+      }),
+      // "Despachable" — ref 2026-06-25, plan wizard remisión order-first.
+      // Single source of truth compartido con stores.service.ts dispatchWhere:
+      // state ∈ {processing, pending_payment} + delivery_type ≠ direct_delivery
+      // (incluye home_delivery, pickup y other). pending_payment cubre el
+      // contraentrega (COD): se despacha antes de cobrar. Coincide con el
+      // dashboard de tienda y el filtro "Por enviar" del frontend.
+      // NOTA: NO excluye órdenes parcialmente remisionadas; el frontend
+      // descuenta cantidades ya despachadas vía getByOrder(orderId).
+      ...(query.dispatchable && {
+        state: { in: ['processing', 'pending_payment'] as order_state_enum[] },
+        delivery_type: { not: 'direct_delivery' },
       }),
       ...(date_from &&
         date_to && {
@@ -329,6 +351,14 @@ export class OrdersService {
           stores: { select: { id: true, name: true, store_code: true } },
           order_items: {
             select: { id: true, product_name: true, quantity: true },
+          },
+          // Cliente para la columna "Cliente" de los listados (wizard de
+          // remisiones, lista de órdenes). findAll ya FILTRA por users en la
+          // búsqueda pero no los devolvía → "No data" en la lista. Select
+          // ligero: solo lo que renderiza el transform (nombre); guests
+          // (customer_id null) traen users=null y caen al fallback.
+          users: {
+            select: { id: true, first_name: true, last_name: true },
           },
         },
       }),
@@ -622,9 +652,15 @@ export class OrdersService {
   async updateOrderItems(id: number, dto: UpdateOrderItemsDto) {
     const order = await this.findOne(id);
 
-    if (order.state !== 'created') {
+    if (order.state !== 'created' && order.state !== 'draft') {
       throw new VendixHttpException(ErrorCodes.ORD_STATUS_001);
     }
+
+    // Las órdenes de mesa nacen en 'draft' SIN reservar stock (se reserva al
+    // pagar vía promoteDraftToCreated). Al editar un draft NO liberamos ni
+    // re-reservamos: no hay reservas que liberar y re-reservar duplicaría el
+    // descuento con inventory_consumed_at_fire. Para 'created' sí (flujo actual).
+    const isDraft = order.state === 'draft';
 
     // Multi-tarifa: revalida permission + recalcula snapshots si las nuevas
     // líneas traen applied_price_tier_id.
@@ -658,25 +694,27 @@ export class OrdersService {
         },
       });
 
-      for (const item of existingOrder?.order_items || []) {
-        if (!item.products?.track_inventory) continue;
-        try {
-          const location_id =
-            await this.stockLevelManager.getDefaultLocationForProduct(
+      if (!isDraft) {
+        for (const item of existingOrder?.order_items || []) {
+          if (!item.products?.track_inventory) continue;
+          try {
+            const location_id =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id || undefined,
+              );
+            await this.stockLevelManager.releaseReservation(
               item.product_id,
               item.product_variant_id || undefined,
+              location_id,
+              'order',
+              id,
             );
-          await this.stockLevelManager.releaseReservation(
-            item.product_id,
-            item.product_variant_id || undefined,
-            location_id,
-            'order',
-            id,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `Failed to release reservation for product ${item.product_id}: ${error.message}`,
-          );
+          } catch (error) {
+            this.logger.warn(
+              `Failed to release reservation for product ${item.product_id}: ${error.message}`,
+            );
+          }
         }
       }
 
@@ -770,37 +808,39 @@ export class OrdersService {
         },
       });
 
-      for (const item of updatedOrder?.order_items || []) {
-        if (!item.products?.track_inventory) continue;
-        try {
-          const location_id =
-            await this.stockLevelManager.getDefaultLocationForProduct(
+      if (!isDraft) {
+        for (const item of updatedOrder?.order_items || []) {
+          if (!item.products?.track_inventory) continue;
+          try {
+            const location_id =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id || undefined,
+              );
+            const stockUnitsConsumed =
+              typeof item.stock_units_consumed === 'number' &&
+              item.stock_units_consumed > 0
+                ? item.stock_units_consumed
+                : undefined;
+            await this.stockLevelManager.reserveStock(
               item.product_id,
               item.product_variant_id || undefined,
+              location_id,
+              item.quantity,
+              'order',
+              id,
+              undefined,
+              false, // Don't validate availability (non-restrictive UX)
+              undefined,
+              undefined,
+              false,
+              stockUnitsConsumed,
             );
-          const stockUnitsConsumed =
-            typeof item.stock_units_consumed === 'number' &&
-            item.stock_units_consumed > 0
-              ? item.stock_units_consumed
-              : undefined;
-          await this.stockLevelManager.reserveStock(
-            item.product_id,
-            item.product_variant_id || undefined,
-            location_id,
-            item.quantity,
-            'order',
-            id,
-            undefined,
-            false, // Don't validate availability (non-restrictive UX)
-            undefined,
-            undefined,
-            false,
-            stockUnitsConsumed,
-          );
-        } catch (error) {
-          this.logger.warn(
-            `Failed to reserve stock for product ${item.product_id}: ${error.message}`,
-          );
+          } catch (error) {
+            this.logger.warn(
+              `Failed to reserve stock for product ${item.product_id}: ${error.message}`,
+            );
+          }
         }
       }
 

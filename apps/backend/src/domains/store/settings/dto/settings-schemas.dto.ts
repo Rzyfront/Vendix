@@ -653,6 +653,31 @@ export class OperationsSettingsDto {
   ticket_closing_hour?: number;
 }
 
+export class DispatchSettingsDto {
+  @ApiProperty({
+    enum: ['live', 'on_close'],
+    example: 'on_close',
+    required: false,
+    description:
+      'When a COD order linked to a dispatch route reflects "delivered": `live` updates it on each stop settle; `on_close` only on route close (default).',
+  })
+  @IsOptional()
+  @IsIn(['live', 'on_close'])
+  order_state_update_mode?: 'live' | 'on_close';
+}
+
+export class RestaurantSettingsDto {
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Enables paying/closing a table check directly from the table screen (table checkout).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_table_checkout?: boolean;
+}
+
 export class PanelUISettingsDto {
   @IsOptional()
   STORE_ADMIN?: Record<string, boolean>;

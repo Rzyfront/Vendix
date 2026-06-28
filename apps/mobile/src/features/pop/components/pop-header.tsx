@@ -164,6 +164,7 @@ export default function PopHeader({
               <Text style={styles.title}>{title}</Text>
               {badge && (
                 <View style={styles.badge}>
+                  <Icon name="shopping-bag" size={10} color={colors.primary} />
                   <Text style={styles.badgeText}>{badge}</Text>
                 </View>
               )}
@@ -344,12 +345,15 @@ export default function PopHeader({
 }
 
 const styles = StyleSheet.create({
-  // Contenedor principal del header — mismo estilo de card que customers.tsx
+  // Contenedor principal del header — fondo blanco (colors.card) con espacio lateral
   container: {
-    backgroundColor: colors.background,
+    marginHorizontal: 6,
+    backgroundColor: colors.card,
     borderTopLeftRadius: borderRadius.lg,
     borderTopRightRadius: borderRadius.lg,
-    borderWidth: 1,
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
     borderColor: colorScales.gray[200],
     borderBottomWidth: 0,
     ...shadows.sm,
@@ -360,6 +364,9 @@ const styles = StyleSheet.create({
   titleBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   title: { fontSize: 16, fontWeight: '800', color: colorScales.gray[900] },
   badge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     backgroundColor: colorScales.green[50],
     borderWidth: 1,
     borderColor: colorScales.green[100],

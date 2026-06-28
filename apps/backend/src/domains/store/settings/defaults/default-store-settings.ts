@@ -344,6 +344,19 @@ export function getDefaultStoreSettings(): StoreSettings {
       ticket_closing_hour: 3,
     },
 
+    // Dispatch - DSD route behavior. `on_close` preserves the legacy flow where
+    // the linked COD order only advances to delivered/finished when the route
+    // is closed. Set to `live` to reflect delivery in real time on each settle.
+    dispatch: {
+      order_state_update_mode: 'on_close',
+    },
+
+    // Restaurant - restaurant suite behavior toggles. Table checkout is
+    // opt-in (false by default) so existing stores keep paying via POS.
+    restaurant: {
+      enable_table_checkout: false,
+    },
+
     // Legacy: Mantener por compatibilidad (redundante con branding)
     app: {
       name: 'Vendix',

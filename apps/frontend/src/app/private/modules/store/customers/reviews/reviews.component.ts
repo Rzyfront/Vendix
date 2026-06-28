@@ -394,6 +394,18 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
             }
           </div>
         </div>
+      } @else {
+        <div class="py-10 text-center text-sm text-gray-500">
+          <div
+            class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-gray-100"
+          >
+            <app-icon name="alert-circle" [size]="20" class="text-gray-400"></app-icon>
+          </div>
+          <p>No se encontró la reseña solicitada.</p>
+          <p class="mt-1 text-xs text-gray-400">
+            Es posible que haya sido eliminada o que el enlace haya expirado.
+          </p>
+        </div>
       }
     </app-modal>
   `,
@@ -632,11 +644,20 @@ export class ReviewsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.reviews.set(res.data || []);
-          if (res.meta) {
-            this.totalItems.set(res.meta.total || 0);
-            this.totalPages.set(
-              res.meta.totalPages || res.meta.total_pages || 0,
+          // Support both response shapes: { data: [...] } and
+          // { data: { items: [...] } }. Some backends wrap the list
+          // inside an items object for pagination metadata.
+          const payload = res?.data;
+          const items = Array.isArray(payload)
+            ? payload
+            : Array.isArray(payload?.items)
+            ? payload.items
+            : [];
+          this.reviews.set(items);
+          const meta = res?.meta ?? payload?.meta;
+          if (meta) {
+            this.totalItems.set(meta.total || 0);
+            this.totalPages.set(meta.totalPages || meta.total_pages || 0,
             );
             this.currentPage.set(res.meta.page || 1);
           }
@@ -760,7 +781,10 @@ export class ReviewsComponent {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.selectedReview.set(res.data || res);
+          // Support both response shapes: { data: {...} } and a flat
+          // response object. Pick whichever has the review fields.
+          const candidate = res?.data ?? res;
+          this.selectedReview.set(candidate?.id ? candidate : null);
           this.detailLoading.set(false);
         },
         error: (error) => {

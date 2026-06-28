@@ -29,6 +29,7 @@ import { AnalyticsCardComponent } from '../../components/analytics-card/analytic
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-customer-summary',
@@ -187,7 +188,7 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
         type: 'value',
         min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary },
+        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
         splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {
@@ -259,14 +260,14 @@ this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 10, width: 100, overflow: 'truncate' } },
+        axisLabel: { color: textSecondary, fontSize: 10, width: 100, overflow: 'truncate', formatter: (val: string) => truncateLabel(val, 14) } },
       yAxis: {
         type: 'value',
         min: 0,
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(Math.round(value), 0) },
+          formatter: (value: number) => this.currencyService.formatChartAxis(value) },
         splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {

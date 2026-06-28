@@ -7,6 +7,7 @@ import {Component,
   computed, effect } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { NgClass } from '@angular/common';
+import { ActivatedRoute } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin } from 'rxjs';
 
@@ -65,6 +66,7 @@ export class OrdersListComponent {
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
+  private route = inject(ActivatedRoute);
 
   // State
   readonly orders = signal<Order[]>([]);
@@ -75,7 +77,7 @@ export class OrdersListComponent {
   readonly selectedChannel = signal('');
   readonly selectedPaymentStatus = signal('');
   readonly selectedDateRange = signal('');
-  readonly missingShippingMethod = signal(false);
+  readonly dispatchableFilter = signal(false);
 
   // Outputs
   readonly create = output<void>();
@@ -108,7 +110,7 @@ export class OrdersListComponent {
     channel: undefined,
     payment_status: undefined,
     date_range: undefined,
-    missing_shipping_method: undefined,
+    dispatchable: undefined,
     page: 1,
     limit: 10,
     sort_by: 'created_at',
@@ -338,6 +340,27 @@ export class OrdersListComponent {
   };
 
   constructor() {
+    // Pre-filter from URL (ref 2026-06-25 — feature/orders-pending-dispatch).
+    // El dashboard navega con ?dispatchable=true (y opcionalmente ?status, ?search)
+    // para aterrizar la lista ya filtrada. Lectura síncrona del snapshot del
+    // ActivatedRoute evita NG0950 y no dispara un re-fetch posterior.
+    const qp = this.route.snapshot.queryParamMap;
+    if (qp.get('dispatchable') === 'true') {
+      this.dispatchableFilter.set(true);
+      this._filters.dispatchable = true;
+    }
+    const status = qp.get('status');
+    if (status) {
+      this.selectedStatus.set(status);
+      this._filters.status = status as OrderState;
+      this.filterValues.set({ status });
+    }
+    const search = qp.get('search');
+    if (search) {
+      this.searchTerm.set(search);
+      this._filters.search = search;
+    }
+
     this.loadOrders();
 
     // Bug 2 (Fase K): react to parent-triggered reload requests.
@@ -357,7 +380,7 @@ export class OrdersListComponent {
       this.selectedChannel() ||
       this.selectedPaymentStatus() ||
       this.selectedDateRange() ||
-      this.missingShippingMethod()
+      this.dispatchableFilter()
     ),
   );
 
@@ -409,7 +432,7 @@ export class OrdersListComponent {
     this.selectedChannel.set('');
     this.selectedPaymentStatus.set('');
     this.selectedDateRange.set('');
-    this.missingShippingMethod.set(false);
+    this.dispatchableFilter.set(false);
     this.filterValues.set({});
 
     this._filters.search = '';
@@ -417,16 +440,24 @@ export class OrdersListComponent {
     this._filters.channel = undefined;
     this._filters.payment_status = undefined;
     this._filters.date_range = undefined;
-    this._filters.missing_shipping_method = undefined;
+    this._filters.dispatchable = undefined;
     this._filters.page = 1;
 
     this.loadOrders();
   }
 
-  toggleMissingShippingMethod(): void {
-    const next = !this.missingShippingMethod();
-    this.missingShippingMethod.set(next);
-    this._filters.missing_shipping_method = next || undefined;
+  toggleDispatchable(): void {
+    const next = !this.dispatchableFilter();
+    this.dispatchableFilter.set(next);
+    this._filters.dispatchable = next || undefined;
+    // Al activar el quick filter, limpia status del dropdown para evitar
+    // colisión en el where de Prisma (state: 'processing' ya lo cubre
+    // dispatchable; selectedStatus vacío evita un AND contradictorio).
+    if (next) {
+      this.selectedStatus.set('');
+      this._filters.status = undefined;
+      this.filterValues.update(v => ({ ...v, status: '' }));
+    }
     this._filters.page = 1;
     this.loadOrders();
   }

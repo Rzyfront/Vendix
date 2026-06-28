@@ -1,0 +1,101 @@
+<div class="menus-page">
+  <header class="menus-page__header">
+    <span class="kicker">Restaurante</span>
+    <h1>Nuestra carta</h1>
+    <p class="lead">Platos organizados por sección y horario de disponibilidad.</p>
+  </header>
+
+  @if (isLoading()) {
+    <div class="state state--loading">
+      <div class="spinner"></div>
+      <p>Cargando carta…</p>
+    </div>
+  } @else if (!hasMenus()) {
+    <div class="state state--empty">
+      <div class="state__icon">🍽️</div>
+      <h2>No hay platos disponibles por ahora</h2>
+      <p>Vuelve más tarde para ver la carta según el horario.</p>
+      <a class="back-link" [routerLink]="['/']">Volver al inicio</a>
+    </div>
+  } @else {
+    @for (menu of renderMenus(); track menu.id) {
+      <section class="menu-block">
+        <div class="menu-block__title">
+          <h2>{{ menu.name }}</h2>
+          @if (!menu.is_available_now) {
+            <span class="badge badge--off">
+              Disponible {{ nextLabel(menu) }}
+            </span>
+          } @else {
+            <span class="badge badge--on">Disponible ahora</span>
+          }
+        </div>
+
+        @for (section of menu.visibleSections; track section.id) {
+          <div class="section-block">
+            <div class="section-block__head">
+              <h3>{{ section.name }}</h3>
+              @if (!section.is_available_now) {
+                <span class="badge badge--off">
+                  Disponible {{ nextLabel(section) }}
+                </span>
+              }
+            </div>
+
+            <div class="dishes-grid">
+              @for (item of section.visibleItems; track item.id) {
+                <a
+                  class="dish-card"
+                  [class.dish-card--off]="!item.is_available_now"
+                  [routerLink]="
+                    item.product?.slug ? ['/products', item.product?.slug] : null
+                  "
+                >
+                  <div class="dish-image">
+                    @if (item.product?.image_url) {
+                      <img
+                        [src]="item.product?.image_url"
+                        [alt]="item.product?.name"
+                        loading="lazy"
+                      />
+                    } @else {
+                      <div class="dish-image__placeholder">🍽️</div>
+                    }
+                    @if (!item.is_available_now) {
+                      <span class="dish-badge">
+                        Disponible {{ nextLabel(item) }}
+                      </span>
+                    }
+                    @if (item.product?.is_combo) {
+                      <span class="dish-combo">Combo</span>
+                    }
+                  </div>
+                  <div class="dish-body">
+                    <h4 class="dish-name">{{ item.product?.name }}</h4>
+                    <div class="dish-price-row">
+                      @if (
+                        item.product?.is_on_sale &&
+                        item.product?.sale_price != null
+                      ) {
+                        <span class="dish-price">
+                          {{ item.product?.sale_price | currency }}
+                        </span>
+                        <span class="dish-price--old">
+                          {{ item.product?.base_price | currency }}
+                        </span>
+                      } @else {
+                        <span class="dish-price">
+                          {{ item.product?.base_price | currency }}
+                        </span>
+                      }
+                    </div>
+                  </div>
+                </a>
+              }
+            </div>
+          </div>
+        }
+      </section>
+    }
+  }
+</div>

@@ -12,6 +12,8 @@ import { EChartsOption } from 'echarts';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
+import { truncateLabel } from '../../../../../../shared/utils/chart-labels.util';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
@@ -71,7 +73,7 @@ import { ExportButtonComponent } from '../../components/export-button/export-but
           </div>
         </div>
 
-        <div class="flex items-center gap-2 md:gap-3 shrink-0">
+        <div class="flex items-end gap-2 md:gap-3 shrink-0">
           <vendix-date-range-filter
             [value]="dateRange()"
             (valueChange)="onDateRangeChange($event)"
@@ -110,6 +112,7 @@ export class PurchasesBySupplierComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private readonly route = inject(ActivatedRoute);
+  private currencyService = inject(CurrencyFormatService);
 
   chartLoading = signal(false);
   chartData = signal<PurchasesBySupplier[]>([]);
@@ -204,14 +207,14 @@ legend: {
         type: 'category',
         data: chartSuppliers,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280', fontSize: 11 },
+        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
       },
       yAxis: {
         type: 'value',
         min: 0,
         splitNumber: 5,
         axisLine: { show: false },
-        axisLabel: { color: '#6b7280', formatter: (v: number) => '$' + Math.round(v).toLocaleString('es-CO', { maximumFractionDigits: 0 }) },
+        axisLabel: { color: '#6b7280', formatter: (v: number) => this.currencyService.formatChartAxis(v) },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
       series: [{

@@ -1,9 +1,9 @@
 import {
   Component,
   DestroyRef,
-  OnDestroy,
-  OnInit,
   ElementRef,
+  OnDestroy,
+  effect,
   inject,
   input,
   output,
@@ -36,9 +36,9 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
         <div class="p-3 border-b border-border flex justify-between items-center">
           <h2 class="text-lg font-semibold">Planilla PDF</h2>
           <div class="flex gap-2">
-            @if (pdfUrl()) {
+@if (pdfUrl(); as url) {
               <a
-                [href]="pdfUrl()"
+                [href]="url"
                 [download]="'planilla-' + routeId() + '.pdf'"
                 class="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm"
               >Descargar</a>
@@ -69,7 +69,7 @@ import { PlanillasRutasService } from '../../services/planillas-rutas.service';
     </div>
   `,
 })
-export class PlanillaPdfViewerComponent implements OnInit, OnDestroy {
+export class PlanillaPdfViewerComponent implements OnDestroy {
   readonly routeId = input.required<number>();
   readonly close = output<void>();
 
@@ -85,11 +85,22 @@ export class PlanillaPdfViewerComponent implements OnInit, OnDestroy {
 
   private blobUrl: string | null = null;
 
-  ngOnInit(): void {
-    // Read the required `routeId` input here (not in the constructor): signal
-    // inputs are only bound after construction, so reading it earlier throws
-    // NG0950 ("Input required but no value available yet").
-    this.load();
+constructor() {
+    this.destroyRef.onDestroy(() => {
+      if (this.blobUrl) URL.revokeObjectURL(this.blobUrl);
+    });
+    // Re-fetch PDF whenever routeId changes (e.g. wizard advances to a
+    // different planilla without unmounting the viewer). Without this effect,
+    // a modal that stays mounted would keep showing the first PDF.
+    //
+    // Note: `effect()` runs in a microtask AFTER Angular binds signal inputs,
+    // so reading `routeId()` here is safe — it does not throw NG0950 (which
+    // only fires when reading signal inputs synchronously in the constructor).
+    effect(() => {
+      if (this.routeId() !== null && this.routeId() !== undefined) {
+        this.load();
+      }
+    });
   }
 
   private load() {

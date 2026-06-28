@@ -4,6 +4,8 @@
     subtitle="Crea, edita y posiciona las mesas del restaurante"
     icon="settings"
     variant="glass"
+    [showBackButton]="true"
+    backRoute="/admin/restaurant-ops/tables"
     [actions]="headerActions()"
     (actionClicked)="onHeaderAction($event)"
   />
@@ -99,7 +101,8 @@
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div class="p-2 md:p-4">
           <p class="text-xs text-text-secondary mb-2">
-            Arrastra las mesas para reposicionarlas. Los cambios se guardan automáticamente.
+            Reposiciona las mesas en el lienzo. Los cambios se guardan
+            automáticamente al soltar.
           </p>
           <app-table-floor-map
             [tables]="tables()"
