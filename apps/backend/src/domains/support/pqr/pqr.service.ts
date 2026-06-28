@@ -833,15 +833,15 @@ export class PqrService {
       throw new VendixHttpException(ErrorCodes.SUP_COMMENT_002);
     }
 
-    // Immutability gate — public comments (sent to the requester via
-    // email) cannot be edited because the customer already received
-    // the original text. Allowing edits would create a discrepancy
-    // between what the customer has in their inbox and what's on
-    // record (a compliance issue under Colombian PQR regulation).
-    // Internal notes (not sent to anyone) remain editable.
-    if (!comment.is_internal) {
-      throw new VendixHttpException(ErrorCodes.SUP_COMMENT_003);
-    }
+    // Note: the previous "public comments are immutable" gate
+    // (SUP_COMMENT_003, blocking edits to is_internal=false rows) has
+    // been removed intentionally. The super-admin now needs to be able
+    // to fix typos and refine wording in responses that were already
+    // sent to the requester. The trade-off (potential inbox vs.
+    // on-record discrepancy) is documented in the commit message —
+    // the History card records every edit so the audit trail stays
+    // complete, and the customer does NOT receive a re-notification
+    // email (the edit is silent from their inbox perspective).
 
     const updated = await this.globalPrisma.support_comments.update({
       where: { id: commentId },
