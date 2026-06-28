@@ -1005,14 +1005,30 @@ export class PqrService {
     dto: AddPqrCommentDto,
     userId: number,
   ) {
-    const orgVendix = await this.getPlatformOrgOrThrow();
-
+    // NOTE: we previously scoped by organization_id: orgVendix.id here
+    // assuming platform-wide PQRs only ever live under the Vendix
+    // platform org. That's only true for /api/public/pqr (anonymous
+    // storefront submissions with no tenant context). Store-admin
+    // "Nueva solicitud" creates PQRS under the owning org (e.g.
+    // Nike's org_id=6), which the previous filter excluded — so
+    // super-admin writes silently 404'd on tenant-scoped PQRS even
+    // though superAdminFindOne happily returned them.
+    //
+    // Mirror the read path: any row with tag 'pqr' is fair game.
+    // The frontend is the source of truth for tenant boundary (a
+    // store-admin writing to a Nike-owned PQRS is blocked upstream
+    // by org-scope guards; super-admin reaches everything by design).
     const ticket = await this.globalPrisma.support_tickets.findFirst({
-      where: { id, organization_id: orgVendix.id, tags: { has: 'pqr' } },
+      where: { id, tags: { has: 'pqr' } },
     });
     if (!ticket) {
       throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
     }
+
+    // orgVendix is still needed for the requester-notification lookup
+    // below — fetch it lazily so we don't pay the round trip on the
+    // happy path where no notification fires.
+    let orgVendix: { id: number } | null = null;
 
     const user = await this.globalPrisma.users.findUnique({
       where: { id: userId },
