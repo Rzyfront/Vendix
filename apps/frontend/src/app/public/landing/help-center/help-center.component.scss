@@ -228,17 +228,16 @@
     gap: 0.25rem;
     padding: 0.25rem 0.625rem;
     border-radius: 6px;
-    background: transparent;
-    border: 1px solid #065f46;
-    color: #065f46;
+    background: #16a34a;
+    color: white;
     font-size: 0.78rem;
     font-weight: 600;
     cursor: pointer;
+    border: 0;
     transition: background-color 0.15s ease;
 
     &:hover {
-      background: #065f46;
-      color: white;
+      background: #15803d;
     }
   }
 
@@ -288,20 +287,34 @@
     transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 
     &:hover {
-      border-color: #2f6f4e;
+      border-color: #22c55e;
       background: #f0fdf4;
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(47, 111, 78, 0.08);
+      box-shadow: 0 4px 12px rgba(34, 197, 94, 0.12);
     }
 
+    // Active state: matches the "Comenzar Gratis" button from the
+    // landing — bright green-500 fill, white text, white check
+    // badge in the corner. The two CTAs now read as the same
+    // brand action.
     &--active {
-      border-color: #2f6f4e;
-      background: #f0fdf4;
-      box-shadow: 0 0 0 3px rgba(47, 111, 78, 0.15);
+      border-color: #22c55e;
+      background: #22c55e;
+      box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2),
+                  0 4px 12px rgba(34, 197, 94, 0.2);
+      transform: translateY(-1px);
+
+      strong {
+        color: #ffffff;
+      }
+
+      span {
+        color: rgba(255, 255, 255, 0.9);
+      }
     }
 
     &:focus-visible {
-      outline: 2px solid #2f6f4e;
+      outline: 2px solid #22c55e;
       outline-offset: 2px;
     }
   }
@@ -310,12 +323,12 @@
     width: 44px;
     height: 44px;
     border-radius: 12px;
-    background: #d1fae5;
+    background: #dcfce7;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    color: #2f6f4e;
+    color: #16a34a;
   }
 
   &__category-body {
@@ -351,12 +364,13 @@
     width: 24px;
     height: 24px;
     border-radius: 50%;
-    background: #2f6f4e;
-    color: white;
+    background: #ffffff;
+    color: #16a34a;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    font-weight: 700;
   }
 
   // ── Artículos populares ────────────────────────────────────
