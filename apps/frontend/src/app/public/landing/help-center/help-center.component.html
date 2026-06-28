@@ -1,4 +1,23 @@
 <section class="help-center min-h-screen bg-[var(--color-background)] text-[var(--color-text-primary)]">
+  <!-- Status banner — thin green strip at the very top. Reinforces
+       that Vendix is a real, monitored platform (not an abandoned
+       support form). Clickable to a future /status page; the
+       anchor is placeholder until that endpoint ships. -->
+  <a
+    class="help-center__status"
+    href="https://status.vendix.online"
+    target="_blank"
+    rel="noopener noreferrer"
+    aria-label="Ver estado de los servicios de Vendix"
+  >
+    <span class="help-center__status-dot" aria-hidden="true"></span>
+    <span>Todos los sistemas operativos</span>
+    <span class="help-center__status-cta">
+      Ver status
+      <app-icon name="arrow-right" [size]="12" color="currentColor"></app-icon>
+    </span>
+  </a>
+
   <!-- Top bar with back button — gives identity (logo) and a clear
        exit so the page doesn't feel like a dead-end documentation
        view. Sticky on scroll so the user always has an escape hatch. -->
@@ -105,6 +124,46 @@
   </div>
 
   <!-- Equipo de soporte: humaniza la página y refuerza confianza. -->
+  <div class="help-center__channels">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+      <h2 class="help-center__section-title help-center__section-title--centered">
+        ¿Prefieres otro canal?
+      </h2>
+      <div class="help-center__channel-grid">
+        <div class="help-center__channel">
+          <div class="help-center__channel-icon">
+            <app-icon name="mail" [size]="20" color="var(--color-primary)"></app-icon>
+          </div>
+          <h3 class="help-center__channel-title">Correo</h3>
+          <p class="help-center__channel-desc">
+            <a href="mailto:soporte@vendix.online">soporte@vendix.online</a>
+          </p>
+          <p class="help-center__channel-meta">24h hábiles</p>
+        </div>
+        <div class="help-center__channel">
+          <div class="help-center__channel-icon">
+            <app-icon name="message-circle" [size]="20" color="var(--color-primary)"></app-icon>
+          </div>
+          <h3 class="help-center__channel-title">Chat en vivo</h3>
+          <p class="help-center__channel-desc">
+            Directo con el equipo de soporte
+          </p>
+          <p class="help-center__channel-meta">Lun-Vie 8-6pm</p>
+        </div>
+        <div class="help-center__channel">
+          <div class="help-center__channel-icon">
+            <app-icon name="book-open" [size]="20" color="var(--color-primary)"></app-icon>
+          </div>
+          <h3 class="help-center__channel-title">Base de conocimiento</h3>
+          <p class="help-center__channel-desc">
+            Guías paso a paso
+          </p>
+          <p class="help-center__channel-meta">100+ artículos</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="help-center__team">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
       <div class="help-center__team-card">

@@ -8,6 +8,49 @@
 // to feel like a knowledge base rather than a marketing page.
 
 .help-center {
+  // ── Status banner ──────────────────────────────────────────
+  &__status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.625rem;
+    padding: 0.5rem 1rem;
+    background: var(--color-primary, #2f6f4e);
+    color: white;
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: background-color 0.15s ease;
+
+    &:hover {
+      background: var(--color-secondary, #1b5132);
+    }
+  }
+
+  &__status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4ade80; // green-400 — brighter against the dark bg
+    box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.25); // soft pulse ring
+    animation: help-center-pulse 2.4s ease-in-out infinite;
+  }
+
+  @keyframes help-center-pulse {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.25); }
+    50%      { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0.05); }
+  }
+
+  &__status-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-left: 0.5rem;
+    padding-left: 0.5rem;
+    border-left: 1px solid rgba(255, 255, 255, 0.3);
+    font-weight: 600;
+  }
+
   // ── Topbar (back + brand) ─────────────────────────────────
   &__topbar {
     position: sticky;
@@ -307,6 +350,81 @@
     padding: 0 1.25rem 1rem;
     color: var(--color-text-secondary, #3c4a42);
     line-height: 1.6;
+  }
+
+  // ── Canales de soporte ──────────────────────────────────────
+  &__channels {
+    padding: 2rem 0 0.5rem;
+  }
+
+  &__section-title--centered {
+    text-align: center;
+  }
+
+  &__channel-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+    max-width: 64rem;
+    margin: 0 auto;
+
+    @media (min-width: 640px) {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+
+  &__channel {
+    background: white;
+    border: 1px solid var(--color-outline-variant, #dce2f3);
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-align: center;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+
+    &:hover {
+      border-color: var(--color-primary, #2f6f4e);
+      transform: translateY(-1px);
+    }
+  }
+
+  &__channel-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--color-tertiary-fixed, #c3ecd7);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 0.625rem;
+  }
+
+  &__channel-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+
+  &__channel-desc {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary, #3c4a42);
+    margin-bottom: 0.5rem;
+    line-height: 1.4;
+
+    a {
+      color: var(--color-primary, #2f6f4e);
+      text-decoration: none;
+      font-weight: 500;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+
+  &__channel-meta {
+    font-size: 0.7rem;
+    color: var(--color-text-secondary, #3c4a42);
+    opacity: 0.75;
   }
 
   // ── Equipo de soporte ────────────────────────────────────────
