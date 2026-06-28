@@ -126,6 +126,12 @@ export class TicketsService {
     try {
       const where: any = {
         organization_id: organizationId,
+        // Exclude PQR rows — those have their own dedicated list at
+        // /store/support/pqr (and /admin/support/pqr / /superadmin/
+        // support/pqrs at higher privilege levels). Without this
+        // filter the Tickets view shows every PQR too, which the
+        // operator sees duplicated in both tabs.
+        NOT: { tags: { has: 'pqr' } },
       };
 
       if (storeId) {
