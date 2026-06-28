@@ -134,7 +134,7 @@
                     class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     placeholder="Carlos"
                     [ngModel]="newEmployee().first_name"
-                    (ngModelChange)="newEmployee.update(e => ({ ...e, first_name: $event }))"
+                    (ngModelChange)="patchNewEmployee('first_name', $event)"
                   />
                 </div>
                 <div class="space-y-1">
@@ -144,7 +144,7 @@
                     class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     placeholder="Pérez"
                     [ngModel]="newEmployee().last_name"
-                    (ngModelChange)="newEmployee.update(e => ({ ...e, last_name: $event }))"
+                    (ngModelChange)="patchNewEmployee('last_name', $event)"
                   />
                 </div>
               </div>
@@ -156,7 +156,7 @@
                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                   placeholder="Estilista, Barbero, Odontólogo..."
                   [ngModel]="newEmployee().position"
-                  (ngModelChange)="newEmployee.update(e => ({ ...e, position: $event }))"
+                  (ngModelChange)="patchNewEmployee('position', $event)"
                 />
               </div>
 
@@ -168,7 +168,7 @@
                     class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     placeholder="1234567890"
                     [ngModel]="newEmployee().document_number"
-                    (ngModelChange)="newEmployee.update(e => ({ ...e, document_number: $event }))"
+                    (ngModelChange)="patchNewEmployee('document_number', $event)"
                   />
                 </div>
                 <div class="space-y-1">
@@ -177,7 +177,7 @@
                     type="date"
                     class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
                     [ngModel]="newEmployee().hire_date"
-                    (ngModelChange)="newEmployee.update(e => ({ ...e, hire_date: $event }))"
+                    (ngModelChange)="patchNewEmployee('hire_date', $event)"
                   />
                 </div>
               </div>
