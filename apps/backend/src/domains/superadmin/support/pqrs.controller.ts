@@ -18,7 +18,6 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { Request } from 'express';
-import { ticket_category_enum } from '@prisma/client';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { UserRole } from '../../auth/enums/user-role.enum';
@@ -35,13 +34,10 @@ import { AddPqrCommentDto } from '../../support/pqr/dto/add-pqr-comment.dto';
  *
  * Provides global visibility into Peticiones, Quejas y Reclamos (PQRs)
  * across the entire platform. PQRS rows are discriminated from generic
- * support tickets by `category` (one of PETITION | COMPLAINT | CLAIM |
- * SUGGESTION in the `ticket_category_enum`), NOT by a tag. The
- * `category` check is more robust than `tags: { has: 'pqr' }` because:
- *  - It's set declaratively in schema.prisma → always populated.
- *  - It's an enum → indexed, type-safe, can't drift to typos.
- *  - It survives migrations / seeders / manual fixes that might miss
- *    the legacy tag-population step.
+ * support tickets by `category` (PETITION | COMPLAINT | CLAIM |
+ * SUGGESTION) OR by the legacy `tags: { has: 'pqr' }` marker — both
+ * signals are checked in the service layer (`superAdminFindOne`) so
+ * the controller stays a thin HTTP wrapper.
  *
  * The super-admin Soporte/Tickets view excludes PQRs to keep the two
  * domains separate (see support.service.ts findAll comment). This
@@ -225,72 +221,11 @@ export class SuperadminPqrsController {
   @ApiResponse({ status: 200, description: 'PQR retrieved successfully' })
   @ApiResponse({ status: 404, description: 'PQR not found' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
-    const ticket = await this.prisma.support_tickets.findFirst({
-      where: {
-        id,
-        // Two-discriminator PQR match. Either condition suffices:
-        //
-        //   (a) tags includes 'pqr'  → modern + legacy rows tagged by
-        //                              createPublic() at line 177 of
-        //                              pqr.service.ts.
-        //   (b) category IN (PETITION, COMPLAINT, CLAIM, SUGGESTION)
-        //                            → enum-based canonical signal set
-        //                              by mapPqrType() at create time.
-        //
-        // We OR the two so a row is visible if EITHER discriminator
-        // is set. Avoids the silent-404 case where a row has one
-        // discriminator populated but not the other (different code
-        // paths, manual fixes, migrations that touched one signal
-        // without the other).
-        OR: [
-          { tags: { has: 'pqr' } },
-          {
-            category: {
-              in: [
-                ticket_category_enum.PETITION,
-                ticket_category_enum.COMPLAINT,
-                ticket_category_enum.CLAIM,
-                ticket_category_enum.SUGGESTION,
-              ],
-            },
-          },
-        ],
-      },
-      include: {
-        organization: { select: { id: true, name: true, slug: true } },
-        store: { select: { id: true, name: true, slug: true } },
-        assigned_to: {
-          select: {
-            id: true,
-            email: true,
-            first_name: true,
-            last_name: true,
-          },
-        },
-        comments: {
-          orderBy: { created_at: 'asc' },
-          include: {
-            author: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
-              },
-            },
-          },
-        },
-        status_history: {
-          orderBy: { created_at: 'desc' },
-        },
-      },
-    });
-
-    if (!ticket) {
-      throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
-    }
-
-    return { success: true, data: ticket };
+    // Delegate to the service so the include shape + PQR
+    // discrimination + response mapping stay in one place. Avoids
+    // the runtime 500 we kept hitting with hand-rolled Prisma
+    // queries that diverged from the proven store-admin path.
+    return this.pqrService.superAdminFindOne(id);
   }
 
   /**

@@ -481,6 +481,115 @@ export class PqrService {
   }
 
   /**
+   * Super-admin variant of adminFindOne — same shape and response
+   * mapper, but does NOT scope by `callerOrgId`. The super-admin
+   * platform-wide oversight view must see PQRs from every tenant,
+   * so the org filter is intentionally absent.
+   *
+   * PQR rows are still discriminated from generic support tickets
+   * by the category enum OR the legacy `tags: { has: 'pqr' }` tag
+   * (whichever was set on creation — see comment on the OR clause
+   * below). Keeps the super-admin controller out of the business
+   * of hand-rolling Prisma queries with exotic include shapes that
+   * can blow up at runtime if the client/DB drift on a new enum
+   * value.
+   */
+  async superAdminFindOne(id: number) {
+    const ticket = await this.globalPrisma.support_tickets.findFirst({
+      where: {
+        id,
+        OR: [
+          { tags: { has: 'pqr' } },
+          {
+            category: {
+              in: [
+                ticket_category_enum.PETITION,
+                ticket_category_enum.COMPLAINT,
+                ticket_category_enum.CLAIM,
+                ticket_category_enum.SUGGESTION,
+              ],
+            },
+          },
+        ],
+      },
+      // Intentionally NOT including organization / store here — the
+      // mapping layer below only needs assigned_to + comments +
+      // status_history to render the admin view. Avoids pulling
+      // extra joins that aren't required by the response shape.
+      include: {
+        assigned_to: {
+          select: {
+            id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+        comments: {
+          orderBy: { created_at: 'asc' },
+          include: {
+            author: {
+              select: {
+                id: true,
+                email: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
+          },
+        },
+        status_history: {
+          orderBy: { created_at: 'desc' },
+          include: {
+            changed_by: {
+              select: {
+                id: true,
+                email: true,
+                first_name: true,
+                last_name: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!ticket) {
+      throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
+    }
+
+    // Reuse the same response shape as adminFindOne so the frontend
+    // gets an identical contract for store-admin and super-admin
+    // GET /:id responses.
+    const requester = this.parseRequester(ticket.description);
+    const firstName = ticket.requester_first_name?.trim() || '';
+    const lastName = ticket.requester_last_name?.trim() || '';
+    const structuredName =
+      [firstName, lastName].filter(Boolean).join(' ').trim() ||
+      ticket.requester_email?.trim() ||
+      '';
+    const email =
+      ticket.requester_email?.trim() || requester.email || '';
+    const phone = ticket.requester_phone?.trim() || requester.phone;
+
+    return {
+      success: true as const,
+      data: {
+        ...this.toAdminView(ticket),
+        requester_first_name: firstName,
+        requester_last_name: lastName,
+        requester_full_name: structuredName,
+        requester_email: email,
+        requester_phone: phone,
+        requester_document_type: ticket.requester_document_type ?? null,
+        requester_document_num: ticket.requester_document_num ?? null,
+        comments: ticket.comments,
+        status_history: ticket.status_history,
+      },
+    };
+  }
+
+  /**
    * Allows the store-admin to fix typos in title / description /
    * requester fields of a PQR they just created. Guarded by status:
    * once the support team has picked it up (status !== NEW), edits
