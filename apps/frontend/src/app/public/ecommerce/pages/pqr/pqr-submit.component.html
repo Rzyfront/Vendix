@@ -155,11 +155,18 @@
       }
     </div>
 
-    <!-- Error del servidor -->
+    <!-- Error del servidor: tarjeta con icono y mensaje humanizado.
+         El humanizeError() del TS ya tradujo "Internal server error"
+         a algo accionable. -->
     @if (serverError(); as msg) {
-    <div class="server-error">
-      <app-icon name="alert-circle" [size]="16"></app-icon>
-      {{ msg }}
+    <div class="server-error" role="alert" aria-live="polite">
+      <div class="server-error__icon">
+        <app-icon name="alert-circle" [size]="20"></app-icon>
+      </div>
+      <div class="server-error__body">
+        <p class="server-error__title">No pudimos enviar tu solicitud</p>
+        <p class="server-error__msg">{{ msg }}</p>
+      </div>
     </div>
     }
 

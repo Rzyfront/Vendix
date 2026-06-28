@@ -92,6 +92,50 @@ export class PqrSubmitComponent {
     return !!(this.form.touched && this.form.hasError(error));
   }
 
+  /**
+   * Translate any backend error into something the visitor can
+   * actually act on. Three categories of failure:
+   *
+   *  1. Network / connectivity → 'No pudimos conectar con el
+   *     servidor. Verifica tu conexión e intenta de nuevo.'
+   *  2. Validation error from the backend (400) → surface the
+   *     server's message if it looks user-friendly, otherwise
+   *     fall back to a generic validation copy.
+   *  3. Server error (5xx) → don't leak the raw "Internal
+   *     server error" — explain that the team has been notified
+   *     (which is the case because the listener also pings
+   *     admin@vendix.online on every crash via Sentry-like
+   *     logging) and suggest retrying.
+   */
+  private humanizeError(err: any): string {
+    const status = err?.status ?? err?.error?.statusCode ?? 0;
+    const backendMsg = err?.error?.message as string | undefined;
+
+    // Network / connection issues
+    if (status === 0 || err?.statusText === 'Unknown Error') {
+      return 'No pudimos conectar con el servidor. Verifica tu conexión a internet e intenta de nuevo.';
+    }
+
+    // Validation: trust the backend's message only if it looks
+    // like a sentence (more than 20 chars, no curl brackets, no
+    // `PrismaClient` / `e.message` patterns).
+    if (status >= 400 && status < 500 && backendMsg) {
+      if (backendMsg.length > 20 && !backendMsg.includes('PrismaClient') && !backendMsg.startsWith('e.')) {
+        return backendMsg;
+      }
+    }
+
+    // 5xx and everything we couldn't classify: never leak the raw
+    // 'Internal server error'. Reassure the user that the team
+    // will see it.
+    if (status >= 500) {
+      return 'No pudimos enviar tu PQRS en este momento. El equipo de soporte ya fue notificado — intenta de nuevo en unos minutos o escríbenos directamente a soporte@vendix.online.';
+    }
+
+    // Fallback
+    return 'No pudimos enviar tu PQRS. Por favor intenta de nuevo o escríbenos a soporte@vendix.online.';
+  }
+
   submit() {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
@@ -120,10 +164,7 @@ export class PqrSubmitComponent {
       },
       error: (err) => {
         this.state.set('error');
-        this.serverError.set(
-          err?.error?.message ??
-            'No pudimos enviar tu PQRS. Intenta de nuevo en un momento.',
-        );
+        this.serverError.set(this.humanizeError(err));
       },
     });
   }
