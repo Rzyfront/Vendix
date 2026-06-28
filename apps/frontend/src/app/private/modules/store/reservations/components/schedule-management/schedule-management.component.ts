@@ -109,6 +109,30 @@ export class ScheduleManagementComponent {
   selectedEmployeeId = signal<string | number | null>(null);
   addingProvider = signal(false);
 
+  // Quick-create employee inline form (shown when no employees exist
+  // or when the user clicks "+ Nuevo empleado" inside the modal)
+  showEmployeeForm = signal(false);
+  creatingEmployee = signal(false);
+  newEmployee = signal({
+    first_name: '',
+    last_name: '',
+    document_type: 'CC',
+    document_number: '',
+    position: '',
+    hire_date: new Date().toISOString().split('T')[0],
+    contract_type: 'service' as
+      | 'indefinite'
+      | 'fixed_term'
+      | 'service'
+      | 'apprentice',
+    email: '',
+    phone: '',
+  });
+  newEmployeeValid = computed(() => {
+    const e = this.newEmployee();
+    return e.first_name.trim().length >= 2 && e.last_name.trim().length >= 2;
+  });
+
   employeeOptions = computed(() =>
     this.availableEmployees().map(emp => ({
       value: emp.id,
@@ -315,6 +339,75 @@ export class ScheduleManagementComponent {
   cancelAddProvider(): void {
     this.showAddForm.set(false);
     this.selectedEmployeeId.set(null);
+    this.showEmployeeForm.set(false);
+  }
+
+  /**
+   * Toggle the inline "new employee" form inside the add-provider modal.
+   */
+  toggleEmployeeForm(): void {
+    this.showEmployeeForm.update((v) => !v);
+  }
+
+  /**
+   * Create the employee via backend, refresh the available list, and
+   * auto-select the new employee so the user only has to click "Agregar"
+   * to finish creating the provider.
+   */
+  submitNewEmployee(): void {
+    if (!this.newEmployeeValid()) {
+      this.toastService.error('Nombre y apellido son obligatorios');
+      return;
+    }
+    this.creatingEmployee.set(true);
+    this.reservationsService
+      .createQuickEmployee(this.newEmployee())
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.creatingEmployee.set(false)),
+      )
+      .subscribe({
+        next: (created) => {
+          this.toastService.success(
+            `Empleado ${created.first_name} ${created.last_name} creado`,
+          );
+          // Append to list and select it
+          const next = [
+            ...this.availableEmployees(),
+            {
+              id: created.id,
+              first_name: created.first_name,
+              last_name: created.last_name,
+              position: created.position,
+            },
+          ];
+          this.availableEmployees.set(next);
+          this.selectedEmployeeId.set(created.id);
+          this.showEmployeeForm.set(false);
+          this.resetNewEmployee();
+        },
+        error: (err) => {
+          const msg =
+            err?.error?.message?.message ||
+            err?.error?.message ||
+            'Error al crear empleado';
+          this.toastService.error(msg);
+        },
+      });
+  }
+
+  private resetNewEmployee(): void {
+    this.newEmployee.set({
+      first_name: '',
+      last_name: '',
+      document_type: 'CC',
+      document_number: '',
+      position: '',
+      hire_date: new Date().toISOString().split('T')[0],
+      contract_type: 'service',
+      email: '',
+      phone: '',
+    });
   }
 
   addProvider(): void {

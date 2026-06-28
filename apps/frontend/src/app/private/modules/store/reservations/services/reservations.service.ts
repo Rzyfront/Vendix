@@ -188,6 +188,26 @@ export class ReservationsService {
       .pipe(map((response) => response.data || response));
   }
 
+  /**
+   * Quick-create an employee from the "Agregar Proveedor" modal.
+   * Backend route: POST /store/payroll/employees
+   */
+  createQuickEmployee(dto: {
+    first_name: string;
+    last_name: string;
+    document_type?: string;
+    document_number?: string;
+    hire_date: string;
+    contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
+    position?: string;
+    email?: string;
+    phone?: string;
+  }): Observable<{ id: number; first_name: string; last_name: string; position?: string }> {
+    return this.http
+      .post<any>(`${environment.apiUrl}/store/payroll/employees`, dto)
+      .pipe(map((response) => response.data || response));
+  }
+
   getCalendar(dateFrom: string, dateTo: string, productId?: number): Observable<Record<string, Booking[]>> {
     let params = new HttpParams()
       .set('date_from', dateFrom)
