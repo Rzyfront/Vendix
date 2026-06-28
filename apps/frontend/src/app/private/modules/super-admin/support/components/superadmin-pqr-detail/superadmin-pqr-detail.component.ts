@@ -77,19 +77,10 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
           </div>
         </div>
         <h1 class="header-card__title">{{ p.title }}</h1>
-        <div class="header-card__actions">
-          @if (latestAdminResponse(); as resp) {
-          <button
-            type="button"
-            class="comment-edit-btn header-card__edit"
-            (click)="openResponseEditModal(resp)"
-            title="Editar tu respuesta"
-          >
-            <app-icon name="edit-2" [size]="12"></app-icon>
-            Editar contenido
-          </button>
-          }
-        </div>
+        <!-- Edit affordance intentionally removed from the header.
+             Each admin comment carries its own inline "Editar"
+             button now, so the conversation card is the single
+             source of truth for edit entry points. -->
         <div class="header-card__meta">
           <app-icon name="calendar" [size]="14"></app-icon>
           Radicado {{ p.created_at | date: 'medium' }}
@@ -567,58 +558,6 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
       </div>
       }
 
-      <!-- Response edit modal — opened by the header "Editar contenido"
-           button. Edits the latest admin response (PATCH /comments/:id),
-           NOT the ticket content. Smaller and simpler than the modal
-           above because there's only one field: the comment text. -->
-      @if (showResponseEditModal()) {
-      <div class="modal-overlay" (click)="closeResponseEditModal()">
-        <div
-          class="modal modal--wide"
-          (click)="$event.stopPropagation()"
-        >
-          <h2>Editar respuesta enviada</h2>
-          <p class="modal-hint">
-            Corrige o mejora el texto de tu respuesta más reciente. El
-            cambio queda registrado en el historial con autor y
-            timestamp. El solicitante <strong>no</strong> recibe un
-            nuevo aviso por correo (es una corrección silenciosa).
-          </p>
-          <label class="modal-field">
-            <span>Tu respuesta</span>
-            <textarea
-              rows="6"
-              class="modal-input"
-              [ngModel]="editResponseContent()"
-              (ngModelChange)="editResponseContent.set($event)"
-              maxlength="5000"
-              name="editResponseContent"
-            ></textarea>
-          </label>
-          @if (editResponseError(); as err) {
-          <p class="modal-error">{{ err }}</p>
-          }
-          <div class="modal-actions">
-            <button
-              type="button"
-              class="ghost-btn"
-              [disabled]="editResponseSaving()"
-              (click)="closeResponseEditModal()"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              class="primary-btn"
-              [disabled]="!canSaveResponseEdit()"
-              (click)="submitResponseEdit()"
-            >
-              {{ editResponseSaving() ? 'Guardando…' : 'Guardar cambios' }}
-            </button>
-          </div>
-        </div>
-      </div>
-      }
       }
     </div>
   `,
@@ -1196,23 +1135,9 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         }
       }
 
-      // Header-card action row (the "Editar contenido" button on
-      // the right side of the title).
-      .header-card__actions {
-        margin-top: 0.75rem;
-        display: flex;
-        gap: 0.5rem;
-      }
-
-      // The header version of the edit button reuses the same
-      // .comment-edit-btn styling as the inline per-comment edit
-      // button so both entry points look identical. Only the size
-      // is bumped slightly so the header one reads as the primary
-      // action vs the small inline shortcut.
-      .header-card__edit {
-        font-size: 0.75rem;
-        padding: 0.25rem 0.625rem;
-      }
+      // Header-card meta row (Radicado timestamp + org + tienda).
+      // The "Editar contenido" button used to live here but was removed
+      // in favour of the per-comment inline edit shortcut.
 
       // ─── Solicitante card — matches the store-admin visual pattern ───
       // Avatar + name block at the top (separated by a border from the
@@ -1441,19 +1366,6 @@ export class SuperadminPqrDetailComponent {
   readonly editRequesterPhone = signal('');
   readonly editRequesterDocType = signal('');
   readonly editRequesterDocNum = signal('');
-
-  // ── Response edit modal (header button "Editar contenido") ───────────
-  // Opens with the content of `latestAdminResponse()`. On save,
-  // PATCH /comments/:id. Distinct from the per-comment inline edit
-  // (`editingCommentId`) and from the ticket-content modal above —
-  // this one is surfaced by a single button in the header card so
-  // super-admins can fix the response they sent without scrolling
-  // through the conversation to find the inline edit button.
-  readonly showResponseEditModal = signal(false);
-  readonly editResponseContent = signal('');
-  readonly editResponseSaving = signal(false);
-  readonly editResponseError = signal<string | null>(null);
-  readonly editingResponseId = signal<number | null>(null);
   readonly editSubmitting = signal(false);
   readonly editError = signal<string | null>(null);
 
@@ -1882,62 +1794,6 @@ export class SuperadminPqrDetailComponent {
   // which the backend now allows for both internal and public
   // comments (SUP_COMMENT_003 immutability gate was removed in this
   // branch — see service note).
-  openResponseEditModal(resp: { id: number; content: string }): void {
-    this.editingResponseId.set(resp.id);
-    this.editResponseContent.set(resp.content ?? '');
-    this.editResponseError.set(null);
-    this.showResponseEditModal.set(true);
-  }
-
-  closeResponseEditModal(): void {
-    if (this.editResponseSaving()) return;
-    this.showResponseEditModal.set(false);
-    this.editingResponseId.set(null);
-    this.editResponseContent.set('');
-    this.editResponseError.set(null);
-  }
-
-  canSaveResponseEdit(): boolean {
-    return (
-      !this.editResponseSaving() &&
-      this.editResponseContent().trim().length >= 2
-    );
-  }
-
-  submitResponseEdit(): void {
-    if (!this.canSaveResponseEdit()) return;
-    const id = this.editingResponseId();
-    const p = this.pqr();
-    if (!id || !p) return;
-    this.editResponseSaving.set(true);
-    this.editResponseError.set(null);
-    this.http
-      .patch<any>(
-        `${this.API_URL}/${p.id}/comments/${id}`,
-        { content: this.editResponseContent().trim() },
-      )
-      .pipe(
-        takeUntilDestroyed(this.destroyRef),
-        catchError((err) => {
-          this.editResponseError.set(
-            err?.error?.message ??
-              'No se pudo guardar la edición de la respuesta.',
-          );
-          this.editResponseSaving.set(false);
-          return of(null);
-        }),
-      )
-      .subscribe((res) => {
-        if (!res?.success) return;
-        this.editResponseSaving.set(false);
-        this.showResponseEditModal.set(false);
-        this.editingResponseId.set(null);
-        this.editResponseContent.set('');
-        // Re-fetch so the conversation list + history card reflect
-        // the new content + audit row.
-        this.fetch(p.id);
-      });
-  }
 }
 
 function businessDaysBetween(start: Date, end: Date): number {
