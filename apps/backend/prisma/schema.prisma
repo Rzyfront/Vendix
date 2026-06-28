@@ -2753,7 +2753,12 @@ enum notification_type_enum {
 
 model notifications {
   id         Int                        @id @default(autoincrement())
-  store_id   Int
+  // store_id is nullable to support super-admin-level notifications
+  // (e.g. "new PQR arrived on the platform"). When null, the
+  // notification is scoped to the super-admin role via the `data`
+  // JSON payload instead of a specific store. Store-scoped rows
+  // (existing behaviour) keep their FK.
+  store_id   Int?
   type       notification_type_enum
   severity   notification_severity_enum @default(info)
   title      String                     @db.VarChar(255)
@@ -2762,12 +2767,13 @@ model notifications {
   is_read    Boolean                    @default(false)
   created_at DateTime                   @default(now()) @db.Timestamp(6)
   updated_at DateTime                   @default(now()) @db.Timestamp(6)
-  stores     stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  stores     stores?                    @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@index([store_id])
   @@index([store_id, is_read])
   @@index([store_id, created_at(sort: Desc)])
   @@index([store_id, severity, is_read])
+  @@index([created_at(sort: Desc)])
 }
 
 model store_weekly_reports {
