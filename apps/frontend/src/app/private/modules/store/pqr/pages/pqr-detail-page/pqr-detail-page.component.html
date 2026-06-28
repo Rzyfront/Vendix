@@ -207,7 +207,7 @@
           </div>
           <div class="requester-name-block">
             <span class="requester-name">{{
-              requesterDisplayName() || '—'
+              requesterDisplayName() || 'No registrado'
             }}</span>
             <span class="requester-subtitle">{{
               typeLabel(d.pqr_type)
@@ -216,9 +216,9 @@
         </div>
         <dl>
           <dt>Nombre</dt>
-          <dd>{{ d.requester_first_name || '—' }}</dd>
+          <dd>{{ d.requester_first_name || 'No registrado' }}</dd>
           <dt>Apellido</dt>
-          <dd>{{ d.requester_last_name || '—' }}</dd>
+          <dd>{{ d.requester_last_name || 'No registrado' }}</dd>
           <dt>Email</dt>
           <dd>
             @if (d.requester_email) {
@@ -266,7 +266,7 @@
           <app-pqr-status-pill [status]="h.new_status"></app-pqr-status-pill>
           <div class="history-meta">
             <span class="muted">
-              {{ h.old_status || '—' }} → {{ h.new_status }}
+              {{ h.old_status || 'No registrado' }} → {{ h.new_status }}
             </span>
             <span>{{ h.created_at | date: 'short' }}</span>
             @if (h.change_reason) {

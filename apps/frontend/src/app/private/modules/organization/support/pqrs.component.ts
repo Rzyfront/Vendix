@@ -226,7 +226,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
               </td>
               <td class="title-cell">{{ t.title }}</td>
               <td>
-                <span class="store-name">{{ t.store?.name || '—' }}</span>
+                <span class="store-name">{{ t.store?.name || 'No registrado' }}</span>
               </td>
               <td>
                 <span class="sla-badge" [attr.data-status]="info.status">

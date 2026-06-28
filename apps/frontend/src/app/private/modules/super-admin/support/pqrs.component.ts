@@ -239,7 +239,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
                      fall back to the organization name because for the
                      platform org (orgVendix) it would misleadingly show
                      "Vendix Corp" as if it were a tienda. -->
-                <span class="store-name">{{ t.store?.name || '—' }}</span>
+                <span class="store-name">{{ t.store?.name || 'No registrado' }}</span>
               </td>
               <td>
                 <span class="sla-badge" [attr.data-status]="info.status">

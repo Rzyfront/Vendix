@@ -276,7 +276,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
               </div>
               <div class="requester-name-block">
                 <span class="requester-name">{{
-                  requesterDisplayName() || '—'
+                  requesterDisplayName() || 'No registrado'
                 }}</span>
                 <span class="requester-subtitle">{{
                   typeLabel(p.category)
@@ -285,9 +285,9 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
             </div>
             <dl>
               <dt>Nombre</dt>
-              <dd>{{ p.requester_first_name || '—' }}</dd>
+              <dd>{{ p.requester_first_name || 'No registrado' }}</dd>
               <dt>Apellido</dt>
-              <dd>{{ p.requester_last_name || '—' }}</dd>
+              <dd>{{ p.requester_last_name || 'No registrado' }}</dd>
               <dt>Email</dt>
               <dd>
                 @if (p.requester_email) {
@@ -323,9 +323,9 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                 }
               </dd>
               <dt>Organización</dt>
-              <dd>{{ p.organization?.name || '—' }}</dd>
+              <dd>{{ p.organization?.name || 'No registrado' }}</dd>
               <dt>Tienda</dt>
-              <dd>{{ p.store?.name || '—' }}</dd>
+              <dd>{{ p.store?.name || 'No registrado' }}</dd>
               <dt>Estado</dt>
               <dd>
                 <span class="status-pill" [attr.data-status]="p.status">
@@ -337,7 +337,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
                 @if (p.sla_deadline) {
                   {{ p.sla_deadline | date: 'mediumDate' }}
                 } @else {
-                  —
+                  No registrado
                 }
               </dd>
             </dl>
