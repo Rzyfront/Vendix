@@ -3,7 +3,7 @@ import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
-import { PublicHeaderComponent } from '../../../../landing/components/public-header/public-header.component';
+import { PublicHeaderComponent } from '../../../landing/components/public-header/public-header.component';
 
 /**
  * Confirmation page shown after a successful PQR submission. Displays
