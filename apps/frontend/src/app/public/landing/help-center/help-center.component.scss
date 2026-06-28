@@ -238,6 +238,60 @@
     line-height: 1.6;
   }
 
+  &__team {
+    padding: 2rem 0 0;
+  }
+
+  &__team-card {
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  &__team-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  &__team-lead {
+    color: var(--color-text-secondary);
+    line-height: 1.5;
+    margin-bottom: 1.25rem;
+  }
+
+  &__team-info {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    flex-wrap: wrap;
+  }
+
+  &__team-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+    color: var(--color-text-primary);
+
+    a {
+      color: var(--color-primary);
+      text-decoration: none;
+      font-weight: 500;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+
+    span {
+      text-align: left;
+      line-height: 1.4;
+    }
+  }
+
   &__cta {
     padding: 4rem 0 8rem;
   }
