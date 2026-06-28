@@ -171,13 +171,23 @@
     }
 
     <div class="actions">
-      <button
-        type="submit"
-        class="primary-btn"
-        [disabled]="form.invalid || state() === 'submitting'"
-      >
-        {{ state() === 'submitting' ? 'Enviando…' : 'Radicar PQRS' }}
-      </button>
+      <div class="actions-row">
+        <button
+          type="button"
+          class="secondary-btn"
+          (click)="goBack()"
+          [disabled]="state() === 'submitting'"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          class="primary-btn"
+          [disabled]="form.invalid || state() === 'submitting'"
+        >
+          {{ state() === 'submitting' ? 'Enviando…' : 'Radicar PQRS' }}
+        </button>
+      </div>
       <p class="legal-note">
         Al enviar este formulario aceptas que te contactemos por el correo
         registrado. Tu información se trata conforme a nuestra política de

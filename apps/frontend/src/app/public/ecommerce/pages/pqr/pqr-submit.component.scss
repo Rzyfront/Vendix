@@ -285,37 +285,75 @@
 }
 
 .primary-btn {
-  // Matches the store-admin "Enviar respuesta" / "Nueva solicitud"
-  // button exactly: same green (#16a34a), same border-radius (8px),
-  // same shadow treatment. The public form should feel like the
-  // exact same product, not a different one.
-  background: #16a34a;
+  // Matches the landing's "Comenzar Gratis" CTA exactly:
+  // same green-500 (#22c55e), same border-radius (8px), same
+  // shadow treatment. The public form should feel like the
+  // landing, not like a different product.
+  background: #22c55e;
   color: #ffffff;
   border: 0;
   border-radius: 8px;
-  padding: 0.625rem 1.5rem;
+  padding: 0.75rem 1.5rem;
   font-weight: 600;
   font-size: 0.95rem;
   cursor: pointer;
-  align-self: stretch;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.2);
-  transition: background-color 0.15s ease;
+  box-shadow: 0 1px 2px rgba(34, 197, 94, 0.2);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
 
   &:hover:not(:disabled) {
-    background: #15803d;
+    background: #16a34a;
   }
 
   &:active:not(:disabled) {
-    background: #14532d;
+    background: #15803d;
   }
 
   &:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+}
+
+.secondary-btn {
+  // Subtle 'Cancel' button that matches the primary in shape
+  // but reads as secondary (border only, hover fills light).
+  background: #ffffff;
+  color: #0f172a;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: #f8fafc;
+    border-color: #cbd5e1;
+  }
+}
+
+.actions-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+
+  .primary-btn {
+    flex: 1;
+    min-width: 180px;
+  }
+
+  .secondary-btn {
+    min-width: 110px;
   }
 }
 

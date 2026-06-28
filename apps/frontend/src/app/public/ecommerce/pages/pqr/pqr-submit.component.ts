@@ -88,6 +88,15 @@ export class PqrSubmitComponent {
     return !!(ctrl?.touched && ctrl?.hasError(error));
   }
 
+  /**
+   * "Cancelar" — go back to the help center (the entry point of
+   * the form). The submit handler does its own redirect on
+   * success, so this only handles the user-initiated exit.
+   */
+  goBack(): void {
+    this.router.navigate(['/ayuda']);
+  }
+
   hasFormError(error: string): boolean {
     return !!(this.form.touched && this.form.hasError(error));
   }
