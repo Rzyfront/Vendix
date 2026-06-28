@@ -35,7 +35,7 @@ type SubmitState = 'idle' | 'submitting' | 'success' | 'error';
 @Component({
   selector: 'app-pqr-submit',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent],
+  imports: [CommonModule, ReactiveFormsModule, IconComponent, PublicHeaderComponent],
   templateUrl: './pqr-submit.component.html',
   styleUrls: ['./pqr-submit.component.scss'],
 })
