@@ -2,11 +2,8 @@
   <!-- Hero -->
   <div class="help-center__hero">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl text-center">
-      <h1 class="help-center__title">¿Necesitas ayuda?</h1>
-      <p class="help-center__lead">
-        Busca en nuestra documentación o crea una solicitud y te
-        responderemos al correo registrado.
-      </p>
+      <h1 class="help-center__title">Centro de Ayuda</h1>
+      <p class="help-center__lead">¿En qué podemos ayudarle?</p>
 
       <div class="help-center__search">
         <app-icon
@@ -16,12 +13,50 @@
         ></app-icon>
         <input
           type="search"
-          placeholder="Buscar en la documentación…"
+          placeholder="Buscar artículos, preguntas o funciones..."
           [ngModel]="searchQuery()"
           (ngModelChange)="searchQuery.set($event)"
-          aria-label="Buscar en la documentación"
+          aria-label="Buscar artículos, preguntas o funciones"
         />
       </div>
+    </div>
+  </div>
+
+  <!-- Categorías -->
+  <div class="help-center__categories">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+      <h2 class="help-center__section-title">Categorías</h2>
+      <div class="help-center__category-grid">
+        @for (cat of categories; track cat.id) {
+        <a class="help-center__category" [attr.href]="'#faq-' + cat.id">
+          <div class="help-center__category-icon">
+            <app-icon [name]="cat.icon" [size]="22" color="var(--color-primary)"></app-icon>
+          </div>
+          <div class="help-center__category-body">
+            <h3 class="help-center__category-title">{{ cat.title }}</h3>
+            <p class="help-center__category-desc">{{ cat.description }}</p>
+          </div>
+        </a>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- Artículos populares -->
+  <div class="help-center__articles">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
+      <h2 class="help-center__section-title">Artículos más consultados</h2>
+      <ul class="help-center__article-list">
+        @for (article of popularArticles; track article.id) {
+        <li class="help-center__article">
+          <a>
+            <app-icon name="file-text" [size]="16" color="var(--color-primary)"></app-icon>
+            <span>{{ article.title }}</span>
+            <app-icon name="arrow-right" [size]="16" color="var(--color-text-secondary)"></app-icon>
+          </a>
+        </li>
+        }
+      </ul>
     </div>
   </div>
 
@@ -39,7 +74,7 @@
       } @else {
       <ul class="help-center__faq-list">
         @for (faq of filteredFaqs(); track faq.id) {
-        <li class="help-center__faq">
+        <li class="help-center__faq" [id]="'faq-' + faq.category">
           <details>
             <summary>
               <span class="help-center__faq-q">{{ faq.question }}</span>
@@ -58,15 +93,32 @@
   <div class="help-center__cta">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
       <div class="help-center__cta-card">
-        <h3 class="help-center__cta-title">¿No encontraste una respuesta?</h3>
+        <h3 class="help-center__cta-title">¿No encontraste la respuesta?</h3>
         <p class="help-center__cta-lead">
-          Crea una solicitud y el equipo de soporte de Vendix te
-          responderá al correo registrado.
+          Nuestro equipo de soporte responderá a tu solicitud.
         </p>
-        <a routerLink="/pqr" class="help-center__cta-btn">
-          <app-icon name="plus-circle" [size]="18" color="currentColor"></app-icon>
-          Crear una solicitud
-        </a>
+        <p class="help-center__cta-sla">
+          <app-icon name="clock" [size]="14" color="currentColor"></app-icon>
+          Te responderemos al correo registrado.
+        </p>
+
+        <div class="help-center__cta-actions">
+          @if (isAuthenticated()) {
+          <a routerLink="/pqr" class="help-center__btn help-center__btn--primary">
+            <app-icon name="plus-circle" [size]="18" color="currentColor"></app-icon>
+            Nueva solicitud
+          </a>
+          <a routerLink="/admin/pqrs" class="help-center__btn help-center__btn--secondary">
+            <app-icon name="list" [size]="18" color="currentColor"></app-icon>
+            Ver mis solicitudes
+          </a>
+          } @else {
+          <a routerLink="/pqr" class="help-center__btn help-center__btn--primary">
+            <app-icon name="plus-circle" [size]="18" color="currentColor"></app-icon>
+            Crear solicitud
+          </a>
+          }
+        </div>
       </div>
     </div>
   </div>

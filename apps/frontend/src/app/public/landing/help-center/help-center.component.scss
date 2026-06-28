@@ -14,14 +14,14 @@
   }
 
   &__title {
-    font-size: 2.5rem;
+    font-size: 2.75rem;
     font-weight: 700;
     letter-spacing: -0.02em;
-    margin-bottom: 1rem;
+    margin-bottom: 0.5rem;
   }
 
   &__lead {
-    font-size: 1.125rem;
+    font-size: 1.25rem;
     color: var(--color-text-secondary);
     margin-bottom: 2rem;
     line-height: 1.5;
@@ -57,14 +57,109 @@
     }
   }
 
-  &__faqs {
-    padding: 4rem 0;
-  }
-
   &__section-title {
     font-size: 1.5rem;
     font-weight: 600;
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
+  }
+
+  &__categories {
+    padding: 4rem 0 2rem;
+  }
+
+  &__category-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 1rem;
+  }
+
+  &__category {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.875rem;
+    background: white;
+    border: 1px solid var(--color-border);
+    border-radius: 12px;
+    padding: 1.25rem;
+    text-decoration: none;
+    color: var(--color-text-primary);
+    transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+
+    &:hover {
+      border-color: var(--color-primary);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+    }
+  }
+
+  &__category-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: var(--color-primary-light, rgba(22, 163, 74, 0.1));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  &__category-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__category-title {
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+  }
+
+  &__category-desc {
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+    line-height: 1.4;
+  }
+
+  &__articles {
+    padding: 2rem 0 2rem;
+  }
+
+  &__article-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  &__article {
+    a {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.875rem 1.25rem;
+      background: white;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      color: var(--color-text-primary);
+      text-decoration: none;
+      transition: border-color 0.15s ease;
+      cursor: pointer;
+
+      &:hover {
+        border-color: var(--color-primary);
+      }
+
+      span {
+        flex: 1;
+        font-weight: 500;
+      }
+    }
+  }
+
+  &__faqs {
+    padding: 2rem 0 2rem;
   }
 
   &__empty {
@@ -150,30 +245,61 @@
   &__cta-title {
     font-size: 1.5rem;
     font-weight: 600;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
   }
 
   &__cta-lead {
     color: var(--color-text-secondary);
-    margin-bottom: 2rem;
     line-height: 1.5;
+    margin-bottom: 0.75rem;
   }
 
-  &__cta-btn {
+  &__cta-sla {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+    margin-bottom: 2rem;
+  }
+
+  &__cta-actions {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  &__btn {
     display: inline-flex;
     align-items: center;
     gap: 0.5rem;
-    background: var(--color-primary);
-    color: white;
     padding: 0.875rem 1.75rem;
     border-radius: 12px;
     font-weight: 600;
     text-decoration: none;
-    transition: background-color 0.15s ease, transform 0.15s ease;
+    transition: background-color 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
 
-    &:hover {
-      background: var(--color-secondary);
-      transform: translateY(-1px);
+    &--primary {
+      background: var(--color-primary);
+      color: white;
+
+      &:hover {
+        background: var(--color-secondary);
+        transform: translateY(-1px);
+      }
+    }
+
+    &--secondary {
+      background: white;
+      color: var(--color-text-primary);
+      border: 1px solid var(--color-border);
+
+      &:hover {
+        border-color: var(--color-primary);
+        color: var(--color-primary);
+        transform: translateY(-1px);
+      }
     }
 
     &:focus-visible {
