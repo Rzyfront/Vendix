@@ -13,11 +13,13 @@ import {
 } from '@nestjs/common';
 import { ProvidersService } from './providers.service';
 import { ProviderScheduleService } from './provider-schedule.service';
+import { ProviderAvailabilityService } from './provider-availability.service';
 import { CreateProviderDto } from './dto/create-provider.dto';
 import { UpdateProviderDto } from './dto/update-provider.dto';
 import { UpsertProviderScheduleDto } from './dto/upsert-provider-schedule.dto';
 import { CreateProviderExceptionDto } from './dto/create-provider-exception.dto';
 import { AssignServiceDto } from './dto/assign-service.dto';
+import { AvailabilityOverviewQueryDto } from '../dto/availability-overview-query.dto';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { ResponseService } from '@common/responses/response.service';
@@ -28,6 +30,7 @@ export class ProvidersController {
   constructor(
     private readonly providersService: ProvidersService,
     private readonly providerScheduleService: ProviderScheduleService,
+    private readonly providerAvailabilityService: ProviderAvailabilityService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -61,6 +64,28 @@ export class ProvidersController {
     return this.responseService.success(
       result,
       'Proveedores del servicio obtenidos exitosamente',
+    );
+  }
+
+  /**
+   * Aggregated per-provider × per-day availability overview.
+   * Powers the `/admin/reservations/availability` dashboard.
+   */
+  @Get('availability-overview')
+  @Permissions('store:reservations:read')
+  async getAvailabilityOverview(
+    @Query() query: AvailabilityOverviewQueryDto,
+  ) {
+    const result = await this.providerAvailabilityService.getOverview({
+      date_from: query.date_from,
+      date_to: query.date_to,
+      provider_id: query.provider_id,
+      product_id: query.product_id,
+      slot_minutes: query.slot_minutes,
+    });
+    return this.responseService.success(
+      result,
+      'Disponibilidad por proveedor obtenida exitosamente',
     );
   }
 

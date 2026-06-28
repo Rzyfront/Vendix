@@ -2733,9 +2733,20 @@ enum notification_type_enum {
   customer_queue_consumed
   customer_queue_cancelled
   customer_queue_released
+  booking_created
+  booking_confirmed
+  booking_cancelled
+  booking_no_show
+  booking_reminder
+  booking_rescheduled
+  booking_started
+  booking_completed
+  booking_arrival
+  booking_attending
   booking_check_in
   booking_confirmation_request
   booking_auto_cancelled
+  invoice_data_request_submitted
   data_collection_created
   data_collection_submitted
   data_collection_prediagnosis_ready
