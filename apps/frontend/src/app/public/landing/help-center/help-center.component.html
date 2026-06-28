@@ -1,17 +1,5 @@
 <section class="help-center text-[var(--color-text-primary)]">
-  <!-- Top bar with back button. Sticky so the user always has
-       an escape hatch. -->
-  <div class="help-center__topbar">
-    <a routerLink="/" class="help-center__back" aria-label="Volver al inicio">
-      <app-icon name="arrow-left" [size]="18" color="currentColor"></app-icon>
-      <span>Volver</span>
-    </a>
-    <div class="help-center__brand">
-      <img src="vlogo.png" alt="Vendix" class="help-center__brand-logo" />
-      <span class="help-center__brand-name">Vendix</span>
-    </div>
-    <div class="help-center__topbar-spacer"></div>
-  </div>
+  <app-public-header></app-public-header>
 
   <!-- Hero -->
   <div class="help-center__hero">

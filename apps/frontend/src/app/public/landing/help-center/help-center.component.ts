@@ -4,6 +4,7 @@ import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
+import { PublicHeaderComponent } from '../components/public-header/public-header.component';
 
 interface FaqItem {
   id: string;
@@ -52,7 +53,7 @@ interface PopularArticle {
 @Component({
   selector: 'app-help-center',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, IconComponent],
+  imports: [CommonModule, RouterModule, FormsModule, IconComponent, PublicHeaderComponent],
   templateUrl: './help-center.component.html',
   styleUrls: ['./help-center.component.scss'],
 })
