@@ -12,6 +12,8 @@ export {
   TableSessionAddItemDto,
 } from './table-session.dto';
 
+export { AssignCustomerDto } from './assign-customer.dto';
+
 export {
   SplitByItemsDto,
   SplitByAmountDto,

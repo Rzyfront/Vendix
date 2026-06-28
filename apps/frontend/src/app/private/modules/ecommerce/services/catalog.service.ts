@@ -137,6 +137,72 @@ export interface PaginatedResponse<T> {
   };
 }
 
+/**
+ * Restaurant menus (cartas) public payload. Mirrors backend
+ * `CatalogService.getPublicMenus`. Cartas are independent from the general
+ * catalog: each level (menu/section/item) carries `is_available_now` +
+ * `next_available` so the storefront can either hide off-schedule dishes or
+ * show a "Disponible a las HH:mm" badge per the store setting.
+ */
+export interface MenuAvailabilityWindow {
+  id: number;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  is_active_now: boolean;
+}
+
+export interface MenuNextAvailable {
+  day_of_week: number;
+  start_time: string;
+}
+
+export interface MenuItemProduct {
+  id: number;
+  name: string;
+  slug: string;
+  base_price: number;
+  sale_price: number | null;
+  is_on_sale: boolean;
+  is_combo: boolean;
+  image_url: string | null;
+}
+
+export interface MenuItem {
+  id: number;
+  product_id: number;
+  sort_order: number;
+  is_available_now: boolean;
+  next_available: MenuNextAvailable | null;
+  product: MenuItemProduct | null;
+}
+
+export interface MenuSection {
+  id: number;
+  name: string;
+  sort_order: number;
+  is_available_now: boolean;
+  next_available: MenuNextAvailable | null;
+  availability_windows: MenuAvailabilityWindow[];
+  items: MenuItem[];
+}
+
+export interface PublicMenu {
+  id: number;
+  name: string;
+  is_active: boolean;
+  is_available_now: boolean;
+  next_available: MenuNextAvailable | null;
+  availability_windows: MenuAvailabilityWindow[];
+  sections: MenuSection[];
+}
+
+export interface PublicMenusResponse {
+  store_timezone: string;
+  now: { day_of_week: number; minutes: number };
+  menus: PublicMenu[];
+}
+
 @Injectable({
   providedIn: 'root',
 })
@@ -224,6 +290,20 @@ export class CatalogService {
   getPublicConfig(): Observable<{ success: boolean; data: any }> {
     return this.http.get<{ success: boolean; data: any }>(
       `${this.api_url}/config/public`,
+      {
+        headers: this.getHeaders(),
+      },
+    );
+  }
+
+  /**
+   * Restaurant menus (cartas) with per-level availability. Returns empty
+   * `menus` when the store is not a restaurant; the storefront only renders
+   * the section when the `home_sections.menus` toggle is enabled.
+   */
+  getMenus(): Observable<{ success: boolean; data: PublicMenusResponse }> {
+    return this.http.get<{ success: boolean; data: PublicMenusResponse }>(
+      `${this.api_url}/menus`,
       {
         headers: this.getHeaders(),
       },

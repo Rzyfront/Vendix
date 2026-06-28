@@ -1,0 +1,126 @@
+<app-modal
+  [isOpen]="isOpen()"
+  [size]="'md'"
+  [title]="'Cobrar mesa'"
+  [subtitle]="tableName() ? tableName() : ''"
+  (isOpenChange)="onIsOpenChange($event)"
+  (closed)="onModalClosed()"
+>
+  <div class="payment-content">
+    <!-- Total -->
+    <div class="total-display">
+      <span class="label">Total a cobrar</span>
+      <p class="amount">{{ total() | currency }}</p>
+    </div>
+
+    <!-- Payment method picker -->
+    <div class="section-header">
+      <app-icon name="credit-card" [size]="16"></app-icon>
+      <h2>Método de pago</h2>
+    </div>
+
+    @if (isLoadingMethods()) {
+      <p class="muted">Cargando métodos…</p>
+    } @else if (methods().length > 0) {
+      <div class="methods-grid">
+        @for (method of methods(); track method.id) {
+          <button
+            type="button"
+            class="method-btn"
+            [class.selected]="selectedMethod()?.id === method.id"
+            (click)="selectMethod(method)"
+          >
+            <app-icon [name]="method.icon" [size]="22"></app-icon>
+            <span class="method-name">{{ method.name }}</span>
+          </button>
+        }
+      </div>
+    } @else {
+      <div class="empty-methods">
+        <app-icon name="credit-card" [size]="22"></app-icon>
+        <p>No hay métodos de pago configurados</p>
+      </div>
+    }
+
+    <!-- Cash flow -->
+    @if (selectedMethod()?.type === 'cash') {
+      <div class="cash-section">
+        <div class="cash-row">
+          <label>Monto recibido</label>
+          <div class="cash-input" [class.error]="isCashInsufficient()">
+            <span class="currency">{{ currencySymbol() }}</span>
+            <input
+              type="number"
+              [value]="cashReceived()"
+              (input)="onCashInput($any($event.target).valueAsNumber)"
+              placeholder="0.00"
+              step="0.01"
+            />
+          </div>
+        </div>
+        <div class="cash-meta">
+          @if (isCashInsufficient()) {
+            <span class="error-text">Faltan: {{ missingAmount() | currency }}</span>
+          } @else {
+            <span class="change-text">Cambio: {{ change() | currency }}</span>
+          }
+          <button type="button" class="link-btn" (click)="setFullAmount()">
+            Monto exacto
+          </button>
+        </div>
+      </div>
+    }
+
+    <!-- Reference for non-cash -->
+    @if (selectedMethod()?.requiresReference) {
+      <div class="reference-section">
+        <app-input
+          [formControl]="referenceControl"
+          [label]="selectedMethod()?.referenceLabel || 'Referencia'"
+          [placeholder]="'Ingresa la referencia'"
+          [error]="getReferenceError()"
+        ></app-input>
+      </div>
+    }
+
+    <!-- Summary -->
+    @if (selectedMethod(); as method) {
+      <div class="summary">
+        <div class="summary-row">
+          <span>Método</span>
+          <strong>{{ method.name }}</strong>
+        </div>
+        @if (method.type === 'cash' && cashReceived() > 0) {
+          <div class="summary-row">
+            <span>Recibido</span>
+            <strong>{{ cashReceived() | currency }}</strong>
+          </div>
+          <div class="summary-row">
+            <span>Cambio</span>
+            <strong class="change">{{ change() | currency }}</strong>
+          </div>
+        }
+        <div class="summary-row total">
+          <span>Total</span>
+          <strong>{{ total() | currency }}</strong>
+        </div>
+      </div>
+    }
+  </div>
+
+  <div slot="footer" class="payment-footer">
+    <app-button variant="ghost" (clicked)="onModalClosed()">
+      Cancelar
+    </app-button>
+    <app-button
+      variant="primary"
+      [disabled]="!canProcess()"
+      [loading]="isProcessing()"
+      [showTextWhileLoading]="true"
+      (clicked)="confirm()"
+    >
+      <app-icon slot="icon" name="check-circle" [size]="18"></app-icon>
+      {{ isProcessing() ? 'Procesando…' : 'Confirmar cobro' }}
+    </app-button>
+  </div>
+</app-modal>

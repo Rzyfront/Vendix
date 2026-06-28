@@ -656,7 +656,14 @@ export class DispatchNotesService {
       order.shipping_address_snapshot,
       orderShippingRelation,
     );
+    // Excepción pickup (recogida en tienda): no hay dirección de entrega porque
+    // el cliente retira el pedido en el mostrador. La remisión documenta el
+    // handover + el registro de seriales, así que NO exigimos dirección. En ese
+    // caso customer_address_snapshot queda null y más abajo se persiste como
+    // Prisma.JsonNull. Para cualquier otro delivery_type (p.ej. home_delivery)
+    // la dirección sigue siendo obligatoria.
     if (
+      order.delivery_type !== 'pickup' &&
       !this.snapshotHasAddress(order.shipping_address_snapshot) &&
       !customer_address_snapshot
     ) {
@@ -690,6 +697,11 @@ export class DispatchNotesService {
       dispatch_items.push({
         product_id: order_item.product_id,
         product_variant_id: order_item.product_variant_id,
+        // Linkage exacto al renglón de la orden (ref 2026-06-25). Lo persiste
+        // también el create standalone; aquí faltaba y rompía el cálculo de
+        // "cantidad pendiente" por ítem en getByOrder() (riesgo de doble
+        // despacho silencioso). La columna sales_order_item_id ya existe.
+        sales_order_item_id: order_item.id,
         // Default to the resolved warehouse (reservation/store default) when the
         // item carries no explicit location_id.
         location_id: dto_item.location_id ?? default_location_id,
@@ -1397,13 +1409,19 @@ export class DispatchNotesService {
 
   async getByOrder(order_id: number) {
     const dispatch_notes = await this.prisma.dispatch_notes.findMany({
-      where: { order_id },
+      // Excluye remisiones anuladas: no consumen el pendiente por ítem
+      // (ref 2026-06-25, cálculo de cantidad pendiente en el wizard).
+      where: { order_id, status: { not: 'voided' } },
       orderBy: { created_at: 'desc' },
       include: {
         dispatch_note_items: {
           select: {
             id: true,
             product_id: true,
+            product_variant_id: true,
+            // Enlace exacto al renglón de la orden — necesario para descontar
+            // el pendiente por ítem en order-items-step (ref 2026-06-25).
+            sales_order_item_id: true,
             dispatched_quantity: true,
           },
         },

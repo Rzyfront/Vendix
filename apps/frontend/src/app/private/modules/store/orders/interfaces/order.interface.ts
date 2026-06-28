@@ -195,6 +195,13 @@ export interface Product {
   product_type?: 'physical' | 'prepared' | 'service' | string;
   final_price: number;
   image_url?: string;
+  /**
+   * Ref 2026-06-25, plan wizard remisión order-first.
+   * Si true, el item requiere asignación de seriales antes de confirmar
+   * la remisión (gate backend SERIAL_REQUIRED_001). El frontend lo lee
+   * del GET /store/orders/:id (findOne incluye products).
+   */
+  requires_serial_numbers?: boolean;
 }
 
 export interface ProductVariant {
@@ -309,6 +316,16 @@ export interface OrderQuery {
   limit?: number;
 
   missing_shipping_method?: boolean;
+
+  /**
+   * "Despachable" / "Por enviar" — ref 2026-06-25.
+   * Filtra órdenes pendientes de despacho: state=processing +
+   * delivery_type ≠ direct_delivery (incluye home_delivery, pickup, other).
+   * Single source of truth compartido con orders.service.ts findAll()
+   * y stores.service.ts dispatchWhere. Usado por el botón "Por enviar"
+   * de la lista y por el contador del dashboard.
+   */
+  dispatchable?: boolean;
 
   // Ordenamiento
   sort?: string; // Format: 'field:direction' e.g., 'created_at:desc'

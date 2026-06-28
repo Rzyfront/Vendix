@@ -69,11 +69,13 @@ Current flow:
 
 `GET /ecommerce/checkout/payment-methods` filters enabled store payment methods by `system_payment_method.processing_mode` and shipping type:
 
-- `pickup`: `DIRECT`, `ONLINE`.
-- Delivery/other shipping types: `ONLINE`, `ON_DELIVERY`.
-- No shipping type: all supported modes.
+- `pickup`: `DIRECT` (cash/wallet at the store) + `ONLINE`. `ON_DELIVERY` is excluded because the customer is already at the store.
+- Delivery methods (`own_fleet`, `carrier`, `custom`, `third_party_provider`): **all enabled modes** — `DIRECT` + `ONLINE` + `ON_DELIVERY`. The customer can pay with cash, prepaid wallet, online gateway, or on delivery regardless of who delivers.
+- No shipping type: all supported modes (initial load before shipping is selected).
 
-Frontend reloads payment methods after shipping selection because shipping method type changes eligible payment methods.
+Frontend reloads payment methods after shipping selection so the UI reflects the current context.
+
+**Why all modes for delivery:** A delivery destination does not preclude paying with wallet balance (already prepaid) or with cash on arrival. Showing all configured methods gives the customer the full set of options their store enabled, which matches the expected UX.
 
 ## Wompi Flow
 

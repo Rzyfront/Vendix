@@ -16,6 +16,8 @@ import {
   SplitResult,
   TableStatus,
   TableSessionAddItem,
+  PayTableSessionDto,
+  PayTableSessionResult,
 } from '../interfaces';
 
 interface ApiResponse<T> {
@@ -157,6 +159,64 @@ export class TablesService {
       .post<ApiResponse<TableSession>>(
         `${this.apiUrl}/store/table-sessions/${sessionId}/close`,
         {},
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  /**
+   * Assign (or clear) the customer of the table session's draft order.
+   * Pass `null` to detach the customer (true anonymous — no "Cliente
+   * General" sentinel). Mirrors `PATCH /store/table-sessions/:id/customer`.
+   */
+  assignCustomer(
+    sessionId: number,
+    customerId: number | null,
+  ): Observable<TableSession> {
+    return this.http
+      .patch<ApiResponse<TableSession>>(
+        `${this.apiUrl}/store/table-sessions/${sessionId}/customer`,
+        { customer_id: customerId },
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  // ─── Table checkout (POS payment against an open table) ──────────────
+
+  /**
+   * Settle the table's bill through the unified POS payment endpoint
+   * (`POST /store/payments/pos`) using `table_session_id`. The backend
+   * applies the payment to the table's existing draft order, re-derives
+   * totals from the order items, closes the session, moves the table to
+   * `cleaning`, and auto-fires any still-pending prepared items.
+   *
+   * `subtotal` and `total_amount` are required by the POS DTO even on the
+   * table-close path (the backend re-derives the authoritative totals, but
+   * the validator demands the two numbers), so we forward the order's
+   * current `subtotal_amount` / `grand_total`.
+   */
+  payTableSession(payload: PayTableSessionDto): Observable<PayTableSessionResult> {
+    const body = {
+      table_session_id: payload.table_session_id,
+      subtotal: payload.subtotal,
+      total_amount: payload.total_amount,
+      store_payment_method_id: payload.store_payment_method_id,
+      ...(payload.amount_received != null
+        ? { amount_received: payload.amount_received }
+        : {}),
+      ...(payload.payment_reference
+        ? { payment_reference: payload.payment_reference }
+        : {}),
+    };
+    return this.http
+      .post<ApiResponse<PayTableSessionResult>>(
+        `${this.apiUrl}/store/payments/pos`,
+        body,
       )
       .pipe(
         map((res) => res.data),

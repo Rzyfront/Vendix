@@ -72,4 +72,21 @@ export class OrderQueryDto {
   @Transform(({ value }) => value === 'true' || value === true)
   @IsBoolean()
   missing_shipping_method?: boolean;
+
+  /**
+   * "Despachable" / "Por enviar" — ref 2026-06-25.
+   * Filtra órdenes pendientes de despacho: state ∈ {processing,
+   * pending_payment} + delivery_type ≠ direct_delivery (incluye
+   * home_delivery, pickup, other). pending_payment cubre el contraentrega
+   * (COD): se despacha antes de cobrar.
+   * Single source of truth compartido con orders.service.ts findAll()
+   * y stores.service.ts dispatchWhere. Usado por el botón "Por enviar"
+   * de la lista y por el contador del dashboard.
+   * La exclusión exacta de órdenes parcialmente remisionadas se mitiga
+   * en frontend vía getByOrder(orderId) hasta una V2 con subquery SQL.
+   */
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  dispatchable?: boolean;
 }

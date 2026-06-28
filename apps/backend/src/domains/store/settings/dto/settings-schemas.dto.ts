@@ -666,6 +666,18 @@ export class DispatchSettingsDto {
   order_state_update_mode?: 'live' | 'on_close';
 }
 
+export class RestaurantSettingsDto {
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Enables paying/closing a table check directly from the table screen (table checkout).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  enable_table_checkout?: boolean;
+}
+
 export class PanelUISettingsDto {
   @IsOptional()
   STORE_ADMIN?: Record<string, boolean>;

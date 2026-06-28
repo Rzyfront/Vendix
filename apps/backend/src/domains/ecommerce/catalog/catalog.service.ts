@@ -377,14 +377,12 @@ export class CatalogService {
       ),
     );
 
-    // Restaurant Suite Fase G — filter out products whose menus are not
-    // currently within an availability window. MÍNIMO: uses the same
-    // Intl-based day/hours/minutes helper as schedule-validation.service
-    // (line 251: getDateInTimezone) without depending on that module.
-    const filtered = await this.filterByMenuAvailability(mappedData, store_id);
-
+    // Las cartas (menús) NO filtran el catálogo general: cartas y productos
+    // conviven sin interferir. Un producto enlazado a una carta con ventana
+    // horaria sigue visible en el catálogo aunque esté fuera de ese horario;
+    // la disponibilidad por horario se expone aparte en GET /ecommerce/menus.
     return {
-      data: filtered,
+      data: mappedData,
       meta: {
         total,
         page: Number(page),
@@ -537,10 +535,23 @@ export class CatalogService {
     const settings = (store?.store_settings?.settings || {}) as any;
     const has_configured_shipping = await this.hasConfiguredShipping();
 
+    const industries = (store?.industries ?? []) as string[];
+    const is_restaurant = industries.includes('restaurant');
+
+    // La sección "Cartas" (home_sections.menus) solo aplica a restaurantes.
+    // Defensa en profundidad: aunque el admin no muestra el toggle para otras
+    // industrias, aquí se elimina por si quedó persistido.
+    const home_sections = { ...(settings.ecommerce?.home_sections || {}) };
+    if (!is_restaurant && 'menus' in home_sections) {
+      delete (home_sections as any).menus;
+    }
+
     return {
       ...settings,
+      industries,
       ecommerce: {
         ...(settings.ecommerce || {}),
+        home_sections,
         shipping: {
           ...(settings.ecommerce?.shipping || {}),
           has_configured_shipping,
@@ -1048,68 +1059,98 @@ export class CatalogService {
   // --------------------------------------------------- Fase G menu windows
 
   /**
-   * Post-filter for the public carta. Hides products that belong to a menu
-   * with availability windows when none of those windows are active right
-   * now. Products with NO menu memberships stay visible (e.g. retail
-   * products that never opted in to a menu).
+   * Public carta endpoint. Returns the store's active menus with their
+   * sections, items and the product snapshot needed to render a storefront
+   * carta. Each menu/section/item carries `is_available_now` (computed from
+   * its availability windows in the store timezone) and, when not available,
+   * `next_available` (the soonest upcoming window). Cartas and the general
+   * catalog are independent: this never hides products from /ecommerce/catalog.
    *
-   * MÍNIMO implementation: a single Prisma query pulls every window that
-   * could affect a product, then a JS-side loop decides what to keep.
-   * Section-level windows are honored too (a section is "menu-locked" if
-   * either its parent menu OR itself has any window defined).
-   *
-   * Timezone: reuses the same Intl-based approach as
-   * `schedule-validation.service.ts` getDateInTimezone (line 251). The
-   * store's timezone is read from store_settings.settings.general.timezone,
-   * defaulting to America/Bogota (Vendix-CO default).
+   * Gated by industry: a store whose `industries` does not include
+   * `restaurant` returns an empty list.
    */
-  private async filterByMenuAvailability<T extends { id: number }>(
-    products: T[],
-    storeId: number | null | undefined,
-  ): Promise<T[]> {
-    if (!storeId || products.length === 0) return products;
-    const productIds = products.map((p) => p.id);
+  async getPublicMenus(): Promise<{
+    store_timezone: string;
+    now: { day_of_week: number; minutes: number };
+    menus: any[];
+  }> {
+    const store_id = RequestContextService.getStoreId();
+    const empty = (tz: string) => ({
+      store_timezone: tz,
+      now: { day_of_week: 0, minutes: 0 },
+      menus: [] as any[],
+    });
+    if (!store_id) return empty('America/Bogota');
 
-    // 1. Resolve the store timezone.
-    const settings = await this.prisma.store_settings.findFirst({
-      where: { store_id: storeId },
-      select: { settings: true },
+    const store = await this.prisma.stores.findUnique({
+      where: { id: store_id },
+      select: {
+        industries: true,
+        store_settings: { select: { settings: true } },
+      },
     });
     const timezone =
-      ((settings?.settings as any)?.general?.timezone as string) ||
+      ((store?.store_settings?.settings as any)?.general?.timezone as string) ||
       'America/Bogota';
 
-    // 2. Compute current day-of-week + minutes-since-midnight in TZ.
-    const { day: nowDay, minutes: nowMinutes } = this.getDateInTimezone(
-      timezone,
-    );
+    const industries = (store?.industries ?? []) as string[];
+    if (!industries.includes('restaurant')) return empty(timezone);
 
-    // 3. Pull every menu_section_items row for the product ids and the
-    //    availability windows attached to its menu or section.
-    const sectionItems = await this.storePrisma.menu_section_items.findMany({
-      where: { product_id: { in: productIds } },
+    const { day: nowDay, minutes: nowMinutes } =
+      this.getDateInTimezone(timezone);
+
+    const menus = await this.storePrisma.menus.findMany({
+      where: { is_active: true },
+      orderBy: { name: 'asc' },
       select: {
-        product_id: true,
-        menu_section_id: true,
-        menu_section: {
+        id: true,
+        name: true,
+        is_active: true,
+        availability_windows: {
           select: {
-            menu_id: true,
-            menu: {
-              select: {
-                availability_windows: {
-                  select: {
-                    day_of_week: true,
-                    start_time: true,
-                    end_time: true,
-                  },
-                },
-              },
-            },
+            id: true,
+            day_of_week: true,
+            start_time: true,
+            end_time: true,
+          },
+        },
+        sections: {
+          orderBy: { sort_order: 'asc' },
+          select: {
+            id: true,
+            name: true,
+            sort_order: true,
             availability_windows: {
               select: {
+                id: true,
                 day_of_week: true,
                 start_time: true,
                 end_time: true,
+              },
+            },
+            items: {
+              orderBy: { sort_order: 'asc' },
+              select: {
+                id: true,
+                product_id: true,
+                sort_order: true,
+                product: {
+                  select: {
+                    id: true,
+                    name: true,
+                    slug: true,
+                    base_price: true,
+                    sale_price: true,
+                    is_on_sale: true,
+                    is_combo: true,
+                    is_sellable: true,
+                    product_images: {
+                      where: { is_main: true },
+                      take: 1,
+                      select: { image_url: true },
+                    },
+                  },
+                },
               },
             },
           },
@@ -1117,31 +1158,142 @@ export class CatalogService {
       },
     });
 
-    // 4. For each product, collapse all windows that could gate it.
-    const productWindows = new Map<number, Array<{
+    const mapWindow = (w: {
+      id: number;
       day_of_week: number;
       start_time: string;
       end_time: string;
-    }>>();
-    for (const item of sectionItems) {
-      const list = productWindows.get(item.product_id) ?? [];
-      const menuWindows = item.menu_section?.menu?.availability_windows ?? [];
-      const sectionWindows =
-        item.menu_section?.availability_windows ?? [];
-      for (const w of menuWindows) list.push(w);
-      for (const w of sectionWindows) list.push(w);
-      if (list.length > 0) productWindows.set(item.product_id, list);
-    }
-
-    // 5. A product is visible if it has NO gating windows, or at least one
-    //    of them is currently active.
-    return products.filter((p) => {
-      const windows = productWindows.get(p.id);
-      if (!windows || windows.length === 0) return true;
-      return windows.some((w) =>
-        this.isWindowActive(w, nowDay, nowMinutes),
-      );
+    }) => ({
+      id: w.id,
+      day_of_week: w.day_of_week,
+      start_time: w.start_time,
+      end_time: w.end_time,
+      is_active_now: this.isWindowActive(w, nowDay, nowMinutes),
     });
+
+    const result = await Promise.all(
+      menus.map(async (menu) => {
+        const menuWindows = menu.availability_windows ?? [];
+        const sections = await Promise.all(
+          (menu.sections ?? []).map(async (section) => {
+            const sectionWindows = section.availability_windows ?? [];
+            // Un item se rige por las ventanas de su sección + las del menú.
+            const gatingWindows = [...sectionWindows, ...menuWindows];
+            const items = await Promise.all(
+              (section.items ?? []).map(async (item) => {
+                const p = item.product;
+                const isAvail =
+                  gatingWindows.length === 0 ||
+                  gatingWindows.some((w) =>
+                    this.isWindowActive(w, nowDay, nowMinutes),
+                  );
+                const image_url = p?.product_images?.[0]?.image_url
+                  ? await this.s3Service.signUrl(p.product_images[0].image_url)
+                  : null;
+                return {
+                  id: item.id,
+                  product_id: item.product_id,
+                  sort_order: item.sort_order,
+                  is_available_now: isAvail,
+                  next_available: isAvail
+                    ? null
+                    : this.nextAvailableWindow(
+                        gatingWindows,
+                        nowDay,
+                        nowMinutes,
+                      ),
+                  product: p
+                    ? {
+                        id: p.id,
+                        name: p.name,
+                        slug: p.slug,
+                        base_price: p.base_price,
+                        sale_price: p.sale_price,
+                        is_on_sale: p.is_on_sale,
+                        is_combo: p.is_combo,
+                        image_url,
+                      }
+                    : null,
+                };
+              }),
+            );
+            const sectionAvail =
+              gatingWindows.length === 0
+                ? true
+                : gatingWindows.some((w) =>
+                    this.isWindowActive(w, nowDay, nowMinutes),
+                  );
+            return {
+              id: section.id,
+              name: section.name,
+              sort_order: section.sort_order,
+              is_available_now: sectionAvail,
+              next_available: sectionAvail
+                ? null
+                : this.nextAvailableWindow(gatingWindows, nowDay, nowMinutes),
+              availability_windows: sectionWindows.map(mapWindow),
+              items,
+            };
+          }),
+        );
+        const menuAvail =
+          menuWindows.length === 0
+            ? true
+            : menuWindows.some((w) =>
+                this.isWindowActive(w, nowDay, nowMinutes),
+              );
+        return {
+          id: menu.id,
+          name: menu.name,
+          is_active: menu.is_active,
+          is_available_now: menuAvail,
+          next_available: menuAvail
+            ? null
+            : this.nextAvailableWindow(menuWindows, nowDay, nowMinutes),
+          availability_windows: menuWindows.map(mapWindow),
+          sections,
+        };
+      }),
+    );
+
+    return {
+      store_timezone: timezone,
+      now: { day_of_week: nowDay, minutes: nowMinutes },
+      menus: result,
+    };
+  }
+
+  /**
+   * Soonest upcoming window (within a week) as {day_of_week, start_time},
+   * or null when there are no windows. Powers "Disponible a las HH:mm".
+   */
+  private nextAvailableWindow(
+    windows: Array<{
+      day_of_week: number;
+      start_time: string;
+      end_time: string;
+    }>,
+    nowDay: number,
+    nowMinutes: number,
+  ): { day_of_week: number; start_time: string } | null {
+    if (!windows || windows.length === 0) return null;
+    const toMinutes = (t: string) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+    let best: { day_of_week: number; start_time: string } | null = null;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (const w of windows) {
+      const start = toMinutes(w.start_time);
+      const dayDiff = (w.day_of_week - nowDay + 7) % 7;
+      let delta = dayDiff * 1440 + (start - nowMinutes);
+      if (delta <= 0) delta += 7 * 1440;
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        best = { day_of_week: w.day_of_week, start_time: w.start_time };
+      }
+    }
+    return best;
   }
 
   private isWindowActive(

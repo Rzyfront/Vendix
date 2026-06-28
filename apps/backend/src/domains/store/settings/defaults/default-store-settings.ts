@@ -355,6 +355,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       order_state_update_mode: 'on_close',
     },
 
+    // Restaurant - restaurant suite behavior toggles. Table checkout is
+    // opt-in (false by default) so existing stores keep paying via POS.
+    restaurant: {
+      enable_table_checkout: false,
+    },
+
     // Legacy: Mantener por compatibilidad (redundante con branding)
     app: {
       name: 'Vendix',

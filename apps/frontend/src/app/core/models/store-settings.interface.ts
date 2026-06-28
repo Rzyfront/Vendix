@@ -17,6 +17,7 @@ export interface StoreSettings {
   app: AppSettings;
   operations?: OperationsSettings;
   dispatch?: DispatchSettings;
+  restaurant?: RestaurantSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
 }
@@ -93,6 +94,20 @@ export type OrderStateUpdateMode = 'live' | 'on_close';
 
 export interface DispatchSettings {
   order_state_update_mode: OrderStateUpdateMode;
+}
+
+/**
+ * Restaurant-specific store settings. Only relevant when the store's
+ * `general.industries` includes `'restaurant'`. Mirrors backend
+ * `store_settings.settings.restaurant`.
+ */
+export interface RestaurantSettings {
+  /**
+   * When `true`, the table view exposes a checkout action so the bill can be
+   * settled directly from the table. When `false`, the table view only shows
+   * the payment status. Default `false`.
+   */
+  enable_table_checkout: boolean;
 }
 
 export interface CheckoutSettings {

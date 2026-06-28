@@ -6,7 +6,7 @@ description: >
 license: MIT
 metadata:
   author: rzyfront
-  version: "1.0"
+  version: "1.1"
   scope: [root]
   auto_invoke:
     - "Code changes, feature work, fixes, refactors, or development execution"
@@ -76,6 +76,7 @@ After code or skill changes:
 
 - Use `buildcheck-dev` for development verification.
 - **Runtime API/endpoint verification uses `curl`, never Bruno.** Authenticate against dev with a seed owner account (`owner@techsolutions.co` or `owner@fashionretail.com`, password `1125634q`; see `apps/backend/prisma/seeds/users.seed.ts`), or ask the user for the `slug`, `email`, and `password` of an authorized dev test account. Bruno (`.bru`) is opt-in only when a developer explicitly requests it (`vendix-bruno-test`).
+- **Frontend changes require end-to-end verification with `agent-browser`, not just a passing build** (a green build does not catch zoneless/signals behavior bugs). Drive the real vhost (`https://vendix.com` and its subdomains), never `localhost:4200`, because the app resolves its `app_type` by hostname. The full curl + agent-browser methodology (install, vhost setup, credentials, recipes) lives in `how-to-test`.
 - Use `skill-sync` after creating or modifying skills.
 - Run production build commands only when the human explicitly requests production verification.
 
@@ -87,4 +88,5 @@ After code or skill changes:
 - `pr-code-review` - Automated code review gate (load before any PR merge, RULE 8)
 - `agent-teams` - Multi-agent orchestration for non-trivial work
 - `buildcheck-dev` - Development verification through Docker watch-mode logs
+- `how-to-test` - Runtime verification methodology (curl for API/auth, agent-browser for frontend E2E)
 - `skill-sync` - Synchronize skill metadata and generated agent files

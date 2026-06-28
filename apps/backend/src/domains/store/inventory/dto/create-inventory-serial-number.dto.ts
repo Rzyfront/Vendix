@@ -4,9 +4,13 @@ import {
   IsInt,
   IsEnum,
   IsArray,
+  IsNumber,
+  IsDateString,
+  ValidateNested,
+  ArrayMinSize,
   Min,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { serial_status_enum } from '@prisma/client';
 
 /**
@@ -103,6 +107,17 @@ export class GetSerialNumbersDto {
   @IsEnum(serial_status_enum)
   status?: serial_status_enum;
 
+  // QUI-431 — warranty expiry range filter (inclusive). Either bound may be
+  // sent independently; the service builds `warranty_expiry: { gte?, lte? }`
+  // using only the provided keys.
+  @IsOptional()
+  @IsDateString()
+  warranty_expiry_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  warranty_expiry_to?: string;
+
   @IsOptional()
   @IsString()
   search?: string;
@@ -120,6 +135,23 @@ export class GetSerialNumbersDto {
   limit?: number;
 }
 
+/**
+ * QUI-431 — Query for GET /store/inventory/serial-numbers/summary.
+ * Optional product/location narrowing; store scope is enforced by the scoped
+ * Prisma client (relational via inventory_locations.store_id).
+ */
+export class SummarySerialNumbersDto {
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  product_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  location_id?: number;
+}
+
 export class GetAvailableSerialNumbersDto {
   @IsInt()
   @Type(() => Number)
@@ -133,4 +165,86 @@ export class GetAvailableSerialNumbersDto {
   @IsInt()
   @Type(() => Number)
   location_id: number;
+}
+
+/**
+ * QUI-431 (continuation) — Backfill serials over EXISTING stock.
+ *
+ * One serial to register against units already on hand. No status field: the
+ * service forces `in_stock` (backfill only registers identities for sellable
+ * units, it never mutates quantity_on_hand).
+ */
+export class BulkBackfillSerialNumberItemDto {
+  @IsString()
+  serial_number: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  cost?: number;
+
+  @IsOptional()
+  @IsDateString()
+  warranty_expiry?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
+/**
+ * Bulk backfill payload: a product/variant at a location plus the list of
+ * serial identities to register. The service enforces parity against
+ * stock_levels.quantity_on_hand (cannot register more serials than units in
+ * stock) and never touches stock.
+ */
+export class BulkBackfillSerialNumbersDto {
+  @IsInt()
+  @Type(() => Number)
+  product_id: number;
+
+  @IsOptional()
+  @IsInt()
+  @Type(() => Number)
+  product_variant_id?: number;
+
+  @IsInt()
+  @Type(() => Number)
+  location_id: number;
+
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => BulkBackfillSerialNumberItemDto)
+  items: BulkBackfillSerialNumberItemDto[];
+}
+
+/**
+ * Generic PATCH /:id — edit the descriptive fields of a serial row.
+ * Status changes go through PATCH /:id/status (UpdateInventorySerialNumberDto);
+ * this DTO deliberately omits status and location_id so the generic edit
+ * endpoint cannot bypass the lifecycle/parity rules.
+ */
+export class PatchSerialNumberDto {
+  @IsOptional()
+  @IsString()
+  serial_number?: string;
+
+  @IsOptional()
+  @IsString()
+  notes?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  cost?: number;
+
+  // QUI-431 — edit the warranty expiry. A date string sets it; an empty
+  // string or null clears it (warranty_expiry := NULL). The Transform coerces
+  // '' to null up front so @IsDateString (skipped by @IsOptional on null)
+  // does not reject the clear-intent payload; the service treats null as clear.
+  @IsOptional()
+  @Transform(({ value }) => (value === '' ? null : value))
+  @IsDateString()
+  warranty_expiry?: string | null;
 }

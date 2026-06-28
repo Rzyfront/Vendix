@@ -7,7 +7,10 @@ import { ButtonComponent } from '../../../../../../../shared/components/button/b
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { PurchaseOrdersService } from '../../../services';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
-import { PurchaseOrder, PurchaseOrderItem } from '../../../interfaces';
+import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '../../../interfaces';
+// QUI-431: reusable bulk serial-load modal in `collect` mode (no API call).
+import { SerialBulkLoadModalComponent } from '../../../../serial-numbers/components/serial-bulk-load-modal/serial-bulk-load-modal.component';
+import { BulkBackfillItem } from '../../../../serial-numbers/services/serial-numbers.service';
 
 interface ReceiveLineItem {
   id: number;
@@ -27,12 +30,19 @@ interface ReceiveLineItem {
   stock_unit?: string | null;
   purchase_unit?: string | null;
   purchase_to_stock_factor?: number | null;
+  // ===== QUI-431: serial capture =====
+  // requires_serial: product is serialized → operator may capture real
+  // serial numbers for this line. The backend auto-generates placeholders
+  // for any missing serials, so capture is optional (soft warning only).
+  requires_serial: boolean;
+  product_id: number;
+  product_variant_id: number | null;
 }
 
 @Component({
   selector: 'app-po-receive-modal',
   standalone: true,
-  imports: [FormsModule, ModalComponent, ButtonComponent, IconComponent],
+  imports: [FormsModule, ModalComponent, ButtonComponent, IconComponent, SerialBulkLoadModalComponent],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -94,6 +104,32 @@ interface ReceiveLineItem {
                       } @else if (item.purchase_unit) {
                         <span class="text-[10px] text-gray-500">{{ item.purchase_unit }}</span>
                       }
+
+                      <!-- QUI-431: serial capture (serialized products only).
+                           Soft validation: capturing fewer serials than the
+                           received quantity is allowed (backend fills the rest
+                           with placeholders); we show a warning badge. -->
+                      @if (item.requires_serial && item.receive_quantity > 0) {
+                        <button
+                          type="button"
+                          class="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                          (click)="openSerialCapture(item)"
+                        >
+                          <app-icon name="barcode" [size]="12"></app-icon>
+                          Capturar seriales
+                        </button>
+                        @if (serialCountFor(item.id) > 0) {
+                          <span
+                            class="text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted"
+                            [class.text-success]="serialCountFor(item.id) >= item.receive_quantity"
+                            [class.text-amber-600]="serialCountFor(item.id) < item.receive_quantity"
+                          >
+                            {{ serialCountFor(item.id) }}/{{ item.receive_quantity }} seriales
+                          </span>
+                        } @else {
+                          <span class="text-[10px] text-amber-600">Se autogenerarán</span>
+                        }
+                      }
                     </div>
                   } @else {
                     <span class="text-xs text-success font-medium">Completo</span>
@@ -142,6 +178,18 @@ interface ReceiveLineItem {
         </div>
       </div>
     </app-modal>
+
+    <!-- QUI-431: serial capture modal (collect mode — parses textarea/CSV and
+         emits the parsed serials; no API call). Reused per line on demand. -->
+    <app-serial-bulk-load-modal
+      [isOpen]="serialModalOpen()"
+      mode="collect"
+      [productId]="serialModalProductId()"
+      [productVariantId]="serialModalVariantId()"
+      [maxCount]="serialModalMaxCount()"
+      (isOpenChange)="onSerialModalOpenChange($event)"
+      (collected)="onSerialsCollected($event)"
+    ></app-serial-bulk-load-modal>
   `,
   styles: [`
     :host { display: block; }
@@ -172,8 +220,55 @@ export class PoReceiveModalComponent {
   readonly saving = signal(false);
   notes = '';
 
+  // ===== QUI-431: serial capture state =====
+  /** Captured serial numbers per PO line id (collect mode of the bulk modal). */
+  readonly serialsByLine = signal<Map<number, string[]>>(new Map());
+  /** Bulk-load modal visibility + context for the line currently capturing. */
+  readonly serialModalOpen = signal(false);
+  readonly serialModalProductId = signal<number | null>(null);
+  readonly serialModalVariantId = signal<number | null>(null);
+  readonly serialModalMaxCount = signal<number | null>(null);
+  /** Line id currently bound to the open serial-capture modal. */
+  private serialModalLineId: number | null = null;
+
   constructor() {
     // Use effect-like pattern via input changes
+  }
+
+  /** Count of serials captured for a given PO line (template helper). */
+  serialCountFor(lineId: number): number {
+    return this.serialsByLine().get(lineId)?.length ?? 0;
+  }
+
+  /** Open the reusable bulk-load modal in collect mode for one serialized line. */
+  openSerialCapture(item: ReceiveLineItem): void {
+    this.serialModalLineId = item.id;
+    this.serialModalProductId.set(item.product_id || null);
+    this.serialModalVariantId.set(item.product_variant_id);
+    this.serialModalMaxCount.set(item.receive_quantity || null);
+    this.serialModalOpen.set(true);
+  }
+
+  /** Bulk modal chrome open/close → keep our visibility signal in sync. */
+  onSerialModalOpenChange(open: boolean): void {
+    this.serialModalOpen.set(open);
+    if (!open) {
+      this.serialModalLineId = null;
+    }
+  }
+
+  /** collect mode emits the parsed items; persist just the serial strings. */
+  onSerialsCollected(items: BulkBackfillItem[]): void {
+    const lineId = this.serialModalLineId;
+    if (lineId == null) return;
+    const serials = items.map((i) => i.serial_number);
+    this.serialsByLine.update((map) => {
+      const next = new Map(map);
+      next.set(lineId, serials);
+      return next;
+    });
+    this.serialModalOpen.set(false);
+    this.serialModalLineId = null;
   }
 
   onOpenChange(value: boolean): void {
@@ -207,10 +302,16 @@ export class PoReceiveModalComponent {
           stock_unit: product?.stock_unit ?? null,
           purchase_unit: product?.purchase_unit ?? null,
           purchase_to_stock_factor: product?.purchase_to_stock_factor ?? null,
+          // QUI-431: serial capture metadata.
+          requires_serial: !!product?.requires_serial_numbers,
+          product_id: item.product_id ?? product?.id ?? 0,
+          product_variant_id: item.product_variant_id ?? item.product_variants?.id ?? null,
         };
       })
     );
     this.notes = '';
+    // Reset any serials captured for a previous PO.
+    this.serialsByLine.set(new Map());
   }
 
   hasPendingItems(): boolean {
@@ -231,12 +332,24 @@ export class PoReceiveModalComponent {
   }
 
   confirm(): void {
-    const itemsToReceive = this.items()
+    const serialsByLine = this.serialsByLine();
+    const itemsToReceive: ReceivePurchaseOrderItemDto[] = this.items()
       .filter(i => i.receive_quantity > 0)
-      .map(i => ({
-        id: i.id,
-        quantity_received: Math.min(i.receive_quantity, i.pending),
-      }));
+      .map(i => {
+        const dto: ReceivePurchaseOrderItemDto = {
+          id: i.id,
+          quantity_received: Math.min(i.receive_quantity, i.pending),
+        };
+        // QUI-431: only attach serials for serialized lines that captured any.
+        // Cap to quantity_received; backend auto-generates the remainder.
+        if (i.requires_serial) {
+          const serials = serialsByLine.get(i.id);
+          if (serials && serials.length > 0) {
+            dto.serial_numbers = serials.slice(0, dto.quantity_received);
+          }
+        }
+        return dto;
+      });
 
     if (itemsToReceive.length === 0) {
       this.toastService.warning('Ingresa al menos una cantidad a recibir');

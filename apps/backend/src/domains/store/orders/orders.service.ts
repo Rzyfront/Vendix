@@ -294,7 +294,16 @@ export class OrdersService {
     // Auto-scoped query
     const where: Prisma.ordersWhereInput = {
       ...(search && {
-        OR: [{ order_number: { contains: search, mode: 'insensitive' } }],
+        // Search by order number OR by customer (first_name, last_name, email).
+        // Customer is reached via orders.users (customer_id). Guest orders
+        // (customer_id null) are not matched by this branch — their name lives
+        // in shipping_address_snapshot JSON (search fragile, out of scope).
+        OR: [
+          { order_number: { contains: search, mode: 'insensitive' } },
+          { users: { first_name: { contains: search, mode: 'insensitive' } } },
+          { users: { last_name: { contains: search, mode: 'insensitive' } } },
+          { users: { email: { contains: search, mode: 'insensitive' } } },
+        ],
       }),
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
@@ -303,6 +312,18 @@ export class OrdersService {
         shipping_method_id: null,
         delivery_type: { not: 'direct_delivery' },
         state: { notIn: ['finished', 'cancelled', 'refunded'] },
+      }),
+      // "Despachable" — ref 2026-06-25, plan wizard remisión order-first.
+      // Single source of truth compartido con stores.service.ts dispatchWhere:
+      // state ∈ {processing, pending_payment} + delivery_type ≠ direct_delivery
+      // (incluye home_delivery, pickup y other). pending_payment cubre el
+      // contraentrega (COD): se despacha antes de cobrar. Coincide con el
+      // dashboard de tienda y el filtro "Por enviar" del frontend.
+      // NOTA: NO excluye órdenes parcialmente remisionadas; el frontend
+      // descuenta cantidades ya despachadas vía getByOrder(orderId).
+      ...(query.dispatchable && {
+        state: { in: ['processing', 'pending_payment'] as order_state_enum[] },
+        delivery_type: { not: 'direct_delivery' },
       }),
       ...(date_from &&
         date_to && {
@@ -330,6 +351,14 @@ export class OrdersService {
           stores: { select: { id: true, name: true, store_code: true } },
           order_items: {
             select: { id: true, product_name: true, quantity: true },
+          },
+          // Cliente para la columna "Cliente" de los listados (wizard de
+          // remisiones, lista de órdenes). findAll ya FILTRA por users en la
+          // búsqueda pero no los devolvía → "No data" en la lista. Select
+          // ligero: solo lo que renderiza el transform (nombre); guests
+          // (customer_id null) traen users=null y caen al fallback.
+          users: {
+            select: { id: true, first_name: true, last_name: true },
           },
         },
       }),

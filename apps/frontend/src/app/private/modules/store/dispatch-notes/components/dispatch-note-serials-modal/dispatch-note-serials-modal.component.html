@@ -1,0 +1,107 @@
+<app-modal [(isOpen)]="isOpen" (cancel)="onCancel()" size="lg" [showCloseButton]="true">
+  <div slot="header" class="flex items-center gap-2">
+    <app-icon name="hash" [size]="20" class="text-primary" />
+    <h3 class="text-base font-semibold text-[var(--color-text-primary)]">
+      Números de serie por línea
+    </h3>
+  </div>
+
+  <div class="space-y-4">
+    <p class="text-[12px] text-[var(--color-text-secondary)]">
+      Esta remisión incluye productos serializados. Asigna a cada línea
+      exactamente la cantidad de seriales despachados antes de confirmar.
+    </p>
+
+    @for (state of lineStates(); track state.line.dispatch_note_item_id) {
+      <div
+        class="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 space-y-3"
+      >
+        <!-- Line header -->
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold text-[var(--color-text-primary)] truncate">
+              {{ state.line.product_name }}
+            </p>
+            <p class="text-[11px] text-[var(--color-text-secondary)]">
+              Requiere {{ state.line.dispatched_quantity }}
+              {{
+                state.line.dispatched_quantity === 1
+                  ? 'número de serie'
+                  : 'números de serie'
+              }}
+            </p>
+          </div>
+          <span
+            class="text-xs font-semibold px-2 py-0.5 rounded-md whitespace-nowrap inline-flex items-center gap-1"
+            [style.color]="isLineComplete(state) ? '#16a34a' : '#b45309'"
+            [style.backgroundColor]="isLineComplete(state) ? '#dcfce7' : '#fef3c7'"
+          >
+            @if (isLineComplete(state)) {
+              <app-icon name="check" [size]="12" />
+            }
+            {{ lineTotal(state) }} / {{ state.line.dispatched_quantity }}
+          </span>
+        </div>
+
+        @if (state.loading()) {
+          <div
+            class="flex items-center gap-2 text-sm text-[var(--color-text-secondary)] py-1"
+          >
+            <app-icon name="search" [size]="16" />
+            Cargando seriales disponibles...
+          </div>
+        } @else {
+          @if (state.options().length > 0) {
+            <app-multi-selector
+              label="Seriales en stock"
+              placeholder="Busca y selecciona seriales del inventario"
+              [options]="state.options()"
+              [ngModel]="state.selectedSerialIds()"
+              (valueChange)="onSelectionChange(state, $event)"
+              [ngModelOptions]="{ standalone: true }"
+            ></app-multi-selector>
+          } @else {
+            <p class="text-[12px] text-[var(--color-text-secondary)]">
+              No hay seriales en stock registrados para este producto. Ingresa
+              los números de serie manualmente.
+            </p>
+          }
+
+          <div>
+            <label class="block text-sm font-medium text-[var(--color-text-primary)] mb-1">
+              <span class="inline-flex items-center gap-1">
+                <app-icon name="plus" [size]="14" />
+                Seriales manuales (opcional)
+              </span>
+            </label>
+            <textarea
+              rows="2"
+              class="w-full px-3 py-2 text-sm border border-[var(--color-border)] rounded-lg
+                     bg-[var(--color-surface)] text-[var(--color-text-primary)]
+                     focus:outline-none focus:ring-2 focus:ring-primary-400"
+              placeholder="Un serial por línea o separados por coma"
+              [value]="state.freeText()"
+              (input)="onFreeTextChange(state, $event)"
+            ></textarea>
+          </div>
+        }
+      </div>
+    }
+  </div>
+
+  <div slot="footer" class="flex items-center justify-between gap-2">
+    <span class="text-[12px] text-[var(--color-text-secondary)]">
+      {{ completedLines() }} / {{ lineStates().length }} líneas completas
+    </span>
+    <div class="flex gap-2">
+      <app-button variant="outline" (clicked)="onCancel()">
+        <app-icon name="x" [size]="16" slot="icon" />
+        Cancelar
+      </app-button>
+      <app-button variant="primary" [disabled]="!canConfirm()" (clicked)="onConfirm()">
+        <app-icon name="check" [size]="16" slot="icon" />
+        Confirmar
+      </app-button>
+    </div>
+  </div>
+</app-modal>
