@@ -1,0 +1,73 @@
+<section class="help-center min-h-screen bg-[var(--color-background)] text-[var(--color-text-primary)]">
+  <!-- Hero -->
+  <div class="help-center__hero">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl text-center">
+      <h1 class="help-center__title">¿Necesitas ayuda?</h1>
+      <p class="help-center__lead">
+        Busca en nuestra documentación o crea una solicitud y te
+        responderemos al correo registrado.
+      </p>
+
+      <div class="help-center__search">
+        <app-icon
+          name="search"
+          [size]="20"
+          color="var(--color-text-secondary)"
+        ></app-icon>
+        <input
+          type="search"
+          placeholder="Buscar en la documentación…"
+          [ngModel]="searchQuery()"
+          (ngModelChange)="searchQuery.set($event)"
+          aria-label="Buscar en la documentación"
+        />
+      </div>
+    </div>
+  </div>
+
+  <!-- FAQ list -->
+  <div class="help-center__faqs">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
+      <h2 class="help-center__section-title">Preguntas frecuentes</h2>
+
+      @if (filteredFaqs().length === 0) {
+      <p class="help-center__empty">
+        No encontramos resultados para
+        <strong>"{{ searchQuery() }}"</strong>. Prueba con otra palabra
+        o crea una solicitud y te respondemos directamente.
+      </p>
+      } @else {
+      <ul class="help-center__faq-list">
+        @for (faq of filteredFaqs(); track faq.id) {
+        <li class="help-center__faq">
+          <details>
+            <summary>
+              <span class="help-center__faq-q">{{ faq.question }}</span>
+              <app-icon name="chevron-down" [size]="18" color="currentColor"></app-icon>
+            </summary>
+            <p class="help-center__faq-a">{{ faq.answer }}</p>
+          </details>
+        </li>
+        }
+      </ul>
+      }
+    </div>
+  </div>
+
+  <!-- CTA: no encontraste respuesta? -->
+  <div class="help-center__cta">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
+      <div class="help-center__cta-card">
+        <h3 class="help-center__cta-title">¿No encontraste una respuesta?</h3>
+        <p class="help-center__cta-lead">
+          Crea una solicitud y el equipo de soporte de Vendix te
+          responderá al correo registrado.
+        </p>
+        <a routerLink="/pqr" class="help-center__cta-btn">
+          <app-icon name="plus-circle" [size]="18" color="currentColor"></app-icon>
+          Crear una solicitud
+        </a>
+      </div>
+    </div>
+  </div>
+</section>

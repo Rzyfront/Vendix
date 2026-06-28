@@ -9,6 +9,17 @@ export const vendixLandingPublicRoutes: Routes = [
         '../../public/landing/vendix-landing/vendix-landing.component'
       ).then((c) => c.VendixLandingComponent),
   },
+  // Help Center — public entry point for unauthenticated visitors
+  // who need help. The CTA inside links to /pqr which opens the
+  // public PQRS submission form. The /pqr routes are mounted
+  // further down in this same file.
+  {
+    path: 'ayuda',
+    loadComponent: () =>
+      import(
+        '../../public/landing/help-center/help-center.component'
+      ).then((c) => c.HelpCenterComponent),
+  },
   // PQR (Peticiones, Quejas y Reclamos) — canal público centralizado
   // para atención al cliente. El link en el footer del landing apunta
   // a /pqr; las rutas thank-you y track también son públicas (sin

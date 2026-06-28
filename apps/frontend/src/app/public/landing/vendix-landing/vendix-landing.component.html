@@ -28,6 +28,10 @@
             class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
             Acceso Gratis
           </a>
+          <a routerLink="/ayuda"
+            class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
+            Centro de Ayuda
+          </a>
           <a routerLink="/auth/login"
             class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
             Iniciar Sesión
@@ -104,6 +108,14 @@
               <app-icon name="sparkles" [size]="20" color="var(--color-text-secondary)"
                 class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
               <span class="text-[var(--color-text-primary)] font-medium">Acceso Gratis</span>
+            </a>
+
+            <a routerLink="/ayuda"
+              class="flex items-center p-3 rounded-lg hover:bg-gray-50 transition-colors duration-200 group"
+              (click)="closeMobileMenu()">
+              <app-icon name="life-buoy" [size]="20" color="var(--color-text-secondary)"
+                class="mr-3 group-hover:text-[var(--color-primary)]"></app-icon>
+              <span class="text-[var(--color-text-primary)] font-medium">Centro de Ayuda</span>
             </a>
 
             <div class="border-t border-gray-200 my-4"></div>
