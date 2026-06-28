@@ -495,98 +495,107 @@ export class PqrService {
    * value.
    */
   async superAdminFindOne(id: number) {
-    const ticket = await this.globalPrisma.support_tickets.findFirst({
-      where: {
-        id,
-        OR: [
-          { tags: { has: 'pqr' } },
-          {
-            category: {
-              in: [
-                ticket_category_enum.PETITION,
-                ticket_category_enum.COMPLAINT,
-                ticket_category_enum.CLAIM,
-                ticket_category_enum.SUGGESTION,
-              ],
+    try {
+      const ticket = await this.globalPrisma.support_tickets.findFirst({
+        where: {
+          id,
+          // PQR rows are tagged with 'pqr' by createPublic() (see
+          // pqr.service.ts line 177). This is the canonical, stable
+          // discriminator — we previously tried layering a category
+          // enum IN (...) check on top, but the running Prisma client
+          // (v7.4.1 in the container) crashed with PrismaClientValidationError
+          // because SUGGESTION wasn't in the deployed DB enum until the
+          // 20260627101500 migration runs. To keep the deployed build
+          // working regardless of migration state, we rely on the tags
+          // discriminator alone. Migration can add the enum-side
+          // check back once it's deployed everywhere.
+          tags: { has: 'pqr' },
+        },
+        // Intentionally NOT including organization / store here — the
+        // mapping layer below only needs assigned_to + comments +
+        // status_history to render the admin view. Avoids pulling
+        // extra joins that aren't required by the response shape.
+        include: {
+          assigned_to: {
+            select: {
+              id: true,
+              email: true,
+              first_name: true,
+              last_name: true,
             },
           },
-        ],
-      },
-      // Intentionally NOT including organization / store here — the
-      // mapping layer below only needs assigned_to + comments +
-      // status_history to render the admin view. Avoids pulling
-      // extra joins that aren't required by the response shape.
-      include: {
-        assigned_to: {
-          select: {
-            id: true,
-            email: true,
-            first_name: true,
-            last_name: true,
+          comments: {
+            orderBy: { created_at: 'asc' },
+            include: {
+              author: {
+                select: {
+                  id: true,
+                  email: true,
+                  first_name: true,
+                  last_name: true,
+                },
+              },
+            },
           },
-        },
-        comments: {
-          orderBy: { created_at: 'asc' },
-          include: {
-            author: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
+          status_history: {
+            orderBy: { created_at: 'desc' },
+            include: {
+              changed_by: {
+                select: {
+                  id: true,
+                  email: true,
+                  first_name: true,
+                  last_name: true,
+                },
               },
             },
           },
         },
-        status_history: {
-          orderBy: { created_at: 'desc' },
-          include: {
-            changed_by: {
-              select: {
-                id: true,
-                email: true,
-                first_name: true,
-                last_name: true,
-              },
-            },
-          },
-        },
-      },
-    });
+      });
 
-    if (!ticket) {
-      throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
+      if (!ticket) {
+        throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
+      }
+
+      // Reuse the same response shape as adminFindOne so the frontend
+      // gets an identical contract for store-admin and super-admin
+      // GET /:id responses.
+      const requester = this.parseRequester(ticket.description);
+      const firstName = ticket.requester_first_name?.trim() || '';
+      const lastName = ticket.requester_last_name?.trim() || '';
+      const structuredName =
+        [firstName, lastName].filter(Boolean).join(' ').trim() ||
+        ticket.requester_email?.trim() ||
+        '';
+      const email =
+        ticket.requester_email?.trim() || requester.email || '';
+      const phone = ticket.requester_phone?.trim() || requester.phone;
+
+      return {
+        success: true as const,
+        data: {
+          ...this.toAdminView(ticket),
+          requester_first_name: firstName,
+          requester_last_name: lastName,
+          requester_full_name: structuredName,
+          requester_email: email,
+          requester_phone: phone,
+          requester_document_type: ticket.requester_document_type ?? null,
+          requester_document_num: ticket.requester_document_num ?? null,
+          comments: ticket.comments,
+          status_history: ticket.status_history,
+        },
+      };
+    } catch (err) {
+      if (err instanceof VendixHttpException) {
+        throw err;
+      }
+      console.error(
+        `[superAdminFindOne] id=${id} crashed:`,
+        err instanceof Error ? err.stack : err,
+      );
+      throw err;
     }
-
-    // Reuse the same response shape as adminFindOne so the frontend
-    // gets an identical contract for store-admin and super-admin
-    // GET /:id responses.
-    const requester = this.parseRequester(ticket.description);
-    const firstName = ticket.requester_first_name?.trim() || '';
-    const lastName = ticket.requester_last_name?.trim() || '';
-    const structuredName =
-      [firstName, lastName].filter(Boolean).join(' ').trim() ||
-      ticket.requester_email?.trim() ||
-      '';
-    const email =
-      ticket.requester_email?.trim() || requester.email || '';
-    const phone = ticket.requester_phone?.trim() || requester.phone;
-
-    return {
-      success: true as const,
-      data: {
-        ...this.toAdminView(ticket),
-        requester_first_name: firstName,
-        requester_last_name: lastName,
-        requester_full_name: structuredName,
-        requester_email: email,
-        requester_phone: phone,
-        requester_document_type: ticket.requester_document_type ?? null,
-        requester_document_num: ticket.requester_document_num ?? null,
-        comments: ticket.comments,
-        status_history: ticket.status_history,
-      },
-    };
   }
 
   /**
