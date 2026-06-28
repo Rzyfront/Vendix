@@ -273,23 +273,51 @@ export class PqrService {
   /* ──────────────────────────── Admin operations ─────────────────────────── */
 
   /**
+   * Builds the base `where` clause for any admin-scoped PQR query.
+   *
+   * Visibility model:
+   *   - Store-admin: callerStoreId is set → MUST see only PQRS from
+   *     their own store. PQRS from other stores of the same org are
+   *     hidden (privacy: customer PII doesn't leak across stores).
+   *   - Org-admin: callerStoreId is null → MUST see all PQRS in the
+   *     org. They have oversight responsibility over every store.
+   *   - Super-admin: callerOrgId is null OR callerStoreId is null AND
+   *     the controller doesn't run this helper (super-admin has its
+   *     own superAdminFindOne path that bypasses org scoping).
+   *
+   * Why a helper: the rule "store-scoped if store-id present, org-
+   * scoped otherwise" needs to be applied consistently across list,
+   * stats, single-fetch, update, and comment endpoints. Centralising
+   * it here means a future tweak (e.g. switch to role-based scoping)
+   * lands in one place.
+   */
+  private buildPqrScope(): Prisma.support_ticketsWhereInput {
+    const callerOrgId = RequestContextService.getOrganizationId();
+    const callerStoreId = RequestContextService.getStoreId();
+    const where: Prisma.support_ticketsWhereInput = {
+      tags: { has: 'pqr' },
+    };
+    if (callerStoreId) {
+      // Store-scoped path — tie down to both org (defence in depth)
+      // AND store. The org check is redundant when the JWT carries
+      // both, but harmless: if a future change decouples store_id
+      // from org_id we still respect the org boundary.
+      where.organization_id = callerOrgId;
+      where.store_id = callerStoreId;
+    } else {
+      // Org-scoped path — caller has no store context (org-admin or
+      // platform operator). They see every PQRS in the org.
+      where.organization_id = callerOrgId;
+    }
+    return where;
+  }
+
+  /**
    * Lists PQRs (paginated, filtered). Always scoped to the Vendix platform
    * organization since PQRs are platform-wide, not per-store.
    */
   async adminFindAll(query: PqrQueryDto) {
-    const callerOrgId = RequestContextService.getOrganizationId();
-
-    // Strict org scope — only show PQRs from the caller's org.
-    // PQRs tagged with the platform org (orgVendix) belong to the
-    // super-admin's inbox and should NOT show up in the store-admin
-    // view even if they were created from the store's storefront
-    // (the storefront's domain context resolves the right org_id
-    // post-fix; legacy orgVendix-tagged rows were an artifact of
-    // the pre-fix createPublic flow).
-    const where: Prisma.support_ticketsWhereInput = {
-      organization_id: callerOrgId,
-      tags: { has: 'pqr' },
-    };
+    const where = this.buildPqrScope();
 
     if (query.status) where.status = query.status;
     if (query.priority) where.priority = query.priority;
@@ -340,12 +368,7 @@ export class PqrService {
   }
 
   async adminGetStats() {
-    const callerOrgId = RequestContextService.getOrganizationId();
-    // Strict org scope — same as adminFindAll.
-    const where: Prisma.support_ticketsWhereInput = {
-      organization_id: callerOrgId,
-      tags: { has: 'pqr' },
-    };
+    const where = this.buildPqrScope();
 
     const [total, byStatus, byType, byPriority, recent24h] =
       await Promise.all([
@@ -393,13 +416,10 @@ export class PqrService {
   }
 
   async adminFindOne(id: number) {
-    const callerOrgId = RequestContextService.getOrganizationId();
-
     const ticket = await this.globalPrisma.support_tickets.findFirst({
       where: {
+        ...this.buildPqrScope(),
         id,
-        organization_id: callerOrgId,
-        tags: { has: 'pqr' },
       },
       include: {
         assigned_to: {
@@ -633,16 +653,11 @@ export class PqrService {
     opts: { bypassStatusGuard?: boolean } = {},
   ) {
     const orgVendix = await this.getPlatformOrgOrThrow();
-    const callerOrgId = RequestContextService.getOrganizationId();
 
     const ticket = await this.globalPrisma.support_tickets.findFirst({
       where: {
+        ...this.buildPqrScope(),
         id,
-        tags: { has: 'pqr' },
-        OR: [
-          callerOrgId ? { organization_id: callerOrgId } : undefined,
-          { organization_id: orgVendix.id },
-        ].filter(Boolean) as Prisma.support_ticketsWhereInput[],
       },
     });
     if (!ticket) {
@@ -742,16 +757,11 @@ export class PqrService {
 
   async adminUpdate(id: number, dto: UpdatePqrDto, userId: number) {
     const orgVendix = await this.getPlatformOrgOrThrow();
-    const callerOrgId = RequestContextService.getOrganizationId();
 
     const existing = await this.globalPrisma.support_tickets.findFirst({
       where: {
+        ...this.buildPqrScope(),
         id,
-        tags: { has: 'pqr' },
-        OR: [
-          callerOrgId ? { organization_id: callerOrgId } : undefined,
-          { organization_id: orgVendix.id },
-        ].filter(Boolean) as Prisma.support_ticketsWhereInput[],
       },
       select: { id: true },
     });
