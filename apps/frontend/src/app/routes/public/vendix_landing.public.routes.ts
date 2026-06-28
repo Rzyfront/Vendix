@@ -41,6 +41,13 @@ export const vendixLandingPublicRoutes: Routes = [
       ).then((c) => c.PqrThankYouComponent),
   },
   {
+    path: 'pqr/consultar',
+    loadComponent: () =>
+      import(
+        '../../public/ecommerce/pages/pqr/pqr-track.component'
+      ).then((c) => c.PqrTrackComponent),
+  },
+  {
     path: 'pqr/consultar/:ticket_number',
     loadComponent: () =>
       import(
