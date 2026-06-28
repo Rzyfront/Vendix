@@ -691,31 +691,37 @@
     text-decoration: none;
     transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 
+    // Primary = Vendix green (matches "Comenzar Gratis" landing CTA)
     &--primary {
-      background: #2f6f4e;
+      background: #22c55e;
       color: white;
-      box-shadow: 0 2px 8px rgba(47, 111, 78, 0.2);
+      box-shadow: 0 2px 8px rgba(34, 197, 94, 0.2);
 
       &:hover {
-        background: #1b5132;
+        background: #16a34a;
         transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(47, 111, 78, 0.3);
+        box-shadow: 0 4px 12px rgba(34, 197, 94, 0.3);
       }
     }
 
+    // Secondary = blue (action: "look up existing"). Distinct from
+    // the green "create new" so the user reads the two options as
+    // different intents: create vs consult.
     &--secondary {
-      background: white;
-      color: #0f172a;
-      border: 1px solid #e2e8f0;
+      background: #2563eb;
+      color: white;
+      border: 0;
+      box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
 
       &:hover {
-        border-color: #2f6f4e;
-        color: #2f6f4e;
+        background: #1d4ed8;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3);
       }
     }
 
     &:focus-visible {
-      outline: 2px solid #2f6f4e;
+      outline: 2px solid #22c55e;
       outline-offset: 2px;
     }
   }
