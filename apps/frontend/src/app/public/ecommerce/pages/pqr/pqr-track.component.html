@@ -11,11 +11,11 @@
     <input
       type="search"
       placeholder="Ej: PQRS-1-00001"
-      [ngModel]="queryInput()"
-      (ngModelChange)="queryInput.set($event.target.value)"
+      [value]="queryInput()"
+      (input)="queryInput.set($any($event.target).value)"
       (keydown.enter)="search()"
     />
-    <button class="primary-btn" (click)="search()">Consultar</button>
+    <button type="button" class="primary-btn" (click)="search()">Consultar</button>
   </div>
 
   @switch (state()) {
