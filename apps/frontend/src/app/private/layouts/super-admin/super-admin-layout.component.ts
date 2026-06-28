@@ -432,13 +432,15 @@ export class SuperAdminLayoutComponent {
       )
       .subscribe({
         next: (stats: any) => {
-          const openCount =
-            (stats.by_status?.['NEW'] || 0) +
-            (stats.by_status?.['OPEN'] || 0) +
-            (stats.by_status?.['IN_PROGRESS'] || 0) +
-            (stats.by_status?.['WAITING_RESPONSE'] || 0) +
-            (stats.by_status?.['REOPENED'] || 0);
-          this.openPqrsCount.set(openCount);
+          // Badge counts only PQRS that still need a response from
+          // the support team — not just "open" ones. Once any admin
+          // (store or super) has posted a public comment, the row
+          // drops off the badge because it's no longer actionable.
+          // The server pre-computes this as `unanswered_count` so we
+          // don't have to do the `comments: { none: { ... } }` query
+          // in the frontend.
+          const unansweredCount = stats.unanswered_count ?? 0;
+          this.openPqrsCount.set(unansweredCount);
         },
         error: (err) => {
           console.error('Error loading PQR stats:', err);

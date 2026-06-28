@@ -370,31 +370,53 @@ export class PqrService {
   async adminGetStats() {
     const where = this.buildPqrScope();
 
-    const [total, byStatus, byType, byPriority, recent24h] =
-      await Promise.all([
-        this.globalPrisma.support_tickets.count({ where }),
-        this.globalPrisma.support_tickets.groupBy({
-          by: ['status'],
-          where,
-          _count: true,
-        }),
-        this.globalPrisma.support_tickets.groupBy({
-          by: ['category'],
-          where,
-          _count: true,
-        }),
-        this.globalPrisma.support_tickets.groupBy({
-          by: ['priority'],
-          where,
-          _count: true,
-        }),
-        this.globalPrisma.support_tickets.count({
-          where: {
-            ...where,
-            created_at: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    const [
+      total,
+      byStatus,
+      byType,
+      byPriority,
+      recent24h,
+      unanswered,
+    ] = await Promise.all([
+      this.globalPrisma.support_tickets.count({ where }),
+      this.globalPrisma.support_tickets.groupBy({
+        by: ['status'],
+        where,
+        _count: true,
+      }),
+      this.globalPrisma.support_tickets.groupBy({
+        by: ['category'],
+        where,
+        _count: true,
+      }),
+      this.globalPrisma.support_tickets.groupBy({
+        by: ['priority'],
+        where,
+        _count: true,
+      }),
+      this.globalPrisma.support_tickets.count({
+        where: {
+          ...where,
+          created_at: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+        },
+      }),
+      // PQRS that have NO admin response yet (public comment with
+      // author_type='admin'). Powers the sidebar badge: once anyone
+      // on the support team has answered, the row stops counting as
+      // actionable. Scope is already applied via `where` so the count
+      // respects store-scoped vs org-scoped visibility.
+      this.globalPrisma.support_tickets.count({
+        where: {
+          ...where,
+          comments: {
+            none: {
+              author_type: 'admin',
+              is_internal: false,
+            },
           },
-        }),
-      ]);
+        },
+      }),
+    ]);
 
     const flatten = (rows: Array<{ _count: number } & Record<string, unknown>>) =>
       rows.reduce<Record<string, number>>((acc, r) => {
@@ -408,6 +430,7 @@ export class PqrService {
       data: {
         total,
         recent_24h: recent24h,
+        unanswered_count: unanswered,
         by_status: flatten(byStatus as any),
         by_type: flatten(byType as any),
         by_priority: flatten(byPriority as any),
