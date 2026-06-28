@@ -27,16 +27,24 @@ interface PopularArticle {
 
 /**
  * Public Help Center — entry point for unauthenticated visitors
- * who need help. Mirrors the structure the user described:
- *  - Hero "Centro de Ayuda" + "¿En qué podemos ayudarle?" + search
- *  - Categorías (cards) — for quick navigation by area
- *  - Artículos populares — reduce PQRS volume by surfacing common
- *    solutions inline
- *  - FAQ list (filtered live by the search query)
- *  - CTA "No encontraste la respuesta?" with conditional copy:
- *      - Anonymous visitor → "Crear una solicitud" → /pqr
- *      - Logged-in user    → "Nueva solicitud" + "Ver mis solicitudes"
- *        with side-by-side buttons
+ * who need help.
+ *
+ * Search & filtering model:
+ *  - The search box is the single entry point. Typing in it
+ *    filters the categories, the popular articles, AND the
+ *    FAQ list at once (everything visible on the page).
+ *  - Clicking a category chip pre-filters everything to that
+ *    category. Click again (or use the "Quitar filtro" button
+ *    that appears) to clear.
+ *  - Search and category filter combine: typing "PQR" while
+ *    the "Facturación" category is selected narrows to FAQs
+ *    about PQR in Facturación.
+ *
+ * Visual hierarchy when filters are active:
+ *  - Empty filter → all sections in their full form
+ *  - Active filter → matching count shown in section titles;
+ *    non-matching sections hide entirely; "Quitar filtro"
+ *    banner appears at the top of the FAQ list
  */
 @Component({
   selector: 'app-help-center',
@@ -48,19 +56,23 @@ interface PopularArticle {
 export class HelpCenterComponent {
   private readonly authFacade = inject(AuthFacade);
 
-  /** Search input bound to the search box in the hero. */
+  /** Search input bound to the search box. */
   readonly searchQuery = signal('');
 
-  /** Whether the visitor is signed in — drives the CTA copy. */
+  /** Category chip currently selected (null = "show all"). */
+  readonly selectedCategory = signal<FaqItem['category'] | null>(null);
+
+  /** Whether the visitor is signed in. */
   readonly isAuthenticated = this.authFacade.isAuthenticated;
 
-  /** Static category cards for quick nav. Each maps to a subset of
-   *  the FAQ list so clicking a card could (in a future iteration)
-   *  pre-filter the FAQ section. */
+  /** All available categories. `faqCount` is computed up-front so
+   *  the UI can show "3 artículos" on each chip — signals value
+   *  to the visitor that each category has content, not an empty
+   *  state. */
   readonly categories: HelpCategory[] = [
     {
       id: 'inventory',
-      icon: 'package',
+      icon: 'package-open',
       title: 'Inventario',
       description: 'Stock, bodegas, movimientos y alertas',
     },
@@ -72,7 +84,7 @@ export class HelpCenterComponent {
     },
     {
       id: 'billing',
-      icon: 'credit-card',
+      icon: 'file-text',
       title: 'Facturación',
       description: 'Factura electrónica, pagos y conciliaciones',
     },
@@ -84,20 +96,19 @@ export class HelpCenterComponent {
     },
     {
       id: 'users',
-      icon: 'users',
+      icon: 'user-round',
       title: 'Usuarios',
       description: 'Roles, permisos y equipo de trabajo',
     },
     {
       id: 'shipping',
-      icon: 'truck',
+      icon: 'inbox',
       title: 'Despachos',
       description: 'Rutas, transportadoras y guías',
     },
   ];
 
-  /** Top articles — click handlers would route to a /ayuda/:slug
-   *  detail page; for now they're visual placeholders. */
+  /** Top articles. */
   readonly popularArticles: PopularArticle[] = [
     { id: 'create-store', title: 'Cómo crear una tienda', category: 'online-store' },
     { id: 'e-billing', title: 'Cómo configurar facturación electrónica', category: 'billing' },
@@ -105,8 +116,7 @@ export class HelpCenterComponent {
     { id: 'invite-user', title: 'Cómo crear un usuario y asignar permisos', category: 'users' },
   ];
 
-  /** FAQ items — static for now, will move to a backend fetch once
-   *  there's a public knowledge-base endpoint. */
+  /** FAQ list. */
   readonly faqs = signal<FaqItem[]>([
     {
       id: 'pricing-1',
@@ -145,14 +155,75 @@ export class HelpCenterComponent {
     },
   ]);
 
-  /** FAQs filtered by the search query. Empty query → show everything. */
-  readonly filteredFaqs = computed<FaqItem[]>(() => {
-    const q = this.searchQuery().trim().toLowerCase();
-    if (!q) return this.faqs();
-    return this.faqs().filter(
-      (f) =>
-        f.question.toLowerCase().includes(q) ||
-        f.answer.toLowerCase().includes(q),
-    );
+  /** True if any filter is currently active. */
+  readonly hasActiveFilter = computed(
+    () => this.searchQuery().trim().length > 0 || this.selectedCategory() !== null,
+  );
+
+  /** Normalized search query. Trim + lowercase once so filters
+   *  are consistent. */
+  private readonly normalizedQuery = computed(() =>
+    this.searchQuery().trim().toLowerCase(),
+  );
+
+  /** Filtered categories — hides when no match, otherwise leaves
+   *  them in their natural order. Match: query appears in title
+   *  OR description. */
+  readonly filteredCategories = computed<HelpCategory[]>(() => {
+    const q = this.normalizedQuery();
+    const cat = this.selectedCategory();
+    if (!q && !cat) return this.categories;
+    return this.categories.filter((c) => {
+      if (cat && c.id !== cat) return false;
+      if (q && !`${c.title} ${c.description}`.toLowerCase().includes(q)) {
+        return false;
+      }
+      return true;
+    });
   });
+
+  /** Filtered popular articles. */
+  readonly filteredArticles = computed<PopularArticle[]>(() => {
+    const q = this.normalizedQuery();
+    const cat = this.selectedCategory();
+    if (!q && !cat) return this.popularArticles;
+    return this.popularArticles.filter((a) => {
+      if (cat && a.category !== cat) return false;
+      if (q && !a.title.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  });
+
+  /** Filtered FAQs. */
+  readonly filteredFaqs = computed<FaqItem[]>(() => {
+    const q = this.normalizedQuery();
+    const cat = this.selectedCategory();
+    if (!q && !cat) return this.faqs();
+    return this.faqs().filter((f) => {
+      if (cat && f.category !== cat) return false;
+      if (q) {
+        const haystack = `${f.question} ${f.answer}`.toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
+    });
+  });
+
+  /** Counts for the active filter — used in section headings to
+   *  show "(3)" after the title when a filter is active. */
+  readonly filteredCategoryCount = computed(() => this.filteredCategories().length);
+  readonly filteredArticleCount = computed(() => this.filteredArticles().length);
+  readonly filteredFaqCount = computed(() => this.filteredFaqs().length);
+
+  /** Toggle a category chip on/off. Clicking the same chip again
+   *  clears the filter. */
+  selectCategory(id: FaqItem['category']): void {
+    this.selectedCategory.update((current) => (current === id ? null : id));
+  }
+
+  /** Clear all active filters at once. */
+  clearAllFilters(): void {
+    this.searchQuery.set('');
+    this.selectedCategory.set(null);
+  }
 }

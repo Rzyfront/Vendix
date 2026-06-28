@@ -1,7 +1,6 @@
-<section class="help-center min-h-screen text-[var(--color-text-primary)]">
-  <!-- Top bar with back button — gives identity (logo) and a clear
-       exit so the page doesn't feel like a dead-end documentation
-       view. Sticky on scroll so the user always has an escape hatch. -->
+<section class="help-center text-[var(--color-text-primary)]">
+  <!-- Top bar with back button. Sticky so the user always has
+       an escape hatch. -->
   <div class="help-center__topbar">
     <a routerLink="/" class="help-center__back" aria-label="Volver al inicio">
       <app-icon name="arrow-left" [size]="18" color="currentColor"></app-icon>
@@ -24,7 +23,7 @@
         <app-icon
           name="search"
           [size]="20"
-          color="var(--color-text-secondary)"
+          color="currentColor"
         ></app-icon>
         <input
           type="search"
@@ -33,25 +32,91 @@
           (ngModelChange)="searchQuery.set($event)"
           aria-label="Buscar artículos, preguntas o funciones"
         />
+        @if (searchQuery()) {
+        <button
+          type="button"
+          class="help-center__search-clear"
+          (click)="searchQuery.set('')"
+          aria-label="Limpiar búsqueda"
+        >
+          <app-icon name="x" [size]="16" color="currentColor"></app-icon>
+        </button>
+        }
       </div>
     </div>
   </div>
 
-  <!-- Categorías -->
+  <!-- Filter status bar — only shown when at least one filter is
+       active. Tells the user "we're filtering" and gives a single
+       click to clear. -->
+  @if (hasActiveFilter()) {
+  <div class="help-center__filter-bar">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
+      <div class="help-center__filter-banner">
+        <span class="help-center__filter-text">
+          @if (selectedCategory()) {
+          Filtrando por categoría:
+          <strong>{{ selectedCategory() }}</strong>
+          @if (searchQuery()) { · Búsqueda: "<strong>{{ searchQuery() }}</strong>" }
+          } @else {
+          Búsqueda: "<strong>{{ searchQuery() }}</strong>"
+          }
+        </span>
+        <button
+          type="button"
+          class="help-center__filter-clear"
+          (click)="clearAllFilters()"
+        >
+          <app-icon name="x" [size]="14" color="currentColor"></app-icon>
+          Quitar filtro
+        </button>
+      </div>
+    </div>
+  </div>
+  }
+
+  <!-- Categorías — clickable chips que filtran todo el contenido
+       de la página. Cada chip muestra cuántos items tiene esa
+       categoría para que el usuario sepa qué esperar. -->
   <div class="help-center__categories">
-    <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-      <h2 class="help-center__section-title">Categorías</h2>
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
+      <div class="help-center__section-head">
+        <h2 class="help-center__section-title">Explorar por categoría</h2>
+        @if (hasActiveFilter()) {
+        <span class="help-center__section-count">
+          ({{ filteredCategoryCount() }})
+        </span>
+        }
+      </div>
       <div class="help-center__category-grid">
-        @for (cat of categories; track cat.id) {
-        <a class="help-center__category" [attr.href]="'#faq-' + cat.id">
+        @for (cat of filteredCategories(); track cat.id) {
+        <button
+          type="button"
+          class="help-center__category"
+          [class.help-center__category--active]="selectedCategory() === cat.id"
+          (click)="selectCategory(cat.id)"
+          [attr.aria-pressed]="selectedCategory() === cat.id"
+        >
           <div class="help-center__category-icon">
-            <app-icon [name]="cat.icon" [size]="22" color="var(--color-primary)"></app-icon>
+            <app-icon [name]="cat.icon" [size]="22" color="currentColor"></app-icon>
           </div>
           <div class="help-center__category-body">
             <h3 class="help-center__category-title">{{ cat.title }}</h3>
             <p class="help-center__category-desc">{{ cat.description }}</p>
           </div>
-        </a>
+          @if (selectedCategory() === cat.id) {
+          <div class="help-center__category-check">
+            <app-icon name="check" [size]="16" color="currentColor"></app-icon>
+          </div>
+          } @else {
+          <app-icon name="arrow-right" [size]="16" color="currentColor" class="help-center__category-arrow"></app-icon>
+          }
+        </button>
+        }
+        @if (filteredCategories().length === 0) {
+        <p class="help-center__empty-inline">
+          No hay categorías que coincidan con tu búsqueda.
+        </p>
         }
       </div>
     </div>
@@ -60,36 +125,55 @@
   <!-- Artículos populares -->
   <div class="help-center__articles">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
-      <h2 class="help-center__section-title">Artículos más consultados</h2>
+      <div class="help-center__section-head">
+        <h2 class="help-center__section-title">Artículos más consultados</h2>
+        @if (hasActiveFilter()) {
+        <span class="help-center__section-count">
+          ({{ filteredArticleCount() }})
+        </span>
+        }
+      </div>
+      @if (filteredArticles().length === 0) {
+      <p class="help-center__empty-inline">
+        No hay artículos que coincidan con tu búsqueda.
+      </p>
+      } @else {
       <ul class="help-center__article-list">
-        @for (article of popularArticles; track article.id) {
+        @for (article of filteredArticles(); track article.id) {
         <li class="help-center__article">
           <a>
-            <app-icon name="file-text" [size]="16" color="var(--color-primary)"></app-icon>
+            <app-icon name="file-text" [size]="16" color="currentColor"></app-icon>
             <span>{{ article.title }}</span>
-            <app-icon name="arrow-right" [size]="16" color="var(--color-text-secondary)"></app-icon>
+            <app-icon name="arrow-right" [size]="16" color="currentColor"></app-icon>
           </a>
         </li>
         }
       </ul>
+      }
     </div>
   </div>
 
   <!-- FAQ list -->
   <div class="help-center__faqs">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
-      <h2 class="help-center__section-title">Preguntas frecuentes</h2>
+      <div class="help-center__section-head">
+        <h2 class="help-center__section-title">Preguntas frecuentes</h2>
+        @if (hasActiveFilter()) {
+        <span class="help-center__section-count">
+          ({{ filteredFaqCount() }})
+        </span>
+        }
+      </div>
 
       @if (filteredFaqs().length === 0) {
-      <p class="help-center__empty">
-        No encontramos resultados para
-        <strong>"{{ searchQuery() }}"</strong>. Prueba con otra palabra
-        o crea una solicitud y te respondemos directamente.
+      <p class="help-center__empty-inline">
+        No encontramos respuestas que coincidan. Prueba con otra
+        palabra o crea una solicitud y te respondemos directamente.
       </p>
       } @else {
       <ul class="help-center__faq-list">
         @for (faq of filteredFaqs(); track faq.id) {
-        <li class="help-center__faq" [id]="'faq-' + faq.category">
+        <li class="help-center__faq">
           <details>
             <summary>
               <span class="help-center__faq-q">{{ faq.question }}</span>
@@ -104,7 +188,7 @@
     </div>
   </div>
 
-  <!-- Equipo de soporte: humaniza la página y refuerza confianza. -->
+  <!-- Canales de soporte -->
   <div class="help-center__channels">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8">
       <h2 class="help-center__section-title help-center__section-title--centered">
@@ -113,7 +197,7 @@
       <div class="help-center__channel-grid">
         <div class="help-center__channel">
           <div class="help-center__channel-icon">
-            <app-icon name="mail" [size]="20" color="var(--color-primary)"></app-icon>
+            <app-icon name="mail" [size]="20" color="currentColor"></app-icon>
           </div>
           <h3 class="help-center__channel-title">Correo</h3>
           <p class="help-center__channel-desc">
@@ -123,7 +207,7 @@
         </div>
         <div class="help-center__channel">
           <div class="help-center__channel-icon">
-            <app-icon name="message-circle" [size]="20" color="var(--color-primary)"></app-icon>
+            <app-icon name="message-circle" [size]="20" color="currentColor"></app-icon>
           </div>
           <h3 class="help-center__channel-title">Chat en vivo</h3>
           <p class="help-center__channel-desc">
@@ -133,7 +217,7 @@
         </div>
         <div class="help-center__channel">
           <div class="help-center__channel-icon">
-            <app-icon name="book-open" [size]="20" color="var(--color-primary)"></app-icon>
+            <app-icon name="book-open" [size]="20" color="currentColor"></app-icon>
           </div>
           <h3 class="help-center__channel-title">Base de conocimiento</h3>
           <p class="help-center__channel-desc">
@@ -145,8 +229,7 @@
     </div>
   </div>
 
-  <!-- Equipo + CTA side-by-side: dark gradient cards que
-       transmiten "producto real, no documentación genérica". -->
+  <!-- Equipo + CTA side-by-side -->
   <div class="help-center__team">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
       <div class="help-center__team-grid">
@@ -157,11 +240,11 @@
           </p>
           <div class="help-center__team-info">
             <div class="help-center__team-item">
-              <app-icon name="mail" [size]="16" color="#4ade80"></app-icon>
+              <app-icon name="mail" [size]="16" color="currentColor"></app-icon>
               <a href="mailto:soporte@vendix.online">soporte@vendix.online</a>
             </div>
             <div class="help-center__team-item">
-              <app-icon name="clock" [size]="16" color="#4ade80"></app-icon>
+              <app-icon name="clock" [size]="16" color="currentColor"></app-icon>
               <span>Lun–Vie<br />8:00 AM – 6:00 PM</span>
             </div>
           </div>
@@ -198,9 +281,6 @@
     </div>
   </div>
 
-  <!-- Botón de regresar al final — alternativa al del topbar para
-       usuarios que llegan al fondo de la página y no quieren
-       scrollear de vuelta. Mismo destino, contexto distinto. -->
   <div class="help-center__footer-nav">
     <a routerLink="/" class="help-center__back help-center__back--centered">
       <app-icon name="arrow-left" [size]="18" color="currentColor"></app-icon>

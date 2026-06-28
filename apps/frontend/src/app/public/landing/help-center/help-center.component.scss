@@ -118,6 +118,7 @@
     padding: 1rem 1.25rem;
     box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    color: #475569;
 
     &:focus-within {
       border-color: #2f6f4e;
@@ -139,6 +140,23 @@
     }
   }
 
+  &__search-clear {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: #94a3b8;
+    padding: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 50%;
+    transition: background-color 0.15s ease, color 0.15s ease;
+
+    &:hover {
+      background: #f1f5f9;
+      color: #475569;
+    }
+  }
+
   &__section-title {
     font-size: 1.35rem;
     font-weight: 700;
@@ -149,6 +167,75 @@
     &--centered {
       text-align: center;
     }
+  }
+
+  &__section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+  }
+
+  &__section-count {
+    color: #94a3b8;
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+
+  // ── Filter bar (only when active) ─────────────────────────
+  &__filter-bar {
+    padding: 0.5rem 0 0.5rem;
+  }
+
+  &__filter-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.625rem 1rem;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    border-radius: 10px;
+    font-size: 0.85rem;
+    color: #065f46;
+  }
+
+  &__filter-text {
+    flex: 1;
+
+    strong {
+      font-weight: 600;
+    }
+  }
+
+  &__filter-clear {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.25rem 0.625rem;
+    border-radius: 6px;
+    background: transparent;
+    border: 1px solid #065f46;
+    color: #065f46;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+
+    &:hover {
+      background: #065f46;
+      color: white;
+    }
+  }
+
+  &__empty-inline {
+    color: #64748b;
+    padding: 1.25rem 1.5rem;
+    background: white;
+    border: 1px dashed #cbd5e1;
+    border-radius: 12px;
+    text-align: center;
+    font-size: 0.9rem;
   }
 
   // ── Categorías ────────────────────────────────────────────
@@ -177,11 +264,13 @@
     align-items: center;
     gap: 1rem;
     background: white;
-    border: 1px solid #e2e8f0;
+    border: 1.5px solid #e2e8f0;
     border-radius: 14px;
     padding: 1.25rem;
-    text-decoration: none;
     color: #0f172a;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
     transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 
     &:hover {
@@ -189,6 +278,17 @@
       background: #f0fdf4;
       transform: translateY(-1px);
       box-shadow: 0 4px 12px rgba(47, 111, 78, 0.08);
+    }
+
+    &--active {
+      border-color: #2f6f4e;
+      background: #f0fdf4;
+      box-shadow: 0 0 0 3px rgba(47, 111, 78, 0.15);
+    }
+
+    &:focus-visible {
+      outline: 2px solid #2f6f4e;
+      outline-offset: 2px;
     }
   }
 
@@ -220,6 +320,29 @@
     font-size: 0.8rem;
     color: #64748b;
     line-height: 1.4;
+  }
+
+  &__category-arrow {
+    color: #94a3b8;
+    flex-shrink: 0;
+    transition: transform 0.15s ease, color 0.15s ease;
+  }
+
+  &__category:hover &__category-arrow {
+    color: #2f6f4e;
+    transform: translateX(2px);
+  }
+
+  &__category-check {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #2f6f4e;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
   }
 
   // ── Artículos populares ────────────────────────────────────
