@@ -222,17 +222,36 @@ export class PqrDetailPageComponent {
   saveEditComment(commentId: number): void {
     if (!this.canSaveEditComment() || !this.detail()) return;
     const detailId = this.detail()!.id;
+    // Capture the new content BEFORE we clear the signal — we need
+    // it to patch the local detail state in the success branch.
+    const newContent = this.editCommentContent().trim();
     this.editCommentSaving.set(true);
     this.editCommentError.set(null);
     this.adminService.editComment(detailId, commentId, {
-      content: this.editCommentContent().trim(),
+      content: newContent,
     }).subscribe({
       next: (res) => {
         if (!res?.success) return;
         this.editCommentSaving.set(false);
         this.editingCommentId.set(null);
         this.editCommentContent.set('');
-        this.fetch(detailId);
+
+        // Patch the local detail state with the updated comment so the
+        // conversation list reflects the new content immediately.
+        // Mirrors the super-admin fix — avoids a follow-up GET that
+        // races with other edits and forces the user to see a stale
+        // view until the round-trip completes. The backend already
+        // persisted the change; we just mirror it in client state.
+        const currentDetail = this.detail();
+        if (currentDetail) {
+          const updatedComments = (currentDetail.comments ?? []).map(
+            (c: any) =>
+              c.id === commentId
+                ? { ...c, content: newContent, updated_at: new Date().toISOString() }
+                : c,
+          );
+          this.detail.set({ ...currentDetail, comments: updatedComments });
+        }
       },
       error: (err) => {
         this.editCommentError.set(

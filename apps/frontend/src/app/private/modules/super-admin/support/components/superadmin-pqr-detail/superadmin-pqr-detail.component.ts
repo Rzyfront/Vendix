@@ -1757,12 +1757,15 @@ export class SuperadminPqrDetailComponent {
 
   saveEditComment(commentId: number): void {
     if (!this.canSaveEditComment() || !this.pqr()) return;
+    // Capture the new content BEFORE we clear the signal — we need
+    // it to patch the local pqr state in the success branch.
+    const newContent = this.editCommentContent().trim();
     this.editCommentSaving.set(true);
     this.editCommentError.set(null);
     this.http
       .patch<any>(
         `${this.API_URL}/${this.pqr()!.id}/comments/${commentId}`,
-        { content: this.editCommentContent().trim() },
+        { content: newContent },
       )
       .pipe(
         takeUntilDestroyed(this.destroyRef),
@@ -1780,9 +1783,22 @@ export class SuperadminPqrDetailComponent {
         this.editCommentSaving.set(false);
         this.editingCommentId.set(null);
         this.editCommentContent.set('');
-        // Re-fetch so the conversation list + history card reflect
-        // the new content + audit row.
-        this.fetch(this.pqr()!.id);
+
+        // Patch the local pqr state with the updated comment so the
+        // conversation list reflects the new content immediately.
+        // Avoids a follow-up GET that would race with other edits
+        // and force the user to see a stale view until the round-trip
+        // completes. The backend already persisted the change; we
+        // just need to mirror it in the client state.
+        const currentPqr = this.pqr();
+        if (currentPqr) {
+          const updatedComments = (currentPqr.comments ?? []).map((c: any) =>
+            c.id === commentId
+              ? { ...c, content: newContent, updated_at: new Date().toISOString() }
+              : c,
+          );
+          this.pqr.set({ ...currentPqr, comments: updatedComments });
+        }
       });
   }
 
