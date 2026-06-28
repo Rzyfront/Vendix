@@ -164,56 +164,54 @@
     </div>
   </div>
 
+  <!-- Equipo + CTA side-by-side: dark gradient cards que
+       transmiten "producto real, no documentación genérica". -->
   <div class="help-center__team">
-    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
-      <div class="help-center__team-card">
-        <h3 class="help-center__team-title">¿Necesitas ayuda?</h3>
-        <p class="help-center__team-lead">
-          Nuestro equipo de soporte está disponible para ayudarte.
-        </p>
-        <div class="help-center__team-info">
-          <div class="help-center__team-item">
-            <app-icon name="mail" [size]="18" color="var(--color-primary)"></app-icon>
-            <a href="mailto:soporte@vendix.online">soporte@vendix.online</a>
-          </div>
-          <div class="help-center__team-item">
-            <app-icon name="clock" [size]="18" color="var(--color-primary)"></app-icon>
-            <span>Lunes a viernes<br />8:00 AM - 6:00 PM</span>
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
+      <div class="help-center__team-grid">
+        <div class="help-center__team-card">
+          <h3 class="help-center__team-title">¿Necesitas ayuda?</h3>
+          <p class="help-center__team-lead">
+            Nuestro equipo de soporte está disponible para ayudarte.
+          </p>
+          <div class="help-center__team-info">
+            <div class="help-center__team-item">
+              <app-icon name="mail" [size]="16" color="#4ade80"></app-icon>
+              <a href="mailto:soporte@vendix.online">soporte@vendix.online</a>
+            </div>
+            <div class="help-center__team-item">
+              <app-icon name="clock" [size]="16" color="#4ade80"></app-icon>
+              <span>Lun–Vie<br />8:00 AM – 6:00 PM</span>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- CTA: no encontraste respuesta? -->
-  <div class="help-center__cta">
-    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
-      <div class="help-center__cta-card">
-        <h3 class="help-center__cta-title">¿No encontraste la respuesta?</h3>
-        <p class="help-center__cta-lead">
-          Nuestro equipo de soporte responderá a tu solicitud.
-        </p>
-        <p class="help-center__cta-sla">
-          <app-icon name="clock" [size]="14" color="currentColor"></app-icon>
-          Te responderemos al correo registrado.
-        </p>
-
-        <div class="help-center__cta-actions">
-          @if (isAuthenticated()) {
-          <a routerLink="/pqr" class="help-center__btn help-center__btn--primary">
-            <app-icon name="plus-circle" [size]="18" color="currentColor"></app-icon>
-            Nueva solicitud
-          </a>
-          <a routerLink="/admin/pqrs" class="help-center__btn help-center__btn--secondary">
-            <app-icon name="list" [size]="18" color="currentColor"></app-icon>
-            Ver mis solicitudes
-          </a>
-          } @else {
-          <a routerLink="/pqr" class="help-center__btn help-center__btn--primary">
-            <app-icon name="plus-circle" [size]="18" color="currentColor"></app-icon>
-            Crear solicitud
-          </a>
-          }
+        <div class="help-center__cta-card">
+          <h3 class="help-center__cta-title">¿No encontraste la respuesta?</h3>
+          <p class="help-center__cta-lead">
+            Crea una solicitud y te respondemos al correo.
+          </p>
+          <p class="help-center__cta-sla">
+            <app-icon name="clock" [size]="12" color="currentColor"></app-icon>
+            Tiempo de respuesta: 24h hábiles
+          </p>
+          <div class="help-center__cta-actions">
+            @if (isAuthenticated()) {
+            <a routerLink="/pqr" class="help-center__btn help-center__btn--primary">
+              <app-icon name="plus-circle" [size]="16" color="currentColor"></app-icon>
+              Nueva solicitud
+            </a>
+            <a routerLink="/admin/pqrs" class="help-center__btn help-center__btn--secondary">
+              <app-icon name="list" [size]="16" color="currentColor"></app-icon>
+              Ver mis solicitudes
+            </a>
+            } @else {
+            <a routerLink="/pqr" class="help-center__btn help-center__btn--primary">
+              <app-icon name="plus-circle" [size]="16" color="currentColor"></app-icon>
+              Crear solicitud
+            </a>
+            }
+          </div>
         </div>
       </div>
     </div>
