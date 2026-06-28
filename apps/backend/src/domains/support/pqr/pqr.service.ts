@@ -919,21 +919,16 @@ export class PqrService {
     content: string,
     userId: number,
   ) {
-    const orgVendix = await this.getPlatformOrgOrThrow();
-    const callerOrgId = RequestContextService.getOrganizationId();
-
-    // Ticket scope — same OR clause as the rest of the admin endpoints
-    // so we can find the comment regardless of whether the PQR was
-    // tagged with the caller's org or the platform org.
+    // Mirror adminAddComment (commit 90588eea): drop the org-scope
+    // OR filter. The previous where clause required the ticket to
+    // belong to either the caller's org OR orgVendix, which silently
+    // excluded tenant-scoped PQRs when called by super-admin
+    // (callerOrgId is null/unrelated for them). The tag-based
+    // discriminator alone is enough — super-admin by design reaches
+    // every PQRS, and the authorship gate below still blocks
+    // cross-role rewriting.
     const ticket = await this.globalPrisma.support_tickets.findFirst({
-      where: {
-        id,
-        tags: { has: 'pqr' },
-        OR: [
-          callerOrgId ? { organization_id: callerOrgId } : undefined,
-          { organization_id: orgVendix.id },
-        ].filter(Boolean) as Prisma.support_ticketsWhereInput[],
-      },
+      where: { id, tags: { has: 'pqr' } },
       select: { id: true, ticket_number: true, status: true },
     });
     if (!ticket) {
