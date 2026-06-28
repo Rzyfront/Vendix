@@ -180,7 +180,7 @@
   }
 
   &:hover {
-    border-color: #2f6f4e;
+    border-color: #22c55e;
     background: #f0fdf4;
   }
 
@@ -188,6 +188,11 @@
   // CTA exactly — bright green-500 fill, white text, white check
   // badge in the corner. The two CTAs (PQR submit + landing
   // "Comenzar Gratis") now read as the exact same brand action.
+  //
+  // The `&--active` rule comes AFTER `&:hover` in the source so
+  // it wins specificity (same level, later wins). On hover over
+  // an already-active card, the active state stays — no jarring
+  // light-up that would make the white text invisible.
   &--active {
     border-color: #22c55e;
     background: #22c55e;
@@ -202,6 +207,14 @@
     span {
       color: rgba(255, 255, 255, 0.9);
     }
+  }
+
+  // Active + hover: lift slightly more, no color change (the
+  // active green stays — that's the whole point of selection).
+  &--active:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25),
+                0 6px 16px rgba(34, 197, 94, 0.2);
   }
 
   // Small check badge that appears in the corner of the
