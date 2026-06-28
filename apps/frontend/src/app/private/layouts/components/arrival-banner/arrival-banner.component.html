@@ -1,0 +1,66 @@
+@if (pendingArrivals().length > 0) {
+  <div class="arrival-banner" role="status" aria-live="polite">
+    <div class="arrival-banner__inner">
+      <div class="arrival-banner__icon">
+        <app-icon name="door-open" [size]="20"></app-icon>
+      </div>
+
+      <div class="arrival-banner__content">
+        @if (count() === 1) {
+          @let first = pendingArrivals()[0];
+          <p class="arrival-banner__title">
+            <strong>{{ first.data?.customer_name ?? 'Cliente' }}</strong>
+            llegó para
+            <strong>{{ first.data?.service_name ?? 'su cita' }}</strong>
+          </p>
+          @if (first.data?.booking_number) {
+            <p class="arrival-banner__sub">
+              Reserva #{{ first.data?.booking_number }}
+            </p>
+          }
+        } @else {
+          <p class="arrival-banner__title">
+            <strong>{{ count() }}</strong> clientes esperando ser atendidos
+          </p>
+          <p class="arrival-banner__sub">
+            @for (a of pendingArrivals(); track a.id; let last = $last) {
+              {{ a.data?.customer_name ?? 'Cliente' }}@if (!last) { · }
+            }
+          </p>
+        }
+      </div>
+
+      <div class="arrival-banner__actions">
+        @if (count() === 1) {
+          <button
+            type="button"
+            class="arrival-banner__btn arrival-banner__btn--primary"
+            (click)="attend(pendingArrivals()[0])"
+          >
+            <app-icon name="user-check" [size]="16"></app-icon>
+            Atender ahora
+          </button>
+        } @else {
+          <button
+            type="button"
+            class="arrival-banner__btn arrival-banner__btn--primary"
+            [routerLink]="['/admin/reservations']"
+          >
+            Ver {{ count() }} llegadas
+          </button>
+        }
+
+        @if (count() === 1) {
+          <button
+            type="button"
+            class="arrival-banner__btn arrival-banner__btn--ghost"
+            (click)="dismiss(pendingArrivals()[0])"
+            aria-label="Descartar llegada"
+          >
+            <app-icon name="x" [size]="14"></app-icon>
+          </button>
+        }
+      </div>
+    </div>
+  </div>
+}
