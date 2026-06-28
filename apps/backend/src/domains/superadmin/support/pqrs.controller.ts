@@ -228,18 +228,33 @@ export class SuperadminPqrsController {
     const ticket = await this.prisma.support_tickets.findFirst({
       where: {
         id,
-        // Discriminate PQR rows by the category enum, NOT by the
-        // legacy `tags: { has: 'pqr' }` check (see class-level
-        // comment for the why). Covers PETITION / COMPLAINT / CLAIM /
-        // SUGGESTION — the four values that mapPqrType emits.
-        category: {
-          in: [
-            ticket_category_enum.PETITION,
-            ticket_category_enum.COMPLAINT,
-            ticket_category_enum.CLAIM,
-            ticket_category_enum.SUGGESTION,
-          ],
-        },
+        // Two-discriminator PQR match. Either condition suffices:
+        //
+        //   (a) tags includes 'pqr'  → modern + legacy rows tagged by
+        //                              createPublic() at line 177 of
+        //                              pqr.service.ts.
+        //   (b) category IN (PETITION, COMPLAINT, CLAIM, SUGGESTION)
+        //                            → enum-based canonical signal set
+        //                              by mapPqrType() at create time.
+        //
+        // We OR the two so a row is visible if EITHER discriminator
+        // is set. Avoids the silent-404 case where a row has one
+        // discriminator populated but not the other (different code
+        // paths, manual fixes, migrations that touched one signal
+        // without the other).
+        OR: [
+          { tags: { has: 'pqr' } },
+          {
+            category: {
+              in: [
+                ticket_category_enum.PETITION,
+                ticket_category_enum.COMPLAINT,
+                ticket_category_enum.CLAIM,
+                ticket_category_enum.SUGGESTION,
+              ],
+            },
+          },
+        ],
       },
       include: {
         organization: { select: { id: true, name: true, slug: true } },
