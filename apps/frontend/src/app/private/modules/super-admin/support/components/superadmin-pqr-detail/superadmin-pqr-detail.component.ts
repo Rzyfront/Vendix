@@ -79,15 +79,15 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         <h1 class="header-card__title">{{ p.title }}</h1>
         <div class="header-card__actions">
           @if (latestAdminResponse(); as resp) {
-          <app-button
-            variant="outline"
-            size="xsm"
-            customClasses="!rounded-lg !h-9 !px-3"
-            (clicked)="openResponseEditModal(resp)"
+          <button
+            type="button"
+            class="comment-edit-btn header-card__edit"
+            (click)="openResponseEditModal(resp)"
+            title="Editar tu respuesta"
           >
-            <app-icon name="edit-2" slot="icon" size="14"></app-icon>
+            <app-icon name="edit-2" [size]="12"></app-icon>
             Editar contenido
-          </app-button>
+          </button>
           }
         </div>
         <div class="header-card__meta">
@@ -1204,6 +1204,16 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
         gap: 0.5rem;
       }
 
+      // The header version of the edit button reuses the same
+      // .comment-edit-btn styling as the inline per-comment edit
+      // button so both entry points look identical. Only the size
+      // is bumped slightly so the header one reads as the primary
+      // action vs the small inline shortcut.
+      .header-card__edit {
+        font-size: 0.75rem;
+        padding: 0.25rem 0.625rem;
+      }
+
       // ─── Solicitante card — matches the store-admin visual pattern ───
       // Avatar + name block at the top (separated by a border from the
       // structured key-value pairs below). The dl drops the default
@@ -1802,7 +1812,15 @@ export class SuperadminPqrDetailComponent {
    */
   canEditComment(c: { author_id?: number; is_internal?: boolean }): boolean {
     const me = this.authFacade.userId();
-    return !!me && c.author_id === me && c.is_internal === true;
+    if (!me || c.author_id !== me) return false;
+    // Originally we required `is_internal === true` to keep public
+    // responses immutable (the customer had already received the
+    // email). The backend dropped SUP_COMMENT_003 in this branch
+    // so admins can fix typos in their own responses. Both states
+    // are now editable; the header card carries the headline
+    // "Editar contenido" button as the primary entry point and
+    // the inline "Editar" in each comment is a quick shortcut.
+    return true;
   }
 
   startEditComment(c: { id: number; content: string }): void {
