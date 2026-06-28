@@ -8,23 +8,17 @@ export interface StatsGridItem {
   value: string | number;
   icon?: ReactNode | string;
   description?: string;
-<<<<<<< HEAD
   descriptionColor?: string;
-  iconBg?: string;
-  iconColor?: string;
-  trend?: { value: number; positive: boolean };
-  /** When true, renders a skeleton placeholder instead of value. */
-  loading?: boolean;
-=======
   /** Highlighted secondary text rendered with brand color (emerald by default). */
   smallText?: string;
   smallTextColor?: string;
   iconBg?: string;
   iconColor?: string;
   trend?: { value: number; positive: boolean };
+  /** When true, renders a skeleton placeholder instead of value. */
+  loading?: boolean;
   /** Render the card without background, border, or shadow. */
   bare?: boolean;
->>>>>>> origin/dev
 }
 
 interface StatsGridProps {
@@ -32,11 +26,8 @@ interface StatsGridProps {
   style?: ViewStyle;
 }
 
-<<<<<<< HEAD
 const CARD_WIDTH = 160;
 
-=======
->>>>>>> origin/dev
 const styles = StyleSheet.create({
   container: {
     backgroundColor: 'transparent',
@@ -81,21 +72,15 @@ export function StatsGrid({ items, style }: StatsGridProps) {
               value={item.value}
               icon={item.icon}
               description={item.description}
-<<<<<<< HEAD
               descriptionColor={item.descriptionColor}
-              iconBg={item.iconBg}
-              iconColor={item.iconColor}
-              trend={item.trend}
-              loading={item.loading}
-              enterIndex={index}
-=======
               smallText={item.smallText}
               smallTextColor={item.smallTextColor}
               iconBg={item.iconBg}
               iconColor={item.iconColor}
               trend={item.trend}
+              loading={item.loading}
               bare={item.bare}
->>>>>>> origin/dev
+              enterIndex={index}
             />
           </View>
         ))}
