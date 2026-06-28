@@ -67,7 +67,7 @@
     <!-- Nombre + Email -->
     <div class="row">
       <div class="field" [class.field--error]="hasError('name', 'required') || hasError('name', 'minlength')">
-        <label for="pqr-name">Nombre completo *</label>
+        <label for="pqr-name">Nombre completo<span class="required">*</span></label>
         <input
           id="pqr-name"
           type="text"
@@ -82,7 +82,7 @@
         }
       </div>
       <div class="field" [class.field--error]="hasError('email', 'required') || hasError('email', 'email')">
-        <label for="pqr-email">Correo electrónico *</label>
+        <label for="pqr-email">Correo electrónico<span class="required">*</span></label>
         <input
           id="pqr-email"
           type="email"
@@ -115,7 +115,7 @@
 
     <!-- Asunto -->
     <div class="field" [class.field--error]="hasError('subject', 'required') || hasError('subject', 'minlength') || hasFormError('subjectEqualsDescription')">
-      <label for="pqr-subject">Asunto *</label>
+      <label for="pqr-subject">Asunto<span class="required">*</span></label>
       <input
         id="pqr-subject"
         type="text"
@@ -136,7 +136,7 @@
 
     <!-- Descripción -->
     <div class="field" [class.field--error]="hasError('description', 'required') || hasError('description', 'minlength')">
-      <label for="pqr-description">Describe tu PQRS *</label>
+      <label for="pqr-description">Describe tu PQRS<span class="required">*</span></label>
       <textarea
         id="pqr-description"
         formControlName="description"

@@ -86,6 +86,12 @@
     font-weight: 600;
     color: #334155;
     letter-spacing: -0.005em;
+
+    .required {
+      color: #ef4444; // red marker for required fields
+      margin-left: 0.125rem;
+      font-weight: 700;
+    }
   }
 
   input,
@@ -319,11 +325,14 @@
 }
 
 .secondary-btn {
-  // Subtle 'Cancel' button that matches the primary in shape
-  // but reads as secondary (border only, hover fills light).
+  // "Cancelar" reads as a destructive action — the user is
+  // abandoning the form. Red outline + red text + red fill on
+  // hover signals that clearly without forcing a modal
+  // confirmation. Mirrors the destructive-action vocabulary
+  // used elsewhere in Vendix (delete, cancel, abandon).
   background: #ffffff;
-  color: #0f172a;
-  border: 1.5px solid #e2e8f0;
+  color: #dc2626;
+  border: 1.5px solid #fecaca;
   border-radius: 8px;
   padding: 0.75rem 1.5rem;
   font-weight: 600;
@@ -333,11 +342,11 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  transition: background-color 0.15s ease, border-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
   &:hover {
-    background: #f8fafc;
-    border-color: #cbd5e1;
+    background: #fef2f2;
+    border-color: #f87171;
   }
 }
 
