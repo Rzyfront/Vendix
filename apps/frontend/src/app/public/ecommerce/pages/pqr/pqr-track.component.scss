@@ -1,7 +1,29 @@
 .pqr-track {
   max-width: 760px;
   margin: 0 auto;
-  padding: 2rem 1.25rem 4rem;
+  padding: 1rem 1.25rem 4rem;
+}
+
+.top-bar {
+  margin-bottom: 1rem;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  color: #475569;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 500;
+  transition: background-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: #f1f5f9;
+    color: #16a34a;
+  }
 }
 
 .hero {
