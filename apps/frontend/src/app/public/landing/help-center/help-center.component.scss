@@ -2,97 +2,18 @@
 // Vendix platform landing. Lives at /ayuda and links to /pqr for
 // visitors who can't find what they need.
 //
-// Dark premium theme: dark green-tinted background, glassmorphism
-// cards, glowing CTAs. Inspired by the "premium documentation"
-// treatment used by Linear, Vercel, and Stripe's developer
-// portals. The page should feel like a product surface, not a
-// generic FAQ template.
+// Theme: clean light with Vendix green accents. Previous dark
+// theme read as "premium" but the user found the green too
+// saturated and the overall feel too cold. This iteration uses
+// a soft warm off-white background with strong green branding
+// that stays legible at all sizes.
 
 .help-center {
-  // ── Page background ───────────────────────────────────────
-  background: #0a1612; // very dark green-black
-  color: #e5e7eb; // soft white text
+  background: #f8faf9; // very subtle green-tinted off-white
+  color: #0f172a;
   min-height: 100vh;
   position: relative;
   overflow-x: hidden;
-
-  // Subtle radial gradient bloom from top
-  &::before {
-    content: '';
-    position: absolute;
-    top: -200px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 800px;
-    height: 600px;
-    background: radial-gradient(
-      ellipse at center,
-      rgba(47, 111, 78, 0.25) 0%,
-      transparent 60%
-    );
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  // ── Status banner (top, with glow) ────────────────────────
-  &__status {
-    position: relative;
-    z-index: 5;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.625rem;
-    padding: 0.625rem 1rem;
-    background: linear-gradient(
-      90deg,
-      rgba(74, 222, 128, 0.15) 0%,
-      rgba(34, 197, 94, 0.2) 50%,
-      rgba(74, 222, 128, 0.15) 100%
-    );
-    color: #4ade80;
-    font-size: 0.8rem;
-    font-weight: 500;
-    text-decoration: none;
-    border-bottom: 1px solid rgba(74, 222, 128, 0.15);
-    transition: background 0.15s ease;
-
-    &:hover {
-      background: linear-gradient(
-        90deg,
-        rgba(74, 222, 128, 0.2) 0%,
-        rgba(34, 197, 94, 0.3) 50%,
-        rgba(74, 222, 128, 0.2) 100%
-      );
-    }
-  }
-
-  &__status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #4ade80;
-    box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.3),
-                0 0 12px rgba(74, 222, 128, 0.6);
-    animation: help-center-pulse 2.4s ease-in-out infinite;
-  }
-
-  @keyframes help-center-pulse {
-    0%, 100% { box-shadow: 0 0 0 3px rgba(74, 222, 128, 0.3),
-                          0 0 12px rgba(74, 222, 128, 0.6); }
-    50%      { box-shadow: 0 0 0 6px rgba(74, 222, 128, 0.1),
-                          0 0 16px rgba(74, 222, 128, 0.4); }
-  }
-
-  &__status-cta {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    margin-left: 0.5rem;
-    padding-left: 0.75rem;
-    border-left: 1px solid rgba(74, 222, 128, 0.25);
-    font-weight: 600;
-    color: #d1fae5;
-  }
 
   // ── Topbar ─────────────────────────────────────────────────
   &__topbar {
@@ -104,9 +25,9 @@
     justify-content: space-between;
     gap: 1rem;
     padding: 0.875rem 1.25rem;
-    background: rgba(10, 22, 18, 0.85);
+    background: rgba(255, 255, 255, 0.9);
     backdrop-filter: blur(12px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
   }
 
   &__topbar-spacer {
@@ -120,15 +41,15 @@
     gap: 0.375rem;
     padding: 0.5rem 0.75rem;
     border-radius: 8px;
-    color: #9ca3af;
+    color: #475569;
     text-decoration: none;
     font-size: 0.9rem;
     font-weight: 500;
     transition: background-color 0.15s ease, color 0.15s ease;
 
     &:hover {
-      background: rgba(255, 255, 255, 0.05);
-      color: #4ade80;
+      background: rgba(15, 23, 42, 0.05);
+      color: #2f6f4e;
     }
 
     &--centered {
@@ -147,17 +68,15 @@
   }
 
   &__brand-logo {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     object-fit: contain;
-    // Invert for dark background
-    filter: brightness(0) invert(1);
   }
 
   &__brand-name {
     font-weight: 700;
-    color: #4ade80;
-    font-size: 0.95rem;
+    color: #2f6f4e;
+    font-size: 1rem;
     letter-spacing: -0.01em;
   }
 
@@ -165,16 +84,16 @@
   &__hero {
     position: relative;
     z-index: 2;
-    padding: 5rem 0 3rem;
+    padding: 4.5rem 0 2.5rem;
     text-align: center;
   }
 
   &__title {
-    font-size: 3rem;
-    font-weight: 700;
+    font-size: 2.75rem;
+    font-weight: 800;
     letter-spacing: -0.03em;
     margin-bottom: 0.75rem;
-    color: white;
+    color: #0f172a;
     line-height: 1.1;
 
     @media (max-width: 640px) {
@@ -183,9 +102,9 @@
   }
 
   &__lead {
-    font-size: 1.25rem;
-    color: #9ca3af;
-    margin-bottom: 2.5rem;
+    font-size: 1.2rem;
+    color: #475569;
+    margin-bottom: 2.25rem;
     line-height: 1.5;
   }
 
@@ -193,18 +112,17 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    background: rgba(255, 255, 255, 0.04);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 16px;
-    padding: 1.125rem 1.5rem;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    background: white;
+    border: 1px solid #cbd5e1;
+    border-radius: 14px;
+    padding: 1rem 1.25rem;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
     &:focus-within {
-      border-color: rgba(74, 222, 128, 0.4);
-      box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.1),
-                  0 4px 20px rgba(0, 0, 0, 0.2);
+      border-color: #2f6f4e;
+      box-shadow: 0 0 0 4px rgba(47, 111, 78, 0.12),
+                  0 1px 3px rgba(15, 23, 42, 0.04);
     }
 
     input {
@@ -212,11 +130,11 @@
       border: none;
       outline: none;
       background: transparent;
-      font-size: 1.05rem;
-      color: white;
+      font-size: 1rem;
+      color: #0f172a;
 
       &::placeholder {
-        color: #6b7280;
+        color: #94a3b8;
       }
     }
   }
@@ -225,7 +143,7 @@
     font-size: 1.35rem;
     font-weight: 700;
     margin-bottom: 1.25rem;
-    color: white;
+    color: #0f172a;
     letter-spacing: -0.01em;
 
     &--centered {
@@ -258,19 +176,19 @@
     display: flex;
     align-items: center;
     gap: 1rem;
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: white;
+    border: 1px solid #e2e8f0;
     border-radius: 14px;
     padding: 1.25rem;
     text-decoration: none;
-    color: white;
-    transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    color: #0f172a;
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 
     &:hover {
-      border-color: rgba(74, 222, 128, 0.4);
-      background: rgba(74, 222, 128, 0.06);
+      border-color: #2f6f4e;
+      background: #f0fdf4;
       transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(47, 111, 78, 0.08);
     }
   }
 
@@ -278,13 +196,12 @@
     width: 44px;
     height: 44px;
     border-radius: 12px;
-    background: rgba(74, 222, 128, 0.12);
-    border: 1px solid rgba(74, 222, 128, 0.2);
+    background: #d1fae5;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    color: #4ade80;
+    color: #2f6f4e;
   }
 
   &__category-body {
@@ -296,12 +213,12 @@
     font-size: 0.95rem;
     font-weight: 600;
     margin-bottom: 0.25rem;
-    color: white;
+    color: #0f172a;
   }
 
   &__category-desc {
     font-size: 0.8rem;
-    color: #9ca3af;
+    color: #64748b;
     line-height: 1.4;
   }
 
@@ -327,17 +244,17 @@
       align-items: center;
       gap: 0.875rem;
       padding: 1rem 1.25rem;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: white;
+      border: 1px solid #e2e8f0;
       border-radius: 12px;
-      color: white;
+      color: #0f172a;
       text-decoration: none;
       transition: border-color 0.15s ease, background 0.15s ease;
       cursor: pointer;
 
       &:hover {
-        border-color: rgba(74, 222, 128, 0.4);
-        background: rgba(74, 222, 128, 0.05);
+        border-color: #2f6f4e;
+        background: #f0fdf4;
       }
 
       span {
@@ -356,10 +273,10 @@
   }
 
   &__empty {
-    color: #9ca3af;
+    color: #64748b;
     padding: 1.5rem;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: white;
+    border: 1px solid #e2e8f0;
     border-radius: 12px;
     text-align: center;
   }
@@ -374,14 +291,15 @@
   }
 
   &__faq {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: white;
+    border: 1px solid #e2e8f0;
     border-radius: 12px;
     overflow: hidden;
-    transition: border-color 0.15s ease;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
     &:hover {
-      border-color: rgba(74, 222, 128, 0.3);
+      border-color: #2f6f4e;
+      box-shadow: 0 2px 8px rgba(47, 111, 78, 0.06);
     }
 
     details {
@@ -394,7 +312,7 @@
         cursor: pointer;
         list-style: none;
         font-weight: 500;
-        color: white;
+        color: #0f172a;
         font-size: 0.92rem;
 
         &::-webkit-details-marker {
@@ -415,7 +333,7 @@
 
   &__faq-a {
     padding: 0 1.25rem 1.125rem;
-    color: #9ca3af;
+    color: #475569;
     line-height: 1.6;
     font-size: 0.9rem;
   }
@@ -440,17 +358,17 @@
   }
 
   &__channel {
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: white;
+    border: 1px solid #e2e8f0;
     border-radius: 14px;
     padding: 1.5rem 1.25rem;
     text-align: center;
-    transition: border-color 0.15s ease, transform 0.15s ease;
+    transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 
     &:hover {
-      border-color: rgba(74, 222, 128, 0.4);
+      border-color: #2f6f4e;
       transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(47, 111, 78, 0.08);
     }
   }
 
@@ -458,30 +376,29 @@
     width: 44px;
     height: 44px;
     border-radius: 50%;
-    background: rgba(74, 222, 128, 0.12);
-    border: 1px solid rgba(74, 222, 128, 0.25);
+    background: #d1fae5;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     margin-bottom: 0.75rem;
-    color: #4ade80;
+    color: #2f6f4e;
   }
 
   &__channel-title {
     font-size: 0.95rem;
     font-weight: 600;
     margin-bottom: 0.375rem;
-    color: white;
+    color: #0f172a;
   }
 
   &__channel-desc {
     font-size: 0.8rem;
-    color: #9ca3af;
+    color: #64748b;
     margin-bottom: 0.625rem;
     line-height: 1.4;
 
     a {
-      color: #4ade80;
+      color: #2f6f4e;
       text-decoration: none;
       font-weight: 500;
 
@@ -493,10 +410,10 @@
 
   &__channel-meta {
     font-size: 0.7rem;
-    color: #6b7280;
+    color: #94a3b8;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    font-weight: 500;
+    font-weight: 600;
   }
 
   // ── Equipo + CTA side-by-side ─────────────────────────────
@@ -517,9 +434,8 @@
   }
 
   &__team-card {
-    background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: white;
+    border: 1px solid #e2e8f0;
     border-radius: 16px;
     padding: 1.75rem;
     height: 100%;
@@ -527,13 +443,13 @@
 
   &__team-title {
     font-size: 1.2rem;
-    font-weight: 600;
+    font-weight: 700;
     margin-bottom: 0.5rem;
-    color: white;
+    color: #0f172a;
   }
 
   &__team-lead {
-    color: #9ca3af;
+    color: #64748b;
     line-height: 1.5;
     margin-bottom: 1.25rem;
     font-size: 0.88rem;
@@ -550,10 +466,10 @@
     align-items: center;
     gap: 0.5rem;
     font-size: 0.85rem;
-    color: #d1d5db;
+    color: #334155;
 
     a {
-      color: #4ade80;
+      color: #2f6f4e;
       text-decoration: none;
       font-weight: 500;
 
@@ -576,28 +492,23 @@
   }
 
   &__cta-card {
-    background: linear-gradient(
-      135deg,
-      rgba(74, 222, 128, 0.08) 0%,
-      rgba(34, 197, 94, 0.12) 100%
-    );
-    border: 1px solid rgba(74, 222, 128, 0.2);
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
     border-radius: 16px;
     padding: 2rem 1.75rem;
     text-align: center;
     height: 100%;
-    box-shadow: 0 0 40px rgba(74, 222, 128, 0.05);
   }
 
   &__cta-title {
     font-size: 1.35rem;
     font-weight: 700;
     margin-bottom: 0.625rem;
-    color: white;
+    color: #0f172a;
   }
 
   &__cta-lead {
-    color: #d1d5db;
+    color: #334155;
     line-height: 1.5;
     margin-bottom: 0.75rem;
     font-size: 0.9rem;
@@ -608,7 +519,7 @@
     align-items: center;
     gap: 0.375rem;
     font-size: 0.78rem;
-    color: #9ca3af;
+    color: #64748b;
     margin-bottom: 1.5rem;
   }
 
@@ -630,31 +541,30 @@
     transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
 
     &--primary {
-      background: #4ade80;
-      color: #052e16;
-      box-shadow: 0 4px 20px rgba(74, 222, 128, 0.3);
+      background: #2f6f4e;
+      color: white;
+      box-shadow: 0 2px 8px rgba(47, 111, 78, 0.2);
 
       &:hover {
-        background: #22c55e;
+        background: #1b5132;
         transform: translateY(-1px);
-        box-shadow: 0 6px 24px rgba(74, 222, 128, 0.4);
+        box-shadow: 0 4px 12px rgba(47, 111, 78, 0.3);
       }
     }
 
     &--secondary {
-      background: rgba(255, 255, 255, 0.06);
-      color: white;
-      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: white;
+      color: #0f172a;
+      border: 1px solid #e2e8f0;
 
       &:hover {
-        background: rgba(255, 255, 255, 0.1);
-        border-color: rgba(74, 222, 128, 0.4);
-        color: #4ade80;
+        border-color: #2f6f4e;
+        color: #2f6f4e;
       }
     }
 
     &:focus-visible {
-      outline: 2px solid #4ade80;
+      outline: 2px solid #2f6f4e;
       outline-offset: 2px;
     }
   }
@@ -662,7 +572,7 @@
   &__footer-nav {
     position: relative;
     z-index: 2;
-    padding: 0 0 5rem;
+    padding: 0 0 4rem;
     text-align: center;
   }
 }
