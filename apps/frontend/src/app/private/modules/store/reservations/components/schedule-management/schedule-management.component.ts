@@ -350,6 +350,19 @@ export class ScheduleManagementComponent {
   }
 
   /**
+   * Patch a single field of the new-employee form. Defined as a method
+   * (not an inline arrow in the template) because Angular's template
+   * parser does not support `(field) => ({ ...field, ... })` with the
+   * spread operator — see GitHub issue #50326.
+   */
+  patchNewEmployee<K extends keyof ReturnType<typeof this.newEmployee>>(
+    field: K,
+    value: ReturnType<typeof this.newEmployee>[K],
+  ): void {
+    this.newEmployee.update((e) => ({ ...e, [field]: value }));
+  }
+
+  /**
    * Create the employee via backend, refresh the available list, and
    * auto-select the new employee so the user only has to click "Agregar"
    * to finish creating the provider.
