@@ -18,7 +18,7 @@ import {
  * Admin-only query for the PQR list endpoint.
  * Reuses the existing `ticket_status_enum` and `ticket_priority_enum`,
  * and constrains `pqr_type` to the PQR-only enum values added in
- * schema.prisma (`PETITION | COMPLAINT | CLAIM`).
+ * schema.prisma (`PETITION | COMPLAINT | CLAIM | SUGGESTION`).
  */
 export class PqrQueryDto {
   @IsOptional()
@@ -26,8 +26,8 @@ export class PqrQueryDto {
   status?: ticket_status_enum;
 
   @IsOptional()
-  @IsIn(['PETITION', 'COMPLAINT', 'CLAIM'])
-  pqr_type?: 'PETITION' | 'COMPLAINT' | 'CLAIM';
+  @IsIn(['PETITION', 'COMPLAINT', 'CLAIM', 'SUGGESTION'])
+  pqr_type?: 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION';
 
   @IsOptional()
   @IsEnum(ticket_priority_enum)

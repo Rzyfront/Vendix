@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 import { environment } from '../../../environments/environment';
 
 export interface CreatePqrPublicDto {
-  pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM';
+  pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION';
   name: string;
   email: string;
   phone?: string;
@@ -65,7 +65,7 @@ export interface PublicPqrView {
   ticket_number: string;
   title: string;
   status: PqrStatus;
-  pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM';
+  pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION';
   priority: PqrPriority;
   created_at: string | null;
   updated_at: string | null;
@@ -85,7 +85,7 @@ export interface PqrTrackResponse {
   data: PublicPqrView;
 }
 
-export type PqrType = 'PETITION' | 'COMPLAINT' | 'CLAIM';
+export type PqrType = 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION';
 export type PqrStatus =
   | 'NEW'
   | 'OPEN'

@@ -20,8 +20,8 @@ import {
  * with field-level error messages on failure.
  */
 export class CreatePqrPublicDto {
-  @IsIn(['PETITION', 'COMPLAINT', 'CLAIM'])
-  pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM';
+  @IsIn(['PETITION', 'COMPLAINT', 'CLAIM', 'SUGGESTION'])
+  pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION';
 
   @IsString()
   @IsNotEmpty()

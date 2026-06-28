@@ -145,7 +145,7 @@ export class PqrEmailService {
     ticket: PqrCreatedEvent['ticket'],
     contact: PqrCreatedEvent['contact'],
   ) {
-    const subject = `Recibimos tu PQR #${ticket.ticket_number}`;
+    const subject = `Recibimos tu PQRS #${ticket.ticket_number}`;
 
     const text =
       `Hola ${contact.name},\n\n` +
@@ -156,7 +156,7 @@ export class PqrEmailService {
       `Equipo Vendix`;
 
     const html = `
-      <h2>Recibimos tu PQR</h2>
+      <h2>Recibimos tu PQRS</h2>
       <p>Hola <b>${this.escape(contact.name)}</b>,</p>
       <p>Hemos recibido tu <b>${this.pqrTypeLabel(contact.pqr_type)}</b>.</p>
       <ul>
@@ -289,11 +289,12 @@ export class PqrEmailService {
     return { name, email };
   }
 
-  private pqrTypeLabel(t: 'PETITION' | 'COMPLAINT' | 'CLAIM'): string {
+  private pqrTypeLabel(t: 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION'): string {
     return {
       PETITION: 'petición',
       COMPLAINT: 'queja',
       CLAIM: 'reclamo',
+      SUGGESTION: 'sugerencia',
     }[t];
   }
 

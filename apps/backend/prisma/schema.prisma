@@ -3839,6 +3839,7 @@ enum ticket_category_enum {
   PETITION
   COMPLAINT
   CLAIM
+  SUGGESTION
 }
 
 enum ticket_priority_enum {

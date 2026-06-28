@@ -48,6 +48,16 @@
           <strong>Reclamo</strong>
           <span>Solicitar solución a algo concreto que salió mal.</span>
         </button>
+        <button
+          type="button"
+          class="type-card"
+          [class.type-card--active]="form.controls['pqr_type'].value === 'SUGGESTION'"
+          (click)="setType('SUGGESTION')"
+        >
+          <app-icon name="lightbulb" [size]="24"></app-icon>
+          <strong>Sugerencia</strong>
+          <span>Proponer una mejora o nueva funcionalidad para Vendix.</span>
+        </button>
       </div>
       @if (hasError('pqr_type', 'required')) {
       <p class="error-text">Selecciona el tipo de PQRS.</p>

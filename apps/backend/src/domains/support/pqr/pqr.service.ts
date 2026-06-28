@@ -30,7 +30,7 @@ export interface PqrCreatedEvent {
     name: string;
     email: string;
     phone?: string;
-    pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM';
+    pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION';
   };
   ip: string;
 }
@@ -72,7 +72,7 @@ export interface PublicPqrView {
   ticket_number: string;
   title: string;
   status: ticket_status_enum;
-  pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM';
+  pqr_type: 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION';
   priority: 'P0' | 'P1' | 'P2' | 'P3' | 'P4';
   created_at: Date | null;
   updated_at: Date | null;
@@ -260,7 +260,7 @@ export class PqrService {
       ticket_number: ticket.ticket_number,
       title: ticket.title,
       status: ticket.status,
-      pqr_type: ticket.category as 'PETITION' | 'COMPLAINT' | 'CLAIM',
+      pqr_type: ticket.category as 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION',
       priority: ticket.priority as PublicPqrView['priority'],
       created_at: ticket.created_at,
       updated_at: ticket.updated_at,
@@ -812,7 +812,7 @@ export class PqrService {
           { organization_id: orgVendix.id },
         ].filter(Boolean) as Prisma.support_ticketsWhereInput[],
       },
-      select: { id: true, ticket_number: true },
+      select: { id: true, ticket_number: true, status: true },
     });
     if (!ticket) {
       throw new VendixHttpException(ErrorCodes.SUP_PQR_003);
@@ -854,11 +854,17 @@ export class PqrService {
     // Append a status_history row noting the edit. We piggyback on the
     // existing schema (no separate edit_log table) — the History card
     // surfaces "Comentario editado por X a las Y" via change_reason.
+    //
+    // old_status is nullable (no status transition happened — this is a
+    // comment edit, not a status change); new_status is NOT NULL per
+    // schema, so we re-use the ticket's current status to satisfy the
+    // constraint without fabricating a status transition that didn't
+    // occur.
     await this.globalPrisma.support_status_history.create({
       data: {
         ticket_id: id,
-        old_status: undefined,
-        new_status: undefined,
+        old_status: null,
+        new_status: ticket.status,
         change_reason: `Comentario editado por ${comment.author_name ?? `Admin #${userId}`}`,
         change_notes: `${comment.content.length} → ${content.length} chars`,
         changed_by_user_id: userId,
@@ -998,18 +1004,23 @@ export class PqrService {
   }
 
   /**
-   * Generates a ticket number in the format PQR-{orgId}-{counter}.
-   * Counts the existing PQR tickets and increments by 1.
+   * Generates a ticket number in the format PQRS-{orgId}-{counter}.
+   *
+   * Counts ALL PQR-shaped tickets under the org — both legacy `PQR-*`
+   * numbers (issued before the visible UI rename) and new `PQRS-*`
+   * numbers — so the counter stays continuous. Existing tickets keep
+   * their original `PQR-*` value (no data migration); only newly filed
+   * tickets use the `PQRS-` prefix going forward.
    */
   private async generatePqrNumber(orgId: number): Promise<string> {
     const count = await this.globalPrisma.support_tickets.count({
       where: {
         organization_id: orgId,
-        ticket_number: { startsWith: 'PQR-' },
+        ticket_number: { startsWith: 'PQR' },
       },
     });
     const padded = String(count + 1).padStart(5, '0');
-    return `PQR-${orgId}-${padded}`;
+    return `PQRS-${orgId}-${padded}`;
   }
 
   /**
@@ -1038,11 +1049,11 @@ export class PqrService {
 
   /**
    * Maps the PQR type to the ticket category enum. The enum supports
-   * PETITION, COMPLAINT, CLAIM natively (added via the prisma schema
-   * migration that ships with this feature).
+   * PETITION, COMPLAINT, CLAIM, SUGGESTION natively (SUGGESTION added
+   * via migration 20260627101500_add_pqr_suggestion_type).
    */
   private mapPqrType(
-    pqrType: 'PETITION' | 'COMPLAINT' | 'CLAIM',
+    pqrType: 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION',
   ): ticket_category_enum {
     return pqrType as ticket_category_enum;
   }
@@ -1075,7 +1086,7 @@ export class PqrService {
       ticket_number: t.ticket_number,
       title: t.title,
       status: t.status,
-      pqr_type: t.category as 'PETITION' | 'COMPLAINT' | 'CLAIM',
+      pqr_type: t.category as 'PETITION' | 'COMPLAINT' | 'CLAIM' | 'SUGGESTION',
       priority: t.priority,
       assigned_to: t.assigned_to
         ? {

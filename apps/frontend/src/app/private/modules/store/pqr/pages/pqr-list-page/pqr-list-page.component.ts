@@ -294,6 +294,8 @@ export class PqrListPageComponent {
         return 'Queja';
       case 'CLAIM':
         return 'Reclamo';
+      case 'SUGGESTION':
+        return 'Sugerencia';
       default:
         return t;
     }
@@ -411,6 +413,11 @@ export class PqrListPageComponent {
         value: 'CLAIM',
         label: 'Reclamo',
         hint: 'Solicitud de revisión por algo que afectó tu operación.',
+      },
+      {
+        value: 'SUGGESTION',
+        label: 'Sugerencia',
+        hint: 'Propuesta de mejora o nueva funcionalidad para Vendix.',
       },
     ];
 

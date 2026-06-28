@@ -169,6 +169,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
             <option value="PETITION">Petición</option>
             <option value="COMPLAINT">Queja</option>
             <option value="CLAIM">Reclamo</option>
+            <option value="SUGGESTION">Sugerencia</option>
           </select>
         </div>
         <div class="filter-group filter-group--search">
