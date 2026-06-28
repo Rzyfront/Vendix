@@ -184,14 +184,15 @@
     background: #f0fdf4;
   }
 
-  // Strong active state: deep green bg, white text, white check
-  // badge in the corner. Mirrors the help-center category chip
-  // treatment so the two pages feel like one product.
+  // Strong active state: matches the "Comenzar Gratis" landing
+  // CTA exactly — bright green-500 fill, white text, white check
+  // badge in the corner. The two CTAs (PQR submit + landing
+  // "Comenzar Gratis") now read as the exact same brand action.
   &--active {
-    border-color: #2f6f4e;
-    background: #2f6f4e;
-    box-shadow: 0 0 0 3px rgba(47, 111, 78, 0.2),
-                0 4px 12px rgba(47, 111, 78, 0.15);
+    border-color: #22c55e;
+    background: #22c55e;
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2),
+                0 4px 12px rgba(34, 197, 94, 0.15);
     transform: translateY(-1px);
 
     strong {
@@ -199,7 +200,7 @@
     }
 
     span {
-      color: rgba(255, 255, 255, 0.85);
+      color: rgba(255, 255, 255, 0.9);
     }
   }
 
