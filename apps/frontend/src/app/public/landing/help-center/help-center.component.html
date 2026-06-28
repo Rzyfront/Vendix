@@ -81,7 +81,10 @@
   <div class="help-center__categories">
     <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
       <div class="help-center__section-head">
-        <h2 class="help-center__section-title">Explorar por categoría</h2>
+        <h2 class="help-center__section-title">¿Cómo podemos ayudarle?</h2>
+        <p class="help-center__section-lead">
+          Elija una categoría para ver solo los artículos relacionados.
+        </p>
         @if (hasActiveFilter()) {
         <span class="help-center__section-count">
           ({{ filteredCategoryCount() }})
@@ -119,37 +122,6 @@
         </p>
         }
       </div>
-    </div>
-  </div>
-
-  <!-- Artículos populares -->
-  <div class="help-center__articles">
-    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
-      <div class="help-center__section-head">
-        <h2 class="help-center__section-title">Artículos más consultados</h2>
-        @if (hasActiveFilter()) {
-        <span class="help-center__section-count">
-          ({{ filteredArticleCount() }})
-        </span>
-        }
-      </div>
-      @if (filteredArticles().length === 0) {
-      <p class="help-center__empty-inline">
-        No hay artículos que coincidan con tu búsqueda.
-      </p>
-      } @else {
-      <ul class="help-center__article-list">
-        @for (article of filteredArticles(); track article.id) {
-        <li class="help-center__article">
-          <a>
-            <app-icon name="file-text" [size]="16" color="currentColor"></app-icon>
-            <span>{{ article.title }}</span>
-            <app-icon name="arrow-right" [size]="16" color="currentColor"></app-icon>
-          </a>
-        </li>
-        }
-      </ul>
-      }
     </div>
   </div>
 

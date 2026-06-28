@@ -24,6 +24,9 @@ interface PopularArticle {
   title: string;
   category: FaqItem['category'];
 }
+// popularArticles removed — the "Artículos más consultados" section
+// confused users (read like generic documentation). The category
+// chips + FAQ list now carry that discoverability.
 
 /**
  * Public Help Center — entry point for unauthenticated visitors
@@ -108,13 +111,8 @@ export class HelpCenterComponent {
     },
   ];
 
-  /** Top articles. */
-  readonly popularArticles: PopularArticle[] = [
-    { id: 'create-store', title: 'Cómo crear una tienda', category: 'online-store' },
-    { id: 'e-billing', title: 'Cómo configurar facturación electrónica', category: 'billing' },
-    { id: 'custom-domain', title: 'Cómo conectar un dominio personalizado', category: 'online-store' },
-    { id: 'invite-user', title: 'Cómo crear un usuario y asignar permisos', category: 'users' },
-  ];
+  /** Top articles — REMOVED. See interface comment. */
+  readonly popularArticles: PopularArticle[] = [];
 
   /** FAQ list. */
   readonly faqs = signal<FaqItem[]>([
@@ -182,18 +180,6 @@ export class HelpCenterComponent {
     });
   });
 
-  /** Filtered popular articles. */
-  readonly filteredArticles = computed<PopularArticle[]>(() => {
-    const q = this.normalizedQuery();
-    const cat = this.selectedCategory();
-    if (!q && !cat) return this.popularArticles;
-    return this.popularArticles.filter((a) => {
-      if (cat && a.category !== cat) return false;
-      if (q && !a.title.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  });
-
   /** Filtered FAQs. */
   readonly filteredFaqs = computed<FaqItem[]>(() => {
     const q = this.normalizedQuery();
@@ -212,7 +198,6 @@ export class HelpCenterComponent {
   /** Counts for the active filter — used in section headings to
    *  show "(3)" after the title when a filter is active. */
   readonly filteredCategoryCount = computed(() => this.filteredCategories().length);
-  readonly filteredArticleCount = computed(() => this.filteredArticles().length);
   readonly filteredFaqCount = computed(() => this.filteredFaqs().length);
 
   /** Toggle a category chip on/off. Clicking the same chip again
