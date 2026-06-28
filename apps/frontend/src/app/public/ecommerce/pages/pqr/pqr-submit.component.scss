@@ -145,6 +145,7 @@
 }
 
 .type-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -177,10 +178,43 @@
     background: #f0fdf4;
   }
 
+  // Strong active state: deep green bg, white text, white check
+  // badge in the corner. Mirrors the help-center category chip
+  // treatment so the two pages feel like one product.
   &--active {
     border-color: #2f6f4e;
-    background: #f0fdf4;
-    box-shadow: 0 0 0 3px rgba(47, 111, 78, 0.15);
+    background: #2f6f4e;
+    box-shadow: 0 0 0 3px rgba(47, 111, 78, 0.2),
+                0 4px 12px rgba(47, 111, 78, 0.15);
+    transform: translateY(-1px);
+
+    strong {
+      color: #ffffff;
+    }
+
+    span {
+      color: rgba(255, 255, 255, 0.85);
+    }
+  }
+
+  // Small check badge that appears in the corner of the
+  // active card. Drawn with CSS only (no extra DOM).
+  &--active::after {
+    content: '✓';
+    position: absolute;
+    top: 0.625rem;
+    right: 0.625rem;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #ffffff;
+    color: #2f6f4e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
   }
 }
 
