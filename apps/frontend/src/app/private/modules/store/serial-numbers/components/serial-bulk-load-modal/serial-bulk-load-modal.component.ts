@@ -41,8 +41,9 @@ import {
  *    `serial_number,cost,warranty_expiry,notes`. A client-side template
  *    download is provided (no backend call).
  *
- * Fully zoneless: every template-observed value is a signal, no EventEmitter,
- * no NgZone. Inputs are read by invoking them, e.g. `this.isOpen()`.
+ * Fully zoneless: every template-observed value is a signal, no legacy
+ * event emitters, no legacy zone wrappers. Inputs are read by invoking
+ * them, e.g. `this.isOpen()`.
  */
 type LoadTab = 'paste' | 'csv';
 
