@@ -30,70 +30,48 @@
   />
   }
 
-  <!-- ── CTA card ────────────────────────────────────────────────────────
-       Same pattern as the org-admin PQR view: sticky-header → CTA →
-       table. Primary action "+ Nueva solicitud" lives in the sticky-header
-       so it stays accessible regardless of scroll position. The CTA
-       card focuses the operator's attention on the single most important
-       question: "what do I need to do today?" -->
-  @if (stats(); as s) {
-  <div
-    class="cta-card"
-    [class.cta-card--urgent]="overdueCount() > 0"
-    [class.cta-card--empty]="s.total === 0"
-  >
-    @if (s.total === 0) {
-    <div class="cta-card__empty">
-      <div class="cta-card__icon cta-card__icon--muted">
-        <app-icon name="inbox" [size]="32"></app-icon>
-      </div>
-      <div>
-        <h2>Aún no tienes solicitudes</h2>
-        <p>
-          Cuando un visitante radique una petición, queja o reclamo desde tu
-          tienda, aparecerá aquí. Mientras tanto, todo en orden.
-        </p>
-      </div>
-    </div>
-    } @else {
-    <div class="cta-card__main">
-      <div class="cta-card__lead">
-        <div class="cta-card__icon">
-          <app-icon
-            [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-circle'"
-            [size]="28"
-          ></app-icon>
-        </div>
-        <div class="cta-card__copy">
-          <h2>
-            @if (overdueCount() > 0) {
-              Tienes {{ overdueCount() }} solicitud{{ overdueCount() === 1 ? '' : 'es' }}
-              con tiempo vencido
-            } @else if (pendingCount() > 0) {
-              Tienes {{ pendingCount() }} solicitud{{ pendingCount() === 1 ? '' : 'es' }}
-              pendiente{{ pendingCount() === 1 ? '' : 's' }} de respuesta
-            } @else {
-              ¡Todo al día con tus solicitudes!
-            }
-          </h2>
-          <p>
-            @if (overdueCount() > 0) {
-              Es importante responder pronto para evitar consecuencias legales.
-            } @else if (pendingCount() > 0) {
-              Cuando respondas, el solicitante recibirá un correo con tu mensaje.
-            } @else {
-              No tienes solicitudes pendientes en este momento.
-            }
-          </p>
-        </div>
-      </div>
-      @if (pendingCount() > 0 && urgentPqrRoute(); as route) {
-      <a class="cta-card__action cta-card__action--ghost" [routerLink]="route">
-        Continuar conversación
-      </a>
-      }
-    </div>
-    }
+  <!-- ── Stats grid ──────────────────────────────────────────────────────
+       Same `<app-stats>` shared component used by Clientes / Reportes /
+       Ventas so the operator has a single mental model for "PQR health
+       at a glance". Rendered AFTER the sticky-header (matches the
+       customers pattern: sticky → stats → list). Stats are aggregate
+       metrics; the redundant CTA card was removed because the stats
+       already surface the urgency ("Vencidas") and the actions live
+       in the sticky-header / dropdown. -->
+  @if (stats() && stats()!.total > 0) {
+  <div class="stats-container">
+    <app-stats
+      title="Total PQRS"
+      [value]="stats()!.total"
+      smallText="Todas tus peticiones, quejas y reclamos"
+      iconName="message-square"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    ></app-stats>
+    <app-stats
+      title="Últimas 24h"
+      [value]="stats()!.recent_24h"
+      smallText="PQRS radicadas recientemente"
+      iconName="clock"
+      iconBgColor="bg-violet-100"
+      iconColor="text-violet-600"
+    ></app-stats>
+    <app-stats
+      title="Vencidas"
+      [value]="overdueCount()"
+      smallText="SLA legal agotado"
+      iconName="alert-triangle"
+      iconBgColor="bg-red-100"
+      iconColor="text-red-600"
+    ></app-stats>
+    <app-stats
+      title="Nuevas"
+      [value]="stats()!.by_status?.['NEW'] || 0"
+      smallText="Sin asignar a tienda"
+      iconName="inbox"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+    ></app-stats>
   </div>
   }
 

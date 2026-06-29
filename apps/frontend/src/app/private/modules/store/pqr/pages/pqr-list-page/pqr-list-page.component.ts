@@ -166,6 +166,11 @@ export class PqrListPageComponent {
     return pqr ? ['/admin/pqrs', String(pqr.id)] : null;
   });
 
+  // Note: the previous "mostUrgentPqr" computed + "urgentPqrRoute"
+  // helper were removed when the redundant CTA card was deleted — the
+  // stats cards (Total / Últimas 24h / Vencidas / Nuevas) and the
+  // sticky-header tabs already surface urgency.
+
   constructor() {
     // Auto-refetch whenever query changes.
     effect(() => {
