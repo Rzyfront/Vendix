@@ -16,7 +16,6 @@ import { environment } from '../../../../../environments/environment';
 import {
   IconComponent,
   StatsComponent,
-  StickyHeaderComponent,
 } from '../../../../shared/components';
 import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
@@ -46,7 +45,6 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     RouterLink,
     IconComponent,
     StatsComponent,
-    StickyHeaderComponent,
   ],
   template: `
     <div class="pqr-list-page">
@@ -55,17 +53,28 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
            section icon + sub-title on the left, and (optionally)
            actions on the right. Single visual pattern across admin
            modules so users don't relearn navigation per page. -->
-      <app-sticky-header
-        title="PQRS"
-        subtitle="Vista global de la plataforma"
-        icon="message-square"
-        variant="glass"
-        [showBackButton]="false"
-        [tabs]="quickFilterTabs()"
-        [activeTab]="quickFilter()"
-        tabsAriaLabel="Filtros de PQRS"
-        (tabChanged)="setQuickFilter($event)"
-      />
+      <!-- Quick-filter tabs (Todas / Vencidas / Sin asignar) — moved
+           from the removed sticky-header so the platform-wide
+           operator can still narrow the queue by bucket. -->
+      <div
+        class="quick-filters"
+        role="tablist"
+        aria-label="Filtros rápidos de PQRS"
+      >
+        @for (tab of quickFilterTabs(); track tab.id) {
+        <button
+          type="button"
+          role="tab"
+          class="quick-filters__tab"
+          [class.quick-filters__tab--active]="quickFilter() === tab.id"
+          [attr.aria-selected]="quickFilter() === tab.id"
+          (click)="setQuickFilter(tab.id)"
+        >
+          <app-icon [name]="tab.icon || 'inbox'" [size]="14"></app-icon>
+          <span>{{ tab.label }}</span>
+        </button>
+        }
+      </div>
 
       <!-- Top CTA — cross-tenant urgency -->
       <div
@@ -328,6 +337,49 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     `
       :host {
         display: block;
+      }
+
+      // Quick-filter tabs (moved from the removed sticky-header)
+      .quick-filters {
+        display: flex;
+        gap: 0.25rem;
+        flex-wrap: wrap;
+        padding: 0 0.25rem;
+      }
+      .quick-filters__tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4375rem;
+        padding: 0.5rem 0.875rem;
+        border: 0;
+        background: transparent;
+        color: #64748b;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        border-radius: 8px;
+        border-bottom: 2px solid transparent;
+        min-height: 44px;
+        transition: color 0.15s, border-color 0.15s, background 0.15s;
+      }
+      .quick-filters__tab:hover {
+        color: #15803d;
+        background: #f0fdf4;
+      }
+      .quick-filters__tab:focus-visible {
+        outline: 2px solid #16a34a;
+        outline-offset: 2px;
+      }
+      .quick-filters__tab app-icon {
+        color: currentColor;
+      }
+      .quick-filters__tab--active {
+        color: #15803d;
+        border-bottom-color: #16a34a;
+        background: transparent;
+      }
+      .quick-filters__tab--active:hover {
+        background: #f0fdf4;
       }
 
       // CTA card (cross-tenant urgency)

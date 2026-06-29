@@ -28,12 +28,8 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
-} from '../../../../../../shared/components';
-import {
-  StickyHeaderComponent,
   StickyHeaderTab,
-  StickyHeaderActionButton,
-} from '../../../../../../shared/components/sticky-header/sticky-header.component';
+} from '../../../../../../shared/components';
 import { PqrService } from '../../../../../../shared/services/pqr.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
@@ -54,7 +50,6 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
     DatePipe,
     PqrStatusPillComponent,
     IconComponent,
-    StickyHeaderComponent,
     StatsComponent,
     CardComponent,
     ResponsiveDataViewComponent,
@@ -105,16 +100,10 @@ export class PqrListPageComponent {
 
   // Primary action rendered in the sticky-header's right slot. The
   // "+ Nueva solicitud" lives here (not in the CTA card) so it stays
-  // visible regardless of how many PQRs are pending — same pattern as
-  // "Ver Analítica" on the Reportes → Ventas view.
-  readonly stickyHeaderActions = computed<StickyHeaderActionButton[]>(() => [
-    {
-      id: 'new-pqr',
-      label: 'Nueva solicitud',
-      variant: 'primary',
-      icon: 'plus',
-    },
-  ]);
+  // Note: the "stickyHeaderActions" computed + "onStickyHeaderAction"
+  // handler were removed when the sticky-header was deleted. The
+  // "Nueva solicitud" action is now reachable via the options-dropdown
+  // "Acciones" menu (dropdownActions → 'new-pqr').
 
   setQuickFilter(value: string) {
     // StickyHeaderComponent emits tabChanged as plain `string`; narrow
@@ -127,16 +116,6 @@ export class PqrListPageComponent {
         : 'all';
     this.quickFilter.set(filter);
     this.query.update((q) => ({ ...q, page: 1 }));
-  }
-
-  /**
-   * Action button click handler for the sticky-header's right slot.
-   * Currently only one action: open the "New PQR" modal.
-   */
-  onStickyHeaderAction(actionId: string): void {
-    if (actionId === 'new-pqr') {
-      this.openNewPqrModal();
-    }
   }
 
   /**

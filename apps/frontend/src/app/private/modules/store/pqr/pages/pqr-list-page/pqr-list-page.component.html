@@ -1,43 +1,12 @@
 <div class="pqr-list-page">
-  <!-- ── StickyHeader: same component used by every admin module (Ventas,
-       Reportes, Clientes). Provides the page icon + subtitle on the left
-       and the primary action ("+ Nueva solicitud") on the right. The
-       quick-filter tabs render inline at the top so the operator can jump
-       between Todas / Vencidas / Pendientes / Nuevas without scrolling. -->
-  @if (stats() && stats()!.total > 0) {
-  <app-sticky-header
-    title="Bandeja"
-    subtitle=""
-    icon="inbox"
-    variant="glass"
-    [showBackButton]="false"
-    [tabs]="quickFilterTabs()"
-    [activeTab]="quickFilter()"
-    tabsAriaLabel="Filtros de PQRS"
-    (tabChanged)="setQuickFilter($event)"
-    [actions]="stickyHeaderActions()"
-    (actionClicked)="onStickyHeaderAction($event)"
-  />
-  } @else {
-  <app-sticky-header
-    title="Bandeja"
-    subtitle="Aún no tienes solicitudes"
-    icon="inbox"
-    variant="glass"
-    [showBackButton]="false"
-    [actions]="stickyHeaderActions()"
-    (actionClicked)="onStickyHeaderAction($event)"
-  />
-  }
-
   <!-- ── Stats grid ──────────────────────────────────────────────────────
        Same `<app-stats>` shared component used by Clientes / Reportes /
        Ventas so the operator has a single mental model for "PQR health
-       at a glance". Rendered AFTER the sticky-header (matches the
-       customers pattern: sticky → stats → list). Stats are aggregate
-       metrics; the redundant CTA card was removed because the stats
-       already surface the urgency ("Vencidas") and the actions live
-       in the sticky-header / dropdown. -->
+       at a glance". The page title comes from the global layout
+       breadcrumb ("Mis Solicitudes"), so the redundant sticky-header
+       was removed. Quick filters (Todas / Vencidas / Pendientes /
+       Nuevas) still live in the options-dropdown so the operator can
+       narrow the queue without scrolling. -->
   @if (stats() && stats()!.total > 0) {
   <div class="stats-container">
     <app-stats
@@ -74,6 +43,31 @@
     ></app-stats>
   </div>
   }
+
+  <!-- ── Quick filter tabs ───────────────────────────────────────────────
+       Inline tab strip for the at-a-glance queue buckets. Mirrors the
+       sticky-header tab set from before but rendered inside the page
+       so the sticky-header can stay removed (page title now comes from
+       the layout breadcrumb). -->
+  <div
+    class="quick-filters"
+    role="tablist"
+    aria-label="Filtros rápidos de solicitudes"
+  >
+    @for (tab of quickFilterTabs(); track tab.id) {
+    <button
+      type="button"
+      role="tab"
+      class="quick-filters__tab"
+      [class.quick-filters__tab--active]="quickFilter() === tab.id"
+      [attr.aria-selected]="quickFilter() === tab.id"
+      (click)="setQuickFilter(tab.id)"
+    >
+      <app-icon [name]="tab.icon || 'inbox'" [size]="14"></app-icon>
+      <span>{{ tab.label }}</span>
+    </button>
+    }
+  </div>
 
   <!-- ── List card ───────────────────────────────────────────────────────
        Mirrors the customer-list pattern (Todos los Clientes (1)) so the

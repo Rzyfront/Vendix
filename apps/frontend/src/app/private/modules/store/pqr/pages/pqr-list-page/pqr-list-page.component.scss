@@ -16,6 +16,66 @@
   }
 }
 
+// ─── Quick-filter tabs ───────────────────────────────────────────────────
+//
+// Inline tab strip (Todas / Vencidas / Pendientes / Nuevas) that used
+// to live in the deleted sticky-header. Rendered above the list card
+// as its own surface so the operator can narrow the queue by bucket
+// without opening the dropdown filters.
+//
+// Accessibility:
+//   • role="tablist" on the container, role="tab" on each button
+//   • aria-selected reflects the active state
+//   • Buttons are <button type="button"> (semantic HTML)
+//   • Min-height 44px for touch targets (mobile-first rule)
+.quick-filters {
+  display: flex;
+  gap: 0.25rem;
+  flex-wrap: wrap;
+  padding: 0 0.25rem;
+
+  &__tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4375rem;
+    padding: 0.5rem 0.875rem;
+    border: 0;
+    background: transparent;
+    color: #64748b;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 8px;
+    border-bottom: 2px solid transparent;
+    min-height: 44px;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+
+    &:hover {
+      color: #15803d;
+      background: #f0fdf4;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #16a34a;
+      outline-offset: 2px;
+    }
+
+    app-icon {
+      color: currentColor;
+    }
+
+    &--active {
+      color: #15803d;
+      border-bottom-color: #16a34a;
+      background: transparent;
+    }
+
+    &--active:hover {
+      background: #f0fdf4;
+    }
+  }
+}
+
 // ─── New PQR modal ───────────────────────────────────────────────────────
 //
 // The "Datos del solicitante" fieldset splits into rows of sub-fields
