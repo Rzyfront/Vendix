@@ -869,24 +869,52 @@ export class KitchenFireService {
   /**
    * pending → in_preparation. Cascades item status, used by the KDS
    * "Start" button. Idempotent if already in_preparation.
+   *
+   * Restaurant Suite — Fase K audit jun-2026: distinguishes the
+   * `already_in_preparation` (409 idempotent-ish) and the terminal
+   * `cancelled`/`delivered` cases with explicit error codes so the KDS
+   * board / table-session panel can show specific Spanish messages
+   * instead of the generic "Transición de estado no permitida".
    */
   async startPreparation(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
-    if (ticket.status === 'cancelled' || ticket.status === 'delivered') {
+    if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
-        ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+        ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
         undefined,
         {
           from: ticket.status,
           to: 'in_preparation',
-          hint: 'Un ticket cancelado o entregado no puede iniciarse.',
+          hint: 'Este plato fue cancelado en cocina y no puede iniciar preparación.',
         },
       );
     }
-    if (ticket.status === 'ready') {
-      // Idempotent — already past this state.
+    if (ticket.status === 'delivered') {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_ALREADY_DELIVERED,
+        undefined,
+        {
+          from: ticket.status,
+          to: 'in_preparation',
+          hint: 'Este plato ya fue entregado y no puede iniciar preparación.',
+        },
+      );
+    }
+    if (ticket.status === 'in_preparation') {
+      // Idempotent — already in this state.
       return ticket;
+    }
+    if (ticket.status === 'ready') {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_ALREADY_READY,
+        undefined,
+        {
+          from: ticket.status,
+          to: 'in_preparation',
+          hint: 'Este plato ya está listo; márcalo como entregado en lugar de iniciarlo.',
+        },
+      );
     }
 
     // Restaurant Suite — Fase K Gap 3: the ticket may contain
@@ -949,18 +977,33 @@ export class KitchenFireService {
   /**
    * in_preparation | pending → ready. Sets ready_at timestamp.
    * Idempotent if already ready.
+   *
+   * Restaurant Suite — Fase K audit jun-2026: distinguishes the
+   * `already_ready` (409 idempotent-ish) and the terminal
+   * `cancelled`/`delivered` cases with explicit error codes.
    */
   async markReady(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
-    if (ticket.status === 'cancelled' || ticket.status === 'delivered') {
+    if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
-        ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+        ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
         undefined,
         {
           from: ticket.status,
           to: 'ready',
-          hint: 'Un ticket cancelado o entregado no puede marcarse como listo.',
+          hint: 'Este plato fue cancelado en cocina y no puede marcarse como listo.',
+        },
+      );
+    }
+    if (ticket.status === 'delivered') {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_ALREADY_DELIVERED,
+        undefined,
+        {
+          from: ticket.status,
+          to: 'ready',
+          hint: 'Este plato ya fue entregado y no puede marcarse como listo.',
         },
       );
     }
@@ -997,35 +1040,83 @@ export class KitchenFireService {
   }
 
   /**
-   * ready → delivered. Marks the order-side flow that the kitchen handoff
-   * is complete. Items are NOT marked `inventory_consumed_at_fire` here
-   * (that flag is flipped in fireOrderItems).
+   * ready | in_preparation → delivered. Marks the order-side flow that the
+   * kitchen handoff is complete. Items are NOT marked
+   * `inventory_consumed_at_fire` here (that flag is flipped in
+   * fireOrderItems).
+   *
+   * Restaurant Suite — Fase K audit jun-2026: emits SPECIFIC error codes
+   * for the common UX bug "Marcar entregado cuando el plato está
+   * pendiente". The previous code threw the generic
+   * KITCHEN_TICKET_INVALID_STATE, which surfaced as the dev-message
+   * "Transición de estado del ticket no permitida" — too generic for the
+   * table-session operator. Now:
+   *   - pending → delivered       → KITCHEN_TICKET_NOT_READY (specific)
+   *   - cancelled → delivered     → KITCHEN_TICKET_ALREADY_CANCELLED
+   *   - delivered → delivered     → KITCHEN_TICKET_ALREADY_DELIVERED
+   *   - in_preparation → delivered OK (auto-bumps ready via markReady)
+   *   - ready → delivered         OK
+   *
+   * The `in_preparation → delivered` shortcut is intentionally preserved:
+   * it atomically marks the ticket ready (with ready_at) THEN delivered,
+   * so the operator doesn't need two clicks when the kitchen says
+   * "listo y entregado" at the same instant.
    */
   async markDelivered(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
-    if (ticket.status === 'cancelled' || ticket.status === 'delivered') {
+    if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
-        ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+        ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
         undefined,
         {
           from: ticket.status,
           to: 'delivered',
-          hint: 'El ticket ya está en estado terminal.',
+          hint: 'Este plato fue cancelado en cocina y no puede entregarse.',
         },
       );
     }
-    if (ticket.status !== 'ready' && ticket.status !== 'in_preparation') {
-      // Allow ready → delivered. For in_preparation, force a ready first.
+    if (ticket.status === 'delivered') {
       throw new VendixHttpException(
-        ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+        ErrorCodes.KITCHEN_TICKET_ALREADY_DELIVERED,
         undefined,
         {
           from: ticket.status,
           to: 'delivered',
-          hint: 'El ticket debe estar listo (ready) o en preparación para entregarse.',
+          hint: 'Este plato ya fue marcado como entregado.',
         },
       );
+    }
+    if (ticket.status === 'pending') {
+      // The operator-visible "Marcar entregado" button should NEVER be
+      // enabled for pending items. If it fires (race, stale UI, devtools)
+      // we surface a specific message that points at the KDS board.
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_NOT_READY,
+        undefined,
+        {
+          from: ticket.status,
+          to: 'delivered',
+          hint:
+            'No se puede marcar como entregado: el plato aún está pendiente en cocina. ' +
+            'Espera a que el KDS lo marque como listo.',
+        },
+      );
+    }
+    // ticket.status is `ready` or `in_preparation` — both valid.
+    // If still in_preparation, bump to ready first (sets ready_at).
+    if (ticket.status === 'in_preparation') {
+      await this.prisma.kitchen_tickets.update({
+        where: { id: ticketId },
+        data: { status: 'ready', ready_at: new Date(), updated_at: new Date() },
+      });
+      await this.prisma.kitchen_ticket_items.updateMany({
+        where: {
+          kitchen_ticket_id: ticketId,
+          status: { in: ['pending', 'in_preparation'] },
+        },
+        data: { status: 'ready', updated_at: new Date() },
+      });
     }
 
     const updated = await this.prisma.kitchen_tickets.update({
@@ -1088,18 +1179,36 @@ export class KitchenFireService {
   /**
    * pending | in_preparation | ready → cancelled. Irreversible from the
    * KDS (the order-side flow would have to re-fire to bring it back).
+   *
+   * Restaurant Suite — Fase K audit jun-2026: emits SPECIFIC error
+   * codes for the terminal cases (`already_cancelled` /
+   * `already_delivered`) so the KDS toasts are actionable instead of
+   * the generic dev-message.
    */
   async cancelTicket(ticketId: number) {
     const { ticket, store_id } = await this.getTicketForStore(ticketId);
 
-    if (ticket.status === 'cancelled' || ticket.status === 'delivered') {
+    if (ticket.status === 'cancelled') {
       throw new VendixHttpException(
-        ErrorCodes.KITCHEN_TICKET_INVALID_STATE,
+        ErrorCodes.KITCHEN_TICKET_ALREADY_CANCELLED,
         undefined,
         {
           from: ticket.status,
           to: 'cancelled',
-          hint: 'El ticket ya está en estado terminal.',
+          hint: 'Este plato ya fue cancelado en cocina.',
+        },
+      );
+    }
+    if (ticket.status === 'delivered') {
+      throw new VendixHttpException(
+        ErrorCodes.KITCHEN_TICKET_ALREADY_DELIVERED,
+        undefined,
+        {
+          from: ticket.status,
+          to: 'cancelled',
+          hint:
+            'Este plato ya fue entregado y no puede cancelarse en cocina. ' +
+            'Gestiona la cancelación desde la orden.',
         },
       );
     }

@@ -509,6 +509,27 @@ export const ERROR_MESSAGES: Record<string, string> = {
   INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
   INVOICING_PROVIDER_001:
     'Fallo la comunicacion con el proveedor de facturacion electronica.',
+
+  // Kitchen tickets (Restaurant Suite Fase K audit jun-2026)
+  KITCHEN_TICKET_NOT_READY:
+    'No se puede marcar como entregado: el plato aun esta pendiente en cocina. Espera a que el KDS lo marque como listo.',
+  KITCHEN_TICKET_ALREADY_DELIVERED:
+    'Este plato ya fue marcado como entregado.',
+  KITCHEN_TICKET_ALREADY_CANCELLED:
+    'Este plato fue cancelado en cocina y no puede modificarse.',
+  KITCHEN_TICKET_ALREADY_IN_PREPARATION:
+    'El ticket ya esta en preparacion.',
+  KITCHEN_TICKET_ALREADY_READY:
+    'El ticket ya esta listo para entregar.',
+  KITCHEN_TICKET_INVALID_STATE:
+    'No se puede realizar esta transicion en el estado actual del ticket de cocina.',
+  KITCHEN_TICKET_NO_RECIPE:
+    'Este plato no tiene una receta activa: adjunta una receta antes de iniciar la preparacion.',
+  KITCHEN_TICKET_CANNOT_REVERT:
+    'El ticket esta en su estado inicial y no se puede revertir.',
+  KITCHEN_TICKET_REVERT_ORDER_FINISHED:
+    'La orden ya esta finalizada; no se puede revertir la entrega del ticket.',
+  KITCHEN_TICKET_NOT_FOUND: 'Ticket de cocina no encontrado.',
 };
 
 export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

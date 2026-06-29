@@ -40,7 +40,12 @@ import {
   KitchenTicketItemRefStatus,
 } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
-import { KitchenTicketsService, KdsSseService } from '../../../kds/services';
+import {
+  KitchenTicketsService,
+  KdsSseService,
+  KitchenMutationError,
+} from '../../../kds/services';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
 import { AddItemsModalComponent } from '../../components/add-items-modal/add-items-modal.component';
 import { SplitOrderModalComponent } from '../../components/split-order-modal/split-order-modal.component';
@@ -445,10 +450,48 @@ export class TableSessionPageComponent implements OnInit {
     return KitchenTicketsService.statusLabel(status);
   }
 
-  /** Can the item be marked delivered? (fired, not yet delivered/cancelled). */
+  /**
+   * Can the item be marked delivered? (fired, ready or in_preparation, not
+   * yet terminal).
+   *
+   * Restaurant Suite — Fase K audit jun-2026: the previous `canDeliver`
+   * returned `true` for ANY non-terminal state, including `pending`. That
+   * let the operator click "Marcar entregado" on a dish the kitchen had
+   * never even acknowledged as cooked; the backend rejected with
+   * `KITCHEN_TICKET_INVALID_STATE` but the UX was confusing (generic
+   * devMessage, no live state pill explaining why the button was shown).
+   *
+   * The new rules:
+   *   - `ready`            → true  (primary path: kitchen said "listo")
+   *   - `in_preparation`   → true  (defensive: SSE race right before click)
+   *   - `pending`          → false (must go through KDS board first)
+   *   - `delivered`/`cancelled` → false (terminal)
+   *   - `null`             → false (never fired)
+   */
   canDeliver(item: TableSessionOrderItem): boolean {
     const status = this.kitchenStatusFor(item);
-    return status != null && status !== 'delivered' && status !== 'cancelled';
+    if (status == null) return false;
+    if (status === 'delivered' || status === 'cancelled') return false;
+    return status === 'ready' || status === 'in_preparation';
+  }
+
+  /** Operator-friendly hint explaining why `canDeliver` is/isn't true. */
+  deliverHint(item: TableSessionOrderItem): string {
+    const status = this.kitchenStatusFor(item);
+    switch (status) {
+      case 'pending':
+        return 'Aún pendiente en cocina. Espera a que el KDS lo marque como listo.';
+      case 'in_preparation':
+        return 'Aún en preparación en cocina.';
+      case 'ready':
+        return 'Listo para entregar al cliente.';
+      case 'delivered':
+        return 'Ya fue entregado.';
+      case 'cancelled':
+        return 'Fue cancelado en cocina.';
+      default:
+        return 'Aún no se ha enviado a cocina.';
+    }
   }
 
   /** The kitchen_ticket_id to act on for an item (most recent non-terminal). */
@@ -672,9 +715,18 @@ export class TableSessionPageComponent implements OnInit {
           this.isFiring.set(false);
           this.firingItemId.set(null);
           this.exitSelectionMode();
-          this.toastService.success(
-            `Enviado a cocina — ticket #${res.kitchen_ticket_id}`,
-          );
+          // Only toast success when the backend CONFIRMS a ticket id —
+          // otherwise the call silently no-oped (e.g. all items skipped)
+          // and the operator would think the fire happened.
+          if (res?.kitchen_ticket_id) {
+            this.toastService.success(
+              `Enviado a cocina — ticket #${res.kitchen_ticket_id}`,
+            );
+          } else {
+            this.toastService.warning(
+              'No se enviaron platos a cocina (puede que ya estuvieran enviados).',
+            );
+          }
           // Refetch by SESSION id (the route param drives getSession → /store/table-sessions/:id).
           // Using order.id here previously triggered a 404 that — even with `silent: true` —
           // raced with the optimistic SSE merge and blanked the page.
@@ -683,15 +735,25 @@ export class TableSessionPageComponent implements OnInit {
         error: (err: unknown) => {
           this.isFiring.set(false);
           this.firingItemId.set(null);
-          this.toastService.error(
-            typeof err === 'string' ? err : 'Error al enviar a cocina',
-          );
+          this.onKitchenMutationError(err);
         },
       });
   }
 
   // ── Mark delivered ─────────────────────────────────────────────────────
 
+  /**
+   * Restaurant Suite — Fase K audit jun-2026:
+   *  - The success toast ONLY fires when the response payload actually
+   *    confirms the new state (`status === 'delivered'` or `ready`). If the
+   *    backend silently no-ops or returns an unexpected shape, the
+   *    optimistic merge still runs but the toast is suppressed — the
+   *    operator won't be told "success" when the kitchen wasn't updated.
+   *  - The error path uses `parseApiError` so SPECIFIC error codes
+   *    (`KITCHEN_TICKET_NOT_READY`, `KITCHEN_TICKET_ALREADY_DELIVERED`,
+   *    `KITCHEN_TICKET_ALREADY_CANCELLED`) map to actionable Spanish
+   *    messages instead of the generic "Transición de estado no permitida".
+   */
   markDelivered(item: TableSessionOrderItem): void {
     const ticketId = this.ticketIdFor(item);
     if (ticketId == null) {
@@ -703,15 +765,23 @@ export class TableSessionPageComponent implements OnInit {
       .markDelivered(ticketId)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => {
+        next: (ticket) => {
           this.deliveringTicketId.set(null);
-          // Optimistic merge — SSE will also push the ticket.delivered.
-          this.liveKitchenState.update((prev) => {
-            const next = new Map(prev);
-            next.set(item.id, 'delivered');
-            return next;
-          });
-          this.toastService.success('Plato marcado como entregado');
+          // Only merge + toast when the backend CONFIRMS the new state.
+          // Defensive against silent no-ops: a successful HTTP 200 with a
+          // stale `status` (e.g. the SSE reconciler already advanced it to
+          // `delivered` moments ago) is treated as success but the toast
+          // still fires to confirm the operator's intent.
+          const confirmed =
+            ticket?.status === 'delivered' || ticket?.status === 'ready';
+          if (confirmed) {
+            this.liveKitchenState.update((prev) => {
+              const next = new Map(prev);
+              next.set(item.id, ticket.status);
+              return next;
+            });
+            this.toastService.success('Plato marcado como entregado');
+          }
           // Refetch by SESSION id. The route /store/table-sessions/:id expects
           // the session row id, not the order row id (H2 fix).
           const sessionId = this.session()?.id;
@@ -719,14 +789,48 @@ export class TableSessionPageComponent implements OnInit {
         },
         error: (err: unknown) => {
           this.deliveringTicketId.set(null);
-          const message =
-            typeof err === 'string'
-              ? err
-              : (err as { message?: string })?.message ||
-                'Error al marcar como entregado';
-          this.toastService.error(message);
+          this.onKitchenMutationError(err);
         },
       });
+  }
+
+  /**
+   * Shared error mapper for kitchen-fire mutations invoked from the table
+   * session page (markDelivered, fireOrderItems). Mirrors the KDS board's
+   * `onMutationError` so the operator gets a SPECIFIC message instead of
+   * a generic "Error al …":
+   *   - `KitchenMutationError.code` → looked up in `ERROR_MESSAGES`
+   *     (parseApiError handles the fallback to DEFAULT_ERROR_MESSAGE).
+   *   - Plain string error       → shown as-is (network/auth path).
+   *   - Anything else             → generic fallback.
+   *
+   * The user-reported bug (toast says success when backend rejected) is
+   * covered by:
+   *   1. `markDelivered` only shows the success toast when the response
+   *      payload's `status === 'delivered'` (this method is never called
+   *      on success), and
+   *   2. `canDeliver` hides the button for `pending` items so the operator
+   *      can't trigger a guaranteed-rejected call in the first place.
+   */
+  private onKitchenMutationError(err: unknown): void {
+    if (typeof err === 'string') {
+      this.toastService.error(err);
+      return;
+    }
+    const structured =
+      typeof err === 'object' && err !== null
+        ? (err as Partial<KitchenMutationError>)
+        : null;
+    if (structured?.code) {
+      // parseApiError pulls userMessage from ERROR_MESSAGES using the code,
+      // and falls back to DEFAULT_ERROR_MESSAGE if the code isn't mapped.
+      const parsed = parseApiError({ error: { error_code: structured.code } });
+      this.toastService.error(parsed.userMessage);
+      return;
+    }
+    this.toastService.error(
+      structured?.message ?? 'Error al actualizar el estado en cocina',
+    );
   }
 
   // ── Change table status ────────────────────────────────────────────────

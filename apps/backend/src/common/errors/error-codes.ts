@@ -2827,6 +2827,39 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Transición de estado del ticket no permitida',
   },
+  // Restaurant Suite — Fase K audit jun-2026: explicit operator-friendly
+  // codes for the common invalid transitions surfaced by the table-session
+  // panel ("Marcar entregado" cuando el plato aún está pendiente) and the
+  // KDS board (cualquier click sobre un ticket terminal). Each carries the
+  // current state in `details.from` and the attempted transition in
+  // `details.to`, plus a Spanish `hint` for UX. Frontend maps the codes to
+  // specific toasts via error-messages.ts.
+  KITCHEN_TICKET_NOT_READY: {
+    code: 'KITCHEN_TICKET_NOT_READY',
+    httpStatus: 409,
+    devMessage:
+      'No se puede marcar como entregado: el plato aún está pendiente o en preparación en cocina',
+  },
+  KITCHEN_TICKET_ALREADY_DELIVERED: {
+    code: 'KITCHEN_TICKET_ALREADY_DELIVERED',
+    httpStatus: 409,
+    devMessage: 'Este plato ya fue marcado como entregado',
+  },
+  KITCHEN_TICKET_ALREADY_CANCELLED: {
+    code: 'KITCHEN_TICKET_ALREADY_CANCELLED',
+    httpStatus: 409,
+    devMessage: 'Este plato ya fue cancelado en cocina',
+  },
+  KITCHEN_TICKET_ALREADY_IN_PREPARATION: {
+    code: 'KITCHEN_TICKET_ALREADY_IN_PREPARATION',
+    httpStatus: 409,
+    devMessage: 'El ticket ya está en preparación',
+  },
+  KITCHEN_TICKET_ALREADY_READY: {
+    code: 'KITCHEN_TICKET_ALREADY_READY',
+    httpStatus: 409,
+    devMessage: 'El ticket ya está listo para entregar',
+  },
   // Restaurant Suite — Fase K Gap 3: the ticket contains a `prepared`
   // product with no active recipe; advancing to in_preparation is
   // blocked because the kitchen would have no BOM to deduct stock

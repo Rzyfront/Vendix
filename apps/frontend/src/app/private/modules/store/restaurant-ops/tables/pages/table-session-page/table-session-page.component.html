@@ -286,16 +286,31 @@
                     <span class="price">{{ +item.total_price | currency }}</span>
                   </div>
 
-                  <!-- Kitchen status: only for prepared dishes. -->
+                  <!-- Kitchen status: only for prepared dishes.
+                       Restaurant Suite — Fase K audit jun-2026: the badge
+                       now also carries the operator hint via the `title`
+                       attribute so hovering on the badge explains WHY the
+                       "Marcar entregado" button is/isn't shown (e.g.
+                       "Aún pendiente en cocina. Espera a que el KDS lo
+                       marque como listo."). The text is also rendered as
+                       an accessible label via aria-label. -->
                   @if (isPrepared(item)) {
                     <div class="item-status">
                       @if (kitchenStatusFor(item); as status) {
-                        <app-badge [variant]="kitchenBadgeVariant(status)">
+                        <app-badge
+                          [variant]="kitchenBadgeVariant(status)"
+                          [attr.title]="deliverHint(item)"
+                          [attr.aria-label]="deliverHint(item)"
+                        >
                           <app-icon name="chef-hat" [size]="12"></app-icon>
                           {{ kitchenStatusLabel(status) }}
                         </app-badge>
                       } @else {
-                        <span class="pending-tag">
+                        <span
+                          class="pending-tag"
+                          [attr.title]="deliverHint(item)"
+                          [attr.aria-label]="deliverHint(item)"
+                        >
                           <app-icon name="clock" [size]="12"></app-icon>
                           Sin enviar
                         </span>
@@ -307,6 +322,13 @@
                     Per-dish primary action (hidden in selection mode AND
                     hidden for non-dish items: bottled water / retail
                     add-ons do not flow through the kitchen).
+
+                    Restaurant Suite — Fase K audit jun-2026: `canDeliver`
+                    now restricts to `ready` / `in_preparation` only —
+                    a `pending` item shows NO action button (the operator
+                    sees the "Pendiente" badge with the hint explaining the
+                    wait). The fallback `else if` (third branch) renders
+                    the "Entregado" / "Cancelado" terminal chip.
                   -->
                   @if (
                     !isClosed() && !selectionMode() && isPrepared(item)
@@ -334,6 +356,7 @@
                             deliveringTicketId() != null &&
                             kitchenStatusFor(item) !== 'delivered'
                           "
+                          [attr.title]="deliverHint(item)"
                           (clicked)="markDelivered(item)"
                         >
                           <app-icon
@@ -344,7 +367,10 @@
                           Marcar entregado
                         </app-button>
                       } @else {
-                        <span class="item-done">
+                        <span
+                          class="item-done"
+                          [attr.title]="deliverHint(item)"
+                        >
                           <app-icon name="circle-check" [size]="14"></app-icon>
                           Entregado
                         </span>
