@@ -675,7 +675,10 @@ export class TableSessionPageComponent implements OnInit {
           this.toastService.success(
             `Enviado a cocina — ticket #${res.kitchen_ticket_id}`,
           );
-          this.loadSession(order.id, { silent: true });
+          // Refetch by SESSION id (the route param drives getSession → /store/table-sessions/:id).
+          // Using order.id here previously triggered a 404 that — even with `silent: true` —
+          // raced with the optimistic SSE merge and blanked the page.
+          this.loadSession(this.session()?.id ?? order.id, { silent: true });
         },
         error: (err: unknown) => {
           this.isFiring.set(false);
@@ -709,8 +712,10 @@ export class TableSessionPageComponent implements OnInit {
             return next;
           });
           this.toastService.success('Plato marcado como entregado');
-          const orderId = this.session()?.order?.id;
-          if (orderId) this.loadSession(orderId, { silent: true });
+          // Refetch by SESSION id. The route /store/table-sessions/:id expects
+          // the session row id, not the order row id (H2 fix).
+          const sessionId = this.session()?.id;
+          if (sessionId) this.loadSession(sessionId, { silent: true });
         },
         error: (err: unknown) => {
           this.deliveringTicketId.set(null);
