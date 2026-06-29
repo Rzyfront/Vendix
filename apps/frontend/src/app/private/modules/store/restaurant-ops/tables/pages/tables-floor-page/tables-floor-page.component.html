@@ -77,4 +77,11 @@
     (isOpenChange)="closeSeatModal()"
     (seated)="onBookingSeated()"
   />
+
+  <app-quick-status-modal
+    [isOpen]="isQuickStatusOpen()"
+    [table]="quickStatusTable()"
+    (isOpenChange)="closeQuickStatus()"
+    (changed)="onQuickStatusChanged($event)"
+  />
 </div>
