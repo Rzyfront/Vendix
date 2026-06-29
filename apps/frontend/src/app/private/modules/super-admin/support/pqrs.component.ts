@@ -16,7 +16,6 @@ import { environment } from '../../../../../environments/environment';
 import {
   IconComponent,
   StatsComponent,
-  StickyHeaderComponent,
 } from '../../../../shared/components';
 import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
@@ -46,29 +45,35 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     RouterLink,
     IconComponent,
     StatsComponent,
-    StickyHeaderComponent,
   ],
   template: `
     <div class="pqr-list-page">
-      <!-- ── Sticky header (patrón Ventas) ─────────────────────────────
-           Same component used by every admin module. Tabs inline at the
-           top so the platform-wide operator can narrow the queue by
-           bucket (Todas / Vencidas / Sin asignar). -->
-      <app-sticky-header
-        title="PQRS"
-        subtitle="Vista global de la plataforma"
-        icon="message-square"
-        variant="glass"
-        [showBackButton]="false"
-        [tabs]="quickFilterTabs()"
-        [activeTab]="quickFilter()"
-        tabsAriaLabel="Filtros de PQRS"
-        (tabChanged)="setQuickFilter($event)"
-      />
+      <!-- ── Quick-filter tabs (inline) ──────────────────────────────
+           Inline tab strip (Todas / Vencidas / Sin asignar) so the
+           platform-wide operator can narrow the queue by bucket. -->
+      <div
+        class="quick-filters"
+        role="tablist"
+        aria-label="Filtros rápidos de PQRS"
+      >
+        @for (tab of quickFilterTabs(); track tab.id) {
+        <button
+          type="button"
+          role="tab"
+          class="quick-filters__tab"
+          [class.quick-filters__tab--active]="quickFilter() === tab.id"
+          [attr.aria-selected]="quickFilter() === tab.id"
+          (click)="setQuickFilter(tab.id)"
+        >
+          <app-icon [name]="tab.icon || 'inbox'" [size]="14"></app-icon>
+          <span>{{ tab.label }}</span>
+        </button>
+        }
+      </div>
 
       <!-- ── Sub-header card (patrón Ventas) ─────────────────────────
            Icon + title + subtitle that gives the super-admin a single
-           scannable block of context right under the sticky header. -->
+           scannable block of context right under the page header. -->
       <div class="pqr-subheader">
         <div class="pqr-subheader__icon">
           <app-icon name="message-square" [size]="22"></app-icon>
@@ -899,7 +904,7 @@ export class SuperadminPqrsComponent {
     ) {
       return;
     }
-    this.quickFilter.set(filter);
+    this.quickFilter.set(f);
     this.page.set(1);
     this.fetch();
   }
