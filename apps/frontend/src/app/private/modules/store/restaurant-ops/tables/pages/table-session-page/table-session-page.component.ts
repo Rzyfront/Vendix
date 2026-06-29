@@ -324,8 +324,20 @@ export class TableSessionPageComponent implements OnInit {
     this.loadSession(id);
   }
 
-  loadSession(id: number): void {
-    this.isLoading.set(true);
+  /**
+   * Fetch the session by id and merge it into local state.
+   *
+   * `opts.silent = true` is used by post-action refetches (mark-delivered,
+   * fire-to-kitchen) so the body does NOT re-enter the loading state — the
+   * template wraps everything in `@if (!isLoading())` showing the
+   * "Cargando sesión…" placeholder. Flipping that flag mid-action blanks
+   * the page until getSession resolves; with silent refetch, the optimistic
+   * local merge stays visible while the server snapshot lands in the
+   * background. Initial load (ngOnInit) intentionally keeps the loading
+   * state on for the first paint.
+   */
+  loadSession(id: number, opts: { silent?: boolean } = {}): void {
+    if (!opts.silent) this.isLoading.set(true);
     this.tablesService
       .getSession(id)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -333,10 +345,10 @@ export class TableSessionPageComponent implements OnInit {
         next: (s) => {
           this.session.set(s);
           this.seedKitchenStateFromOrder(s);
-          this.isLoading.set(false);
+          if (!opts.silent) this.isLoading.set(false);
         },
         error: (err: unknown) => {
-          this.isLoading.set(false);
+          if (!opts.silent) this.isLoading.set(false);
           this.toastService.error(
             typeof err === 'string' ? err : 'Error al cargar la sesión',
           );
@@ -663,7 +675,7 @@ export class TableSessionPageComponent implements OnInit {
           this.toastService.success(
             `Enviado a cocina — ticket #${res.kitchen_ticket_id}`,
           );
-          this.loadSession(order.id);
+          this.loadSession(order.id, { silent: true });
         },
         error: (err: unknown) => {
           this.isFiring.set(false);
@@ -698,7 +710,7 @@ export class TableSessionPageComponent implements OnInit {
           });
           this.toastService.success('Plato marcado como entregado');
           const orderId = this.session()?.order?.id;
-          if (orderId) this.loadSession(orderId);
+          if (orderId) this.loadSession(orderId, { silent: true });
         },
         error: (err: unknown) => {
           this.deliveringTicketId.set(null);
