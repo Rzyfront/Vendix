@@ -62,60 +62,6 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         (tabChanged)="setQuickFilter($event)"
       />
 
-      <!-- Cross-store CTA -->
-      <div
-        class="cta-card"
-        [class.cta-card--urgent]="overdueCount() > 0"
-        [class.cta-card--empty]="stats().total === 0"
-      >
-        @if (stats().total === 0) {
-        <div class="cta-card__main">
-          <div class="cta-card__icon cta-card__icon--muted">
-            <app-icon name="inbox" [size]="32"></app-icon>
-          </div>
-          <div class="cta-card__copy">
-            <h2>Sin PQRS en tus tiendas</h2>
-            <p>
-              Cuando un visitante radique una petición, queja o reclamo en
-              cualquier tienda de tu organización, aparecerá aquí.
-            </p>
-          </div>
-        </div>
-        } @else {
-        <div class="cta-card__main">
-          <div class="cta-card__icon">
-            <app-icon
-              [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-square'"
-              [size]="28"
-            ></app-icon>
-          </div>
-          <div class="cta-card__copy">
-            <h2>
-              @if (overdueCount() > 0) {
-                {{ overdueCount() }} PQRS
-                con SLA vencido en tus tiendas
-              } @else if (stats().recent_24h > 0) {
-                {{ stats().recent_24h }} PQRS
-                radicadas en las últimas 24h
-              } @else {
-                Todas las tiendas al día con PQRS
-              }
-            </h2>
-            <p>
-              @if (overdueCount() > 0) {
-                ⚠️ Riesgo regulatorio a nivel de la organización.
-              } @else if (stats().recent_24h > 0) {
-                Monitorea la respuesta de cada tienda para evitar
-                acumulación de SLA.
-              } @else {
-                Sin PQRS pendientes de revisión.
-              }
-            </p>
-          </div>
-        </div>
-        }
-      </div>
-
       <div class="stats-container">
         <app-stats
           title="Total PQRS"
