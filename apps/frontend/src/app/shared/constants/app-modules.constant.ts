@@ -671,6 +671,12 @@ export const APP_MODULES: {
           description: 'Acceso a la secci\u00f3n de soporte',
         },
         {
+          key: 'help_pqrs',
+          label: 'Mis Solicitudes',
+          description:
+            'Conversaciones y solicitudes radicadas por tus clientes desde la tienda',
+        },
+        {
           key: 'help_center',
           label: 'Centro de Ayuda',
           description: 'Art\u00edculos y gu\u00edas del centro de ayuda',

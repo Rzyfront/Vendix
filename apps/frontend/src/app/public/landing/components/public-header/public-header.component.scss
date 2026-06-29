@@ -1,0 +1,12 @@
+// Landing shared header (extracted so PQR public pages reuse it).
+// Sticky glassmorphism bar with brand logo + minimal nav. Same
+// colors as the landing's main nav so the user feels they're
+// in the same product when filing a complaint.
+
+.public-header {
+  // The component relies on Tailwind utility classes for the
+  // visual treatment (bg-white/80, backdrop-blur-xl, border-b,
+  // shadow-sm, etc.). Component-level CSS is reserved for
+  // state variants that are awkward to express in Tailwind.
+  // Right now there are none — keep the file for future use.
+}

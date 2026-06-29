@@ -189,6 +189,11 @@ export class DefaultPanelUIService {
         help: true,
         help_support: true,
         help_center: true,
+        // PQRs (Peticiones, Quejas y Reclamos) — child of `help`.
+        // Routed to /admin/pqrs. Follows the parent_child convention
+        // already used by help_support and help_center so the user can
+        // toggle PQRs independently from Soporte / Centro de Ayuda.
+        help_pqrs: true,
       },
       STORE_ECOMMERCE: {
         profile: true,

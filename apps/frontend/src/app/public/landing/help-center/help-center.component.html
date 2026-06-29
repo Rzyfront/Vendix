@@ -1,0 +1,213 @@
+<section class="help-center text-[var(--color-text-primary)]">
+  <app-public-header></app-public-header>
+
+  <!-- Hero -->
+  <div class="help-center__hero">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl text-center">
+      <h1 class="help-center__title">Centro de Ayuda</h1>
+      <p class="help-center__lead">¿En qué podemos ayudarle?</p>
+
+      <div class="help-center__search">
+        <app-icon
+          name="search"
+          [size]="20"
+          color="currentColor"
+        ></app-icon>
+        <input
+          type="search"
+          placeholder="Buscar artículos, preguntas o funciones..."
+          [ngModel]="searchQuery()"
+          (ngModelChange)="searchQuery.set($event)"
+          aria-label="Buscar artículos, preguntas o funciones"
+        />
+        @if (searchQuery()) {
+        <button
+          type="button"
+          class="help-center__search-clear"
+          (click)="searchQuery.set('')"
+          aria-label="Limpiar búsqueda"
+        >
+          <app-icon name="x" [size]="16" color="currentColor"></app-icon>
+        </button>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- Filter status bar — only shown when at least one filter is
+       active. Tells the user "we're filtering" and gives a single
+       click to clear. -->
+  @if (hasActiveFilter()) {
+  <div class="help-center__filter-bar">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
+      <div class="help-center__filter-banner">
+        <span class="help-center__filter-text">
+          @if (selectedCategory()) {
+          Filtrando por categoría:
+          <strong>{{ selectedCategory() }}</strong>
+          @if (searchQuery()) { · Búsqueda: "<strong>{{ searchQuery() }}</strong>" }
+          } @else {
+          Búsqueda: "<strong>{{ searchQuery() }}</strong>"
+          }
+        </span>
+        <button
+          type="button"
+          class="help-center__filter-clear"
+          (click)="clearAllFilters()"
+        >
+          <app-icon name="x" [size]="14" color="currentColor"></app-icon>
+          Quitar filtro
+        </button>
+      </div>
+    </div>
+  </div>
+  }
+
+  <!-- Categorías — clickable chips que filtran todo el contenido
+       de la página. Cada chip muestra cuántos items tiene esa
+       categoría para que el usuario sepa qué esperar. -->
+  <div class="help-center__categories">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
+      <div class="help-center__section-head">
+        <h2 class="help-center__section-title">¿Cómo podemos ayudarle?</h2>
+        <p class="help-center__section-lead">
+          Elija una categoría para ver solo los artículos relacionados.
+        </p>
+        @if (hasActiveFilter()) {
+        <span class="help-center__section-count">
+          ({{ filteredCategoryCount() }})
+        </span>
+        }
+      </div>
+      <div class="help-center__category-grid">
+        @for (cat of filteredCategories(); track cat.id) {
+        <button
+          type="button"
+          class="help-center__category"
+          [class.help-center__category--active]="selectedCategory() === cat.id"
+          (click)="selectCategory(cat.id)"
+          [attr.aria-pressed]="selectedCategory() === cat.id"
+        >
+          <div class="help-center__category-icon">
+            <app-icon [name]="cat.icon" [size]="22" color="currentColor"></app-icon>
+          </div>
+          <div class="help-center__category-body">
+            <h3 class="help-center__category-title">{{ cat.title }}</h3>
+            <p class="help-center__category-desc">{{ cat.description }}</p>
+          </div>
+          @if (selectedCategory() === cat.id) {
+          <div class="help-center__category-check">
+            <app-icon name="check" [size]="16" color="currentColor"></app-icon>
+          </div>
+          } @else {
+          <app-icon name="arrow-right" [size]="16" color="currentColor" class="help-center__category-arrow"></app-icon>
+          }
+        </button>
+        }
+        @if (filteredCategories().length === 0) {
+        <p class="help-center__empty-inline">
+          No hay categorías que coincidan con tu búsqueda.
+        </p>
+        }
+      </div>
+    </div>
+  </div>
+
+  <!-- FAQ list -->
+  <div class="help-center__faqs" #faqSection>
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-3xl">
+      <div class="help-center__section-head">
+        <h2 class="help-center__section-title">Preguntas frecuentes</h2>
+        @if (hasActiveFilter()) {
+        <span class="help-center__section-count">
+          ({{ filteredFaqCount() }})
+        </span>
+        }
+      </div>
+
+      @if (filteredFaqs().length === 0) {
+      <p class="help-center__empty-inline">
+        No encontramos respuestas que coincidan. Prueba con otra
+        palabra o crea una solicitud y te respondemos directamente.
+      </p>
+      } @else {
+      <ul class="help-center__faq-list">
+        @for (faq of filteredFaqs(); track faq.id) {
+        <li class="help-center__faq">
+          <details>
+            <summary>
+              <span class="help-center__faq-q">{{ faq.question }}</span>
+              <app-icon name="chevron-down" [size]="18" color="currentColor"></app-icon>
+            </summary>
+            <p class="help-center__faq-a">{{ faq.answer }}</p>
+          </details>
+        </li>
+        }
+      </ul>
+      }
+    </div>
+  </div>
+
+  <!-- Equipo + CTA side-by-side -->
+  <div class="help-center__team">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
+      <div class="help-center__team-grid">
+        <div class="help-center__team-card">
+          <h3 class="help-center__team-title">¿Necesitas ayuda?</h3>
+          <p class="help-center__team-lead">
+            Nuestro equipo de soporte está disponible para ayudarte.
+          </p>
+          <div class="help-center__team-info">
+            <div class="help-center__team-item">
+              <app-icon name="mail" [size]="16" color="currentColor"></app-icon>
+              <a href="mailto:soporte@vendix.online">soporte@vendix.online</a>
+            </div>
+            <div class="help-center__team-item">
+              <app-icon name="clock" [size]="16" color="currentColor"></app-icon>
+              <span>Lun–Vie<br />8:00 AM – 6:00 PM</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="help-center__cta-card">
+          <h3 class="help-center__cta-title">¿No encontraste la respuesta?</h3>
+          <p class="help-center__cta-lead">
+            Crea una solicitud y te respondemos al correo.
+          </p>
+          <p class="help-center__cta-sla">
+            <app-icon name="clock" [size]="12" color="currentColor"></app-icon>
+            Tiempo de respuesta: 24h hábiles
+          </p>
+          <div class="help-center__cta-actions">
+            @if (isAuthenticated()) {
+            <a routerLink="/pqr" class="help-center__btn help-center__btn--primary">
+              <app-icon name="plus-circle" [size]="16" color="currentColor"></app-icon>
+              Nueva solicitud
+            </a>
+            <a routerLink="/admin/pqrs" class="help-center__btn help-center__btn--secondary">
+              <app-icon name="list" [size]="16" color="currentColor"></app-icon>
+              Ver mis solicitudes
+            </a>
+            } @else {
+            <a routerLink="/pqr" class="help-center__btn help-center__btn--primary">
+              <app-icon name="plus-circle" [size]="16" color="currentColor"></app-icon>
+              Crear solicitud
+            </a>
+            <a routerLink="/pqr/consultar" class="help-center__btn help-center__btn--secondary">
+              <app-icon name="search" [size]="16" color="currentColor"></app-icon>
+              Consultar estado
+            </a>
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="help-center__footer-nav">
+    <a routerLink="/" class="help-center__back help-center__back--centered">
+      <app-icon name="arrow-left" [size]="18" color="currentColor"></app-icon>
+      <span>Volver al inicio de Vendix</span>
+    </a>
+  </div>
+</section>

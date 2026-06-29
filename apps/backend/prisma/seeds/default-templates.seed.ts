@@ -360,6 +360,10 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             help: true,
             help_support: true,
             help_center: true,
+            // PQRs (Peticiones, Quejas y Reclamos) — child of `help`.
+            // Keep in sync with PANEL_UI_FALLBACK.STORE_ADMIN.help_pqrs
+            // and default-store-settings.ts.panel_ui.STORE_ADMIN.help_pqrs.
+            help_pqrs: true,
           },
           STORE_ECOMMERCE: {
             profile: true,

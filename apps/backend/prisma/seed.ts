@@ -23,6 +23,7 @@ import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
 import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
 import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
 import { seedSubscriptionPlansProduction } from './seeds/subscription-plans-production.seed';
+import { seedPqrAnonUser } from './seeds/pqr-anon-user.seed';
 
 /**
  * Seed modules registry
@@ -170,6 +171,12 @@ const seedModules = [
     fn: seedSubscriptionPlansProduction,
     description:
       'Canonical SaaS plans (starter / pro / enterprise) — idempotent across all environments',
+  },
+  {
+    name: 'PQR Anonymous User',
+    fn: seedPqrAnonUser,
+    description:
+      'Creates the anon-pqr@vendix.online user that acts as the creator of public PQR submissions (idempotent)',
   },
 ];
 

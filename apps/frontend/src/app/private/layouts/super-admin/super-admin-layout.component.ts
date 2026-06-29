@@ -105,19 +105,34 @@ export class SuperAdminLayoutComponent {
 
   // --- Support tickets open count ---
   private readonly openTicketsCount = signal(0);
+  // --- Support PQRs open count (sibling badge on the same Soporte group) ---
+  private readonly openPqrsCount = signal(0);
 
   // --- Dynamic menu items with support badge ---
   readonly menuItems = computed<MenuItem[]>(() => {
-    const openCount = this.openTicketsCount();
-    const badge = openCount > 0 ? openCount.toString() : undefined;
+    const ticketsCount = this.openTicketsCount();
+    const pqrsCount = this.openPqrsCount();
+    const ticketsBadge = ticketsCount > 0 ? ticketsCount.toString() : undefined;
+    const pqrsBadge = pqrsCount > 0 ? pqrsCount.toString() : undefined;
+    // Sum of both children — used on the parent "Soporte" group so the
+    // operator sees at-a-glance how many items are pending across the
+    // support section, then drills into the right sub-view.
+    const groupTotal = ticketsCount + pqrsCount;
+    const groupBadge = groupTotal > 0 ? groupTotal.toString() : undefined;
     return this.baseMenuItems.map((item) => {
       if (item.label === 'Soporte' && item.children) {
         return {
           ...item,
-          badge,
-          children: item.children.map((child) =>
-            child.label === 'Tickets' ? { ...child, badge } : child,
-          ),
+          badge: groupBadge,
+          children: item.children.map((child) => {
+            if (child.label === 'Tickets') {
+              return { ...child, badge: ticketsBadge };
+            }
+            if (child.label === 'PQRS') {
+              return { ...child, badge: pqrsBadge };
+            }
+            return child;
+          }),
         };
       }
       return item;
@@ -282,7 +297,12 @@ export class SuperAdminLayoutComponent {
           {
             label: 'Tickets',
             icon: 'circle',
-            route: '/super-admin/support',
+            route: '/super-admin/support/tickets',
+          },
+          {
+            label: 'PQRS',
+            icon: 'message-square',
+            route: '/super-admin/support/pqrs',
           },
           {
             label: 'Centro de Ayuda',
@@ -399,6 +419,31 @@ export class SuperAdminLayoutComponent {
         },
         error: (err) => {
           console.error('Error loading support stats:', err);
+        },
+      });
+
+    // Load PQR stats — refresh every 60 seconds, sibling timer to the
+    // ticket one above so they don't share a single in-flight request
+    // (they're independent endpoints).
+    timer(0, 60000)
+      .pipe(
+        switchMap(() => this.supportService.getPqrStats()),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (stats: any) => {
+          // Badge counts only PQRS that still need a response from
+          // the support team — not just "open" ones. Once any admin
+          // (store or super) has posted a public comment, the row
+          // drops off the badge because it's no longer actionable.
+          // The server pre-computes this as `unanswered_count` so we
+          // don't have to do the `comments: { none: { ... } }` query
+          // in the frontend.
+          const unansweredCount = stats.unanswered_count ?? 0;
+          this.openPqrsCount.set(unansweredCount);
+        },
+        error: (err) => {
+          console.error('Error loading PQR stats:', err);
         },
       });
   }

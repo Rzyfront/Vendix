@@ -30,7 +30,19 @@ export class SuperadminSupportService {
    */
   async findAll(query: SuperadminTicketQueryDto) {
     try {
-      const where: any = {};
+      const where: any = {
+        // Exclude PQRs (Peticiones/Quejas/Reclamos) from the super-admin
+        // Soporte view. PQRs live in the same `support_tickets` table as
+        // internal support tickets but are discriminated by the 'pqr'
+        // tag set in pqr.service.ts:143. They have a dedicated flow
+        // (legal SLA, public_form source, anon visitors) managed by the
+        // store-admin at /admin/pqrs and are routed through
+        // pqr.service.ts — not through the standard support pipeline.
+        // Keeping them out of this list avoids mixing two distinct
+        // domains in the same UI. If global PQR oversight is needed,
+        // build a dedicated super-admin PQRs view (not a filter here).
+        NOT: { tags: { has: 'pqr' } },
+      };
 
       // Apply organization filter if provided
       if (query.organization_id) {
@@ -177,6 +189,11 @@ export class SuperadminSupportService {
 
   /**
    * Get a single ticket by ID (any organization)
+   *
+   * Refuses to surface PQRs — they belong to the dedicated PQR pipeline
+   * (see findAll comment for rationale). If a PQR id is requested, we
+   * throw 404 so the caller can't accidentally edit a PQR through the
+   * support endpoints.
    */
   async findOne(ticketId: number) {
     try {
@@ -245,6 +262,11 @@ export class SuperadminSupportService {
       });
 
       if (!ticket) {
+        throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
+      }
+
+      // Hide PQRs from the support view (see findAll rationale).
+      if (Array.isArray(ticket.tags) && ticket.tags.includes('pqr')) {
         throw new VendixHttpException(ErrorCodes.SUP_TICKET_001);
       }
 
@@ -544,25 +566,31 @@ export class SuperadminSupportService {
         openTickets,
         resolved,
       ] = await Promise.all([
-        this.prisma.support_tickets.count(),
+        this.prisma.support_tickets.count({
+          where: { NOT: { tags: { has: 'pqr' } } },
+        }),
 
         this.prisma.support_tickets.groupBy({
           by: ['status'],
+          where: { NOT: { tags: { has: 'pqr' } } },
           _count: true,
         }),
 
         this.prisma.support_tickets.groupBy({
           by: ['priority'],
+          where: { NOT: { tags: { has: 'pqr' } } },
           _count: true,
         }),
 
         this.prisma.support_tickets.groupBy({
           by: ['category'],
+          where: { NOT: { tags: { has: 'pqr' } } },
           _count: true,
         }),
 
         this.prisma.support_tickets.count({
           where: {
+            NOT: { tags: { has: 'pqr' } },
             sla_deadline: { lt: new Date() },
             status: {
               notIn: [ticket_status_enum.RESOLVED, ticket_status_enum.CLOSED],
@@ -572,6 +600,7 @@ export class SuperadminSupportService {
 
         this.prisma.support_tickets.aggregate({
           where: {
+            NOT: { tags: { has: 'pqr' } },
             resolution_time_minutes: { not: null },
           },
           _avg: {
@@ -581,6 +610,7 @@ export class SuperadminSupportService {
 
         this.prisma.support_tickets.count({
           where: {
+            NOT: { tags: { has: 'pqr' } },
             status: {
               in: [
                 ticket_status_enum.NEW,
@@ -594,6 +624,7 @@ export class SuperadminSupportService {
 
         this.prisma.support_tickets.count({
           where: {
+            NOT: { tags: { has: 'pqr' } },
             status: ticket_status_enum.RESOLVED,
           },
         }),

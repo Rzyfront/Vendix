@@ -1,0 +1,277 @@
+.pqr-track {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 1rem 1.25rem 4rem;
+}
+
+.top-bar {
+  margin-bottom: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0.875rem;
+  color: #16a34a;
+  text-decoration: none;
+  font-size: 0.875rem;
+  font-weight: 600;
+  background: #f0fdf4;
+  border: 1.5px solid #86efac;
+  border-radius: 8px;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: #dcfce7;
+    border-color: #22c55e;
+    color: #14532d;
+  }
+}
+
+.hero {
+  text-align: center;
+  margin-bottom: 1.5rem;
+
+  h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+    color: #0f172a;
+  }
+
+  .lead {
+    color: #475569;
+    font-size: 0.95rem;
+    margin: 0;
+  }
+}
+
+.search-bar {
+  display: flex;
+  gap: 0.5rem;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0.5rem;
+  margin-bottom: 1.5rem;
+
+  input {
+    flex: 1;
+    border: 0;
+    padding: 0.5rem 0.75rem;
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.95rem;
+    outline: none;
+    background: transparent;
+  }
+
+  .primary-btn {
+    background: #2563eb;
+    color: #ffffff;
+    border: 0;
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+    text-decoration: none;
+
+    &:hover {
+      background: #1d4ed8;
+      box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+    }
+  }
+
+  // Inline + icon (white) for the inline "+ Radicar otro PQRS" text
+  // decoration. Using text + ::before instead of the <app-icon>
+  // component so the glyph is always white, has no SVG-in-SVG
+  // inheritance quirks, and doesn't need the icon registry.
+  &__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    color: #ffffff;
+    font-size: 0.9rem;
+    font-weight: 700;
+    line-height: 1;
+  }
+}
+
+.state-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem;
+  color: #475569;
+  text-align: center;
+
+  &--warn {
+    background: #fffbeb;
+    border-color: #fde68a;
+    color: #92400e;
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  &--error {
+    background: #fef2f2;
+    border-color: #fecaca;
+    color: #991b1b;
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  p {
+    margin: 0.25rem 0 0;
+    font-size: 0.85rem;
+  }
+}
+
+.ticket-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  padding: 1.5rem;
+}
+
+.ticket-header {
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid #f1f5f9;
+
+  > div:first-child {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #0f172a;
+  }
+}
+
+.mono {
+  font-family: 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.type-tag {
+  display: inline-flex;
+  padding: 0.125rem 0.5rem;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 600;
+
+  &[data-type='PETITION'] {
+    background: #eef2ff;
+    color: #4338ca;
+  }
+  &[data-type='COMPLAINT'] {
+    background: #fef3c7;
+    color: #92400e;
+  }
+  &[data-type='CLAIM'] {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 0.5rem 0.75rem;
+  margin: 0 0 1.5rem;
+  font-size: 0.9rem;
+
+  dt {
+    color: #64748b;
+    font-weight: 500;
+  }
+
+  dd {
+    margin: 0;
+    color: #1e293b;
+  }
+}
+
+.responses {
+  h3 {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #0f172a;
+  }
+
+  .muted {
+    color: #94a3b8;
+    font-size: 0.9rem;
+  }
+
+  .response {
+    background: #f0f9ff;
+    border-left: 3px solid #3b82f6;
+    border-radius: 6px;
+    padding: 0.875rem;
+    margin-bottom: 0.5rem;
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 0.5rem;
+      margin-bottom: 0.25rem;
+    }
+
+    strong {
+      color: #0f172a;
+      font-size: 0.9rem;
+    }
+
+    p {
+      margin: 0;
+      color: #334155;
+      font-size: 0.9rem;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  }
+}
+
+.cta {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 1rem;
+  color: #4f46e5;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.9rem;
+
+  &:hover {
+    color: #4338ca;
+    text-decoration: underline;
+  }
+}
