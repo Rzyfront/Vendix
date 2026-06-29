@@ -52,6 +52,7 @@ import { OrderPrintService } from '../../services/order-print.service';
     OptionsDropdownComponent,
     EmptyStateComponent,
     IconComponent,
+    ButtonComponent,
     PaginationComponent,
     CardComponent,
   ],
