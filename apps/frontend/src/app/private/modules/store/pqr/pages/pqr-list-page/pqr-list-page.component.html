@@ -1,42 +1,31 @@
 <div class="pqr-list-page">
-  <!-- ── Quick-filter tabs (inline) ────────────────────────────────────
-       Inline tab strip (Todas / Vencidas / Pendientes / Nuevas) so
-       the operator can narrow the queue by bucket without opening
-       the dropdown filters. Rendered as semantic <button role="tab">. -->
-  <div
-    class="quick-filters"
-    role="tablist"
-    aria-label="Filtros rápidos de solicitudes"
-  >
-    @for (tab of quickFilterTabs(); track tab.id) {
-    <button
-      type="button"
-      role="tab"
-      class="quick-filters__tab"
-      [class.quick-filters__tab--active]="quickFilter() === tab.id"
-      [attr.aria-selected]="quickFilter() === tab.id"
-      (click)="setQuickFilter(tab.id)"
-    >
-      <app-icon [name]="tab.icon || 'inbox'" [size]="14"></app-icon>
-      <span>{{ tab.label }}</span>
-    </button>
-    }
-  </div>
-
-  <!-- ── Sub-header card ────────────────────────────────────────────────
-       Mirrors the "Ventas / Reportes de ventas y facturación" card
-       pattern used by the Reportes module. Icon + title + subtitle so
-       the operator has a single, scannable block of context right
-       under the page header. -->
-  <div class="pqr-subheader">
-    <div class="pqr-subheader__icon">
-      <app-icon name="message-square" [size]="22"></app-icon>
-    </div>
-    <div class="pqr-subheader__copy">
-      <h2>Bandeja</h2>
-      <p>Gestiona las solicitudes de tus clientes</p>
-    </div>
-  </div>
+  <!-- ── Sticky header ─────────────────────────────────────────────────
+       Same component used by every admin module (Ventas, Reportes,
+       Clientes). Tabs inline at the top so the operator can narrow
+       the queue by bucket (Todas / Vencidas / Pendientes / Nuevas).
+       No primary-action button — '+ Nueva solicitud' lives in the
+       options-dropdown 'Acciones' menu inside the list card. -->
+  @if (stats() && stats()!.total > 0) {
+  <app-sticky-header
+    title="Bandeja"
+    subtitle=""
+    icon="inbox"
+    variant="glass"
+    [showBackButton]="false"
+    [tabs]="quickFilterTabs()"
+    [activeTab]="quickFilter()"
+    tabsAriaLabel="Filtros de PQRS"
+    (tabChanged)="setQuickFilter($event)"
+  />
+  } @else {
+  <app-sticky-header
+    title="Bandeja"
+    subtitle="Aún no tienes solicitudes"
+    icon="inbox"
+    variant="glass"
+    [showBackButton]="false"
+  />
+  }
 
   <!-- ── Stats grid ──────────────────────────────────────────────────────
        Same `<app-stats>` shared component used by Clientes / Reportes /

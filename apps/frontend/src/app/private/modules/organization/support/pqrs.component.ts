@@ -16,6 +16,7 @@ import { RouterLink } from '@angular/router';
 import {
   IconComponent,
   StatsComponent,
+  StickyHeaderComponent,
 } from '../../../../shared/components';
 import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
@@ -41,45 +42,25 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     RouterLink,
     IconComponent,
     StatsComponent,
+    StickyHeaderComponent,
   ],
   template: `
     <div class="pqr-list-page">
-      <!-- ── Quick-filter tabs (inline) ──────────────────────────────
-           Inline tab strip (Todas / Vencidas / Sin asignar) so the
-           org-admin can narrow the queue by bucket without opening
-           the dropdown filters. -->
-      <div
-        class="quick-filters"
-        role="tablist"
-        aria-label="Filtros rápidos de PQRS"
-      >
-        @for (tab of quickFilterTabs(); track tab.id) {
-        <button
-          type="button"
-          role="tab"
-          class="quick-filters__tab"
-          [class.quick-filters__tab--active]="quickFilter() === tab.id"
-          [attr.aria-selected]="quickFilter() === tab.id"
-          (click)="setQuickFilter(tab.id)"
-        >
-          <app-icon [name]="tab.icon || 'inbox'" [size]="14"></app-icon>
-          <span>{{ tab.label }}</span>
-        </button>
-        }
-      </div>
-
-      <!-- ── Sub-header card (patrón Ventas) ─────────────────────────
-           Icon + title + subtitle that gives the org-admin a single
-           scannable block of context right under the page header. -->
-      <div class="pqr-subheader">
-        <div class="pqr-subheader__icon">
-          <app-icon name="message-square" [size]="22"></app-icon>
-        </div>
-        <div class="pqr-subheader__copy">
-          <h2>PQRS</h2>
-          <p>Vista agregada de peticiones, quejas y reclamos en tus tiendas</p>
-        </div>
-      </div>
+      <!-- ── Sticky header ─────────────────────────────────────────
+           Same component used by every admin module. Tabs inline at
+           the top so the operator can narrow the org-wide queue by
+           bucket (Todas / Vencidas / Sin asignar). -->
+      <app-sticky-header
+        title="PQRS"
+        subtitle="Vista agregada por organización"
+        icon="headset"
+        variant="glass"
+        [showBackButton]="false"
+        [tabs]="quickFilterTabs()"
+        [activeTab]="quickFilter()"
+        tabsAriaLabel="Filtros de PQRS"
+        (tabChanged)="setQuickFilter($event)"
+      />
 
       <!-- Cross-store CTA -->
       <div

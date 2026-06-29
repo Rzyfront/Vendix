@@ -51,6 +51,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
     DatePipe,
     PqrStatusPillComponent,
     IconComponent,
+    StickyHeaderComponent,
     StatsComponent,
     CardComponent,
     ResponsiveDataViewComponent,
