@@ -157,7 +157,7 @@ local vhost will fail with `ERR_CERT_AUTHORITY_INVALID` unless you pass these fl
 | Flag (CLI)               | MCP parameter                     | Value                  | Reason                                                 |
 | ------------------------ | --------------------------------- | ---------------------- | ------------------------------------------------------ |
 | `--headed`               | `headed`                          | `true`                 | Dev runs locally — you need to **see** the browser open |
-| `--ignore-certificate-errors` | `extraArgs`                  | `["--ignore-certificate-errors"]` | Vendix vhost uses self-signed cert              |
+| `--ignore-https-errors` | `extraArgs`                  | `["--ignore-https-errors"]` | Vendix vhost uses self-signed cert              |
 
 The MCP server's defaults are **not** user-configurable without forking the Rust binary. Treat
 `headed: true` + `extraArgs: ['--ignore-certificate-errors']` as **mandatory**, not optional. If a
@@ -186,7 +186,8 @@ After registering, **restart the agent** so it loads the MCP subprocess. Until t
 ### E2E recipe (CLI)
 
 ```bash
-agent-browser open https://admin-techsolutions.vendix.com --headed --ignore-certificate-errors
+# Global flags MUST come BEFORE the subcommand
+agent-browser --headed --ignore-https-errors open https://admin-techsolutions.vendix.com
 agent-browser snapshot -i                                   # interactive elements with @e refs
 agent-browser fill @e2 "owner@techsolutions.co"             # use refs from the snapshot
 agent-browser fill @e3 "1125634q"
@@ -203,7 +204,7 @@ MCP equivalent (the only way the agent can drive the browser):
 agent_browser_open(
   url="https://admin-techsolutions.vendix.com",
   headed=true,
-  extraArgs=["--ignore-certificate-errors"],
+  extraArgs=["--ignore-https-errors"],
 )
 ```
 
