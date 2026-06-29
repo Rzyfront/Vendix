@@ -16,6 +16,7 @@ import { RouterLink } from '@angular/router';
 import {
   IconComponent,
   StatsComponent,
+  StickyHeaderComponent,
 } from '../../../../shared/components';
 import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
@@ -41,31 +42,37 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     RouterLink,
     IconComponent,
     StatsComponent,
+    StickyHeaderComponent,
   ],
   template: `
     <div class="pqr-list-page">
-      <!-- Quick-filter tabs (Todas / Vencidas / Sin asignar) — moved
-           from the removed sticky-header so the operator can still
-           narrow the org-wide queue by bucket without opening the
-           dropdown filters. -->
-      <div
-        class="quick-filters"
-        role="tablist"
-        aria-label="Filtros rápidos de PQRS"
-      >
-        @for (tab of quickFilterTabs(); track tab.id) {
-        <button
-          type="button"
-          role="tab"
-          class="quick-filters__tab"
-          [class.quick-filters__tab--active]="quickFilter() === tab.id"
-          [attr.aria-selected]="quickFilter() === tab.id"
-          (click)="setQuickFilter(tab.id)"
-        >
-          <app-icon [name]="tab.icon || 'inbox'" [size]="14"></app-icon>
-          <span>{{ tab.label }}</span>
-        </button>
-        }
+      <!-- ── Sticky header (patrón Ventas) ─────────────────────────────
+           Same component used by every admin module. Tabs inline at the
+           top so the operator can narrow the org-wide queue by bucket
+           (Todas / Vencidas / Sin asignar). -->
+      <app-sticky-header
+        title="PQRS"
+        subtitle="Vista agregada por organización"
+        icon="headset"
+        variant="glass"
+        [showBackButton]="false"
+        [tabs]="quickFilterTabs()"
+        [activeTab]="quickFilter()"
+        tabsAriaLabel="Filtros de PQRS"
+        (tabChanged)="setQuickFilter($event)"
+      />
+
+      <!-- ── Sub-header card (patrón Ventas) ─────────────────────────
+           Icon + title + subtitle that gives the org-admin a single
+           scannable block of context right under the sticky header. -->
+      <div class="pqr-subheader">
+        <div class="pqr-subheader__icon">
+          <app-icon name="message-square" [size]="22"></app-icon>
+        </div>
+        <div class="pqr-subheader__copy">
+          <h2>PQRS</h2>
+          <p>Vista agregada de peticiones, quejas y reclamos en tus tiendas</p>
+        </div>
       </div>
 
       <!-- Cross-store CTA -->
@@ -279,6 +286,43 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         padding: 1.5rem;
         max-width: 1440px;
         margin: 0 auto;
+      }
+      .pqr-subheader {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 1rem 1.25rem;
+      }
+      .pqr-subheader__icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: #dcfce7;
+        color: #15803d;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .pqr-subheader__copy {
+        flex: 1;
+        min-width: 0;
+      }
+      .pqr-subheader__copy h2 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #0f172a;
+        line-height: 1.2;
+      }
+      .pqr-subheader__copy p {
+        margin: 0;
+        color: #64748b;
+        font-size: 0.8125rem;
+        line-height: 1.3;
       }
       .quick-filters {
         display: flex;
@@ -682,12 +726,15 @@ private loadOrgStores(): void {
       });
   }
 
-  setQuickFilter(filter: string) {
+  setQuickFilter(filter: string | Event) {
+    // StickyHeaderComponent emits tabChanged as Event; the inline
+    // quick-filter buttons emit plain strings. Accept both and coerce.
+    const raw = typeof filter === 'string' ? filter : '';
     // Narrow the string input from the quick-filter buttons to the local
     // union. Anything unrecognised falls back to 'all' so a misconfigured
     // tab id can't poison component state.
     const next: 'all' | 'overdue' | 'new' =
-      filter === 'overdue' || filter === 'new' ? filter : 'all';
+      raw === 'overdue' || raw === 'new' ? raw : 'all';
     this.quickFilter.set(next);
     this.fetch();
   }

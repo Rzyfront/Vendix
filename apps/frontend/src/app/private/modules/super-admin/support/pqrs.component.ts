@@ -16,6 +16,7 @@ import { environment } from '../../../../../environments/environment';
 import {
   IconComponent,
   StatsComponent,
+  StickyHeaderComponent,
 } from '../../../../shared/components';
 import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
@@ -45,35 +46,37 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     RouterLink,
     IconComponent,
     StatsComponent,
+    StickyHeaderComponent,
   ],
   template: `
     <div class="pqr-list-page">
-      <!-- Sticky header — same component used by the Reportes →
-           Ventas view. Renders the filter tabs at the top, the
-           section icon + sub-title on the left, and (optionally)
-           actions on the right. Single visual pattern across admin
-           modules so users don't relearn navigation per page. -->
-      <!-- Quick-filter tabs (Todas / Vencidas / Sin asignar) — moved
-           from the removed sticky-header so the platform-wide
-           operator can still narrow the queue by bucket. -->
-      <div
-        class="quick-filters"
-        role="tablist"
-        aria-label="Filtros rápidos de PQRS"
-      >
-        @for (tab of quickFilterTabs(); track tab.id) {
-        <button
-          type="button"
-          role="tab"
-          class="quick-filters__tab"
-          [class.quick-filters__tab--active]="quickFilter() === tab.id"
-          [attr.aria-selected]="quickFilter() === tab.id"
-          (click)="setQuickFilter(tab.id)"
-        >
-          <app-icon [name]="tab.icon || 'inbox'" [size]="14"></app-icon>
-          <span>{{ tab.label }}</span>
-        </button>
-        }
+      <!-- ── Sticky header (patrón Ventas) ─────────────────────────────
+           Same component used by every admin module. Tabs inline at the
+           top so the platform-wide operator can narrow the queue by
+           bucket (Todas / Vencidas / Sin asignar). -->
+      <app-sticky-header
+        title="PQRS"
+        subtitle="Vista global de la plataforma"
+        icon="message-square"
+        variant="glass"
+        [showBackButton]="false"
+        [tabs]="quickFilterTabs()"
+        [activeTab]="quickFilter()"
+        tabsAriaLabel="Filtros de PQRS"
+        (tabChanged)="setQuickFilter($event)"
+      />
+
+      <!-- ── Sub-header card (patrón Ventas) ─────────────────────────
+           Icon + title + subtitle that gives the super-admin a single
+           scannable block of context right under the sticky header. -->
+      <div class="pqr-subheader">
+        <div class="pqr-subheader__icon">
+          <app-icon name="message-square" [size]="22"></app-icon>
+        </div>
+        <div class="pqr-subheader__copy">
+          <h2>PQRS</h2>
+          <p>Vista global de peticiones, quejas y reclamos de la plataforma</p>
+        </div>
       </div>
 
       <!-- Top CTA — cross-tenant urgency -->
@@ -337,6 +340,45 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     `
       :host {
         display: block;
+      }
+
+      // Sub-header card (patrón Ventas)
+      .pqr-subheader {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        padding: 1rem 1.25rem;
+      }
+      .pqr-subheader__icon {
+        width: 44px;
+        height: 44px;
+        border-radius: 12px;
+        background: #dcfce7;
+        color: #15803d;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+      }
+      .pqr-subheader__copy {
+        flex: 1;
+        min-width: 0;
+      }
+      .pqr-subheader__copy h2 {
+        margin: 0;
+        font-size: 1rem;
+        font-weight: 700;
+        color: #0f172a;
+        line-height: 1.2;
+      }
+      .pqr-subheader__copy p {
+        margin: 0;
+        color: #64748b;
+        font-size: 0.8125rem;
+        line-height: 1.3;
       }
 
       // Quick-filter tabs (moved from the removed sticky-header)
@@ -841,16 +883,19 @@ export class SuperadminPqrsComponent {
     });
   }
 
-  setQuickFilter(filter: string) {
+  setQuickFilter(filter: string | Event) {
+    // StickyHeaderComponent emits tabChanged as Event; the inline
+    // quick-filter buttons emit plain strings. Accept both and coerce.
+    const f = typeof filter === 'string' ? filter : '';
     // ScrollableTabsComponent emits tabChange as plain `string`; narrow
     // it to the local union so the rest of the method stays type-safe.
     // Unrecognised ids are ignored so a misconfigured ScrollableTab
     // can't poison component state.
     if (
-      filter !== 'all' &&
-      filter !== 'overdue' &&
-      filter !== 'expiring' &&
-      filter !== 'new'
+      f !== 'all' &&
+      f !== 'overdue' &&
+      f !== 'expiring' &&
+      f !== 'new'
     ) {
       return;
     }

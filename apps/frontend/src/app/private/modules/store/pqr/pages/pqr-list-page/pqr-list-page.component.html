@@ -1,12 +1,51 @@
 <div class="pqr-list-page">
+  <!-- ── Sticky header (patrón Ventas) ─────────────────────────────────
+       Same component used by every admin module (Ventas, Reportes,
+       Clientes). Tabs inline at the top so the operator can narrow
+       the queue by bucket (Todas / Vencidas / Pendientes / Nuevas).
+       No primary-action button — "+ Nueva solicitud" lives in the
+       options-dropdown "Acciones" menu inside the list card. -->
+  @if (stats() && stats()!.total > 0) {
+  <app-sticky-header
+    title="Bandeja"
+    subtitle=""
+    icon="inbox"
+    variant="glass"
+    [showBackButton]="false"
+    [tabs]="quickFilterTabs()"
+    [activeTab]="quickFilter()"
+    tabsAriaLabel="Filtros de PQRS"
+    (tabChanged)="setQuickFilter($event)"
+  />
+  } @else {
+  <app-sticky-header
+    title="Bandeja"
+    subtitle="Aún no tienes solicitudes"
+    icon="inbox"
+    variant="glass"
+    [showBackButton]="false"
+  />
+  }
+
+  <!-- ── Sub-header card ────────────────────────────────────────────────
+       Mirrors the "Ventas / Reportes de ventas y facturación" card
+       pattern used by the Reportes module. Icon + title + subtitle so
+       the operator has a single, scannable block of context right
+       under the page header. -->
+  <div class="pqr-subheader">
+    <div class="pqr-subheader__icon">
+      <app-icon name="message-square" [size]="22"></app-icon>
+    </div>
+    <div class="pqr-subheader__copy">
+      <h2>Bandeja</h2>
+      <p>Gestiona las solicitudes de tus clientes</p>
+    </div>
+  </div>
+
   <!-- ── Stats grid ──────────────────────────────────────────────────────
        Same `<app-stats>` shared component used by Clientes / Reportes /
        Ventas so the operator has a single mental model for "PQR health
-       at a glance". The page title comes from the global layout
-       breadcrumb ("Mis Solicitudes"), so the redundant sticky-header
-       was removed. Quick filters (Todas / Vencidas / Pendientes /
-       Nuevas) still live in the options-dropdown so the operator can
-       narrow the queue without scrolling. -->
+       at a glance". -->
   @if (stats() && stats()!.total > 0) {
   <div class="stats-container">
     <app-stats
@@ -43,31 +82,6 @@
     ></app-stats>
   </div>
   }
-
-  <!-- ── Quick filter tabs ───────────────────────────────────────────────
-       Inline tab strip for the at-a-glance queue buckets. Mirrors the
-       sticky-header tab set from before but rendered inside the page
-       so the sticky-header can stay removed (page title now comes from
-       the layout breadcrumb). -->
-  <div
-    class="quick-filters"
-    role="tablist"
-    aria-label="Filtros rápidos de solicitudes"
-  >
-    @for (tab of quickFilterTabs(); track tab.id) {
-    <button
-      type="button"
-      role="tab"
-      class="quick-filters__tab"
-      [class.quick-filters__tab--active]="quickFilter() === tab.id"
-      [attr.aria-selected]="quickFilter() === tab.id"
-      (click)="setQuickFilter(tab.id)"
-    >
-      <app-icon [name]="tab.icon || 'inbox'" [size]="14"></app-icon>
-      <span>{{ tab.label }}</span>
-    </button>
-    }
-  </div>
 
   <!-- ── List card ───────────────────────────────────────────────────────
        Mirrors the customer-list pattern (Todos los Clientes (1)) so the

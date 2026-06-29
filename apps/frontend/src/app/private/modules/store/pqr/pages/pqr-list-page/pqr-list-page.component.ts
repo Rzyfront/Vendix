@@ -30,6 +30,7 @@ import {
   FilterValues,
   StickyHeaderTab,
 } from '../../../../../../shared/components';
+import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { PqrService } from '../../../../../../shared/services/pqr.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 
@@ -50,6 +51,7 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
     DatePipe,
     PqrStatusPillComponent,
     IconComponent,
+    StickyHeaderComponent,
     StatsComponent,
     CardComponent,
     ResponsiveDataViewComponent,
