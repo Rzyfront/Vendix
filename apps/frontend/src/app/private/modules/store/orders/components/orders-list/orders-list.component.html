@@ -31,19 +31,22 @@
             (actionClick)="onActionClick($event)"
           ></app-options-dropdown>
 
-          <button
-            (click)="toggleDispatchable()"
-            class="flex items-center gap-1.5 h-10 md:h-11 px-3 rounded-[12px] text-sm font-medium transition-all shrink-0 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none"
-            [ngClass]="{
-              'bg-amber-100 text-amber-700 border border-amber-300': dispatchableFilter(),
-              'bg-surface text-gray-500 border border-transparent hover:bg-gray-50': !dispatchableFilter()
-            }"
+          <app-button
+            [variant]="dispatchableFilter() ? 'primary' : 'outline'"
+            size="md"
+            [iconOnlyMobile]="true"
+            class="shrink-0"
             [attr.aria-pressed]="dispatchableFilter()"
-            title="Órdenes pendientes de despacho (state=processing, delivery_type ≠ direct_delivery)"
+            [attr.title]="
+              dispatchableFilter()
+                ? 'Mostrando solo órdenes por enviar — clic para quitar el filtro'
+                : 'Filtrar órdenes pendientes de despacho (state=processing, delivery_type ≠ direct_delivery)'
+            "
+            (clicked)="toggleDispatchable()"
           >
-            <app-icon name="truck" [size]="14"></app-icon>
-            <span class="hidden sm:inline">Por enviar</span>
-          </button>
+            <app-icon slot="icon" name="truck" [size]="16"></app-icon>
+            Por enviar
+          </app-button>
         </div>
       </div>
     </div>
