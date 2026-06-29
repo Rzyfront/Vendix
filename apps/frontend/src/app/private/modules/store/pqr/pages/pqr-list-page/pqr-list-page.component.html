@@ -1,10 +1,9 @@
-<section class="pqr-list-page">
-  <!-- Sticky header — same component used by the Reportes → Ventas
-       view (Resumen de Ventas / Por Producto / …). Renders the
-       filter tabs at the top, the section icon + "Bandeja" sub-title
-       on the left, and the primary action ("+ Nueva solicitud") on
-       the right. Same visual pattern across admin modules so users
-       don't relearn navigation per page. -->
+<div class="pqr-list-page">
+  <!-- ── StickyHeader: same component used by every admin module (Ventas,
+       Reportes, Clientes). Provides the page icon + subtitle on the left
+       and the primary action ("+ Nueva solicitud") on the right. The
+       quick-filter tabs render inline at the top so the operator can jump
+       between Todas / Vencidas / Pendientes / Nuevas without scrolling. -->
   @if (stats() && stats()!.total > 0) {
   <app-sticky-header
     title="Bandeja"
@@ -20,8 +19,6 @@
     (actionClicked)="onStickyHeaderAction($event)"
   />
   } @else {
-  <!-- Empty state: still render the sticky header so the action button
-       stays accessible, but with no tabs (nothing to filter). -->
   <app-sticky-header
     title="Bandeja"
     subtitle="Aún no tienes solicitudes"
@@ -33,14 +30,12 @@
   />
   }
 
-  <!-- Primary CTA card — conversational hub. Header row combines the
-       contextual message (left) with the primary action on the right
-       (matches the page-header pattern used by Ventas / Reportes).
-
-       Order matches the super-admin PQR view: sticky-header → CTA →
-       stats cards. Placing the stats below the CTA keeps the
-       conversational prompt (and its "Continuar conversación" shortcut)
-       at eye-level for the operator's first scroll position. -->
+  <!-- ── CTA card ────────────────────────────────────────────────────────
+       Same pattern as the org-admin PQR view: sticky-header → CTA →
+       table. Primary action "+ Nueva solicitud" lives in the sticky-header
+       so it stays accessible regardless of scroll position. The CTA
+       card focuses the operator's attention on the single most important
+       question: "what do I need to do today?" -->
   @if (stats(); as s) {
   <div
     class="cta-card"
@@ -59,8 +54,6 @@
           tienda, aparecerá aquí. Mientras tanto, todo en orden.
         </p>
       </div>
-      <!-- Primary action lives in the sticky-header above; no need
-           to duplicate it here. -->
     </div>
     } @else {
     <div class="cta-card__main">
@@ -94,302 +87,142 @@
           </p>
         </div>
       </div>
-
-      <!-- "Continuar conversación" stays here as a contextual secondary
-           action (only when there's a pending PQR that needs a reply).
-           The primary action "+ Nueva solicitud" lives in the sticky
-           header above so it stays accessible from anywhere on the
-           page, not just inside the CTA card. -->
-      <div class="cta-card__actions">
-        @if (pendingCount() > 0 && urgentPqrRoute(); as route) {
-        <a class="cta-card__action cta-card__action--ghost" [routerLink]="route">
-          Continuar conversación
-        </a>
-        }
-      </div>
+      @if (pendingCount() > 0 && urgentPqrRoute(); as route) {
+      <a class="cta-card__action cta-card__action--ghost" [routerLink]="route">
+        Continuar conversación
+      </a>
+      }
     </div>
     }
   </div>
   }
 
-  <!-- Stat cards — same pattern as super-admin and org-admin views
-       so the user has a single mental model for "PQR health at a
-       glance". Rendered AFTER the CTA card (matches the super-admin
-       order: sticky → CTA → stats) so the conversational prompt sits
-       at the operator's first scroll position and the metrics land
-       right below, still above the fold on most viewports. The
-       `stats()` signal is populated on mount (via adminService.getStats)
-       and refreshed after every status mutation. -->
-  @if (stats() && stats()!.total > 0) {
-  <div class="stats-container">
-    <app-stats
-      title="Total PQRS"
-      [value]="stats()!.total"
-      smallText="Todas tus peticiones, quejas y reclamos"
-      iconName="message-square"
-      iconBgColor="bg-blue-100"
-      iconColor="text-blue-600"
-    ></app-stats>
-    <app-stats
-      title="Últimas 24h"
-      [value]="stats()!.recent_24h"
-      smallText="PQRS radicadas recientemente"
-      iconName="clock"
-      iconBgColor="bg-violet-100"
-      iconColor="text-violet-600"
-    ></app-stats>
-    <app-stats
-      title="Vencidas"
-      [value]="overdueCount()"
-      smallText="SLA legal agotado"
-      iconName="alert-triangle"
-      iconBgColor="bg-red-100"
-      iconColor="text-red-600"
-    ></app-stats>
-    <app-stats
-      title="Nuevas"
-      [value]="stats()!.by_status?.['NEW'] || 0"
-      smallText="Sin asignar a tienda"
-      iconName="inbox"
-      iconBgColor="bg-amber-100"
-      iconColor="text-amber-600"
-    ></app-stats>
-  </div>
-  }
-
-  <!-- Conversation table — mirrors the org-admin PQR view so the
-       store-admin and org-admin have a single visual mental model.
-       The table card bundles:
-         • Filters inline at the top (status / type / search)
-         • The data rows
+  <!-- ── List card ───────────────────────────────────────────────────────
+       Mirrors the customer-list pattern (Todos los Clientes (1)) so the
+       store-admin has a single visual model for "list of records":
+         • Title + count on the left
+         • Search input + options dropdown (filters + actions) on the right
+         • Data table below
          • Pagination footer
-       This keeps the operator's eyes in one container end-to-end
-       without scrolling past a separate filter card.
-
-       Responsive:
-         • < 768px → table stays scrollable horizontally inside the
-           card. Touch targets on the row are >= 44px (clickable link).
-         • >= 768px → table fills the card. -->
-
-  <div class="table-wrapper">
-    <!-- Filters live INSIDE the table card so the operator only ever
-         moves between two scroll surfaces (the page itself and the
-         table card), not three. -->
-    <div class="filters-bar">
-      <div class="filter-group">
-        <label for="pqr-status-filter">Estado</label>
-        <select
-          id="pqr-status-filter"
-          [ngModel]="statusFilter()"
-          (ngModelChange)="setStatusFilter($event)"
+       The options dropdown collapses Estado / Tipo into a single
+       "Filtros" trigger so the page stays calm at rest; clicking the
+       trigger reveals a popover with both selectors. -->
+  <app-card [responsive]="true" [padding]="false" overflow="visible">
+    <div
+      class="px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+    >
+      <div
+        class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+      >
+        <!-- Title with live count -->
+        <h2
+          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
         >
-          <option value="">Todos</option>
-          <option value="NEW">Nuevo</option>
-          <option value="OPEN">Abierto</option>
-          <option value="IN_PROGRESS">En progreso</option>
-          <option value="WAITING_RESPONSE">Esperando respuesta</option>
-          <option value="RESOLVED">Resuelto</option>
-          <option value="CLOSED">Cerrado</option>
-          <option value="REOPENED">Reabierto</option>
-        </select>
-      </div>
-      <div class="filter-group">
-        <label for="pqr-type-filter">Tipo de solicitud</label>
-        <select
-          id="pqr-type-filter"
-          [ngModel]="typeFilter()"
-          (ngModelChange)="setTypeFilter($event)"
-        >
-          <option value="">Todos</option>
-          <option value="PETITION">Petición</option>
-          <option value="COMPLAINT">Queja</option>
-          <option value="CLAIM">Reclamo</option>
-          <option value="SUGGESTION">Sugerencia</option>
-        </select>
-      </div>
-      <div class="filter-group filter-group--search">
-        <label for="pqr-search-input">Buscar</label>
-        <div class="search-input">
-          <app-icon name="search" [size]="16"></app-icon>
-          <input
-            id="pqr-search-input"
-            type="search"
+          Todas las solicitudes ({{ total() }})
+        </h2>
+
+        <!-- Search + options dropdown -->
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <app-inputsearch
+            class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            size="sm"
             placeholder="Asunto o número de ticket…"
-            [ngModel]="searchInput()"
-            (ngModelChange)="searchInput.set($event)"
-          />
-          @if (searchInput()) {
-          <button
-            type="button"
-            class="clear-btn"
-            (click)="clearSearch()"
-            aria-label="Limpiar búsqueda"
-          >
-            ×
-          </button>
-          }
+            (search)="onSearch($event)"
+          ></app-inputsearch>
+
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            [filters]="filterConfigs"
+            [filterValues]="filterValues"
+            [actions]="dropdownActions"
+            [isLoading]="loading()"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="onClearFilters()"
+            (actionClick)="onActionClick($event)"
+          ></app-options-dropdown>
         </div>
       </div>
     </div>
 
-    <!-- Loading + error states — both render INSIDE the table card
-         so the user never loses their scroll position when data
-         refreshes in the background. -->
+    <!-- Loading state — uses the same spinner pattern as CustomerList so
+         the visual rhythm across admin modules is identical. -->
     @if (loading()) {
-    <div class="loading-overlay" role="status" aria-live="polite">
-      <span>Cargando conversaciones…</span>
+    <div class="p-6 text-center">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-sm text-text-secondary">Cargando solicitudes…</p>
     </div>
     }
 
-    @if (errorMsg(); as msg) {
-    <div class="error-banner" role="alert">{{ msg }}</div>
-    }
+    <!-- Data table — ResponsiveDataView auto-switches between table (≥768px)
+         and card view (<768px) on the same data. Both surfaces share the
+         same columns/actions configuration. -->
+    @if (!loading() && tickets().length > 0) {
+    <div class="px-2 pb-2 pt-1 md:p-4">
+      <app-responsive-data-view
+        [data]="tickets()"
+        [columns]="pqrColumns"
+        [cardConfig]="pqrCardConfig"
+        [actions]="pqrActions"
+        [loading]="loading()"
+        [hoverable]="true"
+        [striped]="true"
+        [emptyMessage]="
+          statusFilter() || typeFilter() || searchInput() || quickFilter() !== 'all'
+            ? 'No hay solicitudes con esos filtros'
+            : 'Cuando recibas nuevas solicitudes, aparecerán aquí.'
+        "
+        [emptyIcon]="'inbox'"
+        tableSize="md"
+        (rowClick)="openPqr($event)"
+      ></app-responsive-data-view>
 
-    <div class="table-scroll" role="region" aria-label="Listado de solicitudes">
-      <table class="pqr-table">
-        <thead>
-          <tr>
-            <th scope="col">Ticket</th>
-            <th scope="col">Tipo</th>
-            <th scope="col">Asunto</th>
-            <th scope="col">SLA</th>
-            <th scope="col">Estado</th>
-            <th scope="col">Última respuesta</th>
-            <th scope="col">Radicada</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (t of tickets(); track t.id) {
-          @let info = slaInfo(t);
-          <tr
-            class="row-link"
-            [class.row-link--overdue]="info.status === 'overdue'"
-            [class.row-link--warn]="info.status === 'warn'"
-            [routerLink]="['/admin/pqrs', t.id]"
-            [attr.aria-label]="'Abrir solicitud ' + t.ticket_number"
-          >
-            <td class="mono">{{ t.ticket_number }}</td>
-            <td>
-              <span class="type-tag" [attr.data-type]="t.pqr_type">
-                {{ typeLabel(t.pqr_type) }}
-              </span>
-            </td>
-            <td class="title-cell">{{ t.title }}</td>
-            <td>
-              <span
-                class="sla-badge"
-                [attr.data-status]="info.status"
-                [title]="
-                  'Término legal: ' +
-                  info.limit +
-                  ' días hábiles (Ley 1755/2015 art. 14 — peticiones; Ley 1474/2011 art. 55 — quejas y reclamos)'
-                "
-              >
-                <app-icon
-                  [name]="
-                    info.status === 'overdue'
-                      ? 'alert-triangle'
-                      : info.status === 'warn'
-                        ? 'clock'
-                        : 'check-circle'
-                  "
-                  [size]="12"
-                ></app-icon>
-                @if (info.status === 'overdue') {
-                  Vencido · {{ -info.remaining }}d
-                } @else if (info.status === 'warn') {
-                  {{ info.remaining }}d
-                } @else {
-                  {{ info.remaining }}d
-                }
-              </span>
-            </td>
-            <td>
-              <span class="status-pill" [attr.data-status]="t.status">
-                {{
-                  ({
-                    NEW: 'Nuevo',
-                    OPEN: 'Abierto',
-                    IN_PROGRESS: 'En progreso',
-                    WAITING_RESPONSE: 'Esperando',
-                    RESOLVED: 'Resuelto',
-                    CLOSED: 'Cerrado',
-                    REOPENED: 'Reabierto'
-                  })[t.status] || t.status
-                }}
-              </span>
-            </td>
-            <td class="muted" [class.is-muted]="!t.first_response_at">
-              {{ lastResponseLabel(t) }}
-            </td>
-            <td class="muted">{{ t.created_at | date: 'shortDate' }}</td>
-          </tr>
-          } @empty {
-          <tr>
-            <td colspan="7" class="empty-state">
-              @if (statusFilter() || typeFilter() || searchInput()) {
-              No hay solicitudes con esos filtros.
-              <button
-                type="button"
-                class="empty-state__reset"
-                (click)="clearAllFilters()"
-              >
-                Limpiar filtros
-              </button>
-              } @else {
-              Cuando recibas nuevas solicitudes, aparecerán aquí.
-              }
-            </td>
-          </tr>
-          }
-        </tbody>
-      </table>
+      @if (totalPages() > 1) {
+      <div class="mt-4 border-t border-border pt-4">
+        <app-pagination
+          [currentPage]="query().page ?? 1"
+          [total]="total()"
+          [limit]="query().limit ?? 20"
+          [totalPages]="totalPages()"
+          infoStyle="none"
+          (pageChange)="goToPage($event)"
+        ></app-pagination>
+      </div>
+      }
     </div>
-
-    <!-- Pagination footer — also INSIDE the table card so the operator
-         doesn't have to scroll back up to navigate pages. -->
-    @if (totalPages() > 1) {
-    <nav class="pagination" aria-label="Paginación de solicitudes">
-      <button
-        type="button"
-        class="page-btn"
-        [disabled]="(query().page ?? 1) <= 1"
-        (click)="goToPage((query().page ?? 1) - 1)"
-        aria-label="Página anterior"
-      >
-        ‹ Anterior
-      </button>
-      @for (p of pageNumbers(); track $index) {
-      @if (p === '…') {
-      <span class="page-ellipsis" aria-hidden="true">…</span>
-      } @else {
-      <button
-        type="button"
-        class="page-btn"
-        [class.active]="p === (query().page ?? 1)"
-        [attr.aria-current]="p === (query().page ?? 1) ? 'page' : null"
-        (click)="goToPage(p)"
-      >
-        {{ p }}
-      </button>
-      }
-      }
-      <button
-        type="button"
-        class="page-btn"
-        [disabled]="(query().page ?? 1) >= totalPages()"
-        (click)="goToPage((query().page ?? 1) + 1)"
-        aria-label="Página siguiente"
-      >
-        Siguiente ›
-      </button>
-      <span class="page-info">{{ total() }} conversaciones</span>
-    </nav>
     }
-  </div>
-</section>
 
-<!-- ── Modal: Nueva solicitud ────────────────────────────────────────────── -->
+    <!-- Empty state (no PQRs ever filed) — distinct from "no results
+         matching filters" so the operator gets the right CTA. -->
+    @if (!loading() && tickets().length === 0) {
+    <div class="p-12 text-center text-gray-500">
+      <app-icon
+        name="inbox"
+        [size]="48"
+        class="mx-auto mb-4 text-gray-300"
+      ></app-icon>
+      <h3 class="text-lg font-medium text-gray-900">
+        @if (statusFilter() || typeFilter() || searchInput() || quickFilter() !== 'all') {
+          No hay solicitudes con esos filtros
+        } @else {
+          Sin solicitudes por ahora
+        }
+      </h3>
+      <p class="mt-1 text-sm">
+        @if (statusFilter() || typeFilter() || searchInput() || quickFilter() !== 'all') {
+          Ajusta los filtros o limpia la búsqueda para ver todas las
+          conversaciones.
+        } @else {
+          Cuando recibas nuevas solicitudes, aparecerán aquí.
+        }
+      </p>
+    </div>
+    }
+  </app-card>
+</div>
+
+<!-- ── Modal: Nueva solicitud ───────────────────────────────────────────── -->
 @if (showNewPqrModal()) {
 <div class="modal-overlay" (click)="closeNewPqrModal()">
   <div class="modal" (click)="$event.stopPropagation()">
@@ -401,8 +234,10 @@
       </p>
     </header>
 
-    <form class="modal__body" (submit)="$event.preventDefault(); submitNewPqr()">
-      <!-- Tipo -->
+    <form
+      class="modal__body"
+      (submit)="$event.preventDefault(); submitNewPqr()"
+    >
       <fieldset class="modal__field">
         <legend>Tipo de solicitud</legend>
         <div class="type-options">
@@ -425,7 +260,6 @@
         </div>
       </fieldset>
 
-      <!-- Prioridad -->
       <fieldset class="modal__field">
         <legend>Prioridad</legend>
         <div class="type-options type-options--priority">
@@ -454,7 +288,6 @@
         </div>
       </fieldset>
 
-      <!-- Título -->
       <label class="modal__field">
         <span class="modal__label">Asunto</span>
         <input
@@ -469,7 +302,6 @@
         />
       </label>
 
-      <!-- Descripción -->
       <label class="modal__field">
         <span class="modal__label">Detalle</span>
         <textarea
@@ -486,10 +318,6 @@
         </span>
       </label>
 
-      <!-- ── Datos del solicitante ─────────────────────────────────────────
-           Editable — pre-filled from the store-admin's own profile so
-           when filing "on behalf of", the operator just adjusts the
-           fields. Stored in dedicated columns on support_tickets. -->
       <fieldset class="modal__field modal__field--grouped">
         <legend class="modal__label">Datos del solicitante</legend>
         <div class="modal__row">
@@ -596,11 +424,7 @@
           class="primary-btn"
           [disabled]="!canSubmitNewPqr()"
         >
-          {{
-            newPqrSubmitting()
-              ? 'Enviando…'
-              : 'Enviar solicitud'
-          }}
+          {{ newPqrSubmitting() ? 'Enviando…' : 'Enviar solicitud' }}
         </button>
       </div>
     </form>

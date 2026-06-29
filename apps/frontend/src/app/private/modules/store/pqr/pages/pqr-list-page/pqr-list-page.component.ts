@@ -15,6 +15,21 @@ import { PqrStatusPillComponent } from '../../components/pqr-status-pill.compone
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import {
+  CardComponent,
+  ResponsiveDataViewComponent,
+  InputsearchComponent,
+  OptionsDropdownComponent,
+  PaginationComponent,
+  ButtonComponent,
+  ToastService,
+  TableColumn,
+  TableAction,
+  ItemListCardConfig,
+  FilterConfig,
+  DropdownAction,
+  FilterValues,
+} from '../../../../../../shared/components';
+import {
   StickyHeaderComponent,
   StickyHeaderTab,
   StickyHeaderActionButton,
@@ -41,6 +56,12 @@ import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
     IconComponent,
     StickyHeaderComponent,
     StatsComponent,
+    CardComponent,
+    ResponsiveDataViewComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
+    PaginationComponent,
+    ButtonComponent,
   ],
   templateUrl: './pqr-list-page.component.html',
   styleUrls: ['./pqr-list-page.component.scss'],
@@ -50,6 +71,7 @@ export class PqrListPageComponent {
   private readonly pqrService = inject(PqrService);
   private readonly authFacade = inject(AuthFacade);
   private readonly router = inject(Router);
+  private readonly toastService = inject(ToastService);
 
   readonly query = signal<PqrQuery>({ page: 1, limit: 20 });
   readonly tickets = signal<Pqr[]>([]);
@@ -580,24 +602,304 @@ export class PqrListPageComponent {
     return `Última respuesta: ${date.getDate()} ${months[date.getMonth()]}`;
   }
 
-  pageNumbers = computed(() => {
-    const total = this.totalPages();
-    const current = this.query().page ?? 1;
-    const pages: (number | '…')[] = [];
-    const window = 2;
-    for (let p = 1; p <= total; p++) {
-      if (
-        p === 1 ||
-        p === total ||
-        (p >= current - window && p <= current + window)
-      ) {
-        pages.push(p);
-      } else if (pages[pages.length - 1] !== '…') {
-        pages.push('…');
-      }
+  // ── List card configuration ────────────────────────────────────────────
+  //
+  // Mirrors the customer-list pattern so the store-admin has a single
+  // visual model for "list of records". All options-dropdown filters
+  // collapse Estado / Tipo into a single "Filtros" trigger; the
+  // search input sits in the header next to the dropdown.
+
+  /** Filters surfaced inside the <app-options-dropdown>'s "Filtros" popover. */
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'status',
+      label: 'Estado',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'NEW', label: 'Nuevo' },
+        { value: 'OPEN', label: 'Abierto' },
+        { value: 'IN_PROGRESS', label: 'En progreso' },
+        { value: 'WAITING_RESPONSE', label: 'Esperando respuesta' },
+        { value: 'RESOLVED', label: 'Resuelto' },
+        { value: 'CLOSED', label: 'Cerrado' },
+        { value: 'REOPENED', label: 'Reabierto' },
+      ],
+    },
+    {
+      key: 'pqr_type',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'PETITION', label: 'Petición' },
+        { value: 'COMPLAINT', label: 'Queja' },
+        { value: 'CLAIM', label: 'Reclamo' },
+        { value: 'SUGGESTION', label: 'Sugerencia' },
+      ],
+    },
+  ];
+
+  /** Two-way bound filter values for the dropdown. */
+  filterValues: FilterValues = {};
+
+  /**
+   * Actions surfaced inside the <app-options-dropdown>'s "+ Acciones"
+   * menu. The primary action (Nueva solicitud) is duplicated in the
+   * sticky header — both paths route to the same modal so the operator
+   * can reach it from anywhere on the page.
+   */
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva solicitud',
+      icon: 'plus',
+      action: 'new-pqr',
+      variant: 'primary',
+    },
+    {
+      label: 'Exportar lista',
+      icon: 'download',
+      action: 'export',
+    },
+  ];
+
+  // ── Table columns (desktop ≥768px) ─────────────────────────────────────
+
+  /**
+   * Returns the legal-SLA caption for a PQR — drives the `title`
+   * attribute on the SLA badge so the owner can hover and verify.
+   * Centralized here so the table column and the mobile card render
+   * the exact same tooltip copy.
+   */
+  private slaCaption(pqr: Pqr): string {
+    const info = this.slaInfo(pqr);
+    return `Término legal: ${info.limit} días hábiles (Ley 1755/2015 art. 14 — peticiones; Ley 1474/2011 art. 55 — quejas y reclamos)`;
+  }
+
+  pqrColumns: TableColumn[] = [
+    {
+      key: 'ticket_number',
+      label: 'Ticket',
+      sortable: true,
+      priority: 0,
+      cellClass: () => 'mono',
+    },
+    {
+      key: 'pqr_type',
+      label: 'Tipo',
+      sortable: true,
+      priority: 1,
+      transform: (val: any) => {
+        const labels: Record<string, string> = {
+          PETITION: 'Petición',
+          COMPLAINT: 'Queja',
+          CLAIM: 'Reclamo',
+          SUGGESTION: 'Sugerencia',
+        };
+        return labels[val] ?? val;
+      },
+    },
+    {
+      key: 'title',
+      label: 'Asunto',
+      sortable: true,
+      priority: 0,
+      width: '280px',
+    },
+    {
+      key: 'sla',
+      label: 'SLA',
+      priority: 1,
+      transform: (_val: any, row?: any) => {
+        if (!row) return '';
+        const info = this.slaInfo(row);
+        if (info.status === 'overdue') return `Vencido · ${-info.remaining}d`;
+        return `${info.remaining}d`;
+      },
+      badge: true,
+      badgeConfig: {
+        type: 'custom' as const,
+        size: 'sm' as const,
+        colorFn: (_value: any, item?: any) => {
+          if (!item) return null;
+          const info = this.slaInfo(item);
+          return {
+            ok: '#10b981',
+            warn: '#f59e0b',
+            overdue: '#dc2626',
+          }[info.status] ?? null;
+        },
+      },
+    },
+    {
+      key: 'status',
+      label: 'Estado',
+      sortable: true,
+      priority: 1,
+      badge: true,
+      badgeConfig: { type: 'status' as const, size: 'sm' as const },
+      badgeTransform: (val: any) => {
+        const labels: Record<string, string> = {
+          NEW: 'Nuevo',
+          OPEN: 'Abierto',
+          IN_PROGRESS: 'En progreso',
+          WAITING_RESPONSE: 'Esperando',
+          RESOLVED: 'Resuelto',
+          CLOSED: 'Cerrado',
+          REOPENED: 'Reabierto',
+        };
+        return labels[val] ?? val;
+      },
+    },
+    {
+      key: 'first_response_at',
+      label: 'Última respuesta',
+      sortable: true,
+      priority: 2,
+      transform: (_val: any, row?: any) =>
+        row ? this.lastResponseLabel(row) : '',
+    },
+    {
+      key: 'created_at',
+      label: 'Radicada',
+      sortable: true,
+      priority: 2,
+      transform: (val: any) =>
+        val ? new Date(val).toLocaleDateString() : '-',
+    },
+  ];
+
+  /** Mobile card config — used by ResponsiveDataView when viewport <768px. */
+  pqrCardConfig: ItemListCardConfig = {
+    titleKey: 'title',
+    titleTransform: (item: any) => item?.title ?? 'Sin asunto',
+    subtitleKey: 'ticket_number',
+    avatarFallbackIcon: 'message-circle',
+    avatarShape: 'circle',
+    badgeKey: 'status',
+    badgeConfig: { type: 'status' as const, size: 'sm' as const },
+    badgeTransform: (val: any) => {
+      const labels: Record<string, string> = {
+        NEW: 'Nuevo',
+        OPEN: 'Abierto',
+        IN_PROGRESS: 'En progreso',
+        WAITING_RESPONSE: 'Esperando',
+        RESOLVED: 'Resuelto',
+        CLOSED: 'Cerrado',
+        REOPENED: 'Reabierto',
+      };
+      return labels[val] ?? val ?? '';
+    },
+    detailKeys: [
+      {
+        key: 'pqr_type',
+        label: 'Tipo',
+        icon: 'tag',
+        transform: (val: any) => {
+          const labels: Record<string, string> = {
+            PETITION: 'Petición',
+            COMPLAINT: 'Queja',
+            CLAIM: 'Reclamo',
+            SUGGESTION: 'Sugerencia',
+          };
+          return labels[val] ?? val;
+        },
+      },
+      {
+        key: 'sla',
+        label: 'SLA',
+        icon: 'clock',
+        transform: (_v: any, item?: any) => {
+          if (!item) return '-';
+          const info = this.slaInfo(item);
+          if (info.status === 'overdue') return `Vencido · ${-info.remaining}d`;
+          return `${info.remaining}d`;
+        },
+      },
+      {
+        key: 'created_at',
+        label: 'Radicada',
+        icon: 'calendar',
+        transform: (val: any) =>
+          val ? new Date(val).toLocaleDateString() : '-',
+      },
+    ],
+  };
+
+  /** Row actions — surfaced as icons in the last column. */
+  pqrActions: TableAction[] = [
+    {
+      label: 'Ver',
+      tooltip: 'Ver conversación',
+      icon: 'eye',
+      variant: 'secondary',
+      action: (row: any) => this.openPqr(row),
+    },
+    {
+      label: 'Editar',
+      tooltip: 'Editar estado',
+      icon: 'edit',
+      variant: 'info',
+      action: (row: any) => this.openPqr(row),
+    },
+  ];
+
+  // ── List-card event handlers ───────────────────────────────────────────
+
+  /** Search input handler — wires the header search to the query signal. */
+  onSearch(query: string): void {
+    this.searchInput.set(query);
+    this.query.update((q) => ({
+      ...q,
+      search: query.trim() || undefined,
+      page: 1,
+    }));
+  }
+
+  /** Filter dropdown change — translates FilterValues into query params. */
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.statusFilter.set((values['status'] as PqrStatus) ?? '');
+    this.typeFilter.set((values['pqr_type'] as PqrType) ?? '');
+    this.query.update((q) => ({
+      ...q,
+      status: values['status'] ? (values['status'] as PqrStatus) : undefined,
+      pqr_type: values['pqr_type']
+        ? (values['pqr_type'] as PqrType)
+        : undefined,
+      page: 1,
+    }));
+  }
+
+  /** Clears all filters from the dropdown's "Limpiar" affordance. */
+  onClearFilters(): void {
+    this.filterValues = {};
+    this.statusFilter.set('');
+    this.typeFilter.set('');
+    this.query.update((q) => ({
+      ...q,
+      status: undefined,
+      pqr_type: undefined,
+      page: 1,
+    }));
+  }
+
+  /** Routes the dropdown action click to the right handler. */
+  onActionClick(action: string): void {
+    switch (action) {
+      case 'new-pqr':
+        this.openNewPqrModal();
+        break;
+      case 'export':
+        this.toastService.info('Exportación próximamente');
+        break;
     }
-    return pages;
-  });
+  }
+
+  /** Row click handler — routes the operator to the conversation detail. */
+  openPqr(row: Pqr): void {
+    this.router.navigate(['/admin/pqrs', row.id]);
+  }
 }
 
 /**
