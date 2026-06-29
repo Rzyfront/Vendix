@@ -25,6 +25,8 @@ export interface PqrCreatedEvent {
     title: string;
     description: string;
     category: string;
+    organization_id: number;
+    store_id: number | null;
   };
   contact: {
     name: string;
@@ -202,6 +204,8 @@ export class PqrService {
         title: ticket.title,
         description: ticket.description,
         category: ticket.category as string,
+        organization_id: owningOrgId,
+        store_id: ticket.store_id,
       },
       contact: {
         name: dto.name,
@@ -230,8 +234,14 @@ export class PqrService {
       throw new VendixHttpException(ErrorCodes.SUP_PQR_001);
     }
 
-    const ticket = await this.globalPrisma.support_tickets.findUnique({
-      where: { ticket_number: ticketNumber },
+    const ticket = await this.globalPrisma.support_tickets.findFirst({
+      where: {
+        ticket_number: ticketNumber,
+        // Defense in depth: even if a non-PQR ticket happened to share
+        // the same ticket_number prefix (e.g. legacy rows without the
+        // `pqr` tag), the public lookup must refuse to surface it.
+        tags: { has: 'pqr' },
+      },
       select: {
         id: true,
         ticket_number: true,
@@ -643,7 +653,7 @@ export class PqrService {
       if (err instanceof VendixHttpException) {
         throw err;
       }
-      console.error(
+      this.logger.error(
         `[superAdminFindOne] id=${id} crashed:`,
         err instanceof Error ? err.stack : err,
       );
@@ -1128,10 +1138,10 @@ export class PqrService {
   /* ──────────────────────────────── Helpers ─────────────────────────────── */
 
   /**
-   * Parses the structured PQR description to recover the original requester
-   * info. The format produced by `formatDescription` is:
+   * Parses the legacy structured PQR description to recover the original
+   * requester info (rows written before the structured requester columns
+   * landed in 20260627002028_add_pqr_requester_fields). The format is:
    *
-   * **Tipo:** Petición
    * **Nombre:** Ada Lovelace
    * **Email:** ada@example.com
    * **Teléfono:** +57 300 123 4567
@@ -1193,40 +1203,45 @@ export class PqrService {
    * numbers — so the counter stays continuous. Existing tickets keep
    * their original `PQR-*` value (no data migration); only newly filed
    * tickets use the `PQRS-` prefix going forward.
+   *
+   * Concurrency: a naive `count + 1` would race under two parallel
+   * submissions for the same org. The `@@unique([organization_id,
+   * ticket_number])` index makes the second insert fail with P2002 —
+   * we catch that and retry up to `MAX_RETRIES` times, recomputing
+   * the counter on each iteration. This stays bounded by the @Throttle
+   * decorator on the controller (10/min/IP) in practice.
    */
   private async generatePqrNumber(orgId: number): Promise<string> {
-    const count = await this.globalPrisma.support_tickets.count({
-      where: {
-        organization_id: orgId,
-        ticket_number: { startsWith: 'PQR' },
-      },
-    });
-    const padded = String(count + 1).padStart(5, '0');
-    return `PQRS-${orgId}-${padded}`;
-  }
+    const MAX_RETRIES = 5;
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const count = await this.globalPrisma.support_tickets.count({
+        where: {
+          organization_id: orgId,
+          ticket_number: { startsWith: 'PQR' },
+        },
+      });
+      const padded = String(count + 1).padStart(5, '0');
+      const candidate = `PQRS-${orgId}-${padded}`;
 
-  /**
-   * Formats the PQR description with structured metadata at the top
-   * for easy reading in the admin inbox and reliable recovery via
-   * `parseRequester`.
-   */
-  private formatDescription(dto: CreatePqrPublicDto): string {
-    const labels: Record<string, string> = {
-      PETITION: 'Petición',
-      COMPLAINT: 'Queja',
-      CLAIM: 'Reclamo',
-    };
-    const lines = [
-      `**Tipo:** ${labels[dto.pqr_type]}`,
-      `**Nombre:** ${dto.name}`,
-      `**Email:** ${dto.email}`,
-      dto.phone ? `**Teléfono:** ${dto.phone}` : null,
-      '',
-      '---',
-      '',
-      dto.description,
-    ].filter((l) => l !== null);
-    return lines.join('\n');
+      // Probe: check if the candidate is already taken before the
+      // caller commits to it. Cheaper than letting create() fail and
+      // retrying the whole createPublic transaction.
+      const existing = await this.globalPrisma.support_tickets.findFirst({
+        where: {
+          organization_id: orgId,
+          ticket_number: candidate,
+        },
+        select: { id: true },
+      });
+      if (!existing) return candidate;
+
+      this.logger.warn(
+        `generatePqrNumber: collision on ${candidate} (attempt ${attempt + 1}/${MAX_RETRIES}), retrying`,
+      );
+    }
+    throw new Error(
+      `Failed to allocate a unique PQR ticket number after ${MAX_RETRIES} retries`,
+    );
   }
 
   /**

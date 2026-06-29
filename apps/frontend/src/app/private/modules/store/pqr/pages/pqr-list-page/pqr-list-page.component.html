@@ -157,208 +157,236 @@
   </div>
   }
 
-  <!-- Filters bar — always visible, no collapse. Three compact
-       dropdowns (Estado / Tipo / Buscar) keep the operator's
-       attention in the same scroll as the queue. -->
-  <div class="filters-bar">
-    <div class="filter-group">
-      <label>Estado</label>
-      <select
-        [ngModel]="statusFilter()"
-        (ngModelChange)="setStatusFilter($event)"
-      >
-        <option value="">Todos</option>
-        <option value="NEW">Nuevo</option>
-        <option value="OPEN">Abierto</option>
-        <option value="IN_PROGRESS">En progreso</option>
-        <option value="WAITING_RESPONSE">Esperando respuesta</option>
-        <option value="RESOLVED">Resuelto</option>
-        <option value="CLOSED">Cerrado</option>
-        <option value="REOPENED">Reabierto</option>
-      </select>
-    </div>
-    <div class="filter-group">
-      <label>Tipo de solicitud</label>
-      <select
-        [ngModel]="typeFilter()"
-        (ngModelChange)="setTypeFilter($event)"
-      >
-        <option value="">Todos</option>
-        <option value="PETITION">Petición</option>
-        <option value="COMPLAINT">Queja</option>
-        <option value="CLAIM">Reclamo</option>
-        <option value="SUGGESTION">Sugerencia</option>
-      </select>
-    </div>
-    <div class="filter-group filter-group--search">
-      <label>Buscar</label>
-      <div class="search-input">
-        <app-icon name="search" [size]="16"></app-icon>
-        <input
-          type="search"
-          placeholder="Asunto o número de ticket…"
-          [ngModel]="searchInput()"
-          (ngModelChange)="searchInput.set($event)"
-        />
-        @if (searchInput()) {
-        <button class="clear-btn" (click)="clearSearch()" aria-label="Limpiar">
-          ×
-        </button>
-        }
+  <!-- Conversation table — mirrors the org-admin PQR view so the
+       store-admin and org-admin have a single visual mental model.
+       The table card bundles:
+         • Filters inline at the top (status / type / search)
+         • The data rows
+         • Pagination footer
+       This keeps the operator's eyes in one container end-to-end
+       without scrolling past a separate filter card.
+
+       Responsive:
+         • < 768px → table stays scrollable horizontally inside the
+           card. Touch targets on the row are >= 44px (clickable link).
+         • >= 768px → table fills the card. -->
+
+  <div class="table-wrapper">
+    <!-- Filters live INSIDE the table card so the operator only ever
+         moves between two scroll surfaces (the page itself and the
+         table card), not three. -->
+    <div class="filters-bar">
+      <div class="filter-group">
+        <label for="pqr-status-filter">Estado</label>
+        <select
+          id="pqr-status-filter"
+          [ngModel]="statusFilter()"
+          (ngModelChange)="setStatusFilter($event)"
+        >
+          <option value="">Todos</option>
+          <option value="NEW">Nuevo</option>
+          <option value="OPEN">Abierto</option>
+          <option value="IN_PROGRESS">En progreso</option>
+          <option value="WAITING_RESPONSE">Esperando respuesta</option>
+          <option value="RESOLVED">Resuelto</option>
+          <option value="CLOSED">Cerrado</option>
+          <option value="REOPENED">Reabierto</option>
+        </select>
       </div>
-    </div>
-  </div>
-
-  <!-- Loading + error states -->
-  @if (loading()) {
-  <div class="loading-banner">Cargando conversaciones…</div>
-  }
-
-  @if (errorMsg(); as msg) {
-  <div class="error-banner">{{ msg }}</div>
-  }
-
-  <!-- Conversation cards list -->
-  <div class="cards-list">
-    @for (t of tickets(); track t.id) {
-    @let info = slaInfo(t);
-    <article
-      class="pqr-card"
-      [class.pqr-card--overdue]="info.status === 'overdue'"
-      [class.pqr-card--warn]="info.status === 'warn'"
-    >
-      <a class="pqr-card__main" [routerLink]="['/admin/pqrs', t.id]">
-        <div class="pqr-card__head">
-          <div class="pqr-card__title-row">
-            <span class="type-tag" [attr.data-type]="t.pqr_type">
-              {{ typeLabel(t.pqr_type) }}
-            </span>
-            <span class="pqr-card__ticket">{{ t.ticket_number }}</span>
-          </div>
-          <span
-            class="sla-badge"
-            [attr.data-status]="info.status"
-            [title]="
-              'Término legal: ' +
-              info.limit +
-              ' días hábiles (Ley 1755/2015 art. 14 — peticiones; Ley 1474/2011 art. 55 — quejas y reclamos)'
-            "
+      <div class="filter-group">
+        <label for="pqr-type-filter">Tipo de solicitud</label>
+        <select
+          id="pqr-type-filter"
+          [ngModel]="typeFilter()"
+          (ngModelChange)="setTypeFilter($event)"
+        >
+          <option value="">Todos</option>
+          <option value="PETITION">Petición</option>
+          <option value="COMPLAINT">Queja</option>
+          <option value="CLAIM">Reclamo</option>
+          <option value="SUGGESTION">Sugerencia</option>
+        </select>
+      </div>
+      <div class="filter-group filter-group--search">
+        <label for="pqr-search-input">Buscar</label>
+        <div class="search-input">
+          <app-icon name="search" [size]="16"></app-icon>
+          <input
+            id="pqr-search-input"
+            type="search"
+            placeholder="Asunto o número de ticket…"
+            [ngModel]="searchInput()"
+            (ngModelChange)="searchInput.set($event)"
+          />
+          @if (searchInput()) {
+          <button
+            type="button"
+            class="clear-btn"
+            (click)="clearSearch()"
+            aria-label="Limpiar búsqueda"
           >
-            <app-icon
-              [name]="
-                info.status === 'overdue'
-                  ? 'alert-triangle'
-                  : info.status === 'warn'
-                    ? 'clock'
-                    : 'check-circle'
-              "
-              [size]="14"
-            ></app-icon>
-            @if (info.status === 'overdue') {
-              Vencido · {{ -info.remaining }} días
-            } @else if (info.status === 'warn') {
-              Vence en {{ info.remaining }} día{{ info.remaining === 1 ? '' : 's' }}
-            } @else {
-              {{ info.remaining }} días hábiles
-            }
-          </span>
+            ×
+          </button>
+          }
         </div>
-
-        <h3 class="pqr-card__title">{{ t.title }}</h3>
-
-        <div class="pqr-card__last-response">
-          <app-icon
-            [name]="t.first_response_at ? 'message-circle' : 'message-square-dashed'"
-            [size]="14"
-          ></app-icon>
-          <span [class.is-muted]="!t.first_response_at">
-            {{ lastResponseLabel(t) }}
-          </span>
-        </div>
-
-        <div class="pqr-card__footer">
-          <span class="pqr-card__meta">
-            <app-icon name="calendar" [size]="14"></app-icon>
-            Radicada {{ t.created_at | date: 'shortDate' }}
-          </span>
-          <span class="pqr-card__status" [attr.data-status]="t.status">
-            {{
-              ({
-                NEW: 'Nuevo',
-                OPEN: 'Abierto',
-                IN_PROGRESS: 'En progreso',
-                WAITING_RESPONSE: 'Esperando',
-                RESOLVED: 'Resuelto',
-                CLOSED: 'Cerrado',
-                REOPENED: 'Reabierto'
-              })[t.status] || t.status
-            }}
-          </span>
-        </div>
-      </a>
-      <a
-        class="pqr-card__action"
-        [routerLink]="['/admin/pqrs', t.id]"
-        title="Ver la conversación completa"
-      >
-        <app-icon name="message-circle" [size]="16"></app-icon>
-        Ver conversación
-      </a>
-    </article>
-    } @empty {
-    <div class="empty-state">
-      <div class="empty-state__icon">
-        <app-icon name="search-x" [size]="48"></app-icon>
       </div>
-      <h3>No hay solicitudes con esos filtros</h3>
-      <p>
-        @if (statusFilter() || typeFilter() || searchInput()) {
-        Prueba ajustando los filtros o
-        <button class="empty-state__reset" (click)="clearAllFilters()">
-          limpia los filtros
-        </button>
-        para ver todas las conversaciones.
-        } @else {
-        Cuando recibas nuevas solicitudes, aparecerán aquí.
-        }
-      </p>
+    </div>
+
+    <!-- Loading + error states — both render INSIDE the table card
+         so the user never loses their scroll position when data
+         refreshes in the background. -->
+    @if (loading()) {
+    <div class="loading-overlay" role="status" aria-live="polite">
+      <span>Cargando conversaciones…</span>
     </div>
     }
-  </div>
 
-  <!-- Pagination -->
-  @if (totalPages() > 1) {
-  <nav class="pagination">
-    <button
-      class="page-btn"
-      [disabled]="(query().page ?? 1) <= 1"
-      (click)="goToPage((query().page ?? 1) - 1)"
-    >
-      ‹ Anterior
-    </button>
-    @for (p of pageNumbers(); track $index) {
-    @if (p === '…') {
-    <span class="page-ellipsis">…</span>
-    } @else {
-    <button
-      class="page-btn"
-      [class.active]="p === (query().page ?? 1)"
-      (click)="goToPage(p)"
-    >
-      {{ p }}
-    </button>
+    @if (errorMsg(); as msg) {
+    <div class="error-banner" role="alert">{{ msg }}</div>
     }
+
+    <div class="table-scroll" role="region" aria-label="Listado de solicitudes">
+      <table class="pqr-table">
+        <thead>
+          <tr>
+            <th scope="col">Ticket</th>
+            <th scope="col">Tipo</th>
+            <th scope="col">Asunto</th>
+            <th scope="col">SLA</th>
+            <th scope="col">Estado</th>
+            <th scope="col">Última respuesta</th>
+            <th scope="col">Radicada</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (t of tickets(); track t.id) {
+          @let info = slaInfo(t);
+          <tr
+            class="row-link"
+            [class.row-link--overdue]="info.status === 'overdue'"
+            [class.row-link--warn]="info.status === 'warn'"
+            [routerLink]="['/admin/pqrs', t.id]"
+            [attr.aria-label]="'Abrir solicitud ' + t.ticket_number"
+          >
+            <td class="mono">{{ t.ticket_number }}</td>
+            <td>
+              <span class="type-tag" [attr.data-type]="t.pqr_type">
+                {{ typeLabel(t.pqr_type) }}
+              </span>
+            </td>
+            <td class="title-cell">{{ t.title }}</td>
+            <td>
+              <span
+                class="sla-badge"
+                [attr.data-status]="info.status"
+                [title]="
+                  'Término legal: ' +
+                  info.limit +
+                  ' días hábiles (Ley 1755/2015 art. 14 — peticiones; Ley 1474/2011 art. 55 — quejas y reclamos)'
+                "
+              >
+                <app-icon
+                  [name]="
+                    info.status === 'overdue'
+                      ? 'alert-triangle'
+                      : info.status === 'warn'
+                        ? 'clock'
+                        : 'check-circle'
+                  "
+                  [size]="12"
+                ></app-icon>
+                @if (info.status === 'overdue') {
+                  Vencido · {{ -info.remaining }}d
+                } @else if (info.status === 'warn') {
+                  {{ info.remaining }}d
+                } @else {
+                  {{ info.remaining }}d
+                }
+              </span>
+            </td>
+            <td>
+              <span class="status-pill" [attr.data-status]="t.status">
+                {{
+                  ({
+                    NEW: 'Nuevo',
+                    OPEN: 'Abierto',
+                    IN_PROGRESS: 'En progreso',
+                    WAITING_RESPONSE: 'Esperando',
+                    RESOLVED: 'Resuelto',
+                    CLOSED: 'Cerrado',
+                    REOPENED: 'Reabierto'
+                  })[t.status] || t.status
+                }}
+              </span>
+            </td>
+            <td class="muted" [class.is-muted]="!t.first_response_at">
+              {{ lastResponseLabel(t) }}
+            </td>
+            <td class="muted">{{ t.created_at | date: 'shortDate' }}</td>
+          </tr>
+          } @empty {
+          <tr>
+            <td colspan="7" class="empty-state">
+              @if (statusFilter() || typeFilter() || searchInput()) {
+              No hay solicitudes con esos filtros.
+              <button
+                type="button"
+                class="empty-state__reset"
+                (click)="clearAllFilters()"
+              >
+                Limpiar filtros
+              </button>
+              } @else {
+              Cuando recibas nuevas solicitudes, aparecerán aquí.
+              }
+            </td>
+          </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Pagination footer — also INSIDE the table card so the operator
+         doesn't have to scroll back up to navigate pages. -->
+    @if (totalPages() > 1) {
+    <nav class="pagination" aria-label="Paginación de solicitudes">
+      <button
+        type="button"
+        class="page-btn"
+        [disabled]="(query().page ?? 1) <= 1"
+        (click)="goToPage((query().page ?? 1) - 1)"
+        aria-label="Página anterior"
+      >
+        ‹ Anterior
+      </button>
+      @for (p of pageNumbers(); track $index) {
+      @if (p === '…') {
+      <span class="page-ellipsis" aria-hidden="true">…</span>
+      } @else {
+      <button
+        type="button"
+        class="page-btn"
+        [class.active]="p === (query().page ?? 1)"
+        [attr.aria-current]="p === (query().page ?? 1) ? 'page' : null"
+        (click)="goToPage(p)"
+      >
+        {{ p }}
+      </button>
+      }
+      }
+      <button
+        type="button"
+        class="page-btn"
+        [disabled]="(query().page ?? 1) >= totalPages()"
+        (click)="goToPage((query().page ?? 1) + 1)"
+        aria-label="Página siguiente"
+      >
+        Siguiente ›
+      </button>
+      <span class="page-info">{{ total() }} conversaciones</span>
+    </nav>
     }
-    <button
-      class="page-btn"
-      [disabled]="(query().page ?? 1) >= totalPages()"
-      (click)="goToPage((query().page ?? 1) + 1)"
-    >
-      Siguiente ›
-    </button>
-    <span class="page-info">{{ total() }} conversaciones</span>
-  </nav>
-  }
+  </div>
 </section>
 
 <!-- ── Modal: Nueva solicitud ────────────────────────────────────────────── -->

@@ -32,6 +32,7 @@ import { PqrQueryDto } from './dto/pqr-query.dto';
 import { UpdatePqrDto } from './dto/update-pqr.dto';
 import { UpdatePqrStatusDto } from './dto/update-pqr-status.dto';
 import { AddPqrCommentDto } from './dto/add-pqr-comment.dto';
+import { EditPqrCommentDto } from './dto/edit-pqr-comment.dto';
 import { AssignPqrDto } from './dto/assign-pqr.dto';
 
 /**
@@ -238,7 +239,7 @@ export class StorePqrController {
   editComment(
     @Param('id') id: string,
     @Param('commentId') commentId: string,
-    @Body() dto: { content: string },
+    @Body() dto: EditPqrCommentDto,
   ) {
     const userId = this.requireUserId();
     return this.pqrService.adminUpdateComment(

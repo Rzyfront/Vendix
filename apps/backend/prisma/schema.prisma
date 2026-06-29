@@ -2749,6 +2749,8 @@ enum notification_type_enum {
   subscription_renewal_upcoming
   partner_commission_available
   weekly_report
+  pqr_new
+  pqr_update
 }
 
 model notifications {

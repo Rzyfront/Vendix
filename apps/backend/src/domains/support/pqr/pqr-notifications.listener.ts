@@ -25,6 +25,11 @@ import {
  *  - store_id = <orgStore> → store-admin audience (existing
  *                            store-scoped pattern)
  *
+ * Per-user targeting is stored in `data.target_user_id` (see
+ * notifications.service.ts) — the `notifications` table does NOT have
+ * a `user_id` column, so the listener writes the recipient as part of
+ * the JSON payload and the SSE / bell query filters by it.
+ *
  * Frontend consumes via the existing /api/store/notifications/stream
  * SSE channel — the bell badge query already filters by user
  * role + store_id when present.
@@ -48,9 +53,9 @@ export class PqrNotificationsListener {
     try {
       const superAdmins = await this.globalPrisma.users.findMany({
         where: {
-          is_active: true,
+          state: 'active',
           user_roles: {
-            some: { role: { code: 'SUPER_ADMIN' } },
+            some: { roles: { name: 'SUPER_ADMIN' } },
           },
         },
         select: { id: true },
@@ -62,31 +67,34 @@ export class PqrNotificationsListener {
       }
 
       const ticket = payload.ticket;
-      const type = ticket.pqr_type;
+      // pqr_type lives on `payload.contact`, not on `ticket` (the
+      // ticket row stores it as a category enum + a `pqr` tag).
+      const pqrType = payload.contact.pqr_type;
       const typeLabel = {
         PETITION: 'Petición',
         COMPLAINT: 'Queja',
         CLAIM: 'Reclamo',
         SUGGESTION: 'Sugerencia',
-      }[type] ?? type;
-
-      const data = JSON.stringify({
-        kind: 'pqr.created',
-        ticket_id: ticket.id,
-        ticket_number: ticket.ticket_number,
-        organization_id: ticket.organization_id,
-        store_id: ticket.store_id,
-      });
+      }[pqrType] ?? pqrType;
 
       await this.globalPrisma.notifications.createMany({
         data: superAdmins.map((u) => ({
-          user_id: u.id, // we keep user_id for read-tracking
           store_id: null,
-          type: 'pqr_new',
-          severity: 'info',
+          // 'pqr_new' / 'pqr_update' are valid enum values after
+          // migration 20260629120000_add_pqr_notification_types.
+          type: 'pqr_new' as any,
+          severity: 'info' as any,
           title: `Nueva ${typeLabel}: ${ticket.ticket_number}`,
           body: `${ticket.title} — pendiente de respuesta del equipo de soporte.`,
-          data,
+          data: {
+            kind: 'pqr.created',
+            ticket_id: ticket.id,
+            ticket_number: ticket.ticket_number,
+            organization_id: ticket.organization_id,
+            store_id: ticket.store_id,
+            pqr_type: pqrType,
+            target_user_id: u.id,
+          },
         })),
         skipDuplicates: false,
       });
@@ -131,10 +139,12 @@ export class PqrNotificationsListener {
       // STORE_ADMIN is the audience here.
       const storeAdmins = await this.globalPrisma.users.findMany({
         where: {
-          is_active: true,
-          store_id: ticket.store_id,
+          state: 'active',
+          store_users: {
+            some: { store_id: ticket.store_id },
+          },
           user_roles: {
-            some: { role: { code: 'STORE_ADMIN' } },
+            some: { roles: { name: 'STORE_ADMIN' } },
           },
         },
         select: { id: true },
@@ -147,21 +157,19 @@ export class PqrNotificationsListener {
         return;
       }
 
-      const data = JSON.stringify({
-        kind: 'pqr.response_sent',
-        ticket_id: ticket.id,
-        ticket_number: ticket.ticket_number,
-      });
-
       await this.globalPrisma.notifications.createMany({
         data: storeAdmins.map((u) => ({
-          user_id: u.id,
           store_id: ticket.store_id,
-          type: 'pqr_update',
-          severity: 'info',
+          type: 'pqr_update' as any,
+          severity: 'info' as any,
           title: `Tu PQRS ${ticket.ticket_number} recibió respuesta`,
           body: `El equipo de soporte respondió: ${ticket.title}.`,
-          data,
+          data: {
+            kind: 'pqr.response_sent',
+            ticket_id: ticket.id,
+            ticket_number: ticket.ticket_number,
+            target_user_id: u.id,
+          },
         })),
       });
 
@@ -184,25 +192,25 @@ export class PqrNotificationsListener {
   }) {
     const superAdmins = await this.globalPrisma.users.findMany({
       where: {
-        is_active: true,
-        user_roles: { some: { role: { code: 'SUPER_ADMIN' } } },
+        state: 'active',
+        user_roles: { some: { roles: { name: 'SUPER_ADMIN' } } },
       },
       select: { id: true },
     });
     if (superAdmins.length === 0) return;
     await this.globalPrisma.notifications.createMany({
       data: superAdmins.map((u) => ({
-        user_id: u.id,
         store_id: null,
-        type: 'pqr_update',
-        severity: 'info',
+        type: 'pqr_update' as any,
+        severity: 'info' as any,
         title: `PQRS ${ticket.ticket_number} respondió (sin tienda)`,
         body: ticket.title,
-        data: JSON.stringify({
+        data: {
           kind: 'pqr.response_sent',
           ticket_id: ticket.id,
           ticket_number: ticket.ticket_number,
-        }),
+          target_user_id: u.id,
+        },
       })),
     });
   }

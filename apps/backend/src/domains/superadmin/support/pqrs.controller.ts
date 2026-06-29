@@ -28,6 +28,7 @@ import { PqrQueryDto } from '../../support/pqr/dto/pqr-query.dto';
 import { UpdatePqrStatusDto } from '../../support/pqr/dto/update-pqr-status.dto';
 import { AssignPqrDto } from '../../support/pqr/dto/assign-pqr.dto';
 import { AddPqrCommentDto } from '../../support/pqr/dto/add-pqr-comment.dto';
+import { EditPqrCommentDto } from '../../support/pqr/dto/edit-pqr-comment.dto';
 
 /**
  * Superadmin PQR Controller
@@ -270,7 +271,7 @@ export class SuperadminPqrsController {
   async editComment(
     @Param('id', ParseIntPipe) id: number,
     @Param('commentId', ParseIntPipe) commentId: number,
-    @Body() dto: { content: string },
+    @Body() dto: EditPqrCommentDto,
     @Req() req: Request,
   ) {
     const userId = (req as any).user?.id;

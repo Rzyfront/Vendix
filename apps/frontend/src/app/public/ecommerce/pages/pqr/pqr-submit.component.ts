@@ -13,6 +13,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { Router } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
 import {
   CreatePqrPublicDto,
   PqrService,
@@ -76,7 +77,19 @@ export class PqrSubmitComponent {
     { validators: [crossFieldValidator()] },
   );
 
-  readonly charCount = computed(() => this.form.controls['description'].value.length);
+  // Live char count for the description field. FormControl.value is
+  // NOT a signal in zoneless mode, so we wrap `valueChanges` in
+  // `toSignal` to make the counter reactive as the user types.
+  // Without this, the counter renders once at component init and
+  // never updates until the next change-detection cycle (which won't
+  // fire in zoneless until a signal changes).
+  private readonly descriptionValue = toSignal(
+    this.form.controls['description'].valueChanges,
+    { initialValue: this.form.controls['description'].value ?? '' },
+  );
+  readonly charCount = computed(
+    () => (this.descriptionValue() ?? '').length,
+  );
   readonly isReady = computed(() => this.state() === 'idle');
 
   setType(type: PqrType) {
