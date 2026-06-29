@@ -306,27 +306,11 @@
       "prompts": 0
     },
     {
-      "id": "17a6bc41",
-      "created_by": "yoner",
-      "created_at": "2026-06-28T23:04:32Z",
-      "sessions": 8,
-      "memories": 24,
-      "prompts": 0
-    },
-    {
-      "id": "d88feada",
-      "created_by": "yoner",
-      "created_at": "2026-06-28T23:25:44Z",
-      "sessions": 1,
-      "memories": 1,
-      "prompts": 0
-    },
-    {
-      "id": "345c1efd",
-      "created_by": "yoner",
-      "created_at": "2026-06-29T01:16:22Z",
-      "sessions": 0,
-      "memories": 1,
+      "id": "de7a4986",
+      "created_by": "rzy",
+      "created_at": "2026-06-29T19:05:18Z",
+      "sessions": 9,
+      "memories": 6,
       "prompts": 0
     }
   ]
