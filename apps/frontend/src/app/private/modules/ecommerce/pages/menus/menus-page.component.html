@@ -89,6 +89,55 @@
                         </span>
                       }
                     </div>
+
+                    @if (item.product?.has_variants) {
+                      <!-- Variant products: cart rejects them without a
+                           product_variant_id → route to detail to pick options. -->
+                      <div class="dish-buy">
+                        <app-button
+                          variant="outline"
+                          size="sm"
+                          [fullWidth]="true"
+                          (clicked)="onViewOptions($event, item)"
+                        >
+                          <app-icon slot="icon" name="eye" [size]="15" />
+                          Ver opciones
+                        </app-button>
+                      </div>
+                    } @else {
+                      <div class="dish-buy" (click)="stopCardNav($event)">
+                        <span class="qty-stepper">
+                          <button
+                            type="button"
+                            class="qty-btn"
+                            [disabled]="qtyOf(item.id) <= 1"
+                            aria-label="Disminuir cantidad"
+                            (click)="decQty($event, item.id)"
+                          >
+                            <app-icon name="minus" [size]="14" />
+                          </button>
+                          <span class="qty-value">{{ qtyOf(item.id) }}</span>
+                          <button
+                            type="button"
+                            class="qty-btn"
+                            aria-label="Aumentar cantidad"
+                            (click)="incQty($event, item.id)"
+                          >
+                            <app-icon name="plus" [size]="14" />
+                          </button>
+                        </span>
+                        <app-button
+                          variant="primary"
+                          size="sm"
+                          [fullWidth]="true"
+                          [disabled]="!item.is_available_now"
+                          (clicked)="onAdd($event, item)"
+                        >
+                          <app-icon slot="icon" name="shopping-cart" [size]="15" />
+                          Agregar
+                        </app-button>
+                      </div>
+                    }
                   </div>
                 </a>
               }

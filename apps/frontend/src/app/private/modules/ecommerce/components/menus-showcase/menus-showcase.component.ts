@@ -8,7 +8,7 @@ import {
   input,
   signal,
 } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -16,8 +16,11 @@ import {
   MenuItem,
   PublicMenu,
 } from '../../services/catalog.service';
+import { CartService } from '../../services/cart.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 /**
  * Compact "Cartas" summary rendered on the storefront home. It is fully
@@ -38,7 +41,7 @@ interface PreviewDish {
 @Component({
   selector: 'app-menus-showcase',
   standalone: true,
-  imports: [RouterModule, CurrencyPipe, ButtonComponent],
+  imports: [RouterModule, CurrencyPipe, ButtonComponent, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (visibleDishes().length > 0) {
@@ -84,6 +87,58 @@ interface PreviewDish {
                 <span class="dish-price">
                   {{ dishPrice(dish.item) | currency }}
                 </span>
+
+                @if (dish.item.product?.has_variants) {
+                  <!-- Variant products: cart rejects them without a
+                       product_variant_id → route to detail to pick options. -->
+                  <span class="dish-buy">
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [fullWidth]="true"
+                      (clicked)="onViewOptions($event, dish.item)"
+                    >
+                      <app-icon slot="icon" name="eye" [size]="15" />
+                      Ver opciones
+                    </app-button>
+                  </span>
+                } @else {
+                  <span
+                    class="dish-buy"
+                    (click)="stopCardNav($event)"
+                  >
+                    <span class="qty-stepper">
+                      <button
+                        type="button"
+                        class="qty-btn"
+                        [disabled]="qtyOf(dish.item.id) <= 1"
+                        aria-label="Disminuir cantidad"
+                        (click)="decQty($event, dish.item.id)"
+                      >
+                        <app-icon name="minus" [size]="14" />
+                      </button>
+                      <span class="qty-value">{{ qtyOf(dish.item.id) }}</span>
+                      <button
+                        type="button"
+                        class="qty-btn"
+                        aria-label="Aumentar cantidad"
+                        (click)="incQty($event, dish.item.id)"
+                      >
+                        <app-icon name="plus" [size]="14" />
+                      </button>
+                    </span>
+                    <app-button
+                      variant="primary"
+                      size="sm"
+                      [fullWidth]="true"
+                      [disabled]="!dish.item.is_available_now"
+                      (clicked)="onAdd($event, dish.item)"
+                    >
+                      <app-icon slot="icon" name="shopping-cart" [size]="15" />
+                      Agregar
+                    </app-button>
+                  </span>
+                }
               </div>
             </a>
           }
@@ -201,6 +256,44 @@ interface PreviewDish {
         font-weight: 700;
         color: var(--color-primary, #2f6f4e);
       }
+      .dish-buy {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+        margin-top: 0.4rem;
+      }
+      .qty-stepper {
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid #e5e7eb;
+        border-radius: 0.5rem;
+        overflow: hidden;
+        flex-shrink: 0;
+      }
+      .qty-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.9rem;
+        height: 2rem;
+        background: #fff;
+        border: none;
+        color: #374151;
+        cursor: pointer;
+      }
+      .qty-btn:hover:not(:disabled) {
+        background: #f3f4f6;
+      }
+      .qty-btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+      .qty-value {
+        min-width: 1.6rem;
+        text-align: center;
+        font-size: 0.85rem;
+        font-weight: 600;
+      }
       .view-more-container {
         text-align: center;
         margin-top: 1.75rem;
@@ -215,9 +308,18 @@ export class MenusShowcaseComponent implements OnInit {
   readonly limit = input<number>(8);
 
   private readonly catalogService = inject(CatalogService);
+  private readonly cartService = inject(CartService);
+  private readonly toastService = inject(ToastService);
+  private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
 
   private readonly menus = signal<PublicMenu[]>([]);
+
+  /**
+   * Per-item quantity for the inline stepper, keyed by `MenuItem.id`.
+   * Signal-based so the template re-renders under zoneless change detection.
+   */
+  private readonly quantities = signal<Record<number, number>>({});
 
   /** Flattened, schedule-aware dish list capped at `limit`. */
   readonly visibleDishes = computed<PreviewDish[]>(() => {
@@ -271,5 +373,51 @@ export class MenusShowcaseComponent implements OnInit {
     ];
     const day = days[na.day_of_week] ?? '';
     return `${day} ${na.start_time}`.trim();
+  }
+
+  /** Current stepper quantity for an item (defaults to 1). */
+  qtyOf(itemId: number): number {
+    return this.quantities()[itemId] ?? 1;
+  }
+
+  incQty(event: Event, itemId: number): void {
+    this.stopCardNav(event);
+    const next = this.qtyOf(itemId) + 1;
+    this.quantities.update((q) => ({ ...q, [itemId]: next }));
+  }
+
+  decQty(event: Event, itemId: number): void {
+    this.stopCardNav(event);
+    const next = Math.max(1, this.qtyOf(itemId) - 1);
+    this.quantities.update((q) => ({ ...q, [itemId]: next }));
+  }
+
+  /** Stops the wrapping card `<a>` from navigating when interacting with buy controls. */
+  stopCardNav(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  /** Routes a variant dish to its detail page so the customer can pick an option. */
+  onViewOptions(event: Event, item: MenuItem): void {
+    this.stopCardNav(event);
+    const slug = item.product?.slug;
+    if (slug) this.router.navigate(['/products', slug]);
+  }
+
+  /** Adds a non-variant dish to the cart. Backend rejects off-schedule dishes
+   * (422 MENU_ITEM_NOT_AVAILABLE_NOW), so the button is already gated by
+   * `is_available_now`; this is a defensive guard. */
+  onAdd(event: Event, item: MenuItem): void {
+    this.stopCardNav(event);
+    const product = item.product;
+    if (!product || !item.is_available_now) return;
+    const result = this.cartService.addToCart(product.id, this.qtyOf(item.id));
+    const done = () => this.toastService.success('Plato agregado al carrito');
+    if (result) {
+      result.subscribe({ next: done });
+    } else {
+      done();
+    }
   }
 }

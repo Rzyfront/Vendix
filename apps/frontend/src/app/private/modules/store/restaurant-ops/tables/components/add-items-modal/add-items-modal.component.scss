@@ -97,6 +97,12 @@
   color: var(--color-text-secondary, #6b7280);
 }
 
+.loading-inline {
+  display: flex;
+  justify-content: center;
+  padding: 0.75rem 0;
+}
+
 .total-preview {
   display: flex;
   align-items: center;

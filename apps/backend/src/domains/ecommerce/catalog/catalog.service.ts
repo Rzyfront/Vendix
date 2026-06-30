@@ -8,6 +8,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
+import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import type {
   ActiveProductPromotion,
   ActivePromotionProductInput,
@@ -21,6 +22,7 @@ export class CatalogService {
     private readonly s3Service: S3Service,
     private readonly priceResolverService: PriceResolverService,
     private readonly promotionEngine: PromotionEngineService,
+    private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     @Inject(CACHE_MANAGER) private readonly cache: Cache,
   ) {}
 
@@ -1097,7 +1099,7 @@ export class CatalogService {
     if (!industries.includes('restaurant')) return empty(timezone);
 
     const { day: nowDay, minutes: nowMinutes } =
-      this.getDateInTimezone(timezone);
+      this.menuAvailabilityChecker.getDateInTimezone(timezone);
 
     const menus = await this.storePrisma.menus.findMany({
       where: { is_active: true },
@@ -1144,11 +1146,21 @@ export class CatalogService {
                     is_on_sale: true,
                     is_combo: true,
                     is_sellable: true,
+                    // Buyability invariant: a carta item must be both active
+                    // and available_for_ecommerce; non-buyable products are
+                    // filtered out below so the carta never shows a dish the
+                    // detail/cart/checkout would reject.
+                    state: true,
+                    available_for_ecommerce: true,
                     product_images: {
                       where: { is_main: true },
                       take: 1,
                       select: { image_url: true },
                     },
+                    // Variant info so the storefront can decide "Agregar"
+                    // (no variants) vs "Ver opciones" (has variants) without a
+                    // second round-trip. Same source the regular catalog uses.
+                    _count: { select: { product_variants: true } },
                   },
                 },
               },
@@ -1168,7 +1180,7 @@ export class CatalogService {
       day_of_week: w.day_of_week,
       start_time: w.start_time,
       end_time: w.end_time,
-      is_active_now: this.isWindowActive(w, nowDay, nowMinutes),
+      is_active_now: this.menuAvailabilityChecker.isWindowActive(w, nowDay, nowMinutes),
     });
 
     const result = await Promise.all(
@@ -1179,17 +1191,27 @@ export class CatalogService {
             const sectionWindows = section.availability_windows ?? [];
             // Un item se rige por las ventanas de su sección + las del menú.
             const gatingWindows = [...sectionWindows, ...menuWindows];
+            // Buyability invariant: only items whose product is active AND
+            // available_for_ecommerce can ever be added to cart / checked out.
+            // Drop the rest so display == purchasable (no orphan carta items).
+            const buyableItems = (section.items ?? []).filter(
+              (item) =>
+                item.product &&
+                item.product.state === 'active' &&
+                item.product.available_for_ecommerce === true,
+            );
             const items = await Promise.all(
-              (section.items ?? []).map(async (item) => {
+              buyableItems.map(async (item) => {
                 const p = item.product;
                 const isAvail =
                   gatingWindows.length === 0 ||
                   gatingWindows.some((w) =>
-                    this.isWindowActive(w, nowDay, nowMinutes),
+                    this.menuAvailabilityChecker.isWindowActive(w, nowDay, nowMinutes),
                   );
                 const image_url = p?.product_images?.[0]?.image_url
                   ? await this.s3Service.signUrl(p.product_images[0].image_url)
                   : null;
+                const variantCount = p?._count?.product_variants ?? 0;
                 return {
                   id: item.id,
                   product_id: item.product_id,
@@ -1211,6 +1233,9 @@ export class CatalogService {
                         sale_price: p.sale_price,
                         is_on_sale: p.is_on_sale,
                         is_combo: p.is_combo,
+                        // Variant signal for direct add-to-cart from the carta.
+                        has_variants: variantCount > 0,
+                        variant_count: variantCount,
                         image_url,
                       }
                     : null,
@@ -1221,7 +1246,7 @@ export class CatalogService {
               gatingWindows.length === 0
                 ? true
                 : gatingWindows.some((w) =>
-                    this.isWindowActive(w, nowDay, nowMinutes),
+                    this.menuAvailabilityChecker.isWindowActive(w, nowDay, nowMinutes),
                   );
             return {
               id: section.id,
@@ -1236,11 +1261,16 @@ export class CatalogService {
             };
           }),
         );
+        // Drop sections that have no buyable items after the invariant filter
+        // (mirrors how empty/unavailable carta nodes are omitted).
+        const nonEmptySections = sections.filter(
+          (section) => section.items.length > 0,
+        );
         const menuAvail =
           menuWindows.length === 0
             ? true
             : menuWindows.some((w) =>
-                this.isWindowActive(w, nowDay, nowMinutes),
+                this.menuAvailabilityChecker.isWindowActive(w, nowDay, nowMinutes),
               );
         return {
           id: menu.id,
@@ -1251,15 +1281,18 @@ export class CatalogService {
             ? null
             : this.nextAvailableWindow(menuWindows, nowDay, nowMinutes),
           availability_windows: menuWindows.map(mapWindow),
-          sections,
+          sections: nonEmptySections,
         };
       }),
     );
 
+    // Drop menus left without any section after filtering.
+    const nonEmptyMenus = result.filter((menu) => menu.sections.length > 0);
+
     return {
       store_timezone: timezone,
       now: { day_of_week: nowDay, minutes: nowMinutes },
-      menus: result,
+      menus: nonEmptyMenus,
     };
   }
 
@@ -1294,56 +1327,5 @@ export class CatalogService {
       }
     }
     return best;
-  }
-
-  private isWindowActive(
-    w: { day_of_week: number; start_time: string; end_time: string },
-    nowDay: number,
-    nowMinutes: number,
-  ): boolean {
-    if (w.day_of_week !== nowDay) return false;
-    const toMinutes = (t: string) => {
-      const [h, m] = t.split(':').map(Number);
-      return h * 60 + m;
-    };
-    const start = toMinutes(w.start_time);
-    const end = toMinutes(w.end_time);
-    return nowMinutes >= start && nowMinutes <= end;
-  }
-
-  private getDateInTimezone(timezone: string): {
-    day: number;
-    hours: number;
-    minutes: number;
-  } {
-    const now = new Date();
-    try {
-      const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: timezone,
-        weekday: 'short',
-        hour: 'numeric',
-        minute: 'numeric',
-        hour12: false,
-      }).formatToParts(now);
-      const weekdayStr = parts.find((p) => p.type === 'weekday')?.value || '';
-      const hoursVal = parseInt(
-        parts.find((p) => p.type === 'hour')?.value || '0',
-        10,
-      );
-      const minutesVal = parseInt(
-        parts.find((p) => p.type === 'minute')?.value || '0',
-        10,
-      );
-      const weekdayMap: Record<string, number> = {
-        Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
-      };
-      return {
-        day: weekdayMap[weekdayStr] ?? now.getDay(),
-        hours: hoursVal,
-        minutes: minutesVal,
-      };
-    } catch {
-      return { day: now.getDay(), hours: now.getHours(), minutes: now.getMinutes() };
-    }
   }
 }

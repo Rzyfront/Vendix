@@ -146,6 +146,24 @@ curl -sk -H "Authorization: Bearer $TOKEN" https://api.vendix.com/api/store/orde
 `agent-browser` is a native Rust CLI that drives Chrome via CDP. Workflow: **open → snapshot → act →
 assert → close**. Each command is stateless on the CLI but shares one long-lived browser daemon.
 
+### ⚠️ Vendix convention — REQUIRED flags for local vhost
+
+Vendix local vhosts use a **self-signed wildcard cert** (`*.vendix.com`). The `agent-browser` MCP
+binary hardcodes `headed: false` and **does NOT** ignore TLS by default — every `open` against the
+local vhost will fail with `ERR_CERT_AUTHORITY_INVALID` unless you pass these flags explicitly.
+
+**Always invoke** `agent-browser` (CLI or MCP) with:
+
+| Flag (CLI)               | MCP parameter                     | Value                  | Reason                                                 |
+| ------------------------ | --------------------------------- | ---------------------- | ------------------------------------------------------ |
+| `--headed`               | `headed`                          | `true`                 | Dev runs locally — you need to **see** the browser open |
+| `--ignore-https-errors` | `extraArgs`                  | `["--ignore-https-errors"]` | Vendix vhost uses self-signed cert              |
+
+The MCP server's defaults are **not** user-configurable without forking the Rust binary. Treat
+`headed: true` + `extraArgs: ['--ignore-certificate-errors']` as **mandatory**, not optional. If a
+sub-agent forgets, the E2E is silently invalid (browser opens against `about:blank` after a cert
+error, no page content).
+
 ### Install / configure if missing
 
 ```bash
@@ -168,7 +186,8 @@ After registering, **restart the agent** so it loads the MCP subprocess. Until t
 ### E2E recipe (CLI)
 
 ```bash
-agent-browser open https://admin-techsolutions.vendix.com   # real vhost, NOT localhost:4200
+# Global flags MUST come BEFORE the subcommand
+agent-browser --headed --ignore-https-errors open https://admin-techsolutions.vendix.com
 agent-browser snapshot -i                                   # interactive elements with @e refs
 agent-browser fill @e2 "owner@techsolutions.co"             # use refs from the snapshot
 agent-browser fill @e3 "1125634q"
@@ -177,6 +196,16 @@ agent-browser wait --load networkidle
 agent-browser get text @e1                                  # assert post-login state
 agent-browser screenshot /tmp/after-login.png               # optional, for a vision check
 agent-browser close
+```
+
+MCP equivalent (the only way the agent can drive the browser):
+
+```ts
+agent_browser_open(
+  url="https://admin-techsolutions.vendix.com",
+  headed=true,
+  extraArgs=["--ignore-https-errors"],
+)
 ```
 
 - `snapshot -i -c` (interactive + compact) keeps the tree small for reasoning; `-s "#sel"` scopes it.

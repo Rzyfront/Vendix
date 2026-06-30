@@ -5,54 +5,30 @@ import {
 import { useIsFocused } from '@react-navigation/native';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
+import { ProductService } from '@/features/store/services/product.service';
 import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateAdjustmentDto } from '@/features/store/services/inventory.service';
 import type { StockAdjustment, AdjustmentType, AdjustmentState, Location } from '@/features/store/types';
-import { ADJUSTMENT_TYPE_LABELS, ADJUSTMENT_STATE_LABELS } from '@/features/store/types';
-import { useTenantStore } from '@/core/store/tenant.store';
+import { ADJUSTMENT_TYPE_LABELS } from '@/features/store/types';
 import { Input } from '@/shared/components/input/input';
 import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { Icon } from '@/shared/components/icon/icon';
+import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { formatDate } from '@/shared/utils/date';
 import { spacing, borderRadius, colors, colorScales, typography, shadows } from '@/shared/theme';
+import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
+import { ADJUSTMENT_STATS, ADJUSTMENT_TYPE_OPTIONS, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
+import * as DocumentPicker from 'expo-document-picker';
 
 const STATE_VARIANT: Record<AdjustmentState, 'warning' | 'success'> = {
   pending: 'warning',
   applied: 'success',
 };
-
-const ADJUSTMENT_TYPE_OPTIONS: { label: string; value: AdjustmentType | 'all' }[] = [
-  { label: 'Todos los tipos', value: 'all' },
-  { label: 'Daño', value: 'damage' },
-  { label: 'Pérdida', value: 'loss' },
-  { label: 'Robo', value: 'theft' },
-  { label: 'Vencido', value: 'expiration' },
-  { label: 'Conteo', value: 'count_variance' },
-  { label: 'Corrección', value: 'manual_correction' },
-];
-
-interface StatItem {
-  title: string;
-  value: number;
-  smallText: string;
-  iconName: keyof typeof Ionicons.glyphMap;
-  bgColor: string;
-  iconColor: string;
-}
-
-const STATS: StatItem[] = [
-  { title: 'Total Ajustes', value: 0, smallText: 'Movimientos registrados', iconName: 'clipboard-outline', bgColor: '#dbeafe', iconColor: '#2563eb' },
-  { title: 'Pérdidas', value: 0, smallText: 'Productos extraviados', iconName: 'trending-down-outline', bgColor: '#fee2e2', iconColor: '#dc2626' },
-  { title: 'Daños', value: 0, smallText: 'Productos dañados', iconName: 'warning-outline', bgColor: '#fef3c7', iconColor: '#d97706' },
-  { title: 'Correcciones', value: 0, smallText: 'Ajustes de inventario', iconName: 'create-outline', bgColor: '#dcfce7', iconColor: '#16a34a' },
-];
-
-// (Los colores de las stat cards usan hex legacy para el badge/icono del header — no son parte de los contenedores)
-
-import { Ionicons } from '@expo/vector-icons';
 
 function AdjustmentCard({ item }: { item: StockAdjustment }) {
   // Fallbacks seguros para evitar "[object Object]" si el backend devuelve un objeto en campos string
@@ -104,12 +80,650 @@ function AdjustmentCard({ item }: { item: StockAdjustment }) {
   );
 }
 
+interface BulkResultItem {
+  row_number: number;
+  sku: string;
+  product_name?: string;
+  status: 'success' | 'error';
+  message?: string;
+  quantity_change?: number;
+}
+
+interface BulkUploadResult {
+  total_processed: number;
+  successful: number;
+  failed: number;
+  results: BulkResultItem[];
+}
+
+/**
+ * BulkAdjustmentModal — wizard de 3 pasos idéntico al web:
+ *  1) Configuración (ubicación + tipo + descripción)
+ *  2) Subir archivo (drop zone xlsx/xls/csv)
+ *  3) Resultado (Total / Exitosos / Fallidos + tabla)
+ */
+function BulkAdjustmentModal({
+  visible,
+  onClose,
+  locations,
+  onCompleted,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  locations: Array<{ value: number; label: string }>;
+  onCompleted?: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const [step, setStep] = useState(1);
+  const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
+  const [selectedAdjustmentType, setSelectedAdjustmentType] = useState<string>('count_variance');
+  const [description, setDescription] = useState<string>('');
+  const [selectedFile, setSelectedFile] = useState<{
+    uri: string;
+    name: string;
+    size?: number;
+    type?: string;
+  } | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadResult, setUploadResult] = useState<BulkUploadResult | null>(null);
+  const [showTypeDropdown, setShowTypeDropdown] = useState(false);
+  const [showAdjTypeDropdown, setShowAdjTypeDropdown] = useState(false);
+
+  const resetState = () => {
+    setStep(1);
+    setSelectedFile(null);
+    setUploadResult(null);
+    setIsUploading(false);
+    setIsDownloading(false);
+    setDescription('');
+    setShowTypeDropdown(false);
+    setShowAdjTypeDropdown(false);
+  };
+
+  const handleClose = () => {
+    resetState();
+    onClose();
+  };
+
+  const handleDownloadTemplate = async () => {
+    setIsDownloading(true);
+    try {
+      // 1) El servicio devuelve directamente la cadena base64 (extraída del arraybuffer).
+      const base64 = await InventoryService.downloadAdjustmentTemplate(
+        selectedLocationId ?? undefined,
+      );
+      if (!base64 || base64.length < 100) {
+        throw new Error('El servidor no devolvió un archivo válido');
+      }
+      // 2) Escribir el archivo en disco.
+      const fileName = `plantilla_ajuste_inventario_${new Date().toISOString().split('T')[0]}.xlsx`;
+      const baseDir =
+        (FileSystem as any).documentDirectory ??
+        (FileSystem as any).cacheDirectory ??
+        '';
+      const fileUri = `${baseDir}${fileName}`;
+      await (FileSystem as any).writeAsStringAsync(fileUri, base64, {
+        encoding: (FileSystem as any).EncodingType?.Base64 ?? 'base64',
+      });
+      toastSuccess(`Plantilla guardada: ${fileName}`);
+      // 3) Abrir diálogo de compartir.
+      try {
+        if (await (Sharing as any).isAvailableAsync()) {
+          await (Sharing as any).shareAsync(fileUri, {
+            mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            dialogTitle: 'Compartir plantilla',
+            UTI: 'org.openxmlformats.spreadsheetml.sheet',
+          });
+        }
+      } catch {
+        // Sharing opcional
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.message ?? e?.message ?? 'Error al descargar plantilla';
+      toastError(typeof msg === 'string' ? msg : 'Error al descargar plantilla');
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handlePickFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: [
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'application/vnd.ms-excel',
+          'text/csv',
+        ],
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets[0]) {
+        const a = result.assets[0];
+        setSelectedFile({
+          uri: a.uri,
+          name: a.name,
+          size: a.size,
+          type: a.mimeType,
+        });
+      }
+    } catch (e: any) {
+      toastError('No se pudo seleccionar el archivo');
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!selectedFile || !selectedLocationId) return;
+    setIsUploading(true);
+    setStep(3);
+    try {
+      const res = await InventoryService.uploadBulkAdjustments(
+        selectedFile,
+        selectedLocationId,
+        selectedAdjustmentType,
+        description || undefined,
+      );
+      setUploadResult(res);
+      queryClient.invalidateQueries({ queryKey: ['adjustments'] });
+      queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
+      if (res.failed === 0) {
+        toastSuccess(`${res.successful} ajustes aplicados exitosamente`);
+      } else {
+        toastError(`${res.successful} exitosos, ${res.failed} con errores`);
+      }
+      onCompleted?.();
+    } catch (e: any) {
+      // Log completo para diagnóstico
+      console.error('[BulkAdjustmentModal] Upload error:', {
+        status: e?.response?.status,
+        data: e?.response?.data,
+        message: e?.message,
+        config: e?.config?.headers,
+      });
+      // Extraer mensaje real del backend
+      const apiMsg =
+        e?.response?.data?.message ??
+        e?.response?.data?.error?.message ??
+        e?.response?.data?.error ??
+        (Array.isArray(e?.response?.data?.message)
+          ? e.response.data.message.join(', ')
+          : null) ??
+        e?.message;
+      const errMsg =
+        e?.response?.status === 400
+          ? `Error 400: ${apiMsg ?? 'datos inválidos. Verifica la plantilla y los campos.'}`
+          : apiMsg ?? 'Error al procesar el archivo';
+      toastError(typeof errMsg === 'string' ? errMsg : 'Error al procesar el archivo');
+      setStep(2);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const formatFileSize = (bytes: number | undefined) => {
+    if (!bytes) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const failedItems = uploadResult?.results.filter((r) => r.status === 'error') ?? [];
+  const typeOptions = [
+    { value: 'count_variance', label: 'Varianza de conteo' },
+    { value: 'manual_correction', label: 'Corrección manual' },
+    { value: 'damage', label: 'Daño' },
+    { value: 'loss', label: 'Pérdida' },
+    { value: 'theft', label: 'Robo / Hurto' },
+    { value: 'expiration', label: 'Vencimiento' },
+  ];
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={handleClose}>
+      <View style={bulkStyles.overlay}>
+        <View style={bulkStyles.modal}>
+          {/* Header */}
+          <View style={bulkStyles.header}>
+            <View style={{ flex: 1 }}>
+              <Text style={bulkStyles.title}>Ajuste Masivo de Inventario</Text>
+              <Text style={bulkStyles.subtitle}>
+                Suba un archivo Excel o CSV para ajustar el inventario de múltiples productos
+              </Text>
+            </View>
+            <Pressable onPress={handleClose} hitSlop={8} style={bulkStyles.closeBtn}>
+              <Icon name="x" size={22} color={colorScales.gray[500]} />
+            </Pressable>
+          </View>
+
+          {/* Step Indicator (1 — 2 — 3) */}
+          <View style={bulkStyles.stepsRow}>
+            {[1, 2, 3].map((s) => (
+              <View key={s} style={bulkStyles.stepRow}>
+                <View
+                  style={[
+                    bulkStyles.stepCircle,
+                    step >= s && bulkStyles.stepCircleActive,
+                  ]}
+                >
+                  {step > s ? (
+                    <Icon name="check" size={12} color={colors.background} />
+                  ) : (
+                    <Text
+                      style={[
+                        bulkStyles.stepNum,
+                        step >= s && bulkStyles.stepNumActive,
+                      ]}
+                    >
+                      {`${s}`}
+                    </Text>
+                  )}
+                </View>
+                {s < 3 && (
+                  <View
+                    style={[
+                      bulkStyles.stepLine,
+                      step > s && bulkStyles.stepLineDone,
+                    ]}
+                  />
+                )}
+              </View>
+            ))}
+          </View>
+
+          <ScrollView
+            style={bulkStyles.body}
+            contentContainerStyle={bulkStyles.bodyContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* STEP 1: Configuración */}
+            {step === 1 && (
+              <View style={bulkStyles.stepContent}>
+                <Text style={bulkStyles.sectionTitle}>Configuración</Text>
+
+                <View>
+                  <Text style={bulkStyles.formLabel}>Ubicación / Bodega *</Text>
+                  <Pressable
+                    onPress={() => setShowTypeDropdown((v) => !v)}
+                    style={[
+                      bulkStyles.selectTrigger,
+                      (showTypeDropdown || selectedLocationId) && bulkStyles.selectTriggerActive,
+                    ]}
+                  >
+                    <Text
+                      style={
+                        selectedLocationId
+                          ? bulkStyles.selectValue
+                          : bulkStyles.selectPlaceholder
+                      }
+                    >
+                      {selectedLocationId
+                        ? locations.find((l) => l.value === selectedLocationId)?.label
+                        : 'Seleccione una ubicación'}
+                    </Text>
+                    <Icon
+                      name={showTypeDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colorScales.gray[500]}
+                    />
+                  </Pressable>
+                  {showTypeDropdown && (
+                    <View style={bulkStyles.selectList}>
+                      {locations.length === 0 ? (
+                        <Text style={bulkStyles.selectEmpty}>No hay ubicaciones registradas</Text>
+                      ) : (
+                        locations.map((loc) => (
+                          <Pressable
+                            key={loc.value}
+                            onPress={() => {
+                              setSelectedLocationId(loc.value);
+                              setShowTypeDropdown(false);
+                            }}
+                            style={[
+                              bulkStyles.selectOption,
+                              selectedLocationId === loc.value && bulkStyles.selectOptionActive,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                bulkStyles.selectOptionText,
+                                selectedLocationId === loc.value && bulkStyles.selectOptionTextActive,
+                              ]}
+                            >
+                              {`${loc.label}`}
+                            </Text>
+                            {selectedLocationId === loc.value && (
+                              <Icon name="check" size={14} color={colors.primary} />
+                            )}
+                          </Pressable>
+                        ))
+                      )}
+                    </View>
+                  )}
+                </View>
+
+                <View>
+                  <Text style={bulkStyles.formLabel}>Tipo de ajuste (global)</Text>
+                  <Pressable
+                    onPress={() => setShowAdjTypeDropdown((v) => !v)}
+                    style={[
+                      bulkStyles.selectTrigger,
+                      (showAdjTypeDropdown || selectedAdjustmentType !== 'count_variance') &&
+                        bulkStyles.selectTriggerActive,
+                    ]}
+                  >
+                    <Text
+                      style={
+                        selectedAdjustmentType
+                          ? bulkStyles.selectValue
+                          : bulkStyles.selectPlaceholder
+                      }
+                    >
+                      {typeOptions.find((t) => t.value === selectedAdjustmentType)?.label ??
+                        'Seleccione un tipo'}
+                    </Text>
+                    <Icon
+                      name={showAdjTypeDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colorScales.gray[500]}
+                    />
+                  </Pressable>
+                  {showAdjTypeDropdown && (
+                    <View style={bulkStyles.selectList}>
+                      {typeOptions.map((t) => (
+                        <Pressable
+                          key={t.value}
+                          onPress={() => {
+                            setSelectedAdjustmentType(t.value);
+                            setShowAdjTypeDropdown(false);
+                          }}
+                          style={[
+                            bulkStyles.selectOption,
+                            selectedAdjustmentType === t.value && bulkStyles.selectOptionActive,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              bulkStyles.selectOptionText,
+                              selectedAdjustmentType === t.value && bulkStyles.selectOptionTextActive,
+                            ]}
+                          >
+                            {`${t.label}`}
+                          </Text>
+                          {selectedAdjustmentType === t.value && (
+                            <Icon name="check" size={14} color={colors.primary} />
+                          )}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+
+                <View>
+                  <Text style={bulkStyles.formLabel}>Descripción general (opcional)</Text>
+                  <TextInput
+                    style={bulkStyles.textArea}
+                    value={description}
+                    onChangeText={setDescription}
+                    placeholder="Ej: Conteo físico mensual de marzo"
+                    placeholderTextColor={colorScales.gray[400]}
+                    multiline
+                    numberOfLines={2}
+                  />
+                </View>
+
+                <View style={bulkStyles.templateRow}>
+                  <Pressable
+                    style={[
+                      bulkStyles.templateBtn,
+                      (!selectedLocationId || isDownloading) && bulkStyles.templateBtnDisabled,
+                    ]}
+                    onPress={handleDownloadTemplate}
+                    disabled={!selectedLocationId || isDownloading}
+                  >
+                    {isDownloading ? (
+                      <Spinner size="sm" />
+                    ) : (
+                      <Icon name="download" size={16} color={colors.primary} />
+                    )}
+                    <Text style={bulkStyles.templateBtnText}>
+                      {isDownloading ? 'Descargando…' : 'Descargar plantilla'}
+                    </Text>
+                  </Pressable>
+                  <Text style={bulkStyles.templateHint}>
+                    La plantilla incluirá los productos con stock en la ubicación seleccionada
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* STEP 2: Subir archivo */}
+            {step === 2 && (
+              <View style={bulkStyles.stepContent}>
+                <Text style={bulkStyles.sectionTitle}>Subir archivo</Text>
+
+                <Pressable
+                  style={[
+                    bulkStyles.dropZone,
+                    selectedFile && bulkStyles.dropZoneActive,
+                  ]}
+                  onPress={handlePickFile}
+                >
+                  {!selectedFile ? (
+                    <>
+                      <Icon
+                        name="upload-cloud"
+                        size={40}
+                        color={colorScales.gray[400]}
+                        style={{ alignSelf: 'center', marginBottom: 12 }}
+                      />
+                      <Text style={bulkStyles.dropZonePrimary}>
+                        Haga clic o arrastre un archivo aquí
+                      </Text>
+                      <Text style={bulkStyles.dropZoneSecondary}>
+                        Formatos aceptados: Excel (.xlsx, .xls) o CSV
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Icon
+                        name="file-spreadsheet"
+                        size={40}
+                        color={colors.primary}
+                        style={{ alignSelf: 'center', marginBottom: 12 }}
+                      />
+                      <Text style={bulkStyles.fileName}>{`${selectedFile.name}`}</Text>
+                      <Text style={bulkStyles.fileSize}>
+                        {`${formatFileSize(selectedFile.size)}`}
+                      </Text>
+                      <Pressable
+                        onPress={() => setSelectedFile(null)}
+                        hitSlop={4}
+                        style={{ marginTop: 8 }}
+                      >
+                        <Text style={bulkStyles.removeFileLink}>Eliminar archivo</Text>
+                      </Pressable>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            )}
+
+            {/* STEP 3: Resultado */}
+            {step === 3 && (
+              <View style={bulkStyles.stepContent}>
+                <Text style={bulkStyles.sectionTitle}>Resultado</Text>
+
+                {isUploading ? (
+                  <View style={bulkStyles.uploadingContainer}>
+                    <Spinner size="lg" />
+                    <Text style={bulkStyles.uploadingText}>Procesando ajustes...</Text>
+                  </View>
+                ) : null}
+
+                {uploadResult && !isUploading && (
+                  <>
+                    <View style={bulkStyles.summaryGrid}>
+                      <View style={bulkStyles.summaryCard}>
+                        <Text style={bulkStyles.summaryValue}>{`${uploadResult.total_processed}`}</Text>
+                        <Text style={bulkStyles.summaryLabel}>Total</Text>
+                      </View>
+                      <View style={[bulkStyles.summaryCard, bulkStyles.summaryCardSuccess]}>
+                        <Text
+                          style={[
+                            bulkStyles.summaryValue,
+                            { color: colorScales.green[600] },
+                          ]}
+                        >
+                          {`${uploadResult.successful}`}
+                        </Text>
+                        <Text style={bulkStyles.summaryLabel}>Exitosos</Text>
+                      </View>
+                      <View style={[bulkStyles.summaryCard, bulkStyles.summaryCardError]}>
+                        <Text
+                          style={[
+                            bulkStyles.summaryValue,
+                            { color: colorScales.red[600] },
+                          ]}
+                        >
+                          {`${uploadResult.failed}`}
+                        </Text>
+                        <Text style={bulkStyles.summaryLabel}>Fallidos</Text>
+                      </View>
+                    </View>
+
+                    <View style={bulkStyles.tableContainer}>
+                      <View style={bulkStyles.tableHeader}>
+                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader]}>Fila</Text>
+                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader]}>Sku</Text>
+                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader]}>Producto</Text>
+                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader, bulkStyles.tableCellCenter]}>Cambio</Text>
+                        <Text style={[bulkStyles.tableCell, bulkStyles.tableCellHeader, bulkStyles.tableCellCenter]}>Estado</Text>
+                      </View>
+                      <ScrollView style={{ maxHeight: 240 }} nestedScrollEnabled>
+                        {uploadResult.results.map((item) => (
+                          <View
+                            key={item.row_number}
+                            style={[
+                              bulkStyles.tableRow,
+                              item.status === 'error' && bulkStyles.tableRowError,
+                            ]}
+                          >
+                            <Text style={bulkStyles.tableCell}>{`${item.row_number}`}</Text>
+                            <Text style={bulkStyles.tableCellMono}>{`${item.sku}`}</Text>
+                            <Text style={bulkStyles.tableCell}>{`${item.product_name ?? '—'}`}</Text>
+                            <View style={bulkStyles.tableCellCenter}>
+                              {item.status === 'success' && item.quantity_change !== undefined ? (
+                                <Text
+                                  style={[
+                                    bulkStyles.tableCell,
+                                    {
+                                      color:
+                                        (item.quantity_change ?? 0) > 0
+                                          ? colorScales.green[600]
+                                          : (item.quantity_change ?? 0) < 0
+                                            ? colorScales.red[600]
+                                            : colorScales.gray[400],
+                                    },
+                                  ]}
+                                >
+                                  {`${(item.quantity_change ?? 0) > 0 ? '+' : ''}${item.quantity_change}`}
+                                </Text>
+                              ) : (
+                                <Text style={[bulkStyles.tableCell, { color: colorScales.gray[400] }]}>—</Text>
+                              )}
+                            </View>
+                            <View style={bulkStyles.tableCellCenter}>
+                              {item.status === 'success' ? (
+                                <View style={bulkStyles.badgeOk}>
+                                  <Text style={bulkStyles.badgeOkText}>OK</Text>
+                                </View>
+                              ) : (
+                                <View style={bulkStyles.badgeError}>
+                                  <Text style={bulkStyles.badgeErrorText}>Error</Text>
+                                </View>
+                              )}
+                            </View>
+                          </View>
+                        ))}
+                      </ScrollView>
+                    </View>
+
+                    {failedItems.length > 0 && (
+                      <View style={bulkStyles.errorBox}>
+                        <Text style={bulkStyles.errorTitle}>Errores encontrados:</Text>
+                        {failedItems.map((item) => (
+                          <Text key={item.row_number} style={bulkStyles.errorLine}>
+                            {`Fila ${item.row_number} (${item.sku}): ${item.message ?? 'Error desconocido'}`}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+                  </>
+                )}
+              </View>
+            )}
+          </ScrollView>
+
+          {/* Footer */}
+          <View style={bulkStyles.footer}>
+            <View style={bulkStyles.footerLeft}>
+              {step > 1 && step < 3 && (
+                <Pressable style={bulkStyles.outlineBtn} onPress={() => setStep(step - 1)}>
+                  <Text style={bulkStyles.outlineBtnText}>Atrás</Text>
+                </Pressable>
+              )}
+            </View>
+            <View style={bulkStyles.footerRight}>
+              <Pressable style={bulkStyles.outlineBtn} onPress={handleClose}>
+                <Text style={bulkStyles.outlineBtnText}>
+                  {step === 3 ? 'Cerrar' : 'Cancelar'}
+                </Text>
+              </Pressable>
+              {step === 1 && (
+                <Pressable
+                  style={[
+                    bulkStyles.primaryBtn,
+                    !selectedLocationId && bulkStyles.primaryBtnDisabled,
+                  ]}
+                  onPress={() => setStep(2)}
+                  disabled={!selectedLocationId}
+                >
+                  <Text style={bulkStyles.primaryBtnText}>Siguiente</Text>
+                </Pressable>
+              )}
+              {step === 2 && (
+                <Pressable
+                  style={[
+                    bulkStyles.primaryBtn,
+                    (!selectedFile || isUploading) && bulkStyles.primaryBtnDisabled,
+                  ]}
+                  onPress={handleUpload}
+                  disabled={!selectedFile || isUploading}
+                >
+                  {isUploading ? (
+                    <Spinner size="sm" />
+                  ) : (
+                    <Icon name="upload" size={16} color={colors.background} />
+                  )}
+                  <Text style={bulkStyles.primaryBtnText}>
+                    {isUploading ? 'Subiendo…' : 'Subir y Aplicar'}
+                  </Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function AdjustmentsScreen() {
   const queryClient = useQueryClient();
-  const currentStoreId = useTenantStore((s) => s.storeId);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<AdjustmentType | 'all'>('all');
   const [modalVisible, setModalVisible] = useState(false);
+  const [bulkUploadOpen, setBulkUploadOpen] = useState(false);
   const [createStep, setCreateStep] = useState<1 | 2 | 3>(1);
   const [confirmCreate, setConfirmCreate] = useState(false);
   const [showActions, setShowActions] = useState(false);
@@ -148,20 +762,27 @@ export default function AdjustmentsScreen() {
     value: Number(loc.id),
     label: loc.name,
   }));
-  // Productos mock para búsqueda (en la web viene de `searchAdjustableProducts`)
-  // Incluye productos con "kit", "limpieza", etc. para que la búsqueda por texto parcial funcione
-  const ALL_PRODUCTS: Array<{ id: number; name: string; sku?: string; stock: number; category?: string }> = [
-    { id: 101, name: 'Kit de Limpieza Soplete', sku: 'KIT-LIM-SOP', stock: 20, category: 'Kits' },
-    { id: 102, name: 'Kit de Limpieza Industrial', sku: 'KIT-LIM-IND', stock: 15, category: 'Kits' },
-    { id: 103, name: 'Kit de Limpieza Deluxe', sku: 'KIT-LIM-DLX', stock: 8, category: 'Kits' },
-    { id: 104, name: 'Camiseta Básica Blanca', sku: 'CAM-BAS-BLA', stock: 50, category: 'Ropa' },
-    { id: 105, name: 'Pantalón Jean Clásico', sku: 'PAN-JEA-CLA', stock: 30, category: 'Ropa' },
-    { id: 106, name: 'Zapatillas Deportivas', sku: 'ZAP-DEP-001', stock: 25, category: 'Calzado' },
-    { id: 107, name: 'Gorra Ajustable', sku: 'GOR-AJU-001', stock: 100, category: 'Accesorios' },
-    { id: 108, name: 'Mochila Escolar', sku: 'MOC-ESC-001', stock: 15, category: 'Accesorios' },
-    { id: 109, name: 'Camiseta Kit Premium', sku: 'CAM-KIT-PRM', stock: 12, category: 'Ropa' },
-    { id: 110, name: 'Kit de Herramientas Pro', sku: 'KIT-HER-PRO', stock: 10, category: 'Kits' },
-  ];
+  // Productos reales desde el backend (reemplaza el MOCK hardcoded anterior)
+  const productsQuery = useQuery({
+    queryKey: ['adjustments-products-search', productSearchTerm],
+    queryFn: () =>
+      ProductService.list({
+        page: 1,
+        limit: 50,
+        search: productSearchTerm.trim() || undefined,
+        include_variants: true,
+      }),
+    enabled: createStep === 2 && productSearchTerm.trim().length > 0,
+    staleTime: 30_000,
+  });
+  const storeProducts: Array<{ id: number; name: string; sku?: string; stock: number; category?: string }> =
+    (productsQuery.data?.data ?? []).map((p) => ({
+      id: Number(p.id),
+      name: p.name,
+      sku: p.sku,
+      stock: p.stock_quantity ?? 0,
+      category: p.category?.name,
+    }));
   const selectedLocationName = selectedLocation ? LOCATIONS.find((l) => l.value === selectedLocation)?.label : '';
 
   const isFocused = useIsFocused();
@@ -203,19 +824,22 @@ export default function AdjustmentsScreen() {
       setConfirmCreate(false);
       toastSuccess('Ajuste creado correctamente');
     },
-    onError: () => toastError('Error al crear el ajuste'),
+    onError: (error: any) => {
+      const message =
+        error?.response?.data?.message ||
+        error?.response?.data?.error?.message ||
+        error?.message ||
+        'Error al crear el ajuste';
+      toastError(typeof message === 'string' ? message : 'Error al crear el ajuste');
+    },
   });
 
   const adjustments = data?.pages.flatMap((p) => p.data) ?? [];
 
-  // Filtro client-side por tienda actual: el backend aún no acota por store_id en
-  // /store/inventory/adjustments (solo por organization_id), así que descartamos
-  // cualquier ajuste cuya ubicación pertenezca a otra tienda.
-  const storeAdjustments = currentStoreId
-    ? adjustments.filter(
-        (a) => a.inventory_locations?.store_id === Number(currentStoreId),
-      )
-    : adjustments;
+  // El backend `/store/inventory/adjustments` ya filtra por `organization_id` del
+  // contexto, así que NO descartamos ajustes client-side por `store_id` (esa lógica
+  // anterior filtraba ajustes legítimos cuya ubicación tenía `store_id` null).
+  const storeAdjustments = adjustments;
 
   const totals = {
     total: storeAdjustments.length,
@@ -245,8 +869,13 @@ export default function AdjustmentsScreen() {
   }, [screenW]);
 
   const handleSubmit = () => {
-    if (!form.product_id || !form.description || form.quantity_after <= 0 || !selectedLocation) return;
-    // Construir el DTO batch que espera el backend
+    if (!form.product_id || !form.description || form.quantity_after <= 0 || !selectedLocation) {
+      toastError('Completa todos los campos requeridos');
+      return;
+    }
+    // DTO batch que espera el backend (POST /store/inventory/adjustments/batch-complete).
+    // El campo `quantity_after` es el stock FINAL (no el cambio). El backend calcula
+    // automáticamente `quantity_change = quantity_after - quantity_before`.
     const dto: CreateAdjustmentDto = {
       location_id: selectedLocation,
       items: [{
@@ -259,6 +888,12 @@ export default function AdjustmentsScreen() {
     };
     createMutation.mutate(dto);
   };
+
+  // Stock actual del producto seleccionado (viene de ProductService.list)
+  const selectedProductCurrentStock =
+    storeProducts.find((p) => p.id === form.product_id)?.stock ?? 0;
+  // Diferencia calculada en cliente para mostrar en UI (el backend hace lo mismo)
+  const calculatedQuantityChange = form.quantity_after - selectedProductCurrentStock;
 
   // --- Wizard helpers (Crear Ajuste — 3 pasos como la web) ---
   const canAdvanceStep1 = selectedLocation !== null;
@@ -288,15 +923,10 @@ export default function AdjustmentsScreen() {
       setProductSearchResults([]);
       return;
     }
-    const lower = term.toLowerCase().trim();
-    // Búsqueda por coincidencia parcial en nombre, SKU y categoría (como la web)
+    // Backend query se dispara automáticamente via useQuery (enabled).
+    // Acá filtramos los resultados contra el producto ya seleccionado.
     setProductSearchResults(
-      ALL_PRODUCTS.filter((p) => {
-        const nameMatch = p.name.toLowerCase().includes(lower);
-        const skuMatch = p.sku ? p.sku.toLowerCase().includes(lower) : false;
-        const categoryMatch = p.category ? p.category.toLowerCase().includes(lower) : false;
-        return nameMatch || skuMatch || categoryMatch;
-      }).filter((p) => p.id !== form.product_id),
+      storeProducts.filter((p) => p.id !== form.product_id),
     );
   };
   const selectProduct = (product: { id: number; name: string; sku?: string; stock: number }) => {
@@ -308,22 +938,44 @@ export default function AdjustmentsScreen() {
 
   return (
     <View style={styles.screen}>
-      {/* Stats: ancho completo de la pantalla (fuera del card) */}
-      <View style={styles.statsContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.statsScroll}>
-          {STATS.map((stat, idx) => {
-            const vals = [totals.total, totals.losses, totals.damages, totals.corrections];
-            return (
-              <View key={idx} style={styles.statCard}>
-                <Ionicons name={stat.iconName} size={16} color={stat.iconColor} style={styles.statIcon} />
-                <Text style={styles.statLabel}>{stat.title}</Text>
-                <Text style={styles.statValue}>{vals[idx]}</Text>
-                <Text style={styles.statSmall}>{stat.smallText}</Text>
-              </View>
-            );
-          })}
-        </ScrollView>
-      </View>
+      {/* Stats: calculado dinámicamente desde los datos (no más hardcoded 0) */}
+      <StatsGrid
+        style={styles.statsContainer}
+        items={[
+          {
+            label: ADJUSTMENT_STATS.total.label,
+            value: totals.total,
+            icon: INVENTORY_ICONS.adjustmentsTotalStat,
+            iconBg: STAT_PALETTE.blue.bg,
+            iconColor: STAT_PALETTE.blue.color,
+            description: ADJUSTMENT_STATS.total.description,
+          },
+          {
+            label: ADJUSTMENT_STATS.loss.label,
+            value: totals.losses,
+            icon: INVENTORY_ICONS.lossStat,
+            iconBg: STAT_PALETTE.red.bg,
+            iconColor: STAT_PALETTE.red.color,
+            description: ADJUSTMENT_STATS.loss.description,
+          },
+          {
+            label: ADJUSTMENT_STATS.damage.label,
+            value: totals.damages,
+            icon: INVENTORY_ICONS.damageStat,
+            iconBg: STAT_PALETTE.amber.bg,
+            iconColor: STAT_PALETTE.amber.color,
+            description: ADJUSTMENT_STATS.damage.description,
+          },
+          {
+            label: ADJUSTMENT_STATS.correction.label,
+            value: totals.corrections,
+            icon: INVENTORY_ICONS.correctionStat,
+            iconBg: STAT_PALETTE.green.bg,
+            iconColor: STAT_PALETTE.green.color,
+            description: ADJUSTMENT_STATS.correction.description,
+          },
+        ]}
+      />
 
       {/* Card contenedor: título + búsqueda + cards de ajustes (con margen y border radius) */}
       <View style={styles.cardContainer}>
@@ -342,7 +994,7 @@ export default function AdjustmentsScreen() {
             {/* POS-style search bar — fondo transparente para integrarse con el card */}
             <View style={styles.searchRow}>
               <View style={styles.searchInput}>
-                <Ionicons name="search-outline" size={16} color={colorScales.gray[400]} style={{ marginRight: 6 }} />
+                <Icon name="search" size={16} color={colorScales.gray[400]} style={{ marginRight: 6 }} />
                 <TextInput
                   style={styles.searchTextInput}
                   value={search}
@@ -355,7 +1007,7 @@ export default function AdjustmentsScreen() {
                 />
                 {search.length > 0 && (
                   <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                    <Ionicons name="close" size={16} color={colorScales.gray[400]} />
+                    <Icon name="x" size={16} color={colorScales.gray[400]} />
                   </Pressable>
                 )}
               </View>
@@ -400,21 +1052,21 @@ export default function AdjustmentsScreen() {
           <View style={styles.dropdown}>
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); setModalVisible(true); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="add-outline" size={18} color={colors.primary} />
+                <Icon name="plus" size={18} color={colors.primary} />
               </View>
               <Text style={styles.dropdownItemPrimary}>Nuevo Ajuste</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
-            <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); /* bulk */ }}>
+            <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); setBulkUploadOpen(true); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="cloud-upload-outline" size={18} color={colorScales.gray[500]} />
+                <Icon name="upload" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Carga Masiva</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="sync-outline" size={18} color={colorScales.gray[500]} />
+                <Icon name="refresh" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Refrescar</Text>
             </Pressable>
@@ -436,7 +1088,7 @@ export default function AdjustmentsScreen() {
                 <Text style={styles.dropdownSelectText}>
                   {ADJUSTMENT_TYPE_OPTIONS.find((o) => o.value === activeFilter)?.label ?? 'Todos los tipos'}
                 </Text>
-                <Ionicons name="chevron-down" size={14} color={colorScales.gray[500]} />
+                <Icon name="chevron-down" size={14} color={colorScales.gray[500]} />
               </Pressable>
             </View>
             <View style={styles.dropdownDivider} />
@@ -445,7 +1097,7 @@ export default function AdjustmentsScreen() {
                 {ADJUSTMENT_TYPE_OPTIONS.map((opt) => (
                   <Pressable key={opt.value} style={[styles.dropdownOption, activeFilter === opt.value && styles.dropdownOptionActive]} onPress={() => { setActiveFilter(opt.value); setShowTypeOptions(false); setShowFilters(false); }}>
                     <Text style={[styles.dropdownOptionText, activeFilter === opt.value && styles.dropdownOptionTextActive]}>{opt.label}</Text>
-                    {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                    {activeFilter === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                   </Pressable>
                 ))}
               </View>
@@ -653,7 +1305,7 @@ export default function AdjustmentsScreen() {
                           </Pressable>
                         </View>
                         <Text style={styles.selectedProductStock}>
-                          Stock actual: {ALL_PRODUCTS.find((p) => p.id === form.product_id)?.stock ?? 0}
+                          Stock actual: {storeProducts.find((p) => p.id === form.product_id)?.stock ?? 0}
                         </Text>
                       </View>
                     ) : (
@@ -704,11 +1356,25 @@ export default function AdjustmentsScreen() {
                         </View>
                         <View style={styles.qtyPreview}>
                           <Text style={styles.qtyPreviewLabel}>Cambio</Text>
-                          <Text style={[styles.qtyPreviewValue, form.quantity_after > 0 ? styles.qtyPreviewValuePositive : styles.qtyPreviewValueNeutral]}>
-                            {form.quantity_after > 0 ? `+${form.quantity_after}` : '0'}
+                          <Text
+                            style={[
+                              styles.qtyPreviewValue,
+                              calculatedQuantityChange > 0
+                                ? styles.qtyPreviewValuePositive
+                                : calculatedQuantityChange < 0
+                                  ? styles.qtyPreviewValueNegative
+                                  : styles.qtyPreviewValueNeutral,
+                            ]}
+                          >
+                            {calculatedQuantityChange > 0
+                              ? `+${calculatedQuantityChange}`
+                              : `${calculatedQuantityChange}`}
                           </Text>
                         </View>
                       </View>
+                      <Text style={styles.qtyHelperText}>
+                        Stock actual: {selectedProductCurrentStock}
+                      </Text>
 
                       <Input
                         label="Motivo / Nota (opcional)"
@@ -751,7 +1417,9 @@ export default function AdjustmentsScreen() {
                     <View style={styles.summaryRow}>
                       <Text style={styles.summaryLabel}>Cambio</Text>
                       <Text style={[styles.summaryValue, styles.summaryValueBold]}>
-                        {form.quantity_after > 0 ? `+${form.quantity_after}` : '0'}
+                        {calculatedQuantityChange > 0
+                          ? `+${calculatedQuantityChange}`
+                          : `${calculatedQuantityChange}`}
                       </Text>
                     </View>
                     {form.reason_code ? (
@@ -880,6 +1548,14 @@ export default function AdjustmentsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal de carga masiva — abre desde acciones (+) → Carga Masiva */}
+      <BulkAdjustmentModal
+        visible={bulkUploadOpen}
+        onClose={() => setBulkUploadOpen(false)}
+        locations={LOCATIONS}
+        onCompleted={handleRefresh}
+      />
     </View>
   );
 }
@@ -1045,7 +1721,15 @@ const styles = StyleSheet.create({
 
   /* Dropdowns (positioned near buttons) */
   dropdownBackdrop: { flex: 1 },
-  dropdownPositioner: { position: 'absolute', alignItems: 'flex-end' },
+  dropdownPositioner: {
+    position: 'absolute',
+    alignItems: 'flex-end',
+    // Render the dropdown above the backdrop and any sibling content.
+    // Without an explicit zIndex/elevation, the absolutely-positioned
+    // dropdown can render behind sibling Views on Android.
+    zIndex: 100,
+    elevation: 12,
+  },
   dropdownArrow: {
     width: 0, height: 0, borderLeftWidth: 8, borderRightWidth: 8, borderBottomWidth: 8,
     borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: colors.background,
@@ -1226,7 +1910,9 @@ const styles = StyleSheet.create({
   qtyPreviewLabel: { fontSize: 10, color: colorScales.gray[500], textTransform: 'uppercase' as any, fontWeight: '600' as any, marginBottom: 2 },
   qtyPreviewValue: { fontSize: 16, fontWeight: '700' as any },
   qtyPreviewValuePositive: { color: colors.primary },
+  qtyPreviewValueNegative: { color: colors.error },
   qtyPreviewValueNeutral: { color: colorScales.gray[500] },
+  qtyHelperText: { fontSize: 11, color: colorScales.gray[500], marginTop: -spacing[1], marginBottom: spacing[2] },
 
   /* Step 3: CONFIRMAR — location info + total */
   locationInfoCard: {
@@ -1243,4 +1929,159 @@ const styles = StyleSheet.create({
   },
   totalCardLabel: { fontSize: 12, color: colorScales.gray[500] },
   totalCardValue: { fontSize: 24, fontWeight: '800' as any, color: colors.primary },
+});
+
+/* BulkAdjustmentModal — replica del web app-bulk-adjustment-modal */
+const bulkStyles = StyleSheet.create({
+  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: spacing[4] },
+  modal: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1, borderColor: colorScales.gray[200],
+    width: '100%', maxWidth: 640, maxHeight: '92%',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8,
+  },
+  header: {
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    paddingHorizontal: spacing[5], paddingTop: spacing[5], paddingBottom: spacing[4],
+    borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
+  },
+  title: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
+  subtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 4 },
+  closeBtn: { padding: spacing[1] },
+
+  stepsRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    paddingVertical: spacing[4], backgroundColor: colorScales.gray[50],
+    gap: spacing[2],
+  },
+  stepRow: { flexDirection: 'row', alignItems: 'center' },
+  stepCircle: {
+    width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colorScales.gray[200],
+  },
+  stepCircleActive: { backgroundColor: colors.primary },
+  stepLine: { width: 48, height: 2, backgroundColor: colorScales.gray[200], marginHorizontal: spacing[2] },
+  stepLineDone: { backgroundColor: colors.primary },
+  stepNum: { fontSize: 13, fontWeight: '600' as any, color: colorScales.gray[500] },
+  stepNumActive: { color: colors.background, fontWeight: '700' as any },
+
+  body: { flexGrow: 0, flexShrink: 1, maxHeight: 520 },
+  bodyContent: { padding: spacing[5], gap: spacing[4] },
+  stepContent: { gap: spacing[4] },
+  sectionTitle: { fontSize: typography.fontSize.base, fontWeight: '700' as any, color: colorScales.gray[900] },
+
+  formLabel: { fontSize: 12, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase' as any, letterSpacing: 0.5, marginBottom: spacing[1] },
+
+  selectTrigger: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: spacing[3], paddingHorizontal: spacing[3],
+    borderWidth: 1.5, borderColor: colorScales.gray[300], borderRadius: borderRadius.lg,
+    backgroundColor: colors.background,
+  },
+  selectTriggerActive: {
+    borderColor: colors.primary,
+  },
+  selectValue: { flex: 1, fontSize: 14, fontWeight: '500' as any, color: colorScales.gray[900] },
+  selectPlaceholder: { flex: 1, fontSize: 14, color: colorScales.gray[400] },
+  selectList: { marginTop: 4, borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: borderRadius.lg, backgroundColor: colors.background, overflow: 'hidden' },
+  selectEmpty: { padding: spacing[3], textAlign: 'center' as any, fontSize: 12, color: colorScales.gray[500] },
+  selectOption: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: spacing[3], paddingHorizontal: spacing[3], borderBottomWidth: 1, borderBottomColor: colorScales.gray[100] },
+  selectOptionActive: { backgroundColor: colorScales.green[50] },
+  selectOptionText: { fontSize: 14, color: colorScales.gray[700] },
+  selectOptionTextActive: { fontWeight: '600' as any, color: colors.primary },
+
+  typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing[2] },
+  typeChip: { paddingHorizontal: spacing[3], paddingVertical: spacing[2], borderRadius: borderRadius.full, borderWidth: 1, borderColor: colorScales.gray[300], backgroundColor: colors.background },
+  typeChipActive: { backgroundColor: colorScales.green[50], borderColor: colors.primary },
+  typeChipText: { fontSize: 12, fontWeight: '500' as any, color: colorScales.gray[700] },
+  typeChipTextActive: { color: colors.primary, fontWeight: '700' as any },
+
+  textArea: {
+    borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3], paddingVertical: spacing[2],
+    fontSize: 14, color: colorScales.gray[900], backgroundColor: colors.background,
+    minHeight: 56, textAlignVertical: 'top' as any,
+  },
+
+  templateRow: { gap: spacing[1] },
+  templateBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing[2],
+    paddingVertical: spacing[2.5], paddingHorizontal: spacing[3],
+    borderWidth: 1.5, borderColor: colors.primary, borderRadius: borderRadius.lg,
+    alignSelf: 'flex-start' as any,
+  },
+  templateBtnDisabled: { opacity: 0.4 },
+  templateBtnText: { fontSize: 13, fontWeight: '600' as any, color: colors.primary },
+  templateHint: { fontSize: 11, color: colorScales.gray[500] },
+
+  dropZone: {
+    borderWidth: 2, borderStyle: 'dashed' as any, borderColor: colorScales.gray[300],
+    borderRadius: borderRadius.lg, paddingVertical: spacing[8], paddingHorizontal: spacing[4],
+    alignItems: 'center' as any, backgroundColor: colors.background,
+  },
+  dropZoneActive: { borderColor: colors.primary, backgroundColor: colorScales.green[50] },
+  dropZonePrimary: { fontSize: 14, fontWeight: '600' as any, color: colorScales.gray[700], textAlign: 'center' as any },
+  dropZoneSecondary: { fontSize: 12, color: colorScales.gray[400], marginTop: 4, textAlign: 'center' as any },
+  fileName: { fontSize: 14, fontWeight: '700' as any, color: colorScales.gray[900], textAlign: 'center' as any },
+  fileSize: { fontSize: 12, color: colorScales.gray[500], marginTop: 4, textAlign: 'center' as any },
+  removeFileLink: { fontSize: 12, color: colorScales.red[500], textDecorationLine: 'underline' as any },
+
+  uploadingContainer: { alignItems: 'center' as any, paddingVertical: spacing[8], gap: spacing[3] },
+  uploadingText: { fontSize: 14, fontWeight: '600' as any, color: colorScales.gray[900] },
+
+  summaryGrid: { flexDirection: 'row', gap: spacing[3] },
+  summaryCard: {
+    flex: 1, alignItems: 'center' as any, paddingVertical: spacing[3], paddingHorizontal: spacing[2],
+    backgroundColor: colorScales.gray[50], borderRadius: borderRadius.lg,
+  },
+  summaryCardSuccess: { backgroundColor: colorScales.green[50] },
+  summaryCardError: { backgroundColor: colorScales.red[50] },
+  summaryValue: { fontSize: typography.fontSize['2xl'], fontWeight: '800' as any, color: colorScales.gray[900] },
+  summaryLabel: { fontSize: 11, color: colorScales.gray[500], marginTop: 2 },
+
+  tableContainer: {
+    borderWidth: 1, borderColor: colorScales.gray[200], borderRadius: borderRadius.lg, overflow: 'hidden' as any,
+  },
+  tableHeader: {
+    flexDirection: 'row', backgroundColor: colorScales.gray[50],
+    paddingVertical: spacing[2], paddingHorizontal: spacing[3],
+    borderBottomWidth: 1, borderBottomColor: colorScales.gray[200],
+  },
+  tableRow: {
+    flexDirection: 'row', paddingVertical: spacing[2], paddingHorizontal: spacing[3],
+    borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
+  },
+  tableRowError: { backgroundColor: colorScales.red[50] },
+  tableCell: { flex: 2, fontSize: 12, color: colorScales.gray[900] },
+  tableCellMono: { flex: 2, fontSize: 12, color: colorScales.gray[900], fontFamily: 'Courier' },
+  tableCellHeader: { fontWeight: '700' as any, color: colorScales.gray[600], textTransform: 'uppercase' as any, fontSize: 10, letterSpacing: 0.5 },
+  tableCellCenter: { flex: 1, alignItems: 'center' as any, justifyContent: 'center' as any },
+  badgeOk: { paddingHorizontal: spacing[2], paddingVertical: 2, borderRadius: 10, backgroundColor: colorScales.green[100] },
+  badgeOkText: { fontSize: 10, fontWeight: '700' as any, color: colorScales.green[800] },
+  badgeError: { paddingHorizontal: spacing[2], paddingVertical: 2, borderRadius: 10, backgroundColor: colorScales.red[100] },
+  badgeErrorText: { fontSize: 10, fontWeight: '700' as any, color: colorScales.red[800] },
+
+  errorBox: {
+    backgroundColor: colorScales.red[50], borderWidth: 1, borderColor: colorScales.red[200],
+    borderRadius: borderRadius.lg, padding: spacing[3], gap: 4,
+  },
+  errorTitle: { fontSize: 12, fontWeight: '700' as any, color: colorScales.red[800] },
+  errorLine: { fontSize: 11, color: colorScales.red[700] },
+
+  footer: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing[2],
+    paddingHorizontal: spacing[4], paddingVertical: spacing[3],
+    backgroundColor: colorScales.gray[50], borderTopWidth: 1, borderTopColor: colorScales.gray[100],
+  },
+  footerLeft: { flexDirection: 'row' },
+  footerRight: { flexDirection: 'row', gap: spacing[2] },
+  outlineBtn: { paddingVertical: 10, paddingHorizontal: spacing[4], borderRadius: borderRadius.lg, borderWidth: 1.5, borderColor: colorScales.gray[300], alignItems: 'center' as any, justifyContent: 'center' as any },
+  outlineBtnText: { fontSize: 14, fontWeight: '700' as any, color: colorScales.gray[700] },
+  primaryBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing[2],
+    paddingVertical: 10, paddingHorizontal: spacing[4], borderRadius: borderRadius.lg, backgroundColor: colors.primary,
+  },
+  primaryBtnDisabled: { backgroundColor: colorScales.green[600], opacity: 0.4 },
+  primaryBtnText: { fontSize: 14, fontWeight: '700' as any, color: colors.background },
 });

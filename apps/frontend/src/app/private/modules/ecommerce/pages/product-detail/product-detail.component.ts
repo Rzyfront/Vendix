@@ -35,6 +35,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { PriceResolverService } from '../../../../../shared/services/pricing';
+import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
 
 @Component({
   selector: 'app-product-detail',
@@ -51,6 +52,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
     QuantityControlComponent,
     ButtonComponent,
     ShareModalComponent,
+    EmptyStateComponent,
   ],
   template: `
     <div class="product-detail-page">
@@ -382,9 +384,25 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
           <!-- Reviews Section -->
           @if (reviewsEnabled() === true) {
           <div class="reviews-section">
-            <h3 class="rv-section-title">
-              Opiniones ({{ reviewsTotalCount() }})
-            </h3>
+            <div class="rv-section-header">
+              <h3 class="rv-section-title">
+                Opiniones ({{ reviewsTotalCount() }})
+              </h3>
+              @if (canWriteReview()?.can_review && !reviewSubmitted()) {
+                <button
+                  type="button"
+                  class="rv-write-btn"
+                  (click)="openReviewForm()"
+                >
+                  <app-icon name="edit-2" [size]="16"></app-icon>
+                  {{ showReviewForm() ? 'Ocultar formulario' : 'Escribir reseña' }}
+                </button>
+              } @else if (canWriteReview()?.reason === 'already_reviewed') {
+                <span class="rv-tag rv-tag-info">Ya reseñaste</span>
+              } @else if (canWriteReview()?.reason === 'no_purchase') {
+                <span class="rv-tag rv-tag-warn">Compra para reseñar</span>
+              }
+            </div>
 
             <!-- Rating Summary -->
             @if (reviewsTotalCount() > 0) {
@@ -545,7 +563,8 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
               </div>
             }
 
-            <!-- Write Review Form -->
+            <!-- Write Review Form (collapsible: only visible after the
+                 user clicks the "Escribir reseña" CTA) -->
             <div class="rv-form-section">
               @if (reviewSubmitted()) {
                 <div class="rv-submitted">
@@ -556,7 +575,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
                   />
                   <p>Tu reseña fue publicada.</p>
                 </div>
-              } @else if (canWriteReview()?.can_review) {
+              } @else if (showReviewForm() && canWriteReview()?.can_review) {
                 <h4 class="rv-form-title">Escribe tu opinión</h4>
                 <form [formGroup]="reviewForm" (ngSubmit)="onSubmitReview()">
                   <div class="star-picker">
@@ -612,6 +631,33 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
           </div>
           }
         </div>
+      } @else if (notFound()) {
+        <app-empty-state
+          icon="search-x"
+          iconColor="warning"
+          title="Producto no disponible"
+          description="No encontramos este producto o ya no está disponible en la tienda. Es posible que haya sido retirado o que el enlace sea incorrecto."
+          actionButtonText="Volver al catálogo"
+          actionButtonIcon="arrow-left"
+          [showActionButton]="true"
+          (actionClick)="goToCatalog()"
+        ></app-empty-state>
+      } @else if (hasError()) {
+        <app-empty-state
+          icon="alert-triangle"
+          iconColor="error"
+          title="No pudimos cargar el producto"
+          description="Ocurrió un problema al cargar este producto. Inténtalo de nuevo o vuelve al catálogo."
+          actionButtonText="Reintentar"
+          actionButtonIcon="refresh-cw"
+          [showActionButton]="true"
+          (actionClick)="retryLoad()"
+        ></app-empty-state>
+        <div class="empty-state-fallback-link">
+          <app-button variant="ghost" size="sm" (clicked)="goToCatalog()">
+            Volver al catálogo
+          </app-button>
+        </div>
       }
     </div>
 
@@ -636,6 +682,13 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         margin: 0 auto;
         padding: 1.5rem;
         font-family: inherit;
+      }
+
+      .empty-state-fallback-link {
+        display: flex;
+        justify-content: center;
+        margin-top: -1rem;
+        padding-bottom: 2rem;
       }
 
       .breadcrumbs {
@@ -925,10 +978,48 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         margin-top: 4rem;
         padding-top: 2rem;
         border-top: 1px solid var(--color-border);
+        .rv-section-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          flex-wrap: wrap;
+          margin-bottom: 1.5rem;
+        }
         .rv-section-title {
           font-size: 1.25rem;
           font-weight: 800;
-          margin-bottom: 1.5rem;
+          margin: 0;
+        }
+        .rv-write-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.4rem;
+          padding: 0.55rem 1rem;
+          background: var(--color-primary);
+          color: #fff;
+          border: 0;
+          border-radius: var(--radius-lg);
+          font-size: 0.875rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: opacity 0.2s ease;
+          &:hover { opacity: 0.9; }
+        }
+        .rv-tag {
+          display: inline-block;
+          padding: 0.3rem 0.7rem;
+          font-size: 0.75rem;
+          font-weight: 600;
+          border-radius: var(--radius-md);
+        }
+        .rv-tag-info {
+          background: var(--color-surface);
+          color: var(--color-text-muted);
+        }
+        .rv-tag-warn {
+          background: rgba(245, 158, 11, 0.12);
+          color: #b45309;
         }
         .rv-summary {
           display: flex;
@@ -1313,6 +1404,10 @@ export class ProductDetailComponent implements OnInit {
   product = signal<ProductDetail | null>(null);
   isLoading = signal(true);
   hasError = signal(false);
+  /** True when the product was not found / not available for ecommerce (HTTP 404). */
+  notFound = signal(false);
+  /** Last slug requested, used to retry after a generic load error. */
+  private currentSlug: string | null = null;
   activeImageUrl = signal<string | null>(null);
   selectedVariantId = signal<number | null>(null);
   isDescriptionExpanded = signal(false);
@@ -1553,6 +1648,12 @@ export class ProductDetailComponent implements OnInit {
   reviewSubmitting = signal(false);
   reviewSubmitted = signal(false);
   reviewErrorMessage = signal<string | null>(null);
+  /**
+   * Controls the visibility of the review form. Hidden by default so
+   * the form doesn't take up space in the reviews section. Toggled
+   * via the "Escribir reseña" CTA in the section header.
+   */
+  showReviewForm = signal(false);
 
   // Computed
   latestReviews = computed(() => this.reviewsList());
@@ -1587,12 +1688,14 @@ export class ProductDetailComponent implements OnInit {
   }
 
   loadProduct(slug: string): void {
+    this.currentSlug = slug;
     this.isLoading.set(true);
     this.hasError.set(false);
+    this.notFound.set(false);
     this.resetReviewsState();
     this.catalogService.getProductBySlug(slug).subscribe({
       next: (response) => {
-        if (response.success) {
+        if (response.success && response.data) {
           const product = response.data;
           this.product.set(product);
           this.activeImageUrl.set(product.image_url);
@@ -1618,15 +1721,40 @@ export class ProductDetailComponent implements OnInit {
           this.loadReviews(product.id);
           this.checkCanReview(product.id);
         } else {
+          // success:false or empty payload → treat as not available.
+          this.notFound.set(true);
+        }
+        this.isLoading.set(false);
+      },
+      error: (error) => {
+        // A 404 means the product does not exist or is not available for
+        // ecommerce → render a graceful "not available" empty state instead
+        // of an empty <main>. parseApiError surfaces the backend error_code
+        // for distinguishing not-found codes from other failures.
+        const parsed = parseApiError(error);
+        const status = error?.status;
+        const isNotFound =
+          status === 404 ||
+          parsed.errorCode === 'PROD_NOT_FOUND_001' ||
+          parsed.errorCode === 'PRODUCT_NOT_FOUND';
+        if (isNotFound) {
+          this.notFound.set(true);
+        } else {
           this.hasError.set(true);
         }
         this.isLoading.set(false);
       },
-      error: () => {
-        this.hasError.set(true);
-        this.isLoading.set(false);
-      },
     });
+  }
+
+  /** Retry loading the current product after a generic load error. */
+  retryLoad(): void {
+    if (this.currentSlug) this.loadProduct(this.currentSlug);
+  }
+
+  /** Navigate back to the storefront catalog. */
+  goToCatalog(): void {
+    this.router.navigate(['/catalog']);
   }
 
   loadRecommendations(product: ProductDetail): void {
@@ -1870,6 +1998,23 @@ export class ProductDetailComponent implements OnInit {
     if (typeof variant.is_available === 'boolean') return variant.is_available;
     if (!this.variantTracksInventory(variant)) return true;
     return (variant.available_stock ?? variant.stock_quantity ?? 0) > 0;
+  }
+
+  /**
+   * Toggles the review form. Triggered by the "Escribir reseña" CTA
+   * in the reviews section header. The form is hidden by default and
+   * becomes visible when the user clicks the button.
+   */
+  openReviewForm(): void {
+    this.showReviewForm.set(!this.showReviewForm());
+    if (this.showReviewForm()) {
+      // Wait for Angular to render the form, then smooth-scroll it
+      // into view.
+      queueMicrotask(() => {
+        const el = document.querySelector('.rv-form-section');
+        el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+    }
   }
 
   onSubmitReview(): void {

@@ -19,11 +19,14 @@ import { S3Module } from '../../../common/services/s3.module';
 import { CustomersModule } from '../../store/customers/customers.module';
 import { PromotionsModule } from '../../store/promotions/promotions.module';
 import { CouponsModule } from '../../store/coupons/coupons.module';
+import { MenusModule } from '../../store/menus/menus.module';
 
 @Module({
   imports: [
     PrismaModule,
     CartModule,
+    // MenuAvailabilityCheckerService enforces strict carta schedule at checkout.
+    MenusModule,
     ShippingModule,
     TaxesModule,
     SettingsModule,

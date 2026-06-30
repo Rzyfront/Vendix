@@ -237,16 +237,18 @@ export class MenuBuilderPageComponent implements OnInit {
   }
 
   private loadProducts(): void {
-    // Mostramos productos activos que NO sean insumos crudos (is_ingredient
-    // false), incluidos los aún no vendibles: al agregarlos a la carta el
-    // backend promueve is_sellable + available_for_ecommerce a true. Nota:
-    // `is_active` NO existe en el ProductQueryDto (forbidNonWhitelisted -> 400),
-    // el campo válido es `state`.
+    // Mostramos productos activos y vendibles para armar la carta. El campo
+    // de filtro válido es `is_sellable` (whitelisted en ProductQueryDto); los
+    // insumos crudos quedan fuera porque tienen is_sellable=false. NO usar
+    // `is_ingredient` ni `is_active`: NO existen en ProductQueryDto y
+    // forbidNonWhitelisted devuelve 400, dejando el selector vacío
+    // ("nunca aparecen resultados"). El backend promueve available_for_ecommerce
+    // al agregar el producto a una sección (invariante carta⇒comprable).
     this.productsService
       .getProducts({
         limit: 200,
         state: ProductState.ACTIVE,
-        is_ingredient: false,
+        is_sellable: true,
       })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

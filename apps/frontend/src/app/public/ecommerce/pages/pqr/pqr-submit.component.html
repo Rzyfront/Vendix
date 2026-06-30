@@ -1,0 +1,198 @@
+<section class="pqr-submit">
+  <header class="hero">
+    <h1>Peticiones, Quejas, Reclamos y Sugerencias</h1>
+    <p class="lead">
+      Tu mensaje será recibido directamente por el equipo de Vendix y
+      recibirás una respuesta en tu correo electrónico.
+    </p>
+  </header>
+
+  <form
+    class="pqr-form"
+    [formGroup]="form"
+    (ngSubmit)="submit()"
+    autocomplete="off"
+    novalidate
+  >
+    <!-- Tipo -->
+    <div class="field" [class.field--error]="hasError('pqr_type', 'required')">
+      <label class="field-label">¿Qué quieres enviarnos?</label>
+      <div class="type-grid">
+        <button
+          type="button"
+          class="type-card"
+          [class.type-card--active]="form.controls['pqr_type'].value === 'PETITION'"
+          (click)="setType('PETITION')"
+        >
+          <app-icon name="hand-heart" [size]="24"></app-icon>
+          <strong>Petición</strong>
+          <span>Solicitar algo que crees que debería existir o mejorar.</span>
+        </button>
+        <button
+          type="button"
+          class="type-card"
+          [class.type-card--active]="form.controls['pqr_type'].value === 'COMPLAINT'"
+          (click)="setType('COMPLAINT')"
+        >
+          <app-icon name="message-square-warning" [size]="24"></app-icon>
+          <strong>Queja</strong>
+          <span>Manifestar inconformidad con un servicio o situación.</span>
+        </button>
+        <button
+          type="button"
+          class="type-card"
+          [class.type-card--active]="form.controls['pqr_type'].value === 'CLAIM'"
+          (click)="setType('CLAIM')"
+        >
+          <app-icon name="shield-alert" [size]="24"></app-icon>
+          <strong>Reclamo</strong>
+          <span>Solicitar solución a algo concreto que salió mal.</span>
+        </button>
+        <button
+          type="button"
+          class="type-card"
+          [class.type-card--active]="form.controls['pqr_type'].value === 'SUGGESTION'"
+          (click)="setType('SUGGESTION')"
+        >
+          <app-icon name="lightbulb" [size]="24"></app-icon>
+          <strong>Sugerencia</strong>
+          <span>Proponer una mejora o nueva funcionalidad para Vendix.</span>
+        </button>
+      </div>
+      @if (hasError('pqr_type', 'required')) {
+      <p class="error-text">Selecciona el tipo de PQRS.</p>
+      }
+    </div>
+
+    <!-- Nombre + Email -->
+    <div class="row">
+      <div class="field" [class.field--error]="hasError('name', 'required') || hasError('name', 'minlength')">
+        <label for="pqr-name">Nombre completo<span class="required">*</span></label>
+        <input
+          id="pqr-name"
+          type="text"
+          formControlName="name"
+          maxlength="255"
+          placeholder="Tu nombre"
+        />
+        @if (hasError('name', 'required')) {
+        <p class="error-text">Tu nombre es obligatorio.</p>
+        } @else if (hasError('name', 'minlength')) {
+        <p class="error-text">Mínimo 3 caracteres.</p>
+        }
+      </div>
+      <div class="field" [class.field--error]="hasError('email', 'required') || hasError('email', 'email')">
+        <label for="pqr-email">Correo electrónico<span class="required">*</span></label>
+        <input
+          id="pqr-email"
+          type="email"
+          formControlName="email"
+          maxlength="255"
+          placeholder="tunombre@correo.com"
+        />
+        @if (hasError('email', 'required')) {
+        <p class="error-text">El correo es obligatorio.</p>
+        } @else if (hasError('email', 'email')) {
+        <p class="error-text">Ingresa un correo válido.</p>
+        }
+      </div>
+    </div>
+
+    <!-- Teléfono -->
+    <div class="field" [class.field--error]="hasError('phone', 'maxlength') || hasFormError('phoneFormat')">
+      <label for="pqr-phone">Teléfono (opcional)</label>
+      <input
+        id="pqr-phone"
+        type="tel"
+        formControlName="phone"
+        maxlength="50"
+        placeholder="+57 300 123 4567"
+      />
+      @if (hasFormError('phoneFormat')) {
+      <p class="error-text">El teléfono debe tener al menos 7 dígitos.</p>
+      }
+    </div>
+
+    <!-- Asunto -->
+    <div class="field" [class.field--error]="hasError('subject', 'required') || hasError('subject', 'minlength') || hasFormError('subjectEqualsDescription')">
+      <label for="pqr-subject">Asunto<span class="required">*</span></label>
+      <input
+        id="pqr-subject"
+        type="text"
+        formControlName="subject"
+        maxlength="255"
+        placeholder="Resumen breve del motivo"
+      />
+      @if (hasFormError('subjectEqualsDescription')) {
+      <p class="error-text">
+        El asunto no puede ser igual al inicio de la descripción.
+      </p>
+      } @else if (hasError('subject', 'required')) {
+      <p class="error-text">El asunto es obligatorio.</p>
+      } @else if (hasError('subject', 'minlength')) {
+      <p class="error-text">Mínimo 5 caracteres.</p>
+      }
+    </div>
+
+    <!-- Descripción -->
+    <div class="field" [class.field--error]="hasError('description', 'required') || hasError('description', 'minlength')">
+      <label for="pqr-description">Describe tu PQRS<span class="required">*</span></label>
+      <textarea
+        id="pqr-description"
+        formControlName="description"
+        rows="6"
+        maxlength="5000"
+        placeholder="Cuéntanos con detalle qué necesitas, qué pasó, o cómo podemos mejorar…"
+      ></textarea>
+      <div class="char-counter">
+        {{ charCount() }} / 5000
+        <span class="muted">(mínimo 20)</span>
+      </div>
+      @if (hasError('description', 'required')) {
+      <p class="error-text">La descripción es obligatoria.</p>
+      } @else if (hasError('description', 'minlength')) {
+      <p class="error-text">Mínimo 20 caracteres.</p>
+      }
+    </div>
+
+    <!-- Error del servidor: tarjeta con icono y mensaje humanizado.
+         El humanizeError() del TS ya tradujo "Internal server error"
+         a algo accionable. -->
+    @if (serverError(); as msg) {
+    <div class="server-error" role="alert" aria-live="polite">
+      <div class="server-error__icon">
+        <app-icon name="alert-circle" [size]="20"></app-icon>
+      </div>
+      <div class="server-error__body">
+        <p class="server-error__title">No pudimos enviar tu solicitud</p>
+        <p class="server-error__msg">{{ msg }}</p>
+      </div>
+    </div>
+    }
+
+    <div class="actions">
+      <div class="actions-row">
+        <button
+          type="button"
+          class="secondary-btn"
+          (click)="goBack()"
+          [disabled]="state() === 'submitting'"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          class="primary-btn"
+          [disabled]="form.invalid || state() === 'submitting'"
+        >
+          {{ state() === 'submitting' ? 'Enviando…' : 'Radicar PQRS' }}
+        </button>
+      </div>
+      <p class="legal-note">
+        Al enviar este formulario aceptas que te contactemos por el correo
+        registrado. Tu información se trata conforme a nuestra política de
+        privacidad.
+      </p>
+    </div>
+  </form>
+</section>

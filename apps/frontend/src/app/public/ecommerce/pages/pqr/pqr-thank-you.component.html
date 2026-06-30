@@ -1,0 +1,40 @@
+<section class="pqr-thank-you">
+  <div class="card">
+    <div class="icon-circle">
+      <app-icon name="check-circle-2" [size]="48"></app-icon>
+    </div>
+    <h1>¡Recibimos tu PQRS!</h1>
+    <p class="lead">
+      Hemos registrado tu mensaje. El equipo de soporte lo revisará y te
+      responderemos por correo electrónico a la dirección que indicaste.
+    </p>
+
+    @if (ticket(); as t) {
+    <div class="ticket-block">
+      <span class="ticket-label">Tu número de ticket es:</span>
+      <div class="ticket-row">
+        <code class="ticket-code">{{ t }}</code>
+        <button class="copy-btn" (click)="copy()" aria-label="Copiar número">
+          <app-icon name="copy" [size]="16"></app-icon>
+        </button>
+      </div>
+      <p class="ticket-hint">
+        Guárdalo. Lo necesitarás para consultar el estado en cualquier
+        momento, sin necesidad de iniciar sesión.
+      </p>
+    </div>
+    }
+
+    <div class="actions">
+      <a [routerLink]="['/pqr/consultar', ticket()]" class="primary-btn">
+        Consultar estado
+      </a>
+      <a routerLink="/" class="ghost-btn">Volver al inicio</a>
+    </div>
+
+    <p class="legal-note">
+      Si en las próximas 24 horas no recibes nuestro acuse de recibo en tu
+      correo, revisa tu carpeta de spam o vuelve a radicar el PQRS.
+    </p>
+  </div>
+</section>

@@ -359,6 +359,14 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // PQR Routes (Peticiones, Quejas y Reclamos) — store_admin only
+      {
+        path: 'pqrs',
+        loadChildren: () =>
+          import(
+            '../../private/modules/store/pqr/pqr.routes'
+          ).then((m) => m.pqrRoutes),
+      },
       // Marketing Routes
       {
         path: 'marketing',

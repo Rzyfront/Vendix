@@ -1,0 +1,69 @@
+<header
+  class="public-header fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-[var(--color-border)] shadow-sm"
+>
+  <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex items-center justify-between h-16">
+      <a routerLink="/" class="flex items-center space-x-3" aria-label="Inicio Vendix">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+          <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
+        </div>
+        <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">Vendix</h1>
+      </a>
+
+      <nav class="hidden md:flex items-center space-x-8">
+        <a routerLink="/ayuda" class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
+          Centro de Ayuda
+        </a>
+        <a routerLink="/pqr" class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
+          Radicar PQRS
+        </a>
+        <a routerLink="/auth/login" class="text-[var(--color-text-secondary)] hover:text-[var(--color-primary)] transition-colors duration-200 font-medium">
+          Iniciar Sesión
+        </a>
+        <a
+          routerLink="/auth/register"
+          class="bg-[var(--color-primary)] text-white px-6 py-2.5 rounded-xl hover:bg-[var(--color-secondary)] transition-all duration-200 shadow-md hover:shadow-lg font-medium"
+        >
+          Comenzar Gratis
+        </a>
+      </nav>
+
+      <div class="flex md:hidden items-center gap-1">
+        <button
+          class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
+          (click)="toggleMobileMenu()"
+          aria-label="Menú"
+        >
+          <app-icon [name]="mobileMenuOpen ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  @if (mobileMenuOpen) {
+  <div class="fixed inset-0 z-[60] md:hidden">
+    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" (click)="closeMobileMenu()"></div>
+
+    <div class="fixed right-0 top-0 h-full w-80 max-w-[85vw] bg-white shadow-xl">
+      <div class="flex flex-col h-full p-4">
+        <button class="self-end p-2 mb-2" (click)="closeMobileMenu()" aria-label="Cerrar menú">
+          <app-icon name="x" [size]="24" color="var(--color-text-primary)"></app-icon>
+        </button>
+        <nav class="flex flex-col space-y-2">
+          <a routerLink="/ayuda" (click)="closeMobileMenu()" class="px-4 py-3 rounded-lg hover:bg-gray-50 text-[var(--color-text-primary)] font-medium">Centro de Ayuda</a>
+          <a routerLink="/pqr" (click)="closeMobileMenu()" class="px-4 py-3 rounded-lg hover:bg-gray-50 text-[var(--color-text-primary)] font-medium">Radicar PQRS</a>
+          <a routerLink="/pqr/consultar" (click)="closeMobileMenu()" class="px-4 py-3 rounded-lg hover:bg-gray-50 text-[var(--color-text-primary)] font-medium">Consultar estado</a>
+          <a routerLink="/auth/login" (click)="closeMobileMenu()" class="px-4 py-3 rounded-lg hover:bg-gray-50 text-[var(--color-text-primary)] font-medium">Iniciar Sesión</a>
+          <a
+            routerLink="/auth/register"
+            (click)="closeMobileMenu()"
+            class="mt-4 bg-[var(--color-primary)] text-white px-4 py-3 rounded-xl text-center font-medium"
+          >
+            Comenzar Gratis
+          </a>
+        </nav>
+      </div>
+    </div>
+  </div>
+  }
+</header>

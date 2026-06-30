@@ -35,6 +35,7 @@ import { CouponsService } from '../../store/coupons/coupons.service';
 import { CouponAppliesTo } from '../../store/coupons/dto';
 import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote.interface';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
+import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 
 @Injectable()
 export class CheckoutService {
@@ -64,6 +65,7 @@ export class CheckoutService {
     private readonly customersService: CustomersService,
     private readonly promotionEngine: PromotionEngineService,
     private readonly couponsService: CouponsService,
+    private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
   ) {}
 
   /**
@@ -557,6 +559,30 @@ export class CheckoutService {
     }
   }
 
+  /**
+   * Strict menu schedule enforcement at order creation. If ANY cart item's
+   * product belongs to an active carta with availability windows and none is
+   * open right now, reject the whole checkout with MENU_ITEM_NOT_AVAILABLE_NOW.
+   * Same algorithm/timezone math as the public carta endpoint (shared service).
+   * Products not in any menu, or in menus without windows, are unaffected — so
+   * a retail-only checkout is never blocked.
+   */
+  private async assertCartItemsWithinMenuWindows(
+    cart_items: Array<{ product_id: number }>,
+  ): Promise<void> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id || cart_items.length === 0) return;
+
+    const productIds = cart_items.map((item) => item.product_id);
+    const blocked = await this.menuAvailabilityChecker.getBlockedProductIds(
+      store_id,
+      productIds,
+    );
+    if (blocked.size > 0) {
+      throw new VendixHttpException(ErrorCodes.MENU_ITEM_NOT_AVAILABLE_NOW);
+    }
+  }
+
   async checkout(dto: CheckoutDto, file?: Express.Multer.File) {
     await this.assertGuestCheckoutAllowed();
 
@@ -657,6 +683,9 @@ export class CheckoutService {
     if (!payment_method) {
       throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
     }
+
+    // Strict carta schedule gate (same OR window semantics as the public menu).
+    await this.assertCartItemsWithinMenuWindows(cart_items);
 
     for (const item of cart_items) {
       const productVariantCount = await this.prisma.product_variants.count({
@@ -1284,6 +1313,9 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
       }
     }
+
+    // Strict carta schedule gate (same OR window semantics as the public menu).
+    await this.assertCartItemsWithinMenuWindows(cart_items);
 
     for (const item of cart_items) {
       const productVariantCount = await this.prisma.product_variants.count({

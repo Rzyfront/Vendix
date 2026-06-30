@@ -23,11 +23,19 @@ export interface StockAdjustment {
 
 export interface StockTransfer {
   id: string;
+  /** Web-style transfer number (e.g. "TRF-20260625-0001"). Falls back to id when absent. */
+  transfer_number?: string;
   origin_location_id: string;
   origin_location_name: string;
   destination_location_id: string;
   destination_location_name: string;
   product_count: number;
+  /** Date the transfer was created (ISO). */
+  transfer_date?: string;
+  /** Expected delivery date (ISO). */
+  expected_date?: string;
+  /** Count of distinct items (sometimes richer than product_count). */
+  items_count?: number;
   state: 'pending' | 'in_transit' | 'completed' | 'cancelled';
   created_at: string;
 }
