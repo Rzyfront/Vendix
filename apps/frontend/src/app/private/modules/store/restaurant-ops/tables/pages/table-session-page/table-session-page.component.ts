@@ -374,14 +374,14 @@ export class TableSessionPageComponent implements OnInit {
   ): KitchenTicketItemRefStatus | null {
     const rows = item.kitchen_ticket_items ?? [];
     if (rows.length === 0) return null;
-    const active = rows.find(
-      (r) =>
-        r.status === 'in_preparation' ||
-        r.status === 'ready' ||
-        r.status === 'pending',
-    );
-    // Rows arrive DESC by id, so rows[0] is the most recent terminal one.
-    return (active?.status ?? rows[0].status) as KitchenTicketItemRefStatus;
+    // Rows arrive DESC by id; rows[0] is the MOST RECENT ticket item and is
+    // therefore the authoritative current state. The previous code preferred
+    // any non-terminal row (pending/in_preparation/ready), which masked a
+    // `delivered`/`cancelled` most-recent row behind an older `pending` one —
+    // a delivered dish kept reading as "pendiente". Most-recent-wins also
+    // handles re-fires correctly: a fresh `pending` ticket created after a
+    // delivered one has the higher id, so it is rows[0].
+    return rows[0].status as KitchenTicketItemRefStatus;
   }
 
   /** Seed the live map from the order's findOne `kitchen_ticket_items`. */

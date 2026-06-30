@@ -366,13 +366,21 @@
                           ></app-icon>
                           Marcar entregado
                         </app-button>
-                      } @else {
+                      } @else if (kitchenStatusFor(item) === 'delivered') {
                         <span
                           class="item-done"
                           [attr.title]="deliverHint(item)"
                         >
                           <app-icon name="circle-check" [size]="14"></app-icon>
                           Entregado
+                        </span>
+                      } @else if (kitchenStatusFor(item) === 'cancelled') {
+                        <span
+                          class="item-done item-cancelled"
+                          [attr.title]="deliverHint(item)"
+                        >
+                          <app-icon name="x-circle" [size]="14"></app-icon>
+                          Cancelado
                         </span>
                       }
                     </div>

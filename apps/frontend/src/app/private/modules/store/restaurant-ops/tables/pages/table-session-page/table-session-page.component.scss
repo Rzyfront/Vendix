@@ -371,6 +371,11 @@
     font-weight: 600;
     color: var(--color-success);
     white-space: nowrap;
+
+    /* Cancelled is also terminal but reads as an error, not a success. */
+    &.item-cancelled {
+      color: var(--color-error);
+    }
   }
 }
 
