@@ -899,7 +899,7 @@ export class SuperadminPqrsComponent {
     ) {
       return;
     }
-    this.quickFilter.set(filter);
+    this.quickFilter.set(f);
     this.page.set(1);
     this.fetch();
   }
