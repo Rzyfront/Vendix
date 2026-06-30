@@ -50,10 +50,6 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
   ],
   template: `
     <div class="pqr-list-page">
-      </div>
-
-      <!-- Quick filters now live in the StickyHeader above. -->
-
       <!-- Filters bar (advanced) -->
       <div class="filters-bar">
         <div class="filter-group">
@@ -215,7 +211,6 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
           <span class="page-info">{{ total() }} resultados</span>
         </nav>
         }
-      </div>
     </div>
   `,
   styles: [
