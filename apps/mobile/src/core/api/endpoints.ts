@@ -95,11 +95,12 @@ export const Endpoints = {
       UPLOAD_LOGO: '/store/brands/upload-logo',
     },
     TAXES: {
+      // El backend expone las categorías en `/store/taxes` (no `/store/taxes/categories`).
       LIST: '/store/taxes',
-      CATEGORIES: '/store/taxes/categories',
-      CATEGORY_CREATE: '/store/taxes/categories',
-      CATEGORY_UPDATE: '/store/taxes/categories/:id',
-      CATEGORY_DELETE: '/store/taxes/categories/:id',
+      CATEGORIES: '/store/taxes',
+      CATEGORY_CREATE: '/store/taxes',
+      CATEGORY_UPDATE: '/store/taxes/:id',
+      CATEGORY_DELETE: '/store/taxes/:id',
     },
     PAYMENT_METHODS: {
       LIST: '/store/payments/payment-methods',

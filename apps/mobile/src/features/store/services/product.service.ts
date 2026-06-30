@@ -137,8 +137,18 @@ export const ProductService = {
   },
 
   async getTaxes(): Promise<TaxCategory[]> {
-    const res = await apiClient.get(Endpoints.STORE.TAXES.CATEGORIES);
-    return unwrap<TaxCategory[]>(res);
+    // Pedimos un limit alto para traer todos los impuestos en una sola llamada
+    // (la mayoría de tiendas tienen < 50). El backend siempre devuelve respuesta
+    // paginada `{ data: TaxCategory[], meta: {...} }` envuelta en el envelope estándar.
+    const res = await apiClient.get(
+      `${Endpoints.STORE.TAXES.CATEGORIES}?limit=200`,
+    );
+    const unwrapped = unwrap<TaxCategory[] | { data: TaxCategory[]; meta: unknown }>(res);
+    // Si la respuesta es paginada, devolvemos el array interno.
+    if (unwrapped && typeof unwrapped === 'object' && 'data' in unwrapped && Array.isArray((unwrapped as { data: TaxCategory[] }).data)) {
+      return (unwrapped as { data: TaxCategory[] }).data;
+    }
+    return unwrapped as TaxCategory[];
   },
 
   /**
@@ -157,5 +167,22 @@ export const ProductService = {
   async deleteTaxCategory(id: number): Promise<void> {
     const endpoint = Endpoints.STORE.TAXES.CATEGORY_DELETE.replace(':id', String(id));
     await apiClient.delete(endpoint);
+  },
+
+  /**
+   * Llama al backend de IA para generar la descripción de un producto a partir
+   * de su nombre + SKU + categoría + marca. Devuelve el texto sugerido.
+   */
+  async generateDescription(payload: {
+    name: string;
+    sku?: string;
+    category_id?: number | null;
+    brand_id?: number | null;
+  }): Promise<{ description: string }> {
+    const res = await apiClient.post(
+      Endpoints.STORE.PRODUCTS.GENERATE_DESCRIPTION,
+      payload,
+    );
+    return unwrap<{ description: string }>(res);
   },
 };

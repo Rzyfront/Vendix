@@ -105,10 +105,17 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
       toastError('Ingresa una tasa válida (>= 0)');
       return;
     }
+    // Validar rango 0-100 (backend rechaza fuera de este rango).
+    if (calcType === 'percentage' && numericRate > 100) {
+      toastError('La tasa porcentual no puede superar 100');
+      return;
+    }
 
     createMutation.mutate({
       name: trimmedName,
-      rate: calcType === 'percentage' ? numericRate / 100 : numericRate,
+      // El backend espera rate como porcentaje 0-100 (válido `0..100` con `@Max(100)`).
+      // No dividir por 100: el input "19" ya es 19% y se envía tal cual.
+      rate: numericRate,
       type: calcType as 'percentage' | 'fixed',
       tax_type: fiscalClass as CreateTaxCategoryDto['tax_type'],
       description: description.trim() || undefined,
