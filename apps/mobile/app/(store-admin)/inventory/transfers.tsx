@@ -12,6 +12,8 @@ import type { StockTransfer, TransferState, Location, Product } from '@/features
 import { TRANSFER_STATE_LABELS } from '@/features/store/types';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Icon } from '@/shared/components/icon/icon';
+import TransferCard from '@/features/store/components/transfer-card';
+import TransferDetailModal from '@/features/store/components/transfer-detail-modal';
 import { Input } from '@/shared/components/input/input';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Button } from '@/shared/components/button/button';
@@ -20,7 +22,7 @@ import { toastSuccess, toastError } from '@/shared/components/toast/toast.store'
 import { formatDate, formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colorScales, typography, colors, shadows } from '@/shared/theme';
 import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
-import { TRANSFER_STATS, TRANSFER_STATE_MAP, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
+import { TRANSFER_STATS, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
 
 const STATE_VARIANT: Record<TransferState, 'warning' | 'info' | 'success' | 'default'> = {
   pending: 'warning',
@@ -39,86 +41,7 @@ const FILTER_OPTIONS: FilterChip[] = [
   { label: 'Canceladas', value: 'cancelled' },
 ];
 
-const TransferCard = ({
-  item,
-  onView,
-}: {
-  item: StockTransfer;
-  onView?: (item: StockTransfer) => void;
-}) => {
-  const displayId = item.transfer_number ?? `Transferencia #${item.id.slice(0, 8)}`;
-  const stateInfo = TRANSFER_STATE_MAP[item.state];
-  const stateColor = stateInfo?.palette
-    ? STAT_PALETTE[stateInfo.palette as keyof typeof STAT_PALETTE] ?? STAT_PALETTE.gray
-    : STAT_PALETTE.gray;
-  const itemsCount = item.items_count ?? item.product_count ?? 0;
-  return (
-    <View style={styles.transferCard}>
-      {/* Header: title (transfer_number) + status badge */}
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardTitle} numberOfLines={1}>
-          {displayId}
-        </Text>
-        <View
-          style={[
-            styles.statusBadge,
-            { backgroundColor: stateColor.bg, borderColor: stateColor.color },
-          ]}
-        >
-          <Text style={[styles.statusBadgeText, { color: stateColor.color }]}>
-            {(stateInfo?.label ?? TRANSFER_STATE_LABELS[item.state]).toLowerCase()}
-          </Text>
-        </View>
-      </View>
-
-      {/* Subtitle: origin → destination */}
-      <Text style={styles.cardSubtitle} numberOfLines={1}>
-        {item.origin_location_name} {item.origin_location_name && item.destination_location_name ? '→' : ''}{' '}
-        {item.destination_location_name}
-      </Text>
-
-      {/* Detail grid: Fecha | Esperada */}
-      <View style={styles.cardDetailGrid}>
-        <View style={styles.cardDetailCell}>
-          <View style={styles.cardDetailLabelRow}>
-            <Icon name="calendar" size={12} color={colorScales.gray[400]} />
-            <Text style={styles.cardDetailLabel}>FECHA</Text>
-          </View>
-          <Text style={styles.cardDetailValue}>
-            {item.transfer_date ? formatDate(item.transfer_date) : '—'}
-          </Text>
-        </View>
-        <View style={styles.cardDetailCell}>
-          <View style={styles.cardDetailLabelRow}>
-            <Icon name="clock" size={12} color={colorScales.gray[400]} />
-            <Text style={styles.cardDetailLabel}>ESPERADA</Text>
-          </View>
-          <Text style={styles.cardDetailValue}>
-            {item.expected_date ? formatDate(item.expected_date) : '—'}
-          </Text>
-        </View>
-      </View>
-
-      {/* Footer: items count + view (eye) button */}
-      <View style={styles.cardFooter}>
-        <View style={styles.cardFooterCell}>
-          <Text style={styles.cardDetailLabel}>ITEMS</Text>
-          <Text style={styles.cardFooterValue}>{itemsCount}</Text>
-        </View>
-        {onView && (
-          <Pressable
-            onPress={() => onView(item)}
-            hitSlop={6}
-            style={({ pressed }) => [styles.eyeBtn, pressed && { opacity: 0.6 }]}
-            accessibilityLabel="Ver detalle de transferencia"
-          >
-            <Icon name="eye" size={16} color={colors.primary} />
-          </Pressable>
-        )}
-      </View>
-    </View>
-  );
-};
+// La función local TransferCard fue extraída a features/store/components/transfer-card.tsx
 
 function EmptyTransfers({ onCreate }: { onCreate: () => void }) {
   return (
@@ -135,182 +58,6 @@ function EmptyTransfers({ onCreate }: { onCreate: () => void }) {
         <Text style={styles.emptyCreateText}>Nueva Transferencia</Text>
       </Pressable>
     </View>
-  );
-}
-
-/**
- * Transfer detail popup — opened when the user taps the eye (ver) button on
- * a TransferCard. Matches the web `app-transfer-detail-modal` visual contract:
- * header with status badge, origin → destination summary, dates, items list,
- * and contextual actions footer (Aprobar / Recibir / Cancelar / Cerrar).
- */
-function TransferDetailModal({
-  transfer,
-  onClose,
-  onApprove,
-  onComplete,
-  onCancel,
-  isSubmitting = false,
-}: {
-  transfer: StockTransfer | null;
-  onClose: () => void;
-  onApprove?: (transfer: StockTransfer) => void;
-  onComplete?: (transfer: StockTransfer) => void;
-  onCancel?: (transfer: StockTransfer) => void;
-  isSubmitting?: boolean;
-}) {
-  if (!transfer) return null;
-  const stateInfo = TRANSFER_STATE_MAP[transfer.state];
-  const stateColor = stateInfo?.palette
-    ? STAT_PALETTE[stateInfo.palette as keyof typeof STAT_PALETTE] ?? STAT_PALETTE.gray
-    : STAT_PALETTE.gray;
-  const itemsCount = transfer.items_count ?? transfer.product_count ?? 0;
-
-  return (
-    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.detailOverlay}>
-        <View style={styles.detailModal}>
-          {/* Header */}
-          <View style={styles.detailHeader}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.detailTitle}>
-                {transfer.transfer_number ?? `Transferencia #${transfer.id.slice(0, 8)}`}
-              </Text>
-              <Text style={styles.detailSubtitle}>
-                {transfer.origin_location_name} → {transfer.destination_location_name}
-              </Text>
-            </View>
-            <Pressable onPress={onClose} hitSlop={8} style={styles.detailCloseBtn}>
-              <Icon name="x" size={22} color={colorScales.gray[500]} />
-            </Pressable>
-          </View>
-
-          <ScrollView
-            style={styles.detailBody}
-            contentContainerStyle={styles.detailBodyContent}
-            showsVerticalScrollIndicator={false}
-          >
-            {/* Status badge */}
-            <View style={styles.detailBadgeRow}>
-              <View
-                style={[
-                  styles.statusBadge,
-                  { backgroundColor: stateColor.bg, borderColor: stateColor.color },
-                ]}
-              >
-                <Text style={[styles.statusBadgeText, { color: stateColor.color }]}>
-                  {stateInfo?.label ?? TRANSFER_STATE_LABELS[transfer.state]}
-                </Text>
-              </View>
-            </View>
-
-            {/* Dates grid */}
-            <View style={styles.detailDatesGrid}>
-              <View style={styles.detailDateCell}>
-                <View style={styles.cardDetailLabelRow}>
-                  <Icon name="calendar" size={12} color={colorScales.gray[500]} />
-                  <Text style={styles.cardDetailLabel}>FECHA</Text>
-                </View>
-                <Text style={styles.detailDateValue}>
-                  {transfer.transfer_date ? formatDate(transfer.transfer_date) : '—'}
-                </Text>
-              </View>
-              <View style={styles.detailDateCell}>
-                <View style={styles.cardDetailLabelRow}>
-                  <Icon name="clock" size={12} color={colorScales.gray[500]} />
-                  <Text style={styles.cardDetailLabel}>ESPERADA</Text>
-                </View>
-                <Text style={styles.detailDateValue}>
-                  {transfer.expected_date ? formatDate(transfer.expected_date) : '—'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Items card */}
-            <View style={styles.detailSection}>
-              <View style={styles.cardDetailLabelRow}>
-                <Icon name="package" size={12} color={colorScales.gray[500]} />
-                <Text style={styles.cardDetailLabel}>ITEMS</Text>
-              </View>
-              <Text style={styles.detailItemsValue}>{itemsCount}</Text>
-            </View>
-
-            {/* Notes (si existen) */}
-            {transfer.notes ? (
-              <View style={styles.detailSection}>
-                <View style={styles.cardDetailLabelRow}>
-                  <Icon name="file-text" size={12} color={colorScales.gray[500]} />
-                  <Text style={styles.cardDetailLabel}>NOTAS</Text>
-                </View>
-                <Text style={styles.detailNotesText}>{transfer.notes}</Text>
-              </View>
-            ) : null}
-
-            {/* Cronología (siempre visible) */}
-            <View style={styles.detailSection}>
-              <View style={styles.cardDetailLabelRow}>
-                <Icon name="history" size={12} color={colorScales.gray[500]} />
-                <Text style={styles.cardDetailLabel}>CRONOLOGÍA</Text>
-              </View>
-              <Text style={styles.detailTimelineText}>
-                Creada {formatRelative(transfer.created_at)}
-              </Text>
-            </View>
-          </ScrollView>
-
-          {/* Footer: contextual actions */}
-          <View style={styles.detailFooter}>
-            {transfer.state === 'pending' && (
-              <>
-                <Pressable
-                  style={styles.detailCancelBtn}
-                  onPress={() => onCancel?.(transfer)}
-                  disabled={isSubmitting}
-                >
-                  <Text style={styles.detailCancelBtnText}>Cancelar</Text>
-                </Pressable>
-                <View style={{ width: spacing[3] }} />
-                <Pressable
-                  style={styles.detailPrimaryBtn}
-                  onPress={() => onApprove?.(transfer)}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? (
-                    <Spinner size="sm" />
-                  ) : (
-                    <Icon name="check" size={16} color={colors.background} />
-                  )}
-                  <Text style={styles.detailPrimaryBtnText}>
-                    {isSubmitting ? 'Aprobando…' : 'Aprobar'}
-                  </Text>
-                </Pressable>
-              </>
-            )}
-            {transfer.state === 'in_transit' && (
-              <Pressable
-                style={styles.detailPrimaryBtn}
-                onPress={() => onComplete?.(transfer)}
-                disabled={isSubmitting}
-              >
-                {isSubmitting ? (
-                  <Spinner size="sm" />
-                ) : (
-                  <Icon name="package-check" size={16} color={colors.background} />
-                )}
-                <Text style={styles.detailPrimaryBtnText}>
-                  {isSubmitting ? 'Recibiendo…' : 'Recibir'}
-                </Text>
-              </Pressable>
-            )}
-            {(transfer.state === 'completed' || transfer.state === 'cancelled') && (
-              <Pressable style={styles.detailCancelBtn} onPress={onClose}>
-                <Text style={styles.detailCancelBtnText}>Cerrar</Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -1390,3 +1137,4 @@ const styles = StyleSheet.create({
   continueBtnDisabled: { backgroundColor: colorScales.gray[200], shadowOpacity: 0, elevation: 0 },
   continueBtnText: { fontSize: 14, fontWeight: '700' as any, color: colors.background },
 });
+/* TransferDetailModal extraido a features/store/components/transfer-detail-modal.tsx */
