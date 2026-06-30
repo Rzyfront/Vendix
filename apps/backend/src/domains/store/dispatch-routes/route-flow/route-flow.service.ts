@@ -1053,7 +1053,7 @@ export class RouteFlowService {
     });
 
     // Conductor/responsable del faltante: interno (driver_user_id) o externo.
-    // El asiento de faltante (CxC 1355) usa este id/etiqueta como tercero.
+    // El asiento de faltante (CxC 1365) usa este id/etiqueta como tercero.
     const driver_label = updated.is_primary_driver_external
       ? updated.external_driver_name || undefined
       : undefined;
