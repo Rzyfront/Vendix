@@ -72,11 +72,23 @@ interface ProductFormState {
   has_variants: boolean;
   variants: VariantForm[];
   stock_by_location: Record<string, string>;
+  // Precios multi-tarifa
+  has_multiple_price_tiers?: boolean;
+  // Dimensiones y peso
+  length?: string;
+  width?: string;
+  height?: string;
+  weight_input?: string;
+  // Otras configuraciones (mirror web)
+  requires_serial_numbers?: boolean;
+  preparation_time_minutes?: string;
+  // Servicio
   service_duration_minutes?: string;
   service_modality?: string;
   service_pricing_type?: string;
   requires_booking?: boolean;
   is_recurring?: boolean;
+  // Compra online (solo edit)
   online_purchase_url?: string;
 }
 
@@ -129,6 +141,19 @@ const initialForm: ProductFormState = {
   has_variants: false,
   variants: [],
   stock_by_location: {},
+  has_multiple_price_tiers: false,
+  length: '',
+  width: '',
+  height: '',
+  weight_input: '',
+  requires_serial_numbers: false,
+  preparation_time_minutes: '',
+  service_duration_minutes: '',
+  service_modality: '',
+  service_pricing_type: '',
+  requires_booking: false,
+  is_recurring: false,
+  online_purchase_url: '',
 };
 
 function toNumber(value: string): number | undefined {
@@ -764,6 +789,23 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </View>
           </Section>
 
+          {/* Precios Multi-Tarifa (mirror web) */}
+          <Section title="Precios Multi-Tarifa" subtitle="Tarifas diferenciadas (Mayorista, VIP, etc.)" icon="tags">
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.has_multiple_price_tiers}
+                onChange={(v) => updateField('has_multiple_price_tiers', v)}
+                label="Activar precios multi-tarifa"
+                description="Define precios distintos para tarifas como Mayorista, Distribuidor, VIP, etc. La tarifa por defecto usa el precio base."
+              />
+            </View>
+            {form.has_multiple_price_tiers && (
+              <Text style={{ fontSize: typography.fontSize.xs, color: colors.text.secondary, marginTop: spacing[2], fontStyle: 'italic' }}>
+                Configura las tarifas específicas (Mayorista, VIP, etc.) desde la versión web por ahora.
+              </Text>
+            )}
+          </Section>
+
           <Section title="Inventario" subtitle="Stock inicial y visibilidad comercial" icon="warehouse">
             <Toggle
               value={form.track_inventory}
@@ -833,6 +875,12 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               label="Permitir cambio de precio en POS"
               description="El cajero puede ajustar el precio al cobrar."
             />
+            <Toggle
+              value={!!form.requires_serial_numbers}
+              onChange={(v) => updateField('requires_serial_numbers', v)}
+              label="Requerir número de serie"
+              description="Cada unidad vendida deberá tener un número de serie único (garantía, postventa, trazabilidad)."
+            />
           </Section>
 
           <Section title="Clasificación" subtitle="Categorías, marca e impuestos" icon="tag">
@@ -860,6 +908,51 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               options={allTaxes.map((t) => ({ label: t.name, value: t.id }))}
               placeholder="Seleccionar impuestos"
             />
+
+            {/* Dimensiones y Peso (espejo del bloque 'Dimensiones y Peso' del web)
+                Header con ícono + título, grid 2x2 en mobile (4 cols en md+). */}
+            <View style={styles.dimensionsHeader}>
+              <Icon name="package" size={typography.fontSize.base} color={colors.primary} />
+              <Text style={styles.dimensionsTitle}>Dimensiones y Peso</Text>
+            </View>
+            <View style={styles.dimensionsGrid}>
+              <View style={styles.dimensionCell}>
+                <Input
+                  label="Largo (cm)"
+                  value={form.length || ''}
+                  onChangeText={(value) => updateField('length', value)}
+                  placeholder="0.00"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={styles.dimensionCell}>
+                <Input
+                  label="Ancho (cm)"
+                  value={form.width || ''}
+                  onChangeText={(value) => updateField('width', value)}
+                  placeholder="0.00"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={styles.dimensionCell}>
+                <Input
+                  label="Alto (cm)"
+                  value={form.height || ''}
+                  onChangeText={(value) => updateField('height', value)}
+                  placeholder="0.00"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+              <View style={styles.dimensionCell}>
+                <Input
+                  label="Peso (kg)"
+                  value={form.weight_input || ''}
+                  onChangeText={(value) => updateField('weight_input', value)}
+                  placeholder="0.00"
+                  keyboardType="decimal-pad"
+                />
+              </View>
+            </View>
           </Section>
 
           {/* Detalles del Servicio (solo cuando product_type === 'service') */}
@@ -1346,5 +1439,31 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     textAlign: 'center',
     lineHeight: 16,
+  },
+  // Header del bloque 'Dimensiones y Peso' dentro de Clasificación.
+  dimensionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    marginTop: spacing[2],
+    paddingTop: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+  },
+  dimensionsTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '700' as any,
+    color: colorScales.gray[700],
+  },
+  // Grid 2 cols en mobile (4 cols en md+).
+  dimensionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[3],
+    rowGap: spacing[3],
+  },
+  dimensionCell: {
+    flexBasis: '48%',
+    flexGrow: 1,
   },
 });
