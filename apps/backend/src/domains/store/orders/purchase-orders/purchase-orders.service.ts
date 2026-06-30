@@ -22,6 +22,7 @@ import {
   CostCalculationResult,
 } from '../../inventory/shared/services/costing.service';
 import { CostingMethodResolverService } from '../../inventory/shared/services/costing-method-resolver.service';
+import { toPublicCostingMethod } from '../../inventory/shared/helpers/costing-method.mapper';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/serial-number-enforcement.service';
 import { AuditService } from '@common/audit/audit.service';
@@ -1678,7 +1679,7 @@ export class PurchaseOrdersService {
       });
     }
 
-    return { costing_method: costingMethod, items };
+    return { costing_method: toPublicCostingMethod(costingMethod), items };
   }
 
   remove(id: number) {
