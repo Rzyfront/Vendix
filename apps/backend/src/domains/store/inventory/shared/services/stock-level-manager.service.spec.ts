@@ -8,6 +8,8 @@ import { InventoryTransactionsService } from '../../transactions/inventory-trans
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
+import { CostingService } from './costing.service';
+import { CostingMethodResolverService } from './costing-method-resolver.service';
 import { ConflictException, BadRequestException } from '@nestjs/common';
 import { VendixHttpException } from 'src/common/errors';
 import { InventoryTransaction } from '../../transactions/interfaces/inventory-transaction.interface';
@@ -139,6 +141,16 @@ describe('StockLevelManager', () => {
       resolveAccountingEntity: jest.fn().mockResolvedValue({ id: 1 }),
     };
 
+    // QUI-425 #4: StockLevelManager now consumes cost via CostingService and
+    // resolves the costing method via CostingMethodResolverService. The spec
+    // doesn't validate COGS math, so the mocks return safe defaults.
+    const mockCostingService = {
+      consumeCostLayers: jest.fn().mockResolvedValue(0),
+    };
+    const mockCostingMethodResolver = {
+      resolveCostingMethod: jest.fn().mockResolvedValue('weighted_average'),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         StockLevelManager,
@@ -157,6 +169,14 @@ describe('StockLevelManager', () => {
         {
           provide: OperatingScopeService,
           useValue: mockOperatingScopeService,
+        },
+        {
+          provide: CostingService,
+          useValue: mockCostingService,
+        },
+        {
+          provide: CostingMethodResolverService,
+          useValue: mockCostingMethodResolver,
         },
       ],
     }).compile();
