@@ -21,6 +21,8 @@ export { ConfirmDialog } from './confirm-dialog/confirm-dialog';
 export { BottomSheet } from './bottom-sheet/bottom-sheet';
 export { Skeleton, SkeletonCard } from './skeleton/skeleton';
 export { PullToRefresh } from './pull-to-refresh/pull-to-refresh';
+export { ScrollableTabs } from './scrollable-tabs';
+export type { ScrollableTab } from './scrollable-tabs';
 
 // Phase A — new shared primitives
 export { Fab } from './fab/fab';

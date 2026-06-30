@@ -17,6 +17,20 @@ const DATETIME_FORMATTER = new Intl.DateTimeFormat('es-CO', {
   minute: '2-digit',
 });
 
+// UTC-stable formatter (espejo de `formatDateOnlyUTC` del web).
+// Garantiza que timestamps de auditoría no varíen por zona horaria del
+// dispositivo — crítico para logs forenses / legales.
+const DATETIME_UTC_FORMATTER = new Intl.DateTimeFormat('es-CO', {
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+  timeZone: 'UTC',
+});
+
 const FULL_DATE_FORMATTER = new Intl.DateTimeFormat('es-CO', {
   weekday: 'long',
   year: 'numeric',
@@ -37,6 +51,18 @@ export function formatTime(date: Date | string | number): string {
 export function formatDateTime(date: Date | string | number): string {
   const d = new Date(date);
   return DATETIME_FORMATTER.format(d);
+}
+
+/**
+ * Formato de fecha+hora **estable en UTC** (espejo del web
+ * `formatDateOnlyUTC`). Usar para timestamps de auditoría donde la
+ * zona horaria del dispositivo no debe alterar el valor mostrado.
+ *
+ * Output: `DD/MM/YYYY, HH:MM:SS` en es-CO.
+ */
+export function formatDateTimeUTC(date: Date | string | number): string {
+  const d = new Date(date);
+  return DATETIME_UTC_FORMATTER.format(d);
 }
 
 export function formatFullDate(date: Date | string | number): string {
