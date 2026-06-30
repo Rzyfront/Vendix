@@ -6,6 +6,8 @@ import {
   computed,
   input,
   output,
+  effect,
+  viewChild,
   ElementRef,
   HostListener,
 } from '@angular/core';
@@ -101,6 +103,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
                 >
                 <div class="p-2 border-b border-border sticky top-0 bg-[var(--color-surface)]">
                   <input
+                    #searchInput
                     type="text"
                     [ngModel]="searchTerm()"
                     (ngModelChange)="onSearch($event)"
@@ -198,6 +201,27 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
 })
 export class SelectorComponent implements ControlValueAccessor {
   private readonly elementRef = inject(ElementRef);
+
+  /**
+   * Referencia al input de búsqueda del modo searchable. Existe solo cuando
+   * `@if (isOpen())` lo renderiza, por eso es una query signal: se resuelve
+   * post-render y dispara el effect de autofocus.
+   */
+  private readonly searchInput =
+    viewChild<ElementRef<HTMLInputElement>>('searchInput');
+
+  constructor() {
+    // Al abrir el dropdown searchable, enfocar el input de búsqueda para que el
+    // usuario pueda teclear de inmediato (UX: no exigir un click extra). El
+    // effect re-corre cuando isOpen() o la query signal cambian; en zoneless la
+    // escritura del signal agenda el render y la query se resuelve antes de esta
+    // pasada del effect.
+    effect(() => {
+      if (this.isOpen() && this.searchable()) {
+        this.searchInput()?.nativeElement.focus();
+      }
+    });
+  }
 
   readonly id = input<string>(`selector-${Math.random().toString(36).substr(2, 9)}`);
   readonly label = input<string>('');
