@@ -1,4 +1,140 @@
 <div class="pqr-list-page">
+  <!-- ── Sticky header ─────────────────────────────────────────────────
+       Same component used by every admin module. Tabs inline at the
+       top so the operator can narrow the queue by bucket
+       (Todas / Vencidas / Pendientes / Nuevas). The primary action
+       "+ Nueva solicitud" lives in the right slot. -->
+  @if (stats() && stats()!.total > 0) {
+  <app-sticky-header
+    title="Bandeja"
+    subtitle=""
+    icon="inbox"
+    variant="glass"
+    [showBackButton]="false"
+    [tabs]="quickFilterTabs()"
+    [activeTab]="quickFilter()"
+    tabsAriaLabel="Filtros de PQRS"
+    (tabChanged)="setQuickFilter($event)"
+    [actions]="stickyHeaderActions()"
+    (actionClicked)="onStickyHeaderAction($event)"
+  />
+  } @else {
+  <app-sticky-header
+    title="Bandeja"
+    subtitle="Aún no tienes solicitudes"
+    icon="inbox"
+    variant="glass"
+    [showBackButton]="false"
+    [actions]="stickyHeaderActions()"
+    (actionClicked)="onStickyHeaderAction($event)"
+  />
+  }
+
+  <!-- ── Stats grid ──────────────────────────────────────────────────────
+       Shared <app-stats> component (same as Clientes / Reportes /
+       Ventas). Surfaces PQR health at a glance. -->
+  @if (stats() && stats()!.total > 0) {
+  <div class="stats-container">
+    <app-stats
+      title="Total PQRS"
+      [value]="stats()!.total"
+      smallText="Todas tus peticiones, quejas y reclamos"
+      iconName="message-square"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    ></app-stats>
+    <app-stats
+      title="Últimas 24h"
+      [value]="stats()!.recent_24h"
+      smallText="PQRS radicadas recientemente"
+      iconName="clock"
+      iconBgColor="bg-violet-100"
+      iconColor="text-violet-600"
+    ></app-stats>
+    <app-stats
+      title="Vencidas"
+      [value]="overdueCount()"
+      smallText="SLA legal agotado"
+      iconName="alert-triangle"
+      iconBgColor="bg-red-100"
+      iconColor="text-red-600"
+    ></app-stats>
+    <app-stats
+      title="Nuevas"
+      [value]="stats()!.by_status?.['NEW'] || 0"
+      smallText="Sin asignar a tienda"
+      iconName="inbox"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+    ></app-stats>
+  </div>
+  }
+
+  <!-- ── CTA card ───────────────────────────────────────────────────────
+       One card that answers the only question the store owner actually
+       has when they open this page: "what do I need to do today?"
+       Surfaces the most urgent state (overdue > pending > all-caught-up). -->
+  @if (stats(); as s) {
+  <div
+    class="cta-card"
+    [class.cta-card--urgent]="overdueCount() > 0"
+    [class.cta-card--empty]="s.total === 0"
+  >
+    @if (s.total === 0) {
+    <div class="cta-card__empty">
+      <div class="cta-card__icon cta-card__icon--muted">
+        <app-icon name="inbox" [size]="32"></app-icon>
+      </div>
+      <div>
+        <h2>Aún no tienes solicitudes</h2>
+        <p>
+          Cuando un visitante radique una petición, queja o reclamo desde tu
+          tienda, aparecerá aquí. Mientras tanto, todo en orden.
+        </p>
+      </div>
+    </div>
+    } @else {
+    <div class="cta-card__main">
+      <div class="cta-card__lead">
+        <div class="cta-card__icon">
+          <app-icon
+            [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-circle'"
+            [size]="28"
+          ></app-icon>
+        </div>
+        <div class="cta-card__copy">
+          <h2>
+            @if (overdueCount() > 0) {
+              Tienes {{ overdueCount() }} solicitud{{ overdueCount() === 1 ? '' : 'es' }}
+              con tiempo vencido
+            } @else if (pendingCount() > 0) {
+              Tienes {{ pendingCount() }} solicitud{{ pendingCount() === 1 ? '' : 'es' }}
+              pendiente{{ pendingCount() === 1 ? '' : 's' }} de respuesta
+            } @else {
+              ¡Todo al día con tus solicitudes!
+            }
+          </h2>
+          <p>
+            @if (overdueCount() > 0) {
+              Es importante responder pronto para evitar consecuencias legales.
+            } @else if (pendingCount() > 0) {
+              Cuando respondas, el solicitante recibirá un correo con tu mensaje.
+            } @else {
+              No tienes solicitudes pendientes en este momento.
+            }
+          </p>
+        </div>
+      </div>
+      @if (pendingCount() > 0 && urgentPqrRoute(); as route) {
+      <a class="cta-card__action cta-card__action--ghost" [routerLink]="route">
+        Continuar conversación
+      </a>
+      }
+    </div>
+    }
+  </div>
+  }
+
   <!-- ── List card ───────────────────────────────────────────────────────
        Mirrors the customer-list pattern (Todos los Clientes (1)) so the
        store-admin has a single visual model for "list of records":

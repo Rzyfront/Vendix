@@ -57,6 +57,113 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
   ],
   template: `
     <div class="pqr-list-page">
+      <!-- ── Sticky header ─────────────────────────────────────────
+           Same component used by every admin module. Tabs inline at
+           the top so the operator can narrow the org-wide queue by
+           bucket (Todas / Vencidas / Sin asignar). -->
+      <app-sticky-header
+        title="PQRS"
+        subtitle="Vista agregada por organización"
+        icon="headset"
+        variant="glass"
+        [showBackButton]="false"
+        [tabs]="quickFilterTabs()"
+        [activeTab]="quickFilter()"
+        tabsAriaLabel="Filtros de PQRS"
+        (tabChanged)="setQuickFilter($event)"
+      />
+
+      <!-- ── Stats grid ────────────────────────────────────────────── -->
+      <div class="stats-container">
+        <app-stats
+          title="Total PQRS"
+          [value]="stats().total"
+          smallText="Todas las tiendas"
+          iconName="message-square"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        ></app-stats>
+        <app-stats
+          title="Últimas 24h"
+          [value]="stats().recent_24h"
+          smallText="PQRS recientes"
+          iconName="clock"
+          iconBgColor="bg-violet-100"
+          iconColor="text-violet-600"
+        ></app-stats>
+        <app-stats
+          title="Vencidas"
+          [value]="overdueCount()"
+          smallText="SLA legal agotado"
+          iconName="alert-triangle"
+          iconBgColor="bg-red-100"
+          iconColor="text-red-600"
+        ></app-stats>
+        <app-stats
+          title="Nuevas"
+          [value]="stats().by_status?.NEW || 0"
+          smallText="Sin asignar"
+          iconName="inbox"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        ></app-stats>
+      </div>
+
+      <!-- ── CTA card ──────────────────────────────────────────────── -->
+      <div
+        class="cta-card"
+        [class.cta-card--urgent]="overdueCount() > 0"
+        [class.cta-card--empty]="stats().total === 0"
+      >
+        @if (stats().total === 0) {
+        <div class="cta-card__main">
+          <div class="cta-card__icon cta-card__icon--muted">
+            <app-icon name="inbox" [size]="32"></app-icon>
+          </div>
+          <div class="cta-card__copy">
+            <h2>Sin PQRS en tus tiendas</h2>
+            <p>
+              Cuando un visitante radique una petición, queja o reclamo en
+              cualquier tienda de tu organización, aparecerá aquí.
+            </p>
+          </div>
+        </div>
+        } @else {
+        <div class="cta-card__main">
+          <div class="cta-card__icon">
+            <app-icon
+              [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-square'"
+              [size]="28"
+            ></app-icon>
+          </div>
+          <div class="cta-card__copy">
+            <h2>
+              @if (overdueCount() > 0) {
+                {{ overdueCount() }} PQRS
+                con SLA vencido en tus tiendas
+              } @else if (stats().recent_24h > 0) {
+                {{ stats().recent_24h }} PQRS
+                radicadas en las últimas 24h
+              } @else {
+                Todas las tiendas al día con PQRS
+              }
+            </h2>
+            <p>
+              @if (overdueCount() > 0) {
+                ⚠️ Riesgo regulatorio a nivel de la organización.
+              } @else if (stats().recent_24h > 0) {
+                Monitorea la respuesta de cada tienda para evitar
+                acumulación de SLA.
+              } @else {
+                Sin PQRS pendientes de revisión.
+              }
+            </p>
+          </div>
+        </div>
+        }
+      </div>
+
+      <!-- ── List card ─────────────────────────────────────────────── -->
       <app-card [responsive]="true" [padding]="false" overflow="visible">
         <div
           class="px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
@@ -765,6 +872,17 @@ private loadOrgStores(): void {
 
   overdueCount(): number {
     return this.stats().overdue || 0;
+  }
+
+  /** Total ticket count for the list header. */
+  total(): number {
+    return this.stats().total || 0;
+  }
+
+  /** Active (open / in-progress / waiting) ticket count for the CTA. */
+  pendingCount(): number {
+    const s = this.stats().by_status || {};
+    return (s['NEW'] || 0) + (s['OPEN'] || 0) + (s['IN_PROGRESS'] || 0);
   }
 
   private slaLimitFor(type: string): number {

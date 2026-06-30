@@ -29,6 +29,7 @@ import {
   DropdownAction,
   FilterValues,
   StickyHeaderTab,
+  StickyHeaderActionButton,
 } from '../../../../../../shared/components';
 import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { PqrService } from '../../../../../../shared/services/pqr.service';
@@ -102,10 +103,26 @@ export class PqrListPageComponent {
 
   // Primary action rendered in the sticky-header's right slot. The
   // "+ Nueva solicitud" lives here (not in the CTA card) so it stays
-  // Note: the "stickyHeaderActions" computed + "onStickyHeaderAction"
-  // handler were removed when the sticky-header was deleted. The
-  // "Nueva solicitud" action is now reachable via the options-dropdown
-  // "Acciones" menu (dropdownActions → 'new-pqr').
+  // visible regardless of how many PQRs are pending — same pattern as
+  // "Ver Analítica" on the Reportes → Ventas view.
+  readonly stickyHeaderActions = computed<StickyHeaderActionButton[]>(() => [
+    {
+      id: 'new-pqr',
+      label: 'Nueva solicitud',
+      variant: 'primary',
+      icon: 'plus',
+    },
+  ]);
+
+  /**
+   * Action button click handler for the sticky-header's right slot.
+   * Currently only one action: open the "New PQR" modal.
+   */
+  onStickyHeaderAction(actionId: string): void {
+    if (actionId === 'new-pqr') {
+      this.openNewPqrModal();
+    }
+  }
 
   setQuickFilter(value: string) {
     // StickyHeaderComponent emits tabChanged as plain `string`; narrow
