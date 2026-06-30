@@ -12,8 +12,13 @@ import {
   ValidateIf,
   ArrayNotEmpty,
   ArrayUnique,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import {
+  IsValidQuantityTiers,
+  QuantityTierDto,
+} from './quantity-tier.dto';
 
 export class CreatePromotionDto {
   @IsString()
@@ -36,6 +41,20 @@ export class CreatePromotionDto {
   @Min(0)
   @Type(() => Number)
   value: number;
+
+  /**
+   * Pricing rule shape:
+   *   - 'flat' (default): single discount driven by `type` + `value`.
+   *   - 'quantity_tiered': volume breaks defined in `quantity_tiers`;
+   *     the parent `value` is still required (engine fallback / reporting)
+   *     but the actual discount comes from the matched tier.
+   *
+   * Omitted -> treated as 'flat' for backwards compatibility with existing
+   * clients that predate this field.
+   */
+  @IsOptional()
+  @IsEnum(['flat', 'quantity_tiered'])
+  rule_type?: 'flat' | 'quantity_tiered' = 'flat';
 
   @IsOptional()
   @IsEnum(['order', 'product', 'category'])
@@ -102,4 +121,18 @@ export class CreatePromotionDto {
   @IsInt({ each: true, message: 'Cada categoria debe ser un id valido' })
   @Type(() => Number)
   category_ids?: number[];
+
+  /**
+   * Volume-break tiers. Required (>= 1 item) when rule_type === 'quantity_tiered';
+   * must be empty/absent when rule_type is 'flat' (or omitted).
+   *
+   * See QuantityTierDto for per-element rules and IsValidQuantityTiers for
+   * the cross-field adjacency / contiguity / open-ended-last rules.
+   */
+  @IsOptional()
+  @IsArray({ message: 'quantity_tiers debe ser un arreglo' })
+  @ValidateNested({ each: true })
+  @Type(() => QuantityTierDto)
+  @IsValidQuantityTiers()
+  quantity_tiers?: QuantityTierDto[];
 }

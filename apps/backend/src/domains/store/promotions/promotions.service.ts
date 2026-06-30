@@ -161,7 +161,8 @@ export class PromotionsService {
 
   async create(dto: CreatePromotionDto) {
     const scope = dto.scope || 'order';
-    const { product_ids, category_ids, ...promotionData } = dto;
+    const rule_type: PromotionRuleType = dto.rule_type || 'flat';
+    const { product_ids, category_ids, quantity_tiers, ...promotionData } = dto;
 
     // Normalize payload: only keep IDs that match the configured scope.
     const normalizedProductIds =
@@ -170,9 +171,11 @@ export class PromotionsService {
       scope === 'category' ? this.sanitizeIds(category_ids) : [];
 
     this.validateScopeSelection(scope, normalizedProductIds, normalizedCategoryIds);
+    this.validateRuleTypeShape(rule_type, quantity_tiers);
 
     const data: any = {
       ...promotionData,
+      rule_type,
       scope,
       start_date: new Date(dto.start_date),
       end_date: dto.end_date ? new Date(dto.end_date) : null,
@@ -194,13 +197,27 @@ export class PromotionsService {
       };
     }
 
-    return this.prisma.promotions.create({
+    // Persist the promotion first so we have its `id` for the tier rows.
+    // For quantity_tiered rules we materialise the tiers in a follow-up
+    // createMany so the FK target exists; nested create would also work but
+    // createMany keeps the service symmetric with the update path below.
+    const created = await this.prisma.promotions.create({
       data,
       include: {
         promotion_products: true,
         promotion_categories: true,
       },
     });
+
+    if (rule_type === 'quantity_tiered' && quantity_tiers?.length) {
+      await this.persistQuantityTiers(created.id, quantity_tiers);
+    }
+
+    // Re-read so the response carries the persisted tiers when relevant.
+    if (rule_type === 'quantity_tiered') {
+      return this.findOne(created.id);
+    }
+    return created;
   }
 
   async update(id: number, dto: UpdatePromotionDto) {
@@ -209,6 +226,7 @@ export class PromotionsService {
       include: {
         promotion_products: true,
         promotion_categories: true,
+        promotion_quantity_tiers: true,
       },
     });
 
@@ -216,11 +234,13 @@ export class PromotionsService {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    const { product_ids, category_ids, ...updateData } = dto;
+    const { product_ids, category_ids, quantity_tiers, ...updateData } = dto;
     const effectiveScope = (dto.scope || existing.scope) as
       | 'order'
       | 'product'
       | 'category';
+    const effectiveRuleType: PromotionRuleType =
+      dto.rule_type || (existing.rule_type as PromotionRuleType) || 'flat';
 
     // Resolve effective ID arrays after merging with existing values.
     const mergedProductIds =
@@ -234,15 +254,31 @@ export class PromotionsService {
     const normalizedCategoryIds =
       effectiveScope === 'category' ? this.sanitizeIds(mergedCategoryIds) : [];
 
+    // Cross-field rule: when the client sent quantity_tiers it is treated as
+    // the authoritative new list. Absent field + rule_type unchanged means
+    // tiers are kept as-is (no rewrite).
+    const tiersExplicitlyProvided = quantity_tiers !== undefined;
+    const effectiveTiers: QuantityTierDto[] | undefined = tiersExplicitlyProvided
+      ? quantity_tiers
+      : existing.promotion_quantity_tiers.map((t) => ({
+          min_quantity: t.min_quantity,
+          max_quantity: t.max_quantity ?? undefined,
+          type: t.type as 'percentage' | 'fixed_amount',
+          value: Number(t.value),
+          sort_order: t.sort_order,
+        }));
+
     this.validateScopeSelection(
       effectiveScope,
       normalizedProductIds,
       normalizedCategoryIds,
     );
+    this.validateRuleTypeShape(effectiveRuleType, effectiveTiers);
 
     // Prepare date conversions
     const data: any = { ...updateData };
     if (dto.scope) data.scope = effectiveScope;
+    if (dto.rule_type) data.rule_type = effectiveRuleType;
     if (dto.start_date) data.start_date = new Date(dto.start_date);
     if (dto.end_date !== undefined) {
       data.end_date = dto.end_date ? new Date(dto.end_date) : null;
@@ -255,6 +291,13 @@ export class PromotionsService {
       product_ids !== undefined || effectiveScope !== 'product';
     const shouldRewriteCategories =
       category_ids !== undefined || effectiveScope !== 'category';
+
+    // Rewrite tiers ONLY when the client sent `quantity_tiers` (or switched
+    // rule_type to flat, in which case we purge any leftover rows). When the
+    // client simply updates other fields of a tiered promotion, the existing
+    // tiers are preserved untouched.
+    const shouldRewriteTiers =
+      tiersExplicitlyProvided || effectiveRuleType !== existing.rule_type;
 
     return this.prisma.$transaction(async (tx) => {
       if (shouldRewriteProducts) {
@@ -285,12 +328,35 @@ export class PromotionsService {
         }
       }
 
+      if (shouldRewriteTiers) {
+        await tx.promotion_quantity_tiers.deleteMany({
+          where: { promotion_id: id },
+        });
+        if (
+          effectiveRuleType === 'quantity_tiered' &&
+          effectiveTiers &&
+          effectiveTiers.length > 0
+        ) {
+          await tx.promotion_quantity_tiers.createMany({
+            data: effectiveTiers.map((tier) => ({
+              promotion_id: id,
+              min_quantity: tier.min_quantity,
+              max_quantity: tier.max_quantity ?? null,
+              type: tier.type,
+              value: tier.value,
+              sort_order: tier.sort_order ?? 0,
+            })),
+          });
+        }
+      }
+
       return tx.promotions.update({
         where: { id },
         data,
         include: {
           promotion_products: true,
           promotion_categories: true,
+          promotion_quantity_tiers: true,
         },
       });
     });
@@ -418,5 +484,57 @@ export class PromotionsService {
       out.push(intVal);
     }
     return out;
+  }
+
+  /**
+   * Cross-field rule tying `rule_type` to `quantity_tiers`:
+   *   - rule_type === 'quantity_tiered' requires >= 1 tier.
+   *   - rule_type === 'flat' (or omitted) requires tiers to be empty/absent.
+   *
+   * Per-element / adjacency rules already ran in the DTO via class-validator,
+   * so this service-layer check only enforces presence.
+   */
+  private validateRuleTypeShape(
+    ruleType: PromotionRuleType,
+    tiers?: QuantityTierDto[],
+  ): void {
+    const hasTiers = Array.isArray(tiers) && tiers.length > 0;
+
+    if (ruleType === 'quantity_tiered' && !hasTiers) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'Debes proporcionar al menos un tramo en quantity_tiers cuando rule_type es quantity_tiered',
+      );
+    }
+
+    if (ruleType === 'flat' && hasTiers) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'quantity_tiers solo se permite cuando rule_type es quantity_tiered',
+      );
+    }
+  }
+
+  /**
+   * Persist a flat list of tiers for a given promotion. Per-element shape
+   * is enforced upstream by the DTO; this method assumes the list has
+   * already passed validation and just writes the rows.
+   */
+  private async persistQuantityTiers(
+    promotionId: number,
+    tiers: QuantityTierDto[],
+  ): Promise<void> {
+    if (!tiers.length) return;
+
+    await this.prisma.promotion_quantity_tiers.createMany({
+      data: tiers.map((tier) => ({
+        promotion_id: promotionId,
+        min_quantity: tier.min_quantity,
+        max_quantity: tier.max_quantity ?? null,
+        type: tier.type,
+        value: tier.value,
+        sort_order: tier.sort_order ?? 0,
+      })),
+    });
   }
 }
