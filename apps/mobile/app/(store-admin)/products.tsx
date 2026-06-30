@@ -382,9 +382,10 @@ export default function ProductsListScreen() {
         </View>
       ) : (
         <FlatList
+numColumns={2} key="2-col"
           data={products}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: 96 }}
+          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: 96 }} key="2-col"
           ItemSeparatorComponent={() => <View style={{ height: spacing[2] }} />}
           refreshControl={
             <RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />
