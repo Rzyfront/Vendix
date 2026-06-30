@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
-  View, Text, FlatList, RefreshControl, Pressable, ScrollView, StyleSheet, Dimensions,
+  View, Text, TextInput, FlatList, RefreshControl, Pressable, ScrollView, StyleSheet, Dimensions,
 } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -15,6 +15,7 @@ import { Button } from '@/shared/components/button/button';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import BulkAdjustmentModal from '@/features/store/components/bulk-adjustment-modal';
 import AdjustmentCard from '@/features/store/components/adjustment-card';
+import AdjustmentDetailModal from '@/features/store/components/adjustment-detail-modal';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { Icon } from '@/shared/components/icon/icon';
@@ -31,6 +32,71 @@ const STATE_VARIANT: Record<AdjustmentState, 'warning' | 'success'> = {
 
 // La función AdjustmentCard fue extraída a features/store/components/adjustment-card.tsx
 // El BulkAdjustmentModal fue extraído a features/store/components/bulk-adjustment-modal.tsx
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[4],
+  },
+  statsContainer: {
+    marginBottom: spacing[4],
+  },
+  cardContainer: {
+    flex: 1,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    ...shadows.sm,
+    overflow: 'hidden',
+  },
+  searchHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[4],
+    paddingBottom: spacing[2],
+  },
+  listTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.text.primary,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    paddingBottom: spacing[4],
+  },
+  searchInput: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colorScales.gray[100],
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing[2],
+    height: 40,
+  },
+  searchTextInput: {
+    flex: 1,
+    height: 40,
+    fontSize: typography.fontSize.sm,
+    color: colors.text.primary,
+  },
+  iconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listContent: {
+    paddingBottom: spacing[6],
+  },
+});
 
 interface BulkResultItem {
   row_number: number;
@@ -64,7 +130,7 @@ export default function AdjustmentsScreen() {
   const actionsBtnRef = useRef<View>(null);
   const [filterDropdownPos, setFilterDropdownPos] = useState({ top: 0, right: 0 });
   const [actionsDropdownPos, setActionsDropdownPos] = useState({ top: 0, right: 0 });
-  const screenW = Dimensions.get('window');
+  const screenW = Dimensions.get('window').width;
   const [form, setForm] = useState<{
     product_id: number;
     description: string;
@@ -111,9 +177,9 @@ export default function AdjustmentsScreen() {
     (productsQuery.data?.data ?? []).map((p) => ({
       id: Number(p.id),
       name: p.name,
-      sku: p.sku,
+      sku: p.sku ?? undefined,
       stock: p.stock_quantity ?? 0,
-      category: p.category?.name,
+      category: (p as any).category?.name,
     }));
   const selectedLocationName = selectedLocation ? LOCATIONS.find((l) => l.value === selectedLocation)?.label : '';
 
@@ -155,7 +221,7 @@ export default function AdjustmentsScreen() {
       setConfirmCreate(false);
       toastSuccess('Ajuste creado correctamente');
     },
-    onError: (error: any) => {
+    onError: (e: any) => {
       const message =
         e?.response?.data?.message ??
         e?.response?.data?.error?.message ??
@@ -164,8 +230,8 @@ export default function AdjustmentsScreen() {
         e?.message;
       const errMsg =
         e?.response?.status === 400
-          ? `Error 400: ${apiMsg ?? 'datos inválidos. Verifica la plantilla y los campos.'}`
-          : apiMsg ?? 'Error al crear el ajuste';
+          ? `Error 400: ${message ?? 'datos inválidos. Verifica la plantilla y los campos.'}`
+          : message ?? 'Error al crear el ajuste';
       toastError(typeof errMsg === 'string' ? errMsg : 'Error al crear el ajuste');
     },
   });
@@ -373,8 +439,8 @@ export default function AdjustmentsScreen() {
       <AdjustmentDetailModal
         adjustment={detailAdjustment}
         onClose={() => setDetailAdjustment(null)}
-        onApprove={(a) => approveMutation.mutate(Number(a.id))}
-        onDelete={(a) => deleteAdjustmentMutation.mutate(Number(a.id))}
+        onApprove={(a: any) => approveMutation.mutate(Number(a.id))}
+        onDelete={(a: any) => deleteAdjustmentMutation.mutate(Number(a.id))}
         isSubmitting={approveMutation.isPending || deleteAdjustmentMutation.isPending}
       />
       </View>

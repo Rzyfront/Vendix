@@ -186,7 +186,7 @@ export default function LocationsScreen() {
     { label: LOCATION_TYPE_OPTIONS[0].label, value: 'warehouse' },
     { label: LOCATION_TYPE_OPTIONS[1].label, value: 'store' },
     { label: LOCATION_TYPE_OPTIONS[2].label, value: 'virtual' },
-    { label: LOCATION_TYPE_OPTIONS[3].label, value: 'transit' },
+    { label: LOCATION_TYPE_OPTIONS[3].label, value: 'transit' as LocationType | 'all' },
   ];
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, refetch, isRefetching } = useInfiniteQuery({
@@ -617,7 +617,7 @@ export default function LocationsScreen() {
                       <Pressable
                         key={opt.value}
                         style={[styles.typeDropdownOption, form.type === opt.value && styles.typeDropdownOptionActive]}
-                        onPress={() => { setForm({ ...form, type: opt.value }); setShowTypeDropdown(false); }}
+                        onPress={() => { setForm({ ...form, type: opt.value as "warehouse" | "store" | "virtual" }); setShowTypeDropdown(false); }}
                       >
                         <Text style={[styles.typeDropdownOptionText, form.type === opt.value && styles.typeDropdownOptionTextActive]}>
                           {opt.label}

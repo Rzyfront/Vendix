@@ -10,7 +10,7 @@ export interface SelectorOption<T = string | number> {
   description?: string;
 }
 
-interface SelectorProps<T = string | number> {
+export interface SelectorProps<T = string | number> {
   value: T | null | undefined;
   onChange: (value: T) => void;
   options: SelectorOption<T>[];

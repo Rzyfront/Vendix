@@ -437,7 +437,6 @@ export const InventoryService = {
   ): Promise<{ total_processed: number; successful: number; failed: number; results: any[] }> {
     const formData = new FormData();
     // 1) Archivo bajo el campo "file" (igual que `FileInterceptor('file')` en el backend)
-    // @ts-expect-error - React Native FormData accepts file objects
     formData.append('file', {
       uri: file.uri,
       name: file.name,

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, Modal } from 'react-native';
+import { View, Text, TextInput, StyleSheet, ScrollView, Pressable, Modal } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';

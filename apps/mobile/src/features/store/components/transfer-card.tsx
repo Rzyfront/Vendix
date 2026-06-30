@@ -3,9 +3,10 @@ import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 import { formatDate } from '@/shared/utils/date';
-import { TRANSFER_STATE_LABELS, TRANSFER_STATE_MAP } from '@/features/store/constants/inventory-labels';
+import { TRANSFER_STATE_MAP } from '@/features/store/constants/inventory-labels';
 import { STAT_PALETTE } from '@/features/store/constants/inventory-icons';
 import type { StockTransfer } from '@/features/store/types';
+import { TRANSFER_STATE_LABELS } from '@/features/store/types';
 
 interface TransferCardProps {
   item: StockTransfer;

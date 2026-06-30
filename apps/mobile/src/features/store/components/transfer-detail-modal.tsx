@@ -3,10 +3,11 @@ import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { colors, colorScales, spacing, borderRadius, typography, shadows } from '@/shared/theme';
-import { TRANSFER_STATE_LABELS, TRANSFER_STATE_MAP } from '@/features/store/constants/inventory-labels';
+import { TRANSFER_STATE_MAP } from '@/features/store/constants/inventory-labels';
 import { STAT_PALETTE } from '@/features/store/constants/inventory-icons';
 import { formatDate } from '@/shared/utils/date';
 import type { StockTransfer } from '@/features/store/types';
+import { TRANSFER_STATE_LABELS } from '@/features/store/types';
 
 /**
  * Transfer detail popup — opened when the user taps the eye (ver) button on

@@ -55,6 +55,7 @@ export interface PoDetailDetail {
   product_name?: string;
   quantity_requested: number;
   quantity_received: number;
+  received_at?: string;
 }
 
 interface PoDetailModalProps {

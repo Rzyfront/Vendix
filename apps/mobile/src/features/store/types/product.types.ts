@@ -229,6 +229,7 @@ export interface CreateProductDto {
   slug?: string;
   description?: string;
   base_price: number;
+  barcode?: string;
   cost_price?: number;
   profit_margin?: number;
   is_on_sale?: boolean;

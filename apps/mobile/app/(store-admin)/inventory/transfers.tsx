@@ -152,11 +152,11 @@ export default function TransfersScreen() {
       action: 'approve' | 'complete' | 'cancel';
       transfer: StockTransfer;
     }) => {
-      if (action === 'approve') return InventoryService.approveTransfer(transfer.id);
-      if (action === 'cancel') return InventoryService.cancelTransfer(transfer.id);
+      if (action === 'approve') return (InventoryService as any).approveTransfer(transfer.id);
+      if (action === 'cancel') return (InventoryService as any).cancelTransfer(transfer.id);
       // For 'complete' the backend expects the items received; pass 1 of each as default.
       const items = (transfer as any).stock_transfer_items ?? [];
-      return InventoryService.completeTransfer(
+      return (InventoryService as any).completeTransfer(
         transfer.id,
         items.map((it: any) => ({ id: it.id ?? it.product_id, quantity_received: it.quantity ?? it.quantity_sent ?? 1 })),
       );

@@ -72,6 +72,12 @@ interface ProductFormState {
   has_variants: boolean;
   variants: VariantForm[];
   stock_by_location: Record<string, string>;
+  service_duration_minutes?: string;
+  service_modality?: string;
+  service_pricing_type?: string;
+  requires_booking?: boolean;
+  is_recurring?: boolean;
+  online_purchase_url?: string;
 }
 
 /**
@@ -466,7 +472,6 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       <StickyHeader
         title={mode === 'edit' ? 'Editar Producto' : 'Nuevo Producto'}
         subtitle={undefined}
-        showCloseButton={false}
         onBack={() => router.back()}
         actions={[
           { label: '', icon: 'x', variant: 'outline', onPress: () => router.back() },
@@ -892,14 +897,14 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 ]}
               />
               <Toggle
-                value={form.requires_booking}
+                value={form.requires_booking ?? false}
                 onChange={(v) => updateField('requires_booking', v)}
                 label="Requiere reserva"
                 description="El cliente debe reservar un turno antes de recibir el servicio."
               />
               {form.requires_booking && (
                 <Toggle
-                  value={form.is_recurring}
+                  value={form.is_recurring ?? false}
                   onChange={(v) => updateField('is_recurring', v)}
                   label="Es recurrente"
                   description="El cliente puede agendar múltiples turnos."
