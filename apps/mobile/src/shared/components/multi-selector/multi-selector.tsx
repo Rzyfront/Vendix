@@ -1,15 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import {
-  Pressable,
-  Text,
-  View,
-  StyleSheet,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  Platform,
-  type ViewStyle,
-} from 'react-native';
+import { useMemo, useState } from 'react';
+import { Pressable, Text, View, StyleSheet, TextInput, type ViewStyle } from 'react-native';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 
@@ -35,21 +25,16 @@ interface MultiSelectorProps<T = string | number> {
   label?: string;
   disabled?: boolean;
   /**
-   * Muestra una barra de búsqueda en el modal. Útil cuando la lista de
-   * opciones es larga (ej. lista de impuestos configurados). El filtrado
-   * es case-insensitive por `label`.
+   * Muestra una barra de búsqueda en el popover cuando está abierto.
+   * Útil cuando la lista de opciones es larga. El filtrado es
+   * case-insensitive por `label`.
    */
   searchable?: boolean;
   /** Texto placeholder del input de búsqueda. */
   searchPlaceholder?: string;
+  /** Texto cuando no hay opciones disponibles. */
+  emptyText?: string;
   style?: ViewStyle;
-}
-
-function arraysEqual<T>(a: T[], b: T[]): boolean {
-  if (a.length !== b.length) return false;
-  const sortedA = [...a].sort();
-  const sortedB = [...b].sort();
-  return sortedA.every((v, i) => sortedB[i] === v);
 }
 
 function normalize(value: string): string {
@@ -69,34 +54,14 @@ export function MultiSelector<T = string | number>({
   disabled = false,
   searchable = false,
   searchPlaceholder = 'Buscar…',
+  emptyText = 'No hay opciones disponibles',
   style,
 }: MultiSelectorProps<T>) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
   const [query, setQuery] = useState('');
-  const triggerRef = useRef<View>(null);
-
-  function measureTrigger() {
-    if (triggerRef.current) {
-      triggerRef.current.measureInWindow((x, y, w, h) => {
-        setPos({ top: y + h + 4, left: x, width: w });
-      });
-    }
-    setOpen(true);
-  }
-
-  function close() {
-    setOpen(false);
-    setQuery('');
-  }
 
   const selectedOptions = options.filter((o) => values.includes(o.value));
 
-  /**
-   * Opciones filtradas por la query de búsqueda. La búsqueda es
-   * case-insensitive y tolera acentos (NFD + strip combining marks) para que
-   * "IVA" coincida con "iva" y "impuesto" con "Impuesto".
-   */
   const filteredOptions = useMemo(() => {
     if (!searchable) return options;
     const trimmed = query.trim();
@@ -120,15 +85,21 @@ export function MultiSelector<T = string | number>({
     onChange([]);
   }
 
+  function close() {
+    setOpen(false);
+    setQuery('');
+  }
+
   return (
     <View style={style}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {label && (
+        <Text style={styles.label}>
+          {label}
+        </Text>
+      )}
 
       <Pressable
-        ref={triggerRef}
-        onPress={() =>
-          !disabled && (open ? setOpen(false) : measureTrigger())
-        }
+        onPress={() => !disabled && setOpen((current) => !current)}
         disabled={disabled}
         style={({ pressed }) => [
           styles.trigger,
@@ -137,7 +108,9 @@ export function MultiSelector<T = string | number>({
         ]}
       >
         {selectedOptions.length === 0 ? (
-          <Text style={[styles.triggerText, styles.placeholder]}>{placeholder}</Text>
+          <Text style={[styles.triggerText, styles.placeholder]} numberOfLines={1}>
+            {placeholder}
+          </Text>
         ) : (
           <View style={styles.chipsRow}>
             {selectedOptions.map((opt) => (
@@ -156,103 +129,95 @@ export function MultiSelector<T = string | number>({
             ))}
           </View>
         )}
-        <Icon name={open ? "chevron-up" : "chevron-down"} size={18} color={colors.text.secondary} />
+        <Icon
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={18}
+          color={colors.text.secondary}
+        />
       </Pressable>
 
-      <Modal
-        visible={open}
-        transparent
-        animationType="fade"
-        onRequestClose={close}
-        statusBarTranslucent
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.kavRoot}
-        >
-          {/* Backdrop con TouchableWithoutFeedback: no intercepta eventos
-              que van al popover (a diferencia de Pressable en algunas versiones
-              de RN con Modal transparent). */}
-          <View style={styles.modalRoot}>
-            <Pressable style={styles.backdrop} onPress={close} />
-            <View
-              style={[
-                styles.popover,
-                { top: pos.top, left: pos.left, width: pos.width },
-              ]}
-            >
-              <View style={styles.popoverHeader}>
-                <Text style={styles.modalHint}>
-                  {values.length === 0
-                    ? 'Toca para agregar'
-                    : `${values.length} seleccionado${values.length === 1 ? '' : 's'}`}
-                  {max ? ` (máx. ${max})` : ''}
-                </Text>
-                {values.length > 0 && (
-                  <Pressable onPress={clear} hitSlop={8}>
-                    <Text style={styles.clearText}>Limpiar</Text>
-                  </Pressable>
-                )}
-              </View>
-
-              {searchable && (
-                <SearchInput
-                  value={query}
-                  onChangeText={setQuery}
-                  placeholder={searchPlaceholder}
-                />
+      {/*
+        Popover renderizado INLINE (sin <Modal>) para evitar el bug conocido
+        de RN donde el <TextInput> dentro de un Modal transparente pierde
+        el foco en cuanto aparece el teclado. Al renderizar el popover
+        como un View normal en el árbol, el teclado funciona nativo.
+      */}
+      {open && (
+        <View style={styles.popover}>
+          <View style={styles.popoverHeader}>
+            <Text style={styles.modalHint}>
+              {values.length === 0
+                ? 'Toca para agregar'
+                : `${values.length} seleccionado${values.length === 1 ? '' : 's'}`}
+              {max ? ` (máx. ${max})` : ''}
+            </Text>
+            <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+              {values.length > 0 && (
+                <Pressable onPress={clear} hitSlop={8}>
+                  <Text style={styles.clearText}>Limpiar</Text>
+                </Pressable>
               )}
-
-              {filteredOptions.length === 0 ? (
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyText}>
-                    {searchable && query.trim()
-                      ? `Sin resultados para "${query.trim()}"`
-                      : 'No hay opciones disponibles'}
-                  </Text>
-                </View>
-              ) : (
-                filteredOptions.map((opt) => {
-                  const isSelected = values.includes(opt.value);
-                  const isDisabled = !!max && !isSelected && values.length >= max;
-                  return (
-                    <Pressable
-                      key={String(opt.value)}
-                      onPress={() => !isDisabled && toggle(opt.value)}
-                      disabled={isDisabled}
-                      style={({ pressed }) => [
-                        styles.option,
-                        pressed && styles.optionPressed,
-                        isSelected && styles.optionSelected,
-                        isDisabled && styles.disabled,
-                      ]}
-                    >
-                      <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-                        {isSelected && <Icon name="check" size={12} color="#FFFFFF" />}
-                      </View>
-                      <Text style={styles.optionLabel} numberOfLines={1}>
-                        {opt.label}
-                      </Text>
-                      {opt.subLabel !== undefined && opt.subLabel !== '' && (
-                        <Text style={styles.optionSubLabel} numberOfLines={1}>
-                          {opt.subLabel}
-                        </Text>
-                      )}
-                    </Pressable>
-                  );
-                })
-              )}
+              <Pressable onPress={close} hitSlop={8}>
+                <Text style={styles.clearText}>Cerrar</Text>
+              </Pressable>
             </View>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+
+          {searchable && (
+            <SearchInput
+              value={query}
+              onChangeText={setQuery}
+              placeholder={searchPlaceholder}
+            />
+          )}
+
+          {filteredOptions.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>
+                {searchable && query.trim()
+                  ? `Sin resultados para "${query.trim()}"`
+                  : emptyText}
+              </Text>
+            </View>
+          ) : (
+            filteredOptions.map((opt) => {
+              const isSelected = values.includes(opt.value);
+              const isDisabled = !!max && !isSelected && values.length >= max;
+              return (
+                <Pressable
+                  key={String(opt.value)}
+                  onPress={() => !isDisabled && toggle(opt.value)}
+                  disabled={isDisabled}
+                  style={({ pressed }) => [
+                    styles.option,
+                    pressed && styles.optionPressed,
+                    isSelected && styles.optionSelected,
+                    isDisabled && styles.disabled,
+                  ]}
+                >
+                  <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
+                    {isSelected && <Icon name="check" size={12} color="#FFFFFF" />}
+                  </View>
+                  <Text style={styles.optionLabel} numberOfLines={1}>
+                    {opt.label}
+                  </Text>
+                  {opt.subLabel !== undefined && opt.subLabel !== '' && (
+                    <Text style={styles.optionSubLabel} numberOfLines={1}>
+                      {opt.subLabel}
+                    </Text>
+                  )}
+                </Pressable>
+              );
+            })
+          )}
+        </View>
+      )}
     </View>
   );
 }
 
 /**
- * Input de búsqueda con borde primary en focus (mirror del estilo web
- * `focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-primary)]`).
+ * Input de búsqueda con borde primary en focus.
  */
 function SearchInput({
   value,
@@ -275,9 +240,9 @@ function SearchInput({
         autoCorrect={false}
         autoCapitalize="none"
         returnKeyType="search"
-        autoFocus
-        // Forzar `selectTextOnFocus` para que el cursor se posicione correctamente
-        // al volver a focus después de un evento que momentáneamente lo quite.
+        // Importante: NO usar autoFocus aquí porque al renderizar el
+        // popover inline, autoFocus puede provocar focus theft con
+        // otros inputs. El usuario debe tocar el input para enfocarlo.
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
       />
@@ -305,7 +270,7 @@ const styles = StyleSheet.create({
     gap: spacing[2],
   },
   triggerPressed: {
-    backgroundColor: colorScales.gray[50],
+    backgroundColor: colorScales.gray[100],
   },
   triggerText: {
     flex: 1,
@@ -317,21 +282,6 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.5,
-  },
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  // Contenedor raíz del Modal (necesario para que KeyboardAvoidingView mida
-  // correctamente el alto disponible cuando aparece el teclado).
-  kavRoot: {
-    flex: 1,
-  },
-  modalRoot: {
-    flex: 1,
   },
   chipsRow: {
     flex: 1,
@@ -358,7 +308,21 @@ const styles = StyleSheet.create({
   chipRemove: {
     padding: 2,
   },
-  // Estructura del popover (dropdown) que aparece al abrir el selector.
+  // Popover (renderizado inline, sin Modal). Mismo visual que la web:
+  // card con border-radius, sombra, header con hint + acciones.
+  popover: {
+    marginTop: spacing[1.5],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colors.card,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 12,
+    elevation: 8,
+    overflow: 'hidden',
+  },
   popoverHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -371,27 +335,12 @@ const styles = StyleSheet.create({
   modalHint: {
     fontSize: typography.fontSize.sm,
     color: colors.text.secondary,
+    flexShrink: 1,
   },
   clearText: {
     fontSize: typography.fontSize.sm,
     color: colors.primary,
     fontWeight: '500',
-  },
-  popover: {
-    position: 'absolute',
-    backgroundColor: colors.background,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 8,
-    overflow: 'hidden',
-  },
-  list: {
-    maxHeight: 400,
   },
   option: {
     flexDirection: 'row',
@@ -419,7 +368,6 @@ const styles = StyleSheet.create({
     maxWidth: '40%',
     flexShrink: 0,
   },
-  // Indicador checkbox a la izquierda de cada opción (espejo de la web)
   checkbox: {
     width: 16,
     height: 16,
@@ -434,7 +382,7 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     backgroundColor: colors.primary,
   },
-  // Búsqueda en el popover (cuando `searchable` está activo)
+  // Búsqueda
   searchBox: {
     marginHorizontal: spacing[3],
     marginTop: spacing[3],
@@ -449,11 +397,6 @@ const styles = StyleSheet.create({
   searchBoxFocused: {
     borderColor: colors.primary,
     borderWidth: 1.5,
-    // Simula el `focus:ring-2` de la web: sombra tenue con color primary
-    ...Platform.select({
-      ios: { shadowColor: colors.primary, shadowOpacity: 0.18, shadowRadius: 4, shadowOffset: { width: 0, height: 0 } },
-      android: { elevation: 2 },
-    }),
   },
   searchInput: {
     fontSize: typography.fontSize.sm,
