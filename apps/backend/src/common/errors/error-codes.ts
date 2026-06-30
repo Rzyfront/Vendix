@@ -3015,6 +3015,12 @@ export const ErrorCodes = {
     devMessage:
       'El producto no es vendible (is_sellable=false) y no puede agregarse a la carta',
   },
+  MENU_ITEM_NOT_AVAILABLE_NOW: {
+    code: 'MENU_ITEM_NOT_AVAILABLE_NOW',
+    httpStatus: 422,
+    devMessage:
+      'El producto pertenece a una carta con horario y no está disponible en este momento',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export const FiscalScopeBlockerCodes = {
