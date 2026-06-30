@@ -15,7 +15,10 @@ import {
 import {
   CardComponent,
   IconComponent,
-  StatsComponent} from '../../../../../../shared/components/index';
+  StatsComponent,
+  AlertBannerComponent,
+  ButtonComponent} from '../../../../../../shared/components/index';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'vendix-cartera-dashboard',
@@ -25,6 +28,8 @@ import {
     CardComponent,
     IconComponent,
     StatsComponent,
+    AlertBannerComponent,
+    ButtonComponent,
   ],
   templateUrl: './cartera-dashboard.component.html'})
 export class CarteraDashboardComponent {
@@ -40,47 +45,53 @@ private carteraService = inject(CarteraService);
   readonly ar_upcoming = signal<AccountReceivable[]>([]);
   readonly ap_upcoming = signal<AccountPayable[]>([]);
   readonly is_loading = signal(true);
+  readonly error = signal<string | null>(null);
 
   constructor() {
     this.loadAll();
   }
-private loadAll(): void {
+  loadAll(): void {
     this.is_loading.set(true);
+    this.error.set(null);
     let pending = 6;
     const done = () => {
       pending--;
       if (pending === 0) this.is_loading.set(false);
     };
+    const fail = (err: unknown) => {
+      this.error.set(parseApiError(err).userMessage);
+      done();
+    };
 
     this.carteraService
       .getArDashboard()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (r) => { this.ar_dashboard.set(r.data); done(); }, error: done });
+      .subscribe({ next: (r) => { this.ar_dashboard.set(r.data); done(); }, error: fail });
 
     this.carteraService
       .getApDashboard()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (r) => { this.ap_dashboard.set(r.data); done(); }, error: done });
+      .subscribe({ next: (r) => { this.ap_dashboard.set(r.data); done(); }, error: fail });
 
     this.carteraService
       .getArAging()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (r) => { this.ar_aging.set(r.data); done(); }, error: done });
+      .subscribe({ next: (r) => { this.ar_aging.set(r.data); done(); }, error: fail });
 
     this.carteraService
       .getApAging()
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (r) => { this.ap_aging.set(r.data); done(); }, error: done });
+      .subscribe({ next: (r) => { this.ap_aging.set(r.data); done(); }, error: fail });
 
     this.carteraService
       .getArUpcoming(7)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (r) => { this.ar_upcoming.set(r.data); done(); }, error: done });
+      .subscribe({ next: (r) => { this.ar_upcoming.set(r.data); done(); }, error: fail });
 
     this.carteraService
       .getApUpcoming(7)
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({ next: (r) => { this.ap_upcoming.set(r.data); done(); }, error: done });
+      .subscribe({ next: (r) => { this.ap_upcoming.set(r.data); done(); }, error: fail });
   }
 
   // ── Format helpers ──────────────────────────────────
