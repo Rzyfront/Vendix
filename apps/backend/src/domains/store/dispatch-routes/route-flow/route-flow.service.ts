@@ -1052,12 +1052,20 @@ export class RouteFlowService {
       return updated_route;
     });
 
+    // Conductor/responsable del faltante: interno (driver_user_id) o externo.
+    // El asiento de faltante (CxC 1355) usa este id/etiqueta como tercero.
+    const driver_label = updated.is_primary_driver_external
+      ? updated.external_driver_name || undefined
+      : undefined;
+
     // Emit route.closed event
     this.eventEmitter.emit('dispatch_route.closed', {
       route_id: id,
       route_number: updated.route_number,
       store_id,
       user_id,
+      driver_user_id: updated.driver_user_id ?? undefined,
+      driver_label,
       total_collected,
       total_changes,
       total_withholdings,

@@ -413,7 +413,10 @@ export class AutoEntryService {
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
       payroll_item: 'auto_payroll',
+      'settlement.approved': 'auto_payroll',
       'settlement.paid': 'auto_payroll',
+      'layaway.cancelled': 'auto_payment',
+      'dispatch_route.closed': 'adjustment',
       ar_write_off: 'adjustment',
       ap_payment: 'auto_purchase',
       ap_write_off: 'adjustment',
@@ -2299,6 +2302,177 @@ export class AutoEntryService {
     });
   }
 
+  /**
+   * layaway.cancelled: reversa del anticipo recibido.
+   *   DR 2805 Anticipos recibidos      (total_paid)
+   *   CR 1105/1110 Caja/Banco          (refund_amount, dinero devuelto)
+   *   CR 4295 Otros ingresos           (cancellation_fee, penalización retenida)
+   * Invariante: refund_amount + cancellation_fee == total_paid (la entrada
+   * balancea por construcción: DR total_paid == CR (refund + fee)).
+   */
+  async onLayawayCancelled(data: {
+    plan_id: number;
+    plan_number: string;
+    organization_id: number;
+    store_id?: number;
+    total_paid: number;
+    refund_amount: number;
+    cancellation_fee: number;
+    refund_method?: string;
+    user_id?: number;
+  }) {
+    const lines: (AutoEntryLine | null)[] = [];
+
+    // DR: reversa del anticipo (todo lo pagado sale del pasivo 2805)
+    if (data.total_paid > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'layaway.cancelled.advance',
+          `Reversa anticipo separé ${data.plan_number}`,
+          data.total_paid,
+          0,
+          data.store_id,
+        ),
+      );
+    }
+
+    // CR: devolución de efectivo/banco al cliente
+    if (data.refund_amount > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'layaway.cancelled.refund',
+          `Devolución separé ${data.plan_number}`,
+          0,
+          data.refund_amount,
+          data.store_id,
+        ),
+      );
+    }
+
+    // CR: penalización retenida reconocida como otros ingresos
+    if (data.cancellation_fee > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'layaway.cancelled.forfeit_income',
+          `Penalización separé ${data.plan_number}`,
+          0,
+          data.cancellation_fee,
+          data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'layaway.cancelled',
+      source_id: data.plan_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Plan separé cancelado ${data.plan_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * dispatch_route.closed: contabiliza SOLO el cuadre de efectivo del conductor
+   * (cash_variance). El recaudo y las retenciones por parada ya se contabilizan
+   * vía payment.received / withholding al liquidar cada parada — aquí NO se
+   * vuelve a contabilizar (anti doble-conteo).
+   *
+   *   Sobrante (cash_variance > 0): DR 1105 Caja / CR 4295 Otros ingresos.
+   *   Faltante (cash_variance < 0): DR 1365 CxC a trabajadores (conductor) / CR 1105 Caja.
+   *   cash_variance == 0: no se genera asiento.
+   */
+  async onDispatchRouteClosed(data: {
+    route_id: number;
+    route_number: string;
+    organization_id: number;
+    store_id?: number;
+    cash_variance: number;
+    driver_user_id?: number;
+    driver_label?: string;
+    user_id?: number;
+  }) {
+    const variance = Number(data.cash_variance || 0);
+    // GUARD anti doble-conteo: sin descuadre no hay asiento (el recaudo y las
+    // retenciones ya fueron contabilizados por parada).
+    if (Math.abs(variance) <= 0.01) {
+      this.logger.log(
+        `Skipping dispatch_route.closed auto-entry for route ${data.route_number}: cash_variance is zero`,
+      );
+      return null;
+    }
+
+    const driver = data.driver_label
+      ? ` - ${data.driver_label}`
+      : data.driver_user_id
+        ? ` - conductor #${data.driver_user_id}`
+        : '';
+    const lines: (AutoEntryLine | null)[] = [];
+
+    if (variance > 0) {
+      // Sobrante: entra efectivo, se reconoce como otro ingreso.
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_route.closed.cash',
+          `Sobrante de ruta ${data.route_number}`,
+          variance,
+          0,
+          data.store_id,
+        ),
+      );
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_route.closed.surplus',
+          `Sobrante de ruta ${data.route_number}`,
+          0,
+          variance,
+          data.store_id,
+        ),
+      );
+    } else {
+      // Faltante: el efectivo no entregado queda como CxC al conductor.
+      const shortage = Math.abs(variance);
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_route.closed.shortage_receivable',
+          `Faltante de ruta ${data.route_number}${driver}`,
+          shortage,
+          0,
+          data.store_id,
+        ),
+      );
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_route.closed.cash',
+          `Faltante de ruta ${data.route_number}`,
+          0,
+          shortage,
+          data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_route.closed',
+      source_id: data.route_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      entry_date: new Date(),
+      description: `Cuadre planilla de ruta ${data.route_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
   // ===== FIXED ASSETS - DEPRECIATION =====
 
   /**
@@ -2554,6 +2728,137 @@ export class AutoEntryService {
    * CR 2370 Retenciones y Aportes de Nómina (salud + pensión)
    * CR 1110 Bancos (neto)
    */
+  /**
+   * settlement.approved (DEVENGO/causación): reconoce el COSTO laboral de la
+   * liquidación como gasto/provisión contra el pasivo laboral 2505.
+   *
+   *   DR 2610 Cesantías
+   *   DR 2615 Intereses sobre Cesantías
+   *   DR 2620 Prima Proporcional
+   *   DR 2625 Vacaciones Proporcionales
+   *   DR 5105 Gastos de Personal (salario pendiente + indemnización)
+   *   CR 2505 Salarios por Pagar (total devengado = suma de los débitos)
+   *
+   * El pago (`onSettlementPaid`) SOLO drena 2505; el gasto NO se vuelve a
+   * reconocer. Idempotencia: `createAutoEntry` deduplica por
+   * (org, source_type='settlement.approved', source_id, accounting_entity);
+   * un re-emit de settlement.approved no causa un segundo asiento.
+   */
+  async onSettlementApproved(data: {
+    settlement_id: number;
+    settlement_number: string;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    employee_name: string;
+    severance: number;
+    severance_interest: number;
+    bonus: number;
+    vacation: number;
+    pending_salary: number;
+    indemnification: number;
+    user_id?: number;
+  }) {
+    const lines: (AutoEntryLine | null)[] = [];
+    const desc = (concept: string) =>
+      `${concept} - ${data.employee_name} (${data.settlement_number})`;
+
+    // DEBIT lines (provisiones + gasto): cada concepto causa su costo.
+    const debit_specs: Array<{ key: string; label: string; amount: number }> = [
+      {
+        key: 'settlement.approved.severance',
+        label: 'Cesantías',
+        amount: data.severance,
+      },
+      {
+        key: 'settlement.approved.severance_interest',
+        label: 'Intereses Cesantías',
+        amount: data.severance_interest,
+      },
+      {
+        key: 'settlement.approved.bonus',
+        label: 'Prima Proporcional',
+        amount: data.bonus,
+      },
+      {
+        key: 'settlement.approved.vacation',
+        label: 'Vacaciones Proporcionales',
+        amount: data.vacation,
+      },
+      {
+        key: 'settlement.approved.pending_salary',
+        label: 'Salario Pendiente',
+        amount: data.pending_salary,
+      },
+      {
+        key: 'settlement.approved.indemnification',
+        label: 'Indemnización',
+        amount: data.indemnification,
+      },
+    ];
+
+    let total_accrued = 0;
+    for (const spec of debit_specs) {
+      if (spec.amount > 0) {
+        total_accrued += spec.amount;
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id,
+            spec.key,
+            desc(spec.label),
+            spec.amount,
+            0,
+            data.store_id,
+          ),
+        );
+      }
+    }
+
+    // CR 2505 Salarios por Pagar — el total devengado pasa a pasivo laboral.
+    if (total_accrued > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.approved.salaries_payable',
+          desc('Salarios por Pagar (causación)'),
+          0,
+          total_accrued,
+          data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'settlement.approved',
+      source_id: data.settlement_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      entry_date: new Date(),
+      description: `Liquidación causada ${data.settlement_number} - ${data.employee_name}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * settlement.paid (DEVENGO): SOLO drena el pasivo laboral 2505 causado en
+   * `settlement.approved`. NO reconoce gasto (ya se reconoció en la causación)
+   * → no hay doble gasto cuando approved + paid ocurren ambos.
+   *
+   *   DR 2505 Salarios por Pagar (total devengado = gross)
+   *   CR 2370 Retenciones de Nómina (salud + pensión)
+   *   CR 1110 Bancos (neto)
+   *
+   * Donde gross == social_deductions + net_settlement, por lo que la entrada
+   * balancea.
+   *
+   * Salvaguarda de orden de estados: la máquina exige calculated→approved→paid
+   * (ver settlement-flow.service.ts VALID_TRANSITIONS), así que `paid` SIEMPRE
+   * llega después de `approved` y el pasivo 2505 ya existe. Si por una ruta
+   * futura el accrual no existiese, este asiento dejaría 2505 en negativo; el
+   * accrual es la única fuente que lo abona.
+   */
   async onSettlementPaid(data: {
     settlement_id: number;
     settlement_number: string;
@@ -2575,74 +2880,24 @@ export class AutoEntryService {
     const desc = (concept: string) =>
       `${concept} - ${data.employee_name} (${data.settlement_number})`;
 
-    // DEBIT lines (provisions and expenses)
-    if (data.severance > 0) {
+    // Total devengado (gross) = suma de conceptos causados en approved. Es lo
+    // que drenamos del pasivo 2505.
+    const gross =
+      data.severance +
+      data.severance_interest +
+      data.bonus +
+      data.vacation +
+      data.pending_salary +
+      data.indemnification;
+
+    // DR 2505 — drena el pasivo laboral causado en approved.
+    if (gross > 0) {
       lines.push(
         await this.resolveAccountLine(
           data.organization_id,
-          'settlement.paid.severance',
-          desc('Cesantías'),
-          data.severance,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.severance_interest > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.severance_interest',
-          desc('Intereses Cesantías'),
-          data.severance_interest,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.bonus > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.bonus',
-          desc('Prima Proporcional'),
-          data.bonus,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.vacation > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.vacation',
-          desc('Vacaciones Proporcionales'),
-          data.vacation,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.pending_salary > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.pending_salary',
-          desc('Salario Pendiente'),
-          data.pending_salary,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.indemnification > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.indemnification',
-          desc('Indemnización'),
-          data.indemnification,
+          'settlement.paid.salaries_payable',
+          desc('Drenaje Salarios por Pagar'),
+          gross,
           0,
           data.store_id,
         ),
