@@ -188,6 +188,13 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     queryFn: () => ProductService.getTaxes(),
   });
 
+  const allTaxes = useMemo(() => {
+    const apiTaxes = (taxes as TaxCategory[]) || [];
+    if (localTaxes.length === 0) return apiTaxes;
+    const existingIds = new Set(apiTaxes.map(t => t.id));
+    return [...apiTaxes, ...localTaxes.filter(t => !existingIds.has(t.id))];
+  }, [taxes, localTaxes]);
+
   const { data: locationsResponse } = useQuery({
     queryKey: ['product-locations'],
     queryFn: () => InventoryService.getLocations({ limit: 100 }),
@@ -263,8 +270,8 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
    */
   const selectedTaxes = useMemo<TaxCategory[]>(() => {
     const ids = new Set(form.tax_category_ids);
-    return ((taxes as TaxCategory[]) || []).filter((tax) => ids.has(tax.id));
-  }, [form.tax_category_ids, taxes]);
+    return allTaxes.filter((tax) => ids.has(tax.id));
+  }, [form.tax_category_ids, allTaxes]);
 
   const taxBreakdown = useMemo<TaxBreakdownItem[]>(() => {
     const base = toNumber(form.base_price) || 0;
@@ -589,7 +596,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   <MultiSelector
                     values={form.tax_category_ids}
                     onChange={(v) => updateField('tax_category_ids', v)}
-                    options={((taxes as TaxCategory[]) || []).map((t) => {
+                    options={allTaxes.map((t) => {
                       const rate = t.tax_rates?.[0]?.rate;
                       const labelText = typeof rate === 'number' ? `${t.name} (${(rate * 100).toFixed(0)}%)` : t.name;
                       return { label: labelText, subLabel: t.name, value: t.id };
@@ -615,7 +622,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   Se muestra siempre visible sin abrir el dropdown. Tocar una fila togglea la selección.
                   Si aún no hay impuestos configurados, muestra un mensaje con CTA para crear uno. */}
               <View style={styles.taxOptionList}>
-                {((taxes as TaxCategory[]) || []).length === 0 && (
+                {allTaxes.length === 0 && (
                   <View style={styles.taxOptionEmpty}>
                     <Icon name="receipt" size={20} color={colors.text.muted} />
                     <Text style={styles.taxOptionEmptyTitle}>No hay impuestos disponibles</Text>
@@ -624,7 +631,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     </Text>
                   </View>
                 )}
-                {((taxes as TaxCategory[]) || []).map((tax) => {
+                {allTaxes.map((tax) => {
                   const isSelected = form.tax_category_ids.includes(tax.id);
                   const rate = tax.tax_rates?.[0]?.rate;
                   const rateLabel = typeof rate === 'number' ? `${tax.name} (${(rate * 100).toFixed(0)}%)` : tax.name;
@@ -842,7 +849,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               label="Impuestos"
               values={form.tax_category_ids}
               onChange={(v) => updateField('tax_category_ids', v)}
-              options={((taxes as TaxCategory[]) || []).map((t) => ({ label: t.name, value: t.id }))}
+              options={allTaxes.map((t) => ({ label: t.name, value: t.id }))}
               placeholder="Seleccionar impuestos"
             />
           </Section>
