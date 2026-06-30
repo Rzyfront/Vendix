@@ -439,11 +439,17 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     // Base payload — fields safe in both create and update.
     // Importante: el backend usa class-validator con `@IsInt()` que rechaza `null`
     // (solo acepta `number | undefined`). Por eso enviamos `undefined` cuando no hay valor.
+    //
+    // SLUG: el DTO requiere `@MinLength(2)` cuando se proporciona. Si el usuario
+    // escribió 1 caracter o nada, lo omitimos para que el backend auto-genere uno.
+    const trimmedSlug = form.slug.trim();
+    const finalSlug = trimmedSlug.length >= 2 ? trimmedSlug : undefined;
+
     const base = {
       name: form.name.trim(),
       description: form.description.trim() || undefined,
       sku: form.sku.trim() || undefined,
-      slug: form.slug.trim() || undefined,
+      slug: finalSlug,
       barcode: form.barcode.trim() || undefined,
       base_price: toNumber(form.base_price) || 0,
       cost_price: toNumber(form.cost_price),
@@ -512,9 +518,16 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       router.back();
     },
     onError: (error: any) => {
-      // NestJS class-validator puede devolver `message: string[]` con cada constraint
-      // violado. Lo aplanamos para mostrar todos los errores al usuario.
       const data = error?.response?.data;
+      // El AllExceptionsFilter del backend mete los constraints de class-validator
+      // en `data.details.validationErrors` y reemplaza `data.message` por un
+      // string genérico "Validation failed". Extraemos los constraints reales.
+      const validationErrors = data?.details?.validationErrors;
+      if (Array.isArray(validationErrors) && validationErrors.length > 0) {
+        toastError(validationErrors.join(' • '));
+        return;
+      }
+      // Fallback: leer data.message (puede ser string o array de otros errores).
       const detail = Array.isArray(data?.message)
         ? data.message.join(' • ')
         : data?.message;
