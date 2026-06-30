@@ -893,7 +893,7 @@ export class PqrService {
         description: ticket.description,
         comment_content: dto.resolution_summary || '',
         author_name: 'Equipo Vendix',
-        requester_email: ticket.requester_email ?? null,
+        requester_email: ticket.requester_email ?? undefined,
         requester_name:
           (ticket.requester_first_name ?? '') +
           ' ' +
@@ -1120,7 +1120,7 @@ export class PqrService {
         comment_content: dto.content,
         author_name: authorName,
         new_status: ticket.status,
-        requester_email: ticket.requester_email ?? null,
+        requester_email: ticket.requester_email ?? undefined,
         requester_name:
           (ticket.requester_first_name ?? '') +
           ' ' +
