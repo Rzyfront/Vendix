@@ -48,58 +48,65 @@
   </div>
 
   <div class="p-2 md:p-4">
-    <div class="view-toggle-bar flex items-center justify-end gap-2 mb-3">
-      <div class="view-toggle inline-flex rounded-md border border-border overflow-hidden">
-        <button
-          type="button"
-          class="px-3 py-1.5 text-xs font-medium flex items-center gap-1"
-          [class.bg-primary-50]="view() === 'table'"
-          [class.text-primary-700]="view() === 'table'"
-          (click)="setView('table')"
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <!-- header: title left, view switch right -->
+      <div class="px-2 py-1.5 md:px-6 md:py-4 md:border-b md:border-border">
+        <div
+          class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
         >
-          <app-icon name="list" [size]="14"></app-icon>
-          Tabla
-        </button>
-        <button
-          type="button"
-          class="px-3 py-1.5 text-xs font-medium flex items-center gap-1"
-          [class.bg-primary-50]="view() === 'floor'"
-          [class.text-primary-700]="view() === 'floor'"
-          (click)="setView('floor')"
-        >
-          <app-icon name="layout-grid" [size]="14"></app-icon>
-          Plano
-        </button>
+          <h2
+            class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+          >
+            Mesas ({{ tables().length }})
+          </h2>
+          <div class="flex items-center gap-2 w-full md:w-auto justify-end">
+            <app-input-buttons
+              [options]="viewOptions"
+              [ngModel]="view()"
+              (ngModelChange)="setView($event)"
+              [equalWidth]="false"
+              [hideLabelsOnMobile]="true"
+              customWrapperClass="!w-auto !mt-0"
+              customContainerClass="!h-9 !rounded-lg"
+            ></app-input-buttons>
+            <app-button
+              variant="outline"
+              size="md"
+              customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
+              (clicked)="openCreate()"
+              title="Nueva mesa"
+            >
+              <app-icon slot="icon" name="plus" [size]="18"></app-icon>
+            </app-button>
+          </div>
+        </div>
       </div>
-    </div>
 
-    @if (isLoading()) {
-      <div class="loading">
-        <app-spinner size="md"></app-spinner>
-        <p>Cargando mesas…</p>
-      </div>
-    } @else if (view() === 'table') {
-      <app-card [responsive]="true" [padding]="false" overflow="visible">
-        <app-responsive-data-view
-          [data]="rows()"
-          [columns]="columns()"
-          [actions]="actions()"
-          [cardConfig]="cardConfig()"
-          [emptyMessage]="'Aún no hay mesas configuradas.'"
-          [emptyTitle]="'Sin mesas'"
-          [emptyDescription]="'Crea la primera mesa con el botón Nueva mesa.'"
-          [emptyActionText]="'Nueva mesa'"
-          [emptyActionIcon]="'plus'"
-          [showEmptyAction]="true"
-          (emptyActionClick)="openCreate()"
-          [loading]="isLoading()"
-          [striped]="true"
-          [hoverable]="true"
-        ></app-responsive-data-view>
-      </app-card>
-    } @else {
-      <app-card [responsive]="true" [padding]="false" overflow="visible">
-        <div class="p-2 md:p-4">
+      <!-- body -->
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        @if (isLoading()) {
+          <div class="loading">
+            <app-spinner size="md"></app-spinner>
+            <p>Cargando mesas…</p>
+          </div>
+        } @else if (view() === 'table') {
+          <app-responsive-data-view
+            [data]="rows()"
+            [columns]="columns()"
+            [actions]="actions()"
+            [cardConfig]="cardConfig()"
+            [emptyMessage]="'Aún no hay mesas configuradas.'"
+            [emptyTitle]="'Sin mesas'"
+            [emptyDescription]="'Crea la primera mesa con el botón Nueva mesa.'"
+            [emptyActionText]="'Nueva mesa'"
+            [emptyActionIcon]="'plus'"
+            [showEmptyAction]="true"
+            (emptyActionClick)="openCreate()"
+            [loading]="isLoading()"
+            [striped]="true"
+            [hoverable]="true"
+          ></app-responsive-data-view>
+        } @else {
           <p class="text-xs text-text-secondary mb-2">
             Reposiciona las mesas en el lienzo. Los cambios se guardan
             automáticamente al soltar.
@@ -110,9 +117,9 @@
             (tableClicked)="openEdit($event)"
             (tableMoved)="onTableMoved($event)"
           />
-        </div>
-      </app-card>
-    }
+        }
+      </div>
+    </app-card>
   </div>
 
   <app-table-form-modal
