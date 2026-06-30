@@ -46,57 +46,6 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
   ],
   template: `
     <div class="pqr-list-page">
-      <!-- ── Sticky header ─────────────────────────────────────────
-           Same component used by every admin module. Tabs inline at
-           the top so the operator can narrow the org-wide queue by
-           bucket (Todas / Vencidas / Sin asignar). -->
-      <app-sticky-header
-        title="PQRS"
-        subtitle="Vista agregada por organización"
-        icon="headset"
-        variant="glass"
-        [showBackButton]="false"
-        [tabs]="quickFilterTabs()"
-        [activeTab]="quickFilter()"
-        tabsAriaLabel="Filtros de PQRS"
-        (tabChanged)="setQuickFilter($event)"
-      />
-
-      <div class="stats-container">
-        <app-stats
-          title="Total PQRS"
-          [value]="stats().total"
-          smallText="Todas las tiendas"
-          iconName="message-square"
-          iconBgColor="bg-blue-100"
-          iconColor="text-blue-600"
-        ></app-stats>
-        <app-stats
-          title="Últimas 24h"
-          [value]="stats().recent_24h"
-          smallText="PQRS recientes"
-          iconName="clock"
-          iconBgColor="bg-violet-100"
-          iconColor="text-violet-600"
-        ></app-stats>
-        <app-stats
-          title="Vencidas"
-          [value]="stats().overdue"
-          smallText="SLA legal agotado"
-          iconName="alert-triangle"
-          iconBgColor="bg-red-100"
-          iconColor="text-red-600"
-        ></app-stats>
-        <app-stats
-          title="Nuevas"
-          [value]="stats().by_status?.NEW || 0"
-          smallText="Sin asignar"
-          iconName="inbox"
-          iconBgColor="bg-amber-100"
-          iconColor="text-amber-600"
-        ></app-stats>
-      </div>
-
       <!-- Quick filters now live in the StickyHeader above. -->
 
       <div class="filters-bar">
