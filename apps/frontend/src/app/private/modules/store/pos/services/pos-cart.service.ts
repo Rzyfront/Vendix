@@ -425,7 +425,27 @@ export class PosCartService {
   }
 
   /**
-   * Apply eligible promotions to the cart
+   * Apply eligible promotions to the cart.
+   *
+   * Phase 3b / Section 6: when a promotion has
+   * `rule_type === 'quantity_tiered'`, the per-line discount is computed by
+   * matching the matched tier against `line.quantity` and priced against the
+   * line total (`unitPrice * quantity`). Tier selection order matches the
+   * backend engine byte-for-byte (see `computeQuantityTierDiscountForLine` in
+   * `apps/backend/src/domains/store/promotions/promotion-engine/promotion-engine.service.ts`):
+   *
+   *   1. Sort tiers by `(min_quantity ASC, sort_order ASC, id ASC)`.
+   *   2. Pick the first tier where `min_quantity <= line.quantity` and
+   *      (`max_quantity` is null OR `>= line.quantity`).
+   *   3. `percentage`: `lineTotal * tier.value / 100`.
+   *      `fixed_amount`: `tier.value * line.quantity` (per-unit value × qty).
+   *   4. Cap each line discount at its line total (never-negative line).
+   *   5. Sum across lines, cap by `max_discount_amount`, then by
+   *      `applicableTotal` (scoped total ceiling).
+   *   6. Scale per-line discounts proportionally so their sum equals the
+   *      final aggregate (persisted snapshot must match per-item breakdown).
+   *
+   * Flat-rule behaviour remains untouched: same flat branch as before.
    */
   applyPromotions(activePromotions: any[]): Observable<CartState> {
     return of(activePromotions).pipe(
@@ -452,6 +472,91 @@ export class PosCartService {
           );
           if (applicableTotal <= 0) continue;
 
+          // -----------------------------------------------------------------
+          // quantity_tiered branch — mirror backend engine math above.
+          // -----------------------------------------------------------------
+          if (promo.rule_type === 'quantity_tiered') {
+            const sortedTiers = (promo.promotion_quantity_tiers ?? [])
+              .slice()
+              .sort((a: any, b: any) => {
+                if (a.min_quantity !== b.min_quantity)
+                  return a.min_quantity - b.min_quantity;
+                if (a.sort_order !== b.sort_order)
+                  return a.sort_order - b.sort_order;
+                return Number(a.id) - Number(b.id);
+              });
+
+            if (sortedTiers.length === 0) continue;
+
+            const applicableItems = this.getPromotionApplicableItems(
+              promo,
+              currentState.items,
+            );
+
+            // Per-line discount computed independently from each line's quantity.
+            const perLineDiscount: Array<{ item: CartItem; discount: number }> =
+              [];
+            let rawTotal = 0;
+            for (const item of applicableItems) {
+              const lineDiscount = this.computeQuantityTierDiscountForLine(
+                item,
+                sortedTiers,
+              );
+              perLineDiscount.push({ item, discount: lineDiscount });
+              rawTotal = this.roundMoney(rawTotal + lineDiscount);
+            }
+
+            if (rawTotal <= 0) continue;
+
+            // Apply the global `max_discount_amount` cap on top of the summed
+            // line discounts; never exceed the applicable scoped total either.
+            let discountAmount = rawTotal;
+            const maxDiscountAmount = this.toOptionalNumber(promo.max_discount_amount);
+            if (maxDiscountAmount !== null && maxDiscountAmount > 0) {
+              discountAmount = Math.min(discountAmount, maxDiscountAmount);
+            }
+            discountAmount = Math.min(discountAmount, applicableTotal);
+            discountAmount = this.roundMoney(discountAmount);
+            if (discountAmount <= 0) continue;
+
+            // Proportionally scale per-line discounts to match the capped
+            // total so the persisted snapshot matches the per-item breakdown.
+            // We only feed the AGGREGATE `discount_amount` into
+            // `CartDiscount.amount` — that's what `calculateSummary` reads
+            // to subtract from the cart total. Per-line persistence is the
+            // backend's job; we mirror math, not state.
+            //
+            // The iteration is kept (instead of just `discountAmount`) so the
+            // rounding-and-last-share remainder logic stays in lockstep with
+            // the engine — any future drift here would silently mis-preview.
+            const scale = rawTotal > 0 ? discountAmount / rawTotal : 0;
+            let assigned = 0;
+            perLineDiscount.forEach(({ item: _item }, i) => {
+              const isLast = i === perLineDiscount.length - 1;
+              const rawShare = perLineDiscount[i].discount;
+              const proportionalShare = this.roundMoney(rawShare * scale);
+              const share = isLast
+                ? this.roundMoney(discountAmount - assigned)
+                : proportionalShare;
+              assigned = this.roundMoney(assigned + share);
+              // `share` is bounded above by `discountAmount`, which itself
+              // was capped at `applicableTotal` and `max_discount_amount`;
+              // so it cannot exceed a single line total here. No mutation.
+            });
+
+            promoDiscounts.push({
+              id: 'PROMO_' + promo.id,
+              type: promo.type === 'percentage' ? 'percentage' : 'fixed',
+              value: Number(promo.value),
+              description: promo.name,
+              amount: discountAmount,
+              promotion_id: promo.id,
+              is_auto_applied: true,
+            });
+            continue;
+          }
+
+          // Flat branch (untouched) — preserved bit-for-bit with prior logic.
           // Calculate discount
           let discountAmount = 0;
           if (promo.type === 'percentage') {
@@ -487,6 +592,88 @@ export class PosCartService {
       }),
       tap((newState) => this.cartState.set(newState)),
     );
+  }
+
+  /**
+   * Pick the items that fall inside the promotion's scope (product, category,
+   * or order-wide). Used by the quantity_tiered branch — pure mirror of the
+   * existing `calculatePromotionApplicableTotal` filter, but returns the
+   * items themselves instead of summing them. Scope semantics are NOT
+   * changed; this is just a non-mutating read.
+   */
+  private getPromotionApplicableItems(promo: any, items: CartItem[]): CartItem[] {
+    if (promo.scope === 'product') {
+      const promoProductIds = (promo.promotion_products || [])
+        .map((pp: any) => Number(pp.product_id))
+        .filter((id: number) => Number.isFinite(id));
+      return items.filter((item) =>
+        promoProductIds.includes(Number(item.product.id)),
+      );
+    }
+
+    if (promo.scope === 'category') {
+      const promoCategoryIds = (promo.promotion_categories || [])
+        .map((pc: any) => Number(pc.category_id))
+        .filter((id: number) => Number.isFinite(id));
+      return items.filter((item) =>
+        this.getItemCategoryIds(item).some((categoryId) =>
+          promoCategoryIds.includes(categoryId),
+        ),
+      );
+    }
+
+    return items;
+  }
+
+  /**
+   * Compute the per-line discount for a `quantity_tiered` promotion. The
+   * matching tier is the one where `min_quantity <= line.quantity` and
+   * (`max_quantity` is null OR `>= line.quantity`). Tier math:
+   *  - percentage: `lineTotal × tier.value / 100`
+   *  - fixed_amount: `tier.value × line.quantity` (per-unit value × qty)
+   * The returned discount is capped at the line total (never negative line)
+   * and rounded to 2 decimals.
+   *
+   * Tiers MUST be pre-sorted by `min_quantity` ascending before calling; this
+   * helper picks the first tier that matches the line quantity.
+   *
+   * MIRROR of `computeQuantityTierDiscountForLine` in the backend engine —
+   * KEEP math byte-identical. See plan Section 6 (drift mitigation).
+   */
+  private computeQuantityTierDiscountForLine(
+    item: CartItem,
+    sortedTiers: any[],
+  ): number {
+    const quantity = Number(item.quantity);
+    const unitPrice = Number(item.finalPrice);
+    if (!Number.isFinite(quantity) || quantity <= 0) return 0;
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) return 0;
+    if (!Array.isArray(sortedTiers) || sortedTiers.length === 0) return 0;
+
+    const matchedTier = sortedTiers.find(
+      (t) =>
+        t.min_quantity <= quantity &&
+        (t.max_quantity === null ||
+          t.max_quantity === undefined ||
+          t.max_quantity >= quantity),
+    );
+    if (!matchedTier) return 0;
+
+    const tierValue = Number(matchedTier.value);
+    if (!Number.isFinite(tierValue) || tierValue <= 0) return 0;
+
+    const lineTotal = unitPrice * quantity;
+    let discount = 0;
+    if (matchedTier.type === 'percentage') {
+      discount = (lineTotal * tierValue) / 100;
+    } else {
+      // fixed_amount: tier.value applies per unit bought
+      discount = tierValue * quantity;
+    }
+
+    // Never discount more than the line total (final line total >= 0).
+    discount = Math.max(0, Math.min(discount, lineTotal));
+    return this.roundMoney(discount);
   }
 
   /**
