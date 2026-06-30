@@ -672,7 +672,7 @@ export const APP_MODULES: {
         },
         {
           key: 'help_pqrs',
-          label: 'Mis Solicitudes',
+          label: 'PQRS',
           description:
             'Conversaciones y solicitudes radicadas por tus clientes desde la tienda',
         },

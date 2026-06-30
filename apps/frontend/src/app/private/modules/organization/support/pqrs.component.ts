@@ -17,6 +17,14 @@ import {
   IconComponent,
   StatsComponent,
   StickyHeaderComponent,
+  CardComponent,
+  InputsearchComponent,
+  OptionsDropdownComponent,
+} from '../../../../shared/components';
+import type {
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
 } from '../../../../shared/components';
 import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
@@ -43,13 +51,16 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     IconComponent,
     StatsComponent,
     StickyHeaderComponent,
+    CardComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
   ],
   template: `
     <div class="pqr-list-page">
-      <!-- ── Sticky header (patrón Ventas) ─────────────────────────────
-           Same component used by every admin module. Tabs inline at the
-           top so the operator can narrow the org-wide queue by bucket
-           (Todas / Vencidas / Sin asignar). -->
+      <!-- ── Sticky header ─────────────────────────────────────────
+           Same component used by every admin module. Tabs inline at
+           the top so the operator can narrow the org-wide queue by
+           bucket (Todas / Vencidas / Sin asignar). -->
       <app-sticky-header
         title="PQRS"
         subtitle="Vista agregada por organización"
@@ -62,73 +73,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         (tabChanged)="setQuickFilter($event)"
       />
 
-      <!-- ── Sub-header card (patrón Ventas) ─────────────────────────
-           Icon + title + subtitle that gives the org-admin a single
-           scannable block of context right under the sticky header. -->
-      <div class="pqr-subheader">
-        <div class="pqr-subheader__icon">
-          <app-icon name="message-square" [size]="22"></app-icon>
-        </div>
-        <div class="pqr-subheader__copy">
-          <h2>PQRS</h2>
-          <p>Vista agregada de peticiones, quejas y reclamos en tus tiendas</p>
-        </div>
-      </div>
-
-      <!-- Cross-store CTA -->
-      <div
-        class="cta-card"
-        [class.cta-card--urgent]="overdueCount() > 0"
-        [class.cta-card--empty]="stats().total === 0"
-      >
-        @if (stats().total === 0) {
-        <div class="cta-card__main">
-          <div class="cta-card__icon cta-card__icon--muted">
-            <app-icon name="inbox" [size]="32"></app-icon>
-          </div>
-          <div class="cta-card__copy">
-            <h2>Sin PQRS en tus tiendas</h2>
-            <p>
-              Cuando un visitante radique una petición, queja o reclamo en
-              cualquier tienda de tu organización, aparecerá aquí.
-            </p>
-          </div>
-        </div>
-        } @else {
-        <div class="cta-card__main">
-          <div class="cta-card__icon">
-            <app-icon
-              [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-square'"
-              [size]="28"
-            ></app-icon>
-          </div>
-          <div class="cta-card__copy">
-            <h2>
-              @if (overdueCount() > 0) {
-                {{ overdueCount() }} PQRS
-                con SLA vencido en tus tiendas
-              } @else if (stats().recent_24h > 0) {
-                {{ stats().recent_24h }} PQRS
-                radicadas en las últimas 24h
-              } @else {
-                Todas las tiendas al día con PQRS
-              }
-            </h2>
-            <p>
-              @if (overdueCount() > 0) {
-                ⚠️ Riesgo regulatorio a nivel de la organización.
-              } @else if (stats().recent_24h > 0) {
-                Monitorea la respuesta de cada tienda para evitar
-                acumulación de SLA.
-              } @else {
-                Sin PQRS pendientes de revisión.
-              }
-            </p>
-          </div>
-        </div>
-        }
-      </div>
-
+      <!-- ── Stats grid ────────────────────────────────────────────── -->
       <div class="stats-container">
         <app-stats
           title="Total PQRS"
@@ -148,7 +93,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         ></app-stats>
         <app-stats
           title="Vencidas"
-          [value]="stats().overdue"
+          [value]="overdueCount()"
           smallText="SLA legal agotado"
           iconName="alert-triangle"
           iconBgColor="bg-red-100"
@@ -164,53 +109,52 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         ></app-stats>
       </div>
 
-      <!-- Quick filters now live in the StickyHeader above. -->
-
-      <div class="filters-bar">
-        <div class="filter-group">
-          <label>Tipo de solicitud</label>
-          <select [(ngModel)]="typeFilter" (change)="applyFilters()">
-            <option value="">Todos</option>
-            <option value="PETITION">Petición</option>
-            <option value="COMPLAINT">Queja</option>
-            <option value="CLAIM">Reclamo</option>
-            <option value="SUGGESTION">Sugerencia</option>
-          </select>
-        </div>
-        <div class="filter-group">
-          <label>Tienda</label>
-          <select
-            [ngModel]="storeFilter()"
-            (ngModelChange)="storeFilter.set($event); applyFilters()"
+      <!-- ── List card ─────────────────────────────────────────────── -->
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+        <div
+          class="px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
-            <option value="">Todas las tiendas</option>
-            @for (s of orgStores(); track s.id) {
-            <option [value]="s.id">{{ s.name }}</option>
-            }
-          </select>
-        </div>
-        <div class="filter-group filter-group--search">
-          <label>Buscar</label>
-          <div class="search-input">
-            <app-icon name="search" [size]="16"></app-icon>
-            <input
-              type="search"
-              placeholder="Asunto o número de ticket…"
-              [ngModel]="searchInput()"
-              (ngModelChange)="searchInput.set($event)"
-            />
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:text-text-primary"
+            >
+              Todas las solicitudes ({{ total() }})
+            </h2>
+            <div class="flex items-center gap-2 w-full md:w-auto">
+              <app-inputsearch
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                size="sm"
+                placeholder="Asunto o número de ticket…"
+                (search)="onSearch($event)"
+              ></app-inputsearch>
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions"
+                [isLoading]="loading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearAllFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="table-wrapper">
-        @if (loading()) {
-        <div class="loading-overlay"><span>Cargando…</span></div>
+        @if (loading() && tickets().length === 0) {
+        <div class="p-6 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-sm text-text-secondary">Cargando solicitudes…</p>
+        </div>
         }
-        @if (errorMsg(); as msg) {
-        <div class="error-banner">{{ msg }}</div>
-        }
-        <table class="pqr-table">
+
+        <div class="px-2 pb-2 pt-1 md:p-4">
+          <div class="table-scroll" role="region" aria-label="Listado de solicitudes">
+            <table class="pqr-table">
           <thead>
             <tr>
               <th>Ticket</th>
@@ -276,7 +220,9 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
             }
           </tbody>
         </table>
-      </div>
+          </div>
+        </div>
+      </app-card>
     </div>
   `,
   styles: [
@@ -759,8 +705,71 @@ private loadOrgStores(): void {
   clearAllFilters() {
     this.quickFilter.set('all');
     this.typeFilter = '';
+    this.storeFilter.set('');
     this.searchInput.set('');
+    this.filterValues = {};
     this.fetch();
+  }
+
+  // ── Options dropdown handlers (patrón imagen #18) ──────────────────
+
+  /** Filters surfaced in the options-dropdown's "Filtros" popover. */
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'pqr_type',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'PETITION', label: 'Petición' },
+        { value: 'COMPLAINT', label: 'Queja' },
+        { value: 'CLAIM', label: 'Reclamo' },
+        { value: 'SUGGESTION', label: 'Sugerencia' },
+      ],
+    },
+    {
+      key: 'store_id',
+      label: 'Tienda',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todas las tiendas' },
+        ...this.orgStores().map((s) => ({
+          value: String(s.id),
+          label: s.name,
+        })),
+      ],
+    },
+  ];
+
+  filterValues: FilterValues = {};
+
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Exportar lista',
+      icon: 'download',
+      action: 'export',
+    },
+  ];
+
+  /** Search input handler. */
+  onSearch(query: string): void {
+    this.searchInput.set(query);
+    this.fetch();
+  }
+
+  /** Filter dropdown change — applies the selected filters. */
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.typeFilter = (values['pqr_type'] as any) ?? '';
+    this.storeFilter.set(
+      values['store_id'] ? Number(values['store_id']) : '',
+    );
+    this.fetch();
+  }
+
+  /** Dropdown action click — currently only export placeholder. */
+  onActionClick(_action: string): void {
+    // No-op for now; real export wiring is out of scope.
   }
 
   typeLabel(t: string): string {
@@ -809,6 +818,17 @@ private loadOrgStores(): void {
 
   overdueCount(): number {
     return this.stats().overdue || 0;
+  }
+
+  /** Total ticket count for the list header. */
+  total(): number {
+    return this.stats().total || 0;
+  }
+
+  /** Active (open / in-progress / waiting) ticket count for the CTA. */
+  pendingCount(): number {
+    const s = this.stats().by_status || {};
+    return (s['NEW'] || 0) + (s['OPEN'] || 0) + (s['IN_PROGRESS'] || 0);
   }
 
   private slaLimitFor(type: string): number {
