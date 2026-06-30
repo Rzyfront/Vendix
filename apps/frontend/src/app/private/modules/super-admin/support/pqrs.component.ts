@@ -17,6 +17,14 @@ import {
   IconComponent,
   StatsComponent,
   StickyHeaderComponent,
+  CardComponent,
+  InputsearchComponent,
+  OptionsDropdownComponent,
+} from '../../../../shared/components';
+import type {
+  FilterConfig,
+  FilterValues,
+  DropdownAction,
 } from '../../../../shared/components';
 import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
@@ -47,53 +55,57 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
     IconComponent,
     StatsComponent,
     StickyHeaderComponent,
+    CardComponent,
+    InputsearchComponent,
+    OptionsDropdownComponent,
   ],
   template: `
     <div class="pqr-list-page">
-      <!-- Filters bar (advanced) -->
-      <div class="filters-bar">
-        <div class="filter-group">
-          <label>Tipo de solicitud</label>
-          <select [(ngModel)]="typeFilter" (change)="applyFilters()">
-            <option value="">Todos</option>
-            <option value="PETITION">Petición</option>
-            <option value="COMPLAINT">Queja</option>
-            <option value="CLAIM">Reclamo</option>
-            <option value="SUGGESTION">Sugerencia</option>
-          </select>
-        </div>
-        <div class="filter-group filter-group--search">
-          <label>Buscar</label>
-          <div class="search-input">
-            <app-icon name="search" [size]="16"></app-icon>
-            <input
-              type="search"
-              placeholder="Asunto, número o tienda…"
-              [ngModel]="searchInput()"
-              (ngModelChange)="searchInput.set($event)"
-            />
-            @if (searchInput()) {
-            <button class="clear-btn" (click)="clearSearch()" aria-label="Limpiar">
-              ×
-            </button>
-            }
+      <app-card [responsive]="true" [padding]="false" overflow="visible">
+        <div
+          class="px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
+          <div
+            class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+          >
+            <h2
+              class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:text-text-primary"
+            >
+              Todas las solicitudes ({{ total() }})
+            </h2>
+            <div class="flex items-center gap-2 w-full md:w-auto">
+              <app-inputsearch
+                class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                size="sm"
+                placeholder="Asunto, número o tienda…"
+                (search)="onSearch($event)"
+              ></app-inputsearch>
+              <app-options-dropdown
+                class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+                [filters]="filterConfigs"
+                [filterValues]="filterValues"
+                [actions]="dropdownActions"
+                [isLoading]="loading()"
+                (filterChange)="onFilterChange($event)"
+                (clearAllFilters)="clearAllFilters()"
+                (actionClick)="onActionClick($event)"
+              ></app-options-dropdown>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Table with SLA column -->
-      <div class="table-wrapper">
-        @if (loading()) {
-        <div class="loading-overlay">
-          <span>Cargando…</span>
+        @if (loading() && tickets().length === 0) {
+        <div class="p-6 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-sm text-text-secondary">Cargando solicitudes…</p>
         </div>
         }
 
-        @if (errorMsg(); as msg) {
-        <div class="error-banner">{{ msg }}</div>
-        }
-
-        <table class="pqr-table">
+        <div class="px-2 pb-2 pt-1 md:p-4">
+          <div class="table-scroll" role="region" aria-label="Listado de solicitudes">
+            <table class="pqr-table">
           <thead>
             <tr>
               <th>Ticket</th>
@@ -211,6 +223,9 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
           <span class="page-info">{{ total() }} resultados</span>
         </nav>
         }
+          </div>
+        </div>
+      </app-card>
     </div>
   `,
   styles: [
@@ -797,6 +812,54 @@ export class SuperadminPqrsComponent {
     this.searchInput.set('');
     this.page.set(1);
     this.fetch();
+  }
+
+  // ── Options dropdown handlers (patrón imagen #18) ──────────────────
+
+  /** Filters surfaced in the options-dropdown's "Filtros" popover. */
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'pqr_type',
+      label: 'Tipo',
+      type: 'select',
+      options: [
+        { value: '', label: 'Todos' },
+        { value: 'PETITION', label: 'Petición' },
+        { value: 'COMPLAINT', label: 'Queja' },
+        { value: 'CLAIM', label: 'Reclamo' },
+        { value: 'SUGGESTION', label: 'Sugerencia' },
+      ],
+    },
+  ];
+
+  filterValues: FilterValues = {};
+
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Exportar lista',
+      icon: 'download',
+      action: 'export',
+    },
+  ];
+
+  /** Search input handler. */
+  onSearch(query: string): void {
+    this.searchInput.set(query);
+    this.page.set(1);
+    this.fetch();
+  }
+
+  /** Filter dropdown change — applies the selected pqr_type. */
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.typeFilter = (values['pqr_type'] as any) ?? '';
+    this.page.set(1);
+    this.fetch();
+  }
+
+  /** Dropdown action click — currently only export placeholder. */
+  onActionClick(_action: string): void {
+    // No-op for now; real export wiring is out of scope.
   }
 
   goToPage(p: number) {
