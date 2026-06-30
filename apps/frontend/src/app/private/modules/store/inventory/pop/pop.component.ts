@@ -42,6 +42,7 @@ import {
   PopProductConfigModalComponent,
 } from './components/pop-product-config-modal.component';
 import { PopOrderConfirmationModalComponent } from './components/pop-order-confirmation-modal.component';
+import { PricingOverridesMap } from './components/pop-order-confirmation-modal.component';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
 import {
   InvoiceScanResult,
@@ -197,6 +198,7 @@ import { POP_USE_UNIFIED_MODAL } from './pop.config';
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
+      (pricingOverridesChange)="onPricingOverridesChange($event)"
     ></app-pop-order-confirmation-modal>
 
     <app-pop-product-config-modal
@@ -322,6 +324,13 @@ export class PopComponent implements OnInit, OnDestroy {
 
   costPreview = signal<CostPreviewResponse | null>(null);
   loadingCostPreview = signal(false);
+  /**
+   * QUI-425 (D4) — Latest pricing overrides captured by the confirmation
+   * modal. Mirrored here so `_executeCreateAndReceive` can thread them into
+   * `receivePurchaseOrder()` without round-tripping through the modal's
+   * internal signal. Default to an empty Map so `?.get()` is always safe.
+   */
+  pricingOverrides = signal<PricingOverridesMap>(new Map());
 
   cartState = signal<PopCartState | null>(null);
   cartSummary = signal<PopCartSummary | null>(null);
@@ -1263,6 +1272,9 @@ export class PopComponent implements OnInit, OnDestroy {
     }
 
     this.confirmOrderAction = 'create-receive';
+    // Reset overrides from any previous reception — each confirmation gets a
+    // clean slate anchored to the freshly-loaded cost preview.
+    this.pricingOverrides.set(new Map());
     this.loadCostPreview();
     this.showOrderConfirmModal.set(true);
   }
@@ -1283,6 +1295,16 @@ export class PopComponent implements OnInit, OnDestroy {
   onNavigateToSettings(): void {
     this.showOrderConfirmModal.set(false);
     this.router.navigate(['/store/settings/general']);
+  }
+
+  /**
+   * QUI-425 (D4) — keep the latest override Map in sync with the modal so
+   * `_executeCreateAndReceive` can grab it synchronously when the operator
+   * confirms. We accept a Map directly (no copy) because the modal emits
+   * the same Map it stores; downstream consumers must treat it as read-only.
+   */
+  onPricingOverridesChange(overrides: PricingOverridesMap): void {
+    this.pricingOverrides.set(overrides);
   }
 
   private loadCostPreview(): void {
@@ -1358,16 +1380,39 @@ export class PopComponent implements OnInit, OnDestroy {
           const orderId = response.data.id;
           const orderItems = response.data.purchase_order_items || [];
 
-          const receiveItems = orderItems.map((item: any) => ({
-            id: item.id,
-            quantity_received: item.quantity_ordered,
-          }));
+          // Capture the latest overrides synchronously — the modal emits
+          // them right before `confirmed`, but we also accept a stale or
+          // missing Map (e.g. confirm from keyboard) by falling back to
+          // an empty Map. QUI-425 (D4).
+          const overrides = this.pricingOverrides();
+
+          const receiveItems = orderItems.map((item: any) => {
+            // Same key shape as the modal: `${product_id}-${variant_id || 0}`.
+            // purchase_order_items carry product_id + product_variant_id
+            // directly so we don't need to walk any joins.
+            const key = `${item.product_id}-${item.product_variant_id || 0}`;
+            const lineOverride = overrides?.get(key);
+            return {
+              id: item.id,
+              quantity_received: item.quantity_ordered,
+              // Only attach the override when defined — `receive` skips
+              // the pricing path entirely when BOTH fields are absent,
+              // applying the cost-anchor default at the backend instead.
+              ...(lineOverride?.new_base_price !== undefined && {
+                new_base_price: lineOverride.new_base_price,
+              }),
+              ...(lineOverride?.new_profit_margin !== undefined && {
+                new_profit_margin: lineOverride.new_profit_margin,
+              }),
+            };
+          });
 
           this.purchaseOrdersService
             .receivePurchaseOrder(orderId, receiveItems)
             .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: () => {
                 this.toastService.success('Stock ingresado correctamente');
+                this.pricingOverrides.set(new Map());
                 this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
                 this.router.navigate(['/admin/products']);
               },
@@ -1376,6 +1421,7 @@ export class PopComponent implements OnInit, OnDestroy {
                 this.toastService.error(
                   'Orden creada pero hubo error al recibir stock',
                 );
+                this.pricingOverrides.set(new Map());
                 this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
                 this.router.navigate(['/admin/products']);
               },

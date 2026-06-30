@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -27,6 +28,32 @@ export class ReceiveItemDto {
   @IsArray()
   @IsString({ each: true })
   serial_numbers?: string[];
+
+  /**
+   * QUI-425 (D2) — optional override for the product / variant base price
+   * (or variant price_override) applied at receipt time. When omitted, the
+   * existing base_price is preserved and profit_margin is recomputed from
+   * the new cost_price (default "cost anchor" behaviour).
+   *
+   * Only one of `new_base_price` / `new_profit_margin` is needed in most
+   * cases — the service derives the other from the new cost_price. Passing
+   * both is allowed; new_base_price wins for the persisted value and the
+   * margin is then computed against that base.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  new_base_price?: number;
+
+  /**
+   * QUI-425 (D2) — optional override for the profit margin (%) applied at
+   * receipt time. When omitted alongside new_base_price, the existing
+   * base_price is preserved and the margin is recomputed from the new
+   * cost_price.
+   */
+  @IsOptional()
+  @IsNumber()
+  new_profit_margin?: number;
 }
 
 export class ReceivePurchaseOrderDto {
