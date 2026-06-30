@@ -219,7 +219,7 @@ export interface TransferStateOption {
 
 export const TRANSFER_STATE_OPTIONS: TransferStateOption[] = [
   { value: 'draft', label: 'Borrador', icon: INVENTORY_ICONS.draftStat, palette: 'gray' },
-  { value: 'pending', label: 'Pendiente', icon: INVENTORY_ICONS.clock, palette: 'gray' },
+  { value: 'pending', label: 'Pendiente', icon: 'clock', palette: 'gray' },
   { value: 'in_transit', label: 'En Tránsito', icon: INVENTORY_ICONS.inTransitStat, palette: 'amber' },
   { value: 'completed', label: 'Completada', icon: INVENTORY_ICONS.completedStat, palette: 'emerald' },
   { value: 'cancelled', label: 'Cancelada', icon: INVENTORY_ICONS.close, palette: 'red' },
@@ -235,7 +235,7 @@ export const TRANSFER_STATE_MAP: Record<TransferStateValue, TransferStateOption>
 export type AdjustmentStateValue = 'pending' | 'approved' | 'rejected';
 
 export const ADJUSTMENT_STATE_OPTIONS = [
-  { value: 'pending' as const, label: 'Pendiente', icon: INVENTORY_ICONS.clock, palette: 'amber' as StatPaletteKey },
+  { value: 'pending' as const, label: 'Pendiente', icon: 'clock', palette: 'amber' as StatPaletteKey },
   { value: 'approved' as const, label: 'Aprobado', icon: INVENTORY_ICONS.check, palette: 'green' as StatPaletteKey },
   { value: 'rejected' as const, label: 'Rechazado', icon: INVENTORY_ICONS.close, palette: 'red' as StatPaletteKey },
 ];

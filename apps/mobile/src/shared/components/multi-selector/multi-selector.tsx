@@ -105,9 +105,9 @@ export function MultiSelector<T = string | number>({
         <Icon name={open ? "chevron-up" : "chevron-down"} size={18} color={colors.text.secondary} />
       </Pressable>
 
-      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+      <Modal visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
-        <View style={styles.popoverHeader}>
+        <View style={styles.modalHeader}>
           <Text style={styles.modalHint}>
             {values.length === 0
               ? 'Toca para agregar'
@@ -120,7 +120,7 @@ export function MultiSelector<T = string | number>({
             </Pressable>
           )}
         </View>
-        <View style={styles.popover}>
+        <View style={styles.list}>
           {options.map((opt) => {
             const isSelected = values.includes(opt.value);
             const isDisabled = !!max && !isSelected && values.length >= max;
@@ -160,7 +160,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minHeight: 40,
     paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
     paddingVertical: spacing[2],
     borderRadius: borderRadius.lg,
     borderWidth: 1,
