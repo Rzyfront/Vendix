@@ -11,51 +11,16 @@ import { NotificationsModal } from '@/features/notifications/notifications-modal
 import { UserDropdownModal } from '@/features/user/user-dropdown-modal';
 import { NotificationsService } from '@/features/notifications/notifications.service';
 import { useAuthStore } from '@/core/store/auth.store';
-import { ScopeChip } from '@/features/org/components/scope-chip';
+import { ToastContainer } from '@/shared/components/toast/toast';
 
 interface AdminShellProps {
   children: ReactNode;
   title?: string;
-  /**
-   * @deprecated Usa `parentLabel` + `parentIcon` para paridad con web.
-   * Se mantiene como fallback para callers que aún pasan breadcrumb como
-   * string formateado "Parent / Current".
-   */
   breadcrumb?: string;
-  /**
-   * Etiqueta del segmento padre del breadcrumb (categoría/sección).
-   * Paridad con web `HeaderComponent` + `BreadcrumbService.routes`.
-   * Ej: "Panel administrativo" (ORG_ADMIN), "Tienda" (STORE_ADMIN).
-   */
-  parentLabel?: string;
-  /**
-   * Ícono opcional para el segmento padre del breadcrumb.
-   */
-  parentIcon?: string;
-  /**
-   * Etiqueta del segmento current del breadcrumb (al lado del ícono current).
-   * INDEPENDIENTE del title — el breadcrumb puede decir "panel principal"
-   * mientras el h1 dice "Dashboard". Si no se provee, PosHeader usa `title`
-   * como fallback.
-   */
-  currentLabel?: string;
-  /**
-   * Ícono del segmento current (default 'home'). En web siempre azul.
-   */
-  currentIcon?: string;
   variant?: 'store' | 'org' | 'super';
 }
 
-export function AdminShell({
-  children,
-  title = 'Vendix',
-  breadcrumb,
-  parentLabel,
-  parentIcon,
-  currentLabel,
-  currentIcon,
-  variant = 'store',
-}: AdminShellProps) {
+export function AdminShell({ children, title = 'Vendix', breadcrumb, variant = 'store' }: AdminShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
@@ -64,10 +29,6 @@ export function AdminShell({
   const pathname = usePathname();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
-
-  // NOTA: el feedback de "Cambiaste a X tienda" lo emite directamente
-  // `performStoreSwitch()` desde el call-site — no usamos un notifier global
-  // aquí para evitar duplicación de toasts.
 
   const windowWidth = Dimensions.get('window').width;
   const DRAWER_WIDTH = Math.min(windowWidth * 0.8, 320);
@@ -127,11 +88,6 @@ export function AdminShell({
     refetchInterval: 30000,
   });
 
-  // Scope chip — paridad con web `app-header` (sólo en ORG_ADMIN).
-  // NO se muestra el icono fiscal — sólo el modo operativo.
-  const operatingScope = user?.organizations?.operating_scope ?? user?.store?.organizations?.operating_scope ?? null;
-  const showScopeChip = variant === 'org' && operatingScope != null;
-
   return (
     <View style={styles.container}>
       <PosHeader
@@ -143,13 +99,6 @@ export function AdminShell({
         userInitials={userInitials}
         title={title}
         breadcrumb={breadcrumb}
-        parentLabel={parentLabel}
-        parentIcon={parentIcon}
-        currentLabel={currentLabel}
-        currentIcon={currentIcon}
-        extraActions={
-          showScopeChip ? <ScopeChip scope={operatingScope} /> : undefined
-        }
       />
 
       <View style={styles.flex}>
@@ -214,6 +163,9 @@ export function AdminShell({
           <DrawerMenu currentRoute={pathname} onClose={closeDrawer} variant={variant} />
         </Animated.View>
       )}
+
+      {/* Toast notifications */}
+      <ToastContainer />
     </View>
   );
 }

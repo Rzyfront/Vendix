@@ -28,7 +28,7 @@ export type { ScrollableTab } from './scrollable-tabs';
 export { Fab } from './fab/fab';
 export type { FabProps, FabPosition } from './fab/fab';
 export { Selector } from './selector/selector';
-export type { SelectorProps, SelectorOption } from './selector/selector';
+export type { SelectorOption } from './selector/selector';
 export { MultiSelector } from './multi-selector/multi-selector';
 export type { MultiSelectorProps, MultiSelectorOption } from './multi-selector/multi-selector';
 export { Toggle } from './toggle/toggle';
@@ -44,12 +44,6 @@ export type {
   StickyHeaderTab,
 } from './sticky-header/sticky-header';
 export { OptionsDropdown } from './options-dropdown/options-dropdown';
-export type {
-  OptionsDropdownProps,
-  OptionsDropdownSection,
-  OptionsDropdownFilter,
-  OptionsDropdownAction,
-} from './options-dropdown/options-dropdown';
 export { Pagination } from './pagination/pagination';
 export type { PaginationProps } from './pagination/pagination';
 export { ImageCarousel } from './image-carousel/image-carousel';

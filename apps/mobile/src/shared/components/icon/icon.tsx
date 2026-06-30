@@ -827,7 +827,6 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   repeat: Repeat,
   'corner-down-left': CornerDownLeft,
   'shield-off': ShieldOff,
-  'x-circle': XCircle,
   'check-circle-2': CheckCircle2,
   'pencil-line': PencilLine,
   'edit-3': Edit3,
