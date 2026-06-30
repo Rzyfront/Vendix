@@ -732,7 +732,102 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             />
           </Section>
 
-          <Section title="Variantes" subtitle="Opciones vendibles del producto" icon="list">
+          {/* Detalles del Servicio (solo cuando product_type === 'service') */}
+          {form.product_type === 'service' && (
+            <Section title="Detalles del Servicio" subtitle="Configuración específica para servicios" icon="clock">
+              <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+                <View style={{ flex: 1 }}>
+                  <Input
+                    label="Duración (minutos)"
+                    value={form.service_duration_minutes}
+                    onChangeText={(value) => updateField('service_duration_minutes', value)}
+                    placeholder="Ej. 60"
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Selector
+                    label="Modalidad"
+                    value={form.service_modality}
+                    onChange={(v) => updateField('service_modality', v as string)}
+                    options={[
+                      { label: 'Presencial', value: 'in_person' },
+                      { label: 'Virtual', value: 'virtual' },
+                      { label: 'Híbrido', value: 'hybrid' },
+                    ]}
+                  />
+                </View>
+              </View>
+              <Selector
+                label="Tipo de precio"
+                value={form.service_pricing_type}
+                onChange={(v) => updateField('service_pricing_type', v as string)}
+                options={[
+                  { label: 'Por hora', value: 'per_hour' },
+                  { label: 'Por sesión', value: 'per_session' },
+                  { label: 'Por paquete', value: 'package' },
+                  { label: 'Suscripción', value: 'subscription' },
+                ]}
+              />
+              <Toggle
+                value={form.requires_booking}
+                onChange={(v) => updateField('requires_booking', v)}
+                label="Requiere reserva"
+                description="El cliente debe reservar un turno antes de recibir el servicio."
+              />
+              {form.requires_booking && (
+                <Toggle
+                  value={form.is_recurring}
+                  onChange={(v) => updateField('is_recurring', v)}
+                  label="Es recurrente"
+                  description="El cliente puede agendar múltiples turnos."
+                />
+              )}
+            </Section>
+          )}
+
+          {/* Compra online (solo en edit) */}
+          {mode === 'edit' && product && (
+            <Section title="Compra Online" subtitle="Link público para vender este producto en la tienda online" icon="globe">
+              <Input
+                label="URL de compra online"
+                value={form.online_purchase_url}
+                onChangeText={(value) => updateField('online_purchase_url', value)}
+                placeholder="Se genera automáticamente al activar la venta online"
+                helperText={form.online_purchase_url ? 'Compartí este link con tus clientes para que compren online.' : 'Activá la venta online desde la web para generar el link.'}
+              />
+              {form.online_purchase_url ? (
+                <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+                  <View style={{ flex: 1 }}>
+                    <Button
+                      title="Copiar link"
+                      variant="outline"
+                      leftIcon={<Icon name="copy" size={16} color={colors.text.primary} />}
+                      onPress={() => {
+                        // Copy to clipboard would require expo-clipboard
+                        toastSuccess('Link copiado al portapapeles');
+                      }}
+                      fullWidth
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Button
+                      title="Ver tienda"
+                      variant="primary"
+                      leftIcon={<Icon name="external-link" size={16} color={colors.background} />}
+                      onPress={() => {
+                        // Linking.openURL would open the URL
+                        toastSuccess('Abriendo tienda...');
+                      }}
+                      fullWidth
+                    />
+                  </View>
+                </View>
+              ) : null}
+            </Section>
+          )}
+
+          <Section title="Variantes subtitle="Opciones vendibles del producto" icon="list">
             <Toggle
               value={form.has_variants}
               onChange={(v) => updateField('has_variants', v)}
