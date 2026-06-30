@@ -827,7 +827,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </Section>
           )}
 
-          <Section title="Variantes subtitle="Opciones vendibles del producto" icon="list">
+          <Section title="Variantes" subtitle="Opciones vendibles del producto" icon="list">
             <Toggle
               value={form.has_variants}
               onChange={(v) => updateField('has_variants', v)}

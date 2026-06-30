@@ -997,4 +997,6 @@ const styles = StyleSheet.create({
   confirmBtn: { flex: 1, paddingVertical: 10, borderRadius: borderRadius.full, backgroundColor: colorScales.green[100], alignItems: 'center', justifyContent: 'center' },
   confirmBtnDisabled: { backgroundColor: colorScales.gray[100] },
   confirmBtnText: { fontSize: 13, fontWeight: '700' as any, color: colorScales.green[800] },
-  actionSpacer: { width: spacing[3] }
+  actionSpacer: { width: spacing[3] },
+});
+/* SupplierCard extraido a features/store/components/supplier-card.tsx */
