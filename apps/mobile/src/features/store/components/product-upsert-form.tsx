@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService, ProductService } from '@/features/store/services';
@@ -20,6 +20,7 @@ import { Button } from '@/shared/components/button/button';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Input } from '@/shared/components/input/input';
+import { MoneyInput } from '@/shared/components/money-input/money-input';
 import { MultiSelector } from '@/shared/components/multi-selector/multi-selector';
 import { Selector } from '@/shared/components/selector/selector';
 import { InputButtons } from '@/shared/components/input-buttons/input-buttons';
@@ -156,8 +157,8 @@ const initialForm: ProductFormState = {
   online_purchase_url: '',
 };
 
-function toNumber(value: string): number | undefined {
-  if (value.trim() === '') return undefined;
+function toNumber(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
@@ -333,6 +334,24 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     return sale && sale > 0 ? sale : priceWithTax;
   }, [form.is_on_sale, form.sale_price, priceWithTax]);
 
+  /**
+   * Suma del stock físico y disponible para la sección "Inventario / Stock".
+   * Si el producto no tiene variantes, viene de stock_quantity + stock_by_location.
+   * Si tiene variantes, el stock se calcula por variante (no mostrado en este nivel).
+   */
+  const { totalStock, availableStock } = useMemo(() => {
+    if (form.has_variants) {
+      return { totalStock: 0, availableStock: 0 };
+    }
+    const initial = toNumber(form.stock_quantity) || 0;
+    const fromLocations = Object.values(form.stock_by_location).reduce(
+      (sum, raw) => sum + (Number(raw) || 0),
+      0,
+    );
+    const total = initial + fromLocations;
+    return { totalStock: total, availableStock: total };
+  }, [form.has_variants, form.stock_quantity, form.stock_by_location]);
+
   const updateField = <K extends keyof ProductFormState>(key: K, value: ProductFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
   };
@@ -418,6 +437,8 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       : undefined;
 
     // Base payload — fields safe in both create and update.
+    // Importante: el backend usa class-validator con `@IsInt()` que rechaza `null`
+    // (solo acepta `number | undefined`). Por eso enviamos `undefined` cuando no hay valor.
     const base = {
       name: form.name.trim(),
       description: form.description.trim() || undefined,
@@ -435,14 +456,36 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       available_for_ecommerce: form.available_for_ecommerce,
       is_featured: form.is_featured,
       allow_pos_price_override: form.allow_pos_price_override,
+      has_multiple_price_tiers: form.has_multiple_price_tiers,
+      requires_serial_numbers: form.requires_serial_numbers,
       state: form.state,
       pricing_type: form.pricing_type,
       product_type: form.product_type,
-      brand_id: form.brand_id ?? null,
-      category_ids: form.category_ids,
-      tax_category_ids: form.tax_category_ids,
+      brand_id: form.brand_id,
+      category_ids: form.category_ids.length > 0 ? form.category_ids : undefined,
+      tax_category_ids: form.tax_category_ids.length > 0 ? form.tax_category_ids : undefined,
       variants,
     };
+
+    // Dimensiones + peso (mirror del web; sólo si hay valor).
+    const numericLength = toNumber(form.length);
+    const numericWidth = toNumber(form.width);
+    const numericHeight = toNumber(form.height);
+    if (numericLength !== undefined || numericWidth !== undefined || numericHeight !== undefined) {
+      (base as any).dimensions = {
+        length: numericLength ?? 0,
+        width: numericWidth ?? 0,
+        height: numericHeight ?? 0,
+      };
+    }
+    const numericWeight = toNumber(form.weight_input);
+    if (numericWeight !== undefined) {
+      (base as any).weight = numericWeight;
+    }
+    const preparationTime = toNumber(form.preparation_time_minutes);
+    if (preparationTime !== undefined) {
+      (base as any).preparation_time_minutes = preparationTime;
+    }
 
     // Create-only fields (these are typically not allowed in PATCH on this backend).
     if (mode === 'create') {
@@ -469,12 +512,54 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       router.back();
     },
     onError: (error: any) => {
+      // NestJS class-validator puede devolver `message: string[]` con cada constraint
+      // violado. Lo aplanamos para mostrar todos los errores al usuario.
+      const data = error?.response?.data;
+      const detail = Array.isArray(data?.message)
+        ? data.message.join(' • ')
+        : data?.message;
       const msg =
-        error?.response?.data?.message ||
-        error?.response?.data?.error ||
+        detail ||
+        data?.error ||
         (error instanceof Error ? error.message : null) ||
         'Error al guardar producto';
       toastError(typeof msg === 'string' ? msg : 'Error al guardar producto');
+    },
+  });
+
+  /**
+   * Mutación para generar descripción con IA (mirror del botón 'Generar con IA' web).
+   * Llama al backend POST /store/products/generate-description y rellena el Textarea.
+   *
+   * Detección de safety: el proveedor de IA (Vertex AI / OpenAI) puede devolver
+   * un placeholder como 'User safety:safe' cuando el filtro de contenido bloquea
+   * la generación. Tratamos este caso como error y mostramos un mensaje claro.
+   */
+  const aiMutation = useMutation({
+    mutationFn: (payload: { name: string; sku?: string; category_id?: number | null; brand_id?: number | null }) =>
+      ProductService.generateDescription(payload),
+    onSuccess: (result) => {
+      const text = result.description?.trim();
+      const isSafetyPlaceholder =
+        !text || /safety|safe content/i.test(text) || text.toLowerCase() === 'user safety:safe';
+      if (isSafetyPlaceholder) {
+        toastError('La IA no pudo generar una descripción (filtro de seguridad del proveedor). Edita manualmente.');
+        return;
+      }
+      setForm((current) => ({ ...current, description: text }));
+      toastSuccess('Descripción generada con IA');
+    },
+    onError: (error: any) => {
+      // Muestra el mensaje exacto del backend. Si es un validation error array, lo detalla.
+      const data = error?.response?.data;
+      const detail = Array.isArray(data?.message)
+        ? data.message.join(', ')
+        : data?.message;
+      const msg =
+        detail ||
+        error?.message ||
+        'No se pudo generar la descripción. Verifica que el backend soporte este endpoint.';
+      toastError(msg);
     },
   });
 
@@ -511,95 +596,167 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-          {/* Tipo de Producto */}
-          <Section title="Tipo de Producto" subtitle="Define si el producto es físico, un servicio o preparado" icon="package">
+          {/* Tipo de Producto (espejo exacto del web:
+              - ícono layers + título (sin subtitle)
+              - segmented control con 2 opciones: Producto Físico | Servicio
+          */}
+          <Section title="Tipo de Producto" icon="layers">
             <InputButtons
               value={form.product_type}
               onChange={(v) => updateField('product_type', v as ProductType)}
               fullWidth
               options={[
-                { label: 'Físico', value: 'physical' },
+                { label: 'Producto Físico', value: 'physical' },
                 { label: 'Servicio', value: 'service' },
-                { label: 'Preparado', value: 'prepared' },
               ]}
             />
           </Section>
 
-          {/* Información General */}
-          <Section title="Información General" subtitle="Datos visibles en punto de venta, catálogo e inventario" icon="info">
-            <Input label="Nombre" value={form.name} onChangeText={(value) => updateField('name', value)} error={errors.name} />
+          {/* Información General (espejo exacto del web) */}
+          <Section title="Información General" icon="info">
+            {/* Nombre del Producto (full-width, required, con clipboard icon suffix) */}
             <Input
-              label="SKU"
-              value={form.sku}
-              onChangeText={(value) => updateField('sku', value.toUpperCase())}
-              autoCapitalize="characters"
+              label="Nombre del Producto"
+              value={form.name}
+              onChangeText={(value) => updateField('name', value)}
+              placeholder="Ej. Camiseta Algodón Premium"
+              required
+              tooltip="Nombre visible del producto en catálogo, facturas y buscador. Sé descriptivo y consistente."
+              error={errors.name}
+              rightIcon={
+                <Pressable
+                  onPress={() => {
+                    // El web permite pegar al portapapeles para autocompletar el nombre.
+                    // En mobile esto requeriría expo-clipboard; placeholder visual.
+                    toastSuccess('Pega el nombre desde el portapapeles');
+                  }}
+                  hitSlop={6}
+                >
+                  <Icon name="clipboard-list" size={16} color={colors.text.muted} />
+                </Pressable>
+              }
             />
-            <Input
-              label="Código de barras"
-              value={form.barcode}
-              onChangeText={(value) => updateField('barcode', value)}
-              placeholder="opcional"
-            />
-            <Input
-              label="Slug (URL)"
-              value={form.slug}
-              onChangeText={(value) => updateField('slug', value)}
-              placeholder="se genera automáticamente si lo dejás vacío"
-              autoCapitalize="none"
-            />
+
+            {/* SKU / Código de barras / Slug en grid 3 cols en sm+ */}
+            <View style={styles.infoGrid}>
+              <Input
+                label="SKU"
+                value={form.sku}
+                onChangeText={(value) => updateField('sku', value.toUpperCase())}
+                placeholder="Ej. CAM-001"
+                tooltip="Código interno único del producto. Útil para inventario, etiquetas y búsqueda rápida en POS."
+                autoCapitalize="characters"
+              />
+              <Input
+                label="Código de barras"
+                value={form.barcode}
+                onChangeText={(value) => updateField('barcode', value)}
+                placeholder="Escanea o escribe el código"
+                tooltip="Código escaneable (EAN/UPC) único en la tienda."
+              />
+              <Input
+                label="Slug (URL)"
+                value={form.slug}
+                onChangeText={(value) => updateField('slug', value)}
+                placeholder="camiseta-algodon-premium"
+                tooltip="Identificador para la URL pública del producto. Se genera automáticamente desde el nombre."
+                autoCapitalize="none"
+              />
+            </View>
+
+            {/* Descripción con botón 'Generar con IA' (espejo del web ai-generate-btn)
+                El botón llama al backend de IA (POST /store/products/generate-description).
+                Muestra tooltip "Generar con IA" al hover/press y rellena el Textarea. */}
+            <View style={styles.descriptionHeader}>
+              <Text style={styles.descriptionLabel}>Descripción</Text>
+              <Pressable
+                onPress={() => {
+                  if (!form.name.trim()) {
+                    toastError('Ingresa primero el nombre del producto');
+                    return;
+                  }
+                  // Construye el payload sólo con campos con valor (undefined los omite del body,
+                  // evitando que el backend rechace por nulls opcionales).
+                  const payload: Parameters<typeof ProductService.generateDescription>[0] = {
+                    name: form.name.trim(),
+                  };
+                  const trimmedSku = form.sku.trim();
+                  if (trimmedSku) payload.sku = trimmedSku;
+                  if (form.category_ids[0]) payload.category_id = form.category_ids[0];
+                  if (form.brand_id) payload.brand_id = form.brand_id;
+                  aiMutation.mutate(payload);
+                }}
+                disabled={aiMutation.isPending || !form.name.trim()}
+                style={({ pressed }) => [
+                  styles.aiGenerateBtn,
+                  pressed && !aiMutation.isPending && { opacity: 0.85 },
+                ]}
+              >
+                {aiMutation.isPending ? (
+                  <ActivityIndicator size="small" color={colors.background} />
+                ) : (
+                  <>
+                    <Icon name="sparkles" size={11} color={colors.background} />
+                    <Text style={styles.aiGenerateText}>IA</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
             <Textarea
-              label="Descripción"
+              label=""
               value={form.description}
               onChangeText={(value) => updateField('description', value)}
+              placeholder="Describe tu producto..."
               rows={3}
               maxLength={1000}
             />
           </Section>
 
-          {/* Precios y Rentabilidad */}
+          {/* Precios y Rentabilidad (espejo exacto del web)
+              - Inputs con prefix "$" (Costo, Precio Base) y suffix "%" (Margen)
+              - Tooltips en cada input/selector (mirror web tooltiptext)
+              - Precio Base con asterisco rojo (required)
+              - Impuestos Aplicables + botón + (mb-[26px] del web) con label del MultiSelector
+          */}
           <Section title="Precios y Rentabilidad" icon="dollar-sign" iconColor={colors.primary}>
-            <Input
-              label={PRICING_LABELS[form.pricing_type].cost}
-              value={form.cost_price}
-              onChangeText={(value) => {
-                updateField('cost_price', value);
-                updatePriceFromCostMargin(value, form.profit_margin);
-              }}
-              keyboardType="decimal-pad"
-              rightIcon={
-                form.cost_price ? (
-                  <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
-                    {formatCurrency(toNumber(form.cost_price) || 0).replace(/\s/g, '')}
-                  </Text>
-                ) : null
-              }
-            />
-            <Input
-              label="Margen %"
-              value={form.profit_margin}
-              onChangeText={(value) => {
-                updateField('profit_margin', value);
-                updatePriceFromCostMargin(form.cost_price, value);
-              }}
-              keyboardType="decimal-pad"
-            />
-            <Input
-              label={PRICING_LABELS[form.pricing_type].base}
-              value={form.base_price}
-              onChangeText={(value) => {
-                updateField('base_price', value);
-                updateMarginFromBase(value, form.cost_price);
-              }}
-              keyboardType="decimal-pad"
-              error={errors.base_price}
-              rightIcon={
-                form.base_price ? (
-                  <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
-                    {formatCurrency(toNumber(form.base_price) || 0).replace(/\s/g, '')}
-                  </Text>
-                ) : null
-              }
-            />
+            <View style={styles.pricingRow}>
+              <MoneyInput
+                label={PRICING_LABELS[form.pricing_type].cost}
+                value={form.cost_price}
+                onChangeText={(value) => {
+                  updateField('cost_price', value);
+                  updatePriceFromCostMargin(value, form.profit_margin);
+                }}
+                prefix="$"
+                placeholder="0"
+                tooltip="Precio al que adquieres el producto. Se usa para calcular la rentabilidad."
+              />
+              <Input
+                label="Margen (%)"
+                value={form.profit_margin}
+                onChangeText={(value) => {
+                  updateField('profit_margin', value);
+                  updatePriceFromCostMargin(form.cost_price, value);
+                }}
+                keyboardType="decimal-pad"
+                suffix="%"
+                placeholder="0.00"
+                tooltip="Porcentaje de ganancia deseado sobre el costo. Ajusta automáticamente el precio base."
+              />
+              <MoneyInput
+                label={PRICING_LABELS[form.pricing_type].base}
+                value={form.base_price}
+                onChangeText={(value) => {
+                  updateField('base_price', value);
+                  updateMarginFromBase(value, form.cost_price);
+                }}
+                error={errors.base_price}
+                placeholder="0"
+                prefix="$"
+                tooltip="Precio de venta antes de impuestos. Se calcula automáticamente si defines costo + margen."
+                required
+              />
+            </View>
             <Selector
               label={PRICING_LABELS[form.pricing_type].type}
               value={form.pricing_type}
@@ -608,45 +765,43 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 { label: 'Venta por unidad', value: 'unit' },
                 { label: 'Venta por peso (kg)', value: 'weight' },
               ]}
+              tooltip="Define si el producto se vende por unidad o por peso (kg). Afecta cómo se interpretan los precios."
             />
-            <View>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[1], marginBottom: spacing[1.5] }}>
-                <Text style={{
-                  fontSize: 10,
-                  fontWeight: typography.fontWeight.bold,
-                  fontFamily: typography.fontFamily,
-                  color: colorScales.gray[700],
-                  letterSpacing: 0.5,
-                  textTransform: 'uppercase',
-                }}>Impuestos aplicables</Text>
-                <Text style={{ color: colorScales.gray[400], fontSize: 10 }}>*</Text>
+
+            {/* Impuestos Aplicables + botón + para creación rápida (mirror web
+                `flex gap-2 items-end h-full md:col-span-2` + `button mb-[26px]`).
+                El MultiSelector pone su propio label 'Impuestos Aplicables' con tooltip.
+                El `marginTop` del botón + compensa el alto del label del MultiSelector
+                para alinear verticalmente con el input. */}
+            <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+              <View style={{ flex: 1 }}>
+                <MultiSelector
+                  label="Impuestos Aplicables"
+                  values={form.tax_category_ids}
+                  onChange={(v) => updateField('tax_category_ids', v)}
+                  options={allTaxes.map((t) => {
+                    const rate = t.tax_rates?.[0]?.rate;
+                    const labelText = typeof rate === 'number' ? `${t.name} (${(rate * 100).toFixed(0)}%)` : t.name;
+                    return { label: labelText, subLabel: t.name, value: t.id };
+                  })}
+                  placeholder="Seleccionar impuestos…"
+                  searchable
+                  searchPlaceholder="Buscar impuesto…"
+                  tooltip="Impuestos que se suman al precio base en facturación y checkout (IVA, INC, retenciones)."
+                />
               </View>
-              <View style={{ flexDirection: 'row', gap: spacing[2] }}>
-                <View style={{ flex: 1 }}>
-                  <MultiSelector
-                    values={form.tax_category_ids}
-                    onChange={(v) => updateField('tax_category_ids', v)}
-                    options={allTaxes.map((t) => {
-                      const rate = t.tax_rates?.[0]?.rate;
-                      const labelText = typeof rate === 'number' ? `${t.name} (${(rate * 100).toFixed(0)}%)` : t.name;
-                      return { label: labelText, subLabel: t.name, value: t.id };
-                    })}
-                    placeholder="Seleccionar impuestos"
-                    searchable
-                    searchPlaceholder="Buscar impuesto…"
-                  />
-                </View>
-                <Pressable
-                  onPress={() => setTaxModalOpen(true)}
-                  hitSlop={6}
-                  style={({ pressed }) => [
-                    styles.taxAddButton,
-                    pressed && styles.taxAddButtonPressed,
-                  ]}
-                >
-                  <Icon name="plus" size={20} color={colors.primary} />
-                </Pressable>
-              </View>
+              <Pressable
+                onPress={() => setTaxModalOpen(true)}
+                hitSlop={6}
+                style={({ pressed }) => [
+                  styles.taxAddButton,
+                  styles.taxAddButtonAligned, // ← alinea con el input (no el label)
+                  pressed && styles.taxAddButtonPressed,
+                ]}
+              >
+                <Icon name="plus" size={20} color={colors.primary} />
+              </Pressable>
+            </View>
 
               {/* Lista inline de impuestos disponibles (espejo exacto de las filas del popover).
                   Se muestra siempre visible sin abrir el dropdown. Tocar una fila togglea la selección.
@@ -701,7 +856,6 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   );
                 })}
               </View>
-            </View>
 
             {/* Sub-card con desglose estructurado del precio (espejo de la versión web mobile) */}
             <View style={styles.pricingBreakdownCard}>
@@ -768,29 +922,38 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </View>
           </Section>
 
-          {/* Imágenes del Producto (placeholder) */}
-          <Section title="Imágenes del Producto" subtitle="Gestioná las imágenes desde la versión web" icon="image">
-            <View
-              style={{
-                height: 120,
-                borderRadius: borderRadius.md,
-                borderWidth: 1,
-                borderColor: colorScales.gray[200],
-                borderStyle: 'dashed',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: colorScales.gray[50],
-              }}
-            >
-              <Icon name="image-plus" size={28} color={colors.text.muted} />
-              <Text style={{ fontSize: typography.fontSize.sm, color: colors.text.muted, marginTop: spacing[1] }}>
-                Subí imágenes desde la versión web
-              </Text>
+          {/* Imágenes del Producto (espejo exacto del web mobile lg:hidden):
+              - Header sin subtitle, con counter "0/5" a la derecha (slot `right`)
+              - Placeholder cuadrado aspect-square max-w-280, mx-auto, con ícono circular bg-white
+              - Botón secundario 64x64 dashed + ícono image-plus + label "Agregar"
+          */}
+          <Section
+            title="Imágenes del Producto"
+            icon="image"
+            right={
+              <Text style={styles.imageCount}>0/5</Text>
+            }
+          >
+            <View style={styles.imageMainPlaceholder}>
+              <View style={styles.imageMainCircle}>
+                <Icon name="image" size={24} color={colors.text.muted} style={{ opacity: 0.2 }} />
+              </View>
+              <Text style={styles.imageMainText}>Sin imágenes</Text>
+              <Text style={styles.imageMainHint}>Toca para agregar</Text>
+            </View>
+            <View style={styles.imageThumbsRow}>
+              <Pressable
+                onPress={() => toastSuccess('Subida de imágenes próximamente')}
+                style={({ pressed }) => [styles.imageThumbAdd, pressed && { opacity: 0.7 }]}
+              >
+                <Icon name="image-plus" size={20} color={colors.text.muted} />
+                <Text style={styles.imageThumbAddText}>Agregar</Text>
+              </Pressable>
             </View>
           </Section>
 
-          {/* Precios Multi-Tarifa (mirror web) */}
-          <Section title="Precios Multi-Tarifa" subtitle="Tarifas diferenciadas (Mayorista, VIP, etc.)" icon="tags">
+          {/* Precios Multi-Tarifa (espejo exacto del web: header simple + setting-toggle-row) */}
+          <Section title="Precios Multi-Tarifa" icon="tags">
             <View style={styles.settingToggleRow}>
               <Toggle
                 value={!!form.has_multiple_price_tiers}
@@ -799,58 +962,53 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 description="Define precios distintos para tarifas como Mayorista, Distribuidor, VIP, etc. La tarifa por defecto usa el precio base."
               />
             </View>
-            {form.has_multiple_price_tiers && (
-              <Text style={{ fontSize: typography.fontSize.xs, color: colors.text.secondary, marginTop: spacing[2], fontStyle: 'italic' }}>
-                Configura las tarifas específicas (Mayorista, VIP, etc.) desde la versión web por ahora.
-              </Text>
-            )}
           </Section>
 
-          <Section title="Inventario" subtitle="Stock inicial y visibilidad comercial" icon="warehouse">
-            <Toggle
-              value={form.track_inventory}
-              onChange={(v) => updateField('track_inventory', v)}
-              label="Controlar inventario"
-              description="Llevar conteo de unidades disponibles por bodega."
-            />
-            <Toggle
-              value={form.available_for_ecommerce}
-              onChange={(v) => updateField('available_for_ecommerce', v)}
-              label="Disponible en ecommerce"
-              description="Mostrar este producto en la tienda online."
-            />
-            {!form.has_variants && form.track_inventory && (
-              <>
-                <Input label="Stock inicial" value={form.stock_quantity} onChangeText={(value) => updateField('stock_quantity', value)} keyboardType="number-pad" />
-                {locations.length > 0 && (
-                  <View style={styles.locationStock}>
-                    <Text style={styles.blockLabel}>Stock por bodega</Text>
-                    {locations.map((location) => (
-                      <View key={location.id} style={styles.locationRow}>
-                        <View style={styles.locationName}>
-                          <Text style={styles.locationTitle}>{location.name}</Text>
-                          <Text style={styles.locationSubtitle}>{location.code || location.type}</Text>
-                        </View>
-                        <Input
-                          label="Cantidad"
-                          value={form.stock_by_location[String(location.id)] || ''}
-                          onChangeText={(value) => setForm((current) => ({
-                            ...current,
-                            stock_by_location: { ...current.stock_by_location, [String(location.id)]: value },
-                          }))}
-                          keyboardType="number-pad"
-                          style={styles.locationInput}
-                        />
-                      </View>
-                    ))}
-                  </View>
-                )}
-              </>
-            )}
+          {/* Inventario / Stock (espejo exacto del web lg:hidden)
+              Header: icon archive + h2 'Inventario / Stock' (sin subtitle)
+              Stats: 2 cards (Físico / Disponible) con label uppercase 9px + valor text-lg bold
+              Acción: button 'Inventario' con cart icon (placeholder hasta integración inventario)
+          */}
+          <Section title="Inventario / Stock" icon="archive">
+            <View style={styles.inventoryStatsGrid}>
+              <View style={styles.inventoryStatCard}>
+                <Text style={styles.inventoryStatLabel}>Físico</Text>
+                <Text style={styles.inventoryStatValue}>{totalStock.toLocaleString('es-CO')}</Text>
+              </View>
+              <View style={styles.inventoryStatCard}>
+                <Text style={styles.inventoryStatLabel}>Disponible</Text>
+                <Text style={[styles.inventoryStatValue, styles.inventoryStatValuePrimary]}>
+                  {availableStock.toLocaleString('es-CO')}
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              onPress={() => {
+                // Gestión detallada de inventario desde un modal dedicado.
+                // El inventario por bodega/seriales requiere UI especializada
+                // que se desarrolla en PR futuro.
+                toastSuccess('Gestión de inventario próximamente');
+              }}
+              style={({ pressed }) => [
+                styles.inventoryActionButton,
+                pressed && { backgroundColor: 'rgba(126, 215, 165, 0.12)' },
+              ]}
+            >
+              <Icon name="cart" size={14} color={colors.primary} />
+              <Text style={styles.inventoryActionText}>Inventario</Text>
+            </Pressable>
           </Section>
 
-          {/* Disponibilidad y Estado */}
-          <Section title="Disponibilidad y Estado" subtitle="Configurá la visibilidad y el estado del producto" icon="eye">
+          {/* Disponibilidad y Estado (espejo exacto del web)
+              - Header: icon check-circle + h2 (sin subtitle)
+              - Estado segmented (Activo/Inactivo/Archivado)
+              - 3 toggles en columna derecha: Disponible E-commerce, Producto destacado,
+                Precio editable en POS
+              - Toggle 'Este producto tiene variantes' + helper amber
+              - Toggle 'Controlar inventario'
+              - Toggle 'Requerir número de serie'
+          */}
+          <Section title="Disponibilidad y Estado" icon="check-circle">
             <InputButtons
               label="Estado"
               value={form.state}
@@ -862,25 +1020,66 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 { label: 'Archivado', value: 'archived' },
               ]}
             />
-            <View style={{ height: spacing[2] }} />
-            <Toggle
-              value={form.is_featured}
-              onChange={(v) => updateField('is_featured', v)}
-              label="Producto destacado"
-              description="Mostrar este producto con prioridad en listados."
-            />
-            <Toggle
-              value={form.allow_pos_price_override}
-              onChange={(v) => updateField('allow_pos_price_override', v)}
-              label="Permitir cambio de precio en POS"
-              description="El cajero puede ajustar el precio al cobrar."
-            />
-            <Toggle
-              value={!!form.requires_serial_numbers}
-              onChange={(v) => updateField('requires_serial_numbers', v)}
-              label="Requerir número de serie"
-              description="Cada unidad vendida deberá tener un número de serie único (garantía, postventa, trazabilidad)."
-            />
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.available_for_ecommerce}
+                onChange={(v) => updateField('available_for_ecommerce', v)}
+                label="Disponible en E-commerce"
+                description="Visible en tu tienda online"
+              />
+            </View>
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_featured}
+                onChange={(v) => updateField('is_featured', v)}
+                label="Producto destacado"
+                description="Aparece en la sección de destacados de la tienda online"
+              />
+            </View>
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.allow_pos_price_override}
+                onChange={(v) => updateField('allow_pos_price_override', v)}
+                label="Precio editable en POS"
+                description="Permite que usuarios autorizados vendan este producto con precio negociado"
+              />
+            </View>
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.has_variants}
+                onChange={(v) => updateField('has_variants', v)}
+                label="Este producto tiene variantes"
+                description="Agrega opciones como tamaño, color o material"
+              />
+              {form.has_variants && (
+                <View style={styles.helperAmber}>
+                  <Icon name="alert-triangle" size={10} color="#d97706" />
+                  <Text style={{ fontSize: 10, color: '#d97706' }}>Configura un SKU para habilitar variantes</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.track_inventory}
+                onChange={(v) => updateField('track_inventory', v)}
+                label="Controlar inventario"
+                description="Se controla el stock de este producto"
+              />
+            </View>
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.requires_serial_numbers}
+                onChange={(v) => updateField('requires_serial_numbers', v)}
+                label="Requerir número de serie"
+                description="Cada unidad vendida deberá tener un número de serie único (garantía, postventa, trazabilidad)."
+              />
+            </View>
           </Section>
 
           <Section title="Clasificación" subtitle="Categorías, marca e impuestos" icon="tag">
@@ -1110,12 +1309,18 @@ function Section({
   subtitle,
   icon,
   iconColor,
+  right,
   children,
 }: {
   title: string;
   subtitle?: string;
   icon?: string;
   iconColor?: string;
+  /**
+   * Slot opcional a la derecha del título en el header. Útil para
+   * contadores (ej. "0/5" en Imágenes) o acciones rápidas.
+   */
+  right?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -1128,6 +1333,7 @@ function Section({
             </View>
           )}
           <Text style={styles.sectionTitle}>{title}</Text>
+          {right && <View style={styles.sectionHeaderRight}>{right}</View>}
         </View>
         {subtitle && <Text style={styles.sectionSubtitle}>{subtitle}</Text>}
       </View>
@@ -1177,8 +1383,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
   sectionSubtitle: { fontSize: typography.fontSize.xs, color: colorScales.gray[500], marginTop: 4 },
-  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], flex: 1 },
   sectionIcon: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  sectionHeaderRight: { marginLeft: 'auto' },
   sectionBody: { padding: spacing[5], gap: spacing[4] },
   chipBlock: { gap: spacing[2] },
   blockLabel: { fontSize: typography.fontSize.xs, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase', letterSpacing: 1 },
@@ -1363,6 +1570,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  taxAddButtonAligned: {
+    // El MultiSelector tiene un label arriba que ocupa ~22px (lineHeight 1.5
+    // × fontSize 10 + marginBottom 1.5×6 = 9px). El web usa `mb-[26px]`
+    // en el botón + para alinear con el input. Acá replicamos ese offset.
+    marginTop: 22,
+  },
   taxAddButtonPressed: {
     backgroundColor: 'rgba(126, 215, 165, 0.06)',
     transform: [{ scale: 0.97 }],
@@ -1465,5 +1678,173 @@ const styles = StyleSheet.create({
   dimensionCell: {
     flexBasis: '48%',
     flexGrow: 1,
+  },
+  // Grid 1 col en mobile, 3 cols en sm+ para SKU/Barcode/Slug.
+  infoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[3],
+    rowGap: spacing[3],
+  },
+  // Wrapper de los 3 inputs de precio (Costo / Margen / Precio Base).
+  // En mobile sigue siendo 1 col (stacked), pero el flex-row deja
+  // preparado el cambio a 3 cols en pantallas más grandes.
+  pricingRow: {
+    flexDirection: 'column',
+    gap: spacing[4],
+  },
+  // Header de la sección Descripción (label a la izquierda + botón IA a la derecha).
+  descriptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing[1],
+  },
+  descriptionLabel: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '500' as any,
+    color: colors.text.secondary,
+  },
+  // Botón 'Generar con IA' (espejo simplificado del ai-generate-btn web).
+  // Web tiene animación shimmer compleja; aquí se hace una versión estática
+  // con los mismos colores (verde + texto blanco, borde verde semitransparente).
+  aiGenerateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.4)',
+    backgroundColor: colors.primary,
+  },
+  aiGenerateText: {
+    fontSize: 8,
+    fontWeight: '700' as any,
+    color: colors.background,
+    marginLeft: spacing[1],
+  },
+  // Helper amber (mirror web `.text-amber-600 .flex .gap-1`).
+  helperAmber: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+    paddingHorizontal: spacing[1],
+    marginTop: spacing[1],
+  },
+
+  // ── Imágenes del Producto (espejo web lg:hidden) ──────────────────────────
+  imageCount: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[400],
+  },
+  imageMainPlaceholder: {
+    width: '100%',
+    maxWidth: 280,
+    aspectRatio: 1,
+    alignSelf: 'center',
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing[4],
+  },
+  imageMainCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 1,
+    marginBottom: spacing[2],
+  },
+  imageMainText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '500' as any,
+    color: colorScales.gray[600],
+  },
+  imageMainHint: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[400],
+  },
+  imageThumbsRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    paddingBottom: spacing[2],
+  },
+  imageThumbAdd: {
+    flexShrink: 0,
+    width: 64,
+    height: 64,
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 2,
+    borderColor: colorScales.gray[300],
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: spacing[1],
+  },
+  imageThumbAddText: {
+    fontSize: 9,
+    color: colorScales.gray[400],
+    marginTop: 2,
+  },
+
+  // ── Inventario / Stock (espejo web lg:hidden) ────────────────────────────
+  inventoryStatsGrid: {
+    flexDirection: 'row',
+    gap: spacing[2],
+  },
+  inventoryStatCard: {
+    flex: 1,
+    padding: spacing[3],
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+  },
+  inventoryStatLabel: {
+    fontSize: 9,
+    color: colors.text.muted,
+    fontWeight: '700' as any,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: spacing[1],
+  },
+  inventoryStatValue: {
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: '700' as any,
+    color: colors.text.primary,
+  },
+  inventoryStatValuePrimary: {
+    color: colors.primary,
+  },
+  inventoryActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2.5],
+    paddingHorizontal: spacing[3],
+    backgroundColor: colorScales.green[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.3)',
+  },
+  inventoryActionText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: '700' as any,
+    color: colorScales.green[700],
   },
 });
