@@ -320,6 +320,14 @@
       "sessions": 4,
       "memories": 15,
       "prompts": 0
+    },
+    {
+      "id": "f6cb7e66",
+      "created_by": "yoner",
+      "created_at": "2026-06-30T22:26:39Z",
+      "sessions": 2,
+      "memories": 1,
+      "prompts": 1
     }
   ]
 }
