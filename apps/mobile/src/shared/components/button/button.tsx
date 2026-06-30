@@ -30,6 +30,10 @@ const baseStyle = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  active: {
+    // Mirror del `active:scale-[0.97]` web: feedback háptico al presionar
+    transform: [{ scale: 0.97 }],
+  },
   disabled: {
     opacity: 0.5,
   },
@@ -143,6 +147,7 @@ export function Button({
         variantStyles[variant],
         sizeStyles[size],
         pressed && variantStyles[`${variant}Pressed` as keyof typeof variantStyles],
+        pressed && !isDisabled && baseStyle.active,
         isDisabled && baseStyle.disabled,
         fullWidth && { width: '100%' },
         style,

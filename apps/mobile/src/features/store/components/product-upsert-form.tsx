@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -7,9 +7,11 @@ import type {
   Brand,
   CreateProductDto,
   CreateProductVariantDto,
+  PricingType,
   Product,
   ProductCategory,
   ProductState,
+  ProductType,
   TaxCategory,
   UpdateProductDto,
 } from '@/features/store/types';
@@ -71,6 +73,30 @@ interface ProductFormState {
   variants: VariantForm[];
   stock_by_location: Record<string, string>;
 }
+
+/**
+ * Single resolved tax line shown in the pricing breakdown sub-card.
+ * Mirrors the web's `taxBreakdown`: one row per selected tax category,
+ * using the category's first `tax_rates[0].rate` (matches `app-input` parity).
+ */
+interface TaxBreakdownItem {
+  id: number;
+  name: string;
+  /** Decimal rate, e.g. 0.19 for 19% */
+  rate: number;
+  /** base_price * rate */
+  amount: number;
+}
+
+/**
+ * Variable labels for the pricing fields. The web version swaps "Costo" →
+ * "Costo por kg" and "Precio base" → "Precio por kg (PVP)" when
+ * `pricing_type === 'weight'`.
+ */
+const PRICING_LABELS: Record<PricingType, { cost: string; base: string; type: string }> = {
+  unit: { cost: 'Precio de Costo', base: 'Precio Base (PVP)', type: 'Tipo de Venta' },
+  weight: { cost: 'Costo por kg', base: 'Precio por kg (PVP)', type: 'Tipo de Venta' },
+};
 
 const initialForm: ProductFormState = {
   name: '',
@@ -229,6 +255,45 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     const sale = form.is_on_sale ? toNumber(form.sale_price) : undefined;
     return sale && sale > 0 ? sale : base;
   }, [form.base_price, form.is_on_sale, form.sale_price]);
+
+  /**
+   * Tax categories the user has selected for this product. Mirrors the web's
+   * `taxBreakdown` aggregation: one row per selected tax_category_id, using
+   * the category's first `tax_rates[0].rate`.
+   */
+  const selectedTaxes = useMemo<TaxCategory[]>(() => {
+    const ids = new Set(form.tax_category_ids);
+    return ((taxes as TaxCategory[]) || []).filter((tax) => ids.has(tax.id));
+  }, [form.tax_category_ids, taxes]);
+
+  const taxBreakdown = useMemo<TaxBreakdownItem[]>(() => {
+    const base = toNumber(form.base_price) || 0;
+    return selectedTaxes
+      .map((tax) => {
+        const rawRate = tax.tax_rates?.[0]?.rate;
+        const numericRate = typeof rawRate === 'number' ? rawRate : Number(rawRate) || 0;
+        if (numericRate === 0) return null;
+        return { id: tax.id, name: tax.name, rate: numericRate, amount: base * numericRate };
+      })
+      .filter((item): item is TaxBreakdownItem => item !== null);
+  }, [selectedTaxes, form.base_price]);
+
+  /** base + Σ(tax.amount) — the value the customer actually pays. */
+  const priceWithTax = useMemo(() => {
+    const base = toNumber(form.base_price) || 0;
+    const taxSum = taxBreakdown.reduce((sum, tax) => sum + tax.amount, 0);
+    return base + taxSum;
+  }, [form.base_price, taxBreakdown]);
+
+  /**
+   * Display value for the Section subtitle and "Precio Final" block: when the
+   * product is on sale we show the offer price; otherwise the tax-inclusive
+   * base price. Mirrors `priceWithTax` on the web.
+   */
+  const finalDisplayPrice = useMemo(() => {
+    const sale = form.is_on_sale ? toNumber(form.sale_price) : undefined;
+    return sale && sale > 0 ? sale : priceWithTax;
+  }, [form.is_on_sale, form.sale_price, priceWithTax]);
 
   const updateField = <K extends keyof ProductFormState>(key: K, value: ProductFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
@@ -455,25 +520,23 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           </Section>
 
           {/* Precios y Rentabilidad */}
-          <Section title="Precios y Rentabilidad" subtitle={`Precio final estimado ${formatCurrency(finalPreview)}`} icon="dollar-sign">
-            <View>
-              <Input
-                label="Costo"
-                value={form.cost_price}
-                onChangeText={(value) => {
-                  updateField('cost_price', value);
-                  updatePriceFromCostMargin(value, form.profit_margin);
-                }}
-                keyboardType="decimal-pad"
-                rightIcon={
-                  form.cost_price ? (
-                    <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
-                      {formatCurrency(toNumber(form.cost_price) || 0).replace(/\s/g, '')}
-                    </Text>
-                  ) : null
-                }
-              />
-            </View>
+          <Section title="Precios y Rentabilidad" icon="dollar-sign" iconColor={colors.primary}>
+            <Input
+              label={PRICING_LABELS[form.pricing_type].cost}
+              value={form.cost_price}
+              onChangeText={(value) => {
+                updateField('cost_price', value);
+                updatePriceFromCostMargin(value, form.profit_margin);
+              }}
+              keyboardType="decimal-pad"
+              rightIcon={
+                form.cost_price ? (
+                  <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
+                    {formatCurrency(toNumber(form.cost_price) || 0).replace(/\s/g, '')}
+                  </Text>
+                ) : null
+              }
+            />
             <Input
               label="Margen %"
               value={form.profit_margin}
@@ -483,27 +546,25 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               }}
               keyboardType="decimal-pad"
             />
-            <View>
-              <Input
-                label="Precio base"
-                value={form.base_price}
-                onChangeText={(value) => {
-                  updateField('base_price', value);
-                  updateMarginFromBase(value, form.cost_price);
-                }}
-                keyboardType="decimal-pad"
-                error={errors.base_price}
-                rightIcon={
-                  form.base_price ? (
-                    <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
-                      {formatCurrency(toNumber(form.base_price) || 0).replace(/\s/g, '')}
-                    </Text>
-                  ) : null
-                }
-              />
-            </View>
+            <Input
+              label={PRICING_LABELS[form.pricing_type].base}
+              value={form.base_price}
+              onChangeText={(value) => {
+                updateField('base_price', value);
+                updateMarginFromBase(value, form.cost_price);
+              }}
+              keyboardType="decimal-pad"
+              error={errors.base_price}
+              rightIcon={
+                form.base_price ? (
+                  <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
+                    {formatCurrency(toNumber(form.base_price) || 0).replace(/\s/g, '')}
+                  </Text>
+                ) : null
+              }
+            />
             <Selector
-              label="Unidad de venta"
+              label={PRICING_LABELS[form.pricing_type].type}
               value={form.pricing_type}
               onChange={(v) => updateField('pricing_type', v as PricingType)}
               options={[
@@ -511,106 +572,160 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 { label: 'Venta por peso (kg)', value: 'weight' },
               ]}
             />
-            {true && (
-              <View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[1], marginBottom: spacing[1.5] }}>
-                  <Text style={{
-                    fontSize: 10,
-                    fontWeight: typography.fontWeight.bold,
-                    fontFamily: typography.fontFamily,
-                    color: colorScales.gray[700],
-                    letterSpacing: 0.5,
-                    textTransform: 'uppercase',
-                  }}>Impuestos aplicables</Text>
-                  <Text style={{ color: colorScales.gray[400], fontSize: 10 }}>*</Text>
+            <View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[1], marginBottom: spacing[1.5] }}>
+                <Text style={{
+                  fontSize: 10,
+                  fontWeight: typography.fontWeight.bold,
+                  fontFamily: typography.fontFamily,
+                  color: colorScales.gray[700],
+                  letterSpacing: 0.5,
+                  textTransform: 'uppercase',
+                }}>Impuestos aplicables</Text>
+                <Text style={{ color: colorScales.gray[400], fontSize: 10 }}>*</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+                <View style={{ flex: 1 }}>
+                  <MultiSelector
+                    values={form.tax_category_ids}
+                    onChange={(v) => updateField('tax_category_ids', v)}
+                    options={((taxes as TaxCategory[]) || []).map((t) => {
+                      const rate = t.tax_rates?.[0]?.rate;
+                      const labelText = typeof rate === 'number' ? `${t.name} (${(rate * 100).toFixed(0)}%)` : t.name;
+                      return { label: labelText, subLabel: t.name, value: t.id };
+                    })}
+                    placeholder="Seleccionar impuestos"
+                    searchable
+                    searchPlaceholder="Buscar impuesto…"
+                  />
                 </View>
-                <View style={{ flexDirection: 'row', gap: spacing[2] }}>
-                  <View style={{ flex: 1 }}>
-                    <MultiSelector
-                      values={form.tax_category_ids}
-                      onChange={(v) => updateField('tax_category_ids', v)}
-                      options={((taxes as TaxCategory[]) || []).map((t) => ({ label: t.name, value: t.id }))}
-                      placeholder="Seleccionar impuestos"
+                <Pressable
+                  onPress={() => setTaxModalOpen(true)}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.taxAddButton,
+                    pressed && styles.taxAddButtonPressed,
+                  ]}
+                >
+                  <Icon name="plus" size={20} color={colors.primary} />
+                </Pressable>
+              </View>
+
+              {/* Lista inline de impuestos disponibles (espejo exacto de las filas del popover).
+                  Se muestra siempre visible sin abrir el dropdown. Tocar una fila togglea la selección.
+                  Si aún no hay impuestos configurados, muestra un mensaje con CTA para crear uno. */}
+              <View style={styles.taxOptionList}>
+                {((taxes as TaxCategory[]) || []).length === 0 && (
+                  <View style={styles.taxOptionEmpty}>
+                    <Icon name="receipt" size={20} color={colors.text.muted} />
+                    <Text style={styles.taxOptionEmptyTitle}>No hay impuestos disponibles</Text>
+                    <Text style={styles.taxOptionEmptyHint}>
+                      Toca el botón + para crear tu primera categoría de impuesto (IVA, INC, etc.).
+                    </Text>
+                  </View>
+                )}
+                {((taxes as TaxCategory[]) || []).map((tax) => {
+                  const isSelected = form.tax_category_ids.includes(tax.id);
+                  const rate = tax.tax_rates?.[0]?.rate;
+                  const rateLabel = typeof rate === 'number' ? `${tax.name} (${(rate * 100).toFixed(0)}%)` : tax.name;
+                  return (
+                    <Pressable
+                      key={tax.id}
+                      onPress={() => {
+                        const next = isSelected
+                          ? form.tax_category_ids.filter((id) => id !== tax.id)
+                          : [...form.tax_category_ids, tax.id];
+                        updateField('tax_category_ids', next);
+                      }}
+                      hitSlop={4}
+                      style={({ pressed }) => [
+                        styles.taxOptionRow,
+                        isSelected && styles.taxOptionRowSelected,
+                        pressed && styles.taxOptionRowPressed,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.taxOptionCheckbox,
+                          isSelected && styles.taxOptionCheckboxSelected,
+                        ]}
+                      >
+                        {isSelected && <Icon name="check" size={12} color="#FFFFFF" />}
+                      </View>
+                      <Text style={styles.taxOptionLabel} numberOfLines={1}>
+                        {rateLabel}
+                      </Text>
+                      {tax.name !== '' && (
+                        <Text style={styles.taxOptionSubLabel} numberOfLines={1}>
+                          {tax.name}
+                        </Text>
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </View>
+
+            {/* Sub-card con desglose estructurado del precio (espejo de la versión web mobile) */}
+            <View style={styles.pricingBreakdownCard}>
+              {/* Fila 1: Fórmula de cálculo (gris) */}
+              <View style={styles.formulaRow}>
+                <Text style={styles.formulaValue}>{formatCurrency(toNumber(form.cost_price) || 0)}</Text>
+                <Text style={styles.formulaHint}>(Costo)</Text>
+                <Text style={styles.formulaOp}>×</Text>
+                <Text style={styles.formulaHint}>(1 + {Number(form.profit_margin || 0).toFixed(1)}%)</Text>
+                <Text style={styles.formulaOp}>=</Text>
+                <Text style={styles.formulaValue}>{formatCurrency(toNumber(form.base_price) || 0)}</Text>
+                <Text style={styles.formulaHint}>(PVP)</Text>
+
+                {taxBreakdown.map((tax) => (
+                  <Fragment key={tax.id}>
+                    <Text style={styles.formulaOp}>+</Text>
+                    <Text style={styles.formulaHint}>{(tax.rate * 100).toFixed(1)}% {tax.name}</Text>
+                    <Text style={styles.formulaAmount}>({formatCurrency(tax.amount)})</Text>
+                  </Fragment>
+                ))}
+
+                <Text style={styles.formulaOp}>=</Text>
+                <Text style={styles.formulaFinal}>{formatCurrency(priceWithTax)}</Text>
+              </View>
+
+              {/* Fila 2: Precio Final + Divisor + Toggle oferta (blanco) */}
+              <View style={styles.finalPriceRow}>
+                <View style={styles.finalPriceCol}>
+                  <Text style={styles.finalLabel}>PRECIO FINAL</Text>
+                  <Text style={[styles.finalAmount, form.is_on_sale && styles.finalAmountStrike]}>
+                    {formatCurrency(priceWithTax)}
+                  </Text>
+                </View>
+                <View style={styles.dividerVertical} />
+                <Toggle
+                  style={{ flex: 1 }}
+                  value={form.is_on_sale}
+                  onChange={(v) => updateField('is_on_sale', v)}
+                  label="Activar precio de oferta"
+                  description="Se mostrará como precio promocional"
+                />
+              </View>
+
+              {/* Fila 3: Sub-sección rose para precio de oferta (solo si is_on_sale) */}
+              {form.is_on_sale && (
+                <View style={styles.saleRow}>
+                  <Icon name="flame" size={18} color={colorScales.red[500]} />
+                  <View style={styles.saleCol}>
+                    <Text style={styles.saleLabel}>PRECIO DE OFERTA</Text>
+                    <Input
+                      tone="rose"
+                      value={form.sale_price}
+                      onChangeText={(value) => updateField('sale_price', value)}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      error={errors.sale_price}
                     />
                   </View>
-                  <Pressable
-                    onPress={() => setTaxModalOpen(true)}
-                    hitSlop={6}
-                    style={({ pressed }) => [
-                      {
-                        width: 40,
-                        height: 40,
-                        borderRadius: 10,
-                        borderWidth: 1.5,
-                        borderColor: colors.primary,
-                        backgroundColor: 'transparent',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <Icon name="plus" size={18} color={colors.primary} />
-                  </Pressable>
                 </View>
-              </View>
-            )}
-
-            {/* Espacio destacado del Precio final (sin border, precio en color primary) */}
-            <View
-              style={{
-                padding: spacing[4],
-                gap: spacing[1],
-                marginTop: spacing[1],
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 10,
-                  fontWeight: '700',
-                  color: colors.text.secondary,
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.5,
-                }}
-              >
-                Precio final estimado
-              </Text>
-              <Text
-                style={{
-                  fontSize: 28,
-                  fontWeight: '800',
-                  color: colors.primary,
-                }}
-              >
-                {formatCurrency(finalPreview)}
-              </Text>
-              <Text
-                style={{
-                  fontSize: typography.fontSize.xs,
-                  color: colors.text.secondary,
-                  marginTop: spacing[1],
-                }}
-              >
-                {`${formatCurrency(toNumber(form.cost_price) || 0)} × (1 + ${form.profit_margin || '0'}%) = ${formatCurrency(finalPreview)}`}
-              </Text>
+              )}
             </View>
-            <View style={{ height: spacing[2] }} />
-            <Toggle
-              value={form.is_on_sale}
-              onChange={(v) => updateField('is_on_sale', v)}
-              label="Activar precio de oferta"
-              description="Mostrar precio tachado y activar precio promocional."
-            />
-            {form.is_on_sale && (
-              <Input
-                label="Precio de oferta"
-                value={form.sale_price}
-                onChangeText={(value) => updateField('sale_price', value)}
-                keyboardType="decimal-pad"
-                error={errors.sale_price}
-                helperText="Debe ser menor al precio base"
-              />
-            )}
           </Section>
 
           {/* Imágenes del Producto (placeholder) */}
@@ -882,14 +997,26 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   );
 }
 
-function Section({ title, subtitle, icon, children }: { title: string; subtitle?: string; icon?: string; children: React.ReactNode }) {
+function Section({
+  title,
+  subtitle,
+  icon,
+  iconColor,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  icon?: string;
+  iconColor?: string;
+  children: React.ReactNode;
+}) {
   return (
     <Card style={styles.section}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionHeaderRow}>
           {icon && (
             <View style={styles.sectionIcon}>
-              <Icon name={icon} size={16} color={colorScales.gray[500]} />
+              <Icon name={icon} size={16} color={iconColor ?? colorScales.gray[500]} />
             </View>
           )}
           <Text style={styles.sectionTitle}>{title}</Text>
@@ -967,4 +1094,235 @@ const styles = StyleSheet.create({
   errorText: { color: colors.error, fontSize: typography.fontSize.xs, fontWeight: '600' as any },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', gap: spacing[3], padding: spacing[4], backgroundColor: colors.background, borderTopWidth: 1, borderTopColor: colorScales.gray[200], ...shadows.lg },
   footerButton: { flex: 1 },
+
+  // ── Pricing breakdown sub-card (espejo de la versión web mobile) ──────
+  pricingBreakdownCard: {
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    backgroundColor: colors.card,
+  },
+  // Fila 1: chips de fórmula con tokens y operadores, fondo gris-50
+  formulaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    backgroundColor: colorScales.gray[50],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2.5],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+    columnGap: spacing[2],
+    rowGap: spacing[1],
+  },
+  formulaValue: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '700' as any,
+    color: colorScales.gray[700],
+  },
+  formulaHint: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[400],
+  },
+  formulaOp: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '500' as any,
+    color: colorScales.gray[300],
+  },
+  formulaAmount: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  formulaFinal: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '700' as any,
+    color: colors.primary,
+  },
+  // Fila 2: Precio Final destacado + divisor + Toggle oferta
+  finalPriceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    gap: spacing[3],
+  },
+  finalPriceCol: {
+    gap: spacing[0.5],
+  },
+  finalLabel: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    color: colorScales.gray[400],
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  finalAmount: {
+    fontSize: 24,
+    fontWeight: '900' as any,
+    lineHeight: 28,
+    color: colors.primary,
+  },
+  finalAmountStrike: {
+    color: colorScales.gray[300],
+    textDecorationLine: 'line-through',
+  },
+  dividerVertical: {
+    width: StyleSheet.hairlineWidth,
+    height: 40,
+    backgroundColor: colorScales.gray[200],
+    alignSelf: 'center',
+  },
+  // Fila 3: Sub-sección rose para precio de oferta
+  saleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.red[200],
+    backgroundColor: colorScales.red[50],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+  },
+  saleCol: {
+    flex: 1,
+    gap: spacing[1.5],
+  },
+  saleLabel: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    color: colorScales.red[600],
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+
+  // ── Tax chip list (espejo del MultiSelector, pero siempre visible) ───
+  taxChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[2],
+  },
+  taxChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1.5],
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[3],
+    borderRadius: borderRadius.full,
+    borderWidth: 1.5,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colors.card,
+  },
+  taxChipSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colorScales.green[50],
+  },
+  taxChipText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '600' as any,
+    color: colorScales.gray[700],
+  },
+  taxChipTextSelected: {
+    color: colorScales.green[700],
+  },
+  taxChipAdd: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderStyle: 'dashed',
+  },
+  // Botón + que abre TaxCreateModal (espejo del `btn-outline-border` web)
+  taxAddButton: {
+    width: 42,
+    height: 42,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.5)',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  taxAddButtonPressed: {
+    backgroundColor: 'rgba(126, 215, 165, 0.06)',
+    transform: [{ scale: 0.97 }],
+  },
+  // Lista inline de impuestos disponibles (espejo de la fila del popover).
+  // Cada fila es un botón full-width con checkbox + label + sub-label.
+  taxOptionList: {
+    marginTop: spacing[2],
+    gap: spacing[2],
+  },
+  taxOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[3],
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colors.card,
+  },
+  taxOptionRowSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colorScales.green[50],
+  },
+  taxOptionRowPressed: {
+    backgroundColor: colorScales.gray[50],
+  },
+  taxOptionCheckbox: {
+    width: 16,
+    height: 16,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1.5,
+    borderColor: colorScales.gray[300],
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  taxOptionCheckboxSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+  taxOptionLabel: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    color: colors.text.primary,
+  },
+  taxOptionSubLabel: {
+    fontSize: typography.fontSize.xs,
+    color: colors.text.secondary,
+    maxWidth: '40%',
+    flexShrink: 0,
+  },
+  // Empty state cuando el tenant aún no tiene impuestos configurados.
+  taxOptionEmpty: {
+    paddingVertical: spacing[5],
+    paddingHorizontal: spacing[4],
+    alignItems: 'center',
+    gap: spacing[1.5],
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colorScales.gray[300],
+    backgroundColor: colorScales.gray[50],
+  },
+  taxOptionEmptyTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '600' as any,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  taxOptionEmptyHint: {
+    fontSize: typography.fontSize.xs,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
 });

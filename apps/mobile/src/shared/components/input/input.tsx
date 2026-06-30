@@ -8,6 +8,17 @@ interface InputProps extends TextInputProps {
   helperText?: string;
   rightIcon?: React.ReactNode;
   helpIcon?: React.ReactNode;
+  /**
+   * Marca el campo como requerido. Muestra un asterisco rojo a la derecha
+   * del label (mirror del `text-[var(--color-destructive)] ml-1` web).
+   */
+  required?: boolean;
+  /**
+   * Visual tone applied to the wrapper. The default keeps the soft gray look
+   * used across the form. `rose` is used for the offer-price field in the
+   * product pricing breakdown card (matches the web's rose-themed input).
+   */
+  tone?: 'default' | 'rose';
   style?: ViewStyle;
 }
 
@@ -48,12 +59,28 @@ const styles = StyleSheet.create({
     borderColor: colors.error,
     borderWidth: 1.5,
   },
+  inputWrapperRose: {
+    backgroundColor: '#FFFFFF',
+    borderColor: colorScales.red[300],
+    borderWidth: 1.5,
+  },
+  inputWrapperRoseFocused: {
+    borderColor: colorScales.red[500],
+  },
+  inputWrapperRoseError: {
+    borderColor: colors.error,
+  },
   textInput: {
     flex: 1,
     height: 40,
     fontSize: typography.fontSize.sm,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
+  },
+  textInputRose: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.red[600],
   },
   iconWrapper: {
     marginLeft: spacing[2],
@@ -70,6 +97,11 @@ const styles = StyleSheet.create({
     color: colors.text.muted,
     marginTop: spacing[1],
   },
+  requiredMark: {
+    color: colors.error,
+    fontSize: 10,
+    fontWeight: '700' as any,
+  },
 });
 
 export function Input({
@@ -78,28 +110,40 @@ export function Input({
   helperText,
   rightIcon,
   helpIcon,
+  required = false,
+  tone = 'default',
   style,
   ...props
 }: InputProps) {
   const [isFocused, setIsFocused] = useState(false);
 
-  const inputWrapperStyle = error
-    ? styles.inputWrapperError
-    : isFocused
-      ? styles.inputWrapperFocused
-      : styles.inputWrapperDefault;
+  const inputWrapperStyle = (() => {
+    if (tone === 'rose') {
+      if (error) return styles.inputWrapperRoseError;
+      return isFocused ? styles.inputWrapperRoseFocused : styles.inputWrapperRose;
+    }
+    if (error) return styles.inputWrapperError;
+    return isFocused ? styles.inputWrapperFocused : styles.inputWrapperDefault;
+  })();
+
+  const textInputStyle = tone === 'rose' ? [styles.textInput, styles.textInputRose] : styles.textInput;
 
   return (
     <View style={styles.container}>
       {(label || helpIcon) && (
         <View style={styles.labelRow}>
-          {label && <Text style={styles.label}>{label}</Text>}
+          {label && (
+            <Text style={styles.label}>
+              {label}
+              {required && <Text style={styles.requiredMark}> *</Text>}
+            </Text>
+          )}
           {helpIcon}
         </View>
       )}
       <View style={[styles.inputWrapper, inputWrapperStyle, style]}>
         <TextInput
-          style={styles.textInput}
+          style={textInputStyle}
           placeholderTextColor={colors.text.muted}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}

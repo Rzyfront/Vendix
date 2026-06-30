@@ -18,6 +18,8 @@ interface SelectorProps<T = string | number> {
   label?: string;
   error?: string;
   disabled?: boolean;
+  /** Marca el campo como requerido. Muestra un asterisco rojo en el label. */
+  required?: boolean;
   style?: ViewStyle;
 }
 
@@ -29,6 +31,7 @@ export function Selector<T = string | number>({
   label,
   error,
   disabled = false,
+  required = false,
   style,
 }: SelectorProps<T>) {
   const [open, setOpen] = useState(false);
@@ -47,7 +50,12 @@ export function Selector<T = string | number>({
 
   return (
     <View style={style}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {label && (
+        <Text style={styles.label}>
+          {label}
+          {required && <Text style={styles.requiredMark}> *</Text>}
+        </Text>
+      )}
       <Pressable
         ref={triggerRef}
         onPress={() => !disabled && (open ? setOpen(false) : measureTrigger())}
@@ -194,5 +202,10 @@ const styles = StyleSheet.create({
   optionLabelSelected: {
     color: colors.background,
     fontWeight: typography.fontWeight.bold,
+  },
+  requiredMark: {
+    color: colors.error,
+    fontSize: 10,
+    fontWeight: '700' as any,
   },
 });

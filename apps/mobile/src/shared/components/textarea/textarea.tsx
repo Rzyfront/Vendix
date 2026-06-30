@@ -13,6 +13,11 @@ interface TextareaProps extends Omit<TextInputProps, 'multiline' | 'style'> {
   containerStyle?: ViewStyle;
   helpIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
+  /**
+   * Marca el campo como requerido. Muestra un asterisco rojo a la derecha
+   * del label (mirror del `text-[var(--color-destructive)] ml-1` web).
+   */
+  required?: boolean;
 }
 
 export function Textarea({
@@ -26,6 +31,7 @@ export function Textarea({
   containerStyle,
   helpIcon,
   rightIcon,
+  required = false,
   ...rest
 }: TextareaProps) {
   const [focused, setFocused] = useState(false);
@@ -35,7 +41,12 @@ export function Textarea({
     <View style={containerStyle}>
       {(label || helpIcon) && (
         <View style={styles.labelRow}>
-          {label && <Text style={styles.label}>{label}</Text>}
+          {label && (
+            <Text style={styles.label}>
+              {label}
+              {required && <Text style={styles.requiredMark}> *</Text>}
+            </Text>
+          )}
           {helpIcon}
         </View>
       )}
@@ -141,6 +152,11 @@ const styles = StyleSheet.create({
   counter: {
     fontSize: typography.fontSize.xs,
     color: colors.text.muted,
+  },
+  requiredMark: {
+    color: colors.error,
+    fontSize: 10,
+    fontWeight: '700' as any,
   },
 });
 
