@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Pressable, Text, View, StyleSheet, TextInput, type ViewStyle } from 'react-native';
+import { Alert, Pressable, Text, View, StyleSheet, TextInput, type ViewStyle } from 'react-native';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 
@@ -34,6 +34,11 @@ interface MultiSelectorProps<T = string | number> {
   searchPlaceholder?: string;
   /** Texto cuando no hay opciones disponibles. */
   emptyText?: string;
+  /**
+   * Texto del tooltip mostrado al lado del label (mirror web).
+   * Renderiza un ícono help-circle que al tap muestra el texto en un Alert.
+   */
+  tooltip?: string;
   style?: ViewStyle;
 }
 
@@ -55,6 +60,7 @@ export function MultiSelector<T = string | number>({
   searchable = false,
   searchPlaceholder = 'Buscar…',
   emptyText = 'No hay opciones disponibles',
+  tooltip,
   style,
 }: MultiSelectorProps<T>) {
   const [open, setOpen] = useState(false);
@@ -95,6 +101,14 @@ export function MultiSelector<T = string | number>({
       {label && (
         <Text style={styles.label}>
           {label}
+          {tooltip && (
+            <Text
+              onPress={() => Alert.alert(label, tooltip)}
+              style={styles.helpIconInline}
+            >
+              {' '}ⓘ
+            </Text>
+          )}
         </Text>
       )}
 
@@ -413,6 +427,11 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     color: colors.text.muted,
     textAlign: 'center',
+  },
+  helpIconInline: {
+    color: colorScales.gray[400],
+    fontSize: 12,
+    fontWeight: typography.fontWeight.normal as any,
   },
 });
 

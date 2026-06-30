@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, StyleSheet, type ViewStyle, type TextInputProps } from 'react-native';
+import { Pressable, View, Text, TextInput, StyleSheet, Alert, type ViewStyle, type TextInputProps } from 'react-native';
 import { colors, spacing, borderRadius, typography, colorScales } from '@/shared/theme';
+import { Icon } from '@/shared/components/icon/icon';
 
 interface InputProps extends TextInputProps {
   label?: string;
@@ -8,6 +9,11 @@ interface InputProps extends TextInputProps {
   helperText?: string;
   rightIcon?: React.ReactNode;
   helpIcon?: React.ReactNode;
+  /**
+   * Texto del tooltip que se muestra al lado del label (mirror web).
+   * Renderiza un ícono help-circle que al tap muestra el texto en un Alert.
+   */
+  tooltip?: string;
   /**
    * Marca el campo como requerido. Muestra un asterisco rojo a la derecha
    * del label (mirror del `text-[var(--color-destructive)] ml-1` web).
@@ -19,6 +25,16 @@ interface InputProps extends TextInputProps {
    * product pricing breakdown card (matches the web's rose-themed input).
    */
   tone?: 'default' | 'rose';
+  /**
+   * Prefijo visual dentro del input (a la izquierda). Mirror del
+   * `prefix="$"` web para campos monetarios.
+   */
+  prefix?: React.ReactNode;
+  /**
+   * Sufijo visual dentro del input (a la derecha, antes del rightIcon).
+   * Mirror del `suffix="%"` web para campos de porcentaje.
+   */
+  suffix?: React.ReactNode;
   style?: ViewStyle;
 }
 
@@ -43,21 +59,23 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colorScales.gray[50],
+    backgroundColor: colors.background,
     borderRadius: 10,
     paddingHorizontal: spacing[3],
-    borderWidth: 0,
+    borderWidth: 1,
   },
   inputWrapperDefault: {
-    borderColor: 'transparent',
+    borderColor: colorScales.gray[300],
   },
   inputWrapperFocused: {
     borderColor: colors.primary,
+    backgroundColor: colors.card,
     borderWidth: 1.5,
   },
   inputWrapperError: {
     borderColor: colors.error,
     borderWidth: 1.5,
+    backgroundColor: colors.card,
   },
   inputWrapperRose: {
     backgroundColor: '#FFFFFF',
@@ -85,6 +103,22 @@ const styles = StyleSheet.create({
   iconWrapper: {
     marginLeft: spacing[2],
   },
+  affix: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    marginHorizontal: spacing[1],
+    fontWeight: '500' as any,
+  },
+  affixSuffix: {
+    marginRight: spacing[2],
+  },
+  helpIconWrapper: {
+    width: 16,
+    height: 16,
+    marginLeft: spacing[1],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   errorText: {
     fontSize: typography.fontSize.xs,
     fontFamily: typography.fontFamily,
@@ -110,8 +144,11 @@ export function Input({
   helperText,
   rightIcon,
   helpIcon,
+  tooltip,
   required = false,
   tone = 'default',
+  prefix,
+  suffix,
   style,
   ...props
 }: InputProps) {
@@ -128,9 +165,26 @@ export function Input({
 
   const textInputStyle = tone === 'rose' ? [styles.textInput, styles.textInputRose] : styles.textInput;
 
+  /**
+   * Renderiza el help-icon según prioridad:
+   * 1. `helpIcon` prop (custom JSX) si fue pasado.
+   * 2. Ícono help-circle automático si hay `tooltip` text.
+   * 3. Nada.
+   */
+  const helpIconNode = helpIcon
+    ?? (tooltip ? (
+      <Pressable
+        onPress={() => Alert.alert(label || 'Información', tooltip)}
+        hitSlop={8}
+        style={styles.helpIconWrapper}
+      >
+        <Icon name="help-circle" size={12} color={colors.text.muted} />
+      </Pressable>
+    ) : null);
+
   return (
     <View style={styles.container}>
-      {(label || helpIcon) && (
+      {(label || helpIconNode) && (
         <View style={styles.labelRow}>
           {label && (
             <Text style={styles.label}>
@@ -138,10 +192,11 @@ export function Input({
               {required && <Text style={styles.requiredMark}> *</Text>}
             </Text>
           )}
-          {helpIcon}
+          {helpIconNode}
         </View>
       )}
       <View style={[styles.inputWrapper, inputWrapperStyle, style]}>
+        {prefix && <Text style={styles.affix}>{prefix}</Text>}
         <TextInput
           style={textInputStyle}
           placeholderTextColor={colors.text.muted}
@@ -149,6 +204,7 @@ export function Input({
           onBlur={() => setIsFocused(false)}
           {...props}
         />
+        {suffix && <Text style={[styles.affix, styles.affixSuffix]}>{suffix}</Text>}
         {rightIcon && <View style={styles.iconWrapper}>{rightIcon}</View>}
       </View>
       {error && <Text style={styles.errorText}>{error}</Text>}

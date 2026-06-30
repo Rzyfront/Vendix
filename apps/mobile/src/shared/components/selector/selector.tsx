@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Modal, Pressable, Text, View, StyleSheet, type ViewStyle } from 'react-native';
+import { Alert, Modal, Pressable, Text, View, StyleSheet, type ViewStyle } from 'react-native';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 
@@ -20,6 +20,11 @@ export interface SelectorProps<T = string | number> {
   disabled?: boolean;
   /** Marca el campo como requerido. Muestra un asterisco rojo en el label. */
   required?: boolean;
+  /**
+   * Texto del tooltip mostrado al lado del label (mirror web).
+   * Renderiza un ícono help-circle que al tap muestra el texto en un Alert.
+   */
+  tooltip?: string;
   style?: ViewStyle;
 }
 
@@ -32,6 +37,7 @@ export function Selector<T = string | number>({
   error,
   disabled = false,
   required = false,
+  tooltip,
   style,
 }: SelectorProps<T>) {
   const [open, setOpen] = useState(false);
@@ -54,6 +60,14 @@ export function Selector<T = string | number>({
         <Text style={styles.label}>
           {label}
           {required && <Text style={styles.requiredMark}> *</Text>}
+          {tooltip && (
+            <Text
+              onPress={() => Alert.alert(label, tooltip)}
+              style={styles.helpIconInline}
+            >
+              {' '}ⓘ
+            </Text>
+          )}
         </Text>
       )}
       <Pressable
@@ -134,12 +148,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[3],
     paddingVertical: spacing[2],
     borderRadius: 10,
-    borderWidth: 0,
-    backgroundColor: colorScales.gray[50],
+    borderWidth: 1,
+    borderColor: colorScales.gray[300],
+    backgroundColor: colors.background,
     gap: spacing[2],
   },
   triggerPressed: {
-    backgroundColor: colorScales.gray[50],
+    backgroundColor: colorScales.gray[100],
   },
   triggerText: {
     flex: 1,
@@ -207,5 +222,10 @@ const styles = StyleSheet.create({
     color: colors.error,
     fontSize: 10,
     fontWeight: '700' as any,
+  },
+  helpIconInline: {
+    color: colorScales.gray[400],
+    fontSize: 12,
+    fontWeight: typography.fontWeight.normal as any,
   },
 });

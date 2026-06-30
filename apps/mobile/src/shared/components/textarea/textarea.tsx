@@ -120,12 +120,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colorScales.gray[300],
     borderRadius: borderRadius.lg,
-    backgroundColor: colors.inputBg,
+    backgroundColor: colors.background,
     paddingHorizontal: spacing[3],
     paddingVertical: spacing[2],
   },
   wrapperFocused: {
     borderColor: colors.primary,
+    backgroundColor: colors.card,
   },
   wrapperError: {
     borderColor: colors.error,
