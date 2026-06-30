@@ -97,6 +97,9 @@ export const Endpoints = {
     TAXES: {
       LIST: '/store/taxes',
       CATEGORIES: '/store/taxes/categories',
+      CATEGORY_CREATE: '/store/taxes/categories',
+      CATEGORY_UPDATE: '/store/taxes/categories/:id',
+      CATEGORY_DELETE: '/store/taxes/categories/:id',
     },
     PAYMENT_METHODS: {
       LIST: '/store/payments/payment-methods',

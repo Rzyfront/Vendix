@@ -110,14 +110,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   label: {
-    fontSize: typography.fontSize.base,
-    color: colors.text.primary,
-    fontWeight: '500',
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[700],
+    fontWeight: '600',
   },
   description: {
-    fontSize: typography.fontSize.sm,
-    color: colors.text.secondary,
+    fontSize: 10,
+    color: colorScales.gray[500],
     marginTop: 2,
+    lineHeight: 12,
   },
   trackContainer: {
     width: TRACK_WIDTH,

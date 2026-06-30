@@ -9,15 +9,20 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Input, Selector, Textarea, Button } from '@/shared/components';
 import { Icon } from '@/shared/components/icon/icon';
-import { toastSuccess } from '@/shared/components/toast/toast.store';
+import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
+import { ProductService } from '@/features/store/services';
+import type { CreateTaxCategoryDto } from '@/features/store/services/product.service';
+import type { TaxCategory } from '@/features/store/types';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 
 interface TaxCreateModalProps {
   visible: boolean;
   onClose: () => void;
-  onCreated?: (tax: { id: number; name: string }) => void;
+  /** Llamado cuando el impuesto se crea exitosamente. Devuelve el tax real con id del backend. */
+  onCreated?: (tax: TaxCategory) => void;
 }
 
 const CALC_TYPE_OPTIONS = [
@@ -35,11 +40,44 @@ const FISCAL_CLASS_OPTIONS = [
 ];
 
 export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalProps) {
+  const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [calcType, setCalcType] = useState('percentage');
   const [fiscalClass, setFiscalClass] = useState('iva');
   const [rate, setRate] = useState('');
   const [description, setDescription] = useState('');
+
+  const createMutation = useMutation({
+    mutationFn: (data: {
+      name: string;
+      rate: number;
+      type: 'percentage' | 'fixed';
+      tax_type: CreateTaxCategoryDto['tax_type'];
+      description?: string;
+    }) =>
+      ProductService.createTaxCategory({
+        name: data.name,
+        rate: data.rate,
+        type: data.type,
+        tax_type: data.tax_type,
+        description: data.description,
+      }),
+    onSuccess: (created) => {
+      toastSuccess(`Impuesto "${created.name}" creado`);
+      // Refrescar la query de taxes para que la nueva aparezca en la lista
+      queryClient.invalidateQueries({ queryKey: ['product-taxes'] });
+      onCreated?.(created);
+      reset();
+      onClose();
+    },
+    onError: (error: any) => {
+      const message =
+        error?.response?.data?.message ||
+        error?.message ||
+        'No se pudo crear la categoría de impuesto';
+      toastError(message);
+    },
+  });
 
   function reset() {
     setName('');
@@ -50,20 +88,31 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
   }
 
   function handleClose() {
+    if (createMutation.isPending) return;
     reset();
     onClose();
   }
 
   function handleSubmit() {
-    if (!name.trim()) {
-      toastSuccess('Funcionalidad próximamente');
+    const trimmedName = name.trim();
+    const numericRate = Number(rate);
+
+    if (!trimmedName) {
+      toastError('Ingresa el nombre del impuesto');
       return;
     }
-    const fakeId = Date.now();
-    onCreated?.({ id: fakeId, name: name.trim() });
-    toastSuccess('Impuesto agregado (local)');
-    reset();
-    onClose();
+    if (!Number.isFinite(numericRate) || numericRate < 0) {
+      toastError('Ingresa una tasa válida (>= 0)');
+      return;
+    }
+
+    createMutation.mutate({
+      name: trimmedName,
+      rate: calcType === 'percentage' ? numericRate / 100 : numericRate,
+      type: calcType as 'percentage' | 'fixed',
+      tax_type: fiscalClass as CreateTaxCategoryDto['tax_type'],
+      description: description.trim() || undefined,
+    });
   }
 
   return (
@@ -79,10 +128,8 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
       >
         <Pressable style={styles.backdrop} onPress={handleClose} />
 
-        {/* Card centrada — max-w-2xl (672px) en web, 480px en mobile */}
         <View style={styles.cardWrapper}>
           <View style={styles.card}>
-            {/* ── Header: título a la izquierda + X a la derecha ── */}
             <View style={styles.header}>
               <View style={styles.headerTitleWrap}>
                 <Text style={styles.headerTitle} numberOfLines={1}>
@@ -102,7 +149,6 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
               </Pressable>
             </View>
 
-            {/* ── Body: form scrollable ── */}
             <ScrollView
               style={styles.body}
               contentContainerStyle={styles.bodyContent}
@@ -116,6 +162,7 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
                 placeholder="Ej. IVA, IVA Reducido"
                 required
                 maxLength={120}
+                editable={!createMutation.isPending}
               />
               <Selector
                 label="Tipo de cálculo"
@@ -124,6 +171,7 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
                 options={CALC_TYPE_OPTIONS}
                 placeholder="Seleccionar tipo"
                 required
+                disabled={createMutation.isPending}
               />
               <Selector
                 label="Clasificación fiscal"
@@ -132,15 +180,17 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
                 options={FISCAL_CLASS_OPTIONS}
                 placeholder="Seleccionar clasificación"
                 required
+                disabled={createMutation.isPending}
               />
               <Input
                 label="Tasa"
                 value={rate}
                 onChangeText={setRate}
-                placeholder="Ej. 19"
+                placeholder={calcType === 'percentage' ? 'Ej. 19' : 'Ej. 5000'}
                 keyboardType="decimal-pad"
                 required
-                rightIcon={<Text style={styles.suffixText}>%</Text>}
+                rightIcon={<Text style={styles.suffixText}>{calcType === 'percentage' ? '%' : '$'}</Text>}
+                editable={!createMutation.isPending}
               />
               <Textarea
                 label="Descripción"
@@ -149,10 +199,10 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
                 placeholder="Descripción de la categoría de impuesto (opcional)"
                 rows={3}
                 maxLength={500}
+                editable={!createMutation.isPending}
               />
             </ScrollView>
 
-            {/* ── Footer: Cancelar + Crear Impuesto (sticky en bottom) ── */}
             <View style={styles.footer}>
               <View style={styles.footerButtonWrap}>
                 <Button
@@ -160,14 +210,16 @@ export function TaxCreateModal({ visible, onClose, onCreated }: TaxCreateModalPr
                   variant="outline"
                   onPress={handleClose}
                   fullWidth
+                  disabled={createMutation.isPending}
                 />
               </View>
               <View style={styles.footerButtonWrap}>
                 <Button
-                  title="Crear Impuesto"
+                  title={createMutation.isPending ? 'Creando…' : 'Crear Impuesto'}
                   variant="primary"
                   onPress={handleSubmit}
                   fullWidth
+                  loading={createMutation.isPending}
                 />
               </View>
             </View>
@@ -202,7 +254,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colorScales.gray[200],
     overflow: 'hidden',
-    // shadow-xl (mirror del web: 0 20px 25px -5px + 0 8px 10px -6px)
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 20 },
     shadowOpacity: 0.1,

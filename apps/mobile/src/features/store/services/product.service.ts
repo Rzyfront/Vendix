@@ -21,6 +21,18 @@ function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
   return response.data as T;
 }
 
+/**
+ * Payload para crear una nueva categoría de impuesto. Coincide con el
+ * endpoint backend POST /store/taxes/categories.
+ */
+export interface CreateTaxCategoryDto {
+  name: string;
+  type?: 'percentage' | 'fixed';
+  tax_type?: 'iva' | 'inc' | 'ica' | 'withholding' | 'reteiva' | 'reteica' | 'other';
+  rate: number;
+  description?: string;
+}
+
 function buildQuery(params?: Record<string, unknown>): string {
   if (!params) return '';
   const parts: string[] = [];
@@ -127,5 +139,23 @@ export const ProductService = {
   async getTaxes(): Promise<TaxCategory[]> {
     const res = await apiClient.get(Endpoints.STORE.TAXES.CATEGORIES);
     return unwrap<TaxCategory[]>(res);
+  },
+
+  /**
+   * Crea una nueva categoría de impuesto (ej. IVA, INC, ReteFuente).
+   * Persiste en backend y devuelve el TaxCategory con el id real.
+   */
+  async createTaxCategory(data: CreateTaxCategoryDto): Promise<TaxCategory> {
+    const res = await apiClient.post(Endpoints.STORE.TAXES.CATEGORY_CREATE, data);
+    return unwrap<TaxCategory>(res);
+  },
+
+  /**
+   * Elimina una categoría de impuesto. Tras borrar, el caller debe
+   * invalidar el queryKey `['product-taxes']` para refrescar la lista.
+   */
+  async deleteTaxCategory(id: number): Promise<void> {
+    const endpoint = Endpoints.STORE.TAXES.CATEGORY_DELETE.replace(':id', String(id));
+    await apiClient.delete(endpoint);
   },
 };

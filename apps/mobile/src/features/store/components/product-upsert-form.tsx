@@ -702,7 +702,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 <Text style={styles.formulaFinal}>{formatCurrency(priceWithTax)}</Text>
               </View>
 
-              {/* Fila 2: Precio Final + Divisor + Toggle oferta (blanco) */}
+              {/* Fila 2: Precio Final + wrapper "setting-toggle-row" del web */}
               <View style={styles.finalPriceRow}>
                 <View style={styles.finalPriceCol}>
                   <Text style={styles.finalLabel}>PRECIO FINAL</Text>
@@ -710,14 +710,17 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     {formatCurrency(priceWithTax)}
                   </Text>
                 </View>
-                <View style={styles.dividerVertical} />
-                <Toggle
-                  style={{ flex: 1 }}
-                  value={form.is_on_sale}
-                  onChange={(v) => updateField('is_on_sale', v)}
-                  label="Activar precio de oferta"
-                  description="Se mostrará como precio promocional"
-                />
+
+                {/* Wrapper del toggle (espejo del `setting-toggle-row` web:
+                    bg-gray-50 + border-gray-100 + rounded-xl + p-2 + mt-3) */}
+                <View style={styles.settingToggleRow}>
+                  <Toggle
+                    value={form.is_on_sale}
+                    onChange={(v) => updateField('is_on_sale', v)}
+                    label="Activar precio de oferta"
+                    description="Se mostrará como precio promocional"
+                  />
+                </View>
               </View>
 
               {/* Fila 3: Sub-sección rose para precio de oferta (solo si is_on_sale) */}
@@ -1151,10 +1154,13 @@ const styles = StyleSheet.create({
     fontWeight: '700' as any,
     color: colors.primary,
   },
-  // Fila 2: Precio Final destacado + divisor + Toggle oferta
+  // Fila 2: Precio Final + Toggle oferta
+  // Mirror del web `bg-white px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3`.
+  // En mobile (que es el caso de esta app) siempre es column: "Precio Final" arriba,
+  // "Activar oferta" abajo (envuelto en `setting-toggle-row`).
   finalPriceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'stretch',
     backgroundColor: colors.card,
     paddingHorizontal: spacing[4],
     paddingVertical: spacing[3],
@@ -1180,11 +1186,15 @@ const styles = StyleSheet.create({
     color: colorScales.gray[300],
     textDecorationLine: 'line-through',
   },
-  dividerVertical: {
-    width: StyleSheet.hairlineWidth,
-    height: 40,
-    backgroundColor: colorScales.gray[200],
-    alignSelf: 'center',
+  // Wrapper del Toggle (espejo del `setting-toggle-row` web:
+  // bg-gray-50 border border-gray-100 rounded-xl p-2 mt-3, con selector toggle adentro).
+  settingToggleRow: {
+    marginTop: spacing[3],
+    padding: spacing[2],
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[100],
+    backgroundColor: colorScales.gray[50],
   },
   // Fila 3: Sub-sección rose para precio de oferta
   saleRow: {
