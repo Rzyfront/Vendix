@@ -1,0 +1,419 @@
+<div class="pqr-list-page">
+  <!-- ── Sticky header (patrón Ventas) ─────────────────────────────────
+       Same component used by every admin module (Ventas, Reportes,
+       Clientes). Tabs inline at the top so the operator can narrow
+       the queue by bucket (Todas / Vencidas / Pendientes / Nuevas).
+       No primary-action button — "+ Nueva solicitud" lives in the
+       options-dropdown "Acciones" menu inside the list card. -->
+  @if (stats() && stats()!.total > 0) {
+  <app-sticky-header
+    title="Bandeja"
+    subtitle=""
+    icon="inbox"
+    variant="glass"
+    [showBackButton]="false"
+    [tabs]="quickFilterTabs()"
+    [activeTab]="quickFilter()"
+    tabsAriaLabel="Filtros de PQRS"
+    (tabChanged)="setQuickFilter($event)"
+  />
+  } @else {
+  <app-sticky-header
+    title="Bandeja"
+    subtitle="Aún no tienes solicitudes"
+    icon="inbox"
+    variant="glass"
+    [showBackButton]="false"
+  />
+  }
+
+  <!-- ── Sub-header card ────────────────────────────────────────────────
+       Mirrors the "Ventas / Reportes de ventas y facturación" card
+       pattern used by the Reportes module. Icon + title + subtitle so
+       the operator has a single, scannable block of context right
+       under the page header. -->
+  <div class="pqr-subheader">
+    <div class="pqr-subheader__icon">
+      <app-icon name="message-square" [size]="22"></app-icon>
+    </div>
+    <div class="pqr-subheader__copy">
+      <h2>Bandeja</h2>
+      <p>Gestiona las solicitudes de tus clientes</p>
+    </div>
+  </div>
+
+  <!-- ── Stats grid ──────────────────────────────────────────────────────
+       Same `<app-stats>` shared component used by Clientes / Reportes /
+       Ventas so the operator has a single mental model for "PQR health
+       at a glance". -->
+  @if (stats() && stats()!.total > 0) {
+  <div class="stats-container">
+    <app-stats
+      title="Total PQRS"
+      [value]="stats()!.total"
+      smallText="Todas tus peticiones, quejas y reclamos"
+      iconName="message-square"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    ></app-stats>
+    <app-stats
+      title="Últimas 24h"
+      [value]="stats()!.recent_24h"
+      smallText="PQRS radicadas recientemente"
+      iconName="clock"
+      iconBgColor="bg-violet-100"
+      iconColor="text-violet-600"
+    ></app-stats>
+    <app-stats
+      title="Vencidas"
+      [value]="overdueCount()"
+      smallText="SLA legal agotado"
+      iconName="alert-triangle"
+      iconBgColor="bg-red-100"
+      iconColor="text-red-600"
+    ></app-stats>
+    <app-stats
+      title="Nuevas"
+      [value]="stats()!.by_status?.['NEW'] || 0"
+      smallText="Sin asignar a tienda"
+      iconName="inbox"
+      iconBgColor="bg-amber-100"
+      iconColor="text-amber-600"
+    ></app-stats>
+  </div>
+  }
+
+  <!-- ── List card ───────────────────────────────────────────────────────
+       Mirrors the customer-list pattern (Todos los Clientes (1)) so the
+       store-admin has a single visual model for "list of records":
+         • Title + count on the left
+         • Search input + options dropdown (filters + actions) on the right
+         • Data table below
+         • Pagination footer
+       The options dropdown collapses Estado / Tipo into a single
+       "Filtros" trigger so the page stays calm at rest; clicking the
+       trigger reveals a popover with both selectors. -->
+  <app-card [responsive]="true" [padding]="false" overflow="visible">
+    <div
+      class="px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+    >
+      <div
+        class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+      >
+        <!-- Title with live count -->
+        <h2
+          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+        >
+          Todas las solicitudes ({{ total() }})
+        </h2>
+
+        <!-- Search + options dropdown -->
+        <div class="flex items-center gap-2 w-full md:w-auto">
+          <app-inputsearch
+            class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            size="sm"
+            placeholder="Asunto o número de ticket…"
+            (search)="onSearch($event)"
+          ></app-inputsearch>
+
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+            [filters]="filterConfigs"
+            [filterValues]="filterValues"
+            [actions]="dropdownActions"
+            [isLoading]="loading()"
+            (filterChange)="onFilterChange($event)"
+            (clearAllFilters)="onClearFilters()"
+            (actionClick)="onActionClick($event)"
+          ></app-options-dropdown>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading state — uses the same spinner pattern as CustomerList so
+         the visual rhythm across admin modules is identical. -->
+    @if (loading()) {
+    <div class="p-6 text-center">
+      <div
+        class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+      ></div>
+      <p class="mt-2 text-sm text-text-secondary">Cargando solicitudes…</p>
+    </div>
+    }
+
+    <!-- Data table — ResponsiveDataView auto-switches between table (≥768px)
+         and card view (<768px) on the same data. Both surfaces share the
+         same columns/actions configuration. -->
+    @if (!loading() && tickets().length > 0) {
+    <div class="px-2 pb-2 pt-1 md:p-4">
+      <app-responsive-data-view
+        [data]="tickets()"
+        [columns]="pqrColumns"
+        [cardConfig]="pqrCardConfig"
+        [actions]="pqrActions"
+        [loading]="loading()"
+        [hoverable]="true"
+        [striped]="true"
+        [emptyMessage]="
+          statusFilter() || typeFilter() || searchInput() || quickFilter() !== 'all'
+            ? 'No hay solicitudes con esos filtros'
+            : 'Cuando recibas nuevas solicitudes, aparecerán aquí.'
+        "
+        [emptyIcon]="'inbox'"
+        tableSize="md"
+        (rowClick)="openPqr($event)"
+      ></app-responsive-data-view>
+
+      @if (totalPages() > 1) {
+      <div class="mt-4 border-t border-border pt-4">
+        <app-pagination
+          [currentPage]="query().page ?? 1"
+          [total]="total()"
+          [limit]="query().limit ?? 20"
+          [totalPages]="totalPages()"
+          infoStyle="none"
+          (pageChange)="goToPage($event)"
+        ></app-pagination>
+      </div>
+      }
+    </div>
+    }
+
+    <!-- Empty state (no PQRs ever filed) — distinct from "no results
+         matching filters" so the operator gets the right CTA. -->
+    @if (!loading() && tickets().length === 0) {
+    <div class="p-12 text-center text-gray-500">
+      <app-icon
+        name="inbox"
+        [size]="48"
+        class="mx-auto mb-4 text-gray-300"
+      ></app-icon>
+      <h3 class="text-lg font-medium text-gray-900">
+        @if (statusFilter() || typeFilter() || searchInput() || quickFilter() !== 'all') {
+          No hay solicitudes con esos filtros
+        } @else {
+          Sin solicitudes por ahora
+        }
+      </h3>
+      <p class="mt-1 text-sm">
+        @if (statusFilter() || typeFilter() || searchInput() || quickFilter() !== 'all') {
+          Ajusta los filtros o limpia la búsqueda para ver todas las
+          conversaciones.
+        } @else {
+          Cuando recibas nuevas solicitudes, aparecerán aquí.
+        }
+      </p>
+    </div>
+    }
+  </app-card>
+</div>
+
+<!-- ── Modal: Nueva solicitud ───────────────────────────────────────────── -->
+@if (showNewPqrModal()) {
+<div class="modal-overlay" (click)="closeNewPqrModal()">
+  <div class="modal" (click)="$event.stopPropagation()">
+    <header class="modal__header">
+      <h2>Nueva solicitud</h2>
+      <p class="modal__hint">
+        Cuéntanos qué necesitas y te responderemos por este medio y por
+        correo a <strong>{{ currentUserEmail() || 'tu email registrado' }}</strong>.
+      </p>
+    </header>
+
+    <form
+      class="modal__body"
+      (submit)="$event.preventDefault(); submitNewPqr()"
+    >
+      <fieldset class="modal__field">
+        <legend>Tipo de solicitud</legend>
+        <div class="type-options">
+          @for (opt of newPqrTypeOptions; track opt.value) {
+          <label
+            class="type-option"
+            [class.type-option--active]="newPqrType() === opt.value"
+          >
+            <input
+              type="radio"
+              name="pqr_type"
+              [value]="opt.value"
+              [checked]="newPqrType() === opt.value"
+              (change)="newPqrType.set(opt.value)"
+            />
+            <span class="type-option__label">{{ opt.label }}</span>
+            <span class="type-option__hint">{{ opt.hint }}</span>
+          </label>
+          }
+        </div>
+      </fieldset>
+
+      <fieldset class="modal__field">
+        <legend>Prioridad</legend>
+        <div class="type-options type-options--priority">
+          @for (opt of newPqrPriorityOptions; track opt.value) {
+          <label
+            class="type-option"
+            [class.type-option--active]="newPqrPriority() === opt.value"
+            [attr.data-priority]="opt.value"
+          >
+            <input
+              type="radio"
+              name="pqr_priority"
+              [value]="opt.value"
+              [checked]="newPqrPriority() === opt.value"
+              (change)="newPqrPriority.set(opt.value)"
+            />
+            <span class="type-option__label">
+              <span class="priority-chip" [attr.data-priority]="opt.value">
+                {{ opt.value }}
+              </span>
+              {{ opt.label }}
+            </span>
+            <span class="type-option__hint">{{ opt.hint }}</span>
+          </label>
+          }
+        </div>
+      </fieldset>
+
+      <label class="modal__field">
+        <span class="modal__label">Asunto</span>
+        <input
+          type="text"
+          class="modal__input"
+          placeholder="Resume tu solicitud en una línea"
+          maxlength="120"
+          [ngModel]="newPqrTitle()"
+          (ngModelChange)="newPqrTitle.set($event)"
+          name="title"
+          required
+        />
+      </label>
+
+      <label class="modal__field">
+        <span class="modal__label">Detalle</span>
+        <textarea
+          rows="5"
+          class="modal__textarea"
+          placeholder="Cuéntanos con el mayor detalle posible qué pasó, qué necesitas o qué te gustaría cambiar…"
+          [ngModel]="newPqrDescription()"
+          (ngModelChange)="newPqrDescription.set($event)"
+          name="description"
+          required
+        ></textarea>
+        <span class="modal__counter">
+          {{ newPqrDescription().length }} caracteres
+        </span>
+      </label>
+
+      <fieldset class="modal__field modal__field--grouped">
+        <legend class="modal__label">Datos del solicitante</legend>
+        <div class="modal__row">
+          <label class="modal__subfield">
+            <span>Nombre</span>
+            <input
+              type="text"
+              class="modal__input"
+              placeholder="Nombre"
+              maxlength="100"
+              [ngModel]="newPqrRequesterFirstName()"
+              (ngModelChange)="newPqrRequesterFirstName.set($event)"
+              name="requester_first_name"
+              required
+            />
+          </label>
+          <label class="modal__subfield">
+            <span>Apellido</span>
+            <input
+              type="text"
+              class="modal__input"
+              placeholder="Apellido"
+              maxlength="100"
+              [ngModel]="newPqrRequesterLastName()"
+              (ngModelChange)="newPqrRequesterLastName.set($event)"
+              name="requester_last_name"
+              required
+            />
+          </label>
+        </div>
+        <div class="modal__row">
+          <label class="modal__subfield">
+            <span>Email</span>
+            <input
+              type="email"
+              class="modal__input"
+              placeholder="email@ejemplo.com"
+              maxlength="255"
+              [ngModel]="newPqrRequesterEmail()"
+              (ngModelChange)="newPqrRequesterEmail.set($event)"
+              name="requester_email"
+              required
+            />
+          </label>
+          <label class="modal__subfield">
+            <span>Teléfono (opcional)</span>
+            <input
+              type="tel"
+              class="modal__input"
+              placeholder="+57 300 000 0000"
+              maxlength="50"
+              [ngModel]="newPqrRequesterPhone()"
+              (ngModelChange)="newPqrRequesterPhone.set($event)"
+              name="requester_phone"
+            />
+          </label>
+        </div>
+        <div class="modal__row">
+          <label class="modal__subfield">
+            <span>Tipo de documento (opcional)</span>
+            <select
+              class="modal__input"
+              [ngModel]="newPqrRequesterDocType()"
+              (ngModelChange)="newPqrRequesterDocType.set($event)"
+              name="requester_document_type"
+            >
+              <option value="">Selecciona tipo de documento</option>
+              <option value="CC">Cédula de ciudadanía (CC)</option>
+              <option value="CE">Cédula de extranjería (CE)</option>
+              <option value="NIT">NIT</option>
+              <option value="PA">Pasaporte (PA)</option>
+            </select>
+          </label>
+          <label class="modal__subfield">
+            <span>Número (opcional)</span>
+            <input
+              type="text"
+              class="modal__input"
+              placeholder="1234567890"
+              maxlength="50"
+              [ngModel]="newPqrRequesterDocNum()"
+              (ngModelChange)="newPqrRequesterDocNum.set($event)"
+              name="requester_document_num"
+            />
+          </label>
+        </div>
+      </fieldset>
+
+      @if (newPqrError(); as err) {
+      <div class="modal__error">{{ err }}</div>
+      }
+
+      <div class="modal__actions">
+        <button
+          type="button"
+          class="ghost-btn"
+          (click)="closeNewPqrModal()"
+          [disabled]="newPqrSubmitting()"
+        >
+          Cancelar
+        </button>
+        <button
+          type="submit"
+          class="primary-btn"
+          [disabled]="!canSubmitNewPqr()"
+        >
+          {{ newPqrSubmitting() ? 'Enviando…' : 'Enviar solicitud' }}
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+}

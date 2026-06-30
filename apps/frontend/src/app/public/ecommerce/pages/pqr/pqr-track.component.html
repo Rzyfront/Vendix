@@ -1,0 +1,108 @@
+<section class="pqr-track">
+  <div class="top-bar">
+    <a routerLink="/" class="back-link" aria-label="Volver al inicio">
+      <app-icon name="arrow-left" [size]="16" color="currentColor"></app-icon>
+      Volver al inicio de Vendix
+    </a>
+  </div>
+
+  <header class="hero">
+    <h1>Consultar estado de PQRS</h1>
+    <p class="lead">
+      Ingresa tu número de ticket para ver el estado y las respuestas
+      públicas que el equipo de Vendix haya publicado.
+    </p>
+  </header>
+
+  <div class="search-bar">
+    <input
+      type="search"
+      placeholder="Ej: PQRS-1-00001"
+      [value]="queryInput()"
+      (input)="queryInput.set($any($event.target).value)"
+      (keydown.enter)="search()"
+    />
+    <button type="button" class="primary-btn" (click)="search()">Consultar</button>
+  </div>
+
+  @switch (state()) {
+  @case ('loading') {
+  <div class="state-card">Consultando…</div>
+  }
+  @case ('not_found') {
+  <div class="state-card state-card--warn">
+    <app-icon name="alert-triangle" [size]="24"></app-icon>
+    <div>
+      <strong>No encontramos un ticket con ese número.</strong>
+      <p>Verifica que esté bien escrito e intenta de nuevo.</p>
+    </div>
+  </div>
+  }
+  @case ('error') {
+  <div class="state-card state-card--error">
+    <app-icon name="alert-circle" [size]="24"></app-icon>
+    <div>
+      <strong>Algo salió mal.</strong>
+      <p>{{ errorMsg() }}</p>
+    </div>
+  </div>
+  }
+  @case ('loaded') {
+  @if (view(); as v) {
+  <article class="ticket-card">
+    <header class="ticket-header">
+      <div>
+        <code class="mono">{{ v.ticket_number }}</code>
+        <span class="type-tag" [attr.data-type]="v.pqr_type">{{ typeLabel() }}</span>
+        <app-pqr-status-pill [status]="v.status"></app-pqr-status-pill>
+      </div>
+      <h2>{{ v.title }}</h2>
+    </header>
+
+    <dl class="meta">
+      <dt>Creado</dt>
+      <dd>{{ v.created_at | date: 'medium' }}</dd>
+      @if (v.resolved_at) {
+      <dt>Respondido</dt>
+      <dd>{{ v.resolved_at | date: 'medium' }}</dd>
+      }
+      @if (v.closed_at) {
+      <dt>Cerrado</dt>
+      <dd>{{ v.closed_at | date: 'medium' }}</dd>
+      }
+    </dl>
+
+    <section class="responses">
+      <h3>Respuestas del equipo</h3>
+      @if (v.public_responses.length === 0) {
+      <p class="muted">
+        Aún no hay respuestas publicadas. Te avisaremos por correo
+        electrónico cuando haya una actualización.
+      </p>
+      }
+      @for (r of v.public_responses; track r.id) {
+      <div class="response">
+        <header>
+          <strong>{{ r.author_name }}</strong>
+          <span class="muted">{{ r.created_at | date: 'medium' }}</span>
+        </header>
+        <p>{{ r.content }}</p>
+      </div>
+      }
+    </section>
+
+    <div class="ticket-actions">
+      <a
+        routerLink="/pqr"
+        class="primary-btn"
+        style="background-color: #2563eb; color: #ffffff; padding: 0.75rem 1.5rem; border-radius: 8px; font-weight: 600; display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none; box-shadow: 0 1px 2px rgba(37, 99, 235, 0.2);"
+      >
+        <span class="primary-btn__icon" style="display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(255, 255, 255, 0.2); color: #ffffff; font-size: 0.9rem; font-weight: 700;">+</span>
+        Radicar otro PQRS
+      </a>
+    </div>
+  </article>
+  }
+  }
+  }
+</section>

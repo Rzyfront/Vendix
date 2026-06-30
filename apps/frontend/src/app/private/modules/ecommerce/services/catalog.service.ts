@@ -165,6 +165,11 @@ export interface MenuItemProduct {
   sale_price: number | null;
   is_on_sale: boolean;
   is_combo: boolean;
+  /** True when the product has sellable variants; the cart rejects a
+   * variant product without `product_variant_id`, so the carta must route
+   * these to the detail page ("Ver opciones") instead of adding directly. */
+  has_variants: boolean;
+  variant_count: number;
   image_url: string | null;
 }
 

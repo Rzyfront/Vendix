@@ -94,6 +94,16 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       recipes: {
         findFirst: jest.fn(),
       },
+      stores: {
+        findUnique: jest.fn().mockResolvedValue({
+          industries: ['restaurant'],
+        }),
+      },
+      store_settings: {
+        findUnique: jest.fn().mockResolvedValue({
+          settings: { general: { timezone: 'America/Bogota' } },
+        }),
+      },
       $transaction: jest.fn(),
     };
 
@@ -132,12 +142,15 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     });
 
     // explodeBom returns 3 leaves:
-    //   - product 99 (harina, direct, with 10% merma → 1.10)
+    //   - product 99 (harina, direct, qty 1 per unit — merma-free
+    //     integer to keep post-Math.round consumption exact)
     //   - product 80 (sub-recipe 'salsa', already resolved at the leaf)
-    //   - product 70 (insumo directo, 0% merma)
+    //   - product 70 (insumo directo)
     // multiplied by qty=2 (order_item.quantity) at the call site.
+    // Production rounds consumedQty = Math.round(line.quantity * orderQty),
+    // so we pick integer-friendly line values to assert exact consumption.
     recipesService.explodeBom.mockResolvedValue([
-      { component_product_id: 99, quantity: 1.1, depth: 1, path_recipe_ids: [] },
+      { component_product_id: 99, quantity: 1, depth: 1, path_recipe_ids: [] },
       { component_product_id: 80, quantity: 0.5, depth: 1, path_recipe_ids: [] },
       { component_product_id: 70, quantity: 3, depth: 1, path_recipe_ids: [] },
     ]);
@@ -146,13 +159,17 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       async (pid: number) => 100 + pid,
     );
 
-    // Per-leaf FIFO cost snapshot. We compute total = 0.20*2.2 + 0.50*1.0 + 0.10*6.0
-    // = 0.44 + 0.50 + 0.60 = 1.54
+    // Per-leaf FIFO cost snapshot. Production passes quantity_change
+    // = -Math.round(line.quantity * orderQty), so we mirror that:
+    //   - harina: 1 * 2 = 2 → cost 0.20 × 2 = 0.40
+    //   - salsa:  0.5 * 2 = 1 → cost 0.50 × 1 = 0.50
+    //   - insumo: 3 * 2 = 6 → cost 0.10 × 6 = 0.60
+    //   total = 1.50
     stockLevelManager.updateStock.mockImplementation(async (params) => {
       let cost = 0;
-      if (params.product_id === 99) cost = 0.2 * 2.2; // harina: 0.20 × 2.2
-      else if (params.product_id === 80) cost = 0.5 * 1.0; // salsa: 0.50 × 1.0
-      else if (params.product_id === 70) cost = 0.1 * 6.0; // insumo: 0.10 × 6.0
+      if (params.product_id === 99) cost = 0.2 * 2; // harina: 0.20 × 2
+      else if (params.product_id === 80) cost = 0.5 * 1; // salsa: 0.50 × 1
+      else if (params.product_id === 70) cost = 0.1 * 6; // insumo: 0.10 × 6
       return {
         stock_level: { id: params.product_id } as FakeStockLevel,
         transaction: { id: params.product_id } as any,
@@ -177,7 +194,11 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     prismaMock.$transaction.mockImplementation(async (cb: any) =>
       cb({
         order_items: { update: orderItemUpdate },
-        kitchen_tickets: { create: ticketCreate },
+        kitchen_tickets: {
+          create: ticketCreate,
+          count: jest.fn().mockResolvedValue(0),
+        },
+        $executeRaw: jest.fn().mockResolvedValue(undefined),
       }),
     );
 
@@ -201,17 +222,18 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
       (c) => c[0].product_id,
     );
     expect(calledProductIds).toEqual([99, 80, 70]);
-    // (c) Quantities reflect qty=2 multiplier: 1.1*2=2.2, 0.5*2=1.0, 3*2=6.0
+    // (c) Quantities reflect qty=2 multiplier: 1*2=2, 0.5*2=1, 3*2=6
+    //     (production rounds: Math.round(line.quantity * orderQty))
     expect(stockLevelManager.updateStock.mock.calls[0][0].quantity_change).toBeCloseTo(
-      -2.2,
+      -2,
       4,
     );
     expect(stockLevelManager.updateStock.mock.calls[1][0].quantity_change).toBeCloseTo(
-      -1.0,
+      -1,
       4,
     );
     expect(stockLevelManager.updateStock.mock.calls[2][0].quantity_change).toBeCloseTo(
-      -6.0,
+      -6,
       4,
     );
 
@@ -236,8 +258,8 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
     expect(result.kitchen_ticket_id).toBe(555);
     expect(result.consumed_line_count).toBe(3);
 
-    // (g) COGS = 0.44 + 0.50 + 0.60 = 1.54
-    expect(result.cogs_total).toBeCloseTo(1.54, 2);
+    // (g) COGS = 0.40 + 0.50 + 0.60 = 1.50
+    expect(result.cogs_total).toBeCloseTo(1.5, 2);
 
     // (h) kitchen.fired event emitted once with the right payload
     expect(eventEmitter.emit).toHaveBeenCalledTimes(1);
@@ -249,7 +271,7 @@ describe('KitchenFireService — fireOrderItems() (Fase D smoke)', () => {
         organization_id: 1,
         store_id: 1,
         consumed_line_count: 3,
-        total_cost: expect.closeTo(1.54, 2),
+        total_cost: expect.closeTo(1.5, 2),
         user_id: 42,
       }),
     );

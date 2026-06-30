@@ -67,11 +67,16 @@ export class KitchenFireController {
         `Fire-to-kitchen ejecutado: ticket #${result.kitchen_ticket_id}, COGS=${result.cogs_total}`,
       );
     } catch (error: any) {
+      const errorCode =
+        error?.errorCode ??
+        error?.error?.error_code ??
+        error?.response?.error_code ??
+        null;
       return this.responseService.error(
         error.message || 'Error al enviar a cocina',
         error.response?.message || error.message,
         error.status || 400,
-        error.error_code,
+        errorCode ?? undefined,
       );
     }
   }
@@ -254,11 +259,20 @@ export class KitchenFireController {
       const ticket = await this.kitchenFireService.startPreparation(id);
       return this.responseService.success(ticket, 'Ticket en preparación');
     } catch (error: any) {
+      // VendixHttpException exposes `errorCode` (camelCase) and `getResponse()`
+      // returns the JSON body. The legacy `error.error_code` is on the
+      // response body, NOT on the exception instance — fall back to it for
+      // non-Vendix exceptions (NestJS HttpException etc.).
+      const errorCode =
+        error?.errorCode ??
+        error?.error?.error_code ??
+        error?.response?.error_code ??
+        null;
       return this.responseService.error(
         error.message || 'Error al iniciar el ticket',
         error.response?.message || error.message,
         error.status || 400,
-        error.error_code,
+        errorCode ?? undefined,
       );
     }
   }
@@ -270,11 +284,16 @@ export class KitchenFireController {
       const ticket = await this.kitchenFireService.markReady(id);
       return this.responseService.success(ticket, 'Ticket listo');
     } catch (error: any) {
+      const errorCode =
+        error?.errorCode ??
+        error?.error?.error_code ??
+        error?.response?.error_code ??
+        null;
       return this.responseService.error(
         error.message || 'Error al marcar el ticket como listo',
         error.response?.message || error.message,
         error.status || 400,
-        error.error_code,
+        errorCode ?? undefined,
       );
     }
   }
@@ -286,11 +305,16 @@ export class KitchenFireController {
       const ticket = await this.kitchenFireService.markDelivered(id);
       return this.responseService.success(ticket, 'Ticket entregado');
     } catch (error: any) {
+      const errorCode =
+        error?.errorCode ??
+        error?.error?.error_code ??
+        error?.response?.error_code ??
+        null;
       return this.responseService.error(
         error.message || 'Error al entregar el ticket',
         error.response?.message || error.message,
         error.status || 400,
-        error.error_code,
+        errorCode ?? undefined,
       );
     }
   }
@@ -302,11 +326,16 @@ export class KitchenFireController {
       const ticket = await this.kitchenFireService.cancelTicket(id);
       return this.responseService.success(ticket, 'Ticket cancelado');
     } catch (error: any) {
+      const errorCode =
+        error?.errorCode ??
+        error?.error?.error_code ??
+        error?.response?.error_code ??
+        null;
       return this.responseService.error(
         error.message || 'Error al cancelar el ticket',
         error.response?.message || error.message,
         error.status || 400,
-        error.error_code,
+        errorCode ?? undefined,
       );
     }
   }
@@ -321,11 +350,16 @@ export class KitchenFireController {
         'Ticket revertido al paso anterior',
       );
     } catch (error: any) {
+      const errorCode =
+        error?.errorCode ??
+        error?.error?.error_code ??
+        error?.response?.error_code ??
+        null;
       return this.responseService.error(
         error.message || 'Error al revertir el ticket',
         error.response?.message || error.message,
         error.status || 400,
-        error.error_code,
+        errorCode ?? undefined,
       );
     }
   }

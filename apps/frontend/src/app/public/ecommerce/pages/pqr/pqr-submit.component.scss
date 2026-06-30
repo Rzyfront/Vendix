@@ -1,0 +1,390 @@
+// PQR submit form — public channel for visitors to file a
+// Petición, Queja, Reclamo o Sugerencia. Vendix-branded with the
+// soft green palette + radial bloom used in /ayuda, so the two
+// pages feel like one continuous experience.
+
+.pqr-submit {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 5rem;
+  position: relative;
+}
+
+// Hero with a soft green bloom behind the title so the entry
+// point feels like a real product surface, not a static form.
+.hero {
+  text-align: center;
+  margin-bottom: 2.5rem;
+  position: relative;
+
+  &::before {
+    content: '';
+    position: absolute;
+    top: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 600px;
+    height: 200px;
+    background: radial-gradient(
+      ellipse at center,
+      rgba(47, 111, 78, 0.18) 0%,
+      transparent 60%
+    );
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  h1 {
+    position: relative;
+    font-size: 2.25rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.625rem;
+    color: #064e3b; // deep Vendix green
+    line-height: 1.15;
+  }
+
+  .lead {
+    position: relative;
+    color: #475569;
+    font-size: 1.05rem;
+    line-height: 1.5;
+    margin: 0;
+  }
+}
+
+.pqr-form {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+
+  label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #334155;
+    letter-spacing: -0.005em;
+
+    .required {
+      color: #ef4444; // red marker for required fields
+      margin-left: 0.125rem;
+      font-weight: 700;
+    }
+  }
+
+  input,
+  textarea {
+    border: 1.5px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0.75rem 0.875rem;
+    font-family: inherit;
+    font-size: 0.95rem;
+    background: #ffffff;
+    color: #0f172a;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+
+    &::placeholder {
+      color: #94a3b8;
+    }
+
+    &:hover {
+      border-color: #cbd5e1;
+    }
+
+    &:focus {
+      outline: none;
+      border-color: #2f6f4e;
+      box-shadow: 0 0 0 4px rgba(47, 111, 78, 0.12);
+    }
+  }
+
+  textarea {
+    resize: vertical;
+    min-height: 130px;
+    line-height: 1.5;
+  }
+
+  &--error {
+    input,
+    textarea {
+      border-color: #ef4444;
+      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+    }
+  }
+
+  .error-text {
+    margin: 0;
+    font-size: 0.8rem;
+    color: #b91c1c;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+  }
+}
+
+.type-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.75rem;
+}
+
+.type-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.375rem;
+  text-align: left;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-family: inherit;
+  color: inherit;
+  width: 100%;
+
+  strong {
+    color: #0f172a;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  span {
+    color: #64748b;
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  &:hover {
+    border-color: #22c55e;
+    background: #f0fdf4;
+  }
+
+  // Strong active state: matches the "Comenzar Gratis" landing
+  // CTA exactly — bright green-500 fill, white text, white check
+  // badge in the corner. The two CTAs (PQR submit + landing
+  // "Comenzar Gratis") now read as the exact same brand action.
+  //
+  // The `&--active` rule comes AFTER `&:hover` in the source so
+  // it wins specificity (same level, later wins). On hover over
+  // an already-active card, the active state stays — no jarring
+  // light-up that would make the white text invisible.
+  &--active {
+    border-color: #22c55e;
+    background: #22c55e;
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2),
+                0 4px 12px rgba(34, 197, 94, 0.15);
+    transform: translateY(-1px);
+
+    strong {
+      color: #ffffff;
+    }
+
+    span {
+      color: rgba(255, 255, 255, 0.9);
+    }
+  }
+
+  // Active + hover: lift slightly more, no color change (the
+  // active green stays — that's the whole point of selection).
+  &--active:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.25),
+                0 6px 16px rgba(34, 197, 94, 0.2);
+  }
+
+  // Small check badge that appears in the corner of the
+  // active card. Drawn with CSS only (no extra DOM).
+  &--active::after {
+    content: '✓';
+    position: absolute;
+    top: 0.625rem;
+    right: 0.625rem;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #ffffff;
+    color: #2f6f4e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1);
+  }
+}
+
+.char-counter {
+  display: flex;
+  justify-content: flex-end;
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-top: 0.25rem;
+
+  .muted {
+    margin-left: 0.25rem;
+    color: #94a3b8;
+  }
+}
+
+// Server error: prominent card with icon + title + body. The
+// humanizeError() method in the .ts translates the raw backend
+// message into something actionable, so this card is what the
+// user sees when something goes wrong.
+.server-error {
+  display: flex;
+  gap: 0.875rem;
+  align-items: flex-start;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  padding: 1rem 1.125rem;
+  box-shadow: 0 1px 2px rgba(239, 68, 68, 0.06);
+
+  &__icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #fee2e2;
+    color: #b91c1c;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  &__body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  &__title {
+    margin: 0 0 0.25rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #7f1d1d;
+  }
+
+  &__msg {
+    margin: 0;
+    font-size: 0.85rem;
+    color: #991b1b;
+    line-height: 1.5;
+  }
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  align-items: stretch;
+}
+
+.primary-btn {
+  // Matches the store-admin PQR modal "Enviar respuesta" /
+  // "Crear solicitud" CTA exactly: same green-600 (#16a34a), same
+  // border-radius (8px), same shadow treatment. The two CTAs
+  // (public PQR submit + store-admin PQR create) now read as
+  // the same brand action.
+  background: #16a34a;
+  color: #ffffff;
+  border: 0;
+  border-radius: 8px;
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  box-shadow: 0 1px 2px rgba(22, 163, 74, 0.2);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: #15803d;
+  }
+
+  &:active:not(:disabled) {
+    background: #14532d;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+.secondary-btn {
+  // "Cancelar" reads as a destructive action — the user is
+  // abandoning the form. Red outline + red text + red fill on
+  // hover signals that clearly without forcing a modal
+  // confirmation. Mirrors the destructive-action vocabulary
+  // used elsewhere in Vendix (delete, cancel, abandon).
+  background: #ffffff;
+  color: #dc2626;
+  border: 1.5px solid #fecaca;
+  border-radius: 8px;
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: #fef2f2;
+    border-color: #f87171;
+  }
+}
+
+.actions-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: stretch;
+  flex-wrap: wrap;
+
+  .primary-btn {
+    flex: 1;
+    min-width: 180px;
+  }
+
+  .secondary-btn {
+    min-width: 110px;
+  }
+}
+
+.legal-note {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-align: center;
+}

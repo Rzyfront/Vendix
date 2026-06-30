@@ -14,6 +14,7 @@ import { PriceResolverService } from '../../store/products/services/price-resolv
 import { PromotionEngineService } from '../../store/promotions/promotion-engine/promotion-engine.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 
 @Injectable()
 export class CartService {
@@ -27,6 +28,7 @@ export class CartService {
     private readonly priceResolverService: PriceResolverService,
     private readonly promotionEngine: PromotionEngineService,
     private readonly storePrisma: StorePrismaService,
+    private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
   ) {}
 
   private readonly cartInclude = {
@@ -86,6 +88,21 @@ export class CartService {
 
     if (!product) {
       throw new VendixHttpException(ErrorCodes.ECOM_PRODUCT_002);
+    }
+
+    // Strict menu schedule enforcement: if the product belongs to an active
+    // carta with availability windows and none is open right now, it cannot be
+    // added to the cart. Products not in any menu, or in menus without windows,
+    // are unaffected (retail catalog stays buyable 24/7).
+    const store_id = RequestContextService.getStoreId();
+    if (
+      store_id &&
+      (await this.menuAvailabilityChecker.isProductBlockedNow(
+        store_id,
+        dto.product_id,
+      ))
+    ) {
+      throw new VendixHttpException(ErrorCodes.MENU_ITEM_NOT_AVAILABLE_NOW);
     }
 
     // Validate: if product has variants, a variant must be selected
