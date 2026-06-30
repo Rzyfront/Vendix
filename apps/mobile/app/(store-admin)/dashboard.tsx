@@ -14,6 +14,7 @@ import { DashboardService, AnalyticsService } from '@/features/store/services';
 import type { DatePreset } from '@/features/store/types';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 import { TrendChartFallback, ChannelListFallback } from '@/shared/components/chart/chart-fallback';
+import { FilterDropdown } from '@/shared/components/filter-dropdown/filter-dropdown';
 
 const PRESETS: { label: string; value: DatePreset }[] = [
   { label: 'Hoy', value: 'today' },
@@ -257,7 +258,7 @@ const DashboardScreen = () => {
   const chartData = useMemo(() => {
     if (!trends?.length) return [];
     return trends.map((t) => ({
-      x: t.period.slice(5),
+      x: t.period,  // Pasamos el period completo para que formatChartPeriod lo procese
       revenue: t.revenue,
       orders: t.orders,
     }));
@@ -420,11 +421,28 @@ const DashboardScreen = () => {
           )}
 
           <Card style={styles.chartCard}>
-            <Card.Header title="Tendencia de Ventas" />
+            <Card.Header
+              title="Tendencia de Ventas"
+              right={
+                <FilterDropdown
+                  triggerIcon="sliders"
+                  activeValue={preset}
+                  sections={[
+                    {
+                      options: PRESETS.map((p) => ({
+                        label: p.label,
+                        value: p.value,
+                      })),
+                      onSelect: (value) => setPreset(value as DatePreset),
+                    },
+                  ]}
+                />
+              }
+            />
             <Card.Body>
               {chartData.length > 0 ? (
                 <View style={styles.chartContainer}>
-                  <TrendChartFallback data={chartData} />
+                  <TrendChartFallback data={chartData} granularity={preset === 'today' || preset === 'yesterday' ? 'hour' : 'day'} />
                 </View>
               ) : (
                 <EmptyState title="Sin datos" description="Sin datos de tendencia" />

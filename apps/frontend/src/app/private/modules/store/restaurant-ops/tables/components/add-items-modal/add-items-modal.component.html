@@ -13,18 +13,18 @@
       label="Buscar producto"
       placeholder="Escribe el nombre del producto..."
       [required]="false"
-      (ngModelChange)="onSearchChange($event)"
+      (ngModelChange)="onSearchInput($event)"
       customWrapperClass="mt-0"
     />
   </div>
 
   <!-- Product list -->
-  @if (productsLoading()) {
+  @if (isLoading() && currentProducts().length === 0) {
     <div class="loading">
       <app-spinner size="md"></app-spinner>
       <p>Cargando productos…</p>
     </div>
-  } @else if (filteredRows().length === 0) {
+  } @else if (currentProducts().length === 0) {
     @if (searchTerm().trim()) {
       <app-empty-state
         icon="search-x"
@@ -44,7 +44,7 @@
     }
   } @else {
     <div class="product-list">
-      @for (row of filteredRows(); track trackById($index, row)) {
+      @for (row of currentProducts(); track trackById($index, row)) {
         <div class="product-row">
           <div class="product-thumb">
             @if (row.image_url) {
@@ -73,13 +73,13 @@
             <app-button
               variant="outline"
               size="sm"
-              [disabled]="row.quantity <= 0"
+              [disabled]="quantityOf(row.id) <= 0"
               [attr.aria-label]="'Disminuir'"
               (clicked)="decrement(row)"
             >
               <app-icon slot="icon" name="minus" [size]="14"></app-icon>
             </app-button>
-            <span class="qty">{{ row.quantity }}</span>
+            <span class="qty">{{ quantityOf(row.id) }}</span>
             <app-button
               variant="outline"
               size="sm"
@@ -92,18 +92,31 @@
         </div>
       }
     </div>
+
+    @if (isLoading()) {
+      <div class="loading-inline">
+        <app-spinner size="sm"></app-spinner>
+      </div>
+    }
+
+    <app-pagination
+      [currentPage]="currentPage()"
+      [totalPages]="totalPages()"
+      [total]="total()"
+      [limit]="limit()"
+      (pageChange)="onPageChange($event)"
+    ></app-pagination>
   }
 
-  @if (hasItems()) {
-    <div class="total-preview">
-      <span>Subtotal estimado:</span>
-      <strong>{{ totalPreview() | currency }}</strong>
-    </div>
-  }
+  <!-- Subtotal is always visible (selection survives page changes) -->
+  <div class="total-preview">
+    <span>Subtotal estimado ({{ selectedCount() }} seleccionado{{ selectedCount() === 1 ? '' : 's' }}):</span>
+    <strong>{{ totalPreview() | currency }}</strong>
+  </div>
 
   <div slot="footer" class="flex justify-between items-center gap-2">
     <span class="text-sm text-text-secondary">
-      {{ productRows().length }} productos disponibles
+      {{ total() }} productos disponibles
     </span>
     <div class="flex gap-2">
       <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>

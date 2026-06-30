@@ -33,6 +33,7 @@ import {
   KitchenTicketsService,
 } from '../../services';
 import { StoreSettingsFacade } from '../../../../../../../core/store/store-settings/store-settings.facade';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import { KdsTicketCardComponent } from '../../components/kds-ticket-card/kds-ticket-card.component';
 import { KdsTicketDetailModalComponent } from '../../components/kds-ticket-detail-modal/kds-ticket-detail-modal.component';
 
@@ -623,8 +624,15 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
    * Surfaces a failed ticket mutation. Most errors become a toast, but the
    * backend's `KITCHEN_TICKET_NO_RECIPE` (422) — raised when "Cocinarlo" is
    * pressed on a dish without an active recipe — gets an actionable dialog
-   * (CTA a Recetas) instead of failing silently. Falls back to a plain
-   * string for any non-structured error.
+   * (CTA a Recetas) instead of failing silently.
+   *
+   * Restaurant Suite — Fase K audit jun-2026: ALL other specific error
+   * codes (NOT_READY, ALREADY_DELIVERED, ALREADY_CANCELLED,
+   * ALREADY_IN_PREPARATION, ALREADY_READY) are mapped through
+   * `parseApiError` → `ERROR_MESSAGES` so the operator sees an actionable
+   * Spanish message ("Este plato ya fue marcado como entregado", "No se
+   * puede marcar como entregado: el plato aún está pendiente…") instead of
+   * the generic devMessage. Unknown errors fall back to a plain toast.
    */
   private onMutationError(err: unknown): void {
     const structured =
@@ -633,6 +641,13 @@ export class KdsBoardPageComponent implements OnInit, OnDestroy {
         : null;
     if (structured?.code === 'KITCHEN_TICKET_NO_RECIPE') {
       this.showNoRecipeDialog();
+      return;
+    }
+    if (structured?.code) {
+      const { userMessage } = parseApiError({
+        error: { error_code: structured.code },
+      });
+      this.toastService.error(userMessage);
       return;
     }
     const message =

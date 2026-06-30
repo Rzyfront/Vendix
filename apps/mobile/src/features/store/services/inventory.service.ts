@@ -28,6 +28,37 @@ function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
   return response.data as T;
 }
 
+/**
+ * Convierte un ArrayBuffer a string base64 sin usar Buffer ni FileReader
+ * (ambos no están disponibles en React Native de forma estable).
+ */
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  // btoa existe en RN moderno y en web; si no, fallback manual.
+  if (typeof globalThis.btoa === 'function') {
+    return globalThis.btoa(binary);
+  }
+  // Fallback: base64 manual (implementación mínima).
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let result = '';
+  let i = 0;
+  while (i < binary.length) {
+    const a = binary.charCodeAt(i++);
+    const b = i < binary.length ? binary.charCodeAt(i++) : -1;
+    const c = i < binary.length ? binary.charCodeAt(i++) : -1;
+    result += chars[a >> 2];
+    result += chars[((a & 0x03) << 4) | ((b === -1 ? 0 : b) >> 4)];
+    result += b === -1 ? '=' : chars[((b & 0x0f) << 2) | ((c === -1 ? 0 : c) >> 6)];
+    result += c === -1 ? '=' : chars[c & 0x3f];
+  }
+  return result;
+}
+
 function buildQuery(params?: Record<string, unknown>): string {
   if (!params) return '';
   const parts: string[] = [];
@@ -211,6 +242,7 @@ export interface LocationQuery {
 export interface CreateAdjustmentItem {
   product_id: number;
   type: AdjustmentType;
+  /** Final stock quantity (NOT the change). Backend computes `quantity_change = quantity_after - quantity_before`. */
   quantity_after: number;
   reason_code?: string;
   description?: string;
@@ -297,13 +329,133 @@ export const InventoryService = {
       state: query?.state,
     };
     const res = await apiClient.get(`${Endpoints.STORE.INVENTORY.ADJUSTMENTS.LIST}${buildQuery(params)}`);
-    const page = unwrapPaginated<Record<string, any>>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
-    return { ...page, data: page.data.map(normalizeAdjustment) };
+    // Backend returns `successResponse<AdjustmentResponse>` where data is
+    // `{ adjustments: [...], total: number, hasMore: boolean }` — NOT a plain array.
+    // Standard `unwrapPaginated` expects `{ data: T[] }`, so we custom-unwrap here.
+    const body = res.data as
+      | { success?: boolean; data?: { adjustments?: Record<string, any>[]; total?: number; hasMore?: boolean } }
+      | { adjustments?: Record<string, any>[]; total?: number; hasMore?: boolean };
+    const payload =
+      body && typeof body === 'object' && 'success' in body && (body as any).success
+        ? (body as any).data
+        : body;
+    const adjustments = Array.isArray((payload as any)?.adjustments)
+      ? (payload as any).adjustments
+      : [];
+    const total = Number((payload as any)?.total ?? adjustments.length);
+    const hasMore = Boolean((payload as any)?.hasMore);
+    const page = Number(query?.page ?? 1);
+    const limit = Number(query?.limit ?? 20);
+
+    return {
+      data: adjustments.map(normalizeAdjustment),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+        hasNext: hasMore,
+        hasPrev: page > 1,
+      },
+    };
   },
 
   async createAdjustment(dto: CreateAdjustmentDto): Promise<StockAdjustment> {
+    // POST /store/inventory/adjustments/batch-complete — creates AND applies immediately.
+    // Backend expects `BatchCreateAdjustmentsDto`: { location_id, items: [{ product_id, type, quantity_after, ... }] }.
+    // The `quantity_after` field is the final stock (not the change); backend computes the delta.
     const res = await apiClient.post(Endpoints.STORE.INVENTORY.ADJUSTMENTS.CREATE, dto);
-    return normalizeAdjustment(unwrap<Record<string, any>>(res));
+    // The batch-complete endpoint returns `{ adjustments: [...], ... }` — unwrap to first item.
+    const payload = unwrap<Record<string, any> | { adjustments?: Record<string, any>[] }>(res);
+    const firstItem = (payload as any)?.adjustments?.[0] ?? payload;
+    return normalizeAdjustment(firstItem as Record<string, any>);
+  },
+
+  async createAdjustmentDraft(dto: CreateAdjustmentDto): Promise<StockAdjustment> {
+    // POST /store/inventory/adjustments/batch — creates as PENDING (draft, not applied).
+    const res = await apiClient.post(Endpoints.STORE.INVENTORY.ADJUSTMENTS.CREATE_DRAFT, dto);
+    const payload = unwrap<Record<string, any> | { adjustments?: Record<string, any>[] }>(res);
+    const firstItem = (payload as any)?.adjustments?.[0] ?? payload;
+    return normalizeAdjustment(firstItem as Record<string, any>);
+  },
+
+  async approveAdjustment(id: number, approvedByUserId: number): Promise<StockAdjustment> {
+    const endpoint = Endpoints.STORE.INVENTORY.ADJUSTMENTS.APPROVE.replace(':id', String(id));
+    const res = await apiClient.patch(endpoint, { approvedByUserId });
+    const payload = unwrap<Record<string, any>>(res);
+    return normalizeAdjustment(payload);
+  },
+
+  async deleteAdjustment(id: number): Promise<void> {
+    const endpoint = Endpoints.STORE.INVENTORY.ADJUSTMENTS.DELETE.replace(':id', String(id));
+    await apiClient.delete(endpoint);
+  },
+
+  /**
+   * Descarga la plantilla de ajustes como base64.
+   * En React Native, axios + `responseType: 'arraybuffer'` es lo más confiable
+   * para binarios. Devolvemos un `string` (base64) listo para `expo-file-system`.
+   */
+  async downloadAdjustmentTemplate(locationId?: number): Promise<string> {
+    const params = locationId ? `?location_id=${locationId}` : '';
+    const res = await apiClient.get<string, { data: string; status: number }>(
+      `${Endpoints.STORE.INVENTORY.ADJUSTMENTS.BULK_TEMPLATE}${params}`,
+      { responseType: 'arraybuffer', transformResponse: [(d: any) => d] },
+    );
+    // En RN con axios, el array buffer viene como un objeto { data: stringBase64, ... }
+    // cuando se usa responseType: 'arraybuffer' sobre un endpoint de archivo.
+    const body: any = res.data as any;
+    if (typeof body === 'string') {
+      return body.replace(/^data:[^;]+;base64,/, '');
+    }
+    if (body && typeof body === 'object') {
+      if (typeof body.data === 'string') {
+        return body.data.replace(/^data:[^;]+;base64,/, '');
+      }
+      if (body._data && typeof body._data.data === 'string') {
+        return body._data.data.replace(/^data:[^;]+;base64,/, '');
+      }
+      // Si llegó un ArrayBuffer puro, convertir manualmente.
+      if (body instanceof ArrayBuffer || body?._arrayBuffer) {
+        const buf: ArrayBuffer = body instanceof ArrayBuffer ? body : body._arrayBuffer;
+        return arrayBufferToBase64(buf);
+      }
+    }
+    // Fallback: intentar base64() del global
+    if (body && typeof body.toString === 'function') {
+      const s = body.toString();
+      if (s && s !== '[object Object]') return s;
+    }
+    throw new Error('El servidor no devolvió un archivo válido');
+  },
+
+  async uploadBulkAdjustments(
+    file: { uri: string; name: string; type?: string },
+    locationId: number,
+    adjustmentType: string,
+    description?: string,
+  ): Promise<{ total_processed: number; successful: number; failed: number; results: any[] }> {
+    const formData = new FormData();
+    // 1) Archivo bajo el campo "file" (igual que `FileInterceptor('file')` en el backend)
+    // @ts-expect-error - React Native FormData accepts file objects
+    formData.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    } as any);
+    // 2) Campos simples: enviar como strings; class-transformer los convierte
+    //    (location_id → number, adjustment_type/description → string)
+    formData.append('location_id', String(locationId));
+    formData.append('adjustment_type', adjustmentType);
+    if (description) formData.append('description', description);
+
+    // 3) NO especificar Content-Type manualmente: axios/rn lo construye con
+    //    el boundary correcto. Si lo fijamos a 'multipart/form-data' rompemos el boundary.
+    const res = await apiClient.post(
+      Endpoints.STORE.INVENTORY.ADJUSTMENTS.BULK_UPLOAD,
+      formData,
+    );
+    return unwrap<{ total_processed: number; successful: number; failed: number; results: any[] }>(res);
   },
 
   async getTransfers(query?: TransferQuery): Promise<PaginatedResponse<StockTransfer>> {
@@ -327,7 +479,11 @@ export const InventoryService = {
   },
 
   async getMovements(query?: MovementQuery): Promise<PaginatedResponse<StockMovement>> {
+    const page = query?.page ?? 1;
+    const limit = query?.limit ?? 20;
     const params: Record<string, unknown> = {
+      page,
+      limit,
       search: query?.search,
       movement_type: query?.movement_type,
       product_id: query?.product_id,
@@ -338,10 +494,10 @@ export const InventoryService = {
       end_date: query?.end_date,
     };
     const res = await apiClient.get(`${Endpoints.STORE.INVENTORY.MOVEMENTS.LIST}${buildQuery(params)}`);
-    const page = unwrapPaginated<Record<string, any>>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
+    const pageResult = unwrapPaginated<Record<string, any>>(res, { page, limit });
     return {
-      ...page,
-      data: page.data.map(normalizeMovement),
+      ...pageResult,
+      data: pageResult.data.map(normalizeMovement),
     };
   },
 

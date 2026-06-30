@@ -7,11 +7,15 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
+  ButtonComponent,
   CardComponent,
   DialogService,
   IconComponent,
+  InputButtonOption,
+  InputButtonsComponent,
   ItemListCardConfig,
   ResponsiveDataViewComponent,
   SpinnerComponent,
@@ -53,10 +57,13 @@ interface TableRow extends Table {
   standalone: true,
   imports: [
     CommonModule,
+    FormsModule,
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
     IconComponent,
+    ButtonComponent,
+    InputButtonsComponent,
     SpinnerComponent,
     ResponsiveDataViewComponent,
     TableFloorMapComponent,
@@ -75,6 +82,11 @@ export class TablesManagePageComponent implements OnInit {
   readonly isLoading = signal(false);
   readonly view = signal<ViewMode>('table');
 
+  readonly viewOptions: InputButtonOption[] = [
+    { value: 'table', label: 'Tabla', icon: 'list' },
+    { value: 'floor', label: 'Plano', icon: 'layout-grid' },
+  ];
+
   readonly isFormOpen = signal(false);
   readonly editingTable = signal<Table | null>(null);
   readonly isFormLoading = signal(false);
@@ -87,12 +99,6 @@ export class TablesManagePageComponent implements OnInit {
       label: 'Refrescar',
       variant: 'ghost',
       icon: 'refresh-cw',
-    },
-    {
-      id: 'new',
-      label: 'Nueva mesa',
-      variant: 'primary',
-      icon: 'plus',
     },
   ]);
 
@@ -179,10 +185,10 @@ export class TablesManagePageComponent implements OnInit {
 
   onHeaderAction(id: string): void {
     if (id === 'refresh') this.load();
-    else if (id === 'new') this.openCreate();
   }
 
-  setView(v: ViewMode): void {
+  setView(v: string): void {
+    if (v !== 'table' && v !== 'floor') return;
     this.view.set(v);
     if (v === 'floor') this.floorMapKey.update((k) => k + 1);
   }

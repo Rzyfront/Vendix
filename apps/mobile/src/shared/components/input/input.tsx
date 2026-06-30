@@ -7,6 +7,7 @@ interface InputProps extends TextInputProps {
   error?: string;
   helperText?: string;
   rightIcon?: React.ReactNode;
+  helpIcon?: React.ReactNode;
   style?: ViewStyle;
 }
 
@@ -15,37 +16,44 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   label: {
-    fontSize: typography.fontSize.xs,
-    fontWeight: typography.fontWeight.semibold,
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold,
     fontFamily: typography.fontFamily,
-    color: colors.text.secondary,
+    color: colorScales.gray[700],
     marginBottom: spacing[1.5],
-    letterSpacing: 1.5,
+    letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.inputBg,
-    borderRadius: borderRadius.lg,
-    paddingHorizontal: spacing[4],
-    borderWidth: 1,
+    backgroundColor: colorScales.gray[50],
+    borderRadius: 10,
+    paddingHorizontal: spacing[3],
+    borderWidth: 0,
   },
   inputWrapperDefault: {
-    borderColor: colors.inputBorder,
+    borderColor: 'transparent',
   },
   inputWrapperFocused: {
     borderColor: colors.primary,
+    borderWidth: 1.5,
   },
   inputWrapperError: {
     borderColor: colors.error,
+    borderWidth: 1.5,
   },
   textInput: {
     flex: 1,
-    height: 48,
+    height: 40,
     fontSize: typography.fontSize.sm,
     fontFamily: typography.fontFamily,
-    color: colors.text.primary,
+    color: colorScales.gray[900],
   },
   iconWrapper: {
     marginLeft: spacing[2],
@@ -69,6 +77,7 @@ export function Input({
   error,
   helperText,
   rightIcon,
+  helpIcon,
   style,
   ...props
 }: InputProps) {
@@ -82,7 +91,12 @@ export function Input({
 
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>{label}</Text>
+      {(label || helpIcon) && (
+        <View style={styles.labelRow}>
+          {label && <Text style={styles.label}>{label}</Text>}
+          {helpIcon}
+        </View>
+      )}
       <View style={[styles.inputWrapper, inputWrapperStyle, style]}>
         <TextInput
           style={styles.textInput}
