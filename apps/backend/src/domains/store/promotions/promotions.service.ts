@@ -197,21 +197,26 @@ export class PromotionsService {
       };
     }
 
-    // Persist the promotion first so we have its `id` for the tier rows.
-    // For quantity_tiered rules we materialise the tiers in a follow-up
-    // createMany so the FK target exists; nested create would also work but
-    // createMany keeps the service symmetric with the update path below.
-    const created = await this.prisma.promotions.create({
-      data,
-      include: {
-        promotion_products: true,
-        promotion_categories: true,
-      },
-    });
+    // Persist the promotion + tiers atomically so a failure mid-write
+    // doesn't leave orphan tiers pointing at a missing parent row.
+    // `tx` exposes `promotion_quantity_tiers` (the un-scoped transaction
+    // client does; the scoped StorePrismaService property does NOT — hence
+    // routing through $transaction instead of `this.prisma` directly).
+    const created = await this.prisma.$transaction(async (tx) => {
+      const promo = await tx.promotions.create({
+        data,
+        include: {
+          promotion_products: true,
+          promotion_categories: true,
+        },
+      });
 
-    if (rule_type === 'quantity_tiered' && quantity_tiers?.length) {
-      await this.persistQuantityTiers(created.id, quantity_tiers);
-    }
+      if (rule_type === 'quantity_tiered' && quantity_tiers?.length) {
+        await this.persistQuantityTiersOnTx(tx, promo.id, quantity_tiers);
+      }
+
+      return promo;
+    });
 
     // Re-read so the response carries the persisted tiers when relevant.
     if (rule_type === 'quantity_tiered') {
@@ -516,17 +521,24 @@ export class PromotionsService {
   }
 
   /**
-   * Persist a flat list of tiers for a given promotion. Per-element shape
-   * is enforced upstream by the DTO; this method assumes the list has
-   * already passed validation and just writes the rows.
+   * Persist a flat list of tiers for a given promotion using the
+   * caller-provided transaction client. Per-element shape is enforced
+   * upstream by the DTO; this method assumes the list has already passed
+   * validation and just writes the rows.
+   *
+   * MUST be invoked from inside `$transaction` because the scoped
+   * StorePrismaService property `this.prisma.promotion_quantity_tiers`
+   * is not registered (only the un-scoped transaction client exposes
+   * the model).
    */
-  private async persistQuantityTiers(
+  private async persistQuantityTiersOnTx(
+    tx: any,
     promotionId: number,
     tiers: QuantityTierDto[],
   ): Promise<void> {
     if (!tiers.length) return;
 
-    await this.prisma.promotion_quantity_tiers.createMany({
+    await tx.promotion_quantity_tiers.createMany({
       data: tiers.map((tier) => ({
         promotion_id: promotionId,
         min_quantity: tier.min_quantity,
