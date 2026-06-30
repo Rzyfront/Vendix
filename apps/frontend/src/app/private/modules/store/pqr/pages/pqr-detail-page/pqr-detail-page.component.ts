@@ -88,6 +88,24 @@ export class PqrDetailPageComponent {
       const id = this.id();
       if (id) this.fetch(id);
     });
+
+    // Auto-open the content-edit modal when the list page navigates
+    // here with ?edit=content. Mirrors the same flow as the super-admin
+    // detail page so the edit pencil does the same thing in both views.
+    // The local `autoOpenTriggered` flag prevents the modal from
+    // re-opening every time `detail()` is re-fetched (e.g. after
+    // submitEdit() / submitComment()).
+    const autoOpenEdit =
+      this.route.snapshot.queryParamMap.get('edit') === 'content';
+    let autoOpenTriggered = false;
+    if (autoOpenEdit) {
+      effect(() => {
+        if (!autoOpenTriggered && this.detail()) {
+          autoOpenTriggered = true;
+          this.openEditModal();
+        }
+      });
+    }
   }
 
   typeLabel(type: string): string {

@@ -6,12 +6,12 @@ import {
   DestroyRef,
   effect,
 } from '@angular/core';
-import { CommonModule, DatePipe } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpParams } from '@angular/common/http';
+import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
-import { RouterLink } from '@angular/router';
 import { environment } from '../../../../../environments/environment';
 import {
   IconComponent,
@@ -20,29 +20,39 @@ import {
   CardComponent,
   InputsearchComponent,
   OptionsDropdownComponent,
+  ResponsiveDataViewComponent,
+  PaginationComponent,
+  ToastService,
 } from '../../../../shared/components';
 import type {
   FilterConfig,
   FilterValues,
   DropdownAction,
+  TableColumn,
+  TableAction,
+  ItemListCardConfig,
 } from '../../../../shared/components';
 import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sticky-header.component';
 
 /**
- * Super-admin global PQRs page (compliance / oversight view).
+ * Super-admin global PQR list page (platform-wide compliance view).
  *
- * Audience: Vendix Corp platform operators and compliance officers who
- * need cross-tenant visibility into Peticiones / Quejas / Reclamos.
+ * Audience: Vendix Corp operators (Super Admin). Cross-tenant visibility
+ * for Peticiones / Quejas / Reclamos across every org/store on the
+ * platform. Mirrors the store-admin PQR layout (sticky header → stats →
+ * CTA card → list card with ResponsiveDataView) so the operator has a
+ * single visual model across admin modules.
  *
- * Differences vs. store-admin PQRs view:
- *   - CTA card emphasizes cross-tenant SLA exposure (the "what's at risk
- *     across all customers today" question).
- *   - Quick filter chips (All / Overdue / Expiring / New) instead of
- *     dropdowns — operators use these a lot.
- *   - SLA column added inline so urgency is one glance away.
- *   - Inline "Ver" action per row for fast triage.
- *   - Same SLA computation as store-admin (15/10 business days) — kept
- *     local because it's a UI concern; backend stays platform-neutral.
+ * Differences vs. store-admin PQR list:
+ *   - Extra "Tienda" column (super-admin sees every store).
+ *   - Search placeholder includes "tienda" so operators can find
+ *     PQRs by tenant.
+ *   - "Pendientes" quick-filter maps to "open status" — matches the
+ *     store-admin semantic so the same label means the same thing in
+ *     both views.
+ *   - Search backend route is `/superadmin/support/pqrs` (not
+ *     `/admin/support/pqr`) — the backend scopes by auth role, not
+ *     by URL prefix.
  */
 @Component({
   selector: 'app-superadmin-pqrs',
@@ -50,25 +60,25 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
   imports: [
     CommonModule,
     FormsModule,
-    DatePipe,
-    RouterLink,
     IconComponent,
     StatsComponent,
     StickyHeaderComponent,
     CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
+    ResponsiveDataViewComponent,
+    PaginationComponent,
   ],
   template: `
     <div class="pqr-list-page">
       <!-- ── Sticky header ─────────────────────────────────────────
-           Same component used by every admin module. Tabs inline at
-           the top so the platform-wide operator can narrow the queue
-           by bucket (Todas / Vencidas / Sin asignar). -->
+           Glass surface that lives across all admin modules. Tabs
+           inline so the platform operator can narrow the queue by
+           bucket (Todas / Vencidas / Pendientes / Nuevas). -->
       <app-sticky-header
-        title="PQRS"
+        title="Bandeja"
         subtitle="Vista global de la plataforma"
-        icon="message-square"
+        icon="inbox"
         variant="glass"
         [showBackButton]="false"
         [tabs]="quickFilterTabs()"
@@ -77,11 +87,15 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         (tabChanged)="setQuickFilter($event)"
       />
 
-      <!-- ── Stats grid ────────────────────────────────────────────── -->
+      <!-- ── Stats grid ──────────────────────────────────────────────
+           Mirrors the store-admin PQR cards. Hidden when total === 0
+           so the page doesn't show four zeros to a brand-new
+           platform. -->
+      @if (stats() && stats()!.total > 0) {
       <div class="stats-container">
         <app-stats
           title="Total PQRS"
-          [value]="stats().total"
+          [value]="stats()!.total"
           smallText="Todas las peticiones, quejas y reclamos"
           iconName="message-square"
           iconBgColor="bg-blue-100"
@@ -89,15 +103,15 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         ></app-stats>
         <app-stats
           title="Últimas 24h"
-          [value]="stats().recent_24h"
-          smallText="PQRS recientes"
+          [value]="stats()!.recent_24h"
+          smallText="PQRS radicadas recientemente"
           iconName="clock"
           iconBgColor="bg-violet-100"
           iconColor="text-violet-600"
         ></app-stats>
         <app-stats
           title="Vencidas"
-          [value]="stats().overdue"
+          [value]="overdueCount()"
           smallText="SLA legal agotado"
           iconName="alert-triangle"
           iconBgColor="bg-red-100"
@@ -105,68 +119,14 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         ></app-stats>
         <app-stats
           title="Nuevas"
-          [value]="stats().by_status?.NEW || 0"
-          smallText="Sin asignar"
+          [value]="stats()!.by_status?.['NEW'] || 0"
+          smallText="Sin asignar a tienda"
           iconName="inbox"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
       </div>
-
-      <!-- ── CTA card ──────────────────────────────────────────────── -->
-      <div
-        class="cta-card"
-        [class.cta-card--urgent]="overdueCount() > 0"
-        [class.cta-card--empty]="stats().total === 0"
-      >
-        @if (stats().total === 0) {
-        <div class="cta-card__main">
-          <div class="cta-card__icon cta-card__icon--muted">
-            <app-icon name="inbox" [size]="32"></app-icon>
-          </div>
-          <div class="cta-card__copy">
-            <h2>Sin PQRS radicadas en la plataforma</h2>
-            <p>
-              Cuando un visitante publique una petición, queja o reclamo
-              desde cualquier storefront, aparecerá aquí.
-            </p>
-          </div>
-        </div>
-        } @else {
-        <div class="cta-card__main">
-          <div class="cta-card__icon">
-            <app-icon
-              [name]="overdueCount() > 0 ? 'alert-triangle' : 'message-square'"
-              [size]="28"
-            ></app-icon>
-          </div>
-          <div class="cta-card__copy">
-            <h2>
-              @if (overdueCount() > 0) {
-                {{ overdueCount() }} PQRS
-                con SLA vencido en la plataforma
-              } @else if (stats().recent_24h > 0) {
-                {{ stats().recent_24h }} PQRS
-                radicadas en las últimas 24h
-              } @else {
-                Plataforma al día con PQRS
-              }
-            </h2>
-            <p>
-              @if (overdueCount() > 0) {
-                ⚠️ Riesgo regulatorio: las PQRS vencidas pueden derivar en
-                silencio administrativo a favor del reclamante.
-              } @else if (stats().recent_24h > 0) {
-                Monitorea la respuesta de cada tienda para evitar acumulación
-                de SLA.
-              } @else {
-                Sin PQRS pendientes de revisión.
-              }
-            </p>
-          </div>
-        </div>
-        }
-      </div>
+      }
 
       <!-- ── List card ─────────────────────────────────────────────── -->
       <app-card [responsive]="true" [padding]="false" overflow="visible">
@@ -177,7 +137,7 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
             class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
           >
             <h2
-              class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:text-text-primary"
+              class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
             >
               Todas las solicitudes ({{ total() }})
             </h2>
@@ -211,128 +171,65 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         </div>
         }
 
+        @if (!loading() && tickets().length > 0) {
         <div class="px-2 pb-2 pt-1 md:p-4">
-          <div class="table-scroll" role="region" aria-label="Listado de solicitudes">
-            <table class="pqr-table">
-          <thead>
-            <tr>
-              <th>Ticket</th>
-              <th>Tipo</th>
-              <th>Asunto</th>
-              <th>Tienda</th>
-              <th>SLA</th>
-              <th>Estado</th>
-              <th>Creado</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (t of tickets(); track t.id) {
-            @let info = slaInfo(t);
-            <tr
-              class="row-link"
-              [class.row-link--overdue]="info.status === 'overdue'"
-              [class.row-link--warn]="info.status === 'warn'"
-              [routerLink]="['/super-admin/support/pqrs', t.id]"
-            >
-              <td class="mono">{{ t.ticket_number }}</td>
-              <td>
-                <span class="type-tag" [attr.data-type]="t.category">
-                  {{ typeLabel(t.category) }}
-                </span>
-              </td>
-              <td class="title-cell">{{ t.title }}</td>
-              <td>
-                <!-- Show the store name when present. t.store is null
-                     for legacy PQRs created via the public storefront
-                     form (no tenant context). We deliberately don't
-                     fall back to the organization name because for the
-                     platform org (orgVendix) it would misleadingly show
-                     "Vendix Corp" as if it were a tienda. -->
-                <span class="store-name">{{ t.store?.name || 'No registrado' }}</span>
-              </td>
-              <td>
-                <span class="sla-badge" [attr.data-status]="info.status">
-                  @if (info.status === 'overdue') {
-                    <app-icon name="alert-triangle" [size]="12"></app-icon>
-                    Vencido
-                  } @else if (info.status === 'warn') {
-                    <app-icon name="clock" [size]="12"></app-icon>
-                    {{ info.remaining }}d
-                  } @else {
-                    {{ info.remaining }}d
-                  }
-                </span>
-              </td>
-              <td>
-                <span class="status-pill" [attr.data-status]="t.status">
-                  {{ statusLabel(t.status) }}
-                </span>
-              </td>
-              <td class="muted">{{ t.created_at | date: 'shortDate' }}</td>
-              <td class="actions">
-                <a
-                  class="action-btn"
-                  [routerLink]="['/super-admin/support/pqrs', t.id]"
-                  title="Ver detalle"
-                >
-                  Ver
-                  <app-icon name="arrow-right" [size]="12"></app-icon>
-                </a>
-              </td>
-            </tr>
-            } @empty {
-            <tr>
-              <td colspan="8" class="empty-state">
-                @if (quickFilter() !== 'all' || typeFilter || searchInput()) {
-                  No hay PQRS con esos filtros.
-                  <button class="empty-state__reset" (click)="clearAllFilters()">
-                    Limpiar filtros
-                  </button>
-                } @else {
-                  Sin PQRS en la plataforma.
-                }
-              </td>
-            </tr>
-            }
-          </tbody>
-        </table>
+          <app-responsive-data-view
+            [data]="tickets()"
+            [columns]="pqrColumns"
+            [cardConfig]="pqrCardConfig"
+            [actions]="pqrActions"
+            [loading]="loading()"
+            [hoverable]="true"
+            [striped]="true"
+            [emptyMessage]="
+              typeFilter || searchInput() || quickFilter() !== 'all'
+                ? 'No hay solicitudes con esos filtros'
+                : 'Sin PQRS en la plataforma.'
+            "
+            [emptyIcon]="'inbox'"
+            tableSize="md"
+            (rowClick)="openPqr($event)"
+          ></app-responsive-data-view>
 
-        <!-- Pagination -->
-        @if (totalPages() > 1) {
-        <nav class="pagination">
-          <button
-            class="page-btn"
-            [disabled]="page() <= 1"
-            (click)="goToPage(page() - 1)"
-          >
-            ‹ Anterior
-          </button>
-          @for (p of pageNumbers(); track $index) {
-            @if (p === '…') {
-            <span class="page-ellipsis">…</span>
-            } @else {
-            <button
-              class="page-btn"
-              [class.active]="p === page()"
-              (click)="goToPage(p)"
-            >
-              {{ p }}
-            </button>
-            }
-          }
-          <button
-            class="page-btn"
-            [disabled]="page() >= totalPages()"
-            (click)="goToPage(page() + 1)"
-          >
-            Siguiente ›
-          </button>
-          <span class="page-info">{{ total() }} resultados</span>
-        </nav>
-        }
+          @if (totalPages() > 1) {
+          <div class="mt-4 border-t border-border pt-4">
+            <app-pagination
+              [currentPage]="page()"
+              [total]="total()"
+              [limit]="limit"
+              [totalPages]="totalPages()"
+              infoStyle="none"
+              (pageChange)="goToPage($event)"
+            ></app-pagination>
           </div>
+          }
         </div>
+        }
+
+        @if (!loading() && tickets().length === 0) {
+        <div class="p-12 text-center text-gray-500">
+          <app-icon
+            name="inbox"
+            [size]="48"
+            class="mx-auto mb-4 text-gray-300"
+          ></app-icon>
+          <h3 class="text-lg font-medium text-gray-900">
+            @if (typeFilter || searchInput() || quickFilter() !== 'all') {
+              No hay PQRS con esos filtros
+            } @else {
+              Sin PQRS en la plataforma
+            }
+          </h3>
+          <p class="mt-1 text-sm">
+            @if (typeFilter || searchInput() || quickFilter() !== 'all') {
+              Ajusta los filtros o limpia la búsqueda para ver todas las
+              solicitudes.
+            } @else {
+              Cuando recibas nuevas solicitudes, aparecerán aquí.
+            }
+          </p>
+        </div>
+        }
       </app-card>
     </div>
   `,
@@ -341,21 +238,36 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
       :host {
         display: block;
       }
-
-      // Sub-header card (patrón Ventas)
-      .pqr-subheader {
+      .pqr-list-page {
         display: flex;
-        align-items: center;
-        gap: 0.75rem;
+        flex-direction: column;
+        gap: 1rem;
+      }
+
+      // CTA card — same friendly copy as store-admin; tonal flip
+      // (cta-card--urgent) when there are overdue PQRs in the queue.
+      .cta-card {
         background: #ffffff;
         border: 1px solid #e2e8f0;
         border-radius: 14px;
-        padding: 1rem 1.25rem;
+        padding: 1.25rem 1.5rem;
       }
-      .pqr-subheader__icon {
-        width: 44px;
-        height: 44px;
-        border-radius: 12px;
+      .cta-card__main,
+      .cta-card__empty {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+      }
+      .cta-card__lead {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        width: 100%;
+      }
+      .cta-card__icon {
+        width: 48px;
+        height: 48px;
+        border-radius: 14px;
         background: #dcfce7;
         color: #15803d;
         display: flex;
@@ -363,481 +275,36 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
         justify-content: center;
         flex-shrink: 0;
       }
-      .pqr-subheader__copy {
+      .cta-card__icon--muted {
+        background: #f1f5f9;
+        color: #94a3b8;
+      }
+      .cta-card__copy {
         flex: 1;
         min-width: 0;
-      }
-      .pqr-subheader__copy h2 {
-        margin: 0;
-        font-size: 1rem;
-        font-weight: 700;
-        color: #0f172a;
-        line-height: 1.2;
-      }
-      .pqr-subheader__copy p {
-        margin: 0;
-        color: #64748b;
-        font-size: 0.8125rem;
-        line-height: 1.3;
-      }
-
-      // Quick-filter tabs (moved from the removed sticky-header)
-      .quick-filters {
-        display: flex;
-        gap: 0.25rem;
-        flex-wrap: wrap;
-        padding: 0 0.25rem;
-      }
-      .quick-filters__tab {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4375rem;
-        padding: 0.5rem 0.875rem;
-        border: 0;
-        background: transparent;
-        color: #64748b;
-        font-size: 0.875rem;
-        font-weight: 600;
-        cursor: pointer;
-        border-radius: 8px;
-        border-bottom: 2px solid transparent;
-        min-height: 44px;
-        transition: color 0.15s, border-color 0.15s, background 0.15s;
-      }
-      .quick-filters__tab:hover {
-        color: #15803d;
-        background: #f0fdf4;
-      }
-      .quick-filters__tab:focus-visible {
-        outline: 2px solid #16a34a;
-        outline-offset: 2px;
-      }
-      .quick-filters__tab app-icon {
-        color: currentColor;
-      }
-      .quick-filters__tab--active {
-        color: #15803d;
-        border-bottom-color: #16a34a;
-        background: transparent;
-      }
-      .quick-filters__tab--active:hover {
-        background: #f0fdf4;
-      }
-
-      // CTA card (cross-tenant urgency)
-      .cta-card {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 14px;
-        padding: 1.25rem 1.5rem;
-        margin-bottom: 1rem;
-
-        &__main {
-          display: flex;
-          align-items: center;
-          gap: 1rem;
+        h2 {
+          margin: 0 0 0.25rem;
+          font-size: 1.0625rem;
+          font-weight: 700;
+          color: #0f172a;
+          line-height: 1.3;
         }
-
-        &__icon {
-          width: 48px;
-          height: 48px;
-          border-radius: 14px;
-          background: #dcfce7;
-          color: #15803d;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-
-          &--muted {
-            background: #f1f5f9;
-            color: #94a3b8;
-          }
-        }
-
-        &__copy {
-          flex: 1;
-          min-width: 0;
-          h2 {
-            margin: 0 0 0.25rem;
-            font-size: 1.0625rem;
-            font-weight: 700;
-            color: #0f172a;
-            line-height: 1.3;
-          }
-          p {
-            margin: 0;
-            color: #475569;
-            font-size: 0.875rem;
-            line-height: 1.45;
-          }
-        }
-
-        &--urgent {
-          border-color: #fecaca;
-          background: linear-gradient(135deg, #fef2f2, #ffffff);
-          .cta-card__icon {
-            background: #fee2e2;
-            color: #b91c1c;
-          }
-          h2 {
-            color: #991b1b;
-          }
-        }
-      }
-
-      // Stats
-      .stats-container {
-        display: grid;
-        grid-template-columns: repeat(4, 1fr);
-        gap: 0.75rem;
-        margin-bottom: 1rem;
-      }
-
-      // Quick filter chips — primary operator tool
-      .filter-chips {
-        display: flex;
-        gap: 0.5rem;
-        flex-wrap: wrap;
-        margin-bottom: 1rem;
-
-        .chip {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.375rem;
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
+        p {
+          margin: 0;
           color: #475569;
-          font-size: 0.8125rem;
-          font-weight: 600;
-          padding: 0.5rem 0.875rem;
-          border-radius: 9999px;
-          cursor: pointer;
-          transition: all 0.15s;
-
-          &:hover {
-            border-color: #cbd5e1;
-            background: #f8fafc;
-          }
-
-          &--active {
-            background: #0f172a;
-            color: #ffffff;
-            border-color: #0f172a;
-
-            .chip__count {
-              background: rgba(255, 255, 255, 0.2);
-              color: #ffffff;
-            }
-          }
-
-          &--warn:not(.chip--active) {
-            color: #b45309;
-          }
-
-          &__count {
-            background: #f1f5f9;
-            color: #64748b;
-            padding: 0.0625rem 0.4375rem;
-            border-radius: 9999px;
-            font-size: 0.7rem;
-            font-weight: 700;
-          }
+          font-size: 0.875rem;
+          line-height: 1.45;
         }
       }
-
-      // Filters bar
-      .filters-bar {
-        display: flex;
-        gap: 0.75rem;
-        align-items: flex-end;
-        padding: 0.875rem 1rem;
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 10px;
-        margin-bottom: 0.75rem;
-
-        .filter-group {
-          display: flex;
-          flex-direction: column;
-          gap: 0.25rem;
-          label {
-            font-size: 0.7rem;
-            color: #64748b;
-            font-weight: 600;
-            text-transform: uppercase;
-          }
-          select,
-          input {
-            padding: 0.4375rem 0.75rem;
-            border: 1px solid #cbd5e1;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            background: #ffffff;
-          }
-          select:focus,
-          input:focus {
-            outline: none;
-            border-color: #16a34a;
-            box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
-          }
-          &--search {
-            flex: 1;
-            min-width: 200px;
-          }
-        }
-        .search-input {
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-          padding: 0 0.75rem;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          background: #ffffff;
-          input {
-            flex: 1;
-            border: 0;
-            outline: none;
-            padding: 0.4375rem 0;
-            font-size: 0.875rem;
-          }
-          app-icon {
-            color: #94a3b8;
-          }
-        }
-        .clear-btn {
-          background: none;
-          border: 0;
-          color: #94a3b8;
-          font-size: 1.2rem;
-          cursor: pointer;
-          padding: 0 0.25rem;
-          line-height: 1;
-        }
-      }
-
-      // Table
-      .table-wrapper {
-        background: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-radius: 12px;
-        overflow: hidden;
-        position: relative;
-      }
-      .loading-overlay {
-        position: absolute;
-        inset: 0;
-        background: rgba(255, 255, 255, 0.85);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        z-index: 5;
-        color: #64748b;
-        font-weight: 500;
-      }
-      .error-banner {
-        background: #fef2f2;
-        border-bottom: 1px solid #fecaca;
-        color: #991b1b;
-        padding: 0.75rem 1rem;
-        font-size: 0.875rem;
-      }
-      .pqr-table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 0.875rem;
-        thead {
-          background: #f8fafc;
-          text-align: left;
-          th {
-            padding: 0.625rem 1rem;
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #64748b;
-            font-weight: 600;
-            border-bottom: 1px solid #e2e8f0;
-          }
-        }
-        tbody tr {
-          border-bottom: 1px solid #f1f5f9;
-          cursor: pointer;
-          transition: background 0.1s;
-          &:hover {
-            background: #f8fafc;
-          }
-          &--warn {
-            background: #fffbeb;
-          }
-          &--overdue {
-            background: #fef2f2;
-          }
-          &:last-child {
-            border-bottom: 0;
-          }
-        }
-        td {
-          padding: 0.75rem 1rem;
-          color: #1e293b;
-          vertical-align: middle;
-        }
-        .mono {
-          font-family: 'SF Mono', Menlo, Consolas, monospace;
-          font-size: 0.8125rem;
-          color: #475569;
-        }
-        .title-cell {
-          max-width: 280px;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .store-name {
-          font-size: 0.8125rem;
-          color: #64748b;
-        }
-        .muted {
-          color: #94a3b8;
-          font-size: 0.8125rem;
-        }
-        .actions {
-          text-align: right;
-        }
-        .action-btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 0.25rem;
-          padding: 0.25rem 0.625rem;
-          border: 1px solid #cbd5e1;
-          border-radius: 6px;
-          font-size: 0.75rem;
-          font-weight: 600;
-          color: #475569;
-          text-decoration: none;
-          transition: all 0.15s;
-          &:hover {
-            background: #f1f5f9;
-            border-color: #94a3b8;
-            color: #0f172a;
-          }
-        }
-        .empty-state {
-          text-align: center;
-          padding: 2.5rem 1rem;
-          color: #94a3b8;
-        }
-        .empty-state__reset {
-          background: none;
-          border: 0;
-          color: #15803d;
-          font-weight: 600;
-          cursor: pointer;
-          margin-left: 0.5rem;
-          text-decoration: underline;
-        }
-      }
-
-      // Type tag
-      .type-tag {
-        display: inline-flex;
-        padding: 0.1875rem 0.5rem;
-        border-radius: 6px;
-        font-size: 0.7rem;
-        font-weight: 600;
-        &[data-type='PETITION'] {
-          background: #dcfce7;
-          color: #15803d;
-        }
-        &[data-type='COMPLAINT'] {
-          background: #fed7aa;
-          color: #9a3412;
-        }
-        &[data-type='CLAIM'] {
-          background: #fecaca;
-          color: #991b1b;
-        }
-      }
-
-      // SLA badge — compact for table density
-      .sla-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.25rem;
-        font-size: 0.75rem;
-        font-weight: 600;
-        padding: 0.1875rem 0.5rem;
-        border-radius: 6px;
-        &[data-status='ok'] {
-          background: #ecfdf5;
-          color: #047857;
-        }
-        &[data-status='warn'] {
-          background: #fef3c7;
-          color: #92400e;
-        }
-        &[data-status='overdue'] {
+      .cta-card--urgent {
+        border-color: #fecaca;
+        background: linear-gradient(135deg, #fef2f2, #ffffff);
+        .cta-card__icon {
           background: #fee2e2;
           color: #b91c1c;
         }
-      }
-
-      // Status pill
-      .status-pill {
-        display: inline-block;
-        padding: 0.1875rem 0.5rem;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 600;
-        background: #f1f5f9;
-        color: #475569;
-        &[data-status='NEW'] {
-          background: #dbeafe;
-          color: #15803d;
-        }
-        &[data-status='RESOLVED'],
-        &[data-status='CLOSED'] {
-          background: #d1fae5;
-          color: #065f46;
-        }
-      }
-
-      // Pagination
-      .pagination {
-        display: flex;
-        align-items: center;
-        gap: 0.25rem;
-        padding: 0.875rem 1rem;
-        border-top: 1px solid #f1f5f9;
-        flex-wrap: wrap;
-        .page-btn {
-          background: #ffffff;
-          border: 1px solid #e2e8f0;
-          padding: 0.375rem 0.625rem;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 0.8125rem;
-          color: #334155;
-          &:hover:not(:disabled) {
-            background: #f8fafc;
-          }
-          &.active {
-            background: #0f172a;
-            color: #ffffff;
-            border-color: #0f172a;
-          }
-          &:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-          }
-        }
-        .page-ellipsis {
-          padding: 0 0.25rem;
-          color: #94a3b8;
-        }
-        .page-info {
-          margin-left: auto;
-          color: #64748b;
-          font-size: 0.8125rem;
+        h2 {
+          color: #991b1b;
         }
       }
     `,
@@ -845,6 +312,8 @@ import { StickyHeaderTab } from '../../../../shared/components/sticky-header/sti
 })
 export class SuperadminPqrsComponent {
   private readonly http = inject(HttpClient);
+  private readonly router = inject(Router);
+  private readonly toastService = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly API_URL = `${environment.apiUrl}/superadmin/support/pqrs`;
 
@@ -862,21 +331,35 @@ export class SuperadminPqrsComponent {
   readonly limit = 20;
   readonly total = signal(0);
   readonly totalPages = signal(1);
-  readonly quickFilter = signal<'all' | 'overdue' | 'expiring' | 'new'>('all');
+
+  /** Quick filter — drives the StickyHeader tabs at the top. */
+  readonly quickFilter = signal<'all' | 'overdue' | 'pending' | 'new'>('all');
 
   typeFilter = '';
   readonly searchInput = signal('');
+
+  /** Live count accessor for the list-card title. */
+  totalListed = computed(() => this.tickets().length);
+
+  /** Quick-filter tabs — match the store-admin visual contract 1:1. */
+  quickFilterTabs = computed<StickyHeaderTab[]>(() => {
+    return [
+      { id: 'all', label: 'Todas', icon: 'inbox' },
+      { id: 'overdue', label: 'Vencidas', icon: 'alert-triangle' },
+      { id: 'pending', label: 'Pendientes', icon: 'clock' },
+      { id: 'new', label: 'Nuevas', icon: 'plus' },
+    ];
+  });
 
   constructor() {
     this.fetch();
     this.fetchStats();
 
-    // Debounced search — 300ms after typing stops.
+    // Debounced search — 300ms after typing stops. Avoids racing the
+    // network on every keystroke.
     effect((onCleanup) => {
       const value = this.searchInput();
       const timer = setTimeout(() => {
-        // Search is applied client-side from the input value via fetch()
-        // but we trigger it here when the value changes.
         this.fetch();
       }, 300);
       onCleanup(() => clearTimeout(timer));
@@ -884,47 +367,33 @@ export class SuperadminPqrsComponent {
   }
 
   setQuickFilter(filter: string | Event) {
-    // StickyHeaderComponent emits tabChanged as Event; the inline
-    // quick-filter buttons emit plain strings. Accept both and coerce.
-    const f = typeof filter === 'string' ? filter : '';
-    // ScrollableTabsComponent emits tabChange as plain `string`; narrow
-    // it to the local union so the rest of the method stays type-safe.
-    // Unrecognised ids are ignored so a misconfigured ScrollableTab
-    // can't poison component state.
+    // StickyHeaderComponent emits tabChanged as Event; raw buttons
+    // emit plain strings. Accept both and coerce.
+    const raw = typeof filter === 'string' ? filter : '';
     if (
-      f !== 'all' &&
-      f !== 'overdue' &&
-      f !== 'expiring' &&
-      f !== 'new'
+      raw !== 'all' &&
+      raw !== 'overdue' &&
+      raw !== 'pending' &&
+      raw !== 'new'
     ) {
       return;
     }
-    this.quickFilter.set(f);
+    this.quickFilter.set(raw);
     this.page.set(1);
     this.fetch();
-  }
-
-  applyFilters() {
-    this.page.set(1);
-    this.fetch();
-  }
-
-  clearSearch() {
-    this.searchInput.set('');
-    this.applyFilters();
   }
 
   clearAllFilters() {
     this.quickFilter.set('all');
     this.typeFilter = '';
     this.searchInput.set('');
+    this.filterValues = {};
     this.page.set(1);
     this.fetch();
   }
 
-  // ── Options dropdown handlers (patrón imagen #18) ──────────────────
+  // ── Options dropdown ──────────────────────────────────────────────
 
-  /** Filters surfaced in the options-dropdown's "Filtros" popover. */
   filterConfigs: FilterConfig[] = [
     {
       key: 'pqr_type',
@@ -966,8 +435,10 @@ export class SuperadminPqrsComponent {
   }
 
   /** Dropdown action click — currently only export placeholder. */
-  onActionClick(_action: string): void {
-    // No-op for now; real export wiring is out of scope.
+  onActionClick(action: string): void {
+    if (action === 'export') {
+      this.toastService.info('Exportación próximamente');
+    }
   }
 
   goToPage(p: number) {
@@ -976,7 +447,28 @@ export class SuperadminPqrsComponent {
     this.fetch();
   }
 
-  // PQR type label
+  /** Click handler for ResponsiveDataView rows — Ver (read-only). */
+  openPqr(row: any): void {
+    if (!row?.id) return;
+    this.router.navigate(['/super-admin/support/pqrs', row.id]);
+  }
+
+  /**
+   * Click handler for the Editar action — passes `?edit=content` so the
+   * detail page auto-opens the title / description / requester edit
+   * modal. The intent travels via URL instead of a shared service so
+   * hard refresh / share-link round-trips stay consistent.
+   */
+  editPqr(row: any): void {
+    if (!row?.id) return;
+    this.router.navigate(['/super-admin/support/pqrs', row.id], {
+      queryParams: { edit: 'content' },
+    });
+  }
+
+  // ── Display helpers ───────────────────────────────────────────────
+
+  /** Spanish label for a PQR type/category enum value. */
   typeLabel(t: string): string {
     switch (t) {
       case 'PETITION':
@@ -985,18 +477,14 @@ export class SuperadminPqrsComponent {
         return 'Queja';
       case 'CLAIM':
         return 'Reclamo';
+      case 'SUGGESTION':
+        return 'Sugerencia';
       default:
         return t;
     }
   }
 
-  /**
-   * Returns the user-facing Spanish label for a PQR status enum value.
-   * Used by the status pill column — keeping it as a method avoids the
-   * `as Record<string, string>` cast inside the template (Angular's
-   * template parser doesn't accept TS-only `as` syntax on inline
-   * object literals).
-   */
+  /** Spanish label for a PQR status enum value. */
   statusLabel(status: string): string {
     switch (status) {
       case 'NEW':
@@ -1019,9 +507,12 @@ export class SuperadminPqrsComponent {
   }
 
   /**
-   * SLA computation — same Colombian regulatory limits as the
-   * store-admin view. PETITION: 15 business days (Ley 1755/2015 art. 14).
-   * COMPLAINT / CLAIM: 10 business days (Ley 1474/2011 art. 55).
+   * SLA computation — Colombian regulatory limits:
+   *   - PETITION: 15 business days (Ley 1755/2015 art. 14)
+   *   - COMPLAINT / CLAIM: 10 business days (Ley 1474/2011 art. 55)
+   *
+   * Returns the days remaining plus a status bucket (ok / warn / overdue)
+   * for color coding the SLA badge.
    */
   slaInfo(
     t: any,
@@ -1031,36 +522,61 @@ export class SuperadminPqrsComponent {
     const elapsed = businessDaysBetween(created, new Date());
     const remaining = limit - elapsed;
     if (remaining < 0) return { remaining, limit, status: 'overdue' };
-    if (remaining <= 3) return { remaining, limit, status: 'warn' };
+    if (remaining <= 4) return { remaining, limit, status: 'overdue' };
+    if (remaining <= 7) return { remaining, limit, status: 'warn' };
     return { remaining, limit, status: 'ok' };
   }
 
-  /**
-   * Quick filter tabs — drives the StickyHeaderComponent tab strip
-   * at the top of the page. Each tab's `id` matches the value
-   * `setQuickFilter()` expects so the same handler drives the
-   * filtering regardless of UI shape.
-   */
-  quickFilterTabs = computed<StickyHeaderTab[]>(() => {
-    return [
-      { id: 'all', label: 'Todas', icon: 'inbox' },
-      { id: 'overdue', label: 'Vencidas', icon: 'alert-triangle' },
-      { id: 'expiring', label: 'Por vencer', icon: 'clock' },
-      { id: 'new', label: 'Sin asignar', icon: 'inbox' },
-    ];
-  });
-
-  /** Count of tickets in "expiring" state (1-3 days remaining). */
-  expiringCount(): number {
-    return this.tickets().filter((t) => {
-      const info = this.slaInfo(t);
-      return info.status === 'warn';
-    }).length;
-  }
-
-  /** Count of overdue tickets — reads from backend stats. */
+  /** Count of PQRs with overdue SLA — read from backend stats. */
   overdueCount(): number {
     return this.stats().overdue || 0;
+  }
+
+  /** Count of PQRs that still require action (open status). */
+  pendingCount(): number {
+    const s = this.stats().by_status || {};
+    return (
+      (s['NEW'] || 0) +
+      (s['OPEN'] || 0) +
+      (s['IN_PROGRESS'] || 0) +
+      (s['WAITING_RESPONSE'] || 0) +
+      (s['REOPENED'] || 0)
+    );
+  }
+
+  /**
+   * Returns a human-friendly label describing the last response on a PQR.
+   * "Sin respuesta aún" / "Última respuesta: hoy/ayer/hace N días" /
+   * "Última respuesta: {día} {mes}" for older entries.
+   */
+  lastResponseLabel(pqr: any): string {
+    const firstResponse = pqr?.first_response_at;
+    if (!firstResponse) return 'Sin respuesta aún';
+
+    const date = new Date(firstResponse);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) return 'Última respuesta: hoy';
+    if (diffDays === 1) return 'Última respuesta: ayer';
+    if (diffDays < 30) return `Última respuesta: hace ${diffDays} días`;
+
+    const months = [
+      'ene',
+      'feb',
+      'mar',
+      'abr',
+      'may',
+      'jun',
+      'jul',
+      'ago',
+      'sep',
+      'oct',
+      'nov',
+      'dic',
+    ];
+    return `Última respuesta: ${date.getDate()} ${months[date.getMonth()]}`;
   }
 
   private slaLimitFor(type: string): number {
@@ -1075,24 +591,193 @@ export class SuperadminPqrsComponent {
     }
   }
 
-  pageNumbers = (): (number | '…')[] => {
-    const total = this.totalPages();
-    const current = this.page();
-    const pages: (number | '…')[] = [];
-    const window = 2;
-    for (let p = 1; p <= total; p++) {
-      if (
-        p === 1 ||
-        p === total ||
-        (p >= current - window && p <= current + window)
-      ) {
-        pages.push(p);
-      } else if (pages[pages.length - 1] !== '…') {
-        pages.push('…');
-      }
+  // ── Quick filter predicate (client-side post-filter) ─────────────
+  // Note: previous version had 'expiring' (SLA warn). Renamed to
+  // 'pending' to align with the store-admin semantic — same label
+  // now means the same thing in both views.
+  private matchesQuickFilter(t: any, filter: 'overdue' | 'pending' | 'new'): boolean {
+    switch (filter) {
+      case 'overdue':
+        return this.slaInfo(t).status === 'overdue';
+      case 'pending':
+        // "Pendientes" = open status awaiting action — matches
+        // store-admin's filter exactly so the same tab means the
+        // same thing across both views.
+        return (
+          t.status === 'NEW' ||
+          t.status === 'OPEN' ||
+          t.status === 'IN_PROGRESS' ||
+          t.status === 'WAITING_RESPONSE' ||
+          t.status === 'REOPENED'
+        );
+      case 'new':
+        // "Nuevas" = unassigned to any store. The legacy PQRs created
+        // via the public storefront have no `assigned_to` set, which
+        // is exactly the operator's mental model: "Sin asignar".
+        return !t.assigned_to;
     }
-    return pages;
+  }
+
+  // ── Table column config (desktop ≥768px) ──────────────────────────
+  // Order mirrors the screenshot: Ticket | Tipo | Asunto | Tienda |
+  // SLA | Estado | Última respuesta | Radicada | Acciones. Tienda is
+  // super-admin-only (multi-tenant scope); the rest match store-admin.
+
+  pqrColumns: TableColumn[] = [
+    {
+      key: 'ticket_number',
+      label: 'Ticket',
+      sortable: true,
+      priority: 0,
+      cellClass: () => 'mono',
+    },
+    {
+      key: 'category',
+      label: 'Tipo',
+      sortable: true,
+      priority: 1,
+      transform: (val: any) => this.typeLabel(val),
+    },
+    {
+      key: 'title',
+      label: 'Asunto',
+      sortable: true,
+      priority: 0,
+      width: '260px',
+    },
+    {
+      key: 'store',
+      label: 'Tienda',
+      sortable: false,
+      priority: 2,
+      transform: (val: any) => val?.name || 'No registrado',
+    },
+    {
+      key: 'sla',
+      label: 'SLA',
+      priority: 1,
+      transform: (_val: any, row?: any) => {
+        if (!row) return '';
+        const info = this.slaInfo(row);
+        if (info.status === 'overdue') return `Vencido · ${-info.remaining}d`;
+        return `${info.remaining}d`;
+      },
+      badge: true,
+      badgeConfig: {
+        type: 'custom' as const,
+        size: 'sm' as const,
+        colorFn: (_value: any, item?: any) => {
+          if (!item) return null;
+          const info = this.slaInfo(item);
+          return (
+            {
+              ok: '#10b981',
+              warn: '#f59e0b',
+              overdue: '#dc2626',
+            } as Record<string, string>
+          )[info.status] ?? null;
+        },
+      },
+    },
+    {
+      key: 'status',
+      label: 'Estado',
+      sortable: true,
+      priority: 1,
+      badge: true,
+      badgeConfig: { type: 'status' as const, size: 'sm' as const },
+      badgeTransform: (val: any) => this.statusLabel(val),
+    },
+    {
+      key: 'first_response_at',
+      label: 'Última respuesta',
+      sortable: true,
+      priority: 2,
+      transform: (_val: any, row?: any) =>
+        row ? this.lastResponseLabel(row) : '',
+    },
+    {
+      key: 'created_at',
+      label: 'Radicada',
+      sortable: true,
+      priority: 2,
+      transform: (val: any) =>
+        val ? new Date(val).toLocaleDateString() : '-',
+    },
+  ];
+
+  // ── Mobile card config (<768px) ──────────────────────────────────
+
+  pqrCardConfig: ItemListCardConfig = {
+    titleKey: 'title',
+    titleTransform: (item: any) => item?.title ?? 'Sin asunto',
+    subtitleKey: 'ticket_number',
+    avatarFallbackIcon: 'message-circle',
+    avatarShape: 'circle',
+    badgeKey: 'status',
+    badgeConfig: { type: 'status' as const, size: 'sm' as const },
+    badgeTransform: (val: any) => this.statusLabel(val),
+    detailKeys: [
+      {
+        key: 'category',
+        label: 'Tipo',
+        icon: 'tag',
+        transform: (val: any) => this.typeLabel(val),
+      },
+      {
+        key: 'store',
+        label: 'Tienda',
+        icon: 'store',
+        transform: (val: any) => val?.name || 'No registrado',
+      },
+      {
+        key: 'sla',
+        label: 'SLA',
+        icon: 'clock',
+        transform: (_v: any, item?: any) => {
+          if (!item) return '-';
+          const info = this.slaInfo(item);
+          if (info.status === 'overdue') return `Vencido · ${-info.remaining}d`;
+          return `${info.remaining}d`;
+        },
+      },
+      {
+        key: 'created_at',
+        label: 'Radicada',
+        icon: 'calendar',
+        transform: (val: any) =>
+          val ? new Date(val).toLocaleDateString() : '-',
+      },
+    ],
   };
+
+  // ── Row actions ──────────────────────────────────────────────────
+
+  // Two actions: "Ver" (eye) and "Editar" (pencil). With ≤2 actions
+  // ResponsiveDataView renders both inline in the row footer — no
+  // overflow menu — matching the store-admin list exactly.
+  pqrActions: TableAction[] = [
+    {
+      label: 'Ver',
+      tooltip: 'Ver conversación',
+      icon: 'eye',
+      variant: 'secondary',
+      action: (row: any) => this.openPqr(row),
+    },
+    {
+      label: 'Editar',
+      tooltip: 'Editar contenido (título, descripción, solicitante)',
+      icon: 'edit',
+      variant: 'info',
+      // Navigates to the detail page with ?edit=content so the
+      // destination auto-opens the title / description / requester
+      // modal. Mirrors the "Editar" entry point already on the
+      // detail page's header card.
+      action: (row: any) => this.editPqr(row),
+    },
+  ];
+
+  // ── Data fetchers ────────────────────────────────────────────────
 
   private fetch() {
     this.loading.set(true);
@@ -1103,8 +788,9 @@ export class SuperadminPqrsComponent {
       .set('limit', this.limit.toString());
 
     if (this.typeFilter) params = params.set('pqr_type', this.typeFilter);
-    if (this.searchInput().trim())
+    if (this.searchInput().trim()) {
       params = params.set('search', this.searchInput().trim());
+    }
 
     this.http
       .get<any>(this.API_URL, { params })
@@ -1122,22 +808,21 @@ export class SuperadminPqrsComponent {
         if (!res) return;
         let data = res.data || [];
 
-        // Quick filter (client-side — backend doesn't have these shortcuts yet)
-        if (this.quickFilter() === 'overdue') {
-          data = data.filter((t: any) => this.slaInfo(t).status === 'overdue');
-        } else if (this.quickFilter() === 'expiring') {
-          data = data.filter((t: any) => this.slaInfo(t).status === 'warn');
-        } else if (this.quickFilter() === 'new') {
-          // Chip label is "Sin asignar" — match the operator's mental model:
-          // a PQR with no `assigned_to_user_id` yet. We keep the internal
-          // value as `'new'` to stay backwards-compatible with the URL
-          // (a follow-up could rename to `'unassigned'`).
-          data = data.filter((t: any) => !t.assigned_to);
+        // Quick filter — client-side post-filter (mirrors store-admin).
+        const qf = this.quickFilter();
+        if (qf !== 'all') {
+          data = data.filter((t: any) => this.matchesQuickFilter(t, qf));
         }
 
         this.tickets.set(data);
-        this.total.set(data.length);
-        this.totalPages.set(1); // client-side filter, no real pagination
+        // Quick filter overrides server-side pagination: show what the
+        // user actually sees, not the unfiltered total.
+        this.total.set(qf === 'all' ? (res.meta?.total ?? data.length) : data.length);
+        this.totalPages.set(
+          qf === 'all'
+            ? (res.meta?.pages ?? 1)
+            : 1,
+        );
         this.loading.set(false);
       });
   }
@@ -1156,9 +841,9 @@ export class SuperadminPqrsComponent {
 }
 
 /**
- * Business days between two dates (excludes Saturday + Sunday). Naive
- * loop — sufficient for the 10-15 day SLA windows in PQR management.
- * Future enhancement: integrate Colombian holiday calendar.
+ * Counts business days between two dates (excludes Saturday + Sunday).
+ * Naive loop — sufficient for the 10–15 day SLA windows in PQR
+ * management. Future enhancement: integrate Colombian holiday calendar.
  */
 function businessDaysBetween(start: Date, end: Date): number {
   let count = 0;
