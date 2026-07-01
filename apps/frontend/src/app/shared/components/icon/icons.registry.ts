@@ -368,7 +368,6 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   'door-open': DoorOpen,
   'bell-ring': BellRing,
   'play-circle': PlayCircle,
-  bell: Bell,
   clock: Clock,
   'user-x': UserX,
   'alert-triangle': TriangleAlert,
