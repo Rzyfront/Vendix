@@ -17,11 +17,12 @@ import {
   StickyHeaderComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
-import { Table } from '../../interfaces';
+import { Table, TableStatus } from '../../interfaces';
 import { TablesService } from '../../services/tables.service';
 import { TableFloorMapComponent } from '../../components/table-floor-map/table-floor-map.component';
 import { OpenTableModalComponent } from '../../components/open-table-modal/open-table-modal.component';
 import { SeatBookingModalComponent } from '../../components/seat-booking-modal/seat-booking-modal.component';
+import { QuickStatusModalComponent } from '../../components/quick-status-modal/quick-status-modal.component';
 
 interface TablesStats {
   total: number;
@@ -51,6 +52,7 @@ interface TablesStats {
     TableFloorMapComponent,
     OpenTableModalComponent,
     SeatBookingModalComponent,
+    QuickStatusModalComponent,
   ],
   templateUrl: './tables-floor-page.component.html',
   styleUrl: './tables-floor-page.component.scss',
@@ -68,6 +70,8 @@ export class TablesFloorPageComponent implements OnInit {
   readonly isOpeningSession = signal(false);
   readonly isSeatModalOpen = signal(false);
   readonly seatTable = signal<Table | null>(null);
+  readonly isQuickStatusOpen = signal(false);
+  readonly quickStatusTable = signal<Table | null>(null);
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
     {
@@ -128,6 +132,7 @@ export class TablesFloorPageComponent implements OnInit {
 
   onTableClick(t: Table): void {
     const status = t.effective_status ?? t.status;
+    // Shortcut 1: occupied + active session → navigate (current behavior).
     if (status === 'occupied' && t.active_session) {
       this.router.navigate([
         '/admin/restaurant-ops/tables/session',
@@ -135,19 +140,40 @@ export class TablesFloorPageComponent implements OnInit {
       ]);
       return;
     }
+    // Shortcut 2: reserved with pending bookings → seat modal.
     if (status === 'reserved' && (t.pending_bookings?.length ?? 0) > 0) {
       this.seatTable.set(t);
       this.isSeatModalOpen.set(true);
       return;
     }
-    if (status === 'available') {
+    // Shortcut 3: available without an active session → open-table modal
+    // (preserves the original UX for the happy path).
+    if (status === 'available' && !t.active_session) {
       this.selectedTable.set(t);
       this.isOpenModalOpen.set(true);
-    } else {
-      this.toastService.error(
-        `La mesa ${t.name} no está disponible (${TablesService.statusLabel(status)})`,
-      );
+      return;
     }
+    // Everything else (cleaning, reserved without bookings, occupied
+    // without session, etc.) opens the quick-status modal so the operator
+    // can flip the mesa to another state without leaving the floor page.
+    this.openQuickStatus(t);
+  }
+
+  openQuickStatus(t: Table): void {
+    this.quickStatusTable.set(t);
+    this.isQuickStatusOpen.set(true);
+  }
+
+  closeQuickStatus(): void {
+    this.isQuickStatusOpen.set(false);
+    this.quickStatusTable.set(null);
+  }
+
+  onQuickStatusChanged(_status: TableStatus): void {
+    // Modal already closed itself; reload the floor map to reflect the
+    // new status on every cell.
+    this.closeQuickStatus();
+    this.loadFloor();
   }
 
   closeSeatModal(): void {

@@ -2760,11 +2760,18 @@ enum notification_type_enum {
   subscription_renewal_upcoming
   partner_commission_available
   weekly_report
+  pqr_new
+  pqr_update
 }
 
 model notifications {
   id         Int                        @id @default(autoincrement())
-  store_id   Int
+  // store_id is nullable to support super-admin-level notifications
+  // (e.g. "new PQR arrived on the platform"). When null, the
+  // notification is scoped to the super-admin role via the `data`
+  // JSON payload instead of a specific store. Store-scoped rows
+  // (existing behaviour) keep their FK.
+  store_id   Int?
   type       notification_type_enum
   severity   notification_severity_enum @default(info)
   title      String                     @db.VarChar(255)
@@ -2773,12 +2780,13 @@ model notifications {
   is_read    Boolean                    @default(false)
   created_at DateTime                   @default(now()) @db.Timestamp(6)
   updated_at DateTime                   @default(now()) @db.Timestamp(6)
-  stores     stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  stores     stores?                    @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@index([store_id])
   @@index([store_id, is_read])
   @@index([store_id, created_at(sort: Desc)])
   @@index([store_id, severity, is_read])
+  @@index([created_at(sort: Desc)])
 }
 
 model store_weekly_reports {
@@ -3847,6 +3855,10 @@ enum ticket_category_enum {
   PROBLEM
   CHANGE
   QUESTION
+  PETITION
+  COMPLAINT
+  CLAIM
+  SUGGESTION
 }
 
 enum ticket_priority_enum {
@@ -3903,6 +3915,21 @@ model support_tickets {
   tags                    String[]                 @default([])
   created_at              DateTime?                @default(now()) @db.Timestamp(6)
   updated_at              DateTime?                @default(now()) @db.Timestamp(6)
+
+  // ── Requester contact fields ─────────────────────────────────────────
+  // Structured columns for the visitor who filed the PQR. Replaces the
+  // legacy "encode name/email/phone inside the description text"
+  // workaround that made `parseRequester()` necessary on every read.
+  // Optional + nullable so legacy rows (pre-migration) and anonymous
+  // submissions from the public storefront (which previously only
+  // collected email) keep working without backfill.
+  requester_first_name    String?                  @db.VarChar(100)
+  requester_last_name     String?                  @db.VarChar(100)
+  requester_email         String?                  @db.VarChar(255)
+  requester_phone         String?                  @db.VarChar(50)
+  requester_document_type String?                  @db.VarChar(20)
+  requester_document_num  String?                  @db.VarChar(50)
+
   organization            organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store                   stores?                  @relation(fields: [store_id], references: [id], onDelete: Cascade)
   attachments             support_attachments[]

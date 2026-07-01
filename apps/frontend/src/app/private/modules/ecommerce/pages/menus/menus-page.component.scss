@@ -231,3 +231,47 @@
     font-weight: 400;
   }
 }
+
+.dish-buy {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.2rem;
+}
+
+.qty-stepper {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.5rem;
+  overflow: hidden;
+  flex-shrink: 0;
+
+  .qty-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.9rem;
+    height: 2rem;
+    background: #fff;
+    border: none;
+    color: #374151;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: #f3f4f6;
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+  }
+
+  .qty-value {
+    min-width: 1.6rem;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+}

@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
+    "start": "node --env-file=.env.web scripts/expo-dev.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
@@ -52,6 +52,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.1.0",
+    "babel-plugin-module-resolver": "^5.0.3",
     "eslint-config-expo": "~10.0.0",
     "typescript": "~5.9.2"
   },

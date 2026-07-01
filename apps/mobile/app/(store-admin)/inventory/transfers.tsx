@@ -2,7 +2,6 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet, TextInput, Dimensions, Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService } from '@/features/store/services/inventory.service';
@@ -12,15 +11,16 @@ import type { CreateTransferDto } from '@/features/store/services/inventory.serv
 import type { StockTransfer, TransferState, Location, Product } from '@/features/store/types';
 import { TRANSFER_STATE_LABELS } from '@/features/store/types';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
-import { Badge } from '@/shared/components/badge/badge';
 import { Icon } from '@/shared/components/icon/icon';
 import { Input } from '@/shared/components/input/input';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Button } from '@/shared/components/button/button';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
-import { formatRelative } from '@/shared/utils/date';
+import { formatDate, formatRelative } from '@/shared/utils/date';
 import { spacing, borderRadius, colorScales, typography, colors, shadows } from '@/shared/theme';
+import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
+import { TRANSFER_STATS, TRANSFER_STATE_MAP, WIZARD_STEPS } from '@/features/store/constants/inventory-labels';
 
 const STATE_VARIANT: Record<TransferState, 'warning' | 'info' | 'success' | 'default'> = {
   pending: 'warning',
@@ -39,26 +39,86 @@ const FILTER_OPTIONS: FilterChip[] = [
   { label: 'Canceladas', value: 'cancelled' },
 ];
 
-const TransferCard = ({ item }: { item: StockTransfer }) => (
-  <View style={styles.transferCard}>
-    <View style={styles.cardHeader}>
-      <View style={styles.cardHeaderLeft}>
-        <Text style={styles.cardTitle}>Transferencia #{item.id.slice(0, 8)}</Text>
-        <Text style={styles.cardSubtitle}>
-          {item.origin_location_name} → {item.destination_location_name}
+const TransferCard = ({
+  item,
+  onView,
+}: {
+  item: StockTransfer;
+  onView?: (item: StockTransfer) => void;
+}) => {
+  const displayId = item.transfer_number ?? `Transferencia #${item.id.slice(0, 8)}`;
+  const stateInfo = TRANSFER_STATE_MAP[item.state];
+  const stateColor = stateInfo?.palette
+    ? STAT_PALETTE[stateInfo.palette as keyof typeof STAT_PALETTE] ?? STAT_PALETTE.gray
+    : STAT_PALETTE.gray;
+  const itemsCount = item.items_count ?? item.product_count ?? 0;
+  return (
+    <View style={styles.transferCard}>
+      {/* Header: title (transfer_number) + status badge */}
+      <View style={styles.cardHeader}>
+        <Text style={styles.cardTitle} numberOfLines={1}>
+          {displayId}
         </Text>
+        <View
+          style={[
+            styles.statusBadge,
+            { backgroundColor: stateColor.bg, borderColor: stateColor.color },
+          ]}
+        >
+          <Text style={[styles.statusBadgeText, { color: stateColor.color }]}>
+            {(stateInfo?.label ?? TRANSFER_STATE_LABELS[item.state]).toLowerCase()}
+          </Text>
+        </View>
       </View>
-      <Badge label={TRANSFER_STATE_LABELS[item.state]} variant={STATE_VARIANT[item.state]} size="sm" />
-    </View>
-    <View style={styles.cardFooter}>
-      <View style={styles.footerLeft}>
-        <Icon name="package" size={14} color={colorScales.gray[500]} />
-        <Text style={styles.footerDetail}>{item.product_count} productos</Text>
+
+      {/* Subtitle: origin → destination */}
+      <Text style={styles.cardSubtitle} numberOfLines={1}>
+        {item.origin_location_name} {item.origin_location_name && item.destination_location_name ? '→' : ''}{' '}
+        {item.destination_location_name}
+      </Text>
+
+      {/* Detail grid: Fecha | Esperada */}
+      <View style={styles.cardDetailGrid}>
+        <View style={styles.cardDetailCell}>
+          <View style={styles.cardDetailLabelRow}>
+            <Icon name="calendar" size={12} color={colorScales.gray[400]} />
+            <Text style={styles.cardDetailLabel}>FECHA</Text>
+          </View>
+          <Text style={styles.cardDetailValue}>
+            {item.transfer_date ? formatDate(item.transfer_date) : '—'}
+          </Text>
+        </View>
+        <View style={styles.cardDetailCell}>
+          <View style={styles.cardDetailLabelRow}>
+            <Icon name="clock" size={12} color={colorScales.gray[400]} />
+            <Text style={styles.cardDetailLabel}>ESPERADA</Text>
+          </View>
+          <Text style={styles.cardDetailValue}>
+            {item.expected_date ? formatDate(item.expected_date) : '—'}
+          </Text>
+        </View>
       </View>
-      <Text style={styles.footerDate}>{formatRelative(item.created_at)}</Text>
+
+      {/* Footer: items count + view (eye) button */}
+      <View style={styles.cardFooter}>
+        <View style={styles.cardFooterCell}>
+          <Text style={styles.cardDetailLabel}>ITEMS</Text>
+          <Text style={styles.cardFooterValue}>{itemsCount}</Text>
+        </View>
+        {onView && (
+          <Pressable
+            onPress={() => onView(item)}
+            hitSlop={6}
+            style={({ pressed }) => [styles.eyeBtn, pressed && { opacity: 0.6 }]}
+            accessibilityLabel="Ver detalle de transferencia"
+          >
+            <Icon name="eye" size={16} color={colors.primary} />
+          </Pressable>
+        )}
+      </View>
     </View>
-  </View>
-);
+  );
+};
 
 function EmptyTransfers({ onCreate }: { onCreate: () => void }) {
   return (
@@ -78,11 +138,188 @@ function EmptyTransfers({ onCreate }: { onCreate: () => void }) {
   );
 }
 
+/**
+ * Transfer detail popup — opened when the user taps the eye (ver) button on
+ * a TransferCard. Matches the web `app-transfer-detail-modal` visual contract:
+ * header with status badge, origin → destination summary, dates, items list,
+ * and contextual actions footer (Aprobar / Recibir / Cancelar / Cerrar).
+ */
+function TransferDetailModal({
+  transfer,
+  onClose,
+  onApprove,
+  onComplete,
+  onCancel,
+  isSubmitting = false,
+}: {
+  transfer: StockTransfer | null;
+  onClose: () => void;
+  onApprove?: (transfer: StockTransfer) => void;
+  onComplete?: (transfer: StockTransfer) => void;
+  onCancel?: (transfer: StockTransfer) => void;
+  isSubmitting?: boolean;
+}) {
+  if (!transfer) return null;
+  const stateInfo = TRANSFER_STATE_MAP[transfer.state];
+  const stateColor = stateInfo?.palette
+    ? STAT_PALETTE[stateInfo.palette as keyof typeof STAT_PALETTE] ?? STAT_PALETTE.gray
+    : STAT_PALETTE.gray;
+  const itemsCount = transfer.items_count ?? transfer.product_count ?? 0;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.detailOverlay}>
+        <View style={styles.detailModal}>
+          {/* Header */}
+          <View style={styles.detailHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailTitle}>
+                {transfer.transfer_number ?? `Transferencia #${transfer.id.slice(0, 8)}`}
+              </Text>
+              <Text style={styles.detailSubtitle}>
+                {transfer.origin_location_name} → {transfer.destination_location_name}
+              </Text>
+            </View>
+            <Pressable onPress={onClose} hitSlop={8} style={styles.detailCloseBtn}>
+              <Icon name="x" size={22} color={colorScales.gray[500]} />
+            </Pressable>
+          </View>
+
+          <ScrollView
+            style={styles.detailBody}
+            contentContainerStyle={styles.detailBodyContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Status badge */}
+            <View style={styles.detailBadgeRow}>
+              <View
+                style={[
+                  styles.statusBadge,
+                  { backgroundColor: stateColor.bg, borderColor: stateColor.color },
+                ]}
+              >
+                <Text style={[styles.statusBadgeText, { color: stateColor.color }]}>
+                  {stateInfo?.label ?? TRANSFER_STATE_LABELS[transfer.state]}
+                </Text>
+              </View>
+            </View>
+
+            {/* Dates grid */}
+            <View style={styles.detailDatesGrid}>
+              <View style={styles.detailDateCell}>
+                <View style={styles.cardDetailLabelRow}>
+                  <Icon name="calendar" size={12} color={colorScales.gray[500]} />
+                  <Text style={styles.cardDetailLabel}>FECHA</Text>
+                </View>
+                <Text style={styles.detailDateValue}>
+                  {transfer.transfer_date ? formatDate(transfer.transfer_date) : '—'}
+                </Text>
+              </View>
+              <View style={styles.detailDateCell}>
+                <View style={styles.cardDetailLabelRow}>
+                  <Icon name="clock" size={12} color={colorScales.gray[500]} />
+                  <Text style={styles.cardDetailLabel}>ESPERADA</Text>
+                </View>
+                <Text style={styles.detailDateValue}>
+                  {transfer.expected_date ? formatDate(transfer.expected_date) : '—'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Items card */}
+            <View style={styles.detailSection}>
+              <View style={styles.cardDetailLabelRow}>
+                <Icon name="package" size={12} color={colorScales.gray[500]} />
+                <Text style={styles.cardDetailLabel}>ITEMS</Text>
+              </View>
+              <Text style={styles.detailItemsValue}>{itemsCount}</Text>
+            </View>
+
+            {/* Notes (si existen) */}
+            {transfer.notes ? (
+              <View style={styles.detailSection}>
+                <View style={styles.cardDetailLabelRow}>
+                  <Icon name="file-text" size={12} color={colorScales.gray[500]} />
+                  <Text style={styles.cardDetailLabel}>NOTAS</Text>
+                </View>
+                <Text style={styles.detailNotesText}>{transfer.notes}</Text>
+              </View>
+            ) : null}
+
+            {/* Cronología (siempre visible) */}
+            <View style={styles.detailSection}>
+              <View style={styles.cardDetailLabelRow}>
+                <Icon name="history" size={12} color={colorScales.gray[500]} />
+                <Text style={styles.cardDetailLabel}>CRONOLOGÍA</Text>
+              </View>
+              <Text style={styles.detailTimelineText}>
+                Creada {formatRelative(transfer.created_at)}
+              </Text>
+            </View>
+          </ScrollView>
+
+          {/* Footer: contextual actions */}
+          <View style={styles.detailFooter}>
+            {transfer.state === 'pending' && (
+              <>
+                <Pressable
+                  style={styles.detailCancelBtn}
+                  onPress={() => onCancel?.(transfer)}
+                  disabled={isSubmitting}
+                >
+                  <Text style={styles.detailCancelBtnText}>Cancelar</Text>
+                </Pressable>
+                <View style={{ width: spacing[3] }} />
+                <Pressable
+                  style={styles.detailPrimaryBtn}
+                  onPress={() => onApprove?.(transfer)}
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? (
+                    <Spinner size="sm" />
+                  ) : (
+                    <Icon name="check" size={16} color={colors.background} />
+                  )}
+                  <Text style={styles.detailPrimaryBtnText}>
+                    {isSubmitting ? 'Aprobando…' : 'Aprobar'}
+                  </Text>
+                </Pressable>
+              </>
+            )}
+            {transfer.state === 'in_transit' && (
+              <Pressable
+                style={styles.detailPrimaryBtn}
+                onPress={() => onComplete?.(transfer)}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? (
+                  <Spinner size="sm" />
+                ) : (
+                  <Icon name="package-check" size={16} color={colors.background} />
+                )}
+                <Text style={styles.detailPrimaryBtnText}>
+                  {isSubmitting ? 'Recibiendo…' : 'Recibir'}
+                </Text>
+              </Pressable>
+            )}
+            {(transfer.state === 'completed' || transfer.state === 'cancelled') && (
+              <Pressable style={styles.detailCancelBtn} onPress={onClose}>
+                <Text style={styles.detailCancelBtnText}>Cerrar</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function TransfersScreen() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<TransferState | 'all'>('all');
   const [modalVisible, setModalVisible] = useState(false);
+  const [detailTransfer, setDetailTransfer] = useState<StockTransfer | null>(null);
   // Dropdowns posicionados (acciones + y filtro)
   const [showActions, setShowActions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -157,6 +394,44 @@ export default function TransfersScreen() {
       toastSuccess('Transferencia creada correctamente');
     },
     onError: () => toastError('Error al crear la transferencia'),
+  });
+
+  // Action mutations wired to TransferDetailModal contextual buttons
+  const actionMutation = useMutation({
+    mutationFn: async ({
+      action,
+      transfer,
+    }: {
+      action: 'approve' | 'complete' | 'cancel';
+      transfer: StockTransfer;
+    }) => {
+      if (action === 'approve') return InventoryService.approveTransfer(transfer.id);
+      if (action === 'cancel') return InventoryService.cancelTransfer(transfer.id);
+      // For 'complete' the backend expects the items received; pass 1 of each as default.
+      const items = (transfer as any).stock_transfer_items ?? [];
+      return InventoryService.completeTransfer(
+        transfer.id,
+        items.map((it: any) => ({ id: it.id ?? it.product_id, quantity_received: it.quantity ?? it.quantity_sent ?? 1 })),
+      );
+    },
+    onSuccess: (_data, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['transfers'] });
+      setDetailTransfer(null);
+      const labels = {
+        approve: 'Transferencia aprobada',
+        complete: 'Transferencia recibida',
+        cancel: 'Transferencia cancelada',
+      } as const;
+      toastSuccess(labels[vars.action]);
+    },
+    onError: (_err, vars) => {
+      const labels = {
+        approve: 'No se pudo aprobar la transferencia',
+        complete: 'No se pudo recibir la transferencia',
+        cancel: 'No se pudo cancelar la transferencia',
+      } as const;
+      toastError(labels[vars.action]);
+    },
   });
 
   const transfers = data?.pages.flatMap((p) => p.data) ?? [];
@@ -265,28 +540,36 @@ export default function TransfersScreen() {
         style={styles.statsWrap}
         items={[
           {
-            label: 'Total',
+            label: TRANSFER_STATS.total.label,
             value: transfers.length,
-            icon: <Icon name="clipboard-list" size={14} color={colorScales.blue[600]} />,
-            description: 'Movimientos',
+            icon: INVENTORY_ICONS.transferTotalStat,
+            iconBg: STAT_PALETTE.blue.bg,
+            iconColor: STAT_PALETTE.blue.color,
+            description: TRANSFER_STATS.total.description,
           },
           {
-            label: 'Borradores',
+            label: TRANSFER_STATS.draft.label,
             value: transfers.filter((t) => t.state === 'pending').length,
-            icon: <Icon name="clock" size={14} color={colorScales.amber[600]} />,
-            description: 'Pendientes',
+            icon: INVENTORY_ICONS.draftStat,
+            iconBg: STAT_PALETTE.gray.bg,
+            iconColor: STAT_PALETTE.gray.color,
+            description: TRANSFER_STATS.draft.description,
           },
           {
-            label: 'En Tránsito',
+            label: TRANSFER_STATS.inTransit.label,
             value: transfers.filter((t) => t.state === 'in_transit').length,
-            icon: <Icon name="truck" size={14} color={colorScales.amber[600]} />,
-            description: 'En camino',
+            icon: INVENTORY_ICONS.inTransitStat,
+            iconBg: STAT_PALETTE.amber.bg,
+            iconColor: STAT_PALETTE.amber.color,
+            description: TRANSFER_STATS.inTransit.description,
           },
           {
-            label: 'Completadas',
+            label: TRANSFER_STATS.completed.label,
             value: transfers.filter((t) => t.state === 'completed').length,
-            icon: <Icon name="check-circle" size={14} color={colorScales.green[600]} />,
-            description: 'Recibidas',
+            icon: INVENTORY_ICONS.completedStat,
+            iconBg: STAT_PALETTE.emerald.bg,
+            iconColor: STAT_PALETTE.emerald.color,
+            description: TRANSFER_STATS.completed.description,
           },
         ]}
       />
@@ -296,7 +579,9 @@ export default function TransfersScreen() {
       <FlatList
         data={transfers}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <TransferCard item={item} />}
+        renderItem={({ item }) => (
+          <TransferCard item={item} onView={setDetailTransfer} />
+        )}
         ListHeaderComponent={
           <View>
             {/* Título "Transferencias (N)" — alineado con la web */}
@@ -309,7 +594,7 @@ export default function TransfersScreen() {
             {/* Barra de búsqueda + botones + y filtro (alineado con la web) */}
             <View style={styles.searchRow}>
               <View style={styles.searchInputWrap}>
-                <Ionicons name="search-outline" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
+                <Icon name="search" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
                 <TextInput
                   style={styles.searchInputField}
                   value={search}
@@ -322,7 +607,7 @@ export default function TransfersScreen() {
                 />
                 {search.length > 0 && (
                   <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                    <Ionicons name="close" size={16} color={colorScales.gray[400]} />
+                    <Icon name="x" size={16} color={colorScales.gray[400]} />
                   </Pressable>
                 )}
               </View>
@@ -353,7 +638,16 @@ export default function TransfersScreen() {
         onEndReachedThreshold={0.3}
         contentContainerStyle={styles.listContent}
       />
-      </View>
+
+      {/* Modal de detalle — abierto al pulsar el botón (ver) */}
+      <TransferDetailModal
+        transfer={detailTransfer}
+        onClose={() => setDetailTransfer(null)}
+        onApprove={(t) => actionMutation.mutate({ action: 'approve', transfer: t })}
+        onComplete={(t) => actionMutation.mutate({ action: 'complete', transfer: t })}
+        onCancel={(t) => actionMutation.mutate({ action: 'cancel', transfer: t })}
+        isSubmitting={actionMutation.isPending}
+      />
 
       {/* Dropdown de acciones (Refrescar + Nueva Transferencia) */}
       <Modal visible={showActions} transparent animationType="fade" onRequestClose={() => setShowActions(false)}>
@@ -363,14 +657,14 @@ export default function TransfersScreen() {
           <View style={styles.dropdown}>
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="sync-outline" size={18} color={colorScales.gray[500]} />
+                <Icon name="refresh" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Refrescar</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); openCreateModal(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="add-outline" size={18} color={colors.primary} />
+                <Icon name="plus" size={18} color={colors.primary} />
               </View>
               <Text style={styles.dropdownItemPrimary}>Nueva Transferencia</Text>
             </Pressable>
@@ -396,7 +690,7 @@ export default function TransfersScreen() {
                 <Text style={styles.filterPopupSelectText}>
                   {FILTER_OPTIONS.find((o) => o.value === activeFilter)?.label ?? 'Todos los estados'}
                 </Text>
-                <Ionicons name={showFilterOptions ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
+                <Icon name={showFilterOptions ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
               </Pressable>
               {showFilterOptions && (
                 <View style={styles.filterPopupOptionsList}>
@@ -409,7 +703,7 @@ export default function TransfersScreen() {
                       <Text style={[styles.filterPopupOptionText, activeFilter === opt.value && styles.filterPopupOptionTextActive]}>
                         {opt.label}
                       </Text>
-                      {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                      {activeFilter === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                     </Pressable>
                   ))}
                 </View>
@@ -430,7 +724,7 @@ export default function TransfersScreen() {
                 <Text style={styles.createSubtitle}>{wizardHeader.subtitle}</Text>
               </View>
               <Pressable onPress={closeCreateModal} hitSlop={8}>
-                <Ionicons name="close" size={22} color={colorScales.gray[500]} />
+                <Icon name="x" size={22} color={colorScales.gray[500]} />
               </Pressable>
             </View>
 
@@ -444,7 +738,7 @@ export default function TransfersScreen() {
                     <View style={styles.stepItem}>
                       <View style={[styles.stepCircle, (isActive || isDone) && styles.stepCircleActive]}>
                         {isDone ? (
-                          <Ionicons name="checkmark" size={14} color={colors.background} />
+                          <Icon name="check" size={14} color={colors.background} />
                         ) : (
                           <Text style={[styles.stepNum, isActive && styles.stepNumActive]}>{s.num}</Text>
                         )}
@@ -473,7 +767,7 @@ export default function TransfersScreen() {
                       <Text style={[styles.locationDropdownText, !originLocation && styles.locationDropdownPlaceholder, !!originLocation && styles.locationDropdownTextSelected]} numberOfLines={1}>
                         {originLocation ? locationLabel(originLocation) : 'Seleccionar origen'}
                       </Text>
-                      <Ionicons name="chevron-down" size={16} color={colorScales.gray[500]} style={{ transform: showOriginDropdown ? [{ rotate: '180deg' }] : [] }} />
+                      <Icon name="chevron-down" size={16} color={colorScales.gray[500]} style={{ transform: showOriginDropdown ? [{ rotate: '180deg' }] : [] }} />
                     </Pressable>
                     {showOriginDropdown && (
                       <View style={styles.locationDropdownList}>
@@ -497,7 +791,7 @@ export default function TransfersScreen() {
                               <Text style={[styles.locationDropdownOptionText, originLocation === loc.value && styles.locationDropdownOptionTextActive]}>
                                 {loc.label}
                               </Text>
-                              {originLocation === loc.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                              {originLocation === loc.value && <Icon name="check" size={16} color={colors.primary} />}
                             </Pressable>
                           ))
                         )}
@@ -515,7 +809,7 @@ export default function TransfersScreen() {
                       <Text style={[styles.locationDropdownText, !destinationLocation && styles.locationDropdownPlaceholder, !!destinationLocation && styles.locationDropdownTextSelected]} numberOfLines={1}>
                         {destinationLocation ? locationLabel(destinationLocation) : 'Seleccionar destino'}
                       </Text>
-                      <Ionicons name="chevron-down" size={16} color={colorScales.gray[500]} style={{ transform: showDestinationDropdown ? [{ rotate: '180deg' }] : [] }} />
+                      <Icon name="chevron-down" size={16} color={colorScales.gray[500]} style={{ transform: showDestinationDropdown ? [{ rotate: '180deg' }] : [] }} />
                     </Pressable>
                     {showDestinationDropdown && (
                       <View style={styles.locationDropdownList}>
@@ -541,7 +835,7 @@ export default function TransfersScreen() {
                                 <Text style={[styles.locationDropdownOptionText, destinationLocation === loc.value && styles.locationDropdownOptionTextActive]}>
                                   {loc.label}
                                 </Text>
-                                {destinationLocation === loc.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                                {destinationLocation === loc.value && <Icon name="check" size={16} color={colors.primary} />}
                               </Pressable>
                             ))
                         )}
@@ -599,7 +893,7 @@ export default function TransfersScreen() {
                   <View style={styles.formGroup}>
                     <Text style={styles.formLabel}>Buscar producto</Text>
                     <View style={styles.searchBox}>
-                      <Ionicons name="search" size={16} color={colorScales.gray[400]} />
+                      <Icon name="search" size={16} color={colorScales.gray[400]} />
                       <TextInput
                         style={styles.searchInputWizard}
                         value={productSearchTerm}
@@ -611,7 +905,7 @@ export default function TransfersScreen() {
                       />
                       {productSearchTerm.length > 0 && (
                         <Pressable onPress={() => searchProducts('')} hitSlop={6}>
-                          <Ionicons name="close" size={14} color={colorScales.gray[400]} />
+                          <Icon name="x" size={14} color={colorScales.gray[400]} />
                         </Pressable>
                       )}
                     </View>
@@ -648,7 +942,7 @@ export default function TransfersScreen() {
                             <View style={styles.selectedProductHeader}>
                               <Text style={styles.selectedProductName} numberOfLines={1}>{product?.name ?? `Producto #${item.product_id}`}</Text>
                               <Pressable onPress={() => removeProduct(item.product_id)} hitSlop={4}>
-                                <Ionicons name="trash" size={16} color={colors.error} />
+                                <Icon name="trash-2" size={16} color={colors.error} />
                               </Pressable>
                             </View>
                             <View style={styles.qtyRow}>
@@ -727,7 +1021,7 @@ export default function TransfersScreen() {
                     onPress={goToStep2}
                     disabled={!canAdvanceStep1}
                   >
-                    <Ionicons name="chevron-forward" size={18} color={colors.background} />
+                    <Icon name="chevron-right" size={18} color={colors.background} />
                     <Text style={styles.continueBtnText}>Continuar</Text>
                   </Pressable>
                 </>
@@ -743,7 +1037,7 @@ export default function TransfersScreen() {
                     onPress={goToStep3}
                     disabled={!canAdvanceStep2}
                   >
-                    <Ionicons name="chevron-forward" size={18} color={colors.background} />
+                    <Icon name="chevron-right" size={18} color={colors.background} />
                     <Text style={styles.continueBtnText}>Continuar</Text>
                   </Pressable>
                 </>
@@ -762,7 +1056,7 @@ export default function TransfersScreen() {
                     {createMutation.isPending ? (
                       <Spinner size="sm" />
                     ) : (
-                      <Ionicons name="chevron-forward" size={18} color={colors.background} />
+                      <Icon name="chevron-right" size={18} color={colors.background} />
                     )}
                     <Text style={styles.continueBtnText}>{createMutation.isPending ? 'Creando...' : 'Crear Transferencia'}</Text>
                   </Pressable>
@@ -773,26 +1067,20 @@ export default function TransfersScreen() {
         </View>
       </Modal>
     </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colorScales.gray[50] },
-  /* Card contenedor — debajo de las stats, con margen lateral + bottom + border radius + fondo blanco */
+  /* Card contenedor — invisible: la lista de transferencias se ve directamente
+     sobre el fondo de la pantalla sin contenedor visual */
   cardContainer: {
     flex: 1,
     marginHorizontal: spacing[3],
     marginBottom: spacing[3],
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    backgroundColor: 'transparent',
+    overflow: 'visible',
   },
   statsWrap: {},
 
@@ -848,7 +1136,7 @@ const styles = StyleSheet.create({
   emptySearch: { alignItems: 'center', justifyContent: 'center', paddingVertical: spacing[8], gap: spacing[2] },
   emptySearchText: { fontSize: typography.fontSize.sm, color: colorScales.gray[500] },
 
-  /* Transfer card: mismo estilo que AdjustmentCard (blanco, borderRadius.lg, gray[200], padding spacing[4]) */
+  /* Transfer card: estilo web — title + badge + subtítulo + detail grid + footer */
   transferCard: {
     marginHorizontal: spacing[3],
     marginBottom: spacing[3],
@@ -864,14 +1152,88 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 1,
   },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: spacing[2] },
-  cardHeaderLeft: { flex: 1 },
-  cardTitle: { fontSize: typography.fontSize.base, fontWeight: '600' as any, color: colorScales.gray[900] },
-  cardSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 2 },
-  cardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing[3], paddingTop: spacing[3], borderTopWidth: 1, borderTopColor: colorScales.gray[100] },
-  footerLeft: { flexDirection: 'row', alignItems: 'center', gap: spacing[1] },
-  footerDetail: { fontSize: typography.fontSize.xs, color: colorScales.gray[500] },
-  footerDate: { fontSize: typography.fontSize.xs, color: colorScales.gray[400] },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing[2] },
+  cardTitle: { fontSize: typography.fontSize.base, fontWeight: '700' as any, color: colorScales.gray[900], flex: 1 },
+  statusBadge: {
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+  },
+  statusBadgeText: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    textTransform: 'lowercase' as any,
+    letterSpacing: 0.3,
+  },
+  cardSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: spacing[2] },
+  cardDetailGrid: {
+    flexDirection: 'row',
+    gap: spacing[3],
+    marginTop: spacing[3],
+    paddingTop: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+  },
+  cardDetailCell: { flex: 1, gap: spacing[1] },
+  cardDetailLabelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[1] },
+  cardDetailLabel: { fontSize: 10, fontWeight: '700' as any, color: colorScales.gray[500], letterSpacing: 0.5, textTransform: 'uppercase' as any },
+  cardDetailValue: { fontSize: typography.fontSize.sm, fontWeight: '600' as any, color: colorScales.gray[900] },
+  cardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing[3],
+  },
+  cardFooterCell: { gap: 2 },
+  cardFooterValue: { fontSize: typography.fontSize.lg, fontWeight: '800' as any, color: colorScales.gray[900] },
+  eyeBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  /* Modal de detalle de transferencia — popup que coincide con la web */
+  detailOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'center', alignItems: 'center', padding: spacing[4] },
+  detailModal: {
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    width: '100%', maxWidth: 520, maxHeight: '90%',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.15, shadowRadius: 24, elevation: 8,
+  },
+  detailHeader: {
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
+    paddingHorizontal: spacing[4], paddingVertical: spacing[4], borderBottomWidth: 1, borderBottomColor: colorScales.gray[100],
+  },
+  detailTitle: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
+  detailSubtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 2 },
+  detailCloseBtn: { padding: spacing[1] },
+  detailBody: { flexGrow: 0, flexShrink: 1, maxHeight: 460 },
+  detailBodyContent: { padding: spacing[4], gap: spacing[4] },
+  detailBadgeRow: { flexDirection: 'row' },
+  detailDatesGrid: { flexDirection: 'row', gap: spacing[3] },
+  detailDateCell: { flex: 1, gap: spacing[1] },
+  detailDateValue: { fontSize: typography.fontSize.sm, fontWeight: '700' as any, color: colorScales.gray[900] },
+  detailSection: { gap: spacing[1] },
+  detailItemsValue: { fontSize: typography.fontSize['2xl'], fontWeight: '800' as any, color: colorScales.gray[900] },
+  detailNotesText: { fontSize: typography.fontSize.sm, color: colorScales.gray[700], lineHeight: 20 },
+  detailTimelineText: { fontSize: typography.fontSize.sm, color: colorScales.gray[500] },
+  detailFooter: {
+    flexDirection: 'row', paddingHorizontal: spacing[4], paddingTop: spacing[3], paddingBottom: spacing[4],
+    borderTopWidth: 1, borderTopColor: colorScales.gray[200], backgroundColor: colorScales.gray[50],
+  },
+  detailCancelBtn: { flex: 1, paddingVertical: 12, borderRadius: borderRadius.lg, borderWidth: 1.5, borderColor: colorScales.red[500], alignItems: 'center', justifyContent: 'center' },
+  detailCancelBtnText: { fontSize: 14, fontWeight: '700' as any, color: colorScales.red[600] },
+  detailPrimaryBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing[2],
+    paddingVertical: 12, borderRadius: borderRadius.lg, backgroundColor: colors.primary,
+  },
+  detailPrimaryBtnText: { fontSize: 14, fontWeight: '700' as any, color: colors.background },
   listContent: { paddingBottom: spacing[6] },
 
   /* Dropdowns posicionados (acciones + y filtro) */

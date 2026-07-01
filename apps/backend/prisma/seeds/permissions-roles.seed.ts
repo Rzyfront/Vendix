@@ -3784,6 +3784,40 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/users/management',
       method: 'PATCH',
     },
+
+    // PQR (Peticiones, Quejas, Reclamos) — canal público/privado
+    {
+      name: 'store:support:pqr:read',
+      description: 'Leer y listar PQRs en el panel de tienda',
+      path: '/api/store/support/pqr',
+      method: 'GET',
+    },
+    {
+      name: 'store:support:pqr:update',
+      description: 'Actualizar campos de un PQR (prioridad, asignado, tags)',
+      path: '/api/store/support/pqr/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:support:pqr:status',
+      description:
+        'Cambiar estado de un PQR (RESOLVED/CLOSED dispara email al solicitante)',
+      path: '/api/store/support/pqr/:id/status',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:support:pqr:assign',
+      description: 'Asignar un PQR a un usuario',
+      path: '/api/store/support/pqr/:id/assign',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:support:pqr:comment',
+      description:
+        'Agregar comentarios a un PQR (internos o públicos; los públicos notifican al solicitante)',
+      path: '/api/store/support/pqr/:id/comments',
+      method: 'POST',
+    },
   ];
 
   // Create-only seed: never delete existing permission rows.

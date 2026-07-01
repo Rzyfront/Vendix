@@ -29,6 +29,23 @@ export class SupportService {
     );
   }
 
+  /**
+   * PQR stats for the sidebar badge. Returns the raw `stats` payload
+   * shaped like { by_status, by_type, by_priority, total, recent_24h } —
+   * the caller picks the counters they need (open count for the badge).
+   */
+  getPqrStats(): Observable<{
+    total: number;
+    recent_24h: number;
+    by_status: Record<string, number>;
+    by_type: Record<string, number>;
+    by_priority: Record<string, number>;
+  }> {
+    return this.http.get<any>(`${this.API_URL}/pqrs/stats`).pipe(
+      map((response) => response.data || response),
+    );
+  }
+
   getTickets(params: TicketQueryDto): Observable<PaginatedTicketsResponse> {
     let httpParams = new HttpParams();
     if (params.page) httpParams = httpParams.set('page', params.page);
@@ -108,5 +125,48 @@ export class SupportService {
     }).pipe(
       map((response) => response.data || response)
     );
+  }
+
+  // ─── PQR actions ──────────────────────────────────────────────────────
+  // The super-admin is the actual recipient of platform-wide PQRs (they
+  // land at admin@vendix.online), so this controller exposes the same
+  // write surface as the store-admin one — comments, status changes,
+  // and assignments — just on the superadmin/support/pqrs path.
+
+  addPqrComment(
+    pqrId: number,
+    content: string,
+    isInternal: boolean = false,
+    notifyRequester: boolean = true,
+  ): Observable<any> {
+    return this.http
+      .post<any>(`${this.API_URL}/pqrs/${pqrId}/comments`, {
+        content,
+        is_internal: isInternal,
+        notify_requester: notifyRequester,
+      })
+      .pipe(map((response) => response.data || response));
+  }
+
+  updatePqrStatus(
+    pqrId: number,
+    payload: { status: string; change_reason?: string; resolution_summary?: string },
+  ): Observable<any> {
+    return this.http
+      .patch<any>(`${this.API_URL}/pqrs/${pqrId}/status`, payload)
+      .pipe(map((response) => response.data || response));
+  }
+
+  assignPqr(
+    pqrId: number,
+    assignedToUserId: number | null,
+    notes?: string,
+  ): Observable<any> {
+    return this.http
+      .patch<any>(`${this.API_URL}/pqrs/${pqrId}/assign`, {
+        assigned_to_user_id: assignedToUserId,
+        notes,
+      })
+      .pipe(map((response) => response.data || response));
   }
 }

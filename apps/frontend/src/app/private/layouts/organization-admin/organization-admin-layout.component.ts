@@ -182,6 +182,37 @@ export class OrganizationAdminLayoutComponent {
       route: '/admin/users',
     },
     {
+      // Aggregated PQR oversight across all stores in the requesting
+      // org. Read-only at the org-admin level — response work happens
+      // per-store. Group with a single child ("PQRs") so the entry
+      // matches the super-admin sidebar shape: click the group to
+      // expand, click the child to navigate.
+      //
+      // No `alwaysVisible` here: the filter (Case 2) keys this item
+      // through `Soporte` which already includes `help_pqrs`, so the
+      // group shows up when the org has the help_pqrs module enabled.
+      label: 'Soporte',
+      icon: 'headset',
+      // Both the parent and the PQRs child use `alwaysVisible: true`
+      // as a pragmatic workaround. The MenuFilterService keys the
+      // Soporte group through `Soporte: ['help_support',
+      // 'settings_support', 'help_pqrs']`, but the org's `panel_ui`
+      // doesn't always carry those flags — when the org has its own
+      // user_settings override that drops `help_pqrs`, the entire
+      // group disappears. Marking both as alwaysVisible decouples
+      // them from that mismatch until the panel_ui contract is
+      // cleaned up at the data layer.
+      alwaysVisible: true,
+      children: [
+        {
+          label: 'PQRS',
+          icon: 'message-square',
+          route: '/admin/support/pqrs',
+          alwaysVisible: true,
+        },
+      ],
+    },
+    {
       label: 'Inventario',
       icon: 'warehouse',
       children: [

@@ -1,0 +1,419 @@
+<section class="pqr-detail-page">
+  <a class="back-link" (click)="goBack()">
+    <app-icon name="chevron-left" [size]="14"></app-icon>
+    Volver al listado
+  </a>
+
+  @if (loading() && !detail()) {
+  <div class="loading">Cargando…</div>
+  } @if (errorMsg(); as msg) {
+  <div class="error-banner">{{ msg }}</div>
+  } @if (detail(); as d) {
+  <header class="ticket-header">
+    <div class="ticket-id-row">
+      <span class="mono">{{ d.ticket_number }}</span>
+      <span class="type-tag" [attr.data-type]="d.pqr_type">
+        {{ typeLabel(d.pqr_type) }}
+      </span>
+      <app-pqr-status-pill [status]="d.status"></app-pqr-status-pill>
+    </div>
+    <h1>{{ d.title }}</h1>
+    <div class="ticket-meta">
+      <span>
+        <app-icon name="calendar" [size]="14"></app-icon>
+        Creado {{ d.created_at | date: 'medium' }}
+      </span>
+      @if (d.assigned_to) {
+      <span>
+        <app-icon name="user" [size]="14"></app-icon>
+        Asignado a {{ d.assigned_to.name }}
+      </span>
+      }
+      @if (d.first_response_at) {
+      <span>
+        <app-icon name="message-circle" [size]="14"></app-icon>
+        Primera respuesta {{ d.first_response_at | date: 'short' }}
+      </span>
+      }
+    </div>
+    <div class="ticket-actions">
+      <!-- The store-admin only reads and replies to PQRs. Status changes
+           (resolving, closing, reopening) are driven by the Vendix
+           support team responding to the ticket. See super-admin view
+           for the writable counterpart. -->
+      <span class="status-managed-by-team">
+        <app-icon name="info" [size]="14"></app-icon>
+        Estado gestionado por el equipo de soporte de Vendix
+      </span>
+    </div>
+  </header>
+
+  <div class="layout-grid">
+    <!-- Left: description + comments -->
+    <div class="main-column">
+      <article class="card description-card">
+        <div class="description-card__header">
+          <h3>Descripción del solicitante</h3>
+          <!-- Edit content — only while status === 'NEW' (before support
+               picks it up). Once status advances, the audit trail is
+               the source of truth and the backend rejects the edit
+               (400 SUP_PQR_006). -->
+          @if (canEditContent()) {
+          <button
+            type="button"
+            class="edit-content-btn"
+            (click)="openEditModal()"
+          >
+            <app-icon name="edit-2" [size]="14"></app-icon>
+            Editar contenido
+          </button>
+          }
+        </div>
+        <pre class="description-block">{{ d.description }}</pre>
+      </article>
+
+      <article class="card">
+        <h3>Comentarios ({{ d.comments.length }})</h3>
+        @if (d.comments.length === 0) {
+        <p class="muted">No hay comentarios aún.</p>
+        }
+        @for (c of d.comments; track c.id) {
+        <div
+          class="comment"
+          [class.comment--public]="!c.is_internal"
+          [class.comment--internal]="c.is_internal"
+          [class.comment--from-customer]="!c.is_internal && c.author_email === d.requester_email"
+          [class.comment--from-team]="!c.is_internal && c.author_email && c.author_email !== d.requester_email"
+        >
+          <header class="comment-header">
+            <strong>{{ c.author_name }}</strong>
+            <span class="comment-meta">
+              {{ c.author_type }} · {{ c.created_at | date: 'medium' }}
+              @if (c.is_internal) {
+              <span class="badge badge--internal">Nota interna</span>
+              } @else if (c.author_email === d.requester_email) {
+              <span class="badge badge--from-customer">Mensaje del solicitante</span>
+              } @else {
+              <span class="badge badge--from-team">Tu respuesta</span>
+              }
+              <!-- Per-comment edit button — only visible to the author.
+                   Backend enforces the same rule with SUP_COMMENT_002. -->
+              @if (canEditComment(c) && editingCommentId() !== c.id) {
+              <button
+                type="button"
+                class="comment-edit-btn"
+                (click)="startEditComment(c)"
+                title="Editar tu comentario"
+              >
+                <app-icon name="edit-2" [size]="12"></app-icon>
+                Editar
+              </button>
+              }
+            </span>
+          </header>
+          @if (editingCommentId() === c.id) {
+          <div class="comment-edit-form">
+            <textarea
+              rows="3"
+              class="comment-edit-input"
+              [ngModel]="editCommentContent()"
+              (ngModelChange)="editCommentContent.set($event)"
+              name="editCommentContent"
+            ></textarea>
+            @if (editCommentError(); as err) {
+            <p class="comment-edit-error">{{ err }}</p>
+            }
+            <div class="comment-edit-actions">
+              <button
+                type="button"
+                class="ghost-btn"
+                [disabled]="editCommentSaving()"
+                (click)="cancelEditComment()"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                class="primary-btn"
+                [disabled]="!canSaveEditComment()"
+                (click)="saveEditComment(c.id)"
+              >
+                {{ editCommentSaving() ? 'Guardando…' : 'Guardar' }}
+              </button>
+            </div>
+          </div>
+          } @else {
+          <p class="comment-body">{{ c.content }}</p>
+          }
+        </div>
+        }
+
+        <!-- Composer -->
+        <div class="composer">
+          <textarea
+            rows="4"
+            [placeholder]="
+              isInternal()
+                ? 'Escribe una nota interna (solo la verá tu equipo)…'
+                : 'Escribe una respuesta para el solicitante…'
+            "
+            [ngModel]="newComment()"
+            (ngModelChange)="newComment.set($event)"
+          ></textarea>
+          <div class="composer-controls">
+            <label class="check">
+              <input
+                type="checkbox"
+                [checked]="isInternal()"
+                (change)="onIsInternalChange(($any($event.target)).checked)"
+              />
+              <span>Marcar como nota interna (no se envía al solicitante)</span>
+            </label>
+            @if (isInternal()) {
+            <label class="check">
+              <input
+                type="checkbox"
+                [checked]="notifyRequester()"
+                (change)="notifyRequester.set(($any($event.target)).checked)"
+              />
+              <span>Notificar al solicitante por email de todos modos</span>
+            </label>
+            }
+            <button
+              class="primary-btn"
+              [disabled]="!canSubmitComment()"
+              (click)="submitComment()"
+            >
+              {{
+                submitting()
+                  ? 'Enviando…'
+                  : isInternal()
+                    ? 'Guardar nota interna'
+                    : 'Enviar respuesta'
+              }}
+            </button>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- Right: requester + history -->
+    <aside class="side-column">
+      <article class="card requester-card">
+        <h3>Solicitante</h3>
+        <div class="requester-header">
+          <div class="avatar" aria-hidden="true">
+            {{ requesterInitials() }}
+          </div>
+          <div class="requester-name-block">
+            <span class="requester-name">{{
+              requesterDisplayName() || 'No registrado'
+            }}</span>
+            <span class="requester-subtitle">{{
+              typeLabel(d.pqr_type)
+            }}</span>
+          </div>
+        </div>
+        <dl>
+          <dt>Nombre</dt>
+          <dd>{{ d.requester_first_name || 'No registrado' }}</dd>
+          <dt>Apellido</dt>
+          <dd>{{ d.requester_last_name || 'No registrado' }}</dd>
+          <dt>Email</dt>
+          <dd>
+            @if (d.requester_email) {
+            <a [href]="'mailto:' + d.requester_email">{{
+              d.requester_email
+            }}</a>
+            } @else {
+            <span class="placeholder">No registrado</span>
+            }
+          </dd>
+          <dt>Teléfono</dt>
+          <dd>
+            @if (d.requester_phone) {
+            {{ d.requester_phone }}
+            } @else {
+            <span class="placeholder">No registrado</span>
+            }
+          </dd>
+          <dt>Tipo de documento</dt>
+          <dd>
+            @if (d.requester_document_type) {
+            {{ documentTypeLabel(d.requester_document_type) }}
+            } @else {
+            <span class="placeholder">No registrado</span>
+            }
+          </dd>
+          <dt>Número</dt>
+          <dd>
+            @if (d.requester_document_num) {
+            {{ d.requester_document_num }}
+            } @else {
+            <span class="placeholder">No registrado</span>
+            }
+          </dd>
+        </dl>
+      </article>
+
+      <article class="card">
+        <h3>Historial</h3>
+        @if (d.status_history.length === 0) {
+        <p class="muted">Sin cambios de estado.</p>
+        }
+        @for (h of d.status_history; track h.id) {
+        <div class="history-item">
+          <app-pqr-status-pill [status]="h.new_status"></app-pqr-status-pill>
+          <div class="history-meta">
+            <span class="muted">
+              {{ h.old_status || 'No registrado' }} → {{ h.new_status }}
+            </span>
+            <span>{{ h.created_at | date: 'short' }}</span>
+            @if (h.change_reason) {
+            <p class="reason">{{ h.change_reason }}</p>
+            }
+          </div>
+        </div>
+        }
+      </article>
+    </aside>
+  </div>
+
+  <!-- Content edit modal — opens when "Editar contenido" is clicked.
+       Visible only when canEditContent() is true (server enforces the
+       same guard, this is just for UX). -->
+  @if (showEditModal()) {
+  <div class="modal-overlay" (click)="closeEditModal()">
+    <div
+      class="modal modal--wide"
+      (click)="$event.stopPropagation()"
+    >
+      <h2>Editar contenido de la solicitud</h2>
+      <p class="modal-hint">
+        Solo puedes editar mientras el estado sea <strong>NUEVO</strong>.
+        Una vez que soporte tome la solicitud, los cambios quedan en el
+        historial y no se pueden revertir desde aquí.
+      </p>
+      <label class="modal-field">
+        <span>Asunto</span>
+        <input
+          type="text"
+          class="modal-input"
+          [ngModel]="editTitle()"
+          (ngModelChange)="editTitle.set($event)"
+          maxlength="255"
+          name="editTitle"
+        />
+      </label>
+      <label class="modal-field">
+        <span>Descripción</span>
+        <textarea
+          rows="5"
+          class="modal-input modal-textarea"
+          [ngModel]="editDescription()"
+          (ngModelChange)="editDescription.set($event)"
+          maxlength="5000"
+          name="editDescription"
+        ></textarea>
+      </label>
+      <fieldset class="modal-field modal-field--grouped">
+        <legend>Datos del solicitante</legend>
+        <div class="modal-row">
+          <label class="modal-subfield">
+            <span>Nombre</span>
+            <input
+              type="text"
+              class="modal-input"
+              [ngModel]="editRequesterFirstName()"
+              (ngModelChange)="editRequesterFirstName.set($event)"
+              name="editFirstName"
+            />
+          </label>
+          <label class="modal-subfield">
+            <span>Apellido</span>
+            <input
+              type="text"
+              class="modal-input"
+              [ngModel]="editRequesterLastName()"
+              (ngModelChange)="editRequesterLastName.set($event)"
+              name="editLastName"
+            />
+          </label>
+        </div>
+        <div class="modal-row">
+          <label class="modal-subfield">
+            <span>Email</span>
+            <input
+              type="email"
+              class="modal-input"
+              [ngModel]="editRequesterEmail()"
+              (ngModelChange)="editRequesterEmail.set($event)"
+              name="editEmail"
+            />
+          </label>
+          <label class="modal-subfield">
+            <span>Teléfono</span>
+            <input
+              type="tel"
+              class="modal-input"
+              [ngModel]="editRequesterPhone()"
+              (ngModelChange)="editRequesterPhone.set($event)"
+              name="editPhone"
+            />
+          </label>
+        </div>
+        <div class="modal-row">
+          <label class="modal-subfield">
+            <span>Tipo documento</span>
+            <select
+              class="modal-input"
+              [ngModel]="editRequesterDocType()"
+              (ngModelChange)="editRequesterDocType.set($event)"
+              name="editDocType"
+            >
+              <option value="">Seleccione tipo de documento</option>
+              <option value="CC">Cédula de ciudadanía (CC)</option>
+              <option value="CE">Cédula de extranjería (CE)</option>
+              <option value="NIT">NIT</option>
+              <option value="PA">Pasaporte (PA)</option>
+            </select>
+          </label>
+          <label class="modal-subfield">
+            <span>Número de documento</span>
+            <input
+              type="text"
+              class="modal-input"
+              [ngModel]="editRequesterDocNum()"
+              (ngModelChange)="editRequesterDocNum.set($event)"
+              name="editDocNum"
+              maxlength="50"
+            />
+          </label>
+        </div>
+      </fieldset>
+      @if (editError(); as err) {
+      <p class="edit-error">{{ err }}</p>
+      }
+      <div class="modal-actions">
+        <button
+          type="button"
+          class="ghost-btn"
+          [disabled]="editSubmitting()"
+          (click)="closeEditModal()"
+        >
+          Cancelar
+        </button>
+        <button
+          type="button"
+          class="primary-btn"
+          [disabled]="!canSubmitEdit()"
+          (click)="submitEdit()"
+        >
+          {{ editSubmitting() ? 'Guardando…' : 'Guardar cambios' }}
+        </button>
+      </div>
+    </div>
+  </div>
+  }
+}
+</section>

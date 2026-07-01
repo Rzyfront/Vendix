@@ -208,7 +208,7 @@ When writing `Verification` and `End-to-End Verification`, pick from this catalo
 | Mechanism | When | Example |
 |-----------|------|---------|
 | `curl` (primary API check) | API contract, auth boundaries & endpoint sanity | `curl -H 'Authorization: Bearer $TOK' http://localhost:3000/organization/invoicing/invoices` |
-| `agent-browser` (frontend E2E) | User-facing flow: login, navigation, form submit, render — against the real vhost | `agent-browser open https://vendix.com && agent-browser snapshot -i` (see `how-to-test`) |
+| `agent-browser` (frontend E2E) | User-facing flow: login, navigation, form submit, render — against the real vhost | `agent-browser --headed --ignore-https-errors open https://vendix.com && agent-browser snapshot -i` (see `how-to-test`; note `--ignore-https-errors` is a **global** flag, placed before the subcommand) |
 | Backend unit test | Service logic | `npm run test -w apps/backend -- --runInBand src/domains/organization/invoicing/invoicing.service.spec.ts` |
 | Frontend build | Type safety after refactor | `npm run build:prod -w apps/frontend` |
 | Zoneless audit | Signal-based components | `npm run zoneless:audit` |
@@ -227,7 +227,9 @@ When writing `Verification` and `End-to-End Verification`, pick from this catalo
 >
 > **For frontend flows, `agent-browser` is the E2E verification mechanism** — drive the real vhost
 > (`https://vendix.com` and its subdomains), never `localhost:4200`, because the app resolves its
-> `app_type` by hostname. The full curl + agent-browser methodology (install, vhost setup,
+> `app_type` by hostname. **Always pass `headed: true` + `extraArgs: ['--ignore-https-errors']`** (NOT
+> `--ignore-certificate-errors`) in MCP calls — Vendix uses a self-signed cert and the MCP defaults
+> are headless + cert-strict. The full curl + agent-browser methodology (install, vhost setup,
 > credentials, recipes) lives in `how-to-test`.
 
 ## Plan Validation Checklist

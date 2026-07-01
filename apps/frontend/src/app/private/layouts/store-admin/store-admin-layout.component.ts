@@ -738,6 +738,11 @@ export class StoreAdminLayoutComponent {
           route: '/admin/help/support',
         },
         {
+          label: 'Mis Solicitudes',
+          icon: 'message-square',
+          route: '/admin/pqrs',
+        },
+        {
           label: 'Centro de Ayuda',
           icon: 'circle',
           route: '/admin/help/center',

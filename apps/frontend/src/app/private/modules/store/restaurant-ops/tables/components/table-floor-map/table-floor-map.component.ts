@@ -95,6 +95,18 @@ const WHEEL_ZOOM_FACTOR = 0.0015;
 export class TableFloorMapComponent {
   readonly tables = input.required<Table[]>();
   readonly editable = input<boolean>(false);
+  /**
+   * When true, the component automatically re-fits the canvas to its
+   * cells after each render cycle. Useful for parents that toggle
+   * between list view and floor map (a single component instance can
+   * be re-mounted or its initial-fit window can be long passed).
+   *
+   * Default `false` to preserve the original "fit once on first
+   * non-empty render" behavior; the parent flips it to `true` when
+   * the floor map becomes visible again (e.g. switching from table
+   * view to floor view in the manage page).
+   */
+  readonly autoReset = input<boolean>(false);
   readonly tableClicked = output<Table>();
   readonly tableMoved = output<TableMovedEvent>();
 
@@ -130,6 +142,19 @@ export class TableFloorMapComponent {
   /** Evita reencuadrar repetidamente: solo en el primer set con datos. */
   private hasInitialFit = false;
 
+  /**
+   * Scheduled fit (used by `resetView` retries). Holds the rAF id so we
+   * can cancel a pending retry when the container finally gets a size.
+   */
+  private pendingFitFrame: number | null = null;
+  /**
+   * Retry attempts for `resetView` when the viewport has no size yet.
+   * Stops after `MAX_FIT_ATTEMPTS` to avoid hammering rAF on a hidden
+   * container that will never get dimensions.
+   */
+  private fitRetries = 0;
+  private static readonly MAX_FIT_ATTEMPTS = 5;
+
   constructor() {
     // Al cambiar la lista de mesas, limpiar overrides locales obsoletos.
     // Reencuadra la vista la primera vez que llegan mesas.
@@ -145,12 +170,23 @@ export class TableFloorMapComponent {
     });
 
     // El viewChild puede no existir al primer effect; garantizamos el
-    // encuadre inicial tras el primer render si ya hay mesas.
+    // encuadre inicial tras el primer render si ya hay mesas (incluso
+    // si el viewport todavía no tiene dimensiones, `resetView` lo
+    // reintenta vía rAF).
     afterNextRender(() => {
       if (!this.hasInitialFit && this.cells().length > 0) {
         this.hasInitialFit = true;
         this.resetView();
       }
+    });
+
+    // Cuando el padre reactiva `autoReset` (p.ej. al alternar entre
+    // vista de tabla y plano en la página de gestión), forzamos un
+    // reencuadre ignorando `hasInitialFit`.
+    effect(() => {
+      const flag = this.autoReset();
+      if (!flag) return;
+      this.refit();
     });
   }
 
@@ -373,7 +409,15 @@ export class TableFloorMapComponent {
     this.zoomAtCenter(this.zoom() - ZOOM_STEP);
   }
 
-  /** Reset / fit: encuadra todas las mesas en el viewport. */
+  /**
+   * Reset / fit: encuadra todas las mesas en el viewport.
+   *
+   * Si el contenedor todavía no tiene dimensiones (display:none
+   * todavía, layout aún no midió), agenda un reintento vía rAF en lugar
+   * de fallar silenciosamente. Tras `MAX_FIT_ATTEMPTS` intentos sin
+   * éxito, abandona — el lienzo permanecerá en su estado actual y la
+   * siguiente interacción (o un `refit()` explícito) lo reagenda.
+   */
   resetView(): void {
     const rect = this.viewport()?.nativeElement.getBoundingClientRect();
     const cells = this.cells();
@@ -383,6 +427,24 @@ export class TableFloorMapComponent {
       this.panY.set(0);
       return;
     }
+
+    // El contenedor aún no tiene tamaño: reintentar en el siguiente
+    // frame. Esto cubre el caso del toggle "Tabla/Plano" en
+    // `tables-manage-page`: el `<app-table-floor-map>` se desmonta del
+    // DOM al cambiar a tabla y, al volver, su contenedor mide 0 hasta
+    // el siguiente reflow.
+    if (rect.width === 0 || rect.height === 0) {
+      if (this.fitRetries < TableFloorMapComponent.MAX_FIT_ATTEMPTS) {
+        if (this.pendingFitFrame != null) return;
+        this.pendingFitFrame = requestAnimationFrame(() => {
+          this.pendingFitFrame = null;
+          this.fitRetries++;
+          this.resetView();
+        });
+      }
+      return;
+    }
+    this.fitRetries = 0;
 
     let minX = Infinity;
     let minY = Infinity;
@@ -408,6 +470,32 @@ export class TableFloorMapComponent {
     this.zoom.set(fit);
     this.panX.set(rect.width / 2 - contentCenterX * fit);
     this.panY.set(rect.height / 2 - contentCenterY * fit);
+  }
+
+  /**
+   * Imperative fit: borra `hasInitialFit` y reencuadra en el siguiente
+   * ciclo de render. Usado por:
+   *  - el effect que observa `autoReset()` (cuando el padre alterna a
+   *    la vista de plano), y
+   *  - el padre directo via `[ref]` o `viewChild` cuando necesita
+   *    forzar un reencuadre sin esperar al effect.
+   *
+   * Hace queue en microtask + 1 frame de rAF para garantizar que el
+   * navegador ya pintó el viewport con sus dimensiones reales.
+   */
+  refit(): void {
+    this.hasInitialFit = false;
+    this.fitRetries = 0;
+    if (this.pendingFitFrame != null) {
+      cancelAnimationFrame(this.pendingFitFrame);
+      this.pendingFitFrame = null;
+    }
+    queueMicrotask(() => {
+      requestAnimationFrame(() => {
+        this.hasInitialFit = true;
+        this.resetView();
+      });
+    });
   }
 
   private zoomAtCenter(target: number): void {

@@ -4,7 +4,6 @@ import {
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
 import { InventoryService } from '@/features/store/services/inventory.service';
 import type { StockMovement, MovementType } from '@/features/store/types';
 import { MOVEMENT_TYPE_LABELS, MOVEMENT_INBOUND_TYPES, MOVEMENT_OUTBOUND_TYPES } from '@/features/store/types';
@@ -13,8 +12,11 @@ import { Spinner } from '@/shared/components/spinner/spinner';
 import { Icon } from '@/shared/components/icon/icon';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
+import { Pagination } from '@/shared/components/pagination/pagination';
 import { formatDate } from '@/shared/utils/date';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
+import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
+import { MOVEMENT_STATS, MOVEMENT_TYPE_MAP } from '@/features/store/constants/inventory-labels';
 
 const TYPE_VARIANT: Record<MovementType, 'success' | 'error' | 'info' | 'warning' | 'default'> = {
   stock_in: 'success',
@@ -27,15 +29,17 @@ const TYPE_VARIANT: Record<MovementType, 'success' | 'error' | 'info' | 'warning
   expiration: 'error',
 };
 
+// Re-mapped to web-parity icons. NB: stock_in → arrow-down-circle (entry/inbound)
+// instead of the previously used trending-down (which suggests decline).
 const TYPE_ICON: Record<MovementType, string> = {
-  stock_in: 'trending-down',
-  stock_out: 'trending-up',
-  transfer: 'truck',
-  adjustment: 'edit-2',
-  sale: 'shopping-bag',
-  return: 'rotate-ccw',
-  damage: 'alert-triangle',
-  expiration: 'clock',
+  stock_in: INVENTORY_ICONS.movementStockIn,        // arrow-down-circle (green)
+  stock_out: INVENTORY_ICONS.movementStockOut,      // arrow-up-circle (red)
+  transfer: INVENTORY_ICONS.movementTransfer,       // repeat (purple)
+  adjustment: INVENTORY_ICONS.movementAdjustment,   // sliders (blue)
+  sale: INVENTORY_ICONS.movementSale,               // shopping-cart (amber)
+  return: INVENTORY_ICONS.movementReturn,           // corner-down-left (cyan)
+  damage: INVENTORY_ICONS.movementDamage,           // alert-triangle (error)
+  expiration: INVENTORY_ICONS.movementExpiration,   // clock (gray)
 };
 
 type FilterOption = { label: string; value: MovementType | 'all' };
@@ -113,7 +117,7 @@ function MovementDetailModal({
           <View style={styles.detailHeader}>
             <Text style={styles.detailTitle}>Detalle del Movimiento</Text>
             <Pressable onPress={onClose} hitSlop={8} style={styles.detailCloseBtn}>
-              <Ionicons name="close" size={22} color={colorScales.gray[500]} />
+              <Icon name="x" size={22} color={colorScales.gray[500]} />
             </Pressable>
           </View>
 
@@ -294,6 +298,8 @@ export default function MovementsScreen() {
   const currentStoreId = useTenantStore((s) => s.storeId);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<MovementType | 'all'>('all');
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [showFilterOptions, setShowFilterOptions] = useState(false);
   const [showFilterTypeList, setShowFilterTypeList] = useState(false);
   const [showActions, setShowActions] = useState(false);
@@ -304,12 +310,20 @@ export default function MovementsScreen() {
   const [filterPos, setFilterPos] = useState({ top: 0, right: 0 });
   const screenW = Dimensions.get('window').width;
 
-  const { data, isLoading, refetch, isRefetching } = useQuery({
-    queryKey: ['movements', search, activeFilter],
+  // Reset page to 1 whenever the search term or type filter changes
+  // so users don't end up on an empty page after narrowing results.
+  React.useEffect(() => {
+    setPage(1);
+  }, [search, activeFilter]);
+
+  const { data, isLoading, isFetching, refetch, isRefetching } = useQuery({
+    queryKey: ['movements', search, activeFilter, page, PAGE_SIZE],
     queryFn: () =>
       InventoryService.getMovements({
         search: search || undefined,
         movement_type: activeFilter === 'all' ? undefined : activeFilter,
+        page,
+        limit: PAGE_SIZE,
       }),
   });
 
@@ -320,15 +334,32 @@ export default function MovementsScreen() {
     ? allMovements.filter((m) => m.store_id === Number(currentStoreId))
     : allMovements;
 
+  // Paginación — derivada de la metadata de la respuesta del backend.
+  const pagination = data?.pagination ?? {
+    page: 1,
+    limit: PAGE_SIZE,
+    total: movements.length,
+    totalPages: 1,
+    hasNext: false,
+    hasPrev: false,
+  };
+
   // Totales para las stats cards
   const totals = {
-    total: movements.length,
+    total: pagination.total,
     inbound: movements.filter((m) => MOVEMENT_INBOUND_TYPES.has(m.movement_type)).length,
     outbound: movements.filter((m) => MOVEMENT_OUTBOUND_TYPES.has(m.movement_type)).length,
-    adjustments: movements.filter((m) => m.movement_type === 'adjustment').length,
+    transfers: movements.filter((m) => m.movement_type === 'transfer').length,
   };
 
   const handleRefresh = useCallback(() => refetch(), [refetch]);
+
+  // Scroll-to-top when the user changes page so the new page header is visible.
+  const flatListRef = React.useRef<FlatList<StockMovement>>(null);
+  const handlePageChange = useCallback((newPage: number) => {
+    setPage(newPage);
+    flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
+  }, []);
 
   const handleProductPress = useCallback((item: StockMovement) => {
     if (item.product_id) {
@@ -364,28 +395,36 @@ export default function MovementsScreen() {
         style={styles.statsWrap}
         items={[
           {
-            label: 'Total',
+            label: MOVEMENT_STATS.total.label,
             value: totals.total,
-            icon: <Icon name="activity" size={14} color={colorScales.blue[600]} />,
-            description: 'Movimientos',
+            icon: INVENTORY_ICONS.movementsTotalStat,
+            iconBg: STAT_PALETTE.blue.bg,
+            iconColor: STAT_PALETTE.blue.color,
+            description: MOVEMENT_STATS.total.description,
           },
           {
-            label: 'Entradas',
+            label: MOVEMENT_STATS.inbound.label,
             value: totals.inbound,
-            icon: <Icon name="trending-down" size={14} color={colorScales.green[600]} />,
-            description: 'Ingresos',
+            icon: INVENTORY_ICONS.inboundStat,
+            iconBg: STAT_PALETTE.green.bg,
+            iconColor: STAT_PALETTE.green.color,
+            description: MOVEMENT_STATS.inbound.description,
           },
           {
-            label: 'Salidas',
+            label: MOVEMENT_STATS.outbound.label,
             value: totals.outbound,
-            icon: <Icon name="trending-up" size={14} color={colorScales.red[600]} />,
-            description: 'Egresos',
+            icon: INVENTORY_ICONS.outboundStat,
+            iconBg: STAT_PALETTE.red.bg,
+            iconColor: STAT_PALETTE.red.color,
+            description: MOVEMENT_STATS.outbound.description,
           },
           {
-            label: 'Ajustes',
-            value: totals.adjustments,
-            icon: <Icon name="edit-2" size={14} color={colorScales.amber[600]} />,
-            description: 'Modificaciones',
+            label: MOVEMENT_STATS.transfer.label,
+            value: totals.transfers,
+            icon: INVENTORY_ICONS.transferStat,
+            iconBg: STAT_PALETTE.purple.bg,
+            iconColor: STAT_PALETTE.purple.color,
+            description: MOVEMENT_STATS.transfer.description,
           },
         ]}
       />
@@ -393,6 +432,7 @@ export default function MovementsScreen() {
       {/* Card contenedor: título + búsqueda + filtros + cards de movimientos */}
       <View style={styles.cardContainer}>
         <FlatList
+          ref={flatListRef}
           data={movements}
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => (
@@ -405,11 +445,11 @@ export default function MovementsScreen() {
           ListHeaderComponent={
             <View>
               <View style={styles.titleRow}>
-                <Text style={styles.listTitle}>Movimientos ({movements.length})</Text>
+                <Text style={styles.listTitle}>Movimientos ({pagination.total})</Text>
               </View>
               <View style={styles.searchRow}>
                 <View style={styles.searchInputWrap}>
-                  <Ionicons name="search-outline" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
+                  <Icon name="search" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
                   <TextInput
                     style={styles.searchInputField}
                     value={search}
@@ -422,7 +462,7 @@ export default function MovementsScreen() {
                   />
                   {search.length > 0 && (
                     <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                      <Ionicons name="close" size={16} color={colorScales.gray[400]} />
+                      <Icon name="x" size={16} color={colorScales.gray[400]} />
                     </Pressable>
                   )}
                 </View>
@@ -436,16 +476,22 @@ export default function MovementsScreen() {
             </View>
           }
           ListEmptyComponent={
-            isLoading ? (
+            isLoading || isFetching ? (
               <Spinner />
             ) : (
               <EmptyState title="Sin movimientos" description="No se encontraron movimientos de stock" />
             )
           }
+          ListFooterComponent={
+            <Pagination
+              page={pagination.page}
+              totalPages={pagination.totalPages}
+              onPageChange={handlePageChange}
+              info={`Mostrando ${movements.length} de ${pagination.total} · página ${pagination.page}/${pagination.totalPages}`}
+            />
+          }
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={handleRefresh} />}
-          onEndReached={() => { /* server paginates by limit; hook would need cursor */ }}
-          onEndReachedThreshold={0.3}
           contentContainerStyle={styles.listContent}
         />
       </View>
@@ -458,7 +504,7 @@ export default function MovementsScreen() {
           <View style={styles.dropdown}>
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="sync-outline" size={18} color={colorScales.gray[500]} />
+                <Icon name="refresh" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Refrescar</Text>
             </Pressable>
@@ -484,7 +530,7 @@ export default function MovementsScreen() {
                 <Text style={styles.filterPopupSelectText}>
                   {FILTER_OPTIONS.find((o) => o.value === activeFilter)?.label ?? 'Todos los tipos'}
                 </Text>
-                <Ionicons name={showFilterTypeList ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
+                <Icon name={showFilterTypeList ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
               </Pressable>
               {showFilterTypeList && (
                 <View style={styles.filterPopupOptionsList}>
@@ -497,7 +543,7 @@ export default function MovementsScreen() {
                       <Text style={[styles.filterPopupOptionText, activeFilter === opt.value && styles.filterPopupOptionTextActive]}>
                         {opt.label}
                       </Text>
-                      {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                      {activeFilter === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                     </Pressable>
                   ))}
                 </View>
@@ -518,21 +564,14 @@ export default function MovementsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colorScales.gray[50] },
-  /* Card contenedor — mismo estilo que adjustments/transfers */
+  /* Card contenedor — invisible: la lista de movimientos se ve directamente
+     sobre el fondo de la pantalla sin contenedor visual */
   cardContainer: {
     flex: 1,
     marginHorizontal: spacing[3],
     marginBottom: spacing[3],
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    backgroundColor: 'transparent',
+    overflow: 'visible',
   },
   statsWrap: {},
   titleRow: { paddingHorizontal: spacing[4], paddingTop: spacing[4], paddingBottom: spacing[2] },

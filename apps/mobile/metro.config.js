@@ -13,8 +13,15 @@ config.resolver.nodeModulesPaths = [
 ];
 config.resolver.disableHierarchicalLookup = true;
 config.resolver.unstable_conditionsByPlatform.web = ['react-native', 'browser'];
-config.resolver.extraNodeModules = {
-  punycode: require.resolve('punycode'),
-};
+config.resolver.extraNodeModules = new Proxy(
+  { punycode: require.resolve('punycode') },
+  {
+    // For any other module name (defensive), fall back to the local
+    // node_modules. This keeps `xlsx`/`punycode` working on Android/Hermes
+    // where the default Metro resolution can miss the polyfill.
+    get: (target, name) =>
+      target[name] ?? path.join(__dirname, 'node_modules', name),
+  },
+);
 
 module.exports = config;

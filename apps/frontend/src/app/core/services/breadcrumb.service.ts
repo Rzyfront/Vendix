@@ -1047,6 +1047,50 @@ export class BreadcrumbService {
       icon: 'file-text',
     },
 
+    // PQRs (Peticiones, Quejas y Reclamos) — visible as "Mis Solicitudes"
+    // in the sidebar (see store-admin-layout.component.ts). The internal
+    // key `help_pqrs` is unchanged for panel_ui compatibility. Parent
+    // chain: Tienda > Ayuda > Mis Solicitudes (matches sidebar grouping).
+    {
+      path: '/admin/pqrs',
+      title: 'Mis Solicitudes',
+      parent: 'Ayuda',
+      icon: 'message-square',
+    },
+    {
+      path: '/admin/pqrs/:id',
+      title: 'Detalle de solicitud',
+      parent: 'Mis Solicitudes',
+      icon: 'message-square',
+    },
+    // Global PQR oversight for super-admin (compliance view). Distinct
+    // from the support tickets view by parent.
+    {
+      path: '/super-admin/support/tickets',
+      title: 'Tickets',
+      parent: 'Soporte',
+      icon: 'headset',
+    },
+    {
+      path: '/super-admin/support/pqrs',
+      title: 'PQRS',
+      parent: 'Soporte',
+      icon: 'message-square',
+    },
+    {
+      path: '/super-admin/support/pqrs/:id',
+      title: 'Detalle de PQRS',
+      parent: 'PQRS',
+      icon: 'message-square',
+    },
+    // Org-admin aggregated PQR oversight across all stores in the org.
+    {
+      path: '/admin/support/pqrs',
+      title: 'PQRS',
+      parent: 'Atención al cliente',
+      icon: 'message-square',
+    },
+
     // Additional Inventory submodules
     {
       path: '/admin/inventory/transfers',

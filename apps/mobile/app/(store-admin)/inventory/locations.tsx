@@ -3,7 +3,6 @@ import {
   View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet, TextInput, Dimensions,
 } from 'react-native';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Ionicons } from '@expo/vector-icons';
 import { InventoryService } from '@/features/store/services/inventory.service';
 import { getNextPageParam } from '@/core/api/pagination';
 import type { CreateLocationDto, UpdateLocationDto } from '@/features/store/services/inventory.service';
@@ -17,18 +16,22 @@ import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
+import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
+import { COUNTRY_OPTIONS, LOCATION_STATS, LOCATION_TYPE_OPTIONS, LOCATION_TYPE_MAP } from '@/features/store/constants/inventory-labels';
 
 const TYPE_VARIANT: Record<LocationType, 'info' | 'warning' | 'default'> = {
   warehouse: 'info',
   store: 'warning',
   virtual: 'default',
-};
+  transit: 'info',
+} as any;
 
 const TYPE_ICON: Record<LocationType, string> = {
   warehouse: 'warehouse',
   store: 'store',
-  virtual: 'circle',
-};
+  virtual: 'package',
+  transit: 'truck',
+} as any;
 
 const STATE_VARIANT: Record<string, 'success' | 'default'> = {
   active: 'success',
@@ -118,7 +121,7 @@ function LocationCard({
             hitSlop={6}
             style={styles.cardActionMore}
           >
-            <Ionicons name="ellipsis-horizontal" size={16} color={colorScales.gray[500]} />
+            <Icon name="ellipsis" size={16} color={colorScales.gray[500]} />
           </Pressable>
         </View>
       </View>
@@ -180,9 +183,10 @@ export default function LocationsScreen() {
 
   const FILTER_OPTIONS: { label: string; value: LocationType | 'all' }[] = [
     { label: 'Todos los tipos', value: 'all' },
-    { label: LOCATION_TYPE_LABELS.warehouse, value: 'warehouse' },
-    { label: LOCATION_TYPE_LABELS.store, value: 'store' },
-    { label: LOCATION_TYPE_LABELS.virtual, value: 'virtual' },
+    { label: LOCATION_TYPE_OPTIONS[0].label, value: 'warehouse' },
+    { label: LOCATION_TYPE_OPTIONS[1].label, value: 'store' },
+    { label: LOCATION_TYPE_OPTIONS[2].label, value: 'virtual' },
+    { label: LOCATION_TYPE_OPTIONS[3].label, value: 'transit' },
   ];
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, refetch, isRefetching } = useInfiniteQuery({
@@ -293,8 +297,8 @@ export default function LocationsScreen() {
   const totals = {
     total: allLocations.length,
     warehouse: allLocations.filter((l) => l.type === 'warehouse').length,
-    store: allLocations.filter((l) => l.type === 'store').length,
-    virtual: allLocations.filter((l) => l.type === 'virtual').length,
+    active: allLocations.filter((l) => !!l.is_active).length,
+    inactive: allLocations.filter((l) => !l.is_active).length,
   };
 
   const handleEndReached = useCallback(() => {
@@ -367,28 +371,36 @@ export default function LocationsScreen() {
         style={styles.statsWrap}
         items={[
           {
-            label: 'Total',
+            label: LOCATION_STATS.total.label,
             value: totals.total,
-            icon: <Icon name="warehouse" size={14} color={colorScales.blue[600]} />,
-            description: 'Ubicaciones',
+            icon: INVENTORY_ICONS.locationsTotalStat,
+            iconBg: STAT_PALETTE.blue.bg,
+            iconColor: STAT_PALETTE.blue.color,
+            description: LOCATION_STATS.total.description,
           },
           {
-            label: LOCATION_TYPE_LABELS.warehouse,
+            label: LOCATION_STATS.warehouse.label,
             value: totals.warehouse,
-            icon: <Icon name="warehouse" size={14} color={colorScales.blue[600]} />,
-            description: 'Almacenes',
+            icon: INVENTORY_ICONS.warehouseStat,
+            iconBg: STAT_PALETTE.purple.bg,
+            iconColor: STAT_PALETTE.purple.color,
+            description: LOCATION_STATS.warehouse.description,
           },
           {
-            label: LOCATION_TYPE_LABELS.store,
-            value: totals.store,
-            icon: <Icon name="store" size={14} color={colorScales.amber[600]} />,
-            description: 'Tiendas',
+            label: LOCATION_STATS.active.label,
+            value: totals.active,
+            icon: INVENTORY_ICONS.activeStat,
+            iconBg: STAT_PALETTE.green.bg,
+            iconColor: STAT_PALETTE.green.color,
+            description: LOCATION_STATS.active.description,
           },
           {
-            label: LOCATION_TYPE_LABELS.virtual,
-            value: totals.virtual,
-            icon: <Icon name="circle" size={14} color={colorScales.blue[400]} />,
-            description: 'Virtuales',
+            label: LOCATION_STATS.inactive.label,
+            value: totals.inactive,
+            icon: INVENTORY_ICONS.inactiveStat,
+            iconBg: STAT_PALETTE.amber.bg,
+            iconColor: STAT_PALETTE.amber.color,
+            description: LOCATION_STATS.inactive.description,
           },
         ]}
       />
@@ -413,7 +425,7 @@ export default function LocationsScreen() {
               </View>
               <View style={styles.searchRow}>
                 <View style={styles.searchInputWrap}>
-                  <Ionicons name="search-outline" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
+                  <Icon name="search" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />
                   <TextInput
                     style={styles.searchInputField}
                     value={search}
@@ -426,7 +438,7 @@ export default function LocationsScreen() {
                   />
                   {search.length > 0 && (
                     <Pressable onPress={() => setSearch('')} hitSlop={8}>
-                      <Ionicons name="close" size={16} color={colorScales.gray[400]} />
+                      <Icon name="x" size={16} color={colorScales.gray[400]} />
                     </Pressable>
                   )}
                 </View>
@@ -462,14 +474,14 @@ export default function LocationsScreen() {
           <View style={styles.dropdown}>
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); handleRefresh(); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="sync-outline" size={18} color={colorScales.gray[500]} />
+                <Icon name="refresh" size={18} color={colorScales.gray[500]} />
               </View>
               <Text style={styles.dropdownItemText}>Refrescar</Text>
             </Pressable>
             <View style={styles.dropdownDivider} />
             <Pressable style={styles.dropdownItem} onPress={() => { setShowActions(false); setEditingId(null); setForm({ ...emptyForm }); setModalVisible(true); }}>
               <View style={styles.dropdownIconWrap}>
-                <Ionicons name="add-outline" size={18} color={colors.primary} />
+                <Icon name="plus" size={18} color={colors.primary} />
               </View>
               <Text style={styles.dropdownItemPrimary}>Nueva Ubicación</Text>
             </Pressable>
@@ -489,7 +501,7 @@ export default function LocationsScreen() {
                 onPress={() => handleAskDelete(cardMoreAnchor.item)}
               >
                 <View style={[styles.dropdownIconWrap, { backgroundColor: colorScales.red[50] }]}>
-                  <Ionicons name="trash" size={18} color={colorScales.red[600]} />
+                  <Icon name="trash-2" size={18} color={colorScales.red[600]} />
                 </View>
                 <Text style={styles.dropdownItemDanger}>Eliminar</Text>
               </Pressable>
@@ -516,7 +528,7 @@ export default function LocationsScreen() {
                 <Text style={styles.filterPopupSelectText}>
                   {FILTER_OPTIONS.find((o) => o.value === activeFilter)?.label ?? 'Todos los tipos'}
                 </Text>
-                <Ionicons name={showFilterTypeList ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
+                <Icon name={showFilterTypeList ? 'chevron-up' : 'chevron-down'} size={16} color={colorScales.gray[500]} />
               </Pressable>
               {showFilterTypeList && (
                 <View style={styles.filterPopupOptionsList}>
@@ -529,7 +541,7 @@ export default function LocationsScreen() {
                       <Text style={[styles.filterPopupOptionText, activeFilter === opt.value && styles.filterPopupOptionTextActive]}>
                         {opt.label}
                       </Text>
-                      {activeFilter === opt.value && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                      {activeFilter === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                     </Pressable>
                   ))}
                 </View>
@@ -554,7 +566,7 @@ export default function LocationsScreen() {
                 </Text>
               </View>
               <Pressable onPress={closeModal} hitSlop={8} style={styles.createCloseBtn}>
-                <Ionicons name="close" size={22} color={colorScales.gray[500]} />
+                <Icon name="x" size={22} color={colorScales.gray[500]} />
               </Pressable>
             </View>
 
@@ -591,27 +603,26 @@ export default function LocationsScreen() {
                   onPress={() => setShowTypeDropdown(!showTypeDropdown)}
                 >
                   <Text style={styles.typeDropdownText}>
-                    {form.type === 'warehouse' ? 'Almacén / Bodega' : form.type === 'store' ? 'Tienda / Local' : 'Virtual'}
+                    {LOCATION_TYPE_MAP[form.type as keyof typeof LOCATION_TYPE_MAP]?.label || 'Seleccionar'}
                   </Text>
-                  <Ionicons
+                  <Icon
                     name={showTypeDropdown ? 'chevron-up' : 'chevron-down'}
                     size={16}
                     color={colorScales.gray[500]}
-                    style={{ transform: showTypeDropdown ? [{ rotate: '0deg' }] : [] }}
                   />
                 </Pressable>
                 {showTypeDropdown && (
                   <View style={styles.typeDropdownList}>
-                    {(['warehouse', 'store', 'virtual'] as LocationType[]).map((t) => (
+                    {LOCATION_TYPE_OPTIONS.map((opt) => (
                       <Pressable
-                        key={t}
-                        style={[styles.typeDropdownOption, form.type === t && styles.typeDropdownOptionActive]}
-                        onPress={() => { setForm({ ...form, type: t }); setShowTypeDropdown(false); }}
+                        key={opt.value}
+                        style={[styles.typeDropdownOption, form.type === opt.value && styles.typeDropdownOptionActive]}
+                        onPress={() => { setForm({ ...form, type: opt.value }); setShowTypeDropdown(false); }}
                       >
-                        <Text style={[styles.typeDropdownOptionText, form.type === t && styles.typeDropdownOptionTextActive]}>
-                          {t === 'warehouse' ? 'Almacén / Bodega' : t === 'store' ? 'Tienda / Local' : 'Virtual'}
+                        <Text style={[styles.typeDropdownOptionText, form.type === opt.value && styles.typeDropdownOptionTextActive]}>
+                          {opt.label}
                         </Text>
-                        {form.type === t && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                        {form.type === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                       </Pressable>
                     ))}
                   </View>
@@ -652,14 +663,14 @@ export default function LocationsScreen() {
               <Pressable style={styles.direccionCard} onPress={() => setShowAddress(!showAddress)}>
                 <View style={styles.direccionCardLeft}>
                   <View style={styles.direccionIconWrap}>
-                    <Ionicons name="location-outline" size={18} color={colors.primary} />
+                    <Icon name="map-pin" size={18} color={colors.primary} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.direccionTitle}>Dirección Física</Text>
                     <Text style={styles.direccionLink}>Agregar ubicación geográfica específica</Text>
                   </View>
                 </View>
-                <Ionicons
+                <Icon
                   name={showAddress ? 'chevron-up' : 'chevron-down'}
                   size={16}
                   color={colorScales.gray[500]}
@@ -698,7 +709,7 @@ export default function LocationsScreen() {
                       <Text style={styles.typeDropdownText}>
                         {COUNTRIES.find((c) => c.code === addressFields.country)?.name ?? 'Seleccionar país'}
                       </Text>
-                      <Ionicons
+                      <Icon
                         name={showCountryDropdown ? 'chevron-up' : 'chevron-down'}
                         size={16}
                         color={colorScales.gray[500]}
@@ -715,7 +726,7 @@ export default function LocationsScreen() {
                             <Text style={[styles.typeDropdownOptionText, addressFields.country === c.code && styles.typeDropdownOptionTextActive]}>
                               {c.name}
                             </Text>
-                            {addressFields.country === c.code && <Ionicons name="checkmark" size={16} color={colors.primary} />}
+                            {addressFields.country === c.code && <Icon name="check" size={16} color={colors.primary} />}
                           </Pressable>
                         ))}
                       </View>
@@ -799,21 +810,14 @@ export default function LocationsScreen() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colorScales.gray[50] },
-  /* Card contenedor — mismo estilo que adjustments/transfers/movements */
+  /* Card contenedor — invisible: la lista de ubicaciones se ve directamente
+     sobre el fondo de la pantalla sin contenedor visual */
   cardContainer: {
     flex: 1,
     marginHorizontal: spacing[3],
     marginBottom: spacing[3],
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
+    backgroundColor: 'transparent',
+    overflow: 'visible',
   },
   statsWrap: {},
   titleRow: { paddingHorizontal: spacing[4], paddingTop: spacing[4], paddingBottom: spacing[2] },
