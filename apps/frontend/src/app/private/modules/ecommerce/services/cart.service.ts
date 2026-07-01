@@ -36,12 +36,24 @@ export interface CartItem {
   } | null;
 }
 
+export interface AppliedPromotion {
+  promotion_id: number;
+  name: string;
+  discount_amount: number;
+}
+
 export interface Cart {
   id: number;
   currency: string;
   subtotal: number;
   item_count: number;
   items: CartItem[];
+  /** Total promotional discount applied to the cart (0 when none). */
+  promotion_discount?: number;
+  /** Subtotal after applying promotional discounts. */
+  promotional_subtotal?: number;
+  /** Per-promotion breakdown of the applied discounts. */
+  applied_promotions?: AppliedPromotion[];
 }
 
 interface LocalCartItem {
@@ -180,6 +192,10 @@ export class CartService {
                 items: cartItems,
               };
               this.cart.set(cart);
+              // Enrich the guest cart with promotional discounts computed by
+              // the backend (localStorage carts are not persisted server-side,
+              // so we ask the stateless summary endpoint for the discount).
+              this.enrichGuestCartWithSummary(items);
             },
             error: () => this.emitEmptyCart(),
           });
@@ -428,6 +444,56 @@ export class CartService {
           }
         }),
       );
+  }
+
+  /**
+   * Stateless promotional summary for guest carts. localStorage carts are not
+   * persisted server-side, so we send the raw items and let the backend
+   * compute `promotion_discount`, `promotional_subtotal` and the applied
+   * promotions breakdown.
+   */
+  getCartSummary(
+    items: { product_id: number; product_variant_id?: number | null; quantity: number }[],
+  ): Observable<any> {
+    return this.http.post(
+      `${this.api_url}/summary`,
+      { items },
+      { headers: this.getHeaders() },
+    );
+  }
+
+  /**
+   * Fetches the promotional summary for the current guest cart and merges the
+   * discount fields into the local cart signal without altering item lines.
+   */
+  private enrichGuestCartWithSummary(items: LocalCartItem[]): void {
+    const summaryItems = items.map((i) => ({
+      product_id: i.product_id,
+      product_variant_id: i.product_variant_id ?? null,
+      quantity: i.quantity,
+    }));
+    if (summaryItems.length === 0) return;
+
+    this.getCartSummary(summaryItems)
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: (response: any) => {
+          const data = response?.data ?? response;
+          const current = this.cart();
+          if (!current || !data) return;
+          this.cart.set({
+            ...current,
+            promotion_discount: Number(data.promotion_discount) || 0,
+            promotional_subtotal:
+              data.promotional_subtotal != null
+                ? Number(data.promotional_subtotal)
+                : current.subtotal,
+            applied_promotions: data.applied_promotions ?? [],
+          });
+        },
+        // On failure keep the cart as-is (no discount line shown).
+        error: () => {},
+      });
   }
 
   // ========== UNIFIED PUBLIC METHODS ==========

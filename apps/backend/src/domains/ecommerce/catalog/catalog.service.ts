@@ -463,7 +463,21 @@ export class CatalogService {
       throw new NotFoundException('Product not found');
     }
 
-    return await this.mapProductDetailToResponse(product, reviews_enabled);
+    // Resolve the active auto-apply promotion for this single product reusing
+    // the SAME batch helper the listing uses, so the detail badge/price match
+    // the card byte-for-byte (identical unit_price + category_ids inputs).
+    // Never break the detail because of promotions: the helper already
+    // swallows errors and degrades to an empty map.
+    const activePromotionsByProductId =
+      await this.resolveActivePromotionsForListing([product]);
+    const activePromotion =
+      activePromotionsByProductId.get(product.id) ?? null;
+
+    return await this.mapProductDetailToResponse(
+      product,
+      reviews_enabled,
+      activePromotion,
+    );
   }
 
   async getCategories() {
@@ -730,6 +744,7 @@ export class CatalogService {
   private async mapProductDetailToResponse(
     product: any,
     reviews_enabled = true,
+    activePromotion: ActiveProductPromotion | null = null,
   ) {
     const reviews = reviews_enabled ? product.reviews || [] : [];
     let avg_rating = 0;
@@ -786,6 +801,7 @@ export class CatalogService {
       is_on_sale: product.is_on_sale,
       is_featured: product.is_featured,
       final_price: this.calculateFinalPrice(product),
+      active_promotion: activePromotion,
       sku: product.sku,
       // Mantener compatibilidad: ahora reflejan stock_levels.
       stock_quantity: productAvailableStock,

@@ -802,10 +802,13 @@ export class PromotionFormModalComponent {
     // Phase 3a: quantity_tiered vs flat payload shaping.
     if (dto.rule_type === 'quantity_tiered') {
       // The backend keeps the top-level `type`/`value` columns non-nullable
-      // for legacy consumers; the engine ignores them when tiered and reads
-      // each row's `type`/`value` instead. We send them as-is (the form
-      // values are optional in this mode) and append the freshly built
-      // tiers array.
+      // (`value` is validated as @IsNumber @Min(0), NOT optional). In tiered
+      // mode the form leaves `value` as null, which would fail validation
+      // (400) even though the engine ignores the parent value and reads each
+      // row's `type`/`value` instead. We coerce the parent `value` to 0 to
+      // satisfy the DTO contract while keeping the flat path untouched, then
+      // append the freshly built tiers array.
+      dto.value = 0;
       dto.quantity_tiers = this.quantityTiers.controls.map((ctrl) => {
         const v = (ctrl as FormGroup).getRawValue();
         return {

@@ -52,6 +52,9 @@ export class PromotionsService {
         take: limit,
         orderBy: { [sort_by]: sort_order },
         include: {
+          promotion_quantity_tiers: {
+            orderBy: { sort_order: 'asc' },
+          },
           _count: {
             select: {
               promotion_products: true,
@@ -78,6 +81,9 @@ export class PromotionsService {
     const promotion = await this.prisma.promotions.findFirst({
       where: { id },
       include: {
+        promotion_quantity_tiers: {
+          orderBy: { sort_order: 'asc' },
+        },
         promotion_products: {
           include: {
             products: {
@@ -152,6 +158,9 @@ export class PromotionsService {
         OR: [{ end_date: null }, { end_date: { gte: now } }],
       },
       include: {
+        promotion_quantity_tiers: {
+          orderBy: { sort_order: 'asc' },
+        },
         promotion_products: true,
         promotion_categories: true,
       },
