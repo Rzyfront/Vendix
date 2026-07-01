@@ -242,6 +242,85 @@ export class AutoEntryService {
    * Validates accounts exist, finds the appropriate fiscal period,
    * creates a balanced entry and auto-posts it.
    */
+  /**
+   * Garantiza (crea si falta) el período fiscal MENSUAL abierto que contiene
+   * `date`, para la organización/entidad contable dada. Idempotente y
+   * tolerante a carreras: si otro asiento concurrente ya lo creó, re-busca y
+   * reutiliza el existente en vez de duplicar.
+   *
+   * Los bordes se calculan en UTC para coincidir con la convención de
+   * almacenamiento de `fiscal_periods` (Timestamp sin zona) usada por el
+   * resto del módulo. El nombre sigue el formato `YYYY-MM`.
+   */
+  private async ensureMonthlyFiscalPeriod(
+    organization_id: number,
+    accounting_entity_id: number,
+    date: Date,
+  ) {
+    const year = date.getUTCFullYear();
+    const monthIndex = date.getUTCMonth(); // 0-based
+    const start_date = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
+    const end_date = new Date(
+      Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999),
+    );
+    const name = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+
+    // `fiscal_periods` no tiene `store_id`: se escribe sin scope de tienda
+    // (org/entidad van explícitos), igual que la resolución de accounting_entities.
+    const db = this.prisma.withoutScope();
+    try {
+      const created = await db.fiscal_periods.create({
+        data: {
+          organization_id,
+          accounting_entity_id,
+          name,
+          start_date,
+          end_date,
+          status: 'open',
+        },
+      });
+      this.logger.log(
+        `Auto-created open fiscal period '${name}' (id ${created.id}) for ` +
+          `organization #${organization_id} entity #${accounting_entity_id}`,
+      );
+      return created;
+    } catch (error) {
+      // Carrera / solapamiento: otro flujo concurrente ya abrió el período.
+      // Re-buscar cualquier período abierto que cubra la fecha y reutilizarlo.
+      const existing = await db.fiscal_periods.findFirst({
+        where: {
+          organization_id,
+          OR: [{ accounting_entity_id }, { accounting_entity_id: null }],
+          status: 'open',
+          start_date: { lte: date },
+          end_date: { gte: date },
+        },
+        orderBy: { accounting_entity_id: 'desc' },
+      });
+      if (existing) return existing;
+
+      // No hay período abierto que cubra la fecha, pero el create falló. Caso
+      // típico: ya existe un período '${name}' para la entidad en estado
+      // CERRADO (unique parcial entity+name). Postear en un período cerrado es
+      // incorrecto, así que fallamos con un mensaje explícito en vez del error
+      // opaco de constraint — el asiento NO debe perderse en silencio.
+      const sameName = await db.fiscal_periods.findFirst({
+        where: { accounting_entity_id, name },
+        select: { id: true, status: true },
+      });
+      const detail = sameName
+        ? `already exists (id ${sameName.id}, status ${sameName.status}) but does not cover the entry date`
+        : (error as Error).message;
+      this.logger.error(
+        `Failed to auto-create fiscal period '${name}' for organization ` +
+          `#${organization_id}: ${detail}`,
+      );
+      throw new Error(
+        `Cannot post auto-entry: fiscal period '${name}' ${detail}`,
+      );
+    }
+  }
+
   async createAutoEntry(event_data: AutoEntryEventData) {
     const {
       source_type,
@@ -331,7 +410,7 @@ export class AutoEntryService {
     }
 
     // Find the open fiscal period for the entry date
-    const fiscal_period = await this.prisma.fiscal_periods.findFirst({
+    let fiscal_period = await this.prisma.fiscal_periods.findFirst({
       where: {
         organization_id,
         OR: [
@@ -345,13 +424,16 @@ export class AutoEntryService {
       orderBy: { accounting_entity_id: 'desc' },
     });
 
+    // Auto-apertura del período mensual que contiene `entry_date` cuando no
+    // existe uno abierto. Cierra el gap de INTEGRIDAD por el que, al rotar el
+    // mes sin período creado, `createAutoEntry` lanzaba y el try/catch del
+    // AccountingEventsListener tragaba el fallo → el asiento se perdía en
+    // silencio (venta/cierre/nómina exitosos pero SIN contabilizar).
     if (!fiscal_period) {
-      this.logger.error(
-        `No open fiscal period found for date ${entry_date.toISOString()} ` +
-          `in organization #${organization_id}`,
-      );
-      throw new Error(
-        `No open fiscal period found for date ${entry_date.toISOString()}`,
+      fiscal_period = await this.ensureMonthlyFiscalPeriod(
+        organization_id,
+        accounting_entity.id,
+        entry_date,
       );
     }
 
