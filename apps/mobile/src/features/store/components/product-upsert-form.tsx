@@ -28,6 +28,7 @@ import { Spinner } from '@/shared/components/spinner/spinner';
 import { StickyHeader } from '@/shared/components/sticky-header/sticky-header';
 import { Textarea } from '@/shared/components/textarea/textarea';
 import { TaxCreateModal } from '@/features/store/components/tax-create-modal';
+import { ImageSourceModal, type UploadedImage } from '@/features/store/components/image-source-modal';
 import { Toggle } from '@/shared/components/toggle/toggle';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
@@ -198,6 +199,8 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [taxModalOpen, setTaxModalOpen] = useState(false);
   const [localTaxes, setLocalTaxes] = useState<TaxCategory[]>([]);
+  const [imageSourceOpen, setImageSourceOpen] = useState(false);
+  const [productImages, setProductImages] = useState<string[]>([]);
 
   const { data: product, isLoading: productLoading } = useQuery({
     queryKey: ['product', productId],
@@ -287,6 +290,17 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       })),
       stock_by_location: stockByLocation,
     });
+
+    // Cargar imágenes existentes del producto (si las hay).
+    // El backend devuelve `product_images` con `url` por registro.
+    const existingImages = (product.product_images || [])
+      .map((img) => img.url)
+      .filter((url): url is string => Boolean(url));
+    if (existingImages.length > 0) {
+      setProductImages(existingImages);
+    } else {
+      setProductImages([]);
+    }
   }, [product]);
 
   const finalPreview = useMemo(() => {
@@ -470,6 +484,10 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       brand_id: form.brand_id,
       category_ids: form.category_ids.length > 0 ? form.category_ids : undefined,
       tax_category_ids: form.tax_category_ids.length > 0 ? form.tax_category_ids : undefined,
+      // Imágenes del producto. En create enviamos las URIs locales que
+      // el backend descarga y guarda. En update las enviamos como
+      // image_urls (el backend reconcilia con product_images existentes).
+      image_urls: productImages.length > 0 ? productImages : undefined,
       variants,
     };
 
@@ -893,26 +911,73 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             title="Imágenes del Producto"
             icon="image"
             right={
-              <Text style={styles.imageCount}>0/5</Text>
+              <Text style={styles.imageCount}>{productImages.length}/5</Text>
             }
           >
-            <View style={styles.imageMainPlaceholder}>
+            <Pressable
+              onPress={() => setImageSourceOpen(true)}
+              style={({ pressed }) => [
+                styles.imageMainPlaceholder,
+                pressed && { borderColor: colors.primary },
+              ]}
+            >
               <View style={styles.imageMainCircle}>
                 <Icon name="image" size={24} color={colors.text.muted} style={{ opacity: 0.2 }} />
               </View>
-              <Text style={styles.imageMainText}>Sin imágenes</Text>
+              <Text style={styles.imageMainText}>
+                {productImages.length === 0 ? 'Sin imágenes' : `${productImages.length} imagen${productImages.length === 1 ? '' : 'es'}`}
+              </Text>
               <Text style={styles.imageMainHint}>Toca para agregar</Text>
-            </View>
+            </Pressable>
             <View style={styles.imageThumbsRow}>
-              <Pressable
-                onPress={() => toastSuccess('Subida de imágenes próximamente')}
-                style={({ pressed }) => [styles.imageThumbAdd, pressed && { opacity: 0.7 }]}
-              >
-                <Icon name="image-plus" size={20} color={colors.text.muted} />
-                <Text style={styles.imageThumbAddText}>Agregar</Text>
-              </Pressable>
+              {productImages.map((uri, index) => (
+                <Pressable
+                  key={`${uri}-${index}`}
+                  onPress={() => {
+                    // Quitar imagen con tap largo
+                    setProductImages((prev) => prev.filter((_, i) => i !== index));
+                  }}
+                  onLongPress={() => {
+                    setProductImages((prev) => prev.filter((_, i) => i !== index));
+                  }}
+                  style={styles.imageThumb}
+                >
+                  <Icon name="image" size={20} color={colors.primary} />
+                  <Text style={styles.imageThumbText} numberOfLines={1}>
+                    {`Imagen ${index + 1}`}
+                  </Text>
+                </Pressable>
+              ))}
+              {productImages.length < 5 && (
+                <Pressable
+                  onPress={() => setImageSourceOpen(true)}
+                  style={({ pressed }) => [
+                    styles.imageThumbAdd,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Icon name="image-plus" size={20} color={colors.text.muted} />
+                  <Text style={styles.imageThumbAddText}>Agregar</Text>
+                </Pressable>
+              )}
             </View>
           </Section>
+
+          <ImageSourceModal
+            visible={imageSourceOpen}
+            onClose={() => setImageSourceOpen(false)}
+            remainingSlots={Math.max(0, 5 - productImages.length)}
+            onConfirm={(image: UploadedImage) => {
+              setProductImages((prev) => {
+                if (prev.length >= 5) {
+                  toastError('Máximo 5 imágenes por producto');
+                  return prev;
+                }
+                return [...prev, image.uri];
+              });
+              toastSuccess('Imagen agregada');
+            }}
+          />
 
           {/* Precios Multi-Tarifa (espejo exacto del web: header simple + setting-toggle-row) */}
           <Section title="Precios Multi-Tarifa" icon="tags">
@@ -1759,6 +1824,25 @@ const styles = StyleSheet.create({
     fontSize: 9,
     color: colorScales.gray[400],
     marginTop: 2,
+  },
+  imageThumb: {
+    flexShrink: 0,
+    width: 64,
+    height: 64,
+    backgroundColor: colorScales.green[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: spacing[1],
+  },
+  imageThumbText: {
+    fontSize: 9,
+    color: colors.primary,
+    fontWeight: '600' as any,
+    marginTop: 2,
+    maxWidth: 56,
   },
 
   // ── Inventario / Stock (espejo web lg:hidden) ────────────────────────────
