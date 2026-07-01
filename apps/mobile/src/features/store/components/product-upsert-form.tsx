@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService, ProductService } from '@/features/store/services';
@@ -914,21 +914,52 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               <Text style={styles.imageCount}>{productImages.length}/5</Text>
             }
           >
-            <Pressable
-              onPress={() => setImageSourceOpen(true)}
-              style={({ pressed }) => [
-                styles.imageMainPlaceholder,
-                pressed && { borderColor: colors.primary },
-              ]}
-            >
-              <View style={styles.imageMainCircle}>
-                <Icon name="image" size={24} color={colors.text.muted} style={{ opacity: 0.2 }} />
-              </View>
-              <Text style={styles.imageMainText}>
-                {productImages.length === 0 ? 'Sin imágenes' : `${productImages.length} imagen${productImages.length === 1 ? '' : 'es'}`}
-              </Text>
-              <Text style={styles.imageMainHint}>Toca para agregar</Text>
-            </Pressable>
+            <View style={styles.imageMainWrapper}>
+              {productImages.length > 0 ? (
+                <Pressable
+                  onPress={() => setImageSourceOpen(true)}
+                  style={({ pressed }) => [
+                    styles.imageMainFilled,
+                    pressed && { opacity: 0.85 },
+                  ]}
+                >
+                  <Image
+                    source={{ uri: productImages[0] }}
+                    style={styles.imageMainImg}
+                    resizeMode="cover"
+                  />
+                  {/* Botón Eliminar (mirror web: top-2 right-2 absolute + red-500/90 + trash-2) */}
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setProductImages((prev) => prev.filter((_, i) => i !== 0));
+                    }}
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.imageMainDelete,
+                      pressed && { backgroundColor: 'rgba(220, 38, 38, 1)' },
+                    ]}
+                    accessibilityLabel="Eliminar imagen"
+                  >
+                    <Icon name="trash-2" size={14} color={colors.background} />
+                  </Pressable>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => setImageSourceOpen(true)}
+                  style={({ pressed }) => [
+                    styles.imageMainPlaceholder,
+                    pressed && { borderColor: colors.primary },
+                  ]}
+                >
+                  <View style={styles.imageMainCircle}>
+                    <Icon name="image" size={24} color={colors.text.muted} style={{ opacity: 0.2 }} />
+                  </View>
+                  <Text style={styles.imageMainText}>Sin imágenes</Text>
+                  <Text style={styles.imageMainHint}>Toca para agregar</Text>
+                </Pressable>
+              )}
+            </View>
             <View style={styles.imageThumbsRow}>
               {productImages.map((uri, index) => (
                 <Pressable
@@ -1782,6 +1813,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: spacing[4],
+  },
+  imageMainWrapper: {
+    alignItems: 'center',
+  },
+  imageMainFilled: {
+    width: '100%',
+    maxWidth: 280,
+    aspectRatio: 1,
+    alignSelf: 'center',
+    backgroundColor: colorScales.gray[100],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  imageMainImg: {
+    width: '100%',
+    height: '100%',
+  },
+  imageMainDelete: {
+    position: 'absolute',
+    top: spacing[2],
+    right: spacing[2],
+    padding: 6,
+    backgroundColor: 'rgba(220, 38, 38, 0.9)',
+    borderRadius: 9999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   imageMainCircle: {
     width: 48,
