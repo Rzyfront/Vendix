@@ -432,9 +432,16 @@ export class ScheduleManagementComponent {
       last_name: '',
       document_type: 'CC',
       document_number: '',
+      // base_salary required by CreateEmployeeDto — must reset to 0
+      // to keep the type aligned with the signal declaration above.
+      base_salary: 0,
       position: '',
       hire_date: new Date().toISOString().split('T')[0],
-      contract_type: 'service',
+      contract_type: 'service' as
+        | 'indefinite'
+        | 'fixed_term'
+        | 'service'
+        | 'apprentice',
       email: '',
       phone: '',
     });
