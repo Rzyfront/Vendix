@@ -21,6 +21,11 @@ export interface SelectorProps<T = string | number> {
   /** Marca el campo como requerido. Muestra un asterisco rojo en el label. */
   required?: boolean;
   /**
+   * Descripción pequeña debajo del label (mirror web mobile).
+   * Ej: "Como la recibes del proveedor." en el selector de Compra UoM.
+   */
+  description?: string;
+  /**
    * Texto del tooltip mostrado al lado del label (mirror web).
    * Renderiza un ícono help-circle que al tap muestra el texto en un Alert.
    */
@@ -37,6 +42,7 @@ export function Selector<T = string | number>({
   error,
   disabled = false,
   required = false,
+  description,
   tooltip,
   style,
 }: SelectorProps<T>) {
@@ -92,6 +98,7 @@ export function Selector<T = string | number>({
         </Text>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.text.secondary} />
       </Pressable>
+      {description && <Text style={styles.description}>{description}</Text>}
       {error && <Text style={styles.errorText}>{error}</Text>}
 
       <Modal
@@ -173,6 +180,11 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: typography.fontSize.xs,
     color: colors.error,
+    marginTop: spacing[1],
+  },
+  description: {
+    fontSize: 10,
+    color: colorScales.gray[500],
     marginTop: spacing[1],
   },
   backdrop: {

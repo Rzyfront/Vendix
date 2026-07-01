@@ -1,5 +1,16 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Image,
+  useWindowDimensions,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService, ProductService } from '@/features/store/services';
@@ -82,8 +93,21 @@ interface ProductFormState {
   available_for_ecommerce: boolean;
   is_featured: boolean;
   allow_pos_price_override: boolean;
+  // Restaurant Suite toggles (Fase A additive, exposed in Fase B)
+  is_sellable?: boolean;
+  is_ingredient?: boolean;
+  is_combo?: boolean;
+  is_batch_produced?: boolean;
+  // Unidades de medida para Restaurant Suite (sólo se usan cuando
+  // `is_ingredient = true`).
+  purchase_uom_id?: number;
+  stock_uom_id?: number;
   state: ProductState;
-  brand_id?: number;
+  // Mirror web: en el form la marca se maneja como array
+  // (`brand_ids`) para usar MultiSelector. En el DTO se serializa
+  // como `brand_id` (primer elemento) para mantener compatibilidad
+  // con el backend.
+  brand_ids?: number[];
   category_ids: number[];
   tax_category_ids: number[];
   has_variants: boolean;
@@ -140,6 +164,22 @@ const PRICING_LABELS: Record<PricingType, { cost: string; base: string; type: st
   weight: { cost: 'Costo por kg', base: 'Precio por kg (PVP)', type: 'Tipo de Venta' },
 };
 
+/**
+ * Unidades de medida disponibles para configurar insumos
+ * (Restaurant Suite). Mirror del web: las opciones se cargan estáticas
+ * porque coinciden con las semillas base del backend
+ * (`product_stock_uoms`). Cuando el usuario selecciona "Es insumo"
+ * aparecen dos selectores (Compra / Stock) con estas opciones.
+ */
+const UOM_OPTIONS: { label: string; value: number }[] = [
+  { label: 'Gramo (g)', value: 1 },
+  { label: 'Kilogramo (kg)', value: 3 },
+  { label: 'Miligramo (mg)', value: 2 },
+  { label: 'Mililitro (ml)', value: 4 },
+  { label: 'Litro (L)', value: 5 },
+  { label: 'Unidad (unit)', value: 6 },
+];
+
 const initialForm: ProductFormState = {
   name: '',
   description: '',
@@ -158,8 +198,18 @@ const initialForm: ProductFormState = {
   available_for_ecommerce: true,
   is_featured: false,
   allow_pos_price_override: false,
+  // Restaurant Suite defaults: al crear un producto, los flags de
+  // restaurante (Fase A) arrancan en false hasta que el usuario los
+  // active explícitamente. is_sellable por defecto true para no
+  // romper la UX existente (los productos son vendibles por default).
+  is_sellable: true,
+  is_ingredient: false,
+  is_combo: false,
+  is_batch_produced: false,
+  purchase_uom_id: undefined,
+  stock_uom_id: undefined,
   state: 'active',
-  brand_id: undefined,
+  brand_ids: [],
   category_ids: [],
   tax_category_ids: [],
   has_variants: false,
@@ -225,6 +275,9 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const [localTaxes, setLocalTaxes] = useState<TaxCategory[]>([]);
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
   const [imageEditorUri, setImageEditorUri] = useState<string | null>(null);
+  // Breakpoint para UoM grid (1 col en mobile, 1fr_auto_1fr en md+).
+  const { width: screenW } = useWindowDimensions();
+  const isMdUp = screenW >= 768;
   const [productImages, setProductImages] = useState<string[]>([]);
   // Flag para no sobrescribir `price_tier_overrides` cada vez que se
   // re-fetchea el producto. Sólo hidratamos desde el backend la primera
@@ -319,12 +372,21 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       available_for_ecommerce: product.available_for_ecommerce !== false,
       is_featured: !!ext.is_featured,
       allow_pos_price_override: !!ext.allow_pos_price_override,
+      // Restaurant Suite toggles (Fase A additive, exposed in Fase B)
+      is_sellable: !!(product as any).is_sellable,
+      is_ingredient: !!(product as any).is_ingredient,
+      is_combo: !!(product as any).is_combo,
+      is_batch_produced: !!(product as any).is_batch_produced,
+      purchase_uom_id: (product as any).purchase_uom_id ?? undefined,
+      stock_uom_id: (product as any).stock_uom_id ?? undefined,
       // Hidratamos el flag de multi-tarifa desde el producto para que
       // la sección quede visible al re-editar un producto que ya
       // tenía tarifas configuradas.
       has_multiple_price_tiers: !!(product as any).has_multiple_price_tiers,
       state: product.state,
-      brand_id: product.brand_id ?? undefined,
+      // brand_ids es un array en el form. Lo hidratamos desde el
+      // `brand_id` (single) del producto para mantener el binding.
+      brand_ids: product.brand_id ? [product.brand_id] : [],
       category_ids: product.categories?.map((category) => category.id) ?? [],
       tax_category_ids: product.product_tax_assignments?.map((assignment) => assignment.tax_category_id) ?? [],
       enabled_price_tier_ids: ext.enabled_price_tier_ids ?? [],
@@ -699,6 +761,16 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       available_for_ecommerce: form.available_for_ecommerce,
       is_featured: form.is_featured,
       allow_pos_price_override: form.allow_pos_price_override,
+      // Restaurant Suite toggles (Fase A additive, exposed in Fase B)
+      is_sellable: form.is_sellable,
+      is_ingredient: form.is_ingredient,
+      is_combo: form.is_combo,
+      is_batch_produced: form.is_batch_produced,
+      // UoM sólo se envían si el insumo está activo (mirror web: el
+      // card "Unidad de medida del insumo" sólo aparece cuando
+      // is_ingredient = true).
+      purchase_uom_id: form.is_ingredient ? form.purchase_uom_id : undefined,
+      stock_uom_id: form.is_ingredient ? form.stock_uom_id : undefined,
       has_multiple_price_tiers: form.has_multiple_price_tiers,
       enabled_price_tier_ids:
         form.has_multiple_price_tiers && (form.enabled_price_tier_ids?.length ?? 0) > 0
@@ -714,7 +786,9 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       state: form.state,
       pricing_type: form.pricing_type,
       product_type: form.product_type,
-      brand_id: form.brand_id,
+      // brand_ids es un array en el form. El DTO del backend espera
+      // `brand_id` (single, primer elemento).
+      brand_id: form.brand_ids?.[0],
       category_ids: form.category_ids.length > 0 ? form.category_ids : undefined,
       tax_category_ids: form.tax_category_ids.length > 0 ? form.tax_category_ids : undefined,
       // Imágenes del producto. En create enviamos las URIs locales que
@@ -973,7 +1047,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   const trimmedSku = form.sku.trim();
                   if (trimmedSku) payload.sku = trimmedSku;
                   if (form.category_ids[0]) payload.category_id = form.category_ids[0];
-                  if (form.brand_id) payload.brand_id = form.brand_id;
+                  if (form.brand_ids?.[0]) payload.brand_id = form.brand_ids[0];
                   aiMutation.mutate(payload);
                 }}
                 disabled={aiMutation.isPending || !form.name.trim()}
@@ -1604,6 +1678,132 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               />
             </View>
 
+            {/* Restaurant Suite toggles (Fase A additive, exposed in
+                Fase B). Se muestran en una sub-sección entre los
+                toggles de visibilidad y los de operativa (mirror web). */}
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_sellable}
+                onChange={(v) => updateField('is_sellable', v)}
+                label="Vendible"
+                description="Visible y vendible en carta, POS y ecommerce"
+              />
+            </View>
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_ingredient}
+                onChange={(v) => updateField('is_ingredient', v)}
+                label="Es insumo"
+                description="Apto para usarse como componente de recetas (BOM)"
+              />
+            </View>
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_combo}
+                onChange={(v) => updateField('is_combo', v)}
+                label="Es combo / menú fijo"
+                description="Plato que agrupa varios productos a precio fijo"
+              />
+            </View>
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_batch_produced}
+                onChange={(v) => updateField('is_batch_produced', v)}
+                label="Producido en lote"
+                description="Sub-receta que se produce y mantiene stock propio"
+              />
+            </View>
+
+            {/* Card "Unidad de medida del insumo": aparece debajo de
+                "Es insumo" cuando el toggle está activo. Permite elegir
+                la unidad de compra y la unidad mínima de stock. */}
+            {form.is_ingredient && (
+              <View style={styles.uomCard}>
+                <View style={styles.uomHeader}>
+                  <Icon name="package" size={14} color={colors.primary} />
+                  <Text style={styles.uomHeaderText}>
+                    Unidad de medida del insumo
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.uomGrid,
+                    isMdUp && styles.uomGridRow,
+                  ]}
+                >
+                  <Selector
+                    label="Compra (presentación)"
+                    description="Como la recibes del proveedor."
+                    placeholder="Ej. Litro, Kilogramo..."
+                    value={form.purchase_uom_id}
+                    onChange={(v) => updateField('purchase_uom_id', v as number)}
+                    options={UOM_OPTIONS}
+                  />
+                  <View style={styles.uomArrow}>
+                    <Icon
+                      name="arrow-right"
+                      size={18}
+                      color={colors.primary}
+                      style={[
+                        styles.uomArrowIcon,
+                        isMdUp ? styles.uomArrowIconNormal : styles.uomArrowIconRotated,
+                      ]}
+                    />
+                    <Text style={styles.uomArrowText}>Elige ambas unidades</Text>
+                  </View>
+                  <Selector
+                    label="Stock (unidad mínima)"
+                    description="En la que se descuenta el inventario."
+                    placeholder="Elige primero la compra"
+                    value={form.stock_uom_id}
+                    onChange={(v) => updateField('stock_uom_id', v as number)}
+                    options={UOM_OPTIONS.filter(
+                      (u) => !form.purchase_uom_id || u.value === form.purchase_uom_id,
+                    )}
+                    disabled={!form.purchase_uom_id}
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Card "Producido en lote": aparece debajo de "Producido en
+                lote" cuando el toggle está activo. Informa que el insumo
+                se gestiona desde Operaciones › Producción y permite ir
+                directamente a esa pantalla. Mirror exacto del web:
+                `flex flex-col sm:flex-row sm:items-center gap-3 mt-1`. */}
+            {form.is_batch_produced && (
+              <View
+                style={[
+                  styles.batchCard,
+                  !isMdUp && styles.batchCardColumn,
+                ]}
+              >
+                <View style={styles.batchCardContent}>
+                  <Icon
+                    name="package-check"
+                    size={18}
+                    color={colors.primary}
+                    style={{ marginTop: 2, marginRight: spacing[2], flexShrink: 0 }}
+                  />
+                  <Text style={styles.batchCardText}>
+                    Este insumo se produce por lote en{' '}
+                    <Text style={styles.batchCardTextBold}>
+                      Operaciones › Producción
+                    </Text>
+                    .
+                  </Text>
+                </View>
+                <Button
+                  title="Ir a Producción"
+                  variant="outline"
+                  onPress={() => router.push('/(store-admin)/production')}
+                  leftIcon={
+                    <Icon name="arrow-right" size={16} color={colors.primary} />
+                  }
+                />
+              </View>
+            )}
+
             <View style={styles.settingToggleRow}>
               <Toggle
                 value={!!form.has_variants}
@@ -1638,74 +1838,137 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </View>
           </Section>
 
-          <Section title="Clasificación" subtitle="Categorías, marca e impuestos" icon="tag">
-            <Selector
-              label="Marca"
-              value={form.brand_id}
-              onChange={(v) => updateField('brand_id', v as number)}
-              options={[
-                { label: 'Sin marca', value: undefined as any },
-                ...((brands as Brand[]) || []).map((b) => ({ label: b.name, value: b.id })),
-              ]}
-              placeholder="Seleccionar marca"
-            />
-            <MultiSelector
-              label="Categorías"
-              values={form.category_ids}
-              onChange={(v) => updateField('category_ids', v)}
-              options={((categories as ProductCategory[]) || []).map((c) => ({ label: c.name, value: c.id }))}
-              placeholder="Seleccionar categorías"
-            />
-            <MultiSelector
-              label="Impuestos"
-              values={form.tax_category_ids}
-              onChange={(v) => updateField('tax_category_ids', v)}
-              options={allTaxes.map((t) => ({ label: t.name, value: t.id }))}
-              placeholder="Seleccionar impuestos"
-            />
-
-            {/* Dimensiones y Peso (espejo del bloque 'Dimensiones y Peso' del web)
-                Header con ícono + título, grid 2x2 en mobile (4 cols en md+). */}
-            <View style={styles.dimensionsHeader}>
-              <Icon name="package" size={typography.fontSize.base} color={colors.primary} />
-              <Text style={styles.dimensionsTitle}>Dimensiones y Peso</Text>
+          {/* Clasificación y Medidas (espejo exacto del web).
+              - Header: icon tag + título "Clasificación" + span gris
+                " y Medidas".
+              - Grid 1 col mobile / 2 col md+: Marca (MultiSelector) +
+                Categorías (MultiSelector), cada una con un botón "+"
+                outline 42x42 para crear nueva marca/categoría.
+              - Separator border-t border-gray-100 con pt-4.
+              - Sub-sección "Dimensiones y Peso" (icon package + título
+                text-sm font-semibold text-gray-700).
+              - Grid 2 col mobile / 4 col md+: 4 inputs (Largo, Ancho,
+                Alto en cm + Peso en kg). */}
+          <Section title="" icon="tag">
+            <View style={styles.classificationHeader}>
+              <Text style={styles.classificationTitle}>
+                Clasificación{' '}
+                <Text style={styles.classificationTitleMuted}>y Medidas</Text>
+              </Text>
             </View>
-            <View style={styles.dimensionsGrid}>
-              <View style={styles.dimensionCell}>
-                <Input
-                  label="Largo (cm)"
-                  value={form.length || ''}
-                  onChangeText={(value) => updateField('length', value)}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                />
+
+            <View
+              style={[
+                styles.classificationGrid,
+                isMdUp && styles.classificationGridRow,
+              ]}
+            >
+              <View style={styles.classificationFieldRow}>
+                <View style={{ flex: 1 }}>
+                  <MultiSelector
+                    label="Marca"
+                    placeholder="Seleccionar marca..."
+                    tooltip="Marca del producto. Se usa para filtros en catálogo y reportes de ventas."
+                    values={form.brand_ids ?? []}
+                    onChange={(v) => updateField('brand_ids', v)}
+                    options={((brands as Brand[]) || []).map((b) => ({ label: b.name, value: b.id }))}
+                    searchable
+                    searchPlaceholder="Buscar..."
+                  />
+                </View>
+                <Pressable
+                  onPress={() => toastSuccess('Próximamente: crear marca')}
+                  hitSlop={6}
+                  style={styles.addIconButton}
+                  accessibilityLabel="Crear nueva marca"
+                >
+                  <Icon name="plus" size={20} color={colors.primary} />
+                </Pressable>
               </View>
-              <View style={styles.dimensionCell}>
-                <Input
-                  label="Ancho (cm)"
-                  value={form.width || ''}
-                  onChangeText={(value) => updateField('width', value)}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                />
+
+              <View style={styles.classificationFieldRow}>
+                <View style={{ flex: 1 }}>
+                  <MultiSelector
+                    label="Categorías"
+                    placeholder="Seleccionar categorías..."
+                    tooltip="Categorías donde aparecerá el producto. Un producto puede pertenecer a varias a la vez."
+                    values={form.category_ids}
+                    onChange={(v) => updateField('category_ids', v)}
+                    options={((categories as ProductCategory[]) || []).map((c) => ({ label: c.name, value: c.id }))}
+                    searchable
+                    searchPlaceholder="Buscar..."
+                  />
+                </View>
+                <Pressable
+                  onPress={() => toastSuccess('Próximamente: crear categoría')}
+                  hitSlop={6}
+                  style={styles.addIconButton}
+                  accessibilityLabel="Crear nueva categoría"
+                >
+                  <Icon name="plus" size={20} color={colors.primary} />
+                </Pressable>
               </View>
-              <View style={styles.dimensionCell}>
-                <Input
-                  label="Alto (cm)"
-                  value={form.height || ''}
-                  onChangeText={(value) => updateField('height', value)}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
+            </View>
+
+            {/* Sub-sección "Dimensiones y Peso" (mirror web mobile). */}
+            <View style={styles.dimensionsDivider}>
+              <View style={styles.dimensionsHeader}>
+                <Icon
+                  name="package"
+                  size={typography.fontSize.base}
+                  color={colors.primary}
                 />
+                <Text style={styles.dimensionsTitle}>Dimensiones y Peso</Text>
               </View>
-              <View style={styles.dimensionCell}>
-                <Input
-                  label="Peso (kg)"
-                  value={form.weight_input || ''}
-                  onChangeText={(value) => updateField('weight_input', value)}
-                  placeholder="0.00"
-                  keyboardType="decimal-pad"
-                />
+              <View style={styles.dimensionsGridResponsive}>
+                <View
+                  style={isMdUp ? styles.dimensionCellQuarter : styles.dimensionCellHalf}
+                >
+                  <Input
+                    label="Largo (cm)"
+                    value={form.length || ''}
+                    onChangeText={(value) => updateField('length', value)}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    tooltip="Largo del producto empacado en centímetros. Se usa para cotizar envíos y ocupar espacio en almacén."
+                  />
+                </View>
+                <View
+                  style={isMdUp ? styles.dimensionCellQuarter : styles.dimensionCellHalf}
+                >
+                  <Input
+                    label="Ancho (cm)"
+                    value={form.width || ''}
+                    onChangeText={(value) => updateField('width', value)}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    tooltip="Ancho del producto empacado en centímetros."
+                  />
+                </View>
+                <View
+                  style={isMdUp ? styles.dimensionCellQuarter : styles.dimensionCellHalf}
+                >
+                  <Input
+                    label="Alto (cm)"
+                    value={form.height || ''}
+                    onChangeText={(value) => updateField('height', value)}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    tooltip="Alto del producto empacado en centímetros."
+                  />
+                </View>
+                <View
+                  style={isMdUp ? styles.dimensionCellQuarter : styles.dimensionCellHalf}
+                >
+                  <Input
+                    label="Peso (kg)"
+                    value={form.weight_input || ''}
+                    onChangeText={(value) => updateField('weight_input', value)}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    tooltip="Peso del producto empacado en kilogramos. Afecta el cálculo de envío."
+                  />
+                </View>
               </View>
             </View>
           </Section>
@@ -1764,46 +2027,55 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </Section>
           )}
 
-          {/* Compra online (solo en edit) */}
-          {mode === 'edit' && product && (
-            <Section title="Compra Online" subtitle="Link público para vender este producto en la tienda online" icon="globe">
-              <Input
-                label="URL de compra online"
-                value={form.online_purchase_url}
-                onChangeText={(value) => updateField('online_purchase_url', value)}
-                placeholder="Se genera automáticamente al activar la venta online"
-                helperText={form.online_purchase_url ? 'Compartí este link con tus clientes para que compren online.' : 'Activá la venta online desde la web para generar el link.'}
-              />
-              {form.online_purchase_url ? (
-                <View style={{ flexDirection: 'row', gap: spacing[2] }}>
-                  <View style={{ flex: 1 }}>
-                    <Button
-                      title="Copiar link"
-                      variant="outline"
-                      leftIcon={<Icon name="copy" size={16} color={colors.text.primary} />}
-                      onPress={() => {
-                        // Copy to clipboard would require expo-clipboard
-                        toastSuccess('Link copiado al portapapeles');
-                      }}
-                      fullWidth
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Button
-                      title="Ver tienda"
-                      variant="primary"
-                      leftIcon={<Icon name="external-link" size={16} color={colors.background} />}
-                      onPress={() => {
-                        // Linking.openURL would open the URL
-                        toastSuccess('Abriendo tienda...');
-                      }}
-                      fullWidth
-                    />
-                  </View>
+          {/* Compra online (espejo exacto del web).
+              - Header: flex-col gap-3 en mobile, sm:flex-row sm:items-start
+                sm:justify-between en md+. Icon shopping-cart + title +
+                subtitle inline. Botón "Generar link y QR" a la derecha.
+              - Card dashed con empty state: icon link + texto + subtítulo. */}
+          <Section title="Compra online" icon="shopping-cart">
+            <View
+              style={[
+                styles.purchaseHeader,
+                isMdUp && styles.purchaseHeaderRow,
+              ]}
+            >
+              <View style={styles.purchaseHeaderLeft}>
+                <View style={styles.purchaseTitleRow}>
+                  <Text style={styles.purchaseTitle}>Compra online</Text>
                 </View>
-              ) : null}
-            </Section>
-          )}
+                <Text style={styles.purchaseSubtitle}>
+                  No hay un dominio principal de ecommerce activo para
+                  generar el QR de compra.
+                </Text>
+              </View>
+              <Button
+                title="Generar link y QR"
+                variant="outline"
+                leftIcon={
+                  <Icon name="link" size={16} color={colors.primary} />
+                }
+                onPress={() => toastSuccess('Próximamente: generar link y QR')}
+              />
+            </View>
+
+            <View style={styles.purchaseEmpty}>
+              <Icon
+                name="link"
+                size={18}
+                color={colorScales.gray[400]}
+                style={styles.purchaseEmptyIcon}
+              />
+              <View style={{ minWidth: 0, flex: 1 }}>
+                <Text style={styles.purchaseEmptyTitle}>
+                  Este producto aún no tiene link ni QR de compra.
+                </Text>
+                <Text style={styles.purchaseEmptySubtitle}>
+                  Se usará el dominio ecommerce principal activo de la
+                  tienda.
+                </Text>
+              </View>
+            </View>
+          </Section>
 
           <Section title="Variantes" subtitle="Opciones vendibles del producto" icon="list">
             <Toggle
@@ -2329,6 +2601,70 @@ const styles = StyleSheet.create({
     flexBasis: '48%',
     flexGrow: 1,
   },
+
+  // ── Clasificación y Medidas (espejo web mobile) ────────────────────────
+  // Header con título "Clasificación" + span gris "y Medidas".
+  classificationHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing[2],
+  },
+  classificationTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  classificationTitleMuted: {
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[400],
+  },
+  // Grid 1 col mobile / 2 col md+ para Marca y Categorías.
+  classificationGrid: {
+    gap: spacing[4],
+  },
+  classificationGridRow: {
+    flexDirection: 'row' as const,
+    gap: spacing[6],
+  },
+  classificationFieldRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-end' as const,
+    gap: spacing[2],
+  },
+  addIconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.5)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginBottom: 2,
+  },
+  // Separator + sub-sección "Dimensiones y Peso".
+  dimensionsDivider: {
+    paddingTop: spacing[4],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+    gap: spacing[3],
+  },
+  // Grid 2 cols en mobile / 4 cols en md+ (mirror del web
+  // `grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4`). Largo+Ancho
+  // en una fila y Alto+Peso en otra en mobile; los 4 en una fila en md+.
+  dimensionsGridResponsive: {
+    gap: spacing[3],
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+  },
+  dimensionCellHalf: {
+    flexBasis: '48%' as const,
+    flexGrow: 1,
+  },
+  dimensionCellQuarter: {
+    flexBasis: '23%' as const,
+    flexGrow: 1,
+  },
+
   // Grid 1 col en mobile, 3 cols en sm+ para SKU/Barcode/Slug.
   infoGrid: {
     flexDirection: 'row',
@@ -2382,6 +2718,159 @@ const styles = StyleSheet.create({
     gap: spacing[1],
     paddingHorizontal: spacing[1],
     marginTop: spacing[1],
+  },
+
+  // ── Compra Online (espejo web mobile) ──────────────────────────────────
+  // Header: flex-col en mobile, sm:flex-row sm:items-start
+  // sm:justify-between en md+ (mirror web).
+  purchaseHeader: {
+    flexDirection: 'column' as const,
+    gap: spacing[3],
+  },
+  purchaseHeaderRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    justifyContent: 'space-between' as const,
+  },
+  purchaseHeaderLeft: {
+    flex: 1,
+  },
+  purchaseTitleRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing[2],
+  },
+  purchaseTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  purchaseSubtitle: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  // Card dashed con empty state (mirror web
+  // `rounded-xl border-dashed border-gray-200 bg-gray-50 p-4 flex
+  // items-start gap-3`).
+  purchaseEmpty: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: spacing[3],
+    padding: spacing[4],
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderStyle: 'dashed' as const,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colorScales.gray[50],
+  },
+  purchaseEmptyIcon: {
+    marginTop: 2,
+  },
+  purchaseEmptyTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[800],
+  },
+  purchaseEmptySubtitle: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: spacing[1],
+  },
+
+  // ── Restaurant Suite cards (espejo web mobile) ────────────────────────
+  // Card "Unidad de medida del insumo" (aparece cuando is_ingredient=true).
+  uomCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.xl,
+    backgroundColor: colorScales.gray[50],
+    padding: spacing[4],
+    gap: spacing[3],
+    marginTop: spacing[1],
+  },
+  uomHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  uomHeaderText: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  uomGrid: {
+    // En mobile (1 col) los 2 selectores van apilados con la flecha
+    // rotada 90° entre ellos. En md+ (1fr_auto_1fr) la flecha queda
+    // horizontal entre los dos selectores.
+    gap: spacing[3],
+    flexDirection: 'column' as const,
+  },
+  uomGridRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+  },
+  uomArrow: {
+    flexDirection: 'column' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: spacing[1.5],
+    paddingVertical: spacing[1],
+  },
+  uomArrowIcon: {
+    // Rotada 90° en mobile (apunta hacia abajo), sin rotar en md+
+    // (apunta hacia la derecha). El sentido se invierte en el render.
+  },
+  uomArrowIconRotated: {
+    transform: [{ rotate: '90deg' as const }],
+  },
+  uomArrowIconNormal: {
+    transform: [{ rotate: '0deg' as const }],
+  },
+  uomArrowText: {
+    fontSize: 11,
+    color: colorScales.gray[500],
+    textAlign: 'center' as const,
+    lineHeight: 14,
+  },
+  // Card "Producido en lote" (aparece cuando is_batch_produced=true).
+  batchCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.xl,
+    backgroundColor: colorScales.gray[50],
+    padding: spacing[4],
+    // Mirror del web `flex flex-col sm:flex-row sm:items-center gap-3`.
+    // Por defecto va en row (md+); en mobile se sobreescribe con
+    // `batchCardColumn` (column).
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing[3],
+    marginTop: spacing[1],
+  },
+  batchCardColumn: {
+    // Override en mobile: el texto va arriba, el botón abajo.
+    flexDirection: 'column' as const,
+    alignItems: 'stretch' as const,
+  },
+  batchCardContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[2],
+  },
+  batchCardText: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+  },
+  batchCardTextBold: {
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[700],
   },
 
   // ── Imágenes del Producto (espejo web lg:hidden) ──────────────────────────
