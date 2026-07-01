@@ -13,7 +13,12 @@ export interface AutoEntryEventData {
   organization_id: number;
   store_id?: number;
   accounting_entity_id?: number;
-  entry_date: Date;
+  /**
+   * Fecha del asiento. Si se omite, `createAutoEntry` la deriva de la zona
+   * horaria de la tienda (`resolveEntryDate`) para que un asiento generado
+   * de noche (COT = UTC-5) no caiga al día/mes siguiente en UTC crudo.
+   */
+  entry_date?: Date;
   description: string;
   lines: (AutoEntryLine | null)[];
   user_id?: number;
@@ -39,6 +44,13 @@ export interface AutoEntryLine {
 @Injectable()
 export class AutoEntryService {
   private readonly logger = new Logger(AutoEntryService.name);
+
+  /**
+   * Cache en memoria de la zona horaria por `store_id`. La timezone de una
+   * tienda no cambia en runtime, así que evitamos consultar `stores` en cada
+   * asiento. `null` = tienda sin timezone configurada (usa el fallback).
+   */
+  private readonly store_tz_cache = new Map<number, string | null>();
 
   constructor(
     private readonly prisma: StorePrismaService,
@@ -243,6 +255,62 @@ export class AutoEntryService {
    * creates a balanced entry and auto-posts it.
    */
   /**
+   * Deriva la fecha del asiento como la MEDIANOCHE del día calendario vigente
+   * en la zona horaria de la tienda, expresada como instante UTC.
+   *
+   * Motivo: los handlers generaban `entry_date` con `new Date()` (instante UTC
+   * del momento de proceso). En Colombia (UTC-5) un asiento creado entre las
+   * 19:00–23:59 locales caía al DÍA siguiente en UTC — y en el borde de fin de
+   * mes, al MES/período siguiente. Al anclar en la medianoche local convertida
+   * a UTC, `ensureMonthlyFiscalPeriod` (que lee `getUTC*`) resuelve el mes
+   * calendario correcto para la tienda.
+   *
+   * Fallback `America/Bogota` cuando no hay `store_id` (asiento a nivel de
+   * organización) o la tienda no tiene `timezone` configurada. Ante una zona
+   * inválida, `Intl` lanza y caemos a UTC — nunca dejamos de fechar el asiento.
+   */
+  private static readonly DEFAULT_TIMEZONE = 'America/Bogota';
+
+  private async resolveStoreTimezone(store_id?: number): Promise<string> {
+    if (!store_id) return AutoEntryService.DEFAULT_TIMEZONE;
+    if (this.store_tz_cache.has(store_id)) {
+      return (
+        this.store_tz_cache.get(store_id) ?? AutoEntryService.DEFAULT_TIMEZONE
+      );
+    }
+    const store = await this.prisma.withoutScope().stores.findUnique({
+      where: { id: store_id },
+      select: { timezone: true },
+    });
+    const tz = store?.timezone ?? null;
+    this.store_tz_cache.set(store_id, tz);
+    return tz ?? AutoEntryService.DEFAULT_TIMEZONE;
+  }
+
+  private async resolveEntryDate(store_id?: number): Promise<Date> {
+    const timezone = await this.resolveStoreTimezone(store_id);
+    const now = new Date();
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(now);
+      const get = (type: string) =>
+        Number(parts.find((p) => p.type === type)?.value);
+      const year = get('year');
+      const month = get('month'); // 1-based
+      const day = get('day');
+      if (!year || !month || !day) return now;
+      return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+    } catch {
+      // Zona horaria inválida: no dejamos el asiento sin fecha.
+      return now;
+    }
+  }
+
+  /**
    * Garantiza (crea si falta) el período fiscal MENSUAL abierto que contiene
    * `date`, para la organización/entidad contable dada. Idempotente y
    * tolerante a carreras: si otro asiento concurrente ya lo creó, re-busca y
@@ -328,11 +396,17 @@ export class AutoEntryService {
       organization_id,
       store_id,
       accounting_entity_id,
-      entry_date,
       description,
       lines,
       user_id,
     } = event_data;
+
+    // Fecha del asiento: la del evento si viene explícita (p.ej. depreciación
+    // con `period_date`, o flujos SaaS), o la medianoche del día vigente en la
+    // zona horaria de la tienda. Nunca `new Date()` UTC crudo (ver
+    // resolveEntryDate) para no descuadrar día/mes en husos negativos.
+    const entry_date =
+      event_data.entry_date ?? (await this.resolveEntryDate(store_id));
 
     // Default ESTRICTO: no materializar entidades/asientos contables si el área
     // `accounting` no está activa para la organización. Red de seguridad para
@@ -721,9 +795,7 @@ export class AutoEntryService {
       source_id: data.invoice_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,
-      entry_date: new Date(),
-      description: `Invoice validated #${data.invoice_id}`,
+      accounting_entity_id: data.accounting_entity_id,      description: `Invoice validated #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -791,9 +863,7 @@ export class AutoEntryService {
       source_id: data.invoice_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,
-      entry_date: new Date(),
-      description: `Credit note accepted #${data.invoice_id}`,
+      accounting_entity_id: data.accounting_entity_id,      description: `Credit note accepted #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -897,9 +967,7 @@ export class AutoEntryService {
       source_id: data.invoice_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,
-      entry_date: new Date(),
-      description: `Support document accepted #${data.invoice_id}`,
+      accounting_entity_id: data.accounting_entity_id,      description: `Support document accepted #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -1058,9 +1126,7 @@ export class AutoEntryService {
       source_type: 'payment.received',
       source_id: data.payment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description,
+      store_id: data.store_id,      description,
       lines,
       user_id: data.user_id,
     });
@@ -1160,9 +1226,7 @@ export class AutoEntryService {
       source_type: 'credit_sale.created',
       source_id: data.order_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Venta a crédito #${data.order_id}${order_ref}`,
+      store_id: data.store_id,      description: `Venta a crédito #${data.order_id}${order_ref}`,
       lines,
       user_id: data.user_id,
     });
@@ -1201,9 +1265,7 @@ export class AutoEntryService {
       source_type: 'expense.approved',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Expense approved #${data.expense_id}`,
+      store_id: data.store_id,      description: `Expense approved #${data.expense_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -1242,9 +1304,7 @@ export class AutoEntryService {
       source_type: 'expense.paid',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Expense paid #${data.expense_id}`,
+      store_id: data.store_id,      description: `Expense paid #${data.expense_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -1400,9 +1460,7 @@ export class AutoEntryService {
       source_id: data.payroll_run_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,
-      entry_date: new Date(),
-      description: `Nómina Aprobada - Run #${data.payroll_run_id}`,
+      accounting_entity_id: data.accounting_entity_id,      description: `Nómina Aprobada - Run #${data.payroll_run_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -1801,9 +1859,7 @@ export class AutoEntryService {
           source_type: 'payroll_item',
           source_id: item.payroll_item_id,
           organization_id: data.organization_id,
-          store_id: data.store_id,
-          entry_date: new Date(),
-          description: `Nómina Pago Empleado #${item.employee_id} - Run #${data.payroll_run_id}`,
+          store_id: data.store_id,          description: `Nómina Pago Empleado #${item.employee_id} - Run #${data.payroll_run_id}`,
           lines,
           user_id: data.user_id,
         });
@@ -1854,9 +1910,7 @@ export class AutoEntryService {
       source_type: 'order.completed',
       source_id: data.order_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Order completed #${data.order_id} - COGS`,
+      store_id: data.store_id,      description: `Order completed #${data.order_id} - COGS`,
       lines,
       user_id: data.user_id,
     });
@@ -1916,9 +1970,7 @@ export class AutoEntryService {
       source_type: 'production.completed',
       source_id: data.production_order_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Producción completada #${data.production_order_id} – ${data.product_name}`,
+      store_id: data.store_id,      description: `Producción completada #${data.production_order_id} – ${data.product_name}`,
       lines,
       user_id: data.user_id,
     });
@@ -1985,9 +2037,7 @@ export class AutoEntryService {
       source_type: 'kitchen.fired',
       source_id: data.kitchen_ticket_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Fire-to-kitchen ticket #${data.kitchen_ticket_id} – orden #${data.order_id} (${data.consumed_line_count} líneas)`,
+      store_id: data.store_id,      description: `Fire-to-kitchen ticket #${data.kitchen_ticket_id} – orden #${data.order_id} (${data.consumed_line_count} líneas)`,
       lines,
       user_id: data.user_id,
     });
@@ -2062,9 +2112,7 @@ export class AutoEntryService {
       source_type: 'refund.completed',
       source_id: data.refund_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Devolución #${data.refund_id}`,
+      store_id: data.store_id,      description: `Devolución #${data.refund_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2103,9 +2151,7 @@ export class AutoEntryService {
       source_type: 'purchase_order.received',
       source_id: data.purchase_order_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Purchase order received #${data.purchase_order_id}`,
+      store_id: data.store_id,      description: `Purchase order received #${data.purchase_order_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2148,9 +2194,7 @@ export class AutoEntryService {
     return this.createAutoEntry({
       source_type: 'purchase_order.payment',
       source_id: data.purchase_order_id,
-      organization_id: data.organization_id,
-      entry_date: new Date(),
-      description: `Pago orden de compra #${data.purchase_order_id}`,
+      organization_id: data.organization_id,      description: `Pago orden de compra #${data.purchase_order_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2215,9 +2259,7 @@ export class AutoEntryService {
       source_type: 'inventory.adjusted',
       source_id: data.adjustment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Inventory adjustment #${data.adjustment_id}`,
+      store_id: data.store_id,      description: `Inventory adjustment #${data.adjustment_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2279,9 +2321,7 @@ export class AutoEntryService {
       source_type: 'installment_payment',
       source_id: data.payment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Abono cuota #${data.installment_number} - Crédito ${data.credit_number}`,
+      store_id: data.store_id,      description: `Abono cuota #${data.installment_number} - Crédito ${data.credit_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2333,9 +2373,7 @@ export class AutoEntryService {
       source_type: 'layaway.payment',
       source_id: data.payment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Pago de plan separé ${data.plan_number}`,
+      store_id: data.store_id,      description: `Pago de plan separé ${data.plan_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2376,9 +2414,7 @@ export class AutoEntryService {
       source_type: 'layaway.completed',
       source_id: data.plan_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Plan separé completado ${data.plan_number}`,
+      store_id: data.store_id,      description: `Plan separé completado ${data.plan_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2451,9 +2487,7 @@ export class AutoEntryService {
       source_type: 'layaway.cancelled',
       source_id: data.plan_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Plan separé cancelado ${data.plan_number}`,
+      store_id: data.store_id,      description: `Plan separé cancelado ${data.plan_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2547,9 +2581,7 @@ export class AutoEntryService {
       source_type: 'dispatch_route.closed',
       source_id: data.route_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Cuadre planilla de ruta ${data.route_number}`,
+      store_id: data.store_id,      description: `Cuadre planilla de ruta ${data.route_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2695,9 +2727,7 @@ export class AutoEntryService {
       source_type: 'disposal.fixed_asset',
       source_id: data.asset_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Baja de activo fijo ${data.asset_number}`,
+      store_id: data.store_id,      description: `Baja de activo fijo ${data.asset_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2789,9 +2819,7 @@ export class AutoEntryService {
       source_type: 'withholding.applied',
       source_id: data.invoice_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Retención ${data.concept_name} - ${data.supplier_name}`,
+      store_id: data.store_id,      description: `Retención ${data.concept_name} - ${data.supplier_name}`,
       lines,
       user_id: data.user_id,
     });
@@ -2915,9 +2943,7 @@ export class AutoEntryService {
       source_id: data.settlement_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,
-      entry_date: new Date(),
-      description: `Liquidación causada ${data.settlement_number} - ${data.employee_name}`,
+      accounting_entity_id: data.accounting_entity_id,      description: `Liquidación causada ${data.settlement_number} - ${data.employee_name}`,
       lines,
       user_id: data.user_id,
     });
@@ -3018,9 +3044,7 @@ export class AutoEntryService {
       source_type: 'settlement.paid',
       source_id: data.settlement_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Liquidación pagada ${data.settlement_number} - ${data.employee_name}`,
+      store_id: data.store_id,      description: `Liquidación pagada ${data.settlement_number} - ${data.employee_name}`,
       lines,
       user_id: data.user_id,
     });
@@ -3062,9 +3086,7 @@ export class AutoEntryService {
       source_type: 'cash_register_opened',
       source_id: data.session_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Apertura caja registradora - Sesión #${data.session_id}`,
+      store_id: data.store_id,      description: `Apertura caja registradora - Sesión #${data.session_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -3140,9 +3162,7 @@ export class AutoEntryService {
       source_type: 'cash_register_closed',
       source_id: data.session_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Cierre caja registradora - Sesión #${data.session_id}`,
+      store_id: data.store_id,      description: `Cierre caja registradora - Sesión #${data.session_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -3188,9 +3208,7 @@ export class AutoEntryService {
       source_type: 'cash_register_movement',
       source_id: data.movement_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `${desc} #${data.movement_id}${data.reference ? ` - ${data.reference}` : ''}`,
+      store_id: data.store_id,      description: `${desc} #${data.movement_id}${data.reference ? ` - ${data.reference}` : ''}`,
       lines,
       user_id: data.user_id,
     });
@@ -3233,9 +3251,7 @@ export class AutoEntryService {
       source_type: 'ar_write_off',
       source_id: data.ar_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Castigo CxC${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ar_id}`,
+      store_id: data.store_id,      description: `Castigo CxC${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ar_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -3279,9 +3295,7 @@ export class AutoEntryService {
       source_type: 'ap_payment',
       source_id: data.ap_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Pago CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
+      store_id: data.store_id,      description: `Pago CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -3322,9 +3336,7 @@ export class AutoEntryService {
       source_type: 'ap_write_off',
       source_id: data.ap_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Castigo CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
+      store_id: data.store_id,      description: `Castigo CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -3367,9 +3379,7 @@ export class AutoEntryService {
       source_type: 'commission',
       source_id: data.payment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Comisión calculada - Pago #${data.payment_id} (Regla #${data.rule_id})`,
+      store_id: data.store_id,      description: `Comisión calculada - Pago #${data.payment_id} (Regla #${data.rule_id})`,
       lines,
       user_id: data.user_id,
     });
@@ -3408,9 +3418,7 @@ export class AutoEntryService {
       source_type: 'wallet.credited',
       source_id: data.wallet_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Recarga wallet #${data.wallet_id} - ${data.reference_type}`,
+      store_id: data.store_id,      description: `Recarga wallet #${data.wallet_id} - ${data.reference_type}`,
       lines,
       user_id: data.user_id,
     });
@@ -3448,9 +3456,7 @@ export class AutoEntryService {
       source_type: 'wallet.debited',
       source_id: data.wallet_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Pago con wallet #${data.wallet_id}${data.order_id ? ` - Orden #${data.order_id}` : ''}`,
+      store_id: data.store_id,      description: `Pago con wallet #${data.wallet_id}${data.order_id ? ` - Orden #${data.order_id}` : ''}`,
       lines,
       user_id: data.user_id,
     });
@@ -3516,9 +3522,7 @@ export class AutoEntryService {
       source_type: 'stock_transfer',
       source_id: data.transfer_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Transferencia de inventario ${data.transfer_number}`,
+      store_id: data.store_id,      description: `Transferencia de inventario ${data.transfer_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -3581,9 +3585,7 @@ export class AutoEntryService {
       source_type: 'intercompany_transfer.shipped',
       source_id: data.transfer_id,
       organization_id: data.organization_id,
-      store_id: data.from_store_id,
-      entry_date: new Date(),
-      description: `Transferencia intercompany enviada ${data.transfer_number}`,
+      store_id: data.from_store_id,      description: `Transferencia intercompany enviada ${data.transfer_number}`,
       lines: shipped_lines,
       user_id: data.user_id,
     });
@@ -3592,9 +3594,7 @@ export class AutoEntryService {
       source_type: 'intercompany_transfer.received',
       source_id: data.transfer_id,
       organization_id: data.organization_id,
-      store_id: data.to_store_id,
-      entry_date: new Date(),
-      description: `Transferencia intercompany recibida ${data.transfer_number}`,
+      store_id: data.to_store_id,      description: `Transferencia intercompany recibida ${data.transfer_number}`,
       lines: received_lines,
       user_id: data.user_id,
     });
@@ -3684,9 +3684,7 @@ export class AutoEntryService {
       source_type: 'expense.refunded',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Reversión pago gasto #${data.expense_id}`,
+      store_id: data.store_id,      description: `Reversión pago gasto #${data.expense_id}`,
       lines: reversalPaymentLines,
       user_id: data.user_id,
     });
@@ -3714,9 +3712,7 @@ export class AutoEntryService {
       source_type: 'expense.refunded',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Reversión aprobación gasto #${data.expense_id}`,
+      store_id: data.store_id,      description: `Reversión aprobación gasto #${data.expense_id}`,
       lines: reversalApprovalLines,
       user_id: data.user_id,
     });
@@ -3752,9 +3748,7 @@ export class AutoEntryService {
       source_type: 'expense.cancelled',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Cancelación gasto #${data.expense_id}`,
+      store_id: data.store_id,      description: `Cancelación gasto #${data.expense_id}`,
       lines,
       user_id: data.user_id,
     });
