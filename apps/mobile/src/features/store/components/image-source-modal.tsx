@@ -161,7 +161,7 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
             <View style={styles.header}>
               <View style={styles.headerTitleWrap}>
                 <Text style={styles.headerTitle} numberOfLines={1}>
-                  {view === 'menu' ? 'Agregar imágenes' : 'Pegar URL'}
+                  {view === 'menu' ? 'Agregar imágenes' : 'Agregar desde URL'}
                 </Text>
                 {view === 'menu' && (
                   <Text style={styles.headerSubtitle} numberOfLines={1}>
@@ -274,17 +274,37 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
               </View>
             )}
 
-            {/* Footer (mirror web: bg-gradient-to-t background/50 → surface + border-t + Cerrar) */}
+            {/* Footer dinámico según vista (mirror web: bg-gradient-to-t + border-t) */}
             <View style={styles.footer}>
               <View style={styles.footerActions}>
-                <Button
-                  title="Cerrar"
-                  variant="outline"
-                  onPress={handleClose}
-                  leftIcon={<Icon name="x" size={16} color={colors.primary} />}
-                  fullWidth
-                  disabled={busy}
-                />
+                {view === 'menu' ? (
+                  <Button
+                    title="Cerrar"
+                    variant="outline"
+                    onPress={handleClose}
+                    leftIcon={<Icon name="x" size={16} color={colors.primary} />}
+                    fullWidth
+                    disabled={busy}
+                  />
+                ) : (
+                  <>
+                    <Button
+                      title="Cancelar"
+                      variant="outline"
+                      onPress={handleClose}
+                      leftIcon={<Icon name="x" size={16} color={colors.primary} />}
+                      disabled={busy}
+                    />
+                    <Button
+                      title="Obtener imagen"
+                      variant="primary"
+                      onPress={handleUrlConfirm}
+                      loading={busy}
+                      leftIcon={<Icon name="download" size={16} color={colors.background} />}
+                      disabled={!urlValue.trim() || busy}
+                    />
+                  </>
+                )}
               </View>
             </View>
           </View>
