@@ -378,55 +378,52 @@ export class PopOrderConfirmationModalComponent {
   }
 
   /**
-   * Handler for the margin input. Parses the string from app-input, then:
-   *  - Re-derives `new_base_price` from the new cost so the price input
-   *    stays in sync (the math lives in one place: backend skill rule).
-   *  - Stores ONLY `new_profit_margin` in the override Map — when the
-   *    operator confirms, the backend will re-derive the price from cost
-   *    (single source of truth: the cost).
+   * Handler for the margin input. Parses the string from app-input, then does
+   * a LIVE cross-recalculation anchored on the NEW cost (`new_cost_per_unit`):
+   *  - Empty input → anchor-to-cost: drop the override entirely (same as
+   *    "Restablecer") so the inputs fall back to the cost-anchor defaults.
+   *  - With a value `m` → derive the base price from the new cost and store
+   *    BOTH fields, so the price input reflects the recalculated value live
+   *    (the draft getters read straight from the override Map).
    */
   onMarginDraftChange(item: CostPreviewItem, raw: string): void {
-    const key = this.previewKey(item);
     const value = this.parseOptionalNumber(raw);
-    const next = new Map(this.pricingOverrides());
-    const existing: PricingOverride = next.get(key) ?? {};
     if (value === null) {
-      // Empty input → drop the override entirely (back to cost-anchor).
-      delete existing.new_profit_margin;
-      if (existing.new_base_price === undefined) {
-        next.delete(key);
-      } else {
-        next.set(key, existing);
-      }
-    } else {
-      existing.new_profit_margin = value;
-      next.set(key, existing);
+      // Empty input → anchor-to-cost (drop the whole override entry).
+      this.clearOverride(item);
+      return;
     }
+    const key = this.previewKey(item);
+    const cost = Number(item.new_cost_per_unit);
+    const base = Math.round(cost * (1 + value / 100) * 100) / 100;
+    const next = new Map(this.pricingOverrides());
+    next.set(key, { new_profit_margin: value, new_base_price: base });
     this.pricingOverrides.set(next);
     this.pricingOverridesChange.emit(next);
   }
 
   /**
-   * Handler for the price input. We store ONLY `new_base_price` and let the
-   * backend derive the margin — keeps the override payload minimal and
-   * avoids two sources of truth drifting on the wire.
+   * Handler for the price input. LIVE cross-recalculation anchored on the NEW
+   * cost (`new_cost_per_unit`):
+   *  - Empty input → anchor-to-cost: drop the override entirely.
+   *  - With a value `p` → derive the margin from the new cost (guarding
+   *    against division by zero) and store BOTH fields so the margin input
+   *    reflects the recalculated value live.
    */
   onPriceDraftChange(item: CostPreviewItem, raw: string): void {
-    const key = this.previewKey(item);
     const value = this.parseOptionalNumber(raw);
-    const next = new Map(this.pricingOverrides());
-    const existing: PricingOverride = next.get(key) ?? {};
     if (value === null) {
-      delete existing.new_base_price;
-      if (existing.new_profit_margin === undefined) {
-        next.delete(key);
-      } else {
-        next.set(key, existing);
-      }
-    } else {
-      existing.new_base_price = value;
-      next.set(key, existing);
+      this.clearOverride(item);
+      return;
     }
+    const key = this.previewKey(item);
+    const cost = Number(item.new_cost_per_unit);
+    const margin =
+      cost > 0
+        ? Math.round(((value - cost) / cost) * 100 * 100) / 100
+        : 0;
+    const next = new Map(this.pricingOverrides());
+    next.set(key, { new_base_price: value, new_profit_margin: margin });
     this.pricingOverrides.set(next);
     this.pricingOverridesChange.emit(next);
   }
