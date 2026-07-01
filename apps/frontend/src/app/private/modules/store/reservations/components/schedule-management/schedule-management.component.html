@@ -156,13 +156,14 @@
               </div>
 
               <!--
-                Document type + Document number + Cargo + Hire date in one
-                row. Document type was previously hidden as a hardcoded
-                'CC' default — exposing it lets the operator choose NIT,
-                CE, PA, etc. without editing JSON. Mobile: the grid
-                collapses into stacked single-column on narrow viewports.
+                Document type + Document number on first row, Cargo +
+                Hire date on second row — matches the 2-col rhythm of
+                Nombre/Apellido above (grid-cols-2 throughout). Document
+                type was previously hidden as a hardcoded 'CC' default
+                — exposing it lets the operator choose NIT, CE, PA,
+                etc. without editing JSON.
               -->
-              <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
+              <div class="grid grid-cols-2 gap-2">
                 <div class="space-y-1">
                   <label class="text-[11px] text-gray-500 font-medium">Tipo de documento</label>
                   <select
