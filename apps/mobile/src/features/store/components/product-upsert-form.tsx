@@ -928,6 +928,41 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     style={styles.imageMainImg}
                     resizeMode="cover"
                   />
+
+                  {/* Botón "Mejorar imagen con IA" (web: bottom-2 left-2 + gradient green + sparkles + 'IA') */}
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      toastSuccess('Mejorar imagen con IA (próximamente)');
+                    }}
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.imageMainAiBtn,
+                      pressed && { opacity: 0.85 },
+                    ]}
+                    accessibilityLabel="Mejorar imagen con IA"
+                  >
+                    <Icon name="sparkles" size={12} color={colors.background} />
+                    <Text style={styles.imageMainAiBtnText}>IA</Text>
+                  </Pressable>
+
+                  {/* Botón "Ajustar y recortar" (web: bottom-2 right-2 + white + crop icon + 'Ajustar') */}
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setImageSourceOpen(true);
+                    }}
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.imageMainCropBtn,
+                      pressed && { opacity: 0.85 },
+                    ]}
+                    accessibilityLabel="Ajustar y recortar imagen"
+                  >
+                    <Icon name="crop" size={14} color={colorScales.gray[700]} />
+                    <Text style={styles.imageMainCropBtnText}>Ajustar</Text>
+                  </Pressable>
+
                   {/* Botón Eliminar (mirror web: top-2 right-2 absolute + red-500/90 + trash-2) */}
                   <Pressable
                     onPress={(e) => {
@@ -965,18 +1000,16 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 <Pressable
                   key={`${uri}-${index}`}
                   onPress={() => {
-                    // Quitar imagen con tap largo
-                    setProductImages((prev) => prev.filter((_, i) => i !== index));
-                  }}
-                  onLongPress={() => {
+                    // Quitar imagen con tap
                     setProductImages((prev) => prev.filter((_, i) => i !== index));
                   }}
                   style={styles.imageThumb}
                 >
-                  <Icon name="image" size={20} color={colors.primary} />
-                  <Text style={styles.imageThumbText} numberOfLines={1}>
-                    {`Imagen ${index + 1}`}
-                  </Text>
+                  <Image
+                    source={{ uri }}
+                    style={styles.imageThumbImg}
+                    resizeMode="cover"
+                  />
                 </Pressable>
               ))}
               {productImages.length < 5 && (
@@ -1848,6 +1881,53 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  imageMainAiBtn: {
+    position: 'absolute',
+    bottom: spacing[2],
+    left: spacing[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.35)',
+    backgroundColor: 'rgba(126, 215, 165, 0.9)',
+    shadowColor: '#7ED7A5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  imageMainAiBtnText: {
+    fontSize: 11,
+    fontWeight: '700' as any,
+    lineHeight: 12,
+    color: colors.background,
+  },
+  imageMainCropBtn: {
+    position: 'absolute',
+    bottom: spacing[2],
+    right: spacing[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 9999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  imageMainCropBtnText: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    color: colorScales.gray[700],
+  },
   imageMainCircle: {
     width: 48,
     height: 48,
@@ -1902,9 +1982,12 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.lg,
     borderWidth: 1,
     borderColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingTop: spacing[1],
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  imageThumbImg: {
+    width: '100%',
+    height: '100%',
   },
   imageThumbText: {
     fontSize: 9,
