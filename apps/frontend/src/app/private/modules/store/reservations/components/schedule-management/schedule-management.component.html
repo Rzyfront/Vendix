@@ -100,15 +100,21 @@
           size="sm"
         />
 
-        <div class="pt-1 border-t border-gray-100">
+        <div class="pt-2">
           @if (!showEmployeeForm()) {
+            <!-- "Crear nuevo empleado" as a dashed ghost button — replaces
+                 the previous small blue text-link that was easy to miss.
+                 Layout: full-width, dashed border, primary text on hover.
+                 Reuses the existing toggleEmployeeForm() so no TS
+                 changes are needed. -->
             <button
               type="button"
-              class="text-xs flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
+              class="w-full flex items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:border-primary hover:text-primary transition-colors"
               (click)="toggleEmployeeForm()"
+              title="Crear un empleado nuevo desde este modal"
             >
-              <app-icon name="plus" [size]="12"></app-icon>
-              Nuevo empleado
+              <app-icon name="plus" [size]="14"></app-icon>
+              Crear nuevo empleado
             </button>
           } @else {
             <div class="space-y-3 pt-2">
