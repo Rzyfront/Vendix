@@ -35,7 +35,11 @@ export interface Product {
   categories?: ProductCategory[];
   product_variants?: ProductVariant[];
   product_images?: ProductImage[];
-  tax_assignments?: ProductTaxAssignment[];
+  /**
+   * Mapeo de `product_tax_assignments` (nombre en la respuesta del backend).
+   * El backend lo devuelve con prefijo `product_` por la relación Prisma.
+   */
+  product_tax_assignments?: ProductTaxAssignment[];
   total_stock_available?: number;
 }
 

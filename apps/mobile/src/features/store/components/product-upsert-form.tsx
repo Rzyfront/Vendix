@@ -271,7 +271,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       state: product.state,
       brand_id: product.brand_id ?? undefined,
       category_ids: product.categories?.map((category) => category.id) ?? [],
-      tax_category_ids: product.tax_assignments?.map((assignment) => assignment.tax_category_id) ?? [],
+      tax_category_ids: product.product_tax_assignments?.map((assignment) => assignment.tax_category_id) ?? [],
       has_variants: (product.product_variants?.length ?? 0) > 0,
       variants: (product.product_variants || []).map((variant) => ({
         localId: `variant-${variant.id}`,
@@ -818,60 +818,6 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 <Icon name="plus" size={20} color={colors.primary} />
               </Pressable>
             </View>
-
-              {/* Lista inline de impuestos disponibles (espejo exacto de las filas del popover).
-                  Se muestra siempre visible sin abrir el dropdown. Tocar una fila togglea la selección.
-                  Si aún no hay impuestos configurados, muestra un mensaje con CTA para crear uno. */}
-              <View style={styles.taxOptionList}>
-                {allTaxes.length === 0 && (
-                  <View style={styles.taxOptionEmpty}>
-                    <Icon name="receipt" size={20} color={colors.text.muted} />
-                    <Text style={styles.taxOptionEmptyTitle}>No hay impuestos disponibles</Text>
-                    <Text style={styles.taxOptionEmptyHint}>
-                      Toca el botón + para crear tu primera categoría de impuesto (IVA, INC, etc.).
-                    </Text>
-                  </View>
-                )}
-                {allTaxes.map((tax) => {
-                  const isSelected = form.tax_category_ids.includes(tax.id);
-                  const rate = tax.tax_rates?.[0]?.rate;
-                  const rateLabel = typeof rate === 'number' ? `${tax.name} (${(rate * 100).toFixed(0)}%)` : tax.name;
-                  return (
-                    <Pressable
-                      key={tax.id}
-                      onPress={() => {
-                        const next = isSelected
-                          ? form.tax_category_ids.filter((id) => id !== tax.id)
-                          : [...form.tax_category_ids, tax.id];
-                        updateField('tax_category_ids', next);
-                      }}
-                      hitSlop={4}
-                      style={({ pressed }) => [
-                        styles.taxOptionRow,
-                        isSelected && styles.taxOptionRowSelected,
-                        pressed && styles.taxOptionRowPressed,
-                      ]}
-                    >
-                      <View
-                        style={[
-                          styles.taxOptionCheckbox,
-                          isSelected && styles.taxOptionCheckboxSelected,
-                        ]}
-                      >
-                        {isSelected && <Icon name="check" size={12} color="#FFFFFF" />}
-                      </View>
-                      <Text style={styles.taxOptionLabel} numberOfLines={1}>
-                        {rateLabel}
-                      </Text>
-                      {tax.name !== '' && (
-                        <Text style={styles.taxOptionSubLabel} numberOfLines={1}>
-                          {tax.name}
-                        </Text>
-                      )}
-                    </Pressable>
-                  );
-                })}
-              </View>
 
             {/* Sub-card con desglose estructurado del precio (espejo de la versión web mobile) */}
             <View style={styles.pricingBreakdownCard}>
