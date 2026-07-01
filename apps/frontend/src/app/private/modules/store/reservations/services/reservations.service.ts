@@ -191,6 +191,12 @@ export class ReservationsService {
   /**
    * Quick-create an employee from the "Agregar Proveedor" modal.
    * Backend route: POST /store/payroll/employees
+   *
+   * `base_salary` is REQUIRED by CreateEmployeeDto
+   * (@IsNumber + @Min(0) + @Type Number) — omitting it causes the
+   * global ValidationPipe (whitelist + forbidNonWhitelisted) to
+   * return 400 Bad Request before the controller is reached, so
+   * the type here marks it as required.
    */
   createQuickEmployee(dto: {
     first_name: string;
@@ -199,6 +205,7 @@ export class ReservationsService {
     document_number?: string;
     hire_date: string;
     contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
+    base_salary: number;
     position?: string;
     email?: string;
     phone?: string;
