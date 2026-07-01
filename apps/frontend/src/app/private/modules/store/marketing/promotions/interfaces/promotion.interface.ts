@@ -1,3 +1,25 @@
+/**
+ * Phase 2c: quantity-tiered promotions.
+ * Mirrors `promotion_rule_type_enum` in apps/backend/prisma/schema.prisma.
+ * `flat` = legacy behavior (single discount on `type`/`value`).
+ * `quantity_tiered` = tiers in `promotion_quantity_tiers`.
+ */
+export type PromotionRuleType = 'flat' | 'quantity_tiered';
+
+/**
+ * Tier row used by `quantity_tiered` promotions.
+ * Mirrors `model promotion_quantity_tiers` in apps/backend/prisma/schema.prisma.
+ * `value` arrives as a decimal string from the API (matches existing `Decimal` handling).
+ */
+export interface PromotionQuantityTier {
+  id?: number;
+  min_quantity: number;
+  max_quantity?: number | null;
+  type: 'percentage' | 'fixed_amount';
+  value: string;
+  sort_order?: number;
+}
+
 export interface Promotion {
   id: number;
   store_id: number;
@@ -6,6 +28,7 @@ export interface Promotion {
   code?: string;
   type: 'percentage' | 'fixed_amount';
   value: number;
+  rule_type: PromotionRuleType;
   scope: 'order' | 'product' | 'category';
   min_purchase_amount?: number;
   max_discount_amount?: number;
@@ -21,6 +44,7 @@ export interface Promotion {
   updated_at: string;
   promotion_products?: PromotionProduct[];
   promotion_categories?: PromotionCategory[];
+  promotion_quantity_tiers?: PromotionQuantityTier[];
   _count?: { order_promotions: number };
 }
 
@@ -44,6 +68,7 @@ export interface CreatePromotionDto {
   code?: string;
   type: 'percentage' | 'fixed_amount';
   value: number;
+  rule_type?: PromotionRuleType;
   scope?: 'order' | 'product' | 'category';
   min_purchase_amount?: number;
   max_discount_amount?: number;
@@ -55,6 +80,12 @@ export interface CreatePromotionDto {
   priority?: number;
   product_ids?: number[];
   category_ids?: number[];
+  /**
+   * Phase 2c: when `rule_type === 'quantity_tiered'`, each tier overrides
+   * the flat `type`/`value` based on the matching quantity bucket.
+   * Server replaces existing tiers on update (no merge semantics).
+   */
+  quantity_tiers?: PromotionQuantityTier[];
 }
 
 export interface UpdatePromotionDto extends Partial<CreatePromotionDto> {}
@@ -68,6 +99,7 @@ export interface QueryPromotionsDto {
   state?: string;
   type?: string;
   scope?: string;
+  rule_type?: PromotionRuleType;
 }
 
 export interface PromotionsSummary {

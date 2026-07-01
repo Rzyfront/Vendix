@@ -8,6 +8,7 @@ import {
   untracked,
 } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { map, switchMap } from 'rxjs/operators';
 import {
@@ -18,6 +19,8 @@ import {
   IconComponent,
   ItemListCardConfig,
   ResponsiveDataViewComponent,
+  SelectorComponent,
+  SelectorOption,
   TableAction,
   TableColumn,
   TooltipComponent,
@@ -66,8 +69,10 @@ type AuditView = 'evidence' | 'history';
     CardComponent,
     FiscalFlowDashboardComponent,
     FiscalRulesTabComponent,
+    FormsModule,
     IconComponent,
     ResponsiveDataViewComponent,
+    SelectorComponent,
     TooltipComponent,
   ],
   template: `
@@ -267,7 +272,7 @@ type AuditView = 'evidence' | 'history';
                 <h2
                   class="text-sm font-semibold text-text-primary md:text-base"
                 >
-                  Cierre fiscal mensual ({{ closeSessions().length }})
+                  Cierre fiscal ({{ closeSessions().length }})
                 </h2>
                 <app-tooltip
                   content="El cierre congela el período; reabrirlo queda auditado."
@@ -281,14 +286,27 @@ type AuditView = 'evidence' | 'history';
                   />
                 </app-tooltip>
               </div>
-              <app-button
-                variant="primary"
-                size="sm"
-                [disabled]="working()"
-                (clicked)="createCloseSession()"
+              <div
+                class="flex flex-col gap-2 sm:flex-row sm:items-end sm:gap-3"
               >
-                Crear cierre del mes
-              </app-button>
+                <app-selector
+                  label="Periodicidad"
+                  size="sm"
+                  class="min-w-[12rem]"
+                  [options]="closeTypeOptions"
+                  [ngModel]="closeType()"
+                  (valueChange)="onCloseTypeChange($event)"
+                  [disabled]="working()"
+                />
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  [disabled]="working()"
+                  (clicked)="createCloseSession()"
+                >
+                  {{ createCloseLabel() }}
+                </app-button>
+              </div>
             </div>
           </app-card>
 
@@ -555,6 +573,41 @@ export class FiscalOperationsComponent {
   readonly selectedDeclaration = signal<TaxDeclarationDraft | null>(null);
   readonly declarationLines = signal<TaxDeclarationLine[]>([]);
   readonly closeSessions = signal<FiscalCloseSession[]>([]);
+
+  // --- Periodicidad de cierre ---------------------------------------------
+  // Conjunto cerrado alineado a periodos DIAN reales (mismo vocabulario que el
+  // backend: monthly / bimonthly / four_monthly / annual). NO trimestral ni
+  // semestral. UI state observado por la plantilla => signal.
+  readonly closeType = signal<
+    'monthly' | 'bimonthly' | 'four_monthly' | 'annual'
+  >('monthly');
+
+  readonly closeTypeOptions: SelectorOption[] = [
+    { value: 'monthly', label: 'Mensual' },
+    { value: 'bimonthly', label: 'Bimestral' },
+    { value: 'four_monthly', label: 'Cuatrimestral' },
+    { value: 'annual', label: 'Anual' },
+  ];
+
+  readonly createCloseLabel = computed(() => {
+    switch (this.closeType()) {
+      case 'bimonthly':
+        return 'Crear cierre bimestral';
+      case 'four_monthly':
+        return 'Crear cierre cuatrimestral';
+      case 'annual':
+        return 'Crear cierre anual';
+      default:
+        return 'Crear cierre del mes';
+    }
+  });
+
+  onCloseTypeChange(value: string | number | null): void {
+    const allowed = ['monthly', 'bimonthly', 'four_monthly', 'annual'] as const;
+    if (typeof value === 'string' && (allowed as readonly string[]).includes(value)) {
+      this.closeType.set(value as (typeof allowed)[number]);
+    }
+  }
   readonly evidence = signal<FiscalEvidence[]>([]);
   readonly history = signal<FiscalOperationEvent[]>([]);
   readonly loading = signal(false);
@@ -956,11 +1009,17 @@ export class FiscalOperationsComponent {
 
   createCloseSession(): void {
     this.working.set(true);
+    const closeType = this.closeType();
+    const { period_year, period_month } = this.currentPeriod();
+    // Anual: solo el año (el backend resuelve 1-ene a 31-dic). El resto envía el
+    // mes actual; para bimonthly/four_monthly el backend normaliza el mes de
+    // cierre del periodo (p.ej. ene → bimestre que cierra en feb).
+    const payload =
+      closeType === 'annual'
+        ? { period_year, close_type: closeType }
+        : { period_year, period_month, close_type: closeType };
     this.service
-      .createCloseSession(this.apiScope(), {
-        ...this.currentPeriod(),
-        close_type: 'monthly',
-      })
+      .createCloseSession(this.apiScope(), payload)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
@@ -1084,12 +1143,29 @@ export class FiscalOperationsComponent {
     period_year: number;
     period_month?: number | null;
     period_quarter?: number | null;
+    close_type?: string | null;
   }): string {
+    // Para cierres multi-mes, el period_month es el mes de cierre del periodo;
+    // mostramos el rango de meses cubierto para que sea legible.
+    if (item.close_type === 'bimonthly' && item.period_month) {
+      return `${item.period_year} Bimestre ${this.monthSpanLabel(item.period_month, 2)}`;
+    }
+    if (item.close_type === 'four_monthly' && item.period_month) {
+      return `${item.period_year} Cuatrimestre ${this.monthSpanLabel(item.period_month, 4)}`;
+    }
+    if (item.close_type === 'annual') return `${item.period_year} (Anual)`;
     if (item.period_month)
       return `${item.period_year}-${String(item.period_month).padStart(2, '0')}`;
     if (item.period_quarter)
       return `${item.period_year} T${item.period_quarter}`;
     return String(item.period_year);
+  }
+
+  /** "MM–MM" del periodo multi-mes que termina en `closingMonth`. */
+  private monthSpanLabel(closingMonth: number, span: number): string {
+    const start = String(closingMonth - span + 1).padStart(2, '0');
+    const end = String(closingMonth).padStart(2, '0');
+    return `${start}–${end}`;
   }
 
   entityLabel(item: {

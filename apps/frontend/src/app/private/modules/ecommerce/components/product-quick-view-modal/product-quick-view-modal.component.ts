@@ -104,6 +104,9 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                   {{ prod.base_price | currency }}
                 </span>
               }
+              @if (isQuantityTiered() && promotionBadgeLabel()) {
+                <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
+              }
             </div>
 
             <!-- Variant Selector -->
@@ -361,6 +364,20 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
         color: var(--color-text-muted);
         text-decoration: line-through;
       }
+
+      .discount-badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 20px;
+        padding: 0.2rem 0.5rem;
+        border-radius: 999px;
+        background: var(--color-success-light);
+        color: var(--color-success);
+        font-size: var(--fs-xs);
+        font-weight: var(--fw-bold);
+        line-height: 1;
+        white-space: nowrap;
+      }
     }
 
     /* Variant Selector */
@@ -583,6 +600,20 @@ export class ProductQuickViewModalComponent {
     if (v) return v.final_price;
     return this.product()?.final_price || 0;
   });
+
+  /**
+   * True when the active promotion is quantity-tiered. No single-unit discount
+   * (price stays normal); we only surface the informative badge (e.g. "Desde 3
+   * und: descuento"). Mirrors ProductCardComponent.isQuantityTiered().
+   */
+  readonly isQuantityTiered = computed(
+    () => this.product()?.active_promotion?.is_quantity_tiered === true,
+  );
+
+  /** Informative label for the active promotion badge. */
+  readonly promotionBadgeLabel = computed(
+    () => this.product()?.active_promotion?.badge_label ?? '',
+  );
 
   readonly displayStock = computed<number | null>(() => {
     const v = this.selectedVariant();

@@ -110,6 +110,10 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'layaway.payment.customer_advance': '2805',
   'layaway.completed.customer_advance': '2805',
   'layaway.completed.revenue': '4135',
+  // Layaway cancellation — reversa anticipo, devolución y penalización
+  'layaway.cancelled.advance': '2805',
+  'layaway.cancelled.refund': '1105',
+  'layaway.cancelled.forfeit_income': '4295',
   // Fixed Assets - Depreciation
   'depreciation.monthly.depreciation_expense': '5199',
   'depreciation.monthly.accumulated_depreciation': '1592',
@@ -132,6 +136,14 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'withholding.suffered.retefuente_receivable': '135510',
   'withholding.suffered.reteiva_receivable': '135515',
   'withholding.suffered.reteica_receivable': '135517',
+  // Settlement ACCRUAL (causación al aprobar) — devengo del costo laboral
+  'settlement.approved.severance': '2610',
+  'settlement.approved.severance_interest': '2615',
+  'settlement.approved.bonus': '2620',
+  'settlement.approved.vacation': '2625',
+  'settlement.approved.pending_salary': '5105',
+  'settlement.approved.indemnification': '5105',
+  'settlement.approved.salaries_payable': '2505',
   // Settlement (Liquidación por Terminación)
   'settlement.paid.severance': '2610',
   'settlement.paid.severance_interest': '2615',
@@ -141,6 +153,8 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'settlement.paid.indemnification': '5105',
   'settlement.paid.social_deductions': '2370',
   'settlement.paid.bank': '1110',
+  // Devengo: el pago drena el pasivo laboral 2505 causado en approved
+  'settlement.paid.salaries_payable': '2505',
   // Stock Transfers
   'stock_transfer.completed.inventory_origin': '1435',
   'stock_transfer.completed.inventory_destination': '1435',
@@ -184,6 +198,10 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'cash_register.closed.shortage': '5295',
   'cash_register.movement.cash': '1105',
   'cash_register.movement.other': '2805',
+  // Dispatch routes (planillas DSD) — cuadre de efectivo del conductor al cierre
+  'dispatch_route.closed.cash': '1105',
+  'dispatch_route.closed.surplus': '4295',
+  'dispatch_route.closed.shortage_receivable': '1365',
   // SaaS Subscription (RNC-31) — Store side: gasto admin del cliente
   'saas_subscription_expense.expense': '5135',
   'saas_subscription_expense.cash_bank': '1110',

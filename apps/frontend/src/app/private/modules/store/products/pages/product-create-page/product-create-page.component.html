@@ -2873,7 +2873,7 @@
                           [(ngModel)]="variant.cost_price"
                           [ngModelOptions]="{ standalone: true }"
                           placeholder="0.00"
-                          (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                          (ngModelChange)="onVariantCostChange(variant)"
                           customWrapperClass="!mt-0"
                           prefix="$"
                         ></app-input>
@@ -2884,7 +2884,7 @@
                           [(ngModel)]="variant.profit_margin"
                           [ngModelOptions]="{ standalone: true }"
                           placeholder="0.00"
-                          (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                          (ngModelChange)="onVariantMarginChange(variant)"
                           customWrapperClass="!mt-0"
                           suffix="%"
                         ></app-input>
@@ -3169,7 +3169,7 @@
                           [(ngModel)]="variant.cost_price"
                           [ngModelOptions]="{ standalone: true }"
                           placeholder="0.00"
-                          (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                          (ngModelChange)="onVariantCostChange(variant)"
                           customWrapperClass="!mt-0"
                           prefix="$"
                         ></app-input>
@@ -3182,7 +3182,7 @@
                           [(ngModel)]="variant.profit_margin"
                           [ngModelOptions]="{ standalone: true }"
                           placeholder="0.00"
-                          (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                          (ngModelChange)="onVariantMarginChange(variant)"
                           customWrapperClass="!mt-0"
                           suffix="%"
                         ></app-input>

@@ -11,6 +11,7 @@ import { FiscalOperationsContext } from './fiscal-context-resolver.service';
 import {
   buildDateRangeFilter,
   resolveFiscalPeriodRange,
+  type FiscalCloseType,
 } from './fiscal-period.util';
 import { FISCAL_CLOSE_CHECKS } from '../constants/fiscal-close-checks';
 import {
@@ -82,7 +83,11 @@ export class FiscalCloseService {
     const userId = RequestContextService.getUserId();
     if (!userId) throw new BadRequestException('User context is required');
 
-    const period = resolveFiscalPeriodRange(dto);
+    // Default a 'monthly' para preservar el comportamiento previo. El rango se
+    // resuelve con el close_type ya normalizado, de modo que bimonthly y
+    // four_monthly produzcan periodos multi-mes correctos.
+    const closeType: FiscalCloseType = dto.close_type ?? 'monthly';
+    const period = resolveFiscalPeriodRange({ ...dto, close_type: closeType });
     const fiscalPeriod = await this.prisma.fiscal_periods.findFirst({
       where: {
         organization_id: context.organization_id,
@@ -96,7 +101,7 @@ export class FiscalCloseService {
     const existing = await this.prisma.fiscal_close_sessions.findFirst({
       where: {
         accounting_entity_id: context.accounting_entity_id,
-        close_type: dto.close_type ?? 'monthly',
+        close_type: closeType,
         period_year: period.period_year,
         period_month: period.period_month,
       },
@@ -110,7 +115,7 @@ export class FiscalCloseService {
         store_id: context.store_id,
         accounting_entity_id: context.accounting_entity_id,
         fiscal_period_id: fiscalPeriod?.id,
-        close_type: dto.close_type ?? 'monthly',
+        close_type: closeType,
         period_year: period.period_year,
         period_month: period.period_month,
         period_start: period.period_start,
@@ -188,7 +193,7 @@ export class FiscalCloseService {
       for (const result of persistedResults) {
         await tx.fiscal_close_checks.upsert({
           where: {
-            fiscal_close_checks_session_key: {
+            close_session_id_check_key: {
               close_session_id: session.id,
               check_key: result.check_key,
             },

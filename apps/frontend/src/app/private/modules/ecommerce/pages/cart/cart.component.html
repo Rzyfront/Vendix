@@ -88,6 +88,13 @@
             <span>{{ cart.subtotal | currency }}</span>
           </div>
 
+          @if (cart.promotion_discount && cart.promotion_discount > 0) {
+            <div class="summary-row discount">
+              <span>Descuento por promociones</span>
+              <span class="discount-amount">-{{ cart.promotion_discount | currency }}</span>
+            </div>
+          }
+
           <div class="summary-row">
             <span>Envío</span>
             <span class="free">Por calcular</span>
@@ -97,7 +104,7 @@
 
           <div class="summary-row total">
             <span>Total</span>
-            <span>{{ cart.subtotal | currency }}</span>
+            <span>{{ (cart.promotion_discount && cart.promotion_discount > 0 ? cart.promotional_subtotal : cart.subtotal) | currency }}</span>
           </div>
 
           <app-button

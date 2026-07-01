@@ -315,4 +315,139 @@ describe('CostingService', () => {
       );
     });
   });
+
+  /**
+   * consumeCostLayers — COGS on stock consumption (fix 2748be26, QUI-425).
+   *
+   * The invariant the fix protects: under weighted_average (CPP) we MUST
+   * decrement inventory_cost_layers (received_at ASC) so they stay in sync with
+   * stock_levels, WHILE still valuing the consumed units at the average
+   * cost_per_unit — never at the individual layer.unit_cost. The FIFO branch is
+   * the contrast: it values at each layer's unit_cost. The E2E that motivated
+   * this (order POS-2026-0042) saw layer 10→7, COGS at CPP 12.500 not 10.000.
+   */
+  describe('consumeCostLayers — COGS on consumption', () => {
+    // Two layers, cheaper one received first. CPP average (in stock_levels) is
+    // 12500, deliberately different from both layer unit_costs (10000, 15000)
+    // so the average-vs-layer distinction is observable.
+    const twoLayers = [
+      {
+        id: 508,
+        quantity_remaining: 10,
+        unit_cost: 10000,
+        received_at: new Date('2026-06-01'),
+      },
+      {
+        id: 509,
+        quantity_remaining: 10,
+        unit_cost: 15000,
+        received_at: new Date('2026-06-15'),
+      },
+    ];
+
+    beforeEach(() => {
+      (prismaService as any).stock_levels.findFirst.mockResolvedValue({
+        id: 7,
+        product_id: 1,
+        product_variant_id: null,
+        location_id: 100,
+        cost_per_unit: 12500,
+      });
+    });
+
+    it('CPP: values COGS at the average and decrements the earliest layer', async () => {
+      (prismaService as any).inventory_cost_layers.findMany.mockResolvedValue([
+        { ...twoLayers[0] },
+        { ...twoLayers[1] },
+      ]);
+
+      const cogs = await service.consumeCostLayers({
+        product_id: 1,
+        location_id: 100,
+        quantity: 3,
+        costing_method: 'weighted_average',
+      });
+
+      // 3 units @ average 12500 = 37500 (NOT 3 @ layer 10000 = 30000).
+      expect(cogs).toBe(37500);
+
+      // Only the earliest layer (508) is touched: 10 - 3 = 7.
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledTimes(1);
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledWith({
+        where: { id: 508 },
+        data: { quantity_remaining: 7 },
+      });
+    });
+
+    it('CPP: spans multiple layers when the first is exhausted, still at average', async () => {
+      (prismaService as any).inventory_cost_layers.findMany.mockResolvedValue([
+        { ...twoLayers[0] },
+        { ...twoLayers[1] },
+      ]);
+
+      const cogs = await service.consumeCostLayers({
+        product_id: 1,
+        location_id: 100,
+        quantity: 15,
+        costing_method: 'weighted_average',
+      });
+
+      // 15 units @ average 12500 = 187500 (blind to the 10000/15000 split).
+      expect(cogs).toBe(187500);
+
+      // First layer drained to 0, second reduced 10 → 5.
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledTimes(2);
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledWith({
+        where: { id: 508 },
+        data: { quantity_remaining: 0 },
+      });
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledWith({
+        where: { id: 509 },
+        data: { quantity_remaining: 5 },
+      });
+    });
+
+    it('CPP: insufficient layers still charge the shortfall at the average cost', async () => {
+      (prismaService as any).inventory_cost_layers.findMany.mockResolvedValue([
+        { ...twoLayers[0] }, // only 10 units of layer data available
+      ]);
+
+      const cogs = await service.consumeCostLayers({
+        product_id: 1,
+        location_id: 100,
+        quantity: 12,
+        costing_method: 'weighted_average',
+      });
+
+      // 12 @ 12500 = 150000: 10 from the layer + 2 shortfall, all at average.
+      expect(cogs).toBe(150000);
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledTimes(1);
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledWith({
+        where: { id: 508 },
+        data: { quantity_remaining: 0 },
+      });
+    });
+
+    it('FIFO contrast: values COGS at the layer unit_cost, not the average', async () => {
+      (prismaService as any).inventory_cost_layers.findMany.mockResolvedValue([
+        { ...twoLayers[0] },
+        { ...twoLayers[1] },
+      ]);
+
+      const cogs = await service.consumeCostLayers({
+        product_id: 1,
+        location_id: 100,
+        quantity: 3,
+        costing_method: 'fifo',
+      });
+
+      // FIFO: 3 units @ earliest layer 10000 = 30000 (proves the CPP branch is
+      // distinct — same inputs, different valuation).
+      expect(cogs).toBe(30000);
+      expect(prismaService.inventory_cost_layers.update).toHaveBeenCalledWith({
+        where: { id: 508 },
+        data: { quantity_remaining: 7 },
+      });
+    });
+  });
 });

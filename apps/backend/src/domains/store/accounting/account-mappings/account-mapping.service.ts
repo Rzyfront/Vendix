@@ -286,6 +286,20 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '4135',
     description: 'Ingresos por Ventas (separé completado)',
   },
+  // Layaway cancellation — reverse the customer advance (2805): refund the
+  // returned cash/bank and recognize any retained cancellation fee as income.
+  'layaway.cancelled.advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (reversa separé cancelado)',
+  },
+  'layaway.cancelled.refund': {
+    code: '1105',
+    description: 'Caja/Banco (devolución separé cancelado)',
+  },
+  'layaway.cancelled.forfeit_income': {
+    code: '4295',
+    description: 'Otros Ingresos (penalización separé cancelado)',
+  },
   // Fixed Assets - Depreciation
   'depreciation.monthly.depreciation_expense': {
     code: '5199',
@@ -360,6 +374,37 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA Retenido a Favor (ReteICA sufrida)',
   },
   // Settlement (Liquidación por Terminación)
+  // Settlement ACCRUAL (devengo) — at approval the labor cost is recognized as
+  // expense/provision (DR) against the labor payable 2505 (CR). The payment
+  // event then only drains 2505 (no expense reconocido at payment).
+  'settlement.approved.severance': {
+    code: '2610',
+    description: 'Cesantías Consolidadas (causación liquidación)',
+  },
+  'settlement.approved.severance_interest': {
+    code: '2615',
+    description: 'Intereses sobre Cesantías (causación liquidación)',
+  },
+  'settlement.approved.bonus': {
+    code: '2620',
+    description: 'Prima de Servicios (causación liquidación)',
+  },
+  'settlement.approved.vacation': {
+    code: '2625',
+    description: 'Vacaciones (causación liquidación)',
+  },
+  'settlement.approved.pending_salary': {
+    code: '5105',
+    description: 'Gastos de Personal - Salario Pendiente (causación)',
+  },
+  'settlement.approved.indemnification': {
+    code: '5105',
+    description: 'Gastos de Personal - Indemnización (causación)',
+  },
+  'settlement.approved.salaries_payable': {
+    code: '2505',
+    description: 'Salarios por Pagar (causación liquidación)',
+  },
   'settlement.paid.severance': {
     code: '2610',
     description: 'Cesantías Consolidadas',
@@ -391,6 +436,11 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'settlement.paid.bank': {
     code: '1110',
     description: 'Bancos (Pago Liquidación)',
+  },
+  // Devengo: el pago SOLO drena el pasivo laboral 2505 causado en approved.
+  'settlement.paid.salaries_payable': {
+    code: '2505',
+    description: 'Salarios por Pagar (drenaje pago liquidación)',
   },
   // Wompi Gateway (Nequi, PSE, Tarjetas locales, Bancolombia)
   'payment.received.wompi': {
@@ -589,6 +639,21 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'cash_register.closed.shortage': {
     code: '5295',
     description: 'Faltante de caja',
+  },
+  // Dispatch routes (planillas DSD) — cash variance reconciliation at close.
+  // Recaudo y retenciones por parada ya se contabilizan vía payment.received;
+  // aquí SOLO se reconoce el sobrante/faltante de efectivo del conductor.
+  'dispatch_route.closed.cash': {
+    code: '1105',
+    description: 'Caja (cuadre planilla de ruta)',
+  },
+  'dispatch_route.closed.surplus': {
+    code: '4295',
+    description: 'Otros Ingresos (sobrante de ruta)',
+  },
+  'dispatch_route.closed.shortage_receivable': {
+    code: '1365',
+    description: 'Cuentas por Cobrar a Trabajadores (faltante de ruta, conductor)',
   },
   'cash_register.movement.cash': {
     code: '1105',

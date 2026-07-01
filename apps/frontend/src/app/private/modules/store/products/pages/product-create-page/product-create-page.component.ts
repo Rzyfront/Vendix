@@ -1499,26 +1499,20 @@ export class ProductCreatePageComponent {
     const marginCtrl = form.get('profit_margin');
     const basePriceCtrl = form.get('base_price');
 
-    // Calculate base_price from cost and margin
-    costCtrl?.valueChanges.subscribe(() => this.calculateBasePrice(form));
-    marginCtrl?.valueChanges.subscribe(() => this.calculateBasePrice(form));
-
-    // Calculate margin from base_price and cost
-    basePriceCtrl?.valueChanges.subscribe(() => {
-      const cost = Number(costCtrl?.value || 0);
-      const basePrice = Number(basePriceCtrl?.value || 0);
-
-      if (cost > 0 && !this.isCalculating) {
-        this.isCalculating = true;
-        const margin = ((basePrice - cost) / cost) * 100;
-        marginCtrl?.setValue(Number(margin.toFixed(2)), { emitEvent: false });
-        this.isCalculating = false;
-      }
-    });
+    // Anchoring model (QUI-425):
+    //  - cost_price is an ANCHOR  → editing cost re-derives profit_margin
+    //    so base_price stays put.
+    //  - base_price is an ANCHOR → editing base_price re-derives profit_margin.
+    //  - profit_margin is the LEVER → editing margin re-derives base_price
+    //    (intentional: user is asking "what would this sell for at X%?").
+    costCtrl?.valueChanges.subscribe(() => this.recalculateMarginFromCost(form));
+    marginCtrl?.valueChanges.subscribe(() => this.recalculateBasePriceFromMargin(form));
+    basePriceCtrl?.valueChanges.subscribe(() => this.recalculateMarginFromBasePrice(form));
   }
 
   private isCalculating = false;
-  private calculateBasePrice(form: FormGroup): void {
+
+  private recalculateBasePriceFromMargin(form: FormGroup): void {
     if (this.isCalculating) return;
 
     const cost = Number(form.get('cost_price')?.value || 0);
@@ -1530,6 +1524,38 @@ export class ProductCreatePageComponent {
       .get('base_price')
       ?.setValue(Number(basePrice.toFixed(2)), { emitEvent: false });
     this.isCalculating = false;
+  }
+
+  private recalculateMarginFromCost(form: FormGroup): void {
+    if (this.isCalculating) return;
+
+    const cost = Number(form.get('cost_price')?.value || 0);
+    const basePrice = Number(form.get('base_price')?.value || 0);
+
+    if (cost > 0) {
+      this.isCalculating = true;
+      const margin = ((basePrice - cost) / cost) * 100;
+      form
+        .get('profit_margin')
+        ?.setValue(Number(margin.toFixed(2)), { emitEvent: false });
+      this.isCalculating = false;
+    }
+  }
+
+  private recalculateMarginFromBasePrice(form: FormGroup): void {
+    if (this.isCalculating) return;
+
+    const cost = Number(form.get('cost_price')?.value || 0);
+    const basePrice = Number(form.get('base_price')?.value || 0);
+
+    if (cost > 0) {
+      this.isCalculating = true;
+      const margin = ((basePrice - cost) / cost) * 100;
+      form
+        .get('profit_margin')
+        ?.setValue(Number(margin.toFixed(2)), { emitEvent: false });
+      this.isCalculating = false;
+    }
   }
 
   get priceWithTax(): number {
@@ -2103,10 +2129,26 @@ export class ProductCreatePageComponent {
     return r;
   }
 
-  // --- Variant Pricing (bidirectional) ---
+  // --- Variant Pricing (anchored: cost & price drive margin; margin drives price) ---
   private variantIsCalculating = false;
 
-  onVariantCostOrMarginChange(variant: GeneratedVariant): void {
+  // Anchoring model (QUI-425): cost is an ANCHOR → editing cost re-derives
+  // profit_margin so price stays put.
+  onVariantCostChange(variant: GeneratedVariant): void {
+    if (this.variantIsCalculating) return;
+    const cost = Number(variant.cost_price || 0);
+    const price = Number(variant.price || 0);
+    if (cost > 0) {
+      this.variantIsCalculating = true;
+      variant.profit_margin = Number(
+        (((price - cost) / cost) * 100).toFixed(2),
+      );
+      this.variantIsCalculating = false;
+    }
+  }
+
+  // LEVER: editing margin explicitly → recalculate price.
+  onVariantMarginChange(variant: GeneratedVariant): void {
     if (this.variantIsCalculating) return;
     this.variantIsCalculating = true;
     const cost = Number(variant.cost_price || 0);
@@ -2115,17 +2157,18 @@ export class ProductCreatePageComponent {
     this.variantIsCalculating = false;
   }
 
+  // ANCHOR: editing price explicitly → re-derive margin.
   onVariantPriceChange(variant: GeneratedVariant): void {
     if (this.variantIsCalculating) return;
-    this.variantIsCalculating = true;
     const cost = Number(variant.cost_price || 0);
     const price = Number(variant.price || 0);
     if (cost > 0) {
+      this.variantIsCalculating = true;
       variant.profit_margin = Number(
         (((price - cost) / cost) * 100).toFixed(2),
       );
+      this.variantIsCalculating = false;
     }
-    this.variantIsCalculating = false;
   }
 
   getVariantPriceWithTax(variant: GeneratedVariant): number {

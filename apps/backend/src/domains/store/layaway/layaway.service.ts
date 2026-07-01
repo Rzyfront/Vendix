@@ -581,7 +581,22 @@ export class LayawayService {
         tx,
       );
 
-      // 4. Emitir evento
+      // 4. Resolver montos del cuadre contable (reversa del anticipo 2805):
+      //    total_paid = lo abonado por el cliente; el descuadre se reparte entre
+      //    devolución (caja/banco) y penalización retenida (otros ingresos).
+      //    Invariante para que el asiento balancee: refund + fee == total_paid.
+      //    Default si no se especifica: devolución total, sin penalización.
+      const total_paid = Number(plan.paid_amount || 0);
+      const cancellation_fee = Math.min(
+        Number(dto.cancellation_fee ?? 0),
+        total_paid,
+      );
+      const refund_amount =
+        dto.refund_amount != null
+          ? Math.min(Number(dto.refund_amount), total_paid - cancellation_fee)
+          : total_paid - cancellation_fee;
+
+      // 5. Emitir evento
       this.eventEmitter.emit('layaway.cancelled', {
         store_id: plan.store_id,
         organization_id: context?.organization_id,
@@ -589,7 +604,11 @@ export class LayawayService {
         plan_number: plan.plan_number,
         customer_id: plan.customer_id,
         paid_amount: plan.paid_amount,
+        total_paid,
+        refund_amount,
+        cancellation_fee,
         cancellation_reason: dto.cancellation_reason,
+        user_id: context?.user_id,
       });
 
       return tx.layaway_plans.findUnique({

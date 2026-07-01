@@ -150,19 +150,45 @@ assert → close**. Each command is stateless on the CLI but shares one long-liv
 
 Vendix local vhosts use a **self-signed wildcard cert** (`*.vendix.com`). The `agent-browser` MCP
 binary hardcodes `headed: false` and **does NOT** ignore TLS by default — every `open` against the
-local vhost will fail with `ERR_CERT_AUTHORITY_INVALID` unless you pass these flags explicitly.
+local vhost will fail with `ERR_CERT_AUTHORITY_INVALID` unless you pass the cert flags explicitly.
 
-**Always invoke** `agent-browser` (CLI or MCP) with:
+**Always invoke** `agent-browser` (CLI or MCP) with **all three** of the following. Both cert flags
+are required together — passing only one is not enough:
 
-| Flag (CLI)               | MCP parameter                     | Value                  | Reason                                                 |
-| ------------------------ | --------------------------------- | ---------------------- | ------------------------------------------------------ |
-| `--headed`               | `headed`                          | `true`                 | Dev runs locally — you need to **see** the browser open |
-| `--ignore-https-errors` | `extraArgs`                  | `["--ignore-https-errors"]` | Vendix vhost uses self-signed cert              |
+| Flag (CLI)                    | MCP (`extraArgs`)              | Reason                                                        |
+| ----------------------------- | ------------------------------ | ------------------------------------------------------------ |
+| `--headed`                    | `headed: true`                 | Dev runs locally — you need to **see** the browser open      |
+| `--ignore-certificate-errors` | `"--ignore-certificate-errors"` | Chrome accepts the self-signed cert (page + subresources)    |
+| `--ignore-https-errors`       | `"--ignore-https-errors"`      | Ignores TLS errors on the automation/CDP layer               |
 
-The MCP server's defaults are **not** user-configurable without forking the Rust binary. Treat
-`headed: true` + `extraArgs: ['--ignore-certificate-errors']` as **mandatory**, not optional. If a
-sub-agent forgets, the E2E is silently invalid (browser opens against `about:blank` after a cert
-error, no page content).
+```ts
+// The canonical, always-correct local invocation:
+agent_browser_open(
+  url="https://roku-shop.vendix.com",
+  headed=true,
+  extraArgs=["--ignore-certificate-errors", "--ignore-https-errors"],
+)
+```
+
+**Why BOTH flags, always (empirically confirmed 2026-06-30):** the frontend resolves its `app_type`
+by fetching `https://api.vendix.com/api/public/domains/resolve/{hostname}`. If Chrome does not trust
+the self-signed cert, that `fetch` dies in the **TLS handshake** (`TypeError: Failed to fetch` — this
+is NOT a CORS problem; CORS already allows the origin over http and https). The frontend treats *any*
+resolution failure as "this is the platform" and silently falls back to `AppType.VENDIX_LANDING`
+(`route-manager.service.ts:72-98`), so **an ecommerce/store subdomain renders the platform landing
+instead of the storefront**. With only `--ignore-https-errors` the CDP layer is satisfied but Chrome
+still blocks the page's `fetch`; you need `--ignore-certificate-errors` too. Pass both and the resolve
+`fetch` returns `200` → the correct app renders. Note: the storefront's `<title>` may still read
+"Vendix — Plataforma…" (static `index.html` title the ecommerce app doesn't override) — this is
+cosmetic; verify the **rendered body**, not the tab title.
+
+> **Scope: LOCAL testing only.** This is about trusting the local self-signed cert in the test
+> browser — it is NOT a production fix. For a normal (non-agent) local dev browser, either trust the
+> CA (`ssl/ca/ca-cert.pem`) in the OS keychain or launch Chrome with `--ignore-certificate-errors`.
+
+The MCP server's defaults are **not** user-configurable without forking the Rust binary, so treat the
+three settings above as **mandatory**. If a sub-agent forgets, the E2E is silently invalid (browser
+either opens `about:blank` after a cert error, or renders the platform landing for a store subdomain).
 
 ### Install / configure if missing
 
@@ -186,8 +212,8 @@ After registering, **restart the agent** so it loads the MCP subprocess. Until t
 ### E2E recipe (CLI)
 
 ```bash
-# Global flags MUST come BEFORE the subcommand
-agent-browser --headed --ignore-https-errors open https://admin-techsolutions.vendix.com
+# Global flags MUST come BEFORE the subcommand — pass BOTH cert flags
+agent-browser --headed --ignore-certificate-errors --ignore-https-errors open https://admin-techsolutions.vendix.com
 agent-browser snapshot -i                                   # interactive elements with @e refs
 agent-browser fill @e2 "owner@techsolutions.co"             # use refs from the snapshot
 agent-browser fill @e3 "1125634q"
@@ -204,7 +230,7 @@ MCP equivalent (the only way the agent can drive the browser):
 agent_browser_open(
   url="https://admin-techsolutions.vendix.com",
   headed=true,
-  extraArgs=["--ignore-https-errors"],
+  extraArgs=["--ignore-certificate-errors", "--ignore-https-errors"],
 )
 ```
 

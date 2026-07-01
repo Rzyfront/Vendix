@@ -46,6 +46,7 @@ import { DnsModule } from './common/services/dns/dns.module';
 import { CorsModule } from './common/cors/cors.module';
 import { BlocklistModule } from './common/services/blocklist/blocklist.module';
 import { RateLimitModule } from './common/services/rate-limit/rate-limit.module';
+import { InventoryCostingModule } from './domains/store/inventory/shared/inventory-costing.module';
 
 @Module({
   imports: [
@@ -78,6 +79,7 @@ import { RateLimitModule } from './common/services/rate-limit/rate-limit.module'
     UploadModule,
     DnsModule,
     CorsModule,
+    InventoryCostingModule,
     BlocklistModule,
     RateLimitModule,
   ],
