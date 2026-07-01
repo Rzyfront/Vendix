@@ -6,6 +6,14 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { CreatePromotionDto } from './dto/create-promotion.dto';
 import { UpdatePromotionDto } from './dto/update-promotion.dto';
 import { QueryPromotionsDto } from './dto/query-promotions.dto';
+import { QuantityTierDto } from './dto/quantity-tier.dto';
+
+/**
+ * Tipo de regla de promoción. Alias local (igual que en
+ * promotion-engine.service.ts): 'flat' = descuento único; 'quantity_tiered' =
+ * cortes por volumen definidos en quantity_tiers.
+ */
+type PromotionRuleType = 'flat' | 'quantity_tiered';
 
 @Injectable()
 export class PromotionsService {
