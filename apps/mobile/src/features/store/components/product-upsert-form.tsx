@@ -1,5 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform } from 'react-native';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  ScrollView,
+  Pressable,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  ActivityIndicator,
+  Image,
+  useWindowDimensions,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService, ProductService } from '@/features/store/services';
@@ -7,17 +18,21 @@ import type {
   Brand,
   CreateProductDto,
   CreateProductVariantDto,
+  PricingType,
   Product,
   ProductCategory,
   ProductState,
+  ProductType,
   TaxCategory,
   UpdateProductDto,
+  PriceTier,
 } from '@/features/store/types';
 import { Badge } from '@/shared/components/badge/badge';
 import { Button } from '@/shared/components/button/button';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Input } from '@/shared/components/input/input';
+import { MoneyInput } from '@/shared/components/money-input/money-input';
 import { MultiSelector } from '@/shared/components/multi-selector/multi-selector';
 import { Selector } from '@/shared/components/selector/selector';
 import { InputButtons } from '@/shared/components/input-buttons/input-buttons';
@@ -25,6 +40,8 @@ import { Spinner } from '@/shared/components/spinner/spinner';
 import { StickyHeader } from '@/shared/components/sticky-header/sticky-header';
 import { Textarea } from '@/shared/components/textarea/textarea';
 import { TaxCreateModal } from '@/features/store/components/tax-create-modal';
+import { ImageSourceModal, type UploadedImage } from '@/features/store/components/image-source-modal';
+import { ImageEditModal } from '@/features/store/components/image-edit-modal';
 import { Toggle } from '@/shared/components/toggle/toggle';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
@@ -45,6 +62,19 @@ interface VariantForm {
   stock_quantity: string;
 }
 
+interface PriceTierOverrideForm {
+  /** ID de la tarifa a la que aplica el override. */
+  tier_id: number;
+  /** Precio final del producto bajo esta tarifa. */
+  price: string;
+  /** Margen (%) sobre el costo. Helper: al cambiarlo se recalcula
+   *  `price = cost * (1 + margin/100)`. Al persistir sólo se envía
+   *  `price` al backend. */
+  margin: string;
+  /** Unidades por empaque para esta tarifa. Vacío = hereda de la tarifa. */
+  units_per_package: string;
+}
+
 interface ProductFormState {
   name: string;
   description: string;
@@ -63,14 +93,92 @@ interface ProductFormState {
   available_for_ecommerce: boolean;
   is_featured: boolean;
   allow_pos_price_override: boolean;
+  // Restaurant Suite toggles (Fase A additive, exposed in Fase B)
+  is_sellable?: boolean;
+  is_ingredient?: boolean;
+  is_combo?: boolean;
+  is_batch_produced?: boolean;
+  // Unidades de medida para Restaurant Suite (sólo se usan cuando
+  // `is_ingredient = true`).
+  purchase_uom_id?: number;
+  stock_uom_id?: number;
   state: ProductState;
-  brand_id?: number;
+  // Mirror web: en el form la marca se maneja como array
+  // (`brand_ids`) para usar MultiSelector. En el DTO se serializa
+  // como `brand_id` (primer elemento) para mantener compatibilidad
+  // con el backend.
+  brand_ids?: number[];
   category_ids: number[];
   tax_category_ids: number[];
   has_variants: boolean;
   variants: VariantForm[];
   stock_by_location: Record<string, string>;
+  // Precios multi-tarifa
+  has_multiple_price_tiers?: boolean;
+  enabled_price_tier_ids?: number[];
+  /**
+   * Overrides por tarifa (precio + unidades por empaque). El margen
+   * (campo del UI) es solo un helper para calcular el precio: al
+   * persistir se envía el `price` calculado = cost * (1 + margin/100).
+   */
+  price_tier_overrides?: PriceTierOverrideForm[];
+  // Dimensiones y peso
+  length?: string;
+  width?: string;
+  height?: string;
+  weight_input?: string;
+  // Otras configuraciones (mirror web)
+  requires_serial_numbers?: boolean;
+  preparation_time_minutes?: string;
+  // Servicio
+  service_duration_minutes?: string;
+  service_modality?: string;
+  service_pricing_type?: string;
+  requires_booking?: boolean;
+  is_recurring?: boolean;
+  // Compra online (solo edit)
+  online_purchase_url?: string;
 }
+
+/**
+ * Single resolved tax line shown in the pricing breakdown sub-card.
+ * Mirrors the web's `taxBreakdown`: one row per selected tax category,
+ * using the category's first `tax_rates[0].rate` (matches `app-input` parity).
+ */
+interface TaxBreakdownItem {
+  id: number;
+  name: string;
+  /** Decimal rate, e.g. 0.19 for 19% */
+  rate: number;
+  /** base_price * rate */
+  amount: number;
+}
+
+/**
+ * Variable labels for the pricing fields. The web version swaps "Costo" →
+ * "Costo por kg" and "Precio base" → "Precio por kg (PVP)" when
+ * `pricing_type === 'weight'`.
+ */
+const PRICING_LABELS: Record<PricingType, { cost: string; base: string; type: string }> = {
+  unit: { cost: 'Precio de Costo', base: 'Precio Base (PVP)', type: 'Tipo de Venta' },
+  weight: { cost: 'Costo por kg', base: 'Precio por kg (PVP)', type: 'Tipo de Venta' },
+};
+
+/**
+ * Unidades de medida disponibles para configurar insumos
+ * (Restaurant Suite). Mirror del web: las opciones se cargan estáticas
+ * porque coinciden con las semillas base del backend
+ * (`product_stock_uoms`). Cuando el usuario selecciona "Es insumo"
+ * aparecen dos selectores (Compra / Stock) con estas opciones.
+ */
+const UOM_OPTIONS: { label: string; value: number }[] = [
+  { label: 'Gramo (g)', value: 1 },
+  { label: 'Kilogramo (kg)', value: 3 },
+  { label: 'Miligramo (mg)', value: 2 },
+  { label: 'Mililitro (ml)', value: 4 },
+  { label: 'Litro (L)', value: 5 },
+  { label: 'Unidad (unit)', value: 6 },
+];
 
 const initialForm: ProductFormState = {
   name: '',
@@ -90,17 +198,42 @@ const initialForm: ProductFormState = {
   available_for_ecommerce: true,
   is_featured: false,
   allow_pos_price_override: false,
+  // Restaurant Suite defaults: al crear un producto, los flags de
+  // restaurante (Fase A) arrancan en false hasta que el usuario los
+  // active explícitamente. is_sellable por defecto true para no
+  // romper la UX existente (los productos son vendibles por default).
+  is_sellable: true,
+  is_ingredient: false,
+  is_combo: false,
+  is_batch_produced: false,
+  purchase_uom_id: undefined,
+  stock_uom_id: undefined,
   state: 'active',
-  brand_id: undefined,
+  brand_ids: [],
   category_ids: [],
   tax_category_ids: [],
   has_variants: false,
   variants: [],
   stock_by_location: {},
+  has_multiple_price_tiers: false,
+  enabled_price_tier_ids: [],
+  price_tier_overrides: [],
+  length: '',
+  width: '',
+  height: '',
+  weight_input: '',
+  requires_serial_numbers: false,
+  preparation_time_minutes: '',
+  service_duration_minutes: '',
+  service_modality: '',
+  service_pricing_type: '',
+  requires_booking: false,
+  is_recurring: false,
+  online_purchase_url: '',
 };
 
-function toNumber(value: string): number | undefined {
-  if (value.trim() === '') return undefined;
+function toNumber(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
@@ -140,6 +273,16 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [taxModalOpen, setTaxModalOpen] = useState(false);
   const [localTaxes, setLocalTaxes] = useState<TaxCategory[]>([]);
+  const [imageSourceOpen, setImageSourceOpen] = useState(false);
+  const [imageEditorUri, setImageEditorUri] = useState<string | null>(null);
+  // Breakpoint para UoM grid (1 col en mobile, 1fr_auto_1fr en md+).
+  const { width: screenW } = useWindowDimensions();
+  const isMdUp = screenW >= 768;
+  const [productImages, setProductImages] = useState<string[]>([]);
+  // Flag para no sobrescribir `price_tier_overrides` cada vez que se
+  // re-fetchea el producto. Sólo hidratamos desde el backend la primera
+  // vez; las selecciones del usuario se preservan en re-fetches.
+  const tierOverridesHydrated = useRef(false);
 
   const { data: product, isLoading: productLoading } = useQuery({
     queryKey: ['product', productId],
@@ -157,10 +300,35 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     queryFn: () => ProductService.getBrands(),
   });
 
+  // Lista de tarifas de precio (multi-tarifa). Se cargan siempre que
+  // el usuario active el toggle, para que pueda elegir cuáles aplican.
+  const { data: priceTiers = [] } = useQuery({
+    queryKey: ['price-tiers'],
+    queryFn: () => ProductService.getPriceTiers({ is_active: true }),
+  });
+
+  // Overrides de precio por tarifa para el producto actual (sólo en
+  // edit mode). Se hidrata al re-editar para mostrar los precios
+  // personalizados previamente guardados. staleTime: 0 para forzar
+  // fetch fresco cada vez que se abre el form.
+  const { data: productTierOverrides = [] } = useQuery({
+    queryKey: ['product-price-tier-overrides', productId],
+    queryFn: () => ProductService.getProductPriceTierOverrides(Number(productId)),
+    enabled: mode === 'edit' && !!productId,
+    staleTime: 0,
+  });
+
   const { data: taxes = [] } = useQuery({
     queryKey: ['product-taxes'],
     queryFn: () => ProductService.getTaxes(),
   });
+
+  const allTaxes = useMemo(() => {
+    const apiTaxes = (taxes as TaxCategory[]) || [];
+    if (localTaxes.length === 0) return apiTaxes;
+    const existingIds = new Set(apiTaxes.map(t => t.id));
+    return [...apiTaxes, ...localTaxes.filter(t => !existingIds.has(t.id))];
+  }, [taxes, localTaxes]);
 
   const { data: locationsResponse } = useQuery({
     queryKey: ['product-locations'],
@@ -183,6 +351,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       pricing_type?: PricingType;
       is_featured?: boolean;
       allow_pos_price_override?: boolean;
+      enabled_price_tier_ids?: number[];
     };
 
     setForm({
@@ -203,10 +372,24 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       available_for_ecommerce: product.available_for_ecommerce !== false,
       is_featured: !!ext.is_featured,
       allow_pos_price_override: !!ext.allow_pos_price_override,
+      // Restaurant Suite toggles (Fase A additive, exposed in Fase B)
+      is_sellable: !!(product as any).is_sellable,
+      is_ingredient: !!(product as any).is_ingredient,
+      is_combo: !!(product as any).is_combo,
+      is_batch_produced: !!(product as any).is_batch_produced,
+      purchase_uom_id: (product as any).purchase_uom_id ?? undefined,
+      stock_uom_id: (product as any).stock_uom_id ?? undefined,
+      // Hidratamos el flag de multi-tarifa desde el producto para que
+      // la sección quede visible al re-editar un producto que ya
+      // tenía tarifas configuradas.
+      has_multiple_price_tiers: !!(product as any).has_multiple_price_tiers,
       state: product.state,
-      brand_id: product.brand_id ?? undefined,
+      // brand_ids es un array en el form. Lo hidratamos desde el
+      // `brand_id` (single) del producto para mantener el binding.
+      brand_ids: product.brand_id ? [product.brand_id] : [],
       category_ids: product.categories?.map((category) => category.id) ?? [],
-      tax_category_ids: product.tax_assignments?.map((assignment) => assignment.tax_category_id) ?? [],
+      tax_category_ids: product.product_tax_assignments?.map((assignment) => assignment.tax_category_id) ?? [],
+      enabled_price_tier_ids: ext.enabled_price_tier_ids ?? [],
       has_variants: (product.product_variants?.length ?? 0) > 0,
       variants: (product.product_variants || []).map((variant) => ({
         localId: `variant-${variant.id}`,
@@ -222,7 +405,60 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       })),
       stock_by_location: stockByLocation,
     });
-  }, [product]);
+
+    // Cargar imágenes existentes del producto (si las hay).
+    // El backend devuelve `product_images` con `image_url` por registro
+    // (key firmada si la imagen vive en S3).
+    const existingImages = (product.product_images || [])
+      .map((img) => img.image_url)
+      .filter((url): url is string => Boolean(url));
+    if (existingImages.length > 0) {
+      setProductImages(existingImages);
+    } else {
+      setProductImages([]);
+    }
+
+    // Overrides por tarifa. Se obtienen del query separado
+    // `product-price-tier-overrides` (el endpoint principal del producto
+    // no incluye esta relación). Sólo hidratamos UNA vez para no
+    // sobrescribir las selecciones del usuario con re-fetches.
+    //
+    // El backend NO almacena el margen (sólo `override_price`); lo
+    // recalculamos al re-editar con la fórmula:
+    //   margin = (price / cost - 1) * 100
+    // de modo que el campo Margen (%) muestre el valor correcto al
+    // volver a abrir el form.
+    if (productTierOverrides.length > 0 && !tierOverridesHydrated.current) {
+      tierOverridesHydrated.current = true;
+      // product.cost_price es number|null. Lo convertimos a string para
+      // `toNumber` (que espera string|undefined).
+      const cost = toNumber(
+        product.cost_price != null ? String(product.cost_price) : undefined,
+      ) || 0;
+      setForm((current) => ({
+        ...current,
+        price_tier_overrides: productTierOverrides.map((o: any) => {
+          const price = o.override_price != null ? String(o.override_price) : '';
+          let margin = '';
+          if (cost > 0 && o.override_price != null) {
+            // margin = (price/cost - 1) * 100, redondeado a 2 decimales.
+            margin = String(
+              Math.round(((o.override_price / cost - 1) * 100) * 100) / 100,
+            );
+          }
+          return {
+            tier_id: o.price_tier_id,
+            price,
+            margin,
+            units_per_package:
+              o.override_units_per_package != null
+                ? String(o.override_units_per_package)
+                : '',
+          };
+        }),
+      }));
+    }
+  }, [product, productTierOverrides]);
 
   const finalPreview = useMemo(() => {
     const base = toNumber(form.base_price) || 0;
@@ -230,8 +466,193 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     return sale && sale > 0 ? sale : base;
   }, [form.base_price, form.is_on_sale, form.sale_price]);
 
+  /**
+   * Tax categories the user has selected for this product. Mirrors the web's
+   * `taxBreakdown` aggregation: one row per selected tax_category_id, using
+   * the category's first `tax_rates[0].rate`.
+   */
+  const selectedTaxes = useMemo<TaxCategory[]>(() => {
+    const ids = new Set(form.tax_category_ids);
+    return allTaxes.filter((tax) => ids.has(tax.id));
+  }, [form.tax_category_ids, allTaxes]);
+
+  const taxBreakdown = useMemo<TaxBreakdownItem[]>(() => {
+    const base = toNumber(form.base_price) || 0;
+    return selectedTaxes
+      .map((tax) => {
+        const rawRate = tax.tax_rates?.[0]?.rate;
+        const numericRate = typeof rawRate === 'number' ? rawRate : Number(rawRate) || 0;
+        if (numericRate === 0) return null;
+        return { id: tax.id, name: tax.name, rate: numericRate, amount: base * numericRate };
+      })
+      .filter((item): item is TaxBreakdownItem => item !== null);
+  }, [selectedTaxes, form.base_price]);
+
+  /** base + Σ(tax.amount) — the value the customer actually pays. */
+  const priceWithTax = useMemo(() => {
+    const base = toNumber(form.base_price) || 0;
+    const taxSum = taxBreakdown.reduce((sum, tax) => sum + tax.amount, 0);
+    return base + taxSum;
+  }, [form.base_price, taxBreakdown]);
+
+  /**
+   * Display value for the Section subtitle and "Precio Final" block: when the
+   * product is on sale we show the offer price; otherwise the tax-inclusive
+   * base price. Mirrors `priceWithTax` on the web.
+   */
+  const finalDisplayPrice = useMemo(() => {
+    const sale = form.is_on_sale ? toNumber(form.sale_price) : undefined;
+    return sale && sale > 0 ? sale : priceWithTax;
+  }, [form.is_on_sale, form.sale_price, priceWithTax]);
+
+  /**
+   * Suma del stock físico y disponible para la sección "Inventario / Stock".
+   * Si el producto no tiene variantes, viene de stock_quantity + stock_by_location.
+   * Si tiene variantes, el stock se calcula por variante (no mostrado en este nivel).
+   */
+  const { totalStock, availableStock } = useMemo(() => {
+    if (form.has_variants) {
+      return { totalStock: 0, availableStock: 0 };
+    }
+    const initial = toNumber(form.stock_quantity) || 0;
+    const fromLocations = Object.values(form.stock_by_location).reduce(
+      (sum, raw) => sum + (Number(raw) || 0),
+      0,
+    );
+    const total = initial + fromLocations;
+    return { totalStock: total, availableStock: total };
+  }, [form.has_variants, form.stock_quantity, form.stock_by_location]);
+
   const updateField = <K extends keyof ProductFormState>(key: K, value: ProductFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  /**
+   * Formatea un número con separador de miles estilo español
+   * (punto como separador, coma como decimal). Acepta strings con
+   * dígitos y opcionalmente un punto decimal. Se usa para mostrar el
+   * Precio de la tarjeta de multi-tarifa.
+   *   formatThousands("10000")    → "10.000"
+   *   formatThousands("10000.5")  → "10.000.5"
+   *   formatThousands("")         → ""
+   */
+  const formatThousands = (value: string): string => {
+    if (!value) return '';
+    // Limpiamos a dígitos + un solo punto decimal.
+    const cleaned = value.replace(/[^0-9.]/g, '');
+    if (!cleaned) return '';
+    const [intPart, decPart] = cleaned.split('.');
+    const withSeparator = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return decPart !== undefined ? `${withSeparator}.${decPart}` : withSeparator;
+  };
+
+  /**
+   * Sincroniza `price_tier_overrides` con `enabled_price_tier_ids`:
+   * - añade entradas vacías para tarifas recién seleccionadas
+   * - elimina entradas de tarifas que ya no están seleccionadas
+   * - conserva los valores de las tarifas que siguen seleccionadas
+   */
+  const syncTierOverrides = (
+    currentOverrides: PriceTierOverrideForm[],
+    selectedIds: number[],
+    selectedTiers: PriceTier[],
+  ): PriceTierOverrideForm[] => {
+    const byId = new Map(currentOverrides.map((o) => [o.tier_id, o]));
+    return selectedIds.map((id) => {
+      const existing = byId.get(id);
+      if (existing) return existing;
+      // Tarifa nueva: crear entrada con el precio base del producto
+      // como precio inicial y margen vacío.
+      const tier = selectedTiers.find((t) => t.id === id);
+      return {
+        tier_id: id,
+        price: form.base_price,
+        margin: '',
+        units_per_package: tier?.units_per_package
+          ? String(tier.units_per_package)
+          : '',
+      };
+    });
+  };
+
+  /**
+   * Recalcula el `price` de un override a partir del margen.
+   * Fórmula (igual que el web): `price = cost * (1 + margin/100)`.
+   */
+  const recalcPriceFromMargin = (
+    cost: number,
+    margin: string,
+    fallbackPrice: string,
+  ): string => {
+    const m = toNumber(margin) ?? 0;
+    if (m < 0) return fallbackPrice;
+    const newPrice = cost * (1 + m / 100);
+    return String(Math.round(newPrice * 100) / 100);
+  };
+
+  const updateTierOverride = (
+    tierId: number,
+    patch: Partial<PriceTierOverrideForm>,
+  ) => {
+    setForm((current) => {
+      const overrides = current.price_tier_overrides ?? [];
+      const idx = overrides.findIndex((o) => o.tier_id === tierId);
+      if (idx === -1) {
+        return {
+          ...current,
+          price_tier_overrides: [{ tier_id: tierId, price: '', margin: '', units_per_package: '', ...patch }],
+        };
+      }
+      const next = [...overrides];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...current, price_tier_overrides: next };
+    });
+  };
+
+  /**
+   * Sincroniza los overrides de precio por tarifa contra el backend
+   * después de guardar el producto. Para cada tarifa seleccionada con
+   * un override en el form, hace upsert. Para tarifas previamente
+   * seleccionadas que ya no están en `enabled_price_tier_ids`, hace
+   * delete (para no dejar overrides huérfanos).
+   *
+   * Se llama DESPUÉS del save principal del producto.
+   */
+  const syncPriceTierOverrides = async (savedProductId: number) => {
+    if (!form.has_multiple_price_tiers) {
+      // Multi-tarifa desactivado: borrar todos los overrides previos.
+      const previousIds = (form.price_tier_overrides ?? []).map((o) => o.tier_id);
+      await Promise.all(
+        previousIds.map((tierId) =>
+          ProductService.removeProductPriceTierOverride(savedProductId, tierId).catch(() => undefined),
+        ),
+      );
+      return;
+    }
+
+    const selectedIds = new Set(form.enabled_price_tier_ids ?? []);
+    const currentOverrides = form.price_tier_overrides ?? [];
+
+    // 1) Upsert de los overrides de las tarifas actualmente
+    //    seleccionadas.
+    const upserts = currentOverrides
+      .filter((o) => selectedIds.has(o.tier_id))
+      .map((o) =>
+        ProductService.upsertProductPriceTierOverride(savedProductId, o.tier_id, {
+          override_price: toNumber(o.price) ?? undefined,
+          override_units_per_package: toNumber(o.units_per_package) ?? undefined,
+        }),
+      );
+
+    // 2) Delete de los overrides de tarifas que ESTABAN en
+    //    `price_tier_overrides` pero ya no están seleccionadas.
+    const deleted = currentOverrides
+      .filter((o) => !selectedIds.has(o.tier_id))
+      .map((o) =>
+        ProductService.removeProductPriceTierOverride(savedProductId, o.tier_id).catch(() => undefined),
+      );
+
+    await Promise.all([...upserts, ...deleted]);
   };
 
   const updatePriceFromCostMargin = (costText: string, marginText: string) => {
@@ -315,11 +736,19 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       : undefined;
 
     // Base payload — fields safe in both create and update.
+    // Importante: el backend usa class-validator con `@IsInt()` que rechaza `null`
+    // (solo acepta `number | undefined`). Por eso enviamos `undefined` cuando no hay valor.
+    //
+    // SLUG: el DTO requiere `@MinLength(2)` cuando se proporciona. Si el usuario
+    // escribió 1 caracter o nada, lo omitimos para que el backend auto-genere uno.
+    const trimmedSlug = form.slug.trim();
+    const finalSlug = trimmedSlug.length >= 2 ? trimmedSlug : undefined;
+
     const base = {
       name: form.name.trim(),
       description: form.description.trim() || undefined,
       sku: form.sku.trim() || undefined,
-      slug: form.slug.trim() || undefined,
+      slug: finalSlug,
       barcode: form.barcode.trim() || undefined,
       base_price: toNumber(form.base_price) || 0,
       cost_price: toNumber(form.cost_price),
@@ -332,46 +761,169 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       available_for_ecommerce: form.available_for_ecommerce,
       is_featured: form.is_featured,
       allow_pos_price_override: form.allow_pos_price_override,
+      // Restaurant Suite toggles (Fase A additive, exposed in Fase B)
+      is_sellable: form.is_sellable,
+      is_ingredient: form.is_ingredient,
+      is_combo: form.is_combo,
+      is_batch_produced: form.is_batch_produced,
+      // UoM sólo se envían si el insumo está activo (mirror web: el
+      // card "Unidad de medida del insumo" sólo aparece cuando
+      // is_ingredient = true).
+      purchase_uom_id: form.is_ingredient ? form.purchase_uom_id : undefined,
+      stock_uom_id: form.is_ingredient ? form.stock_uom_id : undefined,
+      has_multiple_price_tiers: form.has_multiple_price_tiers,
+      enabled_price_tier_ids:
+        form.has_multiple_price_tiers && (form.enabled_price_tier_ids?.length ?? 0) > 0
+          ? form.enabled_price_tier_ids
+          : undefined,
+      // Los overrides por tarifa NO se envían en el DTO del producto.
+      // El backend los gestiona por endpoints separados:
+      //   PUT    /store/price-tiers/products/:productId/overrides/:tierId
+      //   DELETE /store/price-tiers/products/:productId/overrides/:tierId
+      // Se sincronizan DESPUÉS de guardar el producto (ver
+      // `syncPriceTierOverrides` abajo).
+      requires_serial_numbers: form.requires_serial_numbers,
       state: form.state,
       pricing_type: form.pricing_type,
       product_type: form.product_type,
-      brand_id: form.brand_id ?? null,
-      category_ids: form.category_ids,
-      tax_category_ids: form.tax_category_ids,
+      // brand_ids es un array en el form. El DTO del backend espera
+      // `brand_id` (single, primer elemento).
+      brand_id: form.brand_ids?.[0],
+      category_ids: form.category_ids.length > 0 ? form.category_ids : undefined,
+      tax_category_ids: form.tax_category_ids.length > 0 ? form.tax_category_ids : undefined,
+      // Imágenes del producto. En create enviamos las URIs locales que
+      // el backend descarga y guarda. En update las enviamos como
+      // image_urls (el backend reconcilia con product_images existentes).
+      image_urls: productImages.length > 0 ? productImages : undefined,
       variants,
     };
 
-    // Create-only fields (these are typically not allowed in PATCH on this backend).
-    if (mode === 'create') {
-      return {
-        ...base,
-        stock_transfer_mode: 'distribute',
-        variant_removal_stock_mode: 'first',
+    // Dimensiones + peso (mirror del web; sólo si hay valor).
+    const numericLength = toNumber(form.length);
+    const numericWidth = toNumber(form.width);
+    const numericHeight = toNumber(form.height);
+    if (numericLength !== undefined || numericWidth !== undefined || numericHeight !== undefined) {
+      (base as any).dimensions = {
+        length: numericLength ?? 0,
+        width: numericWidth ?? 0,
+        height: numericHeight ?? 0,
       };
     }
+    const numericWeight = toNumber(form.weight_input);
+    if (numericWeight !== undefined) {
+      (base as any).weight = numericWeight;
+    }
+    const preparationTime = toNumber(form.preparation_time_minutes);
+    if (preparationTime !== undefined) {
+      (base as any).preparation_time_minutes = preparationTime;
+    }
 
-    // Edit: only send what changed (partial update).
-    return base;
+    // Create-only fields: sólo válidos en UpdateProductDto. NO los enviamos
+    // en create porque el `forbidNonWhitelisted: true` del ValidationPipe
+    // rechazaría la request con "property X should not exist".
+    if (mode === 'create') {
+      return base;
+    }
+
+    // Edit: incluir campos sólo presentes en UpdateProductDto.
+    const update: UpdateProductDto = { ...base };
+    if (form.stock_quantity !== undefined && !form.has_variants) {
+      (update as any).stock_transfer_mode = 'distribute';
+      (update as any).variant_removal_stock_mode = 'first';
+    }
+    return update;
   };
 
   const mutation = useMutation({
     mutationFn: (dto: CreateProductDto | UpdateProductDto) =>
       mode === 'edit' && productId ? ProductService.update(productId, dto) : ProductService.create(dto as CreateProductDto),
-    onSuccess: () => {
+    onSuccess: async (savedProduct) => {
+      // El backend no acepta `price_tier_overrides` en el DTO del
+      // producto. Se sincronizan aparte, después del save principal,
+      // contra los endpoints:
+      //   PUT    /store/price-tiers/products/:productId/overrides/:tierId
+      //   DELETE /store/price-tiers/products/:productId/overrides/:tierId
+      const savedId = mode === 'edit' && productId ? productId : savedProduct?.id;
+      if (savedId) {
+        try {
+          await syncPriceTierOverrides(savedId);
+        } catch (err) {
+          console.warn('No se pudieron sincronizar los overrides de tarifas', err);
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['pos-products'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
       if (productId) queryClient.invalidateQueries({ queryKey: ['product', productId] });
+      queryClient.invalidateQueries({ queryKey: ['price-tiers'] });
+      // Invalidamos también la query de overrides para que la
+      // próxima vez que se abra el form (al re-editar) se traigan
+      // los datos frescos del backend.
+      if (productId) {
+        queryClient.invalidateQueries({
+          queryKey: ['product-price-tier-overrides', productId],
+        });
+      }
       toastSuccess(mode === 'edit' ? 'Producto actualizado' : 'Producto creado');
       router.back();
     },
     onError: (error: any) => {
+      const data = error?.response?.data;
+      // El AllExceptionsFilter del backend mete los constraints de class-validator
+      // en `data.details.validationErrors` y reemplaza `data.message` por un
+      // string genérico "Validation failed". Extraemos los constraints reales.
+      const validationErrors = data?.details?.validationErrors;
+      if (Array.isArray(validationErrors) && validationErrors.length > 0) {
+        toastError(validationErrors.join(' • '));
+        return;
+      }
+      // Fallback: leer data.message (puede ser string o array de otros errores).
+      const detail = Array.isArray(data?.message)
+        ? data.message.join(' • ')
+        : data?.message;
       const msg =
-        error?.response?.data?.message ||
-        error?.response?.data?.error ||
+        detail ||
+        data?.error ||
         (error instanceof Error ? error.message : null) ||
         'Error al guardar producto';
       toastError(typeof msg === 'string' ? msg : 'Error al guardar producto');
+    },
+  });
+
+  /**
+   * Mutación para generar descripción con IA (mirror del botón 'Generar con IA' web).
+   * Llama al backend POST /store/products/generate-description y rellena el Textarea.
+   *
+   * Detección de safety: el proveedor de IA (Vertex AI / OpenAI) puede devolver
+   * un placeholder como 'User safety:safe' cuando el filtro de contenido bloquea
+   * la generación. Tratamos este caso como error y mostramos un mensaje claro.
+   */
+  const aiMutation = useMutation({
+    mutationFn: (payload: { name: string; sku?: string; category_id?: number | null; brand_id?: number | null }) =>
+      ProductService.generateDescription(payload),
+    onSuccess: (result) => {
+      const text = result.description?.trim();
+      const isSafetyPlaceholder =
+        !text || /safety|safe content/i.test(text) || text.toLowerCase() === 'user safety:safe';
+      if (isSafetyPlaceholder) {
+        toastError('La IA no pudo generar una descripción (filtro de seguridad del proveedor). Edita manualmente.');
+        return;
+      }
+      setForm((current) => ({ ...current, description: text }));
+      toastSuccess('Descripción generada con IA');
+    },
+    onError: (error: any) => {
+      // Muestra el mensaje exacto del backend. Si es un validation error array, lo detalla.
+      const data = error?.response?.data;
+      const detail = Array.isArray(data?.message)
+        ? data.message.join(', ')
+        : data?.message;
+      const msg =
+        detail ||
+        error?.message ||
+        'No se pudo generar la descripción. Verifica que el backend soporte este endpoint.';
+      toastError(msg);
     },
   });
 
@@ -394,7 +946,6 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       <StickyHeader
         title={mode === 'edit' ? 'Editar Producto' : 'Nuevo Producto'}
         subtitle={undefined}
-        showCloseButton={false}
         onBack={() => router.back()}
         actions={[
           { label: '', icon: 'x', variant: 'outline', onPress: () => router.back() },
@@ -409,276 +960,685 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       />
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
-          {/* Tipo de Producto */}
-          <Section title="Tipo de Producto" subtitle="Define si el producto es físico, un servicio o preparado" icon="package">
+          {/* Tipo de Producto (espejo exacto del web:
+              - ícono layers + título (sin subtitle)
+              - segmented control con 2 opciones: Producto Físico | Servicio
+          */}
+          <Section title="Tipo de Producto" icon="layers">
             <InputButtons
               value={form.product_type}
               onChange={(v) => updateField('product_type', v as ProductType)}
               fullWidth
               options={[
-                { label: 'Físico', value: 'physical' },
+                { label: 'Producto Físico', value: 'physical' },
                 { label: 'Servicio', value: 'service' },
-                { label: 'Preparado', value: 'prepared' },
               ]}
             />
           </Section>
 
-          {/* Información General */}
-          <Section title="Información General" subtitle="Datos visibles en punto de venta, catálogo e inventario" icon="info">
-            <Input label="Nombre" value={form.name} onChangeText={(value) => updateField('name', value)} error={errors.name} />
+          {/* Información General (espejo exacto del web) */}
+          <Section title="Información General" icon="info">
+            {/* Nombre del Producto (full-width, required, con clipboard icon suffix) */}
             <Input
-              label="SKU"
-              value={form.sku}
-              onChangeText={(value) => updateField('sku', value.toUpperCase())}
-              autoCapitalize="characters"
+              label="Nombre del Producto"
+              value={form.name}
+              onChangeText={(value) => updateField('name', value)}
+              placeholder="Ej. Camiseta Algodón Premium"
+              required
+              tooltip="Nombre visible del producto en catálogo, facturas y buscador. Sé descriptivo y consistente."
+              error={errors.name}
+              rightIcon={
+                <Pressable
+                  onPress={() => {
+                    // El web permite pegar al portapapeles para autocompletar el nombre.
+                    // En mobile esto requeriría expo-clipboard; placeholder visual.
+                    toastSuccess('Pega el nombre desde el portapapeles');
+                  }}
+                  hitSlop={6}
+                >
+                  <Icon name="clipboard-list" size={16} color={colors.text.muted} />
+                </Pressable>
+              }
             />
-            <Input
-              label="Código de barras"
-              value={form.barcode}
-              onChangeText={(value) => updateField('barcode', value)}
-              placeholder="opcional"
-            />
-            <Input
-              label="Slug (URL)"
-              value={form.slug}
-              onChangeText={(value) => updateField('slug', value)}
-              placeholder="se genera automáticamente si lo dejás vacío"
-              autoCapitalize="none"
-            />
+
+            {/* SKU / Código de barras / Slug en grid 3 cols en sm+ */}
+            <View style={styles.infoGrid}>
+              <Input
+                label="SKU"
+                value={form.sku}
+                onChangeText={(value) => updateField('sku', value.toUpperCase())}
+                placeholder="Ej. CAM-001"
+                tooltip="Código interno único del producto. Útil para inventario, etiquetas y búsqueda rápida en POS."
+                autoCapitalize="characters"
+              />
+              <Input
+                label="Código de barras"
+                value={form.barcode}
+                onChangeText={(value) => updateField('barcode', value)}
+                placeholder="Escanea o escribe el código"
+                tooltip="Código escaneable (EAN/UPC) único en la tienda."
+              />
+              <Input
+                label="Slug (URL)"
+                value={form.slug}
+                onChangeText={(value) => updateField('slug', value)}
+                placeholder="camiseta-algodon-premium"
+                tooltip="Identificador para la URL pública del producto. Se genera automáticamente desde el nombre."
+                autoCapitalize="none"
+              />
+            </View>
+
+            {/* Descripción con botón 'Generar con IA' (espejo del web ai-generate-btn)
+                El botón llama al backend de IA (POST /store/products/generate-description).
+                Muestra tooltip "Generar con IA" al hover/press y rellena el Textarea. */}
+            <View style={styles.descriptionHeader}>
+              <Text style={styles.descriptionLabel}>Descripción</Text>
+              <Pressable
+                onPress={() => {
+                  if (!form.name.trim()) {
+                    toastError('Ingresa primero el nombre del producto');
+                    return;
+                  }
+                  // Construye el payload sólo con campos con valor (undefined los omite del body,
+                  // evitando que el backend rechace por nulls opcionales).
+                  const payload: Parameters<typeof ProductService.generateDescription>[0] = {
+                    name: form.name.trim(),
+                  };
+                  const trimmedSku = form.sku.trim();
+                  if (trimmedSku) payload.sku = trimmedSku;
+                  if (form.category_ids[0]) payload.category_id = form.category_ids[0];
+                  if (form.brand_ids?.[0]) payload.brand_id = form.brand_ids[0];
+                  aiMutation.mutate(payload);
+                }}
+                disabled={aiMutation.isPending || !form.name.trim()}
+                style={({ pressed }) => [
+                  styles.aiGenerateBtn,
+                  pressed && !aiMutation.isPending && { opacity: 0.85 },
+                ]}
+              >
+                {aiMutation.isPending ? (
+                  <ActivityIndicator size="small" color={colors.background} />
+                ) : (
+                  <>
+                    <Icon name="sparkles" size={11} color={colors.background} />
+                    <Text style={styles.aiGenerateText}>IA</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
             <Textarea
-              label="Descripción"
+              label=""
               value={form.description}
               onChangeText={(value) => updateField('description', value)}
+              placeholder="Describe tu producto..."
               rows={3}
               maxLength={1000}
             />
           </Section>
 
-          {/* Precios y Rentabilidad */}
-          <Section title="Precios y Rentabilidad" subtitle={`Precio final estimado ${formatCurrency(finalPreview)}`} icon="dollar-sign">
-            <View>
-              <Input
-                label="Costo"
+          {/* Precios y Rentabilidad (espejo exacto del web)
+              - Inputs con prefix "$" (Costo, Precio Base) y suffix "%" (Margen)
+              - Tooltips en cada input/selector (mirror web tooltiptext)
+              - Precio Base con asterisco rojo (required)
+              - Impuestos Aplicables + botón + (mb-[26px] del web) con label del MultiSelector
+          */}
+          <Section title="Precios y Rentabilidad" icon="dollar-sign" iconColor={colors.primary}>
+            <View style={styles.pricingRow}>
+              <MoneyInput
+                label={PRICING_LABELS[form.pricing_type].cost}
                 value={form.cost_price}
                 onChangeText={(value) => {
                   updateField('cost_price', value);
                   updatePriceFromCostMargin(value, form.profit_margin);
                 }}
-                keyboardType="decimal-pad"
-                rightIcon={
-                  form.cost_price ? (
-                    <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
-                      {formatCurrency(toNumber(form.cost_price) || 0).replace(/\s/g, '')}
-                    </Text>
-                  ) : null
-                }
+                prefix="$"
+                placeholder="0"
+                tooltip="Precio al que adquieres el producto. Se usa para calcular la rentabilidad."
               />
-            </View>
-            <Input
-              label="Margen %"
-              value={form.profit_margin}
-              onChangeText={(value) => {
-                updateField('profit_margin', value);
-                updatePriceFromCostMargin(form.cost_price, value);
-              }}
-              keyboardType="decimal-pad"
-            />
-            <View>
               <Input
-                label="Precio base"
+                label="Margen (%)"
+                value={form.profit_margin}
+                onChangeText={(value) => {
+                  updateField('profit_margin', value);
+                  updatePriceFromCostMargin(form.cost_price, value);
+                }}
+                keyboardType="decimal-pad"
+                suffix="%"
+                placeholder="0.00"
+                tooltip="Porcentaje de ganancia deseado sobre el costo. Ajusta automáticamente el precio base."
+              />
+              <MoneyInput
+                label={PRICING_LABELS[form.pricing_type].base}
                 value={form.base_price}
                 onChangeText={(value) => {
                   updateField('base_price', value);
                   updateMarginFromBase(value, form.cost_price);
                 }}
-                keyboardType="decimal-pad"
                 error={errors.base_price}
-                rightIcon={
-                  form.base_price ? (
-                    <Text style={{ fontSize: typography.fontSize.sm, fontWeight: '600', color: colorScales.gray[500] }}>
-                      {formatCurrency(toNumber(form.base_price) || 0).replace(/\s/g, '')}
-                    </Text>
-                  ) : null
-                }
+                placeholder="0"
+                prefix="$"
+                tooltip="Precio de venta antes de impuestos. Se calcula automáticamente si defines costo + margen."
+                required
               />
             </View>
             <Selector
-              label="Unidad de venta"
+              label={PRICING_LABELS[form.pricing_type].type}
               value={form.pricing_type}
               onChange={(v) => updateField('pricing_type', v as PricingType)}
               options={[
                 { label: 'Venta por unidad', value: 'unit' },
                 { label: 'Venta por peso (kg)', value: 'weight' },
               ]}
+              tooltip="Define si el producto se vende por unidad o por peso (kg). Afecta cómo se interpretan los precios."
             />
-            {true && (
-              <View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing[1], marginBottom: spacing[1.5] }}>
-                  <Text style={{
-                    fontSize: 10,
-                    fontWeight: typography.fontWeight.bold,
-                    fontFamily: typography.fontFamily,
-                    color: colorScales.gray[700],
-                    letterSpacing: 0.5,
-                    textTransform: 'uppercase',
-                  }}>Impuestos aplicables</Text>
-                  <Text style={{ color: colorScales.gray[400], fontSize: 10 }}>*</Text>
+
+            {/* Impuestos Aplicables + botón + para creación rápida (mirror web
+                `flex gap-2 items-end h-full md:col-span-2` + `button mb-[26px]`).
+                El MultiSelector pone su propio label 'Impuestos Aplicables' con tooltip.
+                El `marginTop` del botón + compensa el alto del label del MultiSelector
+                para alinear verticalmente con el input. */}
+            <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+              <View style={{ flex: 1 }}>
+                <MultiSelector
+                  label="Impuestos Aplicables"
+                  values={form.tax_category_ids}
+                  onChange={(v) => updateField('tax_category_ids', v)}
+                  options={allTaxes.map((t) => {
+                    const rate = t.tax_rates?.[0]?.rate;
+                    const labelText = typeof rate === 'number' ? `${t.name} (${(rate * 100).toFixed(0)}%)` : t.name;
+                    return { label: labelText, subLabel: t.name, value: t.id };
+                  })}
+                  placeholder="Seleccionar impuestos…"
+                  searchable
+                  searchPlaceholder="Buscar impuesto…"
+                  tooltip="Impuestos que se suman al precio base en facturación y checkout (IVA, INC, retenciones)."
+                />
+              </View>
+              <Pressable
+                onPress={() => setTaxModalOpen(true)}
+                hitSlop={6}
+                style={({ pressed }) => [
+                  styles.taxAddButton,
+                  styles.taxAddButtonAligned, // ← alinea con el input (no el label)
+                  pressed && styles.taxAddButtonPressed,
+                ]}
+              >
+                <Icon name="plus" size={20} color={colors.primary} />
+              </Pressable>
+            </View>
+
+            {/* Sub-card con desglose estructurado del precio (espejo de la versión web mobile) */}
+            <View style={styles.pricingBreakdownCard}>
+              {/* Fila 1: Fórmula de cálculo (gris) */}
+              <View style={styles.formulaRow}>
+                <Text style={styles.formulaValue}>{formatCurrency(toNumber(form.cost_price) || 0)}</Text>
+                <Text style={styles.formulaHint}>(Costo)</Text>
+                <Text style={styles.formulaOp}>×</Text>
+                <Text style={styles.formulaHint}>(1 + {Number(form.profit_margin || 0).toFixed(1)}%)</Text>
+                <Text style={styles.formulaOp}>=</Text>
+                <Text style={styles.formulaValue}>{formatCurrency(toNumber(form.base_price) || 0)}</Text>
+                <Text style={styles.formulaHint}>(PVP)</Text>
+
+                {taxBreakdown.map((tax) => (
+                  <Fragment key={tax.id}>
+                    <Text style={styles.formulaOp}>+</Text>
+                    <Text style={styles.formulaHint}>{(tax.rate * 100).toFixed(1)}% {tax.name}</Text>
+                    <Text style={styles.formulaAmount}>({formatCurrency(tax.amount)})</Text>
+                  </Fragment>
+                ))}
+
+                <Text style={styles.formulaOp}>=</Text>
+                <Text style={styles.formulaFinal}>{formatCurrency(priceWithTax)}</Text>
+              </View>
+
+              {/* Fila 2: Precio Final + wrapper "setting-toggle-row" del web */}
+              <View style={styles.finalPriceRow}>
+                <View style={styles.finalPriceCol}>
+                  <Text style={styles.finalLabel}>PRECIO FINAL</Text>
+                  <Text style={[styles.finalAmount, form.is_on_sale && styles.finalAmountStrike]}>
+                    {formatCurrency(priceWithTax)}
+                  </Text>
                 </View>
-                <View style={{ flexDirection: 'row', gap: spacing[2] }}>
-                  <View style={{ flex: 1 }}>
-                    <MultiSelector
-                      values={form.tax_category_ids}
-                      onChange={(v) => updateField('tax_category_ids', v)}
-                      options={((taxes as TaxCategory[]) || []).map((t) => ({ label: t.name, value: t.id }))}
-                      placeholder="Seleccionar impuestos"
-                    />
-                  </View>
-                  <Pressable
-                    onPress={() => setTaxModalOpen(true)}
-                    hitSlop={6}
-                    style={({ pressed }) => [
-                      {
-                        width: 40,
-                        height: 40,
-                        borderRadius: 10,
-                        borderWidth: 1.5,
-                        borderColor: colors.primary,
-                        backgroundColor: 'transparent',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      },
-                      pressed && { opacity: 0.7 },
-                    ]}
-                  >
-                    <Icon name="plus" size={18} color={colors.primary} />
-                  </Pressable>
+
+                {/* Wrapper del toggle (espejo del `setting-toggle-row` web:
+                    bg-gray-50 + border-gray-100 + rounded-xl + p-2 + mt-3) */}
+                <View style={styles.settingToggleRow}>
+                  <Toggle
+                    value={form.is_on_sale}
+                    onChange={(v) => updateField('is_on_sale', v)}
+                    label="Activar precio de oferta"
+                    description="Se mostrará como precio promocional"
+                  />
                 </View>
               </View>
-            )}
 
-            {/* Espacio destacado del Precio final (sin border, precio en color primary) */}
-            <View
-              style={{
-                padding: spacing[4],
-                gap: spacing[1],
-                marginTop: spacing[1],
-              }}
-            >
-              <Text
-                style={{
-                  fontSize: 10,
-                  fontWeight: '700',
-                  color: colors.text.secondary,
-                  textTransform: 'uppercase',
-                  letterSpacing: 0.5,
-                }}
-              >
-                Precio final estimado
-              </Text>
-              <Text
-                style={{
-                  fontSize: 28,
-                  fontWeight: '800',
-                  color: colors.primary,
-                }}
-              >
-                {formatCurrency(finalPreview)}
-              </Text>
-              <Text
-                style={{
-                  fontSize: typography.fontSize.xs,
-                  color: colors.text.secondary,
-                  marginTop: spacing[1],
-                }}
-              >
-                {`${formatCurrency(toNumber(form.cost_price) || 0)} × (1 + ${form.profit_margin || '0'}%) = ${formatCurrency(finalPreview)}`}
-              </Text>
-            </View>
-            <View style={{ height: spacing[2] }} />
-            <Toggle
-              value={form.is_on_sale}
-              onChange={(v) => updateField('is_on_sale', v)}
-              label="Activar precio de oferta"
-              description="Mostrar precio tachado y activar precio promocional."
-            />
-            {form.is_on_sale && (
-              <Input
-                label="Precio de oferta"
-                value={form.sale_price}
-                onChangeText={(value) => updateField('sale_price', value)}
-                keyboardType="decimal-pad"
-                error={errors.sale_price}
-                helperText="Debe ser menor al precio base"
-              />
-            )}
-          </Section>
-
-          {/* Imágenes del Producto (placeholder) */}
-          <Section title="Imágenes del Producto" subtitle="Gestioná las imágenes desde la versión web" icon="image">
-            <View
-              style={{
-                height: 120,
-                borderRadius: borderRadius.md,
-                borderWidth: 1,
-                borderColor: colorScales.gray[200],
-                borderStyle: 'dashed',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: colorScales.gray[50],
-              }}
-            >
-              <Icon name="image-plus" size={28} color={colors.text.muted} />
-              <Text style={{ fontSize: typography.fontSize.sm, color: colors.text.muted, marginTop: spacing[1] }}>
-                Subí imágenes desde la versión web
-              </Text>
-            </View>
-          </Section>
-
-          <Section title="Inventario" subtitle="Stock inicial y visibilidad comercial" icon="warehouse">
-            <Toggle
-              value={form.track_inventory}
-              onChange={(v) => updateField('track_inventory', v)}
-              label="Controlar inventario"
-              description="Llevar conteo de unidades disponibles por bodega."
-            />
-            <Toggle
-              value={form.available_for_ecommerce}
-              onChange={(v) => updateField('available_for_ecommerce', v)}
-              label="Disponible en ecommerce"
-              description="Mostrar este producto en la tienda online."
-            />
-            {!form.has_variants && form.track_inventory && (
-              <>
-                <Input label="Stock inicial" value={form.stock_quantity} onChangeText={(value) => updateField('stock_quantity', value)} keyboardType="number-pad" />
-                {locations.length > 0 && (
-                  <View style={styles.locationStock}>
-                    <Text style={styles.blockLabel}>Stock por bodega</Text>
-                    {locations.map((location) => (
-                      <View key={location.id} style={styles.locationRow}>
-                        <View style={styles.locationName}>
-                          <Text style={styles.locationTitle}>{location.name}</Text>
-                          <Text style={styles.locationSubtitle}>{location.code || location.type}</Text>
-                        </View>
-                        <Input
-                          label="Cantidad"
-                          value={form.stock_by_location[String(location.id)] || ''}
-                          onChangeText={(value) => setForm((current) => ({
-                            ...current,
-                            stock_by_location: { ...current.stock_by_location, [String(location.id)]: value },
-                          }))}
-                          keyboardType="number-pad"
-                          style={styles.locationInput}
-                        />
-                      </View>
-                    ))}
+              {/* Fila 3: Sub-sección rose para precio de oferta (solo si is_on_sale) */}
+              {form.is_on_sale && (
+                <View style={styles.saleRow}>
+                  <Icon name="flame" size={18} color={colorScales.red[500]} />
+                  <View style={styles.saleCol}>
+                    <Text style={styles.saleLabel}>PRECIO DE OFERTA</Text>
+                    <Input
+                      tone="rose"
+                      value={form.sale_price}
+                      onChangeText={(value) => updateField('sale_price', value)}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      error={errors.sale_price}
+                    />
                   </View>
-                )}
-              </>
+                </View>
+              )}
+            </View>
+          </Section>
+
+          {/* Precios Multi-Tarifa (justo después de Precios y Rentabilidad,
+              mirror web: header con icon tags + toggle + al activarlo
+              aparece el multi-selector de "Tarifas aplicables" + el
+              mensaje informativo con el conteo de tarifas disponibles). */}
+          <Section title="Precios Multi-Tarifa" icon="tags">
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.has_multiple_price_tiers}
+                onChange={(v) => {
+                  updateField('has_multiple_price_tiers', v);
+                  // Si se desactiva, limpiamos las tarifas seleccionadas
+                  // para no enviar IDs que el backend ignore.
+                  if (!v) updateField('enabled_price_tier_ids', []);
+                }}
+                label="Activar precios multi-tarifa"
+                description="Define precios distintos para tarifas como Mayorista, Distribuidor, VIP, etc. La tarifa por defecto usa el precio base."
+              />
+            </View>
+            {form.has_multiple_price_tiers && (
+              <View style={styles.priceTiersBlock}>
+                <MultiSelector
+                  label="Tarifas aplicables"
+                  placeholder="Buscar y seleccionar tarifas..."
+                  tooltip="Selecciona las tarifas que aplican a este producto. Solo las seleccionadas mostrarán precio, margen y cantidad por empaque configurables."
+                  values={form.enabled_price_tier_ids ?? []}
+                  onChange={(values) => {
+                    // Usamos el formulario funcional de setForm para
+                    // evitar race conditions con el closure (el
+                    // `form` capturado podía tener un valor stale y
+                    // perder el sync entre IDs seleccionados y overrides).
+                    setForm((current) => {
+                      const currentOverrides = current.price_tier_overrides ?? [];
+                      const next = syncTierOverrides(currentOverrides, values, priceTiers);
+                      return {
+                        ...current,
+                        enabled_price_tier_ids: values,
+                        price_tier_overrides: next,
+                      };
+                    });
+                  }}
+                  options={priceTiers.map((tier) => ({
+                    value: tier.id,
+                    label: tier.name,
+                    subLabel: tier.is_default
+                      ? 'Por defecto'
+                      : tier.units_per_package
+                      ? `Empaque x${tier.units_per_package}`
+                      : undefined,
+                  }))}
+                  searchable
+                  searchPlaceholder="Buscar..."
+                />
+                <View style={styles.priceTiersHint}>
+                  <Icon name="info" size={16} color={colorScales.gray[500]} />
+                  <Text style={styles.priceTiersHintText}>
+                    {priceTiers.length === 0
+                      ? 'No hay tarifas configuradas. Crea tarifas en Configuración → Tarifas de precio para poder seleccionarlas aquí.'
+                      : `Hay ${priceTiers.length} tarifa${priceTiers.length === 1 ? '' : 's'} disponible${priceTiers.length === 1 ? '' : 's'}. Selecciona al menos una arriba para configurar su precio, margen y cantidad por empaque.`}
+                  </Text>
+                </View>
+
+                {/* Card de configuración por tarifa seleccionada */}
+                {(form.enabled_price_tier_ids ?? []).map((tierId) => {
+                  const tier = priceTiers.find((t) => t.id === tierId);
+                  const override = (form.price_tier_overrides ?? []).find(
+                    (o) => o.tier_id === tierId,
+                  );
+                  if (!tier || !override) return null;
+                  const cost = toNumber(form.cost_price) || 0;
+                  const calculatedPrice =
+                    override.margin && toNumber(override.margin) !== null
+                      ? cost * (1 + (toNumber(override.margin) ?? 0) / 100)
+                      : toNumber(override.price) ?? cost;
+                  return (
+                    <View key={tierId} style={styles.priceTierCard}>
+                      <View style={styles.priceTierCardHeader}>
+                        <View style={styles.priceTierCardTitleRow}>
+                          <Text style={styles.priceTierCardName}>
+                            {tier.name}
+                          </Text>
+                          <Text style={styles.priceTierCardRate}>
+                            {tier.is_default
+                              ? 'Tarifa por defecto'
+                              : `${tier.units_per_package ?? 1}× empaque`}
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={() => {
+                            setForm((current) => {
+                              const remaining = (
+                                current.enabled_price_tier_ids ?? []
+                              ).filter((id) => id !== tierId);
+                              const next = syncTierOverrides(
+                                current.price_tier_overrides ?? [],
+                                remaining,
+                                priceTiers,
+                              );
+                              return {
+                                ...current,
+                                enabled_price_tier_ids: remaining,
+                                price_tier_overrides: next,
+                              };
+                            });
+                          }}
+                          hitSlop={6}
+                          style={styles.priceTierCardRemove}
+                          accessibilityLabel={`Quitar tarifa ${tier.name}`}
+                        >
+                          <Icon name="x" size={14} color={colorScales.gray[400]} />
+                          <Text style={styles.priceTierCardRemoveText}>
+                            Quitar
+                          </Text>
+                        </Pressable>
+                      </View>
+
+                      <View style={styles.priceTierCardGrid}>
+                        {/* Columna 1/3: Precio (con separador de miles
+                            al estilo español: 10.000 en vez de 10000). */}
+                        <View style={styles.priceTierField}>
+                          <Input
+                            label="Precio"
+                            value={formatThousands(override.price)}
+                            onChangeText={(value) => {
+                              const numeric = value.replace(/[^0-9.]/g, '');
+                              updateTierOverride(tierId, {
+                                price: numeric,
+                                margin: '', // Al editar precio directo, limpiamos el margen.
+                              });
+                            }}
+                            placeholder="$0"
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                        <View style={styles.priceTierField}>
+                          <Input
+                            label="Margen (%)"
+                            value={override.margin}
+                            onChangeText={(value) => {
+                              const numeric = value.replace(/[^0-9.]/g, '');
+                              // Al cambiar el margen, recalculamos el
+                              // precio con la fórmula cost * (1 + m/100).
+                              const newPrice = recalcPriceFromMargin(
+                                cost,
+                                numeric,
+                                override.price,
+                              );
+                              updateTierOverride(tierId, {
+                                margin: numeric,
+                                price: newPrice,
+                              });
+                            }}
+                            placeholder=""
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                        <View style={styles.priceTierField}>
+                          <Input
+                            label="Cantidad x empaque"
+                            value={override.units_per_package}
+                            onChangeText={(value) => {
+                              const numeric = value.replace(/[^0-9]/g, '');
+                              updateTierOverride(tierId, {
+                                units_per_package: numeric,
+                              });
+                            }}
+                            placeholder="Sin empaque"
+                            keyboardType="number-pad"
+                            tooltip="Sobrescribe las unidades por empaque de la tarifa solo para este producto. Vacío hereda el valor de la tarifa. Mínimo 2."
+                          />
+                        </View>
+                      </View>
+
+                      <View style={styles.priceTierCardResult}>
+                        <Text style={styles.priceTierCardResultLabel}>
+                          Precio resultante:{' '}
+                          <Text style={styles.priceTierCardResultValue}>
+                            {formatCurrency(calculatedPrice)}
+                          </Text>
+                          <Text style={styles.priceTierCardResultCalc}>
+                            {' '}
+                            (calculado)
+                          </Text>
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
             )}
           </Section>
 
-          {/* Disponibilidad y Estado */}
-          <Section title="Disponibilidad y Estado" subtitle="Configurá la visibilidad y el estado del producto" icon="eye">
+          {/* Imágenes del Producto (espejo exacto del web mobile lg:hidden):
+              - Header sin subtitle, con counter "0/5" a la derecha (slot `right`)
+              - Placeholder cuadrado aspect-square max-w-280, mx-auto, con ícono circular bg-white
+              - Botón secundario 64x64 dashed + ícono image-plus + label "Agregar"
+          */}
+          <Section
+            title="Imágenes del Producto"
+            icon="image"
+            right={
+              <Text style={styles.imageCount}>{productImages.length}/5</Text>
+            }
+          >
+            <View style={styles.imageMainWrapper}>
+              {productImages.length > 0 ? (
+                <Pressable
+                  onPress={() => setImageSourceOpen(true)}
+                  style={({ pressed }) => [
+                    styles.imageMainFilled,
+                    pressed && { opacity: 0.85 },
+                  ]}
+                >
+                  <Image
+                    source={{ uri: productImages[0] }}
+                    style={styles.imageMainImg}
+                    resizeMode="cover"
+                  />
+
+                  {/* Botón "Mejorar imagen con IA" (web: bottom-2 left-2 + gradient green + sparkles + 'IA') */}
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      toastSuccess('Mejorar imagen con IA (próximamente)');
+                    }}
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.imageMainAiBtn,
+                      pressed && { opacity: 0.85 },
+                    ]}
+                    accessibilityLabel="Mejorar imagen con IA"
+                  >
+                    <Icon name="sparkles" size={12} color={colors.background} />
+                    <Text style={styles.imageMainAiBtnText}>IA</Text>
+                  </Pressable>
+
+                  {/* Botón "Ajustar y recortar" (web: bottom-2 right-2 + white + crop icon + 'Ajustar') */}
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setImageEditorUri(productImages[0]);
+                    }}
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.imageMainCropBtn,
+                      pressed && { opacity: 0.85 },
+                    ]}
+                    accessibilityLabel="Ajustar y recortar imagen"
+                  >
+                    <Icon name="crop" size={14} color={colorScales.gray[700]} />
+                    <Text style={styles.imageMainCropBtnText}>Ajustar</Text>
+                  </Pressable>
+
+                  {/* Botón Eliminar (mirror web: top-2 right-2 absolute + red-500/90 + trash-2) */}
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      setProductImages((prev) => prev.filter((_, i) => i !== 0));
+                    }}
+                    hitSlop={6}
+                    style={({ pressed }) => [
+                      styles.imageMainDelete,
+                      pressed && { backgroundColor: 'rgba(220, 38, 38, 1)' },
+                    ]}
+                    accessibilityLabel="Eliminar imagen"
+                  >
+                    <Icon name="trash-2" size={14} color={colors.background} />
+                  </Pressable>
+                </Pressable>
+              ) : (
+                <Pressable
+                  onPress={() => setImageSourceOpen(true)}
+                  style={({ pressed }) => [
+                    styles.imageMainPlaceholder,
+                    pressed && { borderColor: colors.primary },
+                  ]}
+                >
+                  <View style={styles.imageMainCircle}>
+                    <Icon name="image" size={24} color={colors.text.muted} style={{ opacity: 0.2 }} />
+                  </View>
+                  <Text style={styles.imageMainText}>Sin imágenes</Text>
+                  <Text style={styles.imageMainHint}>Toca para agregar</Text>
+                </Pressable>
+              )}
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.imageThumbsRow}
+              style={styles.imageThumbsScroll}
+            >
+              {productImages.map((uri, index) => {
+                const isMain = index === 0;
+                return (
+                  <Pressable
+                    key={`${uri}-${index}`}
+                    onPress={() => {
+                      // Tap en miniatura = seleccionar como imagen principal
+                      // (mirror web: ring-2 ring-primary-500 sobre la activa).
+                      if (isMain) return;
+                      setProductImages((prev) => {
+                        const next = [...prev];
+                        const [picked] = next.splice(index, 1);
+                        next.unshift(picked);
+                        return next;
+                      });
+                    }}
+                    style={[styles.imageThumb, isMain && styles.imageThumbActive]}
+                  >
+                    <Image
+                      source={{ uri }}
+                      style={styles.imageThumbImg}
+                      resizeMode="cover"
+                    />
+                  </Pressable>
+                );
+              })}
+              {productImages.length < 5 && (
+                <Pressable
+                  onPress={() => setImageSourceOpen(true)}
+                  style={({ pressed }) => [
+                    styles.imageThumbAdd,
+                    pressed && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.primary,
+                      opacity: 0.7,
+                    },
+                  ]}
+                >
+                  <Icon name="plus" size={20} color={colors.text.muted} />
+                  <Text style={styles.imageThumbAddText}>Agregar</Text>
+                </Pressable>
+              )}
+            </ScrollView>
+          </Section>
+
+          <ImageSourceModal
+            visible={imageSourceOpen && imageEditorUri === null}
+            onClose={() => setImageSourceOpen(false)}
+            remainingSlots={Math.max(0, 5 - productImages.length)}
+            onConfirm={(image: UploadedImage) => {
+              setImageEditorUri(image.uri);
+              setImageSourceOpen(false);
+            }}
+          />
+
+          <ImageEditModal
+            visible={imageEditorUri !== null}
+            imageUri={imageEditorUri}
+            onClose={() => setImageEditorUri(null)}
+            onApply={(result) => {
+              setProductImages((prev) => {
+                if (prev.length >= 5) {
+                  toastError('Máximo 5 imágenes por producto');
+                  return prev;
+                }
+                return [...prev, result.uri];
+              });
+              toastSuccess('Imagen agregada');
+              setImageEditorUri(null);
+            }}
+          />
+
+          {/* Inventario / Stock (espejo exacto del web lg:hidden)
+              Header: icon archive + h2 'Inventario / Stock' (sin subtitle)
+              Stats: 2 cards (Físico / Disponible) con label uppercase 9px + valor text-lg bold
+              Acción: button 'Inventario' con cart icon (placeholder hasta integración inventario)
+          */}
+          <Section title="Inventario / Stock" icon="archive">
+            <View style={styles.inventoryStatsGrid}>
+              <View style={styles.inventoryStatCard}>
+                <Text style={styles.inventoryStatLabel}>Físico</Text>
+                <Text style={styles.inventoryStatValue}>{totalStock.toLocaleString('es-CO')}</Text>
+              </View>
+              <View style={styles.inventoryStatCard}>
+                <Text style={styles.inventoryStatLabel}>Disponible</Text>
+                <Text style={[styles.inventoryStatValue, styles.inventoryStatValuePrimary]}>
+                  {availableStock.toLocaleString('es-CO')}
+                </Text>
+              </View>
+            </View>
+            <Pressable
+              onPress={() => {
+                // Gestión detallada de inventario desde un modal dedicado.
+                // El inventario por bodega/seriales requiere UI especializada
+                // que se desarrolla en PR futuro.
+                toastSuccess('Gestión de inventario próximamente');
+              }}
+              style={({ pressed }) => [
+                styles.inventoryActionButton,
+                pressed && { backgroundColor: 'rgba(126, 215, 165, 0.12)' },
+              ]}
+            >
+              <Icon name="cart" size={14} color={colors.primary} />
+              <Text style={styles.inventoryActionText}>Inventario</Text>
+            </Pressable>
+          </Section>
+
+          {/* Disponibilidad y Estado (espejo exacto del web)
+              - Header: icon check-circle + h2 (sin subtitle)
+              - Estado segmented (Activo/Inactivo/Archivado)
+              - 3 toggles en columna derecha: Disponible E-commerce, Producto destacado,
+                Precio editable en POS
+              - Toggle 'Este producto tiene variantes' + helper amber
+              - Toggle 'Controlar inventario'
+              - Toggle 'Requerir número de serie'
+          */}
+          <Section title="Disponibilidad y Estado" icon="check-circle">
             <InputButtons
               label="Estado"
               value={form.state}
@@ -690,46 +1650,431 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 { label: 'Archivado', value: 'archived' },
               ]}
             />
-            <View style={{ height: spacing[2] }} />
-            <Toggle
-              value={form.is_featured}
-              onChange={(v) => updateField('is_featured', v)}
-              label="Producto destacado"
-              description="Mostrar este producto con prioridad en listados."
-            />
-            <Toggle
-              value={form.allow_pos_price_override}
-              onChange={(v) => updateField('allow_pos_price_override', v)}
-              label="Permitir cambio de precio en POS"
-              description="El cajero puede ajustar el precio al cobrar."
-            />
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.available_for_ecommerce}
+                onChange={(v) => updateField('available_for_ecommerce', v)}
+                label="Disponible en E-commerce"
+                description="Visible en tu tienda online"
+              />
+            </View>
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_featured}
+                onChange={(v) => updateField('is_featured', v)}
+                label="Producto destacado"
+                description="Aparece en la sección de destacados de la tienda online"
+              />
+            </View>
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.allow_pos_price_override}
+                onChange={(v) => updateField('allow_pos_price_override', v)}
+                label="Precio editable en POS"
+                description="Permite que usuarios autorizados vendan este producto con precio negociado"
+              />
+            </View>
+
+            {/* Restaurant Suite toggles (Fase A additive, exposed in
+                Fase B). Se muestran en una sub-sección entre los
+                toggles de visibilidad y los de operativa (mirror web). */}
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_sellable}
+                onChange={(v) => updateField('is_sellable', v)}
+                label="Vendible"
+                description="Visible y vendible en carta, POS y ecommerce"
+              />
+            </View>
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_ingredient}
+                onChange={(v) => updateField('is_ingredient', v)}
+                label="Es insumo"
+                description="Apto para usarse como componente de recetas (BOM)"
+              />
+            </View>
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_combo}
+                onChange={(v) => updateField('is_combo', v)}
+                label="Es combo / menú fijo"
+                description="Plato que agrupa varios productos a precio fijo"
+              />
+            </View>
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.is_batch_produced}
+                onChange={(v) => updateField('is_batch_produced', v)}
+                label="Producido en lote"
+                description="Sub-receta que se produce y mantiene stock propio"
+              />
+            </View>
+
+            {/* Card "Unidad de medida del insumo": aparece debajo de
+                "Es insumo" cuando el toggle está activo. Permite elegir
+                la unidad de compra y la unidad mínima de stock. */}
+            {form.is_ingredient && (
+              <View style={styles.uomCard}>
+                <View style={styles.uomHeader}>
+                  <Icon name="package" size={14} color={colors.primary} />
+                  <Text style={styles.uomHeaderText}>
+                    Unidad de medida del insumo
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.uomGrid,
+                    isMdUp && styles.uomGridRow,
+                  ]}
+                >
+                  <Selector
+                    label="Compra (presentación)"
+                    description="Como la recibes del proveedor."
+                    placeholder="Ej. Litro, Kilogramo..."
+                    value={form.purchase_uom_id}
+                    onChange={(v) => updateField('purchase_uom_id', v as number)}
+                    options={UOM_OPTIONS}
+                  />
+                  <View style={styles.uomArrow}>
+                    <Icon
+                      name="arrow-right"
+                      size={18}
+                      color={colors.primary}
+                      style={[
+                        styles.uomArrowIcon,
+                        isMdUp ? styles.uomArrowIconNormal : styles.uomArrowIconRotated,
+                      ]}
+                    />
+                    <Text style={styles.uomArrowText}>Elige ambas unidades</Text>
+                  </View>
+                  <Selector
+                    label="Stock (unidad mínima)"
+                    description="En la que se descuenta el inventario."
+                    placeholder="Elige primero la compra"
+                    value={form.stock_uom_id}
+                    onChange={(v) => updateField('stock_uom_id', v as number)}
+                    options={UOM_OPTIONS.filter(
+                      (u) => !form.purchase_uom_id || u.value === form.purchase_uom_id,
+                    )}
+                    disabled={!form.purchase_uom_id}
+                  />
+                </View>
+              </View>
+            )}
+
+            {/* Card "Producido en lote": aparece debajo de "Producido en
+                lote" cuando el toggle está activo. Informa que el insumo
+                se gestiona desde Operaciones › Producción y permite ir
+                directamente a esa pantalla. Mirror exacto del web:
+                `flex flex-col sm:flex-row sm:items-center gap-3 mt-1`. */}
+            {form.is_batch_produced && (
+              <View
+                style={[
+                  styles.batchCard,
+                  !isMdUp && styles.batchCardColumn,
+                ]}
+              >
+                <View style={styles.batchCardContent}>
+                  <Icon
+                    name="package-check"
+                    size={18}
+                    color={colors.primary}
+                    style={{ marginTop: 2, marginRight: spacing[2], flexShrink: 0 }}
+                  />
+                  <Text style={styles.batchCardText}>
+                    Este insumo se produce por lote en{' '}
+                    <Text style={styles.batchCardTextBold}>
+                      Operaciones › Producción
+                    </Text>
+                    .
+                  </Text>
+                </View>
+                <Button
+                  title="Ir a Producción"
+                  variant="outline"
+                  onPress={() => router.push('/(store-admin)/production')}
+                  leftIcon={
+                    <Icon name="arrow-right" size={16} color={colors.primary} />
+                  }
+                />
+              </View>
+            )}
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.has_variants}
+                onChange={(v) => updateField('has_variants', v)}
+                label="Este producto tiene variantes"
+                description="Agrega opciones como tamaño, color o material"
+              />
+              {form.has_variants && (
+                <View style={styles.helperAmber}>
+                  <Icon name="alert-triangle" size={10} color="#d97706" />
+                  <Text style={{ fontSize: 10, color: '#d97706' }}>Configura un SKU para habilitar variantes</Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.track_inventory}
+                onChange={(v) => updateField('track_inventory', v)}
+                label="Controlar inventario"
+                description="Se controla el stock de este producto"
+              />
+            </View>
+
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.requires_serial_numbers}
+                onChange={(v) => updateField('requires_serial_numbers', v)}
+                label="Requerir número de serie"
+                description="Cada unidad vendida deberá tener un número de serie único (garantía, postventa, trazabilidad)."
+              />
+            </View>
           </Section>
 
-          <Section title="Clasificación" subtitle="Categorías, marca e impuestos" icon="tag">
-            <Selector
-              label="Marca"
-              value={form.brand_id}
-              onChange={(v) => updateField('brand_id', v as number)}
-              options={[
-                { label: 'Sin marca', value: undefined as any },
-                ...((brands as Brand[]) || []).map((b) => ({ label: b.name, value: b.id })),
+          {/* Clasificación y Medidas (espejo exacto del web).
+              - Header: icon tag + título "Clasificación" + span gris
+                " y Medidas".
+              - Grid 1 col mobile / 2 col md+: Marca (MultiSelector) +
+                Categorías (MultiSelector), cada una con un botón "+"
+                outline 42x42 para crear nueva marca/categoría.
+              - Separator border-t border-gray-100 con pt-4.
+              - Sub-sección "Dimensiones y Peso" (icon package + título
+                text-sm font-semibold text-gray-700).
+              - Grid 2 col mobile / 4 col md+: 4 inputs (Largo, Ancho,
+                Alto en cm + Peso en kg). */}
+          <Section title="" icon="tag">
+            <View style={styles.classificationHeader}>
+              <Text style={styles.classificationTitle}>
+                Clasificación{' '}
+                <Text style={styles.classificationTitleMuted}>y Medidas</Text>
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.classificationGrid,
+                isMdUp && styles.classificationGridRow,
               ]}
-              placeholder="Seleccionar marca"
-            />
-            <MultiSelector
-              label="Categorías"
-              values={form.category_ids}
-              onChange={(v) => updateField('category_ids', v)}
-              options={((categories as ProductCategory[]) || []).map((c) => ({ label: c.name, value: c.id }))}
-              placeholder="Seleccionar categorías"
-            />
-            <MultiSelector
-              label="Impuestos"
-              values={form.tax_category_ids}
-              onChange={(v) => updateField('tax_category_ids', v)}
-              options={((taxes as TaxCategory[]) || []).map((t) => ({ label: t.name, value: t.id }))}
-              placeholder="Seleccionar impuestos"
-            />
+            >
+              <View style={styles.classificationFieldRow}>
+                <View style={{ flex: 1 }}>
+                  <MultiSelector
+                    label="Marca"
+                    placeholder="Seleccionar marca..."
+                    tooltip="Marca del producto. Se usa para filtros en catálogo y reportes de ventas."
+                    values={form.brand_ids ?? []}
+                    onChange={(v) => updateField('brand_ids', v)}
+                    options={((brands as Brand[]) || []).map((b) => ({ label: b.name, value: b.id }))}
+                    searchable
+                    searchPlaceholder="Buscar..."
+                  />
+                </View>
+                <Pressable
+                  onPress={() => toastSuccess('Próximamente: crear marca')}
+                  hitSlop={6}
+                  style={styles.addIconButton}
+                  accessibilityLabel="Crear nueva marca"
+                >
+                  <Icon name="plus" size={20} color={colors.primary} />
+                </Pressable>
+              </View>
+
+              <View style={styles.classificationFieldRow}>
+                <View style={{ flex: 1 }}>
+                  <MultiSelector
+                    label="Categorías"
+                    placeholder="Seleccionar categorías..."
+                    tooltip="Categorías donde aparecerá el producto. Un producto puede pertenecer a varias a la vez."
+                    values={form.category_ids}
+                    onChange={(v) => updateField('category_ids', v)}
+                    options={((categories as ProductCategory[]) || []).map((c) => ({ label: c.name, value: c.id }))}
+                    searchable
+                    searchPlaceholder="Buscar..."
+                  />
+                </View>
+                <Pressable
+                  onPress={() => toastSuccess('Próximamente: crear categoría')}
+                  hitSlop={6}
+                  style={styles.addIconButton}
+                  accessibilityLabel="Crear nueva categoría"
+                >
+                  <Icon name="plus" size={20} color={colors.primary} />
+                </Pressable>
+              </View>
+            </View>
+
+            {/* Sub-sección "Dimensiones y Peso" (mirror web mobile). */}
+            <View style={styles.dimensionsDivider}>
+              <View style={styles.dimensionsHeader}>
+                <Icon
+                  name="package"
+                  size={typography.fontSize.base}
+                  color={colors.primary}
+                />
+                <Text style={styles.dimensionsTitle}>Dimensiones y Peso</Text>
+              </View>
+              <View style={styles.dimensionsGridResponsive}>
+                <View
+                  style={isMdUp ? styles.dimensionCellQuarter : styles.dimensionCellHalf}
+                >
+                  <Input
+                    label="Largo (cm)"
+                    value={form.length || ''}
+                    onChangeText={(value) => updateField('length', value)}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    tooltip="Largo del producto empacado en centímetros. Se usa para cotizar envíos y ocupar espacio en almacén."
+                  />
+                </View>
+                <View
+                  style={isMdUp ? styles.dimensionCellQuarter : styles.dimensionCellHalf}
+                >
+                  <Input
+                    label="Ancho (cm)"
+                    value={form.width || ''}
+                    onChangeText={(value) => updateField('width', value)}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    tooltip="Ancho del producto empacado en centímetros."
+                  />
+                </View>
+                <View
+                  style={isMdUp ? styles.dimensionCellQuarter : styles.dimensionCellHalf}
+                >
+                  <Input
+                    label="Alto (cm)"
+                    value={form.height || ''}
+                    onChangeText={(value) => updateField('height', value)}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    tooltip="Alto del producto empacado en centímetros."
+                  />
+                </View>
+                <View
+                  style={isMdUp ? styles.dimensionCellQuarter : styles.dimensionCellHalf}
+                >
+                  <Input
+                    label="Peso (kg)"
+                    value={form.weight_input || ''}
+                    onChangeText={(value) => updateField('weight_input', value)}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    tooltip="Peso del producto empacado en kilogramos. Afecta el cálculo de envío."
+                  />
+                </View>
+              </View>
+            </View>
+          </Section>
+
+          {/* Detalles del Servicio (solo cuando product_type === 'service') */}
+          {form.product_type === 'service' && (
+            <Section title="Detalles del Servicio" subtitle="Configuración específica para servicios" icon="clock">
+              <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+                <View style={{ flex: 1 }}>
+                  <Input
+                    label="Duración (minutos)"
+                    value={form.service_duration_minutes}
+                    onChangeText={(value) => updateField('service_duration_minutes', value)}
+                    placeholder="Ej. 60"
+                    keyboardType="number-pad"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Selector
+                    label="Modalidad"
+                    value={form.service_modality}
+                    onChange={(v) => updateField('service_modality', v as string)}
+                    options={[
+                      { label: 'Presencial', value: 'in_person' },
+                      { label: 'Virtual', value: 'virtual' },
+                      { label: 'Híbrido', value: 'hybrid' },
+                    ]}
+                  />
+                </View>
+              </View>
+              <Selector
+                label="Tipo de precio"
+                value={form.service_pricing_type}
+                onChange={(v) => updateField('service_pricing_type', v as string)}
+                options={[
+                  { label: 'Por hora', value: 'per_hour' },
+                  { label: 'Por sesión', value: 'per_session' },
+                  { label: 'Por paquete', value: 'package' },
+                  { label: 'Suscripción', value: 'subscription' },
+                ]}
+              />
+              <Toggle
+                value={form.requires_booking ?? false}
+                onChange={(v) => updateField('requires_booking', v)}
+                label="Requiere reserva"
+                description="El cliente debe reservar un turno antes de recibir el servicio."
+              />
+              {form.requires_booking && (
+                <Toggle
+                  value={form.is_recurring ?? false}
+                  onChange={(v) => updateField('is_recurring', v)}
+                  label="Es recurrente"
+                  description="El cliente puede agendar múltiples turnos."
+                />
+              )}
+            </Section>
+          )}
+
+          {/* Compra online (espejo exacto del web).
+              - Header: flex-col gap-3 en mobile, sm:flex-row sm:items-start
+                sm:justify-between en md+. Icon shopping-cart + title +
+                subtitle inline. Botón "Generar link y QR" a la derecha.
+              - Card dashed con empty state: icon link + texto + subtítulo. */}
+          <Section title="Compra online" icon="shopping-cart">
+            <View
+              style={[
+                styles.purchaseHeader,
+                isMdUp && styles.purchaseHeaderRow,
+              ]}
+            >
+              <View style={styles.purchaseHeaderLeft}>
+                <View style={styles.purchaseTitleRow}>
+                  <Text style={styles.purchaseTitle}>Compra online</Text>
+                </View>
+                <Text style={styles.purchaseSubtitle}>
+                  No hay un dominio principal de ecommerce activo para
+                  generar el QR de compra.
+                </Text>
+              </View>
+              <Button
+                title="Generar link y QR"
+                variant="outline"
+                leftIcon={
+                  <Icon name="link" size={16} color={colors.primary} />
+                }
+                onPress={() => toastSuccess('Próximamente: generar link y QR')}
+              />
+            </View>
+
+            <View style={styles.purchaseEmpty}>
+              <Icon
+                name="link"
+                size={18}
+                color={colorScales.gray[400]}
+                style={styles.purchaseEmptyIcon}
+              />
+              <View style={{ minWidth: 0, flex: 1 }}>
+                <Text style={styles.purchaseEmptyTitle}>
+                  Este producto aún no tiene link ni QR de compra.
+                </Text>
+                <Text style={styles.purchaseEmptySubtitle}>
+                  Se usará el dominio ecommerce principal activo de la
+                  tienda.
+                </Text>
+              </View>
+            </View>
           </Section>
 
           <Section title="Variantes" subtitle="Opciones vendibles del producto" icon="list">
@@ -787,17 +2132,36 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   );
 }
 
-function Section({ title, subtitle, icon, children }: { title: string; subtitle?: string; icon?: string; children: React.ReactNode }) {
+function Section({
+  title,
+  subtitle,
+  icon,
+  iconColor,
+  right,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  icon?: string;
+  iconColor?: string;
+  /**
+   * Slot opcional a la derecha del título en el header. Útil para
+   * contadores (ej. "0/5" en Imágenes) o acciones rápidas.
+   */
+  right?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <Card style={styles.section}>
       <View style={styles.sectionHeader}>
         <View style={styles.sectionHeaderRow}>
           {icon && (
             <View style={styles.sectionIcon}>
-              <Icon name={icon} size={16} color={colorScales.gray[500]} />
+              <Icon name={icon} size={16} color={iconColor ?? colorScales.gray[500]} />
             </View>
           )}
           <Text style={styles.sectionTitle}>{title}</Text>
+          {right && <View style={styles.sectionHeaderRight}>{right}</View>}
         </View>
         {subtitle && <Text style={styles.sectionSubtitle}>{subtitle}</Text>}
       </View>
@@ -847,8 +2211,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { fontSize: typography.fontSize.lg, fontWeight: '700' as any, color: colorScales.gray[900] },
   sectionSubtitle: { fontSize: typography.fontSize.xs, color: colorScales.gray[500], marginTop: 4 },
-  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2] },
+  sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing[2], flex: 1 },
   sectionIcon: { width: 24, height: 24, alignItems: 'center', justifyContent: 'center' },
+  sectionHeaderRight: { marginLeft: 'auto' },
   sectionBody: { padding: spacing[5], gap: spacing[4] },
   chipBlock: { gap: spacing[2] },
   blockLabel: { fontSize: typography.fontSize.xs, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase', letterSpacing: 1 },
@@ -872,4 +2237,876 @@ const styles = StyleSheet.create({
   errorText: { color: colors.error, fontSize: typography.fontSize.xs, fontWeight: '600' as any },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', gap: spacing[3], padding: spacing[4], backgroundColor: colors.background, borderTopWidth: 1, borderTopColor: colorScales.gray[200], ...shadows.lg },
   footerButton: { flex: 1 },
+
+  // ── Pricing breakdown sub-card (espejo de la versión web mobile) ──────
+  pricingBreakdownCard: {
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    backgroundColor: colors.card,
+  },
+  // Fila 1: chips de fórmula con tokens y operadores, fondo gris-50
+  formulaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    backgroundColor: colorScales.gray[50],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2.5],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+    columnGap: spacing[2],
+    rowGap: spacing[1],
+  },
+  formulaValue: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '700' as any,
+    color: colorScales.gray[700],
+  },
+  formulaHint: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[400],
+  },
+  formulaOp: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '500' as any,
+    color: colorScales.gray[300],
+  },
+  formulaAmount: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  formulaFinal: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '700' as any,
+    color: colors.primary,
+  },
+  // Fila 2: Precio Final + Toggle oferta
+  // Mirror del web `bg-white px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3`.
+  // En mobile (que es el caso de esta app) siempre es column: "Precio Final" arriba,
+  // "Activar oferta" abajo (envuelto en `setting-toggle-row`).
+  finalPriceRow: {
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    backgroundColor: colors.card,
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    gap: spacing[3],
+  },
+  finalPriceCol: {
+    gap: spacing[0.5],
+  },
+  finalLabel: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    color: colorScales.gray[400],
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+  finalAmount: {
+    fontSize: 24,
+    fontWeight: '900' as any,
+    lineHeight: 28,
+    color: colors.primary,
+  },
+  finalAmountStrike: {
+    color: colorScales.gray[300],
+    textDecorationLine: 'line-through',
+  },
+  // Wrapper del Toggle (espejo del `setting-toggle-row` web:
+  // bg-gray-50 border border-gray-100 rounded-xl p-2 mt-3, con selector toggle adentro).
+  settingToggleRow: {
+    marginTop: spacing[3],
+    padding: spacing[2],
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[100],
+    backgroundColor: colorScales.gray[50],
+  },
+  // Bloque que aparece debajo del toggle de multi-tarifa con el
+  // multi-selector + mensaje informativo.
+  priceTiersBlock: {
+    marginTop: spacing[3],
+    gap: spacing[3],
+  },
+  priceTiersHint: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[2],
+    padding: spacing[3],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colorScales.gray[50],
+  },
+  priceTiersHintText: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[600],
+    lineHeight: 18,
+  },
+  // Card de configuración por tarifa seleccionada
+  // (espejo del bloque "Tarifa configurable" del web).
+  priceTierCard: {
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
+    padding: spacing[3],
+    gap: spacing[3],
+    backgroundColor: colors.card,
+  },
+  priceTierCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[2],
+  },
+  priceTierCardTitleRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    flexWrap: 'wrap',
+  },
+  priceTierCardName: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  priceTierCardRate: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  priceTierCardRemove: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  priceTierCardRemoveText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[400],
+  },
+  priceTierCardGrid: {
+    // En mobile (mirror del web `grid-cols-1 sm:grid-cols-3`) los
+    // 3 inputs van apilados verticalmente y ocupan ancho completo.
+    flexDirection: 'column',
+    gap: spacing[3],
+  },
+  priceTierFieldNoMargin: {
+    flex: 1,
+  },
+  priceTierField: {
+    width: '100%',
+  },
+  priceTierCardResult: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+  },
+  priceTierCardResultLabel: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  priceTierCardResultValue: {
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[700],
+  },
+  priceTierCardResultCalc: {
+    color: colorScales.gray[400],
+  },
+  // Fila 3: Sub-sección rose para precio de oferta
+  saleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.red[200],
+    backgroundColor: colorScales.red[50],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+  },
+  saleCol: {
+    flex: 1,
+    gap: spacing[1.5],
+  },
+  saleLabel: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    color: colorScales.red[600],
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+
+  // ── Tax chip list (espejo del MultiSelector, pero siempre visible) ───
+  taxChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[2],
+  },
+  taxChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1.5],
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[3],
+    borderRadius: borderRadius.full,
+    borderWidth: 1.5,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colors.card,
+  },
+  taxChipSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colorScales.green[50],
+  },
+  taxChipText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '600' as any,
+    color: colorScales.gray[700],
+  },
+  taxChipTextSelected: {
+    color: colorScales.green[700],
+  },
+  taxChipAdd: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderStyle: 'dashed',
+  },
+  // Botón + que abre TaxCreateModal (espejo del `btn-outline-border` web)
+  taxAddButton: {
+    width: 42,
+    height: 42,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.5)',
+    backgroundColor: 'transparent',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  taxAddButtonAligned: {
+    // El MultiSelector tiene un label arriba que ocupa ~22px (lineHeight 1.5
+    // × fontSize 10 + marginBottom 1.5×6 = 9px). El web usa `mb-[26px]`
+    // en el botón + para alinear con el input. Acá replicamos ese offset.
+    marginTop: 22,
+  },
+  taxAddButtonPressed: {
+    backgroundColor: 'rgba(126, 215, 165, 0.06)',
+    transform: [{ scale: 0.97 }],
+  },
+  // Lista inline de impuestos disponibles (espejo de la fila del popover).
+  // Cada fila es un botón full-width con checkbox + label + sub-label.
+  taxOptionList: {
+    marginTop: spacing[2],
+    gap: spacing[2],
+  },
+  taxOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[3],
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colors.card,
+  },
+  taxOptionRowSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colorScales.green[50],
+  },
+  taxOptionRowPressed: {
+    backgroundColor: colorScales.gray[50],
+  },
+  taxOptionCheckbox: {
+    width: 16,
+    height: 16,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1.5,
+    borderColor: colorScales.gray[300],
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  taxOptionCheckboxSelected: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primary,
+  },
+  taxOptionLabel: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    color: colors.text.primary,
+  },
+  taxOptionSubLabel: {
+    fontSize: typography.fontSize.xs,
+    color: colors.text.secondary,
+    maxWidth: '40%',
+    flexShrink: 0,
+  },
+  // Empty state cuando el tenant aún no tiene impuestos configurados.
+  taxOptionEmpty: {
+    paddingVertical: spacing[5],
+    paddingHorizontal: spacing[4],
+    alignItems: 'center',
+    gap: spacing[1.5],
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colorScales.gray[300],
+    backgroundColor: colorScales.gray[50],
+  },
+  taxOptionEmptyTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '600' as any,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  taxOptionEmptyHint: {
+    fontSize: typography.fontSize.xs,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  // Header del bloque 'Dimensiones y Peso' dentro de Clasificación.
+  dimensionsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    marginTop: spacing[2],
+    paddingTop: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+  },
+  dimensionsTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '700' as any,
+    color: colorScales.gray[700],
+  },
+  // Grid 2 cols en mobile (4 cols en md+).
+  dimensionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[3],
+    rowGap: spacing[3],
+  },
+  dimensionCell: {
+    flexBasis: '48%',
+    flexGrow: 1,
+  },
+
+  // ── Clasificación y Medidas (espejo web mobile) ────────────────────────
+  // Header con título "Clasificación" + span gris "y Medidas".
+  classificationHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing[2],
+  },
+  classificationTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  classificationTitleMuted: {
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[400],
+  },
+  // Grid 1 col mobile / 2 col md+ para Marca y Categorías.
+  classificationGrid: {
+    gap: spacing[4],
+  },
+  classificationGridRow: {
+    flexDirection: 'row' as const,
+    gap: spacing[6],
+  },
+  classificationFieldRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-end' as const,
+    gap: spacing[2],
+  },
+  addIconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.5)',
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    marginBottom: 2,
+  },
+  // Separator + sub-sección "Dimensiones y Peso".
+  dimensionsDivider: {
+    paddingTop: spacing[4],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+    gap: spacing[3],
+  },
+  // Grid 2 cols en mobile / 4 cols en md+ (mirror del web
+  // `grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4`). Largo+Ancho
+  // en una fila y Alto+Peso en otra en mobile; los 4 en una fila en md+.
+  dimensionsGridResponsive: {
+    gap: spacing[3],
+    flexDirection: 'row' as const,
+    flexWrap: 'wrap' as const,
+  },
+  dimensionCellHalf: {
+    flexBasis: '48%' as const,
+    flexGrow: 1,
+  },
+  dimensionCellQuarter: {
+    flexBasis: '23%' as const,
+    flexGrow: 1,
+  },
+
+  // Grid 1 col en mobile, 3 cols en sm+ para SKU/Barcode/Slug.
+  infoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[3],
+    rowGap: spacing[3],
+  },
+  // Wrapper de los 3 inputs de precio (Costo / Margen / Precio Base).
+  // En mobile sigue siendo 1 col (stacked), pero el flex-row deja
+  // preparado el cambio a 3 cols en pantallas más grandes.
+  pricingRow: {
+    flexDirection: 'column',
+    gap: spacing[4],
+  },
+  // Header de la sección Descripción (label a la izquierda + botón IA a la derecha).
+  descriptionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing[1],
+  },
+  descriptionLabel: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '500' as any,
+    color: colors.text.secondary,
+  },
+  // Botón 'Generar con IA' (espejo simplificado del ai-generate-btn web).
+  // Web tiene animación shimmer compleja; aquí se hace una versión estática
+  // con los mismos colores (verde + texto blanco, borde verde semitransparente).
+  aiGenerateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+    paddingHorizontal: spacing[2],
+    paddingVertical: 2,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.4)',
+    backgroundColor: colors.primary,
+  },
+  aiGenerateText: {
+    fontSize: 8,
+    fontWeight: '700' as any,
+    color: colors.background,
+    marginLeft: spacing[1],
+  },
+  // Helper amber (mirror web `.text-amber-600 .flex .gap-1`).
+  helperAmber: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+    paddingHorizontal: spacing[1],
+    marginTop: spacing[1],
+  },
+
+  // ── Compra Online (espejo web mobile) ──────────────────────────────────
+  // Header: flex-col en mobile, sm:flex-row sm:items-start
+  // sm:justify-between en md+ (mirror web).
+  purchaseHeader: {
+    flexDirection: 'column' as const,
+    gap: spacing[3],
+  },
+  purchaseHeaderRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    justifyContent: 'space-between' as const,
+  },
+  purchaseHeaderLeft: {
+    flex: 1,
+  },
+  purchaseTitleRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing[2],
+  },
+  purchaseTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  purchaseSubtitle: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  // Card dashed con empty state (mirror web
+  // `rounded-xl border-dashed border-gray-200 bg-gray-50 p-4 flex
+  // items-start gap-3`).
+  purchaseEmpty: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    gap: spacing[3],
+    padding: spacing[4],
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderStyle: 'dashed' as const,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colorScales.gray[50],
+  },
+  purchaseEmptyIcon: {
+    marginTop: 2,
+  },
+  purchaseEmptyTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[800],
+  },
+  purchaseEmptySubtitle: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: spacing[1],
+  },
+
+  // ── Restaurant Suite cards (espejo web mobile) ────────────────────────
+  // Card "Unidad de medida del insumo" (aparece cuando is_ingredient=true).
+  uomCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.xl,
+    backgroundColor: colorScales.gray[50],
+    padding: spacing[4],
+    gap: spacing[3],
+    marginTop: spacing[1],
+  },
+  uomHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  uomHeaderText: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  uomGrid: {
+    // En mobile (1 col) los 2 selectores van apilados con la flecha
+    // rotada 90° entre ellos. En md+ (1fr_auto_1fr) la flecha queda
+    // horizontal entre los dos selectores.
+    gap: spacing[3],
+    flexDirection: 'column' as const,
+  },
+  uomGridRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+  },
+  uomArrow: {
+    flexDirection: 'column' as const,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    gap: spacing[1.5],
+    paddingVertical: spacing[1],
+  },
+  uomArrowIcon: {
+    // Rotada 90° en mobile (apunta hacia abajo), sin rotar en md+
+    // (apunta hacia la derecha). El sentido se invierte en el render.
+  },
+  uomArrowIconRotated: {
+    transform: [{ rotate: '90deg' as const }],
+  },
+  uomArrowIconNormal: {
+    transform: [{ rotate: '0deg' as const }],
+  },
+  uomArrowText: {
+    fontSize: 11,
+    color: colorScales.gray[500],
+    textAlign: 'center' as const,
+    lineHeight: 14,
+  },
+  // Card "Producido en lote" (aparece cuando is_batch_produced=true).
+  batchCard: {
+    width: '100%',
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.xl,
+    backgroundColor: colorScales.gray[50],
+    padding: spacing[4],
+    // Mirror del web `flex flex-col sm:flex-row sm:items-center gap-3`.
+    // Por defecto va en row (md+); en mobile se sobreescribe con
+    // `batchCardColumn` (column).
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing[3],
+    marginTop: spacing[1],
+  },
+  batchCardColumn: {
+    // Override en mobile: el texto va arriba, el botón abajo.
+    flexDirection: 'column' as const,
+    alignItems: 'stretch' as const,
+  },
+  batchCardContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[2],
+  },
+  batchCardText: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+  },
+  batchCardTextBold: {
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[700],
+  },
+
+  // ── Imágenes del Producto (espejo web lg:hidden) ──────────────────────────
+  imageCount: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[400],
+  },
+  imageMainPlaceholder: {
+    width: '100%',
+    maxWidth: 280,
+    aspectRatio: 1,
+    alignSelf: 'center',
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing[4],
+  },
+  imageMainWrapper: {
+    alignItems: 'center',
+  },
+  imageMainFilled: {
+    width: '100%',
+    maxWidth: 280,
+    aspectRatio: 1,
+    alignSelf: 'center',
+    backgroundColor: colorScales.gray[100],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  imageMainImg: {
+    width: '100%',
+    height: '100%',
+  },
+  imageMainDelete: {
+    position: 'absolute',
+    top: spacing[2],
+    right: spacing[2],
+    padding: 6,
+    backgroundColor: 'rgba(220, 38, 38, 0.9)',
+    borderRadius: 9999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageMainAiBtn: {
+    position: 'absolute',
+    bottom: spacing[2],
+    left: spacing[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 9999,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.35)',
+    backgroundColor: 'rgba(126, 215, 165, 0.9)',
+    shadowColor: '#7ED7A5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  imageMainAiBtnText: {
+    fontSize: 11,
+    fontWeight: '700' as any,
+    lineHeight: 12,
+    color: colors.background,
+  },
+  imageMainCropBtn: {
+    position: 'absolute',
+    bottom: spacing[2],
+    right: spacing[2],
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    borderRadius: 9999,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  imageMainCropBtnText: {
+    fontSize: 10,
+    fontWeight: '700' as any,
+    color: colorScales.gray[700],
+  },
+  imageMainCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 1,
+    marginBottom: spacing[2],
+  },
+  imageMainText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: '500' as any,
+    color: colorScales.gray[600],
+  },
+  imageMainHint: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[400],
+  },
+  imageThumbsRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    paddingBottom: spacing[2],
+    // Scroll horizontal para que las 5 miniaturas + botón "+ Agregar"
+    // quepan sin recortarse en pantallas angostas. Sin esto, el botón
+    // de agregar queda fuera de pantalla a partir de 3 miniaturas y
+    // el usuario no puede seguir agregando.
+    flexGrow: 0,
+  },
+  imageThumbsScroll: {
+    flexGrow: 0,
+  },
+  imageThumbAdd: {
+    flexShrink: 0,
+    width: 64,
+    height: 64,
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 2,
+    borderColor: colorScales.gray[300],
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: spacing[0.5],
+  },
+  imageThumbAddText: {
+    fontSize: 9,
+    color: colorScales.gray[400],
+    marginTop: 2,
+  },
+  imageThumb: {
+    flexShrink: 0,
+    width: 64,
+    height: 64,
+    backgroundColor: colorScales.green[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  imageThumbActive: {
+    // Mirror web: ring-2 ring-primary-500 sobre la miniatura principal.
+    borderWidth: 2,
+    borderColor: colors.primary,
+    // Sombra verde para reforzar el "anillo" (RN no soporta `box-shadow`
+    // con color independiente del shadowColor del padre).
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  imageThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  imageThumbText: {
+    fontSize: 9,
+    color: colors.primary,
+    fontWeight: '600' as any,
+    marginTop: 2,
+    maxWidth: 56,
+  },
+
+  // ── Inventario / Stock (espejo web lg:hidden) ────────────────────────────
+  inventoryStatsGrid: {
+    flexDirection: 'row',
+    gap: spacing[2],
+  },
+  inventoryStatCard: {
+    flex: 1,
+    padding: spacing[3],
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+  },
+  inventoryStatLabel: {
+    fontSize: 9,
+    color: colors.text.muted,
+    fontWeight: '700' as any,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: spacing[1],
+  },
+  inventoryStatValue: {
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: '700' as any,
+    color: colors.text.primary,
+  },
+  inventoryStatValuePrimary: {
+    color: colors.primary,
+  },
+  inventoryActionButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2.5],
+    paddingHorizontal: spacing[3],
+    backgroundColor: colorScales.green[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.3)',
+  },
+  inventoryActionText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: '700' as any,
+    color: colorScales.green[700],
+  },
 });

@@ -58,6 +58,9 @@ export const Endpoints = {
       SHIPPING_ASSIGN: '/store/orders/:id/shipping',
       REFUNDS: '/store/orders/:id/refunds',
     },
+    PRICE_TIERS: {
+      LIST: '/store/price-tiers',
+    },
     ANALYTICS: {
       SALES_SUMMARY: '/store/analytics/sales/summary',
       SALES_TRENDS: '/store/analytics/sales/trends',
@@ -95,8 +98,12 @@ export const Endpoints = {
       UPLOAD_LOGO: '/store/brands/upload-logo',
     },
     TAXES: {
+      // El backend expone las categorías en `/store/taxes` (no `/store/taxes/categories`).
       LIST: '/store/taxes',
-      CATEGORIES: '/store/taxes/categories',
+      CATEGORIES: '/store/taxes',
+      CATEGORY_CREATE: '/store/taxes',
+      CATEGORY_UPDATE: '/store/taxes/:id',
+      CATEGORY_DELETE: '/store/taxes/:id',
     },
     PAYMENT_METHODS: {
       LIST: '/store/payments/payment-methods',

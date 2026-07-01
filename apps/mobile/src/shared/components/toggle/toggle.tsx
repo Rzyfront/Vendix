@@ -1,6 +1,6 @@
 import { useRef, useEffect } from 'react';
 import { Pressable, Text, View, StyleSheet, Animated, type ViewStyle } from 'react-native';
-import { colors, colorScales, spacing, typography } from '@/shared/theme';
+import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 
 interface ToggleProps {
   value: boolean;
@@ -102,6 +102,10 @@ const styles = StyleSheet.create({
     paddingVertical: spacing[2],
     paddingHorizontal: spacing[2],
     gap: spacing[3],
+    borderWidth: 1,
+    borderColor: colorScales.gray[300],
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.lg,
   },
   rowPressed: {
     opacity: 0.7,
@@ -110,14 +114,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   label: {
-    fontSize: typography.fontSize.base,
-    color: colors.text.primary,
-    fontWeight: '500',
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[700],
+    fontWeight: '600',
   },
   description: {
-    fontSize: typography.fontSize.sm,
-    color: colors.text.secondary,
+    fontSize: 10,
+    color: colorScales.gray[500],
     marginTop: 2,
+    lineHeight: 12,
   },
   trackContainer: {
     width: TRACK_WIDTH,

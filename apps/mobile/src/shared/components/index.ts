@@ -52,3 +52,5 @@ export { Pagination } from './pagination/pagination';
 export type { PaginationProps } from './pagination/pagination';
 export { ImageCarousel } from './image-carousel/image-carousel';
 export type { ImageCarouselProps, CarouselImage } from './image-carousel/image-carousel';
+export { MoneyInput, formatThousands, stripThousands } from './money-input/money-input';
+export type { MoneyInputProps } from './money-input/money-input';

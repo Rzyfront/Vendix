@@ -86,7 +86,7 @@ export function BulkImageUploadModal({ visible, onClose }: BulkImageUploadModalP
           type: img.type,
         });
       });
-      const res = await apiClient.post(Endpoints.STORE.PRODUCTS.BULK_IMAGE_UPLOAD ?? '/store/products/bulk-image-upload', formData, {
+      const res = await apiClient.post('/store/products/bulk-image-upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       return res.data;

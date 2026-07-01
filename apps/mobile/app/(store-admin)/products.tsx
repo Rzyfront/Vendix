@@ -382,6 +382,7 @@ export default function ProductsListScreen() {
         </View>
       ) : (
         <FlatList
+
           data={products}
           keyExtractor={(item) => String(item.id)}
           contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: 96 }}

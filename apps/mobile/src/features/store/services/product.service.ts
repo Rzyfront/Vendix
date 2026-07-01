@@ -13,12 +13,25 @@ import type {
   ProductCategory,
   Brand,
   TaxCategory,
+  PriceTier,
 } from '../types';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
   const d = response.data as ApiResponse<T>;
   if (d && typeof d === 'object' && 'success' in d) return d.data;
   return response.data as T;
+}
+
+/**
+ * Payload para crear una nueva categoría de impuesto. Coincide con el
+ * endpoint backend POST /store/taxes/categories.
+ */
+export interface CreateTaxCategoryDto {
+  name: string;
+  type?: 'percentage' | 'fixed';
+  tax_type?: 'iva' | 'inc' | 'ica' | 'withholding' | 'reteiva' | 'reteica' | 'other';
+  rate: number;
+  description?: string;
 }
 
 function buildQuery(params?: Record<string, unknown>): string {
@@ -114,6 +127,68 @@ export const ProductService = {
     return unwrap<ProductImage[]>(res);
   },
 
+  /**
+   * Lista las tarifas de precio del store (multi-tarifa). Se usa en
+   * el form de producto para que el usuario seleccione cuáles aplican.
+   * Devuelve `{ data: PriceTier[], meta: { total, ... } }`.
+   */
+  async getPriceTiers(params?: { is_active?: boolean; search?: string }): Promise<PriceTier[]> {
+    const query: string[] = [];
+    if (params?.is_active !== undefined) query.push(`is_active=${params.is_active}`);
+    if (params?.search) query.push(`search=${encodeURIComponent(params.search)}`);
+    const qs = query.length ? `?${query.join('&')}` : '';
+    const res = await apiClient.get(`${Endpoints.STORE.PRICE_TIERS.LIST}${qs}`);
+    const body = unwrap<{ data?: PriceTier[] } | PriceTier[]>(res);
+    return Array.isArray(body) ? body : body.data ?? [];
+  },
+
+  /**
+   * Lista los overrides de precio (override_price, override_units_per_package)
+   * que un producto tiene configurados para cada tarifa aplicada.
+   * Se usa para hidratar el form al re-editar un producto con
+   * multi-tarifa.
+   */
+  async getProductPriceTierOverrides(productId: number): Promise<
+    Array<{
+      price_tier_id: number;
+      override_price?: number | null;
+      override_units_per_package?: number | null;
+    }>
+  > {
+    const res = await apiClient.get(
+      `/store/price-tiers/products/${productId}/overrides`,
+    );
+    const body = unwrap<unknown[] | { data?: unknown[] }>(res);
+    return Array.isArray(body) ? (body as any[]) : ((body as any).data ?? []);
+  },
+
+  /**
+   * Crea/actualiza el override de precio y unidades por empaque de
+   * una tarifa específica sobre un producto. El backend reconcilia con
+   * la tabla `product_price_tier_overrides`.
+   */
+  async upsertProductPriceTierOverride(
+    productId: number,
+    tierId: number,
+    body: { override_price?: number; override_units_per_package?: number },
+  ): Promise<void> {
+    const endpoint = `/store/price-tiers/products/${productId}/overrides/${tierId}`;
+    await apiClient.put(endpoint, body);
+  },
+
+  /**
+   * Elimina el override de una tarifa para un producto. Se llama cuando
+   * el usuario desactiva la multi-tarifa o quita una tarifa de la
+   * selección, y esa tarifa ya tenía override persistido.
+   */
+  async removeProductPriceTierOverride(
+    productId: number,
+    tierId: number,
+  ): Promise<void> {
+    const endpoint = `/store/price-tiers/products/${productId}/overrides/${tierId}`;
+    await apiClient.delete(endpoint);
+  },
+
   async getCategories(): Promise<ProductCategory[]> {
     const res = await apiClient.get(Endpoints.STORE.CATEGORIES.LIST);
     return unwrap<ProductCategory[]>(res);
@@ -125,7 +200,52 @@ export const ProductService = {
   },
 
   async getTaxes(): Promise<TaxCategory[]> {
-    const res = await apiClient.get(Endpoints.STORE.TAXES.CATEGORIES);
-    return unwrap<TaxCategory[]>(res);
+    // Pedimos un limit alto para traer todos los impuestos en una sola llamada
+    // (la mayoría de tiendas tienen < 50). El backend siempre devuelve respuesta
+    // paginada `{ data: TaxCategory[], meta: {...} }` envuelta en el envelope estándar.
+    const res = await apiClient.get(
+      `${Endpoints.STORE.TAXES.CATEGORIES}?limit=200`,
+    );
+    const unwrapped = unwrap<TaxCategory[] | { data: TaxCategory[]; meta: unknown }>(res);
+    // Si la respuesta es paginada, devolvemos el array interno.
+    if (unwrapped && typeof unwrapped === 'object' && 'data' in unwrapped && Array.isArray((unwrapped as { data: TaxCategory[] }).data)) {
+      return (unwrapped as { data: TaxCategory[] }).data;
+    }
+    return unwrapped as TaxCategory[];
+  },
+
+  /**
+   * Crea una nueva categoría de impuesto (ej. IVA, INC, ReteFuente).
+   * Persiste en backend y devuelve el TaxCategory con el id real.
+   */
+  async createTaxCategory(data: CreateTaxCategoryDto): Promise<TaxCategory> {
+    const res = await apiClient.post(Endpoints.STORE.TAXES.CATEGORY_CREATE, data);
+    return unwrap<TaxCategory>(res);
+  },
+
+  /**
+   * Elimina una categoría de impuesto. Tras borrar, el caller debe
+   * invalidar el queryKey `['product-taxes']` para refrescar la lista.
+   */
+  async deleteTaxCategory(id: number): Promise<void> {
+    const endpoint = Endpoints.STORE.TAXES.CATEGORY_DELETE.replace(':id', String(id));
+    await apiClient.delete(endpoint);
+  },
+
+  /**
+   * Llama al backend de IA para generar la descripción de un producto a partir
+   * de su nombre + SKU + categoría + marca. Devuelve el texto sugerido.
+   */
+  async generateDescription(payload: {
+    name: string;
+    sku?: string;
+    category_id?: number | null;
+    brand_id?: number | null;
+  }): Promise<{ description: string }> {
+    const res = await apiClient.post(
+      Endpoints.STORE.PRODUCTS.GENERATE_DESCRIPTION,
+      payload,
+    );
+    return unwrap<{ description: string }>(res);
   },
 };

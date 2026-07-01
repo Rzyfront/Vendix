@@ -55,7 +55,7 @@ export function BulkUploadModal({ visible, onClose }: BulkUploadModalProps) {
         name: file.name,
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       });
-      const res = await apiClient.post(Endpoints.STORE.PRODUCTS.BULK_UPLOAD ?? '/store/products/bulk-upload', formData, {
+      const res = await apiClient.post('/store/products/bulk-upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
       return res.data;

@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useRef } from 'react';
+import { useDebouncedSearch } from '@/shared/hooks/use-debounced-search';
 import {
   View, Text, FlatList, RefreshControl, Pressable, Modal, ScrollView, StyleSheet, TextInput, Dimensions,
 } from 'react-native';
@@ -18,78 +19,13 @@ import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 import { INVENTORY_ICONS, STAT_PALETTE } from '@/features/store/constants/inventory-icons';
 import { CURRENCY_OPTIONS, SUPPLIER_STATS, TAX_REGIME_OPTIONS, PERSON_TYPE_OPTIONS } from '@/features/store/constants/inventory-labels';
+import SupplierCard from '@/features/store/components/supplier-card';
+import SupplierFormModal from '@/features/store/components/supplier-form-modal';
 
 const STATE_LABELS = {
   true: 'Activo',
   false: 'Inactivo',
 } as const;
-
-function SupplierCard({
-  item,
-  onPress,
-  onDelete,
-}: {
-  item: Supplier;
-  onPress: () => void;
-  onDelete: (item: Supplier) => void;
-}) {
-  const isActive = !!item.is_active;
-
-  return (
-    <View style={styles.supplierCard}>
-      {/* Fila 1: Ícono building-2 + (nombre + contacto + email/código) + badge estado */}
-      <View style={styles.cardTopRow}>
-        <View style={styles.cardMedia}>
-          <Icon name="building-2" size={24} color={colorScales.gray[500]} />
-        </View>
-
-        <View style={styles.cardCenter}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
-          {item.contact_person ? (
-            <Text style={styles.cardSubtitle} numberOfLines={1}>{item.contact_person}</Text>
-          ) : null}
-
-          <View style={styles.cardMetaRow}>
-            <View style={styles.cardMetaItem}>
-              <Icon name="hash" size={12} color={colorScales.gray[400]} />
-              <Text style={styles.cardMetaValue} numberOfLines={1}>{item.code || '—'}</Text>
-            </View>
-            <View style={styles.cardMetaItem}>
-              <Icon name="mail" size={12} color={colorScales.gray[400]} />
-              <Text style={styles.cardMetaValue} numberOfLines={1}>{item.email || '—'}</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={[styles.cardStatusBadge, { backgroundColor: isActive ? colorScales.green[50] : colorScales.gray[100] }]}>
-          <Text style={[styles.cardStatusBadgeText, { color: isActive ? colorScales.green[700] : colorScales.gray[500] }]}>
-            {isActive ? 'Activo' : 'Inactivo'}
-          </Text>
-        </View>
-      </View>
-
-      {/* Fila 2 (footer): TELÉFONO + 2 botones directos (editar azul, eliminar rojo) */}
-      <View style={styles.cardFooter}>
-        <View style={styles.cardFooterLeft}>
-          <View style={styles.cardFooterItem}>
-            <Icon name="phone" size={12} color={colorScales.gray[400]} />
-            <Text style={styles.cardFooterValue} numberOfLines={1}>{item.phone || '—'}</Text>
-          </View>
-        </View>
-        <View style={styles.cardActions}>
-          {/* Botón 1: edit (azul) */}
-          <Pressable onPress={onPress} hitSlop={6} style={styles.cardActionEdit}>
-            <Icon name="edit" size={16} color={colorScales.blue[600]} />
-          </Pressable>
-          {/* Botón 2: trash-2 (rojo) — elimina directamente */}
-          <Pressable onPress={() => onDelete(item)} hitSlop={6} style={styles.cardActionDelete}>
-            <Icon name="trash-2" size={16} color={colorScales.red[600]} />
-          </Pressable>
-        </View>
-      </View>
-    </View>
-  );
-}
 
 const emptyForm: CreateSupplierDto & {
   is_active?: boolean;
@@ -122,7 +58,7 @@ export default function SuppliersScreen() {
   const currentStoreId = useTenantStore((s) => s.storeId);
   const appType = getAppType();
   const isStoreScope = appType === 'STORE_ADMIN';
-  const [search, setSearch] = useState('');
+  const { value: search, setValue: setSearch, debouncedValue: debouncedSearch } = useDebouncedSearch('', 300);
   const [activeFilter, setActiveFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [showActions, setShowActions] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -148,12 +84,12 @@ export default function SuppliersScreen() {
   ];
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, refetch, isRefetching } = useInfiniteQuery({
-    queryKey: ['suppliers', search, activeFilter],
+    queryKey: ['suppliers', debouncedSearch, activeFilter],
     queryFn: ({ pageParam = 1 }) =>
       InventoryService.getSuppliers({
         page: pageParam,
         limit: 20,
-        search: search || undefined,
+        search: debouncedSearch || undefined,
       }),
     getNextPageParam,
     initialPageParam: 1,
@@ -662,7 +598,7 @@ export default function SuppliersScreen() {
                   onPress={() => setShowCurrencyDropdown(!showCurrencyDropdown)}
                 >
                   <Text style={{ flex: 1, fontSize: 14, color: colorScales.gray[900] }}>
-                    {CURRENCY_OPTIONS.find((c) => c.code === form.currency)?.label || 'Seleccionar moneda'}
+                    {CURRENCY_OPTIONS.find((c) => c.value === form.currency)?.label || 'Seleccionar moneda'}
                   </Text>
                   <Icon
                     name={showCurrencyDropdown ? 'chevron-up' : 'chevron-down'}
@@ -674,14 +610,14 @@ export default function SuppliersScreen() {
                   <View style={styles.currencyDropdownList}>
                     {CURRENCY_OPTIONS.map((opt) => (
                       <Pressable
-                        key={opt.code}
-                        style={[styles.currencyDropdownOption, form.currency === opt.code && styles.currencyDropdownOptionActive]}
-                        onPress={() => { setForm({ ...form, currency: opt.code }); setShowCurrencyDropdown(false); }}
+                        key={opt.value}
+                        style={[styles.currencyDropdownOption, form.currency === opt.value && styles.currencyDropdownOptionActive]}
+                        onPress={() => { setForm({ ...form, currency: opt.value }); setShowCurrencyDropdown(false); }}
                       >
-                        <Text style={[styles.currencyDropdownOptionText, form.currency === opt.code && styles.currencyDropdownOptionTextActive]}>
+                        <Text style={[styles.currencyDropdownOptionText, form.currency === opt.value && styles.currencyDropdownOptionTextActive]}>
                           {opt.label}
                         </Text>
-                        {form.currency === opt.code && <Icon name="check" size={16} color={colors.primary} />}
+                        {form.currency === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                       </Pressable>
                     ))}
                   </View>
@@ -1063,3 +999,4 @@ const styles = StyleSheet.create({
   confirmBtnText: { fontSize: 13, fontWeight: '700' as any, color: colorScales.green[800] },
   actionSpacer: { width: spacing[3] },
 });
+/* SupplierCard extraido a features/store/components/supplier-card.tsx */

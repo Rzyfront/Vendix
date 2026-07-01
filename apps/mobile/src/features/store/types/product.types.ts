@@ -35,7 +35,11 @@ export interface Product {
   categories?: ProductCategory[];
   product_variants?: ProductVariant[];
   product_images?: ProductImage[];
-  tax_assignments?: ProductTaxAssignment[];
+  /**
+   * Mapeo de `product_tax_assignments` (nombre en la respuesta del backend).
+   * El backend lo devuelve con prefijo `product_` por la relación Prisma.
+   */
+  product_tax_assignments?: ProductTaxAssignment[];
   total_stock_available?: number;
 }
 
@@ -62,7 +66,13 @@ export interface ProductVariant {
 export interface ProductImage {
   id: number;
   product_id: number;
-  url: string;
+  /**
+   * El backend devuelve `image_url` directamente del modelo Prisma
+   * `product_images` (campo firmado si la key no es una URL completa).
+   * Históricamente la mobile lo leía como `url` y eso rompía la carga
+   * de imágenes al editar un producto.
+   */
+  image_url: string;
   alt_text?: string | null;
   is_main: boolean;
   sort_order: number;
@@ -229,6 +239,7 @@ export interface CreateProductDto {
   slug?: string;
   description?: string;
   base_price: number;
+  barcode?: string;
   cost_price?: number;
   profit_margin?: number;
   is_on_sale?: boolean;
@@ -250,3 +261,22 @@ export interface CreateProductDto {
 }
 
 export type UpdateProductDto = Partial<CreateProductDto>;
+
+/**
+ * Tarifa de precio (multi-tarifa). El backend devuelve estos registros
+ * en `GET /store/price-tiers` con paginación `{ data, meta }`.
+ */
+export interface PriceTier {
+  id: number;
+  store_id: number;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  is_default?: boolean;
+  is_active?: boolean;
+  is_package_unit?: boolean;
+  units_per_package?: number | null;
+  sort_order?: number;
+  created_at?: string;
+  updated_at?: string;
+}
