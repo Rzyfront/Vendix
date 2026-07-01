@@ -118,6 +118,12 @@ export class ScheduleManagementComponent {
     last_name: '',
     document_type: 'CC',
     document_number: '',
+    // base_salary required by CreateEmployeeDto (@IsNumber + @Min(0))
+    // and required for booking quick-create. Global ValidationPipe has
+    // whitelist + forbidNonWhitelisted, so missing this field returns
+    // 400 Bad Request before reaching the controller. Default to 0 so
+    // the form can submit immediately and the operator can adjust later.
+    base_salary: 0,
     position: '',
     hire_date: new Date().toISOString().split('T')[0],
     contract_type: 'service' as
@@ -130,7 +136,18 @@ export class ScheduleManagementComponent {
   });
   newEmployeeValid = computed(() => {
     const e = this.newEmployee();
-    return e.first_name.trim().length >= 2 && e.last_name.trim().length >= 2;
+    // Mirror the backend CreateEmployeeDto requirements: first_name,
+    // last_name (>=2 chars each), document_number (required, min 4
+    // for any Colombian doc type), and base_salary (>=0 per
+    // @Min(0)). Without these checks the submit button would be
+    // enabled but the backend would reject with 400.
+    return (
+      e.first_name.trim().length >= 2 &&
+      e.last_name.trim().length >= 2 &&
+      e.document_number.trim().length >= 4 &&
+      Number.isFinite(e.base_salary) &&
+      e.base_salary >= 0
+    );
   });
 
   employeeOptions = computed(() =>
