@@ -113,32 +113,46 @@ export default function BrandsListScreen() {
           </View>
           <OptionsDropdown
             triggerLabel="Filtros"
-            filterSections={[
+            filters={[
               {
+                key: 'state',
                 label: 'Estado',
-                onSelect: (value) => {
-                  setStateFilter(value === 'all' ? undefined : (value as BrandState));
-                  setPage(1);
-                },
+                type: 'select',
                 options: [
-                  { label: 'Todas', value: 'all', active: !stateFilter },
-                  { label: 'Activas', value: 'active', active: stateFilter === 'active' },
-                  { label: 'Inactivas', value: 'inactive', active: stateFilter === 'inactive' },
+                  { value: 'all', label: 'Todas' },
+                  { value: 'active', label: 'Activas' },
+                  { value: 'inactive', label: 'Inactivas' },
                 ],
               },
               {
+                key: 'featured',
                 label: 'Destacadas',
-                onSelect: (value) => {
-                  setFeaturedFilter(value === 'all' ? undefined : value === 'true');
-                  setPage(1);
-                },
+                type: 'select',
                 options: [
-                  { label: 'Todas', value: 'all', active: featuredFilter === undefined },
-                  { label: 'Destacadas', value: 'true', active: featuredFilter === true },
-                  { label: 'No destacadas', value: 'false', active: featuredFilter === false },
+                  { value: 'all', label: 'Todas' },
+                  { value: 'true', label: 'Destacadas' },
+                  { value: 'false', label: 'No destacadas' },
                 ],
               },
             ]}
+            filterValues={{
+              state: stateFilter ?? 'all',
+              featured:
+                featuredFilter === undefined ? 'all' : featuredFilter ? 'true' : 'false',
+            }}
+            onFilterChange={(values) => {
+              const stateVal = values.state;
+              const featuredVal = values.featured;
+              setStateFilter(
+                !stateVal || stateVal === 'all' ? undefined : (stateVal as BrandState),
+              );
+              setFeaturedFilter(
+                !featuredVal || featuredVal === 'all'
+                  ? undefined
+                  : featuredVal === 'true',
+              );
+              setPage(1);
+            }}
             actions={canCreate ? [
               {
                 label: 'Nueva Marca',

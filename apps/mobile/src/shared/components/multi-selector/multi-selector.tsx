@@ -1,7 +1,14 @@
 import { useRef, useState } from 'react';
-import { Pressable, Text, View, StyleSheet, ScrollView, type ViewStyle } from 'react-native';
+import {
+  Pressable,
+  Text,
+  View,
+  Modal,
+  StyleSheet,
+  ScrollView,
+  type ViewStyle,
+} from 'react-native';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
-import { Modal } from '@/shared/components/modal/modal';
 import { Icon } from '@/shared/components/icon/icon';
 
 export interface MultiSelectorOption<T = string | number> {

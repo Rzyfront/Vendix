@@ -31,6 +31,8 @@ interface StickyHeaderProps {
   tabs?: StickyHeaderTab[];
   variant?: 'default' | 'glass';
   style?: ViewStyle;
+  /** Show close (X) button alongside back arrow. Default false. */
+  showCloseButton?: boolean;
 }
 
 export function StickyHeader({
@@ -42,6 +44,7 @@ export function StickyHeader({
   tabs,
   variant = 'default',
   style,
+  showCloseButton = false,
 }: StickyHeaderProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();

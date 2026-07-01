@@ -37,15 +37,19 @@ export type DropdownActionVariant = 'primary' | 'outline' | 'destructive';
 export interface DropdownAction {
   label: string;
   icon: string;
-  /** Identificador emitido en `onActionClick`. */
-  action: string;
+  /** Identificador emitido en `onActionClick`. Required if `onPress` is not provided. */
+  action?: string;
   variant?: DropdownActionVariant;
   disabled?: boolean;
+  /** Optional direct handler (alternative to onActionClick). Takes precedence when provided. */
+  onPress?: () => void;
 }
 
 export type FilterValues = Record<string, string | string[] | null>;
 
 interface OptionsDropdownProps {
+  /** Etiqueta del trigger del dropdown. */
+  triggerLabel?: string;
   /** Filtros a mostrar en el dropdown de filtros. */
   filters?: FilterConfig[];
   /** Acciones a mostrar en el dropdown de acciones. */
@@ -125,6 +129,7 @@ interface TriggerPos {
  * En desktop el web muestra trigger con label, pero en mobile-first ambos son icon-only.
  */
 export function OptionsDropdown({
+  triggerLabel,
   filters = [],
   actions = [],
   showActions = true,
@@ -217,9 +222,14 @@ export function OptionsDropdown({
   }, [openMenu, triggerPos]);
 
   // ── Action click ──────────────────────────────────────────────────────
-  const handleActionClick = (actionKey: string) => {
+  const handleActionClick = (action: DropdownAction) => {
     setOpenMenu(null);
-    setTimeout(() => onActionClick?.(actionKey), 120);
+    // Direct onPress handler (if provided) takes precedence over onActionClick
+    if (action.onPress) {
+      setTimeout(() => action.onPress?.(), 120);
+      return;
+    }
+    setTimeout(() => action.action && onActionClick?.(action.action), 120);
   };
 
   // ── Filter change with debounce ───────────────────────────────────────
@@ -320,14 +330,14 @@ export function OptionsDropdown({
 
                   return (
                     <Pressable
-                      key={action.action}
+                      key={action.action ?? action.label}
                       disabled={action.disabled}
                       style={({ pressed }) => [
                         styles.actionItem,
                         pressed && styles.actionItemPressed,
                         isDestructive && pressed && styles.actionItemDestructivePressed,
                       ]}
-                      onPress={() => handleActionClick(action.action)}
+                      onPress={() => handleActionClick(action)}
                     >
                       <Icon name={action.icon} size={16} color={color} />
                       <Text
