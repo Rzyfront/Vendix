@@ -155,7 +155,12 @@ export class ProviderAvailabilityService {
       exceptionsByProvider.set(e.provider_id, arr);
     }
 
-    // Load bookings overlapping the range (non-cancelled)
+    // Load bookings overlapping the range (cancelled + no_show excluded
+    // from occupancy — both represent an empty slot in practice: a
+    // cancellation means the time is freed; a no_show means the
+    // customer never arrived, so counting it would inflate
+    // booked_slots and occupancy_pct against the provider's real
+    // workload).
     const bookings = await this.prisma.bookings.findMany({
       where: {
         provider_id: { in: providerIds },
@@ -163,7 +168,9 @@ export class ProviderAvailabilityService {
           gte: new Date(params.date_from),
           lte: new Date(params.date_to),
         },
-        status: { notIn: [booking_status_enum.cancelled] },
+        status: {
+          notIn: [booking_status_enum.cancelled, booking_status_enum.no_show],
+        },
       },
       select: {
         provider_id: true,
