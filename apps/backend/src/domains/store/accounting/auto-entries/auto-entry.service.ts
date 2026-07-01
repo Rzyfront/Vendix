@@ -6,6 +6,7 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
 import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
+import { AccountingEntryFailureService } from './accounting-entry-failure.service';
 
 export interface AutoEntryEventData {
   source_type: string;
@@ -57,6 +58,7 @@ export class AutoEntryService {
     private readonly account_mapping_service: AccountMappingService,
     private readonly fiscal_scope_service: FiscalScopeService,
     private readonly fiscal_gate: FiscalGateService,
+    private readonly entry_failure_service: AccountingEntryFailureService,
   ) {}
 
   /**
@@ -389,7 +391,28 @@ export class AutoEntryService {
     }
   }
 
+  /**
+   * Punto de entrada de todos los handlers `on*()`. Envuelve `postAutoEntry`
+   * para NO perder el asiento en silencio: si el posteo lanza (mapping/cuenta
+   * faltante, período cerrado, error de BD), se persiste el fallo + se encola
+   * un reintento automático, y luego se re-lanza el error original para
+   * preservar el logging del AccountingEventsListener. El reintento reejecuta
+   * `postAutoEntry` directamente (ver AccountingEntryRetryProcessor) para no
+   * volver a registrar el mismo fallo.
+   */
   async createAutoEntry(event_data: AutoEntryEventData) {
+    try {
+      return await this.postAutoEntry(event_data);
+    } catch (error) {
+      await this.entry_failure_service.recordFailure(
+        event_data,
+        error as Error,
+      );
+      throw error;
+    }
+  }
+
+  async postAutoEntry(event_data: AutoEntryEventData) {
     const {
       source_type,
       source_id,

@@ -4588,6 +4588,30 @@ model accounting_entries {
   @@index([organization_id, is_historical_consolidated])
 }
 
+/// Cola de observabilidad de asientos automáticos fallidos. Cuando
+/// `AutoEntryService.createAutoEntry` lanza (mapping/cuenta faltante, período
+/// cerrado, error de BD), en vez de tragarse el error se persiste aquí el
+/// evento crudo + el error y se encola un reintento (cola BullMQ
+/// `accounting-entry-retry`). Sin relaciones a `organizations`/`stores` a
+/// propósito: es una bitácora operativa, no un modelo de negocio.
+model accounting_entry_failures {
+  id              Int       @id @default(autoincrement())
+  organization_id Int
+  store_id        Int?
+  handler_key     String    @db.VarChar(80)
+  source_type     String?   @db.VarChar(50)
+  source_id       Int?
+  event_payload   Json
+  error_message   String    @db.Text
+  attempt_count   Int       @default(1)
+  resolved_at     DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  updated_at      DateTime  @updatedAt @db.Timestamp(6)
+
+  @@index([organization_id, resolved_at])
+  @@index([source_type, source_id])
+}
+
 model accounting_entry_lines {
   id            Int       @id @default(autoincrement())
   entry_id      Int
