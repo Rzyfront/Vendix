@@ -155,20 +155,31 @@
                 </div>
               </div>
 
-              <div class="space-y-1">
-                <label class="text-[11px] text-gray-500 font-medium">Cargo</label>
-                <input
-                  type="text"
-                  class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  placeholder="Estilista, Barbero, Odontólogo..."
-                  [ngModel]="newEmployee().position"
-                  (ngModelChange)="patchNewEmployee('position', $event)"
-                />
-              </div>
-
-              <div class="grid grid-cols-2 gap-2">
+              <!--
+                Document type + Document number + Cargo + Hire date in one
+                row. Document type was previously hidden as a hardcoded
+                'CC' default — exposing it lets the operator choose NIT,
+                CE, PA, etc. without editing JSON. Mobile: the grid
+                collapses into stacked single-column on narrow viewports.
+              -->
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-2">
                 <div class="space-y-1">
-                  <label class="text-[11px] text-gray-500 font-medium">Documento</label>
+                  <label class="text-[11px] text-gray-500 font-medium">Tipo de documento</label>
+                  <select
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                    [ngModel]="newEmployee().document_type"
+                    (ngModelChange)="patchNewEmployee('document_type', $event)"
+                  >
+                    <option value="CC">CC - Cédula</option>
+                    <option value="CE">CE - Cédula de Extranjería</option>
+                    <option value="NIT">NIT</option>
+                    <option value="PA">PA - Pasaporte</option>
+                    <option value="TI">TI - Tarjeta de Identidad</option>
+                    <option value="RC">RC - Registro Civil</option>
+                  </select>
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Número</label>
                   <input
                     type="text"
                     class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -178,7 +189,17 @@
                   />
                 </div>
                 <div class="space-y-1">
-                  <label class="text-[11px] text-gray-500 font-medium">Fecha de ingreso</label>
+                  <label class="text-[11px] text-gray-500 font-medium">Cargo</label>
+                  <input
+                    type="text"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Barbero, Estilista..."
+                    [ngModel]="newEmployee().position"
+                    (ngModelChange)="patchNewEmployee('position', $event)"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Fecha de inicio</label>
                   <input
                     type="date"
                     class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
