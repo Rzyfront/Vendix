@@ -134,7 +134,10 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
             <View style={styles.header}>
               <View style={styles.headerTitleWrap}>
                 <Text style={styles.headerTitle} numberOfLines={1}>
-                  Recortar imagen
+                  Ajustar y recortar
+                </Text>
+                <Text style={styles.headerSubtitle} numberOfLines={1}>
+                  Edita la foto seleccionada
                 </Text>
               </View>
               <Pressable
@@ -276,7 +279,7 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
               </Text>
             </ScrollView>
 
-            {/* Footer */}
+            {/* Footer (mirror web: 3 botones - Restablecer, Cancelar, Guardar ajuste) */}
             <View style={styles.footer}>
               <View style={styles.footerActions}>
                 <Button
@@ -287,13 +290,6 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
                   disabled={!imageUri}
                 />
                 <Button
-                  title="Omitir"
-                  variant="outline"
-                  onPress={onClose}
-                  leftIcon={<Icon name="skip-forward" size={16} color={colors.primary} />}
-                  disabled={!imageUri}
-                />
-                <Button
                   title="Cancelar"
                   variant="outline"
                   onPress={onClose}
@@ -301,7 +297,7 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
                   disabled={!imageUri}
                 />
                 <Button
-                  title="Aplicar y agregar"
+                  title="Guardar ajuste"
                   variant="primary"
                   onPress={apply}
                   loading={!imageUri}
@@ -363,6 +359,11 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily,
     fontWeight: typography.fontWeight.semibold,
     color: colors.text.primary,
+  },
+  headerSubtitle: {
+    fontSize: typography.fontSize.sm,
+    color: colors.text.secondary,
+    marginTop: 2,
   },
   closeButton: {
     width: 36,
