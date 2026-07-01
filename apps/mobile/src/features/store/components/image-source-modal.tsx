@@ -13,7 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { Button } from '@/shared/components';
+import { Button, Input } from '@/shared/components';
 import { Icon } from '@/shared/components/icon/icon';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
@@ -157,7 +157,7 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
 
         <View style={styles.cardWrapper}>
           <View style={styles.card}>
-            {/* Header */}
+            {/* Header (mirror web: bg-gradient-to-b surface → surface/95) */}
             <View style={styles.header}>
               <View style={styles.headerTitleWrap}>
                 <Text style={styles.headerTitle} numberOfLines={1}>
@@ -174,7 +174,7 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
                 hitSlop={8}
                 style={({ pressed }) => [
                   styles.closeButton,
-                  pressed && { backgroundColor: colorScales.gray[100] },
+                  pressed && { backgroundColor: 'rgba(148, 163, 184, 0.2)' },
                 ]}
                 accessibilityLabel="Cerrar modal"
               >
@@ -184,7 +184,12 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
 
             {/* Body */}
             {view === 'menu' ? (
-              <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+              <ScrollView
+                style={styles.bodyScroll}
+                contentContainerStyle={styles.body}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
                 <Text style={styles.bodyHint}>
                   Quedan {remainingSlots} espacio{remainingSlots === 1 ? '' : 's'} disponible{remainingSlots === 1 ? '' : 's'}. Elige cómo quieres agregar imágenes:
                 </Text>
@@ -214,7 +219,7 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
                     onPress={pickFromCamera}
                     disabled={busy}
                   />
-                  {/* Buscar en la web — placeholder */}
+                  {/* Buscar en la web — placeholder, ocupa la 4ta celda */}
                   <OptionButton
                     icon="search"
                     title="Buscar en la web"
@@ -223,7 +228,7 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
                     disabled
                     style={styles.placeholderOption}
                   />
-                  {/* Generar con IA — placeholder, full width */}
+                  {/* Generar con IA — placeholder, full width (sm:col-span-2) */}
                   <OptionButton
                     icon="sparkles"
                     title="Generar con IA"
@@ -236,39 +241,52 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
               </ScrollView>
             ) : (
               <View style={styles.urlView}>
-                <Text style={styles.urlLabel}>URL de la imagen</Text>
-                <TextInput
-                  style={styles.urlInput}
+                {/* Botón "Volver" (mirror web: chevron-left + text-primary-600 hover:text-primary-700) */}
+                <Pressable
+                  onPress={() => {
+                    setView('menu');
+                    setUrlValue('');
+                  }}
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.urlBackBtn,
+                    pressed && { opacity: 0.7 },
+                  ]}
+                >
+                  <Icon name="chevron-left" size={14} color={colors.primary} />
+                  <Text style={styles.urlBackText}>Volver</Text>
+                </Pressable>
+
+                <Input
+                  label="URL pública de la imagen"
                   value={urlValue}
                   onChangeText={setUrlValue}
-                  placeholder="https://ejemplo.com/imagen.jpg"
+                  placeholder="https://..."
                   placeholderTextColor={colors.text.muted}
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="url"
                   editable={!busy}
                 />
-                <View style={styles.urlActions}>
-                  <Button
-                    title="Volver"
-                    variant="outline"
-                    onPress={() => {
-                      setView('menu');
-                      setUrlValue('');
-                    }}
-                    fullWidth
-                    disabled={busy}
-                  />
-                  <Button
-                    title={busy ? 'Descargando…' : 'Confirmar'}
-                    variant="primary"
-                    onPress={handleUrlConfirm}
-                    fullWidth
-                    loading={busy}
-                  />
-                </View>
+                <Text style={styles.urlHint}>
+                  Descargamos la imagen desde nuestro servidor para evitar bloqueos de origen y poder recortarla.
+                </Text>
               </View>
             )}
+
+            {/* Footer (mirror web: bg-gradient-to-t background/50 → surface + border-t + Cerrar) */}
+            <View style={styles.footer}>
+              <View style={styles.footerActions}>
+                <Button
+                  title="Cerrar"
+                  variant="outline"
+                  onPress={handleClose}
+                  leftIcon={<Icon name="x" size={16} color={colors.primary} />}
+                  fullWidth
+                  disabled={busy}
+                />
+              </View>
+            </View>
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -370,6 +388,9 @@ const styles = StyleSheet.create({
     padding: spacing[4],
     gap: spacing[3],
   },
+  bodyScroll: {
+    flexShrink: 1,
+  },
   bodyHint: {
     fontSize: typography.fontSize.sm,
     color: colors.text.secondary,
@@ -448,5 +469,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing[3],
     marginTop: spacing[2],
+  },
+  // Volver en vista URL (mirror web: chevron-left + text-primary-600)
+  urlBackBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    paddingVertical: spacing[1],
+  },
+  urlBackText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.medium,
+    color: colors.primary,
+  },
+  urlHint: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  // Footer del modal (gradient sutil + border-t + botón Cerrar)
+  footer: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[200],
+    backgroundColor: colors.card,
+  },
+  footerActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    gap: spacing[2],
   },
 });

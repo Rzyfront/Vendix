@@ -953,7 +953,11 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   onPress={() => setImageSourceOpen(true)}
                   style={({ pressed }) => [
                     styles.imageThumbAdd,
-                    pressed && { opacity: 0.7 },
+                    pressed && {
+                      backgroundColor: colors.card,
+                      borderColor: colors.primary,
+                      opacity: 0.7,
+                    },
                   ]}
                 >
                   <Icon name="image-plus" size={20} color={colors.text.muted} />
@@ -1818,7 +1822,7 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: spacing[1],
+    paddingTop: spacing[0.5],
   },
   imageThumbAddText: {
     fontSize: 9,
