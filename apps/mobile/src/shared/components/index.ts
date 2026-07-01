@@ -48,3 +48,7 @@ export { Pagination } from './pagination/pagination';
 export type { PaginationProps } from './pagination/pagination';
 export { ImageCarousel } from './image-carousel/image-carousel';
 export type { ImageCarouselProps, CarouselImage } from './image-carousel/image-carousel';
+export { AnimatedPressable } from './animated-pressable/animated-pressable';
+export type { AnimatedPressableProps } from './animated-pressable/animated-pressable';
+export { RowActionsMenu } from './row-actions-menu/row-actions-menu';
+export type { RowAction } from './row-actions-menu/row-actions-menu';

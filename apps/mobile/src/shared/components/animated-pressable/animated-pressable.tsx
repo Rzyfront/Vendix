@@ -20,9 +20,9 @@ const AnimatedPressableRoot = Animated.createAnimatedComponent(Pressable);
  * Diseñado para tarjetas, botones de lista y CTAs. Más vivo que el feedback
  * plano de `Pressable`, pero sin la exageración de un "bounce" agresivo.
  *
- * Acepta las mismas props que `Pressable` + callbacks `onPressIn` / `onPressOut`
- * propios (los consume internamente para la animación, pero los expone vía
- * `onPressInExternal` / `onPressOutExternal` si necesitas reaccionar también).
+ * Acepta las mismas props que `Pressable`. Los callbacks `onPressIn` y
+ * `onPressOut` nativos de RN son consumidos internamente por la animación,
+ * por lo que este componente los omite de sus tipos públicos.
  *
  * Uso:
  *   <AnimatedPressable onPress={...} style={styles.card}>

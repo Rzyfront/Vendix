@@ -438,9 +438,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   calculator: Calculator,
   wallet: Wallet,
   'bar-chart': BarChart3,
-  // lucide-react-native no tiene `BarChart3` (web-only); el visual es idéntico a
-  // `ChartBar` (4 barras verticales). Mantenemos el nombre web `bar-chart-3`
-  // en el iconMap para paridad con apps/frontend (lucide-react).
+  // Mantenemos `bar-chart-3` mapeado a `ChartBar` para paridad con
+  // apps/frontend (lucide-react), donde ese nombre existe pero RN no lo
+  // provee. El alias `bar-chart` usa `BarChart3` directamente.
   'bar-chart-3': ChartBar,
   settings: Settings,
   shield: Shield,

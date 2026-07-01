@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -48,8 +48,6 @@ export interface DropdownAction {
 export type FilterValues = Record<string, string | string[] | null>;
 
 interface OptionsDropdownProps {
-  /** Etiqueta del trigger del dropdown. */
-  triggerLabel?: string;
   /** Filtros a mostrar en el dropdown de filtros. */
   filters?: FilterConfig[];
   /** Acciones a mostrar en el dropdown de acciones. */
@@ -129,7 +127,6 @@ interface TriggerPos {
  * En desktop el web muestra trigger con label, pero en mobile-first ambos son icon-only.
  */
 export function OptionsDropdown({
-  triggerLabel,
   filters = [],
   actions = [],
   showActions = true,
@@ -153,7 +150,7 @@ export function OptionsDropdown({
   const filtersTriggerRef = useRef<ViewType>(null);
 
   // ── Sync external filterValues → local state ─────────────────────────
-  useMemo(() => {
+  useEffect(() => {
     setLocalValues(filterValues);
   }, [filterValues]);
 
@@ -235,6 +232,11 @@ export function OptionsDropdown({
   // ── Filter change with debounce ───────────────────────────────────────
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Cleanup pending debounce on unmount to avoid setState-after-unmount.
+  useEffect(() => () => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+  }, []);
+
   const handleFilterChange = (key: string, value: string | string[] | null) => {
     setLocalValues((prev) => ({ ...prev, [key]: value }));
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -312,7 +314,6 @@ export function OptionsDropdown({
           {dropdownPosition && openMenu === 'actions' && (
             <Pressable
               style={[styles.dropdown, { top: dropdownPosition.top, left: dropdownPosition.left }]}
-              onPress={(e) => e.stopPropagation()}
             >
               <View style={styles.header}>
                 <Text style={styles.headerTitle}>{actionsTitle}</Text>
@@ -361,7 +362,6 @@ export function OptionsDropdown({
           {dropdownPosition && openMenu === 'filters' && (
             <Pressable
               style={[styles.dropdown, { top: dropdownPosition.top, left: dropdownPosition.left }]}
-              onPress={(e) => e.stopPropagation()}
             >
               <View style={styles.header}>
                 <Text style={styles.headerTitle}>{filtersTitle}</Text>

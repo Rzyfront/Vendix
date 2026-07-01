@@ -112,43 +112,45 @@ export function MultiSelector<T = string | number>({
         <Icon name={open ? "chevron-up" : "chevron-down"} size={18} color={colors.text.secondary} />
       </Pressable>
 
-      <Modal visible={open} animationType="fade" onRequestClose={() => setOpen(false)}>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)} statusBarTranslucent>
         <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalHint}>
-            {values.length === 0
-              ? 'Toca para agregar'
-              : `${values.length} seleccionado${values.length === 1 ? '' : 's'}`}
-            {max ? ` (máx. ${max})` : ''}
-          </Text>
-          {values.length > 0 && (
-            <Pressable onPress={clear} hitSlop={8}>
-              <Text style={styles.clearText}>Limpiar</Text>
-            </Pressable>
-          )}
-        </View>
-        <View style={styles.list}>
-          {options.map((opt) => {
-            const isSelected = values.includes(opt.value);
-            const isDisabled = !!max && !isSelected && values.length >= max;
-            return (
-              <Pressable
-                key={String(opt.value)}
-                onPress={() => !isDisabled && toggle(opt.value)}
-                disabled={isDisabled}
-                style={({ pressed }) => [
-                  styles.option,
-                  pressed && styles.optionPressed,
-                  isSelected && styles.optionSelected,
-                  isDisabled && styles.disabled,
-                ]}
-              >
-                {opt.icon && <Icon name={opt.icon} size={18} color={colors.text.primary} />}
-                <Text style={styles.optionLabel}>{opt.label}</Text>
-                {isSelected && <Icon name="check" size={18} color={colors.primary} />}
+        <View style={[styles.dropdown, { top: pos.top, left: pos.left, width: pos.width }]}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalHint}>
+              {values.length === 0
+                ? 'Toca para agregar'
+                : `${values.length} seleccionado${values.length === 1 ? '' : 's'}`}
+              {max ? ` (máx. ${max})` : ''}
+            </Text>
+            {values.length > 0 && (
+              <Pressable onPress={clear} hitSlop={8}>
+                <Text style={styles.clearText}>Limpiar</Text>
               </Pressable>
-            );
-          })}
+            )}
+          </View>
+          <View style={styles.list}>
+            {options.map((opt) => {
+              const isSelected = values.includes(opt.value);
+              const isDisabled = !!max && !isSelected && values.length >= max;
+              return (
+                <Pressable
+                  key={String(opt.value)}
+                  onPress={() => !isDisabled && toggle(opt.value)}
+                  disabled={isDisabled}
+                  style={({ pressed }) => [
+                    styles.option,
+                    pressed && styles.optionPressed,
+                    isSelected && styles.optionSelected,
+                    isDisabled && styles.disabled,
+                  ]}
+                >
+                  {opt.icon && <Icon name={opt.icon} size={18} color={colors.text.primary} />}
+                  <Text style={styles.optionLabel}>{opt.label}</Text>
+                  {isSelected && <Icon name="check" size={18} color={colors.primary} />}
+                </Pressable>
+              );
+            })}
+          </View>
         </View>
       </Modal>
     </View>
@@ -194,6 +196,20 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  dropdown: {
+    position: 'absolute',
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
   },
   chipsRow: {
     flex: 1,

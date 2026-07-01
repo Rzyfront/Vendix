@@ -112,7 +112,6 @@ export default function BrandsListScreen() {
             />
           </View>
           <OptionsDropdown
-            triggerLabel="Filtros"
             filters={[
               {
                 key: 'state',

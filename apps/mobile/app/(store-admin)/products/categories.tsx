@@ -112,7 +112,6 @@ export default function CategoriesListScreen() {
             />
           </View>
           <OptionsDropdown
-            triggerLabel="Filtros"
             filters={[
               {
                 key: 'state',

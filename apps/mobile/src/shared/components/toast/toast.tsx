@@ -230,7 +230,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: colorScales.gray[800],
     fontFamily: typography.fontFamily,
-    fontWeight: typography.fontWeight.medium as any,
+    fontWeight: typography.fontWeight.medium,
   },
   actionBtn: {
     marginLeft: spacing[2],
@@ -241,7 +241,7 @@ const styles = StyleSheet.create({
   actionLabel: {
     fontSize: 12,
     fontFamily: typography.fontFamily,
-    fontWeight: typography.fontWeight.semibold as any,
+    fontWeight: typography.fontWeight.semibold,
   },
   dismissBtn: {
     marginLeft: spacing[1],

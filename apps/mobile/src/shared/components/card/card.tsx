@@ -84,14 +84,16 @@ const styles = StyleSheet.create({
 });
 
 function Card({ children, style, onPress, activeOpacity = 0.7, disabled, ...props }: CardProps) {
-  const cardStyle = [styles.card, style];
+  const cardBase = [styles.card, style];
   if (onPress) {
     return (
       <Pressable
         onPress={onPress}
-        activeOpacity={activeOpacity}
         disabled={disabled}
-        style={cardStyle}
+        style={({ pressed }) => [
+          ...cardBase,
+          pressed && { opacity: activeOpacity },
+        ]}
         {...(props as any)}
       >
         {children}
@@ -99,7 +101,7 @@ function Card({ children, style, onPress, activeOpacity = 0.7, disabled, ...prop
     );
   }
   return (
-    <View style={cardStyle} {...props}>
+    <View style={cardBase} {...props}>
       {children}
     </View>
   );

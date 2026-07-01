@@ -72,6 +72,11 @@ export function StickyHeader({
             <Icon name="chevron-left" size={24} color={colors.text.primary} />
           </Pressable>
         )}
+        {showCloseButton && (
+          <Pressable onPress={handleBack} hitSlop={12} style={styles.backButton}>
+            <Icon name="x" size={22} color={colors.text.primary} />
+          </Pressable>
+        )}
         <View style={styles.titleBlock}>
           <Text style={styles.title} numberOfLines={1}>
             {title}
