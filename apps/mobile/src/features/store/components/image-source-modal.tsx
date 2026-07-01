@@ -310,16 +310,28 @@ function OptionButton({ icon, title, subtitle, onPress, disabled, style }: Optio
       disabled={disabled}
       style={({ pressed }) => [
         styles.option,
+        // Mirror web: hover:border-primary-400 hover:bg-primary-50/40 (en mobile: en press)
+        !disabled && pressed && styles.optionHovered,
         disabled && styles.optionDisabled,
         style,
-        pressed && !disabled && { backgroundColor: colorScales.green[50] },
       ]}
     >
-      <View style={styles.optionIcon}>
-        <Icon name={icon} size={20} color={colors.primary} />
+      <View
+        style={[
+          styles.optionIcon,
+          disabled && styles.optionIconDisabled,
+        ]}
+      >
+        <Icon
+          name={icon}
+          size={20}
+          color={disabled ? colorScales.gray[500] : colors.primary}
+        />
       </View>
       <View style={styles.optionText}>
-        <Text style={[styles.optionTitle, disabled && { color: colorScales.gray[700] }]}>{title}</Text>
+        <Text style={[styles.optionTitle, disabled && { color: colorScales.gray[700] }]}>
+          {title}
+        </Text>
         <Text style={styles.optionSubtitle}>{subtitle}</Text>
       </View>
     </Pressable>
@@ -415,9 +427,16 @@ const styles = StyleSheet.create({
   fullWidthOption: {
     minWidth: '100%',
   },
+  optionHovered: {
+    // Mirror web `hover:border-primary-400 hover:bg-primary-50/40`
+    borderColor: colorScales.green[400],
+    backgroundColor: 'rgba(46, 204, 113, 0.4)',
+  },
   optionDisabled: {
     backgroundColor: colorScales.gray[50],
-    opacity: 0.7,
+    opacity: 0.5,
+    // Evita que hover sobreescriba el bg del placeholder
+    borderColor: colorScales.gray[200],
   },
   placeholderOption: {
     backgroundColor: colorScales.gray[50],
@@ -431,6 +450,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexShrink: 0,
   },
+  optionIconDisabled: {
+    backgroundColor: colorScales.gray[200],
+  },
   optionText: {
     flex: 1,
   },
@@ -441,7 +463,7 @@ const styles = StyleSheet.create({
   },
   optionSubtitle: {
     fontSize: typography.fontSize.xs,
-    color: colors.text.secondary,
+    color: colorScales.gray[500],
     marginTop: 2,
   },
   urlView: {
