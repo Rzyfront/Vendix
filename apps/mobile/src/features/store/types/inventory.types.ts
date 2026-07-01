@@ -37,6 +37,7 @@ export interface StockTransfer {
   /** Count of distinct items (sometimes richer than product_count). */
   items_count?: number;
   state: 'pending' | 'in_transit' | 'completed' | 'cancelled';
+  notes?: string | null;
   created_at: string;
 }
 
@@ -91,7 +92,7 @@ export interface Location {
   id: string;
   name: string;
   code?: string;
-  type: 'warehouse' | 'store' | 'virtual';
+  type: LocationType;
   address?: string;
   is_active: boolean;
 }
@@ -173,7 +174,19 @@ export interface InventoryStats {
 export type AdjustmentType = 'damage' | 'loss' | 'theft' | 'expiration' | 'count_variance' | 'manual_correction';
 export type AdjustmentState = 'pending' | 'applied';
 export type TransferState = 'pending' | 'in_transit' | 'completed' | 'cancelled';
-export type LocationType = 'warehouse' | 'store' | 'virtual';
+/**
+ * Alineado con el enum del backend `location_type_enum`
+ * (apps/backend/prisma/schema.prisma). Cualquier desajuste causa 400 al
+ * hacer POST /locations porque el backend valida con @IsEnum.
+ */
+export type LocationType =
+  | 'warehouse'
+  | 'store'
+  | 'production_area'
+  | 'receiving_area'
+  | 'shipping_area'
+  | 'quarantine'
+  | 'damaged_goods';
 
 /**
  * Aliases legacy — mantener para compatibilidad hacia atrás.
@@ -233,7 +246,11 @@ export const MOVEMENT_OUTBOUND_TYPES: ReadonlySet<MovementType> = new Set<Moveme
 export const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
   warehouse: 'Bodega',
   store: 'Tienda',
-  virtual: 'Virtual',
+  production_area: 'Área de Producción',
+  receiving_area: 'Área de Recepción',
+  shipping_area: 'Área de Despacho',
+  quarantine: 'Cuarentena',
+  damaged_goods: 'Mercancía Dañada',
 };
 
 export interface ConsolidatedStock {

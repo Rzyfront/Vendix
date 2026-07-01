@@ -9,6 +9,7 @@ import type {
   StockMovement,
   Supplier,
   Location,
+  LocationType,
   AdjustmentType,
   AdjustmentState,
   TransferState,
@@ -285,7 +286,7 @@ export type UpdateSupplierDto = Partial<CreateSupplierDto>;
 export interface CreateLocationDto {
   name: string;
   code?: string;
-  type: 'warehouse' | 'store' | 'virtual';
+  type: LocationType;
   address?: string;
   is_active?: boolean;
 }
@@ -437,7 +438,6 @@ export const InventoryService = {
   ): Promise<{ total_processed: number; successful: number; failed: number; results: any[] }> {
     const formData = new FormData();
     // 1) Archivo bajo el campo "file" (igual que `FileInterceptor('file')` en el backend)
-    // @ts-expect-error - React Native FormData accepts file objects
     formData.append('file', {
       uri: file.uri,
       name: file.name,
@@ -475,6 +475,31 @@ export const InventoryService = {
 
   async createTransfer(dto: CreateTransferDto): Promise<StockTransfer> {
     const res = await apiClient.post(Endpoints.STORE.INVENTORY.TRANSFERS.CREATE, toStockTransferPayload(dto));
+    return normalizeTransfer(unwrap<Record<string, any>>(res));
+  },
+
+  async approveTransfer(id: string): Promise<StockTransfer> {
+    const res = await apiClient.post(
+      Endpoints.STORE.INVENTORY.TRANSFERS.APPROVE.replace(':id', id),
+    );
+    return normalizeTransfer(unwrap<Record<string, any>>(res));
+  },
+
+  async cancelTransfer(id: string): Promise<StockTransfer> {
+    const res = await apiClient.post(
+      Endpoints.STORE.INVENTORY.TRANSFERS.CANCEL.replace(':id', id),
+    );
+    return normalizeTransfer(unwrap<Record<string, any>>(res));
+  },
+
+  async completeTransfer(
+    id: string,
+    items: Array<{ id: number; quantity_received: number }>,
+  ): Promise<StockTransfer> {
+    const res = await apiClient.post(
+      Endpoints.STORE.INVENTORY.TRANSFERS.COMPLETE.replace(':id', id),
+      { items },
+    );
     return normalizeTransfer(unwrap<Record<string, any>>(res));
   },
 

@@ -662,7 +662,7 @@ export default function SuppliersScreen() {
                   onPress={() => setShowCurrencyDropdown(!showCurrencyDropdown)}
                 >
                   <Text style={{ flex: 1, fontSize: 14, color: colorScales.gray[900] }}>
-                    {CURRENCY_OPTIONS.find((c) => c.code === form.currency)?.label || 'Seleccionar moneda'}
+                    {CURRENCY_OPTIONS.find((c) => c.value === form.currency)?.label || 'Seleccionar moneda'}
                   </Text>
                   <Icon
                     name={showCurrencyDropdown ? 'chevron-up' : 'chevron-down'}
@@ -674,14 +674,14 @@ export default function SuppliersScreen() {
                   <View style={styles.currencyDropdownList}>
                     {CURRENCY_OPTIONS.map((opt) => (
                       <Pressable
-                        key={opt.code}
-                        style={[styles.currencyDropdownOption, form.currency === opt.code && styles.currencyDropdownOptionActive]}
-                        onPress={() => { setForm({ ...form, currency: opt.code }); setShowCurrencyDropdown(false); }}
+                        key={opt.value}
+                        style={[styles.currencyDropdownOption, form.currency === opt.value && styles.currencyDropdownOptionActive]}
+                        onPress={() => { setForm({ ...form, currency: opt.value }); setShowCurrencyDropdown(false); }}
                       >
-                        <Text style={[styles.currencyDropdownOptionText, form.currency === opt.code && styles.currencyDropdownOptionTextActive]}>
+                        <Text style={[styles.currencyDropdownOptionText, form.currency === opt.value && styles.currencyDropdownOptionTextActive]}>
                           {opt.label}
                         </Text>
-                        {form.currency === opt.code && <Icon name="check" size={16} color={colors.primary} />}
+                        {form.currency === opt.value && <Icon name="check" size={16} color={colors.primary} />}
                       </Pressable>
                     ))}
                   </View>

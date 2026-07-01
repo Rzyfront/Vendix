@@ -181,7 +181,16 @@ export const MOVEMENT_OUTBOUND_TYPES: MovementTypeValue[] = MOVEMENT_TYPE_OPTION
   .map((o) => o.value);
 
 // ─── Location types ──────────────────────────────────────────────────────────
-export type LocationTypeValue = 'warehouse' | 'store' | 'virtual' | 'transit';
+// Alineado con `location_type_enum` del backend (apps/backend/prisma/schema.prisma).
+// Cualquier desajuste causa 400 en POST /locations.
+export type LocationTypeValue =
+  | 'warehouse'
+  | 'store'
+  | 'production_area'
+  | 'receiving_area'
+  | 'shipping_area'
+  | 'quarantine'
+  | 'damaged_goods';
 
 export interface LocationTypeOption {
   value: LocationTypeValue;
@@ -192,8 +201,11 @@ export interface LocationTypeOption {
 export const LOCATION_TYPE_OPTIONS: LocationTypeOption[] = [
   { value: 'warehouse', label: 'Almacén', icon: INVENTORY_ICONS.warehouse },
   { value: 'store', label: 'Tienda', icon: INVENTORY_ICONS.store },
-  { value: 'virtual', label: 'Virtual', icon: INVENTORY_ICONS.package },
-  { value: 'transit', label: 'En Tránsito', icon: INVENTORY_ICONS.truck },
+  { value: 'production_area', label: 'Área de Producción', icon: INVENTORY_ICONS.package },
+  { value: 'receiving_area', label: 'Área de Recepción', icon: INVENTORY_ICONS.package },
+  { value: 'shipping_area', label: 'Área de Despacho', icon: INVENTORY_ICONS.truck },
+  { value: 'quarantine', label: 'Cuarentena', icon: INVENTORY_ICONS.package },
+  { value: 'damaged_goods', label: 'Mercancía Dañada', icon: INVENTORY_ICONS.package },
 ];
 
 export const LOCATION_TYPE_MAP: Record<LocationTypeValue, LocationTypeOption> =
@@ -219,7 +231,7 @@ export interface TransferStateOption {
 
 export const TRANSFER_STATE_OPTIONS: TransferStateOption[] = [
   { value: 'draft', label: 'Borrador', icon: INVENTORY_ICONS.draftStat, palette: 'gray' },
-  { value: 'pending', label: 'Pendiente', icon: INVENTORY_ICONS.clock, palette: 'gray' },
+  { value: 'pending', label: 'Pendiente', icon: 'clock', palette: 'gray' },
   { value: 'in_transit', label: 'En Tránsito', icon: INVENTORY_ICONS.inTransitStat, palette: 'amber' },
   { value: 'completed', label: 'Completada', icon: INVENTORY_ICONS.completedStat, palette: 'emerald' },
   { value: 'cancelled', label: 'Cancelada', icon: INVENTORY_ICONS.close, palette: 'red' },
@@ -235,7 +247,7 @@ export const TRANSFER_STATE_MAP: Record<TransferStateValue, TransferStateOption>
 export type AdjustmentStateValue = 'pending' | 'approved' | 'rejected';
 
 export const ADJUSTMENT_STATE_OPTIONS = [
-  { value: 'pending' as const, label: 'Pendiente', icon: INVENTORY_ICONS.clock, palette: 'amber' as StatPaletteKey },
+  { value: 'pending' as const, label: 'Pendiente', icon: 'clock', palette: 'amber' as StatPaletteKey },
   { value: 'approved' as const, label: 'Aprobado', icon: INVENTORY_ICONS.check, palette: 'green' as StatPaletteKey },
   { value: 'rejected' as const, label: 'Rechazado', icon: INVENTORY_ICONS.close, palette: 'red' as StatPaletteKey },
 ];
