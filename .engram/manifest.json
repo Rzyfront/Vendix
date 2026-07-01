@@ -344,22 +344,6 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
-    },
-    {
-      "id": "c1ef3ae9",
-      "created_by": "yoner",
-      "created_at": "2026-07-01T12:54:55Z",
-      "sessions": 1,
-      "memories": 0,
-      "prompts": 0
-    },
-    {
-      "id": "1bcec562",
-      "created_by": "yoner",
-      "created_at": "2026-07-01T22:46:04Z",
-      "sessions": 3,
-      "memories": 5,
-      "prompts": 0
     }
   ]
 }
