@@ -58,6 +58,9 @@ export const Endpoints = {
       SHIPPING_ASSIGN: '/store/orders/:id/shipping',
       REFUNDS: '/store/orders/:id/refunds',
     },
+    PRICE_TIERS: {
+      LIST: '/store/price-tiers',
+    },
     ANALYTICS: {
       SALES_SUMMARY: '/store/analytics/sales/summary',
       SALES_TRENDS: '/store/analytics/sales/trends',

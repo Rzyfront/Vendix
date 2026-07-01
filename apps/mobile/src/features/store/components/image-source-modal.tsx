@@ -42,6 +42,21 @@ interface ImageSourceModalProps {
 const CARD_MAX_WIDTH = 480;
 
 /**
+ * Construye un data URL a partir de un asset del ImagePicker. Si el asset
+ * trae base64, lo usamos para evitar depender de un `file://` local que
+ * el backend no sabrá resolver (sólo acepta `data:image/...` o
+ * `http(s)://`). Si por algún motivo base64 viene vacío, caemos al
+ * `file://` original como fallback.
+ */
+function buildDataUri(uri: string, base64?: string | null, mimeType?: string | null): string {
+  if (base64 && base64.length > 0) {
+    const mime = mimeType || 'image/jpeg';
+    return `data:${mime};base64,${base64}`;
+  }
+  return uri;
+}
+
+/**
  * Modal de selección de fuente de imagen. Mirror del web:
  * Subir | Desde URL | Tomar foto | Buscar en la web (placeholder) | Generar con IA (placeholder)
  *
@@ -77,12 +92,16 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.85,
         allowsEditing: false,
+        // Pedimos base64 para serializar la imagen a data URL. El backend
+        // sólo acepta `data:image/...` o `http(s)://`; los `file://` locales
+        // quedarían como URLs inválidas en product_images.
+        base64: true,
       });
       if (result.canceled) return;
       const asset = result.assets?.[0];
       if (!asset?.uri) return;
       onConfirm({
-        uri: asset.uri,
+        uri: buildDataUri(asset.uri, asset.base64, asset.mimeType),
         fileName: asset.fileName ?? undefined,
         width: asset.width,
         height: asset.height,
@@ -107,12 +126,14 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
       const result = await ImagePicker.launchCameraAsync({
         quality: 0.85,
         allowsEditing: false,
+        // Ver nota en pickFromGallery sobre por qué pedimos base64.
+        base64: true,
       });
       if (result.canceled) return;
       const asset = result.assets?.[0];
       if (!asset?.uri) return;
       onConfirm({
-        uri: asset.uri,
+        uri: buildDataUri(asset.uri, asset.base64, asset.mimeType),
         fileName: asset.fileName ?? undefined,
         width: asset.width,
         height: asset.height,
@@ -203,14 +224,6 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
                     onPress={pickFromGallery}
                     disabled={busy}
                   />
-                  {/* Desde URL */}
-                  <OptionButton
-                    icon="link"
-                    title="Desde URL"
-                    subtitle="Descarga una imagen pública y edítala"
-                    onPress={() => setView('url')}
-                    disabled={busy}
-                  />
                   {/* Tomar foto — camera */}
                   <OptionButton
                     icon="camera"
@@ -218,6 +231,16 @@ export function ImageSourceModal({ visible, onClose, onConfirm, remainingSlots =
                     subtitle="Usa la cámara del dispositivo"
                     onPress={pickFromCamera}
                     disabled={busy}
+                  />
+                  {/* Desde URL — deshabilitado en móvil (mirror web:
+                      la opción existe pero no aplica en este cliente). */}
+                  <OptionButton
+                    icon="link"
+                    title="Desde URL"
+                    subtitle="Descarga una imagen pública y edítala"
+                    subtitleMuted="No disponible en móvil"
+                    onPress={() => setView('url')}
+                    disabled
                   />
                   {/* Buscar en la web — placeholder, ocupa la 4ta celda */}
                   <OptionButton
@@ -318,12 +341,18 @@ interface OptionButtonProps {
   icon: string;
   title: string;
   subtitle: string;
+  /**
+   * Segunda línea debajo del subtitle, con tono gris "deshabilitado".
+   * Sirve para señalar que la opción existe pero no aplica en el
+   * contexto actual (p.ej. "No disponible en móvil").
+   */
+  subtitleMuted?: string;
   onPress: () => void;
   disabled?: boolean;
   style?: any;
 }
 
-function OptionButton({ icon, title, subtitle, onPress, disabled, style }: OptionButtonProps) {
+function OptionButton({ icon, title, subtitle, subtitleMuted, onPress, disabled, style }: OptionButtonProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -353,6 +382,9 @@ function OptionButton({ icon, title, subtitle, onPress, disabled, style }: Optio
           {title}
         </Text>
         <Text style={styles.optionSubtitle}>{subtitle}</Text>
+        {subtitleMuted ? (
+          <Text style={styles.optionSubtitleMuted}>{subtitleMuted}</Text>
+        ) : null}
       </View>
     </Pressable>
   );
@@ -484,6 +516,13 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   optionSubtitle: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  optionSubtitleMuted: {
+    // Mismo tono gris (`gray-500`) que los placeholders "Aún no
+    // disponible" — diferencia visual nula respecto al web.
     fontSize: typography.fontSize.xs,
     color: colorScales.gray[500],
     marginTop: 2,

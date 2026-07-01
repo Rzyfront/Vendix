@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Modal as RNModal,
   View,
@@ -10,10 +10,9 @@ import {
   PanResponder,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
-  GestureResponderEvent,
-  PanResponderGestureState,
+  useWindowDimensions,
 } from 'react-native';
+import * as ImageManipulator from 'expo-image-manipulator';
 import { Button } from '@/shared/components';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
@@ -75,8 +74,19 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
   const [rotation, setRotation] = useState(0);
   const [flippedH, setFlippedH] = useState(false);
   const [flippedV, setFlippedV] = useState(false);
-  const [aspect, setAspect] = useState<AspectRatio>('free');
+  // Default: 1:1 (cuadrado) al subir una imagen. El usuario puede
+  // cambiar a 'libre' u otro aspect desde los chips.
+  const [aspect, setAspect] = useState<AspectRatio>('1:1');
   const [frame, setFrame] = useState<Frame>({ x: 0, y: 0, w: 1, h: 1 });
+  // Aspect ratio real de la imagen (ancho/alto). Usado para dimensionar
+  // el canvas según la imagen subida.
+  const [imageAspect, setImageAspect] = useState<number>(1);
+  // Dimensiones reales (en píxeles) de la imagen. Necesarias para
+  // convertir el frame normalizado del canvas a coordenadas de píxeles
+  // que `expo-image-manipulator` entiende al recortar.
+  const [imageDims, setImageDims] = useState<{ w: number; h: number }>({ w: 0, h: 0 });
+  // Loading mientras se aplica el crop/rotación/flip con expo-image-manipulator.
+  const [processing, setProcessing] = useState(false);
 
   // Refs para el PanResponder (no trigger re-render)
   const containerSizeRef = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
@@ -84,9 +94,19 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
   const activeHandleRef = useRef<Handle>(null);
   const startFrameRef = useRef<Frame | null>(null);
   const startTouchRef = useRef<{ x: number; y: number } | null>(null);
+  // Ref espejo del aspect actual: lo lee el PanResponder sin recrearlo en
+  // cada cambio de aspect. Cuando el aspect no es 'libre', el frame está
+  // bloqueado y no se debe permitir arrastrarlo/redimensionarlo.
+  const aspectRef = useRef<AspectRatio>('free');
+
+  // Tamaño de la ventana: el canvas debe caber en el viewport y respetar
+  // el aspect ratio de la imagen (mirror web: max-w-full + max-h-[60vh]).
+  const { width: screenW, height: screenH } = useWindowDimensions();
 
   // Actualizar el ref cuando el state cambia
   frameRef.current = frame;
+  aspectRef.current = aspect;
+  const frameLocked = aspect !== 'free';
 
   // Helpers de validación
   function clampFrame(f: Frame): Frame {
@@ -190,13 +210,42 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
 
   const panResponder = useRef(
     PanResponder.create({
+      // Aceptamos el gesto siempre: el frame puede moverse aunque el
+      // aspect ratio sea fijo. En `onPanResponderGrant` decidimos si
+      // se trata de un drag válido (touch dentro del frame) o si lo
+      // ignoramos (touch fuera del frame o intento de resize con
+      // aspect bloqueado).
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt) => {
         const { locationX, locationY } = evt.nativeEvent;
-        const handle = getHandle(locationX, locationY, frameRef.current);
-        activeHandleRef.current = handle;
-        startFrameRef.current = { ...frameRef.current };
+        const current = frameRef.current;
+        const c = containerSizeRef.current;
+        // Slop extra alrededor del frame para que sea más fácil de
+        // atrapar con el dedo (sin esto, hay que ser muy preciso
+        // para tocar justo sobre el borde).
+        const touchSlop = 8;
+        const x0 = current.x * c.w - touchSlop;
+        const y0 = current.y * c.h - touchSlop;
+        const x1 = (current.x + current.w) * c.w + touchSlop;
+        const y1 = (current.y + current.h) * c.h + touchSlop;
+        // Sólo iniciamos un drag si el touch cae dentro (o cerca) del
+        // frame. Tocando lejos no hacemos nada.
+        if (
+          locationX < x0 ||
+          locationX > x1 ||
+          locationY < y0 ||
+          locationY > y1
+        ) {
+          return;
+        }
+        const handle = getHandle(locationX, locationY, current);
+        // Con aspect ratio bloqueado forzamos 'move': los handles de
+        // resize (esquinas/lados) no están renderizados y aunque el
+        // touch caiga cerca del borde lo tratamos como drag.
+        activeHandleRef.current =
+          aspectRef.current === 'free' ? handle : 'move';
+        startFrameRef.current = { ...current };
         startTouchRef.current = { x: locationX, y: locationY };
       },
       onPanResponderMove: (evt, gestureState) => {
@@ -216,23 +265,214 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
     }),
   ).current;
 
-  function reset() {
+  const reset = useCallback(() => {
     setRotation(0);
     setFlippedH(false);
     setFlippedV(false);
-    setAspect('free');
-    setFrame({ x: 0, y: 0, w: 1, h: 1 });
+    // Default: aspect 1:1 (cuadrado centrado). El usuario puede
+    // cambiar a 'libre' u otro desde los chips.
+    setAspect('1:1');
+    setFrame(frameForAspect(ASPECT_RATIOS['1:1'], 1));
+  }, []);
+
+  /**
+   * Cambia la relación de aspecto del frame y re-centra el rectángulo de
+   * recorte. Si el aspect es 'free', el frame ocupa todo el canvas.
+   * En caso contrario, devuelve el rectángulo más grande con esa
+   * proporción que cabe dentro del canvas (centrado).
+   */
+  const changeAspect = useCallback(
+    (next: AspectRatio) => {
+      setAspect(next);
+      setFrame(frameForAspect(ASPECT_RATIOS[next], imageAspect));
+    },
+    [imageAspect],
+  );
+
+  /**
+   * Calcula el frame de recorte para un aspect ratio dado, normalizado al
+   * canvas. El frame resultante es el rectángulo más grande con
+   * `targetRatio` (w/h) que cabe dentro del canvas, centrado.
+   *
+   * Coords en 0..1 (x, y, w, h) relativas al canvas.
+   */
+  function frameForAspect(targetRatio: number, imageAR: number): Frame {
+    if (!targetRatio || targetRatio <= 0 || !imageAR || imageAR <= 0) {
+      // 'free' o imageAspect aún desconocido: ocupar todo el canvas
+      return { x: 0, y: 0, w: 1, h: 1 };
+    }
+    // imageAR = canvasW / canvasH (lo que renderiza computeCanvasSize)
+    if (imageAR > targetRatio) {
+      // Canvas más ancho que el target → la altura es el cuello de botella
+      const w = targetRatio / imageAR;
+      return { x: (1 - w) / 2, y: 0, w, h: 1 };
+    } else {
+      // Canvas más angosto que el target → el ancho es el cuello de botella
+      const h = imageAR / targetRatio;
+      return { x: 0, y: (1 - h) / 2, w: 1, h };
+    }
   }
 
-  function apply() {
+  /**
+   * Calcula el tamaño del canvas respetando el aspect ratio de la imagen y
+   * los límites de pantalla. En mobile (pantalla vertical) el cuello de
+   * botella suele ser el alto: una imagen 9:16 no debe forzar 1200px de
+   * altura. Se inspira en el web `max-w-full max-h-[60vh]`.
+   */
+  function computeCanvasSize(aspect: number): { w: number; h: number } {
+    // El modal tiene un cardWrapper con maxWidth 720 y padding externo
+    // (spacing[4] cada lado). El canvasWrapper ya no tiene padding
+    // interno, así que el ancho disponible es screenW - padding del card
+    // y se aprovecha al máximo.
+    const horizontalPadding = 32; // spacing[4] * 2 a cada lado
+    const cardInnerPadding = spacing[4] * 2; // padding del body
+    const maxW = Math.max(160, screenW - horizontalPadding - cardInnerPadding);
+    // Cap de altura: 60% de la pantalla o 320px en mobile chico.
+    const maxH = Math.max(160, Math.min(screenH * 0.45, 320));
+
+    if (!aspect || aspect <= 0) {
+      // Fallback cuadrado mientras se mide la imagen
+      const s = Math.min(maxW, maxH);
+      return { w: s, h: s };
+    }
+
+    let w = maxW;
+    let h = w / aspect;
+    if (h > maxH) {
+      h = maxH;
+      w = h * aspect;
+    }
+    if (w > maxW) {
+      w = maxW;
+      h = w / aspect;
+    }
+    return { w: Math.round(w), h: Math.round(h) };
+  }
+
+  // Resetear estado al cambiar la imagen
+  useEffect(() => {
+    reset();
+    setImageDims({ w: 0, h: 0 });
+    // Detectar dimensiones de la imagen al cambiar
+    if (imageUri) {
+      Image.getSize(
+        imageUri,
+        (w, h) => {
+          setImageAspect(w / h);
+          setImageDims({ w, h });
+        },
+        (err) => {
+          console.warn('No se pudo leer la imagen', err);
+        },
+      );
+    }
+  }, [imageUri, reset]);
+
+  // Re-centra el frame cada vez que cambia el chip de aspect o se
+  // conoce el aspect real de la imagen. Lee los valores frescos
+  // directamente del closure actual (no del closure del callback de
+  // Image.getSize, que puede ser stale).
+  useEffect(() => {
+    setFrame(frameForAspect(ASPECT_RATIOS[aspect], imageAspect));
+    // changeAspect ya hace su propio setFrame, así que sólo
+    // necesitamos reaccionar a cambios de imageAspect o del chip
+    // cuando vienen de fuera.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aspect, imageAspect]);
+
+  /**
+   * Aplica el recorte + rotación/flip sobre la imagen real usando
+   * `expo-image-manipulator`. Devuelve un data URL (`data:image/jpeg;base64,…`)
+   * con sólo el contenido del frame, para que el backend no reciba
+   * zonas vacías o la imagen sin recortar.
+   *
+   * Si el manipulador falla (memoria, formato no soportado, etc.) hacemos
+   * fallback al uri original para no bloquear al usuario.
+   */
+  async function apply() {
     if (!imageUri) return;
-    onApply({
-      uri: imageUri,
-      rotation,
-      flippedH,
-      flippedV,
-      aspectRatio: ASPECT_RATIOS[aspect],
-    });
+    const hasTransform = rotation !== 0 || flippedH || flippedV;
+    const hasCrop = !(frame.x === 0 && frame.y === 0 && frame.w === 1 && frame.h === 1);
+    if (!hasTransform && !hasCrop) {
+      // Nada que aplicar, devolver la imagen tal cual.
+      onApply({
+        uri: imageUri,
+        rotation,
+        flippedH,
+        flippedV,
+        aspectRatio: ASPECT_RATIOS[aspect],
+      });
+      return;
+    }
+    if (imageDims.w === 0 || imageDims.h === 0) {
+      // No pudimos leer las dimensiones: fallback defensivo.
+      onApply({
+        uri: imageUri,
+        rotation,
+        flippedH,
+        flippedV,
+        aspectRatio: ASPECT_RATIOS[aspect],
+      });
+      return;
+    }
+    try {
+      setProcessing(true);
+      // La rotación 90/270 intercambia ancho/alto de la imagen rendered.
+      const swapAxes = rotation === 90 || rotation === 270;
+      const renderedW = swapAxes ? imageDims.h : imageDims.w;
+      const renderedH = swapAxes ? imageDims.w : imageDims.h;
+      const crop = {
+        originX: Math.round(frame.x * renderedW),
+        originY: Math.round(frame.y * renderedH),
+        width: Math.max(1, Math.round(frame.w * renderedW)),
+        height: Math.max(1, Math.round(frame.h * renderedH)),
+      };
+
+      const manipulator = ImageManipulator.ImageManipulator.manipulate(imageUri);
+      // Forzamos la imagen a su resolución natural ANTES del crop.
+      // `expo-image-manipulator` puede cargar la imagen a una
+      // resolución menor (p.ej. para ahorrar memoria) y si las coords
+      // del crop vienen de `imageDims` (resolución natural) el recorte
+      // queda "zoomed in" porque se aplica sobre la versión reducida.
+      // `resize` a la dimensión natural hace que el crop opere sobre la
+      // imagen a tamaño completo.
+      manipulator.resize({ width: renderedW, height: renderedH });
+      // Encadenamos: rotar, voltear, recortar.
+      // El orden importa: el crop opera sobre el sistema de coords de la
+      // imagen rendered (post-rotación).
+      if (rotation !== 0) manipulator.rotate(rotation);
+      if (flippedV) manipulator.flip('vertical');
+      if (flippedH) manipulator.flip('horizontal');
+      manipulator.crop(crop);
+
+      const rendered = await manipulator.renderAsync();
+      const saved = await rendered.saveAsync({
+        format: ImageManipulator.SaveFormat.JPEG,
+        compress: 0.85,
+        base64: true,
+      });
+      const dataUri = saved.base64
+        ? `data:image/jpeg;base64,${saved.base64}`
+        : saved.uri;
+      onApply({
+        uri: dataUri,
+        rotation,
+        flippedH,
+        flippedV,
+        aspectRatio: ASPECT_RATIOS[aspect],
+      });
+    } catch (err) {
+      console.warn('No se pudo recortar la imagen, usando original', err);
+      onApply({
+        uri: imageUri,
+        rotation,
+        flippedH,
+        flippedV,
+        aspectRatio: ASPECT_RATIOS[aspect],
+      });
+    } finally {
+      setProcessing(false);
+    }
   }
 
   // Frame coords -> pixel position
@@ -335,7 +575,7 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
                     return (
                       <Pressable
                         key={key}
-                        onPress={() => setAspect(key)}
+                        onPress={() => changeAspect(key)}
                         style={[
                           styles.aspectChip,
                           isActive && styles.aspectChipActive,
@@ -355,56 +595,77 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
                 </View>
               </View>
 
-              {/* Canvas con imagen + frame de crop interactivo */}
-              <View
-                style={styles.canvasContainer}
-                onLayout={(e) => {
-                  containerSizeRef.current = {
-                    w: e.nativeEvent.layout.width,
-                    h: e.nativeEvent.layout.height,
-                  };
-                }}
-                {...panResponder.panHandlers}
-              >
-                <Image
-                  source={{ uri: imageUri || '' }}
-                  style={[
-                    styles.canvasImage,
-                    {
-                      transform: [
-                        { rotate: `${rotation}deg` },
-                        { scaleX: flippedH ? -1 : 1 },
-                        { scaleY: flippedV ? -1 : 1 },
-                      ],
-                    },
-                  ]}
-                  resizeMode="contain"
-                />
-                {/* Frame de crop interactivo con drag y resize */}
-                <FrameView
-                  frame={getFramePixel()}
-                  onMove={(e) => {
-                    e.stopPropagation?.();
-                    const next = updateFrame('move', e.nativeEvent.pageX - (startTouchRef.current?.x ?? 0), e.nativeEvent.pageY - (startTouchRef.current?.y ?? 0));
-                    setFrame(next);
-                  }}
-                />
-                {/* Edges del frame */}
-                <FrameEdge frame={getFramePixel()} side="t" />
-                <FrameEdge frame={getFramePixel()} side="b" />
-                <FrameEdge frame={getFramePixel()} side="l" />
-                <FrameEdge frame={getFramePixel()} side="r" />
-                {/* Corners del frame */}
-                <FrameCorner frame={getFramePixel()} corner="tl" />
-                <FrameCorner frame={getFramePixel()} corner="tr" />
-                <FrameCorner frame={getFramePixel()} corner="bl" />
-                <FrameCorner frame={getFramePixel()} corner="br" />
-                {/* Grid thirds */}
-                <View style={[styles.cropGridLineH, { top: getFramePixel().top + getFramePixel().height / 3 }]} />
-                <View style={[styles.cropGridLineH, { top: getFramePixel().top + (getFramePixel().height * 2) / 3 }]} />
-                <View style={[styles.cropGridLineV, { left: getFramePixel().left + getFramePixel().width / 3 }]} />
-                <View style={[styles.cropGridLineV, { left: getFramePixel().left + (getFramePixel().width * 2) / 3 }]} />
-              </View>
+              {/* Canvas con imagen + frame de crop interactivo. El tamaño se
+                  calcula respetando el aspect ratio de la imagen y los
+                  límites de pantalla (max-w-full + max-h equivalente a
+                  `max-h-[60vh]` del web). El padding visual vive en el
+                  wrapper (canvasWrapper) para que la imagen llene el
+                  canvas completo y el frame de crop quede centrado sobre
+                  la imagen (no sobre el área con padding). */}
+              {(() => {
+                const { w: canvasW, h: canvasH } = computeCanvasSize(imageAspect);
+                return (
+                  <View style={styles.canvasWrapper}>
+                    <View
+                      style={[styles.canvasContainer, { width: canvasW, height: canvasH }]}
+                      onLayout={(e) => {
+                        containerSizeRef.current = {
+                          w: e.nativeEvent.layout.width,
+                          h: e.nativeEvent.layout.height,
+                        };
+                      }}
+                      {...panResponder.panHandlers}
+                    >
+                      <Image
+                        source={{ uri: imageUri || '' }}
+                        style={[
+                          styles.canvasImage,
+                          {
+                            width: canvasW,
+                            height: canvasH,
+                            transform: [
+                              { rotate: `${rotation}deg` },
+                              { scaleX: flippedH ? -1 : 1 },
+                              { scaleY: flippedV ? -1 : 1 },
+                            ],
+                          },
+                        ]}
+                        resizeMode="contain"
+                      />
+                      {/* Frame de crop. El border cambia de color para
+                          indicar visualmente si está bloqueado o libre. */}
+                      <FrameView
+                        frame={getFramePixel()}
+                        locked={frameLocked}
+                      />
+                      {/* Edges y esquinas sólo cuando el frame es libre */}
+                      {!frameLocked && (
+                        <>
+                          <FrameEdge frame={getFramePixel()} side="t" />
+                          <FrameEdge frame={getFramePixel()} side="b" />
+                          <FrameEdge frame={getFramePixel()} side="l" />
+                          <FrameEdge frame={getFramePixel()} side="r" />
+                          <FrameCorner frame={getFramePixel()} corner="tl" />
+                          <FrameCorner frame={getFramePixel()} corner="tr" />
+                          <FrameCorner frame={getFramePixel()} corner="bl" />
+                          <FrameCorner frame={getFramePixel()} corner="br" />
+                        </>
+                      )}
+                      {/* Grid thirds (siempre visible) */}
+                      <View style={[styles.cropGridLineH, { top: getFramePixel().top + getFramePixel().height / 3 }]} />
+                      <View style={[styles.cropGridLineH, { top: getFramePixel().top + (getFramePixel().height * 2) / 3 }]} />
+                      <View style={[styles.cropGridLineV, { left: getFramePixel().left + getFramePixel().width / 3 }]} />
+                      <View style={[styles.cropGridLineV, { left: getFramePixel().left + (getFramePixel().width * 2) / 3 }]} />
+                    </View>
+                  </View>
+                );
+              })()}
+
+              {frameLocked && (
+                <Text style={styles.lockedHint}>
+                  Tamaño del recorte bloqueado por la relación de aspecto ({aspect})
+                </Text>
+              )}
 
               <Text style={styles.helperText}>
                 Imagen 1 de 1 · Arrastra el marco para reposicionarlo y los puntos para redimensionarlo
@@ -432,9 +693,9 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
                   title="Guardar ajuste"
                   variant="primary"
                   onPress={apply}
-                  loading={!imageUri}
+                  loading={processing || !imageUri}
                   leftIcon={<Icon name="check" size={16} color={colors.background} />}
-                  disabled={!imageUri}
+                  disabled={!imageUri || processing}
                 />
               </View>
             </View>
@@ -447,9 +708,17 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
 
 /**
  * View del frame completo (área interior con border).
- * Soporta drag (mover).
+ * Soporta drag (mover). Cuando `locked` es true el border cambia de
+ * color para señalar que el tamaño está bloqueado por el aspect ratio.
  */
-function FrameView({ frame, onMove }: { frame: { left: number; top: number; width: number; height: number }; onMove: (e: any) => void }) {
+function FrameView({
+  frame,
+  locked = false,
+}: {
+  frame: { left: number; top: number; width: number; height: number };
+  onMove?: (e: any) => void;
+  locked?: boolean;
+}) {
   return (
     <View
       style={[
@@ -460,27 +729,45 @@ function FrameView({ frame, onMove }: { frame: { left: number; top: number; widt
           width: frame.width,
           height: frame.height,
           borderWidth: 2,
-          borderColor: colors.background,
+          borderColor: locked ? colors.primary : colors.background,
+          borderStyle: locked ? 'dashed' : 'solid',
         },
       ]}
-      onStartShouldSetResponder={() => true}
-      onResponderRelease={onMove}
+      pointerEvents="none"
     />
   );
 }
 
 function FrameEdge({ frame, side }: { frame: any; side: 't' | 'b' | 'l' | 'r' }) {
+  const edgeThickness = 14;
   const edgeStyle =
     side === 't' || side === 'b'
-      ? { left: frame.left, top: side === 't' ? frame.top - 5 : frame.top + frame.height - 5, width: frame.width, height: 10 }
-      : { top: frame.top, left: side === 'l' ? frame.left - 5 : frame.left + frame.width - 5, width: 10, height: frame.height };
-  return <View pointerEvents="none" style={[edgeStyle, { backgroundColor: 'transparent' }]} />;
+      ? {
+          left: frame.left,
+          top: side === 't' ? frame.top - edgeThickness / 2 : frame.top + frame.height - edgeThickness / 2,
+          width: frame.width,
+          height: edgeThickness,
+        }
+      : {
+          top: frame.top,
+          left: side === 'l' ? frame.left - edgeThickness / 2 : frame.left + frame.width - edgeThickness / 2,
+          width: edgeThickness,
+          height: frame.height,
+        };
+  // Línea blanca semitransparente para que el usuario VEA dónde puede
+  // arrastrar. Antes era `transparent` y por eso era imposible de
+  // encontrar visualmente.
+  return <View pointerEvents="none" style={[edgeStyle, { backgroundColor: 'rgba(255,255,255,0.35)' }]} />;
 }
 
 function FrameCorner({ frame, corner }: { frame: any; corner: 'tl' | 'tr' | 'bl' | 'br' }) {
+  // Handles más grandes (20x20) y con mejor contraste para que sean
+  // fáciles de agarrar con el dedo.
+  const size = 20;
+  const offset = size / 2;
   const cornerStyle = {
-    top: corner === 'tl' || corner === 'tr' ? frame.top - 6 : frame.top + frame.height - 6,
-    left: corner === 'tl' || corner === 'bl' ? frame.left - 6 : frame.left + frame.width - 6,
+    top: corner === 'tl' || corner === 'tr' ? frame.top - offset : frame.top + frame.height - offset,
+    left: corner === 'tl' || corner === 'bl' ? frame.left - offset : frame.left + frame.width - offset,
   };
   return (
     <View
@@ -488,12 +775,18 @@ function FrameCorner({ frame, corner }: { frame: any; corner: 'tl' | 'tr' | 'bl'
       style={[
         {
           position: 'absolute',
-          width: 12,
-          height: 12,
+          width: size,
+          height: size,
           backgroundColor: colors.background,
-          borderWidth: 1,
-          borderColor: colorScales.gray[700],
-          borderRadius: 2,
+          borderWidth: 2,
+          borderColor: colors.primary,
+          borderRadius: 4,
+          // Sombra suave para que destaque sobre la imagen.
+          shadowColor: '#000',
+          shadowOffset: { width: 0, height: 1 },
+          shadowOpacity: 0.3,
+          shadowRadius: 2,
+          elevation: 3,
         },
         cornerStyle,
       ]}
@@ -523,6 +816,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colorScales.gray[200],
     overflow: 'hidden',
+    // El card actúa como flex container para que el ScrollView del body
+    // pueda hacer scroll y el footer quede fijo abajo (mirror web).
+    maxHeight: '100%',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 20 },
     shadowOpacity: 0.1,
@@ -561,7 +857,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bodyScroll: {
+    // El ScrollView se encoje para caber en el espacio disponible entre
+    // el header y el footer, que quedan fijos. Sin `flexShrink: 1` el
+    // contenido se expande y empuja el footer fuera de pantalla.
     flexGrow: 1,
+    flexShrink: 1,
   },
   body: {
     padding: spacing[4],
@@ -617,19 +917,30 @@ const styles = StyleSheet.create({
   aspectChipTextActive: {
     color: colors.background,
   },
-  canvasContainer: {
-    width: '100%',
-    minHeight: 280,
-    backgroundColor: colorScales.gray[100],
+  canvasWrapper: {
+    // Sin padding ni fondo extra: la imagen llena todo el área
+    // disponible. El frame de crop queda exactamente sobre la imagen,
+    // sin "espacios adicionales" alrededor.
+    alignSelf: 'center',
     borderRadius: borderRadius.lg,
+    overflow: 'hidden',
+  },
+  canvasContainer: {
+    alignSelf: 'center',
+    backgroundColor: '#000',
+    borderRadius: borderRadius.md,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing[3],
   },
   canvasImage: {
-    width: '100%',
-    height: '100%',
+    // width/height se setean dinámicamente según aspect ratio de la imagen
+  },
+  lockedHint: {
+    fontSize: typography.fontSize.xs,
+    color: colors.primary,
+    textAlign: 'center',
+    fontWeight: typography.fontWeight.medium,
   },
   cropGridLineH: {
     position: 'absolute',

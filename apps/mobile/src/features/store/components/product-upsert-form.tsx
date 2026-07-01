@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, ScrollView, Pressable, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -14,6 +14,7 @@ import type {
   ProductType,
   TaxCategory,
   UpdateProductDto,
+  PriceTier,
 } from '@/features/store/types';
 import { Badge } from '@/shared/components/badge/badge';
 import { Button } from '@/shared/components/button/button';
@@ -50,6 +51,19 @@ interface VariantForm {
   stock_quantity: string;
 }
 
+interface PriceTierOverrideForm {
+  /** ID de la tarifa a la que aplica el override. */
+  tier_id: number;
+  /** Precio final del producto bajo esta tarifa. */
+  price: string;
+  /** Margen (%) sobre el costo. Helper: al cambiarlo se recalcula
+   *  `price = cost * (1 + margin/100)`. Al persistir sólo se envía
+   *  `price` al backend. */
+  margin: string;
+  /** Unidades por empaque para esta tarifa. Vacío = hereda de la tarifa. */
+  units_per_package: string;
+}
+
 interface ProductFormState {
   name: string;
   description: string;
@@ -77,6 +91,13 @@ interface ProductFormState {
   stock_by_location: Record<string, string>;
   // Precios multi-tarifa
   has_multiple_price_tiers?: boolean;
+  enabled_price_tier_ids?: number[];
+  /**
+   * Overrides por tarifa (precio + unidades por empaque). El margen
+   * (campo del UI) es solo un helper para calcular el precio: al
+   * persistir se envía el `price` calculado = cost * (1 + margin/100).
+   */
+  price_tier_overrides?: PriceTierOverrideForm[];
   // Dimensiones y peso
   length?: string;
   width?: string;
@@ -145,6 +166,8 @@ const initialForm: ProductFormState = {
   variants: [],
   stock_by_location: {},
   has_multiple_price_tiers: false,
+  enabled_price_tier_ids: [],
+  price_tier_overrides: [],
   length: '',
   width: '',
   height: '',
@@ -203,6 +226,10 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
   const [imageEditorUri, setImageEditorUri] = useState<string | null>(null);
   const [productImages, setProductImages] = useState<string[]>([]);
+  // Flag para no sobrescribir `price_tier_overrides` cada vez que se
+  // re-fetchea el producto. Sólo hidratamos desde el backend la primera
+  // vez; las selecciones del usuario se preservan en re-fetches.
+  const tierOverridesHydrated = useRef(false);
 
   const { data: product, isLoading: productLoading } = useQuery({
     queryKey: ['product', productId],
@@ -218,6 +245,24 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const { data: brands = [] } = useQuery({
     queryKey: ['product-brands'],
     queryFn: () => ProductService.getBrands(),
+  });
+
+  // Lista de tarifas de precio (multi-tarifa). Se cargan siempre que
+  // el usuario active el toggle, para que pueda elegir cuáles aplican.
+  const { data: priceTiers = [] } = useQuery({
+    queryKey: ['price-tiers'],
+    queryFn: () => ProductService.getPriceTiers({ is_active: true }),
+  });
+
+  // Overrides de precio por tarifa para el producto actual (sólo en
+  // edit mode). Se hidrata al re-editar para mostrar los precios
+  // personalizados previamente guardados. staleTime: 0 para forzar
+  // fetch fresco cada vez que se abre el form.
+  const { data: productTierOverrides = [] } = useQuery({
+    queryKey: ['product-price-tier-overrides', productId],
+    queryFn: () => ProductService.getProductPriceTierOverrides(Number(productId)),
+    enabled: mode === 'edit' && !!productId,
+    staleTime: 0,
   });
 
   const { data: taxes = [] } = useQuery({
@@ -253,6 +298,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       pricing_type?: PricingType;
       is_featured?: boolean;
       allow_pos_price_override?: boolean;
+      enabled_price_tier_ids?: number[];
     };
 
     setForm({
@@ -273,10 +319,15 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       available_for_ecommerce: product.available_for_ecommerce !== false,
       is_featured: !!ext.is_featured,
       allow_pos_price_override: !!ext.allow_pos_price_override,
+      // Hidratamos el flag de multi-tarifa desde el producto para que
+      // la sección quede visible al re-editar un producto que ya
+      // tenía tarifas configuradas.
+      has_multiple_price_tiers: !!(product as any).has_multiple_price_tiers,
       state: product.state,
       brand_id: product.brand_id ?? undefined,
       category_ids: product.categories?.map((category) => category.id) ?? [],
       tax_category_ids: product.product_tax_assignments?.map((assignment) => assignment.tax_category_id) ?? [],
+      enabled_price_tier_ids: ext.enabled_price_tier_ids ?? [],
       has_variants: (product.product_variants?.length ?? 0) > 0,
       variants: (product.product_variants || []).map((variant) => ({
         localId: `variant-${variant.id}`,
@@ -294,16 +345,58 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     });
 
     // Cargar imágenes existentes del producto (si las hay).
-    // El backend devuelve `product_images` con `url` por registro.
+    // El backend devuelve `product_images` con `image_url` por registro
+    // (key firmada si la imagen vive en S3).
     const existingImages = (product.product_images || [])
-      .map((img) => img.url)
+      .map((img) => img.image_url)
       .filter((url): url is string => Boolean(url));
     if (existingImages.length > 0) {
       setProductImages(existingImages);
     } else {
       setProductImages([]);
     }
-  }, [product]);
+
+    // Overrides por tarifa. Se obtienen del query separado
+    // `product-price-tier-overrides` (el endpoint principal del producto
+    // no incluye esta relación). Sólo hidratamos UNA vez para no
+    // sobrescribir las selecciones del usuario con re-fetches.
+    //
+    // El backend NO almacena el margen (sólo `override_price`); lo
+    // recalculamos al re-editar con la fórmula:
+    //   margin = (price / cost - 1) * 100
+    // de modo que el campo Margen (%) muestre el valor correcto al
+    // volver a abrir el form.
+    if (productTierOverrides.length > 0 && !tierOverridesHydrated.current) {
+      tierOverridesHydrated.current = true;
+      // product.cost_price es number|null. Lo convertimos a string para
+      // `toNumber` (que espera string|undefined).
+      const cost = toNumber(
+        product.cost_price != null ? String(product.cost_price) : undefined,
+      ) || 0;
+      setForm((current) => ({
+        ...current,
+        price_tier_overrides: productTierOverrides.map((o: any) => {
+          const price = o.override_price != null ? String(o.override_price) : '';
+          let margin = '';
+          if (cost > 0 && o.override_price != null) {
+            // margin = (price/cost - 1) * 100, redondeado a 2 decimales.
+            margin = String(
+              Math.round(((o.override_price / cost - 1) * 100) * 100) / 100,
+            );
+          }
+          return {
+            tier_id: o.price_tier_id,
+            price,
+            margin,
+            units_per_package:
+              o.override_units_per_package != null
+                ? String(o.override_units_per_package)
+                : '',
+          };
+        }),
+      }));
+    }
+  }, [product, productTierOverrides]);
 
   const finalPreview = useMemo(() => {
     const base = toNumber(form.base_price) || 0;
@@ -370,6 +463,134 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
 
   const updateField = <K extends keyof ProductFormState>(key: K, value: ProductFormState[K]) => {
     setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  /**
+   * Formatea un número con separador de miles estilo español
+   * (punto como separador, coma como decimal). Acepta strings con
+   * dígitos y opcionalmente un punto decimal. Se usa para mostrar el
+   * Precio de la tarjeta de multi-tarifa.
+   *   formatThousands("10000")    → "10.000"
+   *   formatThousands("10000.5")  → "10.000.5"
+   *   formatThousands("")         → ""
+   */
+  const formatThousands = (value: string): string => {
+    if (!value) return '';
+    // Limpiamos a dígitos + un solo punto decimal.
+    const cleaned = value.replace(/[^0-9.]/g, '');
+    if (!cleaned) return '';
+    const [intPart, decPart] = cleaned.split('.');
+    const withSeparator = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    return decPart !== undefined ? `${withSeparator}.${decPart}` : withSeparator;
+  };
+
+  /**
+   * Sincroniza `price_tier_overrides` con `enabled_price_tier_ids`:
+   * - añade entradas vacías para tarifas recién seleccionadas
+   * - elimina entradas de tarifas que ya no están seleccionadas
+   * - conserva los valores de las tarifas que siguen seleccionadas
+   */
+  const syncTierOverrides = (
+    currentOverrides: PriceTierOverrideForm[],
+    selectedIds: number[],
+    selectedTiers: PriceTier[],
+  ): PriceTierOverrideForm[] => {
+    const byId = new Map(currentOverrides.map((o) => [o.tier_id, o]));
+    return selectedIds.map((id) => {
+      const existing = byId.get(id);
+      if (existing) return existing;
+      // Tarifa nueva: crear entrada con el precio base del producto
+      // como precio inicial y margen vacío.
+      const tier = selectedTiers.find((t) => t.id === id);
+      return {
+        tier_id: id,
+        price: form.base_price,
+        margin: '',
+        units_per_package: tier?.units_per_package
+          ? String(tier.units_per_package)
+          : '',
+      };
+    });
+  };
+
+  /**
+   * Recalcula el `price` de un override a partir del margen.
+   * Fórmula (igual que el web): `price = cost * (1 + margin/100)`.
+   */
+  const recalcPriceFromMargin = (
+    cost: number,
+    margin: string,
+    fallbackPrice: string,
+  ): string => {
+    const m = toNumber(margin) ?? 0;
+    if (m < 0) return fallbackPrice;
+    const newPrice = cost * (1 + m / 100);
+    return String(Math.round(newPrice * 100) / 100);
+  };
+
+  const updateTierOverride = (
+    tierId: number,
+    patch: Partial<PriceTierOverrideForm>,
+  ) => {
+    setForm((current) => {
+      const overrides = current.price_tier_overrides ?? [];
+      const idx = overrides.findIndex((o) => o.tier_id === tierId);
+      if (idx === -1) {
+        return {
+          ...current,
+          price_tier_overrides: [{ tier_id: tierId, price: '', margin: '', units_per_package: '', ...patch }],
+        };
+      }
+      const next = [...overrides];
+      next[idx] = { ...next[idx], ...patch };
+      return { ...current, price_tier_overrides: next };
+    });
+  };
+
+  /**
+   * Sincroniza los overrides de precio por tarifa contra el backend
+   * después de guardar el producto. Para cada tarifa seleccionada con
+   * un override en el form, hace upsert. Para tarifas previamente
+   * seleccionadas que ya no están en `enabled_price_tier_ids`, hace
+   * delete (para no dejar overrides huérfanos).
+   *
+   * Se llama DESPUÉS del save principal del producto.
+   */
+  const syncPriceTierOverrides = async (savedProductId: number) => {
+    if (!form.has_multiple_price_tiers) {
+      // Multi-tarifa desactivado: borrar todos los overrides previos.
+      const previousIds = (form.price_tier_overrides ?? []).map((o) => o.tier_id);
+      await Promise.all(
+        previousIds.map((tierId) =>
+          ProductService.removeProductPriceTierOverride(savedProductId, tierId).catch(() => undefined),
+        ),
+      );
+      return;
+    }
+
+    const selectedIds = new Set(form.enabled_price_tier_ids ?? []);
+    const currentOverrides = form.price_tier_overrides ?? [];
+
+    // 1) Upsert de los overrides de las tarifas actualmente
+    //    seleccionadas.
+    const upserts = currentOverrides
+      .filter((o) => selectedIds.has(o.tier_id))
+      .map((o) =>
+        ProductService.upsertProductPriceTierOverride(savedProductId, o.tier_id, {
+          override_price: toNumber(o.price) ?? undefined,
+          override_units_per_package: toNumber(o.units_per_package) ?? undefined,
+        }),
+      );
+
+    // 2) Delete de los overrides de tarifas que ESTABAN en
+    //    `price_tier_overrides` pero ya no están seleccionadas.
+    const deleted = currentOverrides
+      .filter((o) => !selectedIds.has(o.tier_id))
+      .map((o) =>
+        ProductService.removeProductPriceTierOverride(savedProductId, o.tier_id).catch(() => undefined),
+      );
+
+    await Promise.all([...upserts, ...deleted]);
   };
 
   const updatePriceFromCostMargin = (costText: string, marginText: string) => {
@@ -479,6 +700,16 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       is_featured: form.is_featured,
       allow_pos_price_override: form.allow_pos_price_override,
       has_multiple_price_tiers: form.has_multiple_price_tiers,
+      enabled_price_tier_ids:
+        form.has_multiple_price_tiers && (form.enabled_price_tier_ids?.length ?? 0) > 0
+          ? form.enabled_price_tier_ids
+          : undefined,
+      // Los overrides por tarifa NO se envían en el DTO del producto.
+      // El backend los gestiona por endpoints separados:
+      //   PUT    /store/price-tiers/products/:productId/overrides/:tierId
+      //   DELETE /store/price-tiers/products/:productId/overrides/:tierId
+      // Se sincronizan DESPUÉS de guardar el producto (ver
+      // `syncPriceTierOverrides` abajo).
       requires_serial_numbers: form.requires_serial_numbers,
       state: form.state,
       pricing_type: form.pricing_type,
@@ -532,11 +763,34 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const mutation = useMutation({
     mutationFn: (dto: CreateProductDto | UpdateProductDto) =>
       mode === 'edit' && productId ? ProductService.update(productId, dto) : ProductService.create(dto as CreateProductDto),
-    onSuccess: () => {
+    onSuccess: async (savedProduct) => {
+      // El backend no acepta `price_tier_overrides` en el DTO del
+      // producto. Se sincronizan aparte, después del save principal,
+      // contra los endpoints:
+      //   PUT    /store/price-tiers/products/:productId/overrides/:tierId
+      //   DELETE /store/price-tiers/products/:productId/overrides/:tierId
+      const savedId = mode === 'edit' && productId ? productId : savedProduct?.id;
+      if (savedId) {
+        try {
+          await syncPriceTierOverrides(savedId);
+        } catch (err) {
+          console.warn('No se pudieron sincronizar los overrides de tarifas', err);
+        }
+      }
+
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['pos-products'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
       if (productId) queryClient.invalidateQueries({ queryKey: ['product', productId] });
+      queryClient.invalidateQueries({ queryKey: ['price-tiers'] });
+      // Invalidamos también la query de overrides para que la
+      // próxima vez que se abra el form (al re-editar) se traigan
+      // los datos frescos del backend.
+      if (productId) {
+        queryClient.invalidateQueries({
+          queryKey: ['product-price-tier-overrides', productId],
+        });
+      }
       toastSuccess(mode === 'edit' ? 'Producto actualizado' : 'Producto creado');
       router.back();
     },
@@ -904,6 +1158,197 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </View>
           </Section>
 
+          {/* Precios Multi-Tarifa (justo después de Precios y Rentabilidad,
+              mirror web: header con icon tags + toggle + al activarlo
+              aparece el multi-selector de "Tarifas aplicables" + el
+              mensaje informativo con el conteo de tarifas disponibles). */}
+          <Section title="Precios Multi-Tarifa" icon="tags">
+            <View style={styles.settingToggleRow}>
+              <Toggle
+                value={!!form.has_multiple_price_tiers}
+                onChange={(v) => {
+                  updateField('has_multiple_price_tiers', v);
+                  // Si se desactiva, limpiamos las tarifas seleccionadas
+                  // para no enviar IDs que el backend ignore.
+                  if (!v) updateField('enabled_price_tier_ids', []);
+                }}
+                label="Activar precios multi-tarifa"
+                description="Define precios distintos para tarifas como Mayorista, Distribuidor, VIP, etc. La tarifa por defecto usa el precio base."
+              />
+            </View>
+            {form.has_multiple_price_tiers && (
+              <View style={styles.priceTiersBlock}>
+                <MultiSelector
+                  label="Tarifas aplicables"
+                  placeholder="Buscar y seleccionar tarifas..."
+                  tooltip="Selecciona las tarifas que aplican a este producto. Solo las seleccionadas mostrarán precio, margen y cantidad por empaque configurables."
+                  values={form.enabled_price_tier_ids ?? []}
+                  onChange={(values) => {
+                    // Usamos el formulario funcional de setForm para
+                    // evitar race conditions con el closure (el
+                    // `form` capturado podía tener un valor stale y
+                    // perder el sync entre IDs seleccionados y overrides).
+                    setForm((current) => {
+                      const currentOverrides = current.price_tier_overrides ?? [];
+                      const next = syncTierOverrides(currentOverrides, values, priceTiers);
+                      return {
+                        ...current,
+                        enabled_price_tier_ids: values,
+                        price_tier_overrides: next,
+                      };
+                    });
+                  }}
+                  options={priceTiers.map((tier) => ({
+                    value: tier.id,
+                    label: tier.name,
+                    subLabel: tier.is_default
+                      ? 'Por defecto'
+                      : tier.units_per_package
+                      ? `Empaque x${tier.units_per_package}`
+                      : undefined,
+                  }))}
+                  searchable
+                  searchPlaceholder="Buscar..."
+                />
+                <View style={styles.priceTiersHint}>
+                  <Icon name="info" size={16} color={colorScales.gray[500]} />
+                  <Text style={styles.priceTiersHintText}>
+                    {priceTiers.length === 0
+                      ? 'No hay tarifas configuradas. Crea tarifas en Configuración → Tarifas de precio para poder seleccionarlas aquí.'
+                      : `Hay ${priceTiers.length} tarifa${priceTiers.length === 1 ? '' : 's'} disponible${priceTiers.length === 1 ? '' : 's'}. Selecciona al menos una arriba para configurar su precio, margen y cantidad por empaque.`}
+                  </Text>
+                </View>
+
+                {/* Card de configuración por tarifa seleccionada */}
+                {(form.enabled_price_tier_ids ?? []).map((tierId) => {
+                  const tier = priceTiers.find((t) => t.id === tierId);
+                  const override = (form.price_tier_overrides ?? []).find(
+                    (o) => o.tier_id === tierId,
+                  );
+                  if (!tier || !override) return null;
+                  const cost = toNumber(form.cost_price) || 0;
+                  const calculatedPrice =
+                    override.margin && toNumber(override.margin) !== null
+                      ? cost * (1 + (toNumber(override.margin) ?? 0) / 100)
+                      : toNumber(override.price) ?? cost;
+                  return (
+                    <View key={tierId} style={styles.priceTierCard}>
+                      <View style={styles.priceTierCardHeader}>
+                        <View style={styles.priceTierCardTitleRow}>
+                          <Text style={styles.priceTierCardName}>
+                            {tier.name}
+                          </Text>
+                          <Text style={styles.priceTierCardRate}>
+                            {tier.is_default
+                              ? 'Tarifa por defecto'
+                              : `${tier.units_per_package ?? 1}× empaque`}
+                          </Text>
+                        </View>
+                        <Pressable
+                          onPress={() => {
+                            setForm((current) => {
+                              const remaining = (
+                                current.enabled_price_tier_ids ?? []
+                              ).filter((id) => id !== tierId);
+                              const next = syncTierOverrides(
+                                current.price_tier_overrides ?? [],
+                                remaining,
+                                priceTiers,
+                              );
+                              return {
+                                ...current,
+                                enabled_price_tier_ids: remaining,
+                                price_tier_overrides: next,
+                              };
+                            });
+                          }}
+                          hitSlop={6}
+                          style={styles.priceTierCardRemove}
+                          accessibilityLabel={`Quitar tarifa ${tier.name}`}
+                        >
+                          <Icon name="x" size={14} color={colorScales.gray[400]} />
+                          <Text style={styles.priceTierCardRemoveText}>
+                            Quitar
+                          </Text>
+                        </Pressable>
+                      </View>
+
+                      <View style={styles.priceTierCardGrid}>
+                        {/* Columna 1/3: Precio (con separador de miles
+                            al estilo español: 10.000 en vez de 10000). */}
+                        <View style={styles.priceTierField}>
+                          <Input
+                            label="Precio"
+                            value={formatThousands(override.price)}
+                            onChangeText={(value) => {
+                              const numeric = value.replace(/[^0-9.]/g, '');
+                              updateTierOverride(tierId, {
+                                price: numeric,
+                                margin: '', // Al editar precio directo, limpiamos el margen.
+                              });
+                            }}
+                            placeholder="$0"
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                        <View style={styles.priceTierField}>
+                          <Input
+                            label="Margen (%)"
+                            value={override.margin}
+                            onChangeText={(value) => {
+                              const numeric = value.replace(/[^0-9.]/g, '');
+                              // Al cambiar el margen, recalculamos el
+                              // precio con la fórmula cost * (1 + m/100).
+                              const newPrice = recalcPriceFromMargin(
+                                cost,
+                                numeric,
+                                override.price,
+                              );
+                              updateTierOverride(tierId, {
+                                margin: numeric,
+                                price: newPrice,
+                              });
+                            }}
+                            placeholder=""
+                            keyboardType="decimal-pad"
+                          />
+                        </View>
+                        <View style={styles.priceTierField}>
+                          <Input
+                            label="Cantidad x empaque"
+                            value={override.units_per_package}
+                            onChangeText={(value) => {
+                              const numeric = value.replace(/[^0-9]/g, '');
+                              updateTierOverride(tierId, {
+                                units_per_package: numeric,
+                              });
+                            }}
+                            placeholder="Sin empaque"
+                            keyboardType="number-pad"
+                            tooltip="Sobrescribe las unidades por empaque de la tarifa solo para este producto. Vacío hereda el valor de la tarifa. Mínimo 2."
+                          />
+                        </View>
+                      </View>
+
+                      <View style={styles.priceTierCardResult}>
+                        <Text style={styles.priceTierCardResultLabel}>
+                          Precio resultante:{' '}
+                          <Text style={styles.priceTierCardResultValue}>
+                            {formatCurrency(calculatedPrice)}
+                          </Text>
+                          <Text style={styles.priceTierCardResultCalc}>
+                            {' '}
+                            (calculado)
+                          </Text>
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </Section>
+
           {/* Imágenes del Producto (espejo exacto del web mobile lg:hidden):
               - Header sin subtitle, con counter "0/5" a la derecha (slot `right`)
               - Placeholder cuadrado aspect-square max-w-280, mx-auto, con ícono circular bg-white
@@ -997,23 +1442,38 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 </Pressable>
               )}
             </View>
-            <View style={styles.imageThumbsRow}>
-              {productImages.map((uri, index) => (
-                <Pressable
-                  key={`${uri}-${index}`}
-                  onPress={() => {
-                    // Quitar imagen con tap
-                    setProductImages((prev) => prev.filter((_, i) => i !== index));
-                  }}
-                  style={styles.imageThumb}
-                >
-                  <Image
-                    source={{ uri }}
-                    style={styles.imageThumbImg}
-                    resizeMode="cover"
-                  />
-                </Pressable>
-              ))}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.imageThumbsRow}
+              style={styles.imageThumbsScroll}
+            >
+              {productImages.map((uri, index) => {
+                const isMain = index === 0;
+                return (
+                  <Pressable
+                    key={`${uri}-${index}`}
+                    onPress={() => {
+                      // Tap en miniatura = seleccionar como imagen principal
+                      // (mirror web: ring-2 ring-primary-500 sobre la activa).
+                      if (isMain) return;
+                      setProductImages((prev) => {
+                        const next = [...prev];
+                        const [picked] = next.splice(index, 1);
+                        next.unshift(picked);
+                        return next;
+                      });
+                    }}
+                    style={[styles.imageThumb, isMain && styles.imageThumbActive]}
+                  >
+                    <Image
+                      source={{ uri }}
+                      style={styles.imageThumbImg}
+                      resizeMode="cover"
+                    />
+                  </Pressable>
+                );
+              })}
               {productImages.length < 5 && (
                 <Pressable
                   onPress={() => setImageSourceOpen(true)}
@@ -1026,11 +1486,11 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     },
                   ]}
                 >
-                  <Icon name="image-plus" size={20} color={colors.text.muted} />
+                  <Icon name="plus" size={20} color={colors.text.muted} />
                   <Text style={styles.imageThumbAddText}>Agregar</Text>
                 </Pressable>
               )}
-            </View>
+            </ScrollView>
           </Section>
 
           <ImageSourceModal
@@ -1059,18 +1519,6 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               setImageEditorUri(null);
             }}
           />
-
-          {/* Precios Multi-Tarifa (espejo exacto del web: header simple + setting-toggle-row) */}
-          <Section title="Precios Multi-Tarifa" icon="tags">
-            <View style={styles.settingToggleRow}>
-              <Toggle
-                value={!!form.has_multiple_price_tiers}
-                onChange={(v) => updateField('has_multiple_price_tiers', v)}
-                label="Activar precios multi-tarifa"
-                description="Define precios distintos para tarifas como Mayorista, Distribuidor, VIP, etc. La tarifa por defecto usa el precio base."
-              />
-            </View>
-          </Section>
 
           {/* Inventario / Stock (espejo exacto del web lg:hidden)
               Header: icon archive + h2 'Inventario / Stock' (sin subtitle)
@@ -1604,6 +2052,100 @@ const styles = StyleSheet.create({
     borderColor: colorScales.gray[100],
     backgroundColor: colorScales.gray[50],
   },
+  // Bloque que aparece debajo del toggle de multi-tarifa con el
+  // multi-selector + mensaje informativo.
+  priceTiersBlock: {
+    marginTop: spacing[3],
+    gap: spacing[3],
+  },
+  priceTiersHint: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[2],
+    padding: spacing[3],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colorScales.gray[50],
+  },
+  priceTiersHintText: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[600],
+    lineHeight: 18,
+  },
+  // Card de configuración por tarifa seleccionada
+  // (espejo del bloque "Tarifa configurable" del web).
+  priceTierCard: {
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    borderRadius: borderRadius.lg,
+    padding: spacing[3],
+    gap: spacing[3],
+    backgroundColor: colors.card,
+  },
+  priceTierCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[2],
+  },
+  priceTierCardTitleRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    flexWrap: 'wrap',
+  },
+  priceTierCardName: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  priceTierCardRate: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  priceTierCardRemove: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+  },
+  priceTierCardRemoveText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[400],
+  },
+  priceTierCardGrid: {
+    // En mobile (mirror del web `grid-cols-1 sm:grid-cols-3`) los
+    // 3 inputs van apilados verticalmente y ocupan ancho completo.
+    flexDirection: 'column',
+    gap: spacing[3],
+  },
+  priceTierFieldNoMargin: {
+    flex: 1,
+  },
+  priceTierField: {
+    width: '100%',
+  },
+  priceTierCardResult: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+  },
+  priceTierCardResultLabel: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  priceTierCardResultValue: {
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[700],
+  },
+  priceTierCardResultCalc: {
+    color: colorScales.gray[400],
+  },
   // Fila 3: Sub-sección rose para precio de oferta
   saleRow: {
     flexDirection: 'row',
@@ -1968,6 +2510,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing[2],
     paddingBottom: spacing[2],
+    // Scroll horizontal para que las 5 miniaturas + botón "+ Agregar"
+    // quepan sin recortarse en pantallas angostas. Sin esto, el botón
+    // de agregar queda fuera de pantalla a partir de 3 miniaturas y
+    // el usuario no puede seguir agregando.
+    flexGrow: 0,
+  },
+  imageThumbsScroll: {
+    flexGrow: 0,
   },
   imageThumbAdd: {
     flexShrink: 0,
@@ -1997,6 +2547,18 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     overflow: 'hidden',
     position: 'relative',
+  },
+  imageThumbActive: {
+    // Mirror web: ring-2 ring-primary-500 sobre la miniatura principal.
+    borderWidth: 2,
+    borderColor: colors.primary,
+    // Sombra verde para reforzar el "anillo" (RN no soporta `box-shadow`
+    // con color independiente del shadowColor del padre).
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+    elevation: 4,
   },
   imageThumbImg: {
     width: '100%',
