@@ -193,7 +193,7 @@ export class FiscalCloseService {
       for (const result of persistedResults) {
         await tx.fiscal_close_checks.upsert({
           where: {
-            fiscal_close_checks_session_key: {
+            close_session_id_check_key: {
               close_session_id: session.id,
               check_key: result.check_key,
             },
