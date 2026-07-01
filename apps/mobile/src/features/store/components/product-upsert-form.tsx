@@ -493,17 +493,20 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       (base as any).preparation_time_minutes = preparationTime;
     }
 
-    // Create-only fields (these are typically not allowed in PATCH on this backend).
+    // Create-only fields: sólo válidos en UpdateProductDto. NO los enviamos
+    // en create porque el `forbidNonWhitelisted: true` del ValidationPipe
+    // rechazaría la request con "property X should not exist".
     if (mode === 'create') {
-      return {
-        ...base,
-        stock_transfer_mode: 'distribute',
-        variant_removal_stock_mode: 'first',
-      };
+      return base;
     }
 
-    // Edit: only send what changed (partial update).
-    return base;
+    // Edit: incluir campos sólo presentes en UpdateProductDto.
+    const update: UpdateProductDto = { ...base };
+    if (form.stock_quantity !== undefined && !form.has_variants) {
+      (update as any).stock_transfer_mode = 'distribute';
+      (update as any).variant_removal_stock_mode = 'first';
+    }
+    return update;
   };
 
   const mutation = useMutation({
