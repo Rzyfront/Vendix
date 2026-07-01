@@ -413,8 +413,9 @@ const styles = StyleSheet.create({
     gap: spacing[3],
   },
   option: {
-    flex: 1,
-    minWidth: '46%',
+    // Mobile: cada opción ocupa 100% del ancho (1 por fila).
+    // En pantallas anchas (sm+): el web pone 2 por fila vía `grid grid-cols-2`.
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: spacing[3],
@@ -425,7 +426,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
   },
   fullWidthOption: {
-    minWidth: '100%',
+    // Mantenido por compatibilidad con versiones anteriores; ahora todas son full-width.
+    width: '100%',
   },
   optionHovered: {
     // Mirror web `hover:border-primary-400 hover:bg-primary-50/40`
