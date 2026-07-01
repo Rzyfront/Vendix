@@ -29,6 +29,7 @@ import { StickyHeader } from '@/shared/components/sticky-header/sticky-header';
 import { Textarea } from '@/shared/components/textarea/textarea';
 import { TaxCreateModal } from '@/features/store/components/tax-create-modal';
 import { ImageSourceModal, type UploadedImage } from '@/features/store/components/image-source-modal';
+import { ImageEditModal } from '@/features/store/components/image-edit-modal';
 import { Toggle } from '@/shared/components/toggle/toggle';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
@@ -200,6 +201,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const [taxModalOpen, setTaxModalOpen] = useState(false);
   const [localTaxes, setLocalTaxes] = useState<TaxCategory[]>([]);
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
+  const [imageEditorUri, setImageEditorUri] = useState<string | null>(null);
   const [productImages, setProductImages] = useState<string[]>([]);
 
   const { data: product, isLoading: productLoading } = useQuery({
@@ -950,7 +952,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   <Pressable
                     onPress={(e) => {
                       e.stopPropagation();
-                      setImageSourceOpen(true);
+                      setImageEditorUri(productImages[0]);
                     }}
                     hitSlop={6}
                     style={({ pressed }) => [
@@ -1032,18 +1034,29 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           </Section>
 
           <ImageSourceModal
-            visible={imageSourceOpen}
+            visible={imageSourceOpen && imageEditorUri === null}
             onClose={() => setImageSourceOpen(false)}
             remainingSlots={Math.max(0, 5 - productImages.length)}
             onConfirm={(image: UploadedImage) => {
+              setImageEditorUri(image.uri);
+              setImageSourceOpen(false);
+            }}
+          />
+
+          <ImageEditModal
+            visible={imageEditorUri !== null}
+            imageUri={imageEditorUri}
+            onClose={() => setImageEditorUri(null)}
+            onApply={(result) => {
               setProductImages((prev) => {
                 if (prev.length >= 5) {
                   toastError('Máximo 5 imágenes por producto');
                   return prev;
                 }
-                return [...prev, image.uri];
+                return [...prev, result.uri];
               });
               toastSuccess('Imagen agregada');
+              setImageEditorUri(null);
             }}
           />
 
