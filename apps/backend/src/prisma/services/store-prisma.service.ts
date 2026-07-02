@@ -1635,6 +1635,36 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.menu_availability_windows;
   }
 
+  // ===== Gym Suite (Ola 1) — scoped getters =====
+  get gym_plans() {
+    return this.scoped_client.gym_plans;
+  }
+
+  get gym_memberships() {
+    return this.scoped_client.gym_memberships;
+  }
+
+  get gym_member_profiles() {
+    return this.scoped_client.gym_member_profiles;
+  }
+
+  get gym_access_credentials() {
+    return this.scoped_client.gym_access_credentials;
+  }
+
+  get gym_access_logs() {
+    return this.scoped_client.gym_access_logs;
+  }
+
+  /**
+   * Escape hatch to the UNSCOPED base client. There is NO automatic tenant
+   * scoping here: every query MUST carry an explicit `store_id` predicate.
+   * Use only for cross-scope/global reads or models without a scoped getter.
+   */
+  withoutScope() {
+    return this.baseClient;
+  }
+
   // Global tables (no store scoping)
   get default_templates() {
     return this.baseClient.default_templates;
