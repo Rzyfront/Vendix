@@ -109,18 +109,29 @@ export class CreateEmployeeDto {
   @MaxLength(100)
   compensation_fund?: string;
 
-  // Contact channels — required for the inline create-employee
-  // form in schedule-management (so the operator can capture them
-  // at booking-creation time instead of routing through Payroll
-  // later). Friendlier Spanish messages replace the default
-  // class-validator copy so the operator understands the failure.
-  @IsString({ message: 'El correo es obligatorio' })
+  // Contact channels — kept OPTIONAL here because CreateEmployeeDto
+  // is the shared DTO used by multiple flows (bulk import, payroll
+  // module's full form, etc.), and making them required would
+  // break TS2739 compile errors in callers that don't set them
+  // (e.g. employees-bulk.service.ts builds the DTO from a partial
+  // import row).
+  //
+  // The inline quick-create form in schedule-management IS strict
+  // about email/phone — it gates submission via newEmployeeValid
+  // BEFORE calling createQuickEmployee, so the backend never sees
+  // an empty email/phone from that path.
+  //
+  // When the operator DOES provide them, the format validators
+  // (and the Spanish messages) still apply — so we keep the
+  // @IsEmail/@MaxLength decorations, just not the required one.
+  @IsOptional()
   @IsEmail({}, { message: 'El correo debe tener un formato válido (ej: usuario@empresa.com)' })
-  email: string;
+  email?: string;
 
-  @IsString({ message: 'El teléfono es obligatorio' })
+  @IsOptional()
+  @IsString()
   @MaxLength(20, { message: 'El teléfono no puede exceder 20 caracteres' })
-  phone: string;
+  phone?: string;
 
   @IsOptional()
   @IsBoolean()
