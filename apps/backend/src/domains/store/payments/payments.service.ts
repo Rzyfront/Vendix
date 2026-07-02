@@ -1184,6 +1184,12 @@ export class PaymentsService {
                 payment.store_payment_method?.system_payment_method
                   ?.display_name || 'Unknown',
               user_id: user.id,
+              // C4-followup: solo tenemos el id en memoria en este flujo POS
+              // (order.customer_id escalar) — name/tax_id quedan undefined a
+              // propósito para no introducir un lookup N+1 aquí.
+              customer: order.customer_id
+                ? { id: Number(order.customer_id) }
+                : undefined,
             });
 
             // Persist suffered withholding once for the immediate-payment

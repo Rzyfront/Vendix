@@ -1356,6 +1356,15 @@ export class PurchaseOrdersService {
             store_id: result.updated_po.location?.store_id,
             total_amount,
             user_id: RequestContextService.getUserId(),
+            // C4-followup: result.updated_po.suppliers ya viene completo del
+            // include de la transacción — sin lookup adicional.
+            supplier: result.updated_po.suppliers
+              ? {
+                  id: result.updated_po.suppliers.id,
+                  name: result.updated_po.suppliers.name,
+                  tax_id: result.updated_po.suppliers.tax_id ?? undefined,
+                }
+              : undefined,
           });
         }
       } catch (error) {

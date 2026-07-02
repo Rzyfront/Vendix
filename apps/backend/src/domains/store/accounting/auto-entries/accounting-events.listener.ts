@@ -86,6 +86,8 @@ export class AccountingEventsListener {
     withholding_breakdown?: WithholdingLine[];
     total_amount: number;
     user_id?: number;
+    /** C4-followup: propagado desde invoice-flow.service.ts (updated.customer). */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
       if (!(await this.isFlowEnabled(event.store_id, 'invoicing'))) return;
@@ -122,6 +124,7 @@ export class AccountingEventsListener {
         withholding_breakdown: event.withholding_breakdown,
         total: event.total_amount,
         user_id: event.user_id,
+        customer: event.customer,
       });
       this.logger.log(
         `Auto-entry created for invoice.accepted #${event.invoice_id}`,
@@ -193,6 +196,8 @@ export class AccountingEventsListener {
     currency: string;
     payment_method: string;
     user_id?: number;
+    /** C4-followup: propagado desde payments.service.ts (order.customer_id). */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
       if (!(await this.isFlowEnabled(event.store_id, 'payments'))) return;
@@ -217,6 +222,7 @@ export class AccountingEventsListener {
             ? Number(event.discount_amount)
             : undefined,
         user_id: event.user_id,
+        customer: event.customer,
       });
       this.logger.log(
         `Auto-entry created for payment.received #${event.payment_id}`,
@@ -450,6 +456,9 @@ export class AccountingEventsListener {
       payroll_item_id: number;
       employee_id: number;
       cost_center: string;
+      /** C4-followup: propagado desde payroll-flow.service.ts (item.employee). */
+      employee_name?: string;
+      employee_document?: string;
       earnings: any;
       deductions: any;
       employer_costs: any;
@@ -614,6 +623,8 @@ export class AccountingEventsListener {
     store_id?: number;
     total_amount: number;
     user_id?: number;
+    /** C4-followup: propagado desde purchase-orders.service.ts (updated_po.suppliers). */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
       if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
@@ -623,6 +634,7 @@ export class AccountingEventsListener {
         store_id: event.store_id,
         total_amount: Number(event.total_amount),
         user_id: event.user_id,
+        supplier: event.supplier,
       });
       this.logger.log(
         `Auto-entry created for purchase_order.received #${event.purchase_order_id}`,

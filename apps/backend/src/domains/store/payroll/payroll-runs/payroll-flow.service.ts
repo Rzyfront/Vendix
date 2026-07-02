@@ -516,6 +516,12 @@ export class PayrollFlowService {
         payroll_item_id: item.id,
         employee_id: item.employee_id,
         cost_center: item.employee?.cost_center ?? 'administrative',
+        // C4-followup: item.employee ya viene cargado por
+        // PAYROLL_RUN_DETAIL_INCLUDE — sin lookup adicional.
+        employee_name: item.employee
+          ? `${item.employee.first_name} ${item.employee.last_name}`.trim()
+          : undefined,
+        employee_document: item.employee?.document_number ?? undefined,
         earnings: item.earnings,
         deductions: item.deductions,
         employer_costs: item.employer_costs,
