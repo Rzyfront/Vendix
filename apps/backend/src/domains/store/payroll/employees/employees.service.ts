@@ -218,6 +218,22 @@ export class EmployeesService {
           },
         });
 
+        // Persist email/phone on the linked user when present.
+        // employees table has no email/phone columns, so this is
+        // the only storage location reachable via the DTO. When
+        // dto.user_id is null (no linked user), the values are
+        // silently dropped — the operator would need to add them
+        // later via the Payroll module. Documented in the DTO.
+        if (dto.user_id && (dto.email || dto.phone)) {
+          await tx.users.update({
+            where: { id: dto.user_id },
+            data: {
+              ...(dto.email && { email: dto.email }),
+              ...(dto.phone && { phone: dto.phone }),
+            },
+          });
+        }
+
         return await tx.employees.findFirst({
           where: { id: employee.id },
           include: EMPLOYEE_INCLUDE,
