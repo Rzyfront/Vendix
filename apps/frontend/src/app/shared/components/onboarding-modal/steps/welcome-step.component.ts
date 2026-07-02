@@ -390,7 +390,7 @@ import { AppConfig } from '../../../../core/services/app-config.service';
           <div class="context-content">
             <h3>¿Qué estás haciendo?</h3>
             <p>
-              Configuraremos tu tienda, organización y preferencias para
+              Configuraremos tu comercio, organización y preferencias para
               que puedas vender hoy mismo.
             </p>
           </div>
@@ -414,7 +414,7 @@ import { AppConfig } from '../../../../core/services/app-config.service';
                 ></app-icon>
               </div>
               <div class="option-text">
-                <h4>Gestionar una tienda</h4>
+                <h4>Gestionar un comercio</h4>
                 <p>Ideal para un solo negocio o punto de venta.</p>
               </div>
             </div>
@@ -458,7 +458,7 @@ import { AppConfig } from '../../../../core/services/app-config.service';
               </div>
               <div class="option-text">
                 <h4>Enfoque organizacional</h4>
-                <p>Para múltiples tiendas, sucursales y escalabilidad.</p>
+                <p>Para múltiples comercios, sucursales y escalabilidad.</p>
               </div>
             </div>
 
@@ -470,7 +470,7 @@ import { AppConfig } from '../../../../core/services/app-config.service';
                   class="feature-icon"
                   [color]="primaryColor()"
                 ></app-icon>
-                <span>Múltiples tiendas y sucursales</span>
+                <span>Múltiples comercios y sucursales</span>
               </div>
               <div class="feature-item">
                 <app-icon
