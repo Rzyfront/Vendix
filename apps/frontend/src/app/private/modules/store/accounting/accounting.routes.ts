@@ -68,6 +68,43 @@ const TAXES_SUB_TABS: AccountingSubTab[] = [
   },
 ];
 
+// Reportes — super-tab grouping the 4 legacy reports + the new subsidiary
+// ledger (C4, Ola 3). Migrated to the same sub-tabs-shell pattern used by
+// configuration/cartera/taxes so all 5 sub-views are actually reachable via
+// visible tabs (the previous `ReportsComponent` was a bare router-outlet).
+const REPORTS_SUB_TABS: AccountingSubTab[] = [
+  {
+    id: 'trial-balance',
+    label: 'Balance de Prueba',
+    icon: 'scale',
+    route: '/admin/accounting/reports/trial-balance',
+  },
+  {
+    id: 'balance-sheet',
+    label: 'Balance General',
+    icon: 'landmark',
+    route: '/admin/accounting/reports/balance-sheet',
+  },
+  {
+    id: 'income-statement',
+    label: 'Estado de Resultados',
+    icon: 'trending-up',
+    route: '/admin/accounting/reports/income-statement',
+  },
+  {
+    id: 'general-ledger',
+    label: 'Libro Mayor',
+    icon: 'book',
+    route: '/admin/accounting/reports/general-ledger',
+  },
+  {
+    id: 'subsidiary-ledger',
+    label: 'Libro Auxiliar',
+    icon: 'book-open',
+    route: '/admin/accounting/reports/subsidiary-ledger',
+  },
+];
+
 export const accountingRoutes: Routes = [
   {
     path: '',
@@ -316,9 +353,13 @@ export const accountingRoutes: Routes = [
       {
         path: 'reports',
         loadComponent: () =>
-          import('./components/reports/reports.component').then(
-            (c) => c.ReportsComponent,
+          import('./components/sub-tabs-shell/sub-tabs-shell.component').then(
+            (c) => c.AccountingSubTabsShellComponent,
           ),
+        data: {
+          subTabs: REPORTS_SUB_TABS,
+          subTabsAriaLabel: 'Reportes contables',
+        },
         children: [
           {
             path: '',
@@ -351,6 +392,13 @@ export const accountingRoutes: Routes = [
             loadComponent: () =>
               import('./components/reports/general-ledger/general-ledger.component').then(
                 (c) => c.GeneralLedgerComponent,
+              ),
+          },
+          {
+            path: 'subsidiary-ledger',
+            loadComponent: () =>
+              import('./components/reports/subsidiary-ledger/subsidiary-ledger.component').then(
+                (c) => c.SubsidiaryLedgerComponent,
               ),
           },
         ],

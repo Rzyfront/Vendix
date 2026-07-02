@@ -27,11 +27,38 @@ export interface AutoEntryEventData {
   user_id?: number;
 }
 
+/**
+ * Snapshot histórico del tercero (cliente/proveedor/empleado) ligado a una
+ * línea de asiento. Se persiste TAL CUAL en `accounting_entry_lines` — nunca
+ * se relee por FK en reportes, para no mutar la identidad fiscal exhibida en
+ * asientos ya posteados (exigencia exógena art. 631 ET: el NIT histórico no
+ * cambia aunque el tercero actualice sus datos después).
+ *
+ * `type` sigue la convención ya usada por la migración M2 de backfill
+ * (`20260702100002_backfill_third_party_accounting_entry_lines`): 'customer'
+ * | 'supplier' | 'employee'. Debe viajar en el payload del evento — está
+ * PROHIBIDO resolverlo con un lookup por línea (N+1).
+ */
+export interface AutoEntryThirdParty {
+  id: number;
+  type: 'customer' | 'supplier' | 'employee' | string;
+  name?: string;
+  tax_id?: string;
+}
+
 export interface AutoEntryLine {
   account_code: string;
   description?: string;
   debit_amount: number;
   credit_amount: number;
+  /**
+   * Tercero asociado a ESTA línea (no al asiento completo — un mismo asiento
+   * puede tener líneas con terceros distintos, p.ej. AR de cliente vs CxP de
+   * un proveedor en el mismo movimiento). Opcional: los handlers que no
+   * reciban el tercero en el payload del evento simplemente omiten el campo
+   * y la línea se postea igual que hoy (sin regresión).
+   */
+  third_party?: AutoEntryThirdParty;
 }
 
 /**
@@ -73,6 +100,7 @@ export class AutoEntryService {
     debit_amount: number,
     credit_amount: number,
     store_id?: number,
+    third_party?: AutoEntryThirdParty,
   ): Promise<AutoEntryLine | null> {
     const mapping = await this.account_mapping_service.getMapping(
       org_id,
@@ -85,6 +113,7 @@ export class AutoEntryService {
       description,
       debit_amount,
       credit_amount,
+      ...(third_party && { third_party }),
     };
   }
 
@@ -717,6 +746,12 @@ export class AutoEntryService {
             description: line.description || null,
             debit_amount: new Prisma.Decimal(line.debit_amount),
             credit_amount: new Prisma.Decimal(line.credit_amount),
+            // Snapshot histórico del tercero — viaja en el payload del evento
+            // (nunca se resuelve por lookup aquí). Ver AutoEntryThirdParty.
+            third_party_id: line.third_party?.id ?? null,
+            third_party_type: line.third_party?.type ?? null,
+            third_party_name: line.third_party?.name ?? null,
+            third_party_tax_id: line.third_party?.tax_id ?? null,
           };
         }),
       });
@@ -798,7 +833,22 @@ export class AutoEntryService {
     total: number;
     user_id?: number;
     accounting_entity_id?: number;
+    /**
+     * Snapshot del cliente al momento de la venta. Debe venir ya resuelto por
+     * el emisor (p.ej. `updated.customer` en invoice-flow.service.ts, ya
+     * cargado vía INVOICE_INCLUDE) — PROHIBIDO resolverlo aquí por lookup.
+     */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     // Caso 2 (retenido): the customer withholds part of the payment. Recognize
     // the withholding as an asset (1355) at revenue recognition and reduce the
     // receivable by the same amount. Empty breakdown → identical to legacy.
@@ -815,6 +865,7 @@ export class AutoEntryService {
         accounts_receivable,
         0,
         data.store_id,
+        customer_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -1064,7 +1115,21 @@ export class AutoEntryService {
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
     user_id?: number;
+    /**
+     * Snapshot del cliente que paga. El emisor ya tiene `order.customer_id`
+     * en scope (ver payments.service.ts) — PROHIBIDO resolverlo aquí.
+     */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     // Check if this payment's order has an associated invoice
     let has_invoice = false;
     if (data.order_id) {
@@ -1104,6 +1169,7 @@ export class AutoEntryService {
           0,
           data.amount,
           data.store_id,
+          customer_third_party,
         ),
       ]);
     } else {
@@ -1208,7 +1274,18 @@ export class AutoEntryService {
     discount_amount?: number;
     total_amount: number;
     user_id?: number;
+    /** Snapshot del cliente de la venta a crédito. Ver onPaymentReceived. */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     const order_ref = data.order_number ? ` - Orden ${data.order_number}` : '';
     const discount = Number(data.discount_amount || 0);
 
@@ -1230,6 +1307,7 @@ export class AutoEntryService {
         accounts_receivable,
         0,
         data.store_id,
+        customer_third_party,
       ),
     ];
 
@@ -1301,7 +1379,25 @@ export class AutoEntryService {
     store_id?: number;
     amount: number;
     user_id?: number;
+    /**
+     * Snapshot del proveedor/acreedor del gasto. NOTA: el modelo `expenses`
+     * genérico no tiene `supplier_id` propio (confirmado — solo
+     * `vendor_support_documents`, un flujo DIAN aparte, liga a `suppliers`).
+     * Se deja el campo opcional listo para el día que expense-flow.service.ts
+     * lo resuelva desde `expense_categories`/vendor y lo agregue al payload;
+     * hoy siempre llega `undefined` y la línea se postea igual que antes.
+     */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -1318,6 +1414,7 @@ export class AutoEntryService {
         0,
         data.amount,
         data.store_id,
+        supplier_third_party,
       ),
     ]);
 
@@ -1340,7 +1437,18 @@ export class AutoEntryService {
     store_id?: number;
     amount: number;
     user_id?: number;
+    /** Snapshot del proveedor/acreedor. Ver onExpenseApproved. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -1349,6 +1457,7 @@ export class AutoEntryService {
         data.amount,
         0,
         data.store_id,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -1590,6 +1699,15 @@ export class AutoEntryService {
       payroll_item_id: number;
       employee_id: number;
       cost_center: string;
+      /**
+       * Snapshot del empleado (forward-fill: solo asientos NUEVOS lo llevan;
+       * la nómina histórica ya posteada NO se reescribe). Opcional porque el
+       * emisor (payroll-flow.service.ts) hoy no lo incluye — `run.payroll_items`
+       * ya trae `employee.{id,document_type,document_number,first_name,last_name}`
+       * en memoria; falta solo que ese servicio lo agregue al payload.
+       */
+      employee_name?: string;
+      employee_document?: string;
       earnings: {
         base_salary: number;
         transport_subsidy: number;
@@ -1625,6 +1743,12 @@ export class AutoEntryService {
 
     for (const item of data.payroll_items) {
       try {
+        const employee_third_party: AutoEntryThirdParty = {
+          id: item.employee_id,
+          type: 'employee',
+          name: item.employee_name,
+          tax_id: item.employee_document,
+        };
         const e = item.earnings ?? {
           base_salary: 0,
           transport_subsidy: 0,
@@ -1853,6 +1977,7 @@ export class AutoEntryService {
             0,
             item.net_pay,
             data.store_id,
+            employee_third_party,
           ),
         );
 
@@ -2240,7 +2365,21 @@ export class AutoEntryService {
     store_id?: number;
     total_amount: number;
     user_id?: number;
+    /**
+     * Snapshot del proveedor. El emisor ya carga `result.updated_po.suppliers`
+     * completo (ver purchase-orders.service.ts) — PROHIBIDO resolverlo aquí.
+     */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -2257,6 +2396,7 @@ export class AutoEntryService {
         0,
         data.total_amount,
         data.store_id,
+        supplier_third_party,
       ),
     ]);
 
@@ -2279,7 +2419,18 @@ export class AutoEntryService {
     amount: number;
     payment_method: string;
     user_id?: number;
+    /** Snapshot del proveedor. Ver onPurchaseOrderReceived. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     // Resolve cash/bank key based on payment method
     const method = (data.payment_method || '').toLowerCase();
     const is_cash = method.includes('cash') || method.includes('efectivo');
@@ -2294,6 +2445,8 @@ export class AutoEntryService {
         'Proveedores - Pago OC',
         data.amount,
         0,
+        undefined,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -3340,7 +3493,18 @@ export class AutoEntryService {
     amount: number;
     document_number?: string;
     user_id: number;
+    /** Snapshot del cliente cuya cartera se castiga. */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -3357,6 +3521,7 @@ export class AutoEntryService {
         0,
         data.amount,
         data.store_id,
+        customer_third_party,
       ),
     ]);
 
@@ -3384,7 +3549,18 @@ export class AutoEntryService {
     payment_method?: string;
     document_number?: string;
     user_id: number;
+    /** Snapshot del proveedor cuya cuenta por pagar se cancela. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -3393,6 +3569,7 @@ export class AutoEntryService {
         data.amount,
         0,
         data.store_id,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -3425,7 +3602,18 @@ export class AutoEntryService {
     amount: number;
     document_number?: string;
     user_id: number;
+    /** Snapshot del proveedor cuya cuenta por pagar se castiga. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -3434,6 +3622,7 @@ export class AutoEntryService {
         data.amount,
         0,
         data.store_id,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,

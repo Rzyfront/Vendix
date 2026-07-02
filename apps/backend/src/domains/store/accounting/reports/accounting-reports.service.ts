@@ -3,6 +3,10 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { ReportQueryDto } from './dto/report-query.dto';
+import {
+  SubsidiaryLedgerByAccountQueryDto,
+  SubsidiaryLedgerByThirdPartyQueryDto,
+} from './dto/subsidiary-ledger-query.dto';
 
 @Injectable()
 export class AccountingReportsService {
@@ -315,5 +319,306 @@ export class AccountingReportsService {
     }
 
     return period;
+  }
+
+  /**
+   * Libro auxiliar jerárquico por rango de cuenta (arts. 48-55 C.Co: libro
+   * auxiliar obligatorio para comerciantes). Resuelve la cuenta padre por
+   * `account_code` y agrega TODAS sus hijas directas vía
+   * `chart_of_accounts.parent_id` (jerarquía ya existente, sin migración).
+   *
+   * Signo por naturaleza (C3, commit 7739c9ba — reusa el mismo criterio, NO
+   * Math.abs): cuentas credit-nature muestran CR - DR; debit-nature muestran
+   * DR - CR. Un saldo contrario a naturaleza queda negativo a propósito para
+   * que el contador lo detecte.
+   */
+  async getSubsidiaryLedgerByAccountRange(
+    query: SubsidiaryLedgerByAccountQueryDto,
+  ) {
+    const parent_account = await this.prisma.chart_of_accounts.findFirst({
+      where: { code: query.account_code },
+    });
+
+    if (!parent_account) {
+      throw new VendixHttpException(ErrorCodes.ACC_FIND_001);
+    }
+
+    const children = await this.prisma.chart_of_accounts.findMany({
+      where: { parent_id: parent_account.id },
+      orderBy: { code: 'asc' },
+    });
+
+    const account_ids = [parent_account.id, ...children.map((c) => c.id)];
+
+    const entry_where: Prisma.accounting_entriesWhereInput = {
+      status: 'posted',
+      ...(query.date_from && {
+        entry_date: {
+          gte: new Date(query.date_from),
+          ...(query.date_to && { lte: new Date(query.date_to) }),
+        },
+      }),
+    };
+
+    const entries = await this.prisma.accounting_entries.findMany({
+      where: entry_where,
+      select: { id: true },
+    });
+    const entry_ids = entries.map((e) => e.id);
+
+    const signedBalance = (nature: string, debit: number, credit: number) =>
+      nature === 'credit' ? credit - debit : debit - credit;
+
+    if (entry_ids.length === 0) {
+      const accounts = [parent_account, ...children].map((a: any) => ({
+        account_id: a.id,
+        account_code: a.code,
+        account_name: a.name,
+        account_type: a.account_type,
+        nature: a.nature,
+        is_parent: a.id === parent_account.id,
+        lines: [],
+        total_debit: 0,
+        total_credit: 0,
+        closing_balance: 0,
+      }));
+      return {
+        parent_account: {
+          id: parent_account.id,
+          code: parent_account.code,
+          name: parent_account.name,
+        },
+        accounts,
+        grand_total: { total_debit: 0, total_credit: 0, closing_balance: 0 },
+      };
+    }
+
+    const lines = await this.prisma.accounting_entry_lines.findMany({
+      where: {
+        account_id: { in: account_ids },
+        entry_id: { in: entry_ids },
+      },
+      include: {
+        entry: {
+          select: {
+            id: true,
+            entry_number: true,
+            entry_date: true,
+            description: true,
+            entry_type: true,
+            store: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: { entry: { entry_date: 'asc' } },
+    });
+
+    const account_map = new Map(
+      [parent_account, ...children].map((a: any) => [a.id, a]),
+    );
+
+    // Running balance independiente por cuenta (padre e hijas no se mezclan).
+    const running_balance_by_account = new Map<number, number>();
+    const lines_by_account = new Map<number, any[]>();
+
+    for (const line of lines) {
+      const account: any = account_map.get(line.account_id);
+      const debit = Number(line.debit_amount);
+      const credit = Number(line.credit_amount);
+      const prev_balance = running_balance_by_account.get(line.account_id) ?? 0;
+      const delta = signedBalance(account.nature, debit, credit);
+      const running_balance = prev_balance + delta;
+      running_balance_by_account.set(line.account_id, running_balance);
+
+      const bucket = lines_by_account.get(line.account_id) ?? [];
+      bucket.push({
+        line_id: line.id,
+        entry_id: line.entry_id,
+        entry_number: line.entry.entry_number,
+        entry_date: line.entry.entry_date,
+        entry_description: line.entry.description,
+        entry_type: line.entry.entry_type,
+        store: line.entry.store,
+        line_description: line.description,
+        debit_amount: debit,
+        credit_amount: credit,
+        third_party_id: line.third_party_id,
+        third_party_type: line.third_party_type,
+        third_party_name: line.third_party_name,
+        third_party_tax_id: line.third_party_tax_id,
+        running_balance,
+      });
+      lines_by_account.set(line.account_id, bucket);
+    }
+
+    let grand_total_debit = 0;
+    let grand_total_credit = 0;
+    let grand_total_balance = 0;
+
+    const accounts = [parent_account, ...children].map((a: any) => {
+      const account_lines = lines_by_account.get(a.id) ?? [];
+      const total_debit = account_lines.reduce(
+        (sum, l) => sum + l.debit_amount,
+        0,
+      );
+      const total_credit = account_lines.reduce(
+        (sum, l) => sum + l.credit_amount,
+        0,
+      );
+      const closing_balance = running_balance_by_account.get(a.id) ?? 0;
+
+      grand_total_debit += total_debit;
+      grand_total_credit += total_credit;
+      grand_total_balance += closing_balance;
+
+      return {
+        account_id: a.id,
+        account_code: a.code,
+        account_name: a.name,
+        account_type: a.account_type,
+        nature: a.nature,
+        is_parent: a.id === parent_account.id,
+        lines: account_lines,
+        total_debit,
+        total_credit,
+        closing_balance,
+      };
+    });
+
+    return {
+      parent_account: {
+        id: parent_account.id,
+        code: parent_account.code,
+        name: parent_account.name,
+      },
+      accounts,
+      grand_total: {
+        total_debit: grand_total_debit,
+        total_credit: grand_total_credit,
+        closing_balance: grand_total_balance,
+      },
+    };
+  }
+
+  /**
+   * Libro auxiliar por tercero: todas las líneas cuyo snapshot histórico
+   * (third_party_id/type, columnas M1+M2) coincide con el tercero solicitado.
+   * Fidelidad histórica: el nombre/NIT mostrado es el snapshot GUARDADO en la
+   * línea al momento del asiento, nunca releído desde customers/suppliers/
+   * employees (exigencia exógena art. 631 ET — el NIT histórico no muta).
+   */
+  async getSubsidiaryLedgerByThirdParty(
+    query: SubsidiaryLedgerByThirdPartyQueryDto,
+  ) {
+    const entry_where: Prisma.accounting_entriesWhereInput = {
+      status: 'posted',
+      ...(query.date_from && {
+        entry_date: {
+          gte: new Date(query.date_from),
+          ...(query.date_to && { lte: new Date(query.date_to) }),
+        },
+      }),
+    };
+
+    const entries = await this.prisma.accounting_entries.findMany({
+      where: entry_where,
+      select: { id: true },
+    });
+    const entry_ids = entries.map((e) => e.id);
+
+    if (entry_ids.length === 0) {
+      return {
+        third_party: {
+          type: query.third_party_type,
+          id: query.third_party_id,
+          name: null,
+          tax_id: null,
+        },
+        lines: [],
+        totals: { total_debit: 0, total_credit: 0, final_balance: 0 },
+      };
+    }
+
+    const lines = await this.prisma.accounting_entry_lines.findMany({
+      where: {
+        third_party_type: query.third_party_type,
+        third_party_id: query.third_party_id,
+        entry_id: { in: entry_ids },
+      },
+      include: {
+        account: true,
+        entry: {
+          select: {
+            id: true,
+            entry_number: true,
+            entry_date: true,
+            description: true,
+            entry_type: true,
+            store: { select: { id: true, name: true } },
+          },
+        },
+      },
+      orderBy: { entry: { entry_date: 'asc' } },
+    });
+
+    const signedBalance = (nature: string, debit: number, credit: number) =>
+      nature === 'credit' ? credit - debit : debit - credit;
+
+    let running_balance = 0;
+    let snapshot_name: string | null = null;
+    let snapshot_tax_id: string | null = null;
+
+    const ledger_lines = lines.map((line: any) => {
+      const debit = Number(line.debit_amount);
+      const credit = Number(line.credit_amount);
+      running_balance += signedBalance(line.account.nature, debit, credit);
+
+      // Última ocurrencia no nula gana — el snapshot puede variar levemente
+      // entre líneas antiguas (p.ej. mayúsculas) pero refleja siempre lo
+      // guardado, nunca un lookup en vivo.
+      if (line.third_party_name) snapshot_name = line.third_party_name;
+      if (line.third_party_tax_id) snapshot_tax_id = line.third_party_tax_id;
+
+      return {
+        line_id: line.id,
+        entry_id: line.entry_id,
+        entry_number: line.entry.entry_number,
+        entry_date: line.entry.entry_date,
+        entry_description: line.entry.description,
+        entry_type: line.entry.entry_type,
+        store: line.entry.store,
+        account_id: line.account.id,
+        account_code: line.account.code,
+        account_name: line.account.name,
+        line_description: line.description,
+        debit_amount: debit,
+        credit_amount: credit,
+        third_party_name: line.third_party_name,
+        third_party_tax_id: line.third_party_tax_id,
+        running_balance,
+      };
+    });
+
+    const totals = ledger_lines.reduce(
+      (acc, l) => ({
+        total_debit: acc.total_debit + l.debit_amount,
+        total_credit: acc.total_credit + l.credit_amount,
+      }),
+      { total_debit: 0, total_credit: 0 },
+    );
+
+    return {
+      third_party: {
+        type: query.third_party_type,
+        id: query.third_party_id,
+        name: snapshot_name,
+        tax_id: snapshot_tax_id,
+      },
+      lines: ledger_lines,
+      totals: {
+        ...totals,
+        final_balance: running_balance,
+      },
+    };
   }
 }
