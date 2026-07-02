@@ -210,6 +210,39 @@
                 </div>
               </div>
 
+              <!--
+                Contact channels — 4th row of the 2-col grid (matches
+                the symmetry of the rows above). Email validated
+                client-side via type="email"; phone is freeform
+                international format (+57 300 000 0000, etc.). Both
+                fields are optional at the backend (@IsOptional) but
+                rendered here so the operator can capture them
+                inline instead of routing through the full Payroll
+                module later.
+              -->
+              <div class="grid grid-cols-2 gap-2">
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Correo</label>
+                  <input
+                    type="email"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="email@empresa.com"
+                    [ngModel]="newEmployee().email"
+                    (ngModelChange)="patchNewEmployee('email', $event)"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Teléfono</label>
+                  <input
+                    type="tel"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="+57 300 000 0000"
+                    [ngModel]="newEmployee().phone"
+                    (ngModelChange)="patchNewEmployee('phone', $event)"
+                  />
+                </div>
+              </div>
+
               <app-button
                 variant="primary"
                 size="sm"
