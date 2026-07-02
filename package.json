@@ -31,7 +31,6 @@
     "prettier": "^3.4.2"
   },
   "dependencies": {
-    "@shopify/react-native-skia": "^2.6.2",
-    "expo-image-manipulator": "~14.0.8"
+    "@shopify/react-native-skia": "^2.6.2"
   }
 }
