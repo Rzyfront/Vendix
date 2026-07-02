@@ -586,6 +586,51 @@ export interface PilaReport {
   totals: PilaTotals;
 }
 
+// ── PILA Submissions (tracking de generación/exportación) ──────────────
+
+export type PilaSubmissionStatus = 'generated' | 'exported' | 'void';
+
+export interface PilaSubmission {
+  id: number;
+  organization_id: number;
+  accounting_entity_id: number;
+  period_year: number;
+  period_month: number;
+  status: PilaSubmissionStatus;
+  employees_count: number;
+  total_earnings: string;
+  total_contributions: string;
+  metadata: Record<string, unknown> | null;
+  exported_at: string | null;
+  exported_by_user_id: number | null;
+  voided_at: string | null;
+  voided_by_user_id: number | null;
+  void_reason: string | null;
+  created_by_user_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface QueryPilaSubmissionsDto {
+  year?: number;
+  month?: number;
+  status?: PilaSubmissionStatus;
+  page?: number;
+  limit?: number;
+}
+
+export interface PilaSubmissionListResponse {
+  data: PilaSubmission[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage?: boolean;
+    hasPreviousPage?: boolean;
+  };
+}
+
 // ── Perfil fiscal (art. 387 ET) ────────────────────────────────────────
 
 export type RetentionProcedure = 'proc1' | 'proc2';

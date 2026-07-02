@@ -36,6 +36,8 @@ import {
   QueryNoveltyDto,
   NoveltyListResponse,
   PilaReport,
+  QueryPilaSubmissionsDto,
+  PilaSubmissionListResponse,
   EmployeeFiscalProfile,
   EmployeeFiscalProfileUpdateDto,
 } from '../interfaces/payroll.interface';
@@ -349,11 +351,27 @@ export class PayrollService {
     });
   }
 
+  generatePilaReport(year: number, month: number): Observable<ApiResponse<PilaReport>> {
+    return this.http.get<ApiResponse<PilaReport>>(this.getApiUrl('pila/generate'), {
+      params: { year, month },
+    });
+  }
+
   exportPilaCsv(year: number, month: number): Observable<Blob> {
     return this.http.get(this.getApiUrl('pila/export'), {
       params: { year, month },
       responseType: 'blob',
     });
+  }
+
+  getPilaSubmissions(
+    query: QueryPilaSubmissionsDto = {},
+  ): Observable<PilaSubmissionListResponse> {
+    const params = this.buildParams(query as Record<string, any>);
+    return this.http.get<PilaSubmissionListResponse>(
+      this.getApiUrl('pila/submissions'),
+      { params },
+    );
   }
 
   // ─── Paystubs & ACH ───────────────────────────────────
