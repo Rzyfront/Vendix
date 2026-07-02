@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsDateString,
   IsBoolean,
+  IsEmail,
   MaxLength,
   Min,
   IsInt,
@@ -107,6 +108,19 @@ export class CreateEmployeeDto {
   @IsString()
   @MaxLength(100)
   compensation_fund?: string;
+
+  // Contact channels — required for the inline create-employee
+  // form in schedule-management (so the operator can capture them
+  // at booking-creation time instead of routing through Payroll
+  // later). Friendlier Spanish messages replace the default
+  // class-validator copy so the operator understands the failure.
+  @IsString({ message: 'El correo es obligatorio' })
+  @IsEmail({}, { message: 'El correo debe tener un formato válido (ej: usuario@empresa.com)' })
+  email: string;
+
+  @IsString({ message: 'El teléfono es obligatorio' })
+  @MaxLength(20, { message: 'El teléfono no puede exceder 20 caracteres' })
+  phone: string;
 
   @IsOptional()
   @IsBoolean()

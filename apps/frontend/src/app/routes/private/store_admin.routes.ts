@@ -309,6 +309,13 @@ export const storeAdminRoutes: Routes = [
                 (c) => c.ScheduleManagementComponent,
               ),
           },
+          {
+            path: 'availability',
+            loadComponent: () =>
+              import(
+                '../../private/modules/store/reservations/components/provider-availability/provider-availability.component'
+              ).then((c) => c.ProviderAvailabilityComponent),
+          },
         ],
       },
       // Consultations Routes

@@ -318,6 +318,13 @@ import {
   Navigation,
   // Serial-numbers module icon
   Fingerprint,
+  // Booking-notification icons (added per code review — keys are
+  // referenced from notifications-dropdown.component.ts but had no
+  // registry entry, falling back to HelpCircle).
+  DoorOpen,
+  BellRing,
+  PlayCircle,
+  CheckCircle2,
 } from 'lucide-angular';
 
 /**
@@ -357,6 +364,10 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
   archive: Archive,
   shield: Shield,
   'check-circle': CheckCircle,
+  'check-circle-2': CheckCircle2,
+  'door-open': DoorOpen,
+  'bell-ring': BellRing,
+  'play-circle': PlayCircle,
   clock: Clock,
   'user-x': UserX,
   'alert-triangle': TriangleAlert,
