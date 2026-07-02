@@ -893,6 +893,8 @@ export class SettingsService {
           tax_id: true,
           tax_id_dv: true,
           nit_type: true,
+          municipality_code: true,
+          ciiu_code: true,
         },
       }),
     ]);
@@ -906,6 +908,8 @@ export class SettingsService {
       tax_id: store?.tax_id ?? fiscalData.tax_id,
       tax_id_dv: store?.tax_id_dv ?? fiscalData.tax_id_dv,
       nit_type: store?.nit_type ?? fiscalData.nit_type,
+      municipality_code: store?.municipality_code ?? fiscalData.municipality_code,
+      ciiu_code: store?.ciiu_code ?? fiscalData.ciiu_code,
     };
 
     // Pre-fill defaults for a freshly created per-store-scope store: it has no
@@ -1021,6 +1025,12 @@ export class SettingsService {
           : undefined;
     const nit_type =
       typeof dto.nit_type === 'string' ? dto.nit_type.trim() : undefined;
+    const municipality_code =
+      typeof dto.municipality_code === 'string'
+        ? dto.municipality_code.trim()
+        : undefined;
+    const ciiu_code =
+      typeof dto.ciiu_code === 'string' ? dto.ciiu_code.trim() : undefined;
 
     const updatedSettings: StoreSettings = {
       ...currentSettings,
@@ -1047,6 +1057,10 @@ export class SettingsService {
           ...(tax_id !== undefined && { tax_id: tax_id || null }),
           ...(tax_id_dv !== undefined && { tax_id_dv: tax_id_dv || null }),
           ...(nit_type !== undefined && { nit_type: nit_type || null }),
+          ...(municipality_code !== undefined && {
+            municipality_code: municipality_code || null,
+          }),
+          ...(ciiu_code !== undefined && { ciiu_code: ciiu_code || null }),
           updated_at: new Date(),
         },
       });

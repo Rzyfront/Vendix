@@ -337,15 +337,39 @@ export class SettingsService {
     );
 
     if (target.scope === 'store') {
-      const row = await this.prisma.withoutScope().store_settings.findUnique({
-        where: { store_id: target.store_id },
-        select: { settings: true },
-      });
-      return (((row?.settings as any)?.fiscal_data ?? {}) as OrganizationFiscalData);
+      const [row, store] = await Promise.all([
+        this.prisma.withoutScope().store_settings.findUnique({
+          where: { store_id: target.store_id },
+          select: { settings: true },
+        }),
+        this.prisma.withoutScope().stores.findUnique({
+          where: { id: target.store_id },
+          select: { municipality_code: true, ciiu_code: true },
+        }),
+      ]);
+      const fiscalData = ((row?.settings as any)?.fiscal_data ??
+        {}) as OrganizationFiscalData;
+      return {
+        ...fiscalData,
+        municipality_code:
+          store?.municipality_code ?? fiscalData.municipality_code,
+        ciiu_code: store?.ciiu_code ?? fiscalData.ciiu_code,
+      };
     }
 
-    const row = await this.prisma.organization_settings.findFirst();
-    return (((row?.settings as any)?.fiscal_data ?? {}) as OrganizationFiscalData);
+    const [row, organization] = await Promise.all([
+      this.prisma.organization_settings.findFirst(),
+      this.prisma.withoutScope().organizations.findUnique({
+        where: { id: context.organization_id },
+        select: { ciiu_code: true },
+      }),
+    ]);
+    const fiscalData = ((row?.settings as any)?.fiscal_data ??
+      {}) as OrganizationFiscalData;
+    return {
+      ...fiscalData,
+      ciiu_code: organization?.ciiu_code ?? fiscalData.ciiu_code,
+    };
   }
 
   /**
@@ -425,12 +449,22 @@ export class SettingsService {
         typeof cleanDto.nit_type === 'string'
           ? (cleanDto.nit_type.trim() as dian_nit_type_enum)
           : undefined;
+      const municipality_code =
+        typeof cleanDto.municipality_code === 'string'
+          ? cleanDto.municipality_code.trim()
+          : undefined;
+      const ciiu_code =
+        typeof cleanDto.ciiu_code === 'string'
+          ? cleanDto.ciiu_code.trim()
+          : undefined;
 
       if (
         legal_name !== undefined ||
         tax_id !== undefined ||
         tax_id_dv !== undefined ||
-        nit_type !== undefined
+        nit_type !== undefined ||
+        municipality_code !== undefined ||
+        ciiu_code !== undefined
       ) {
         await this.prisma.withoutScope().stores.update({
           where: { id: target.store_id },
@@ -439,6 +473,10 @@ export class SettingsService {
             ...(tax_id !== undefined && { tax_id: tax_id || null }),
             ...(tax_id_dv !== undefined && { tax_id_dv: tax_id_dv || null }),
             ...(nit_type !== undefined && { nit_type: nit_type || null }),
+            ...(municipality_code !== undefined && {
+              municipality_code: municipality_code || null,
+            }),
+            ...(ciiu_code !== undefined && { ciiu_code: ciiu_code || null }),
             updated_at: new Date(),
           },
         });
@@ -496,6 +534,22 @@ export class SettingsService {
           organization_id: context.organization_id,
           settings: nextSettings as any,
         },
+      });
+    }
+
+    // ciiu_code también persiste en la columna real `organizations.ciiu_code`
+    // (leída por tax-declaration-draft.service.ts:calculateIca vía cascada
+    // store→org). No hay columna `municipality_code` a nivel organización — el
+    // ICA siempre se declara por tienda, así que ese campo solo aplica al
+    // target 'store' (rama de arriba).
+    const orgCiiuCode =
+      typeof cleanDto.ciiu_code === 'string'
+        ? cleanDto.ciiu_code.trim()
+        : undefined;
+    if (orgCiiuCode !== undefined) {
+      await this.prisma.withoutScope().organizations.update({
+        where: { id: context.organization_id },
+        data: { ciiu_code: orgCiiuCode || null, updated_at: new Date() },
       });
     }
 

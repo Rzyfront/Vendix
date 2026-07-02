@@ -31,6 +31,11 @@ export interface FiscalDataSettings {
   // is_self_withholder: tenant may be subject to being withheld (Caso 2, autorretenedor).
   is_withholding_agent?: boolean;
   is_self_withholder?: boolean;
+  // ICA location (Colombia). Mirrors the real columns `stores.municipality_code`
+  // / `stores.ciiu_code` (read/write symmetry with getFiscalData/updateFiscalData
+  // and with tax-declaration-draft.service.ts:calculateIca).
+  municipality_code?: string;
+  ciiu_code?: string;
 }
 
 // ============================================================================
