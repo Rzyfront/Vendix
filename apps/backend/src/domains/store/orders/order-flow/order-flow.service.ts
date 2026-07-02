@@ -320,10 +320,23 @@ export class OrderFlowService {
             { decrementOnHand: false },
           );
         } else {
-          // P3.4: ORG-scope auto-fulfillment already moved stock and marked
-          // reservations as 'consumed' during 'shipped'. No-op here so we
-          // do not double-decrement. We still need an accounting cost for
-          // the `order.completed` event — derive it from order item cost.
+          // P3.4: ORG-scope auto-fulfillment already TRANSFERRED stock (and
+          // marked reservations as 'consumed') from central to the
+          // fulfilling store's default location during 'shipped'
+          // (see OrderAutoFulfillmentListener). That transfer creates a
+          // fresh `inventory_cost_layers` row at the store location, priced
+          // at the REAL cost consumed from the central warehouse's layers
+          // (see StockLevelManager.createTransferCostLayer). That layer has
+          // never been consumed as a sale — quantity_on_hand at the store
+          // was only ever incremented by the transfer, never decremented.
+          //
+          // D3 fix: consume it here as the real sale, exactly like the POS /
+          // legacy branch above (movement_type: 'sale'), instead of summing
+          // the static `cost_price` snapshot. This decrements the store's
+          // on-hand qty exactly once and returns the REAL cost consumed from
+          // `inventory_cost_layers` (respecting the org/store configured
+          // costing method — CPP/FIFO/LIFO — via the same
+          // StockLevelManager/CostingService used by every other sale path).
           for (const item of orderWithItems?.order_items || []) {
             if (
               !item.products?.track_inventory ||
@@ -335,7 +348,7 @@ export class OrderFlowService {
             // already recognized in fire-to-kitchen (accounting entry
             // 6135/1435 emitted by the kitchen.fired listener); the
             // `order.completed` event must not double-count them by
-            // re-summing cost_price here.
+            // re-consuming layers here.
             if (
               storeIsRestaurant(
                 (orderWithItems as any)?.stores?.industries,
@@ -345,7 +358,30 @@ export class OrderFlowService {
             ) {
               continue;
             }
-            totalCost += Number(item.cost_price || 0) * item.quantity;
+
+            const location_id =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id || undefined,
+              );
+
+            // QUI-431 — same FIFO auto-consumption of serials as the legacy
+            // branch, at the store location the ORG-scope transfer landed
+            // the stock on.
+            await this.consumeSerialsForOrderItem(item, location_id);
+
+            const stockUpdate = await this.stockLevelManager.updateStock({
+              product_id: item.product_id,
+              variant_id: item.product_variant_id || undefined,
+              location_id,
+              quantity_change: -item.quantity,
+              movement_type: 'sale',
+              reason: `Order ${previous_order?.order_number || orderId} completed (ORG-scope auto-fulfillment)`,
+              user_id: RequestContextService.getUserId(),
+              order_item_id: item.id,
+              create_movement: true,
+            });
+            totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
           }
         }
 
