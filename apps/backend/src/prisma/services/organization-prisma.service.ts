@@ -465,6 +465,14 @@ export class OrganizationPrismaService extends BasePrismaService {
     return this.scoped_client.payroll_novelties;
   }
 
+  get employee_fiscal_profiles() {
+    return this.scoped_client.employee_fiscal_profiles;
+  }
+
+  get pila_submissions() {
+    return this.scoped_client.pila_submissions;
+  }
+
   get partner_plan_overrides() {
     return this.scoped_client.partner_plan_overrides;
   }
