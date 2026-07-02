@@ -753,6 +753,45 @@ export class AccountingEventsListener {
     }
   }
 
+  @OnEvent('layaway.cancelled')
+  async handleLayawayCancelled(event: {
+    store_id: number;
+    plan_id: number;
+    plan_number: string;
+    customer_id?: number;
+    total_paid?: number;
+    refund_amount?: number;
+    cancellation_fee?: number;
+    refund_method?: string;
+    organization_id?: number;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'layaway'))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onLayawayCancelled({
+        plan_id: event.plan_id,
+        plan_number: event.plan_number,
+        organization_id,
+        store_id: event.store_id,
+        total_paid: Number(event.total_paid || 0),
+        refund_amount: Number(event.refund_amount || 0),
+        cancellation_fee: Number(event.cancellation_fee || 0),
+        refund_method: event.refund_method,
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for layaway.cancelled - plan ${event.plan_number}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for layaway.cancelled - plan ${event.plan_number}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
   // ===== CREDIT INSTALLMENT PAYMENTS =====
 
   @OnEvent('installment_payment.received')
@@ -798,6 +837,59 @@ export class AccountingEventsListener {
   }
 
   // ===== PAYROLL SETTLEMENTS =====
+
+  /**
+   * settlement.approved (DEVENGO): causa el COSTO laboral de la liquidación
+   * (gasto/provisiones) contra el pasivo 2505. El pago posterior SOLO drena
+   * 2505 (ver handleSettlementPaid) → approved + paid juntos NO duplican el
+   * gasto. Idempotente: createAutoEntry deduplica por source_type/source_id,
+   * por lo que un re-emit de settlement.approved es un no-op.
+   */
+  @OnEvent('settlement.approved')
+  async handleSettlementApproved(event: {
+    settlement_id: number;
+    settlement_number?: string;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    employee_id?: number;
+    employee_name?: string;
+    severance?: number;
+    severance_interest?: number;
+    bonus?: number;
+    vacation?: number;
+    pending_salary?: number;
+    indemnification?: number;
+    net_settlement?: number;
+    approved_by?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'settlements'))) return;
+      await this.auto_entry_service.onSettlementApproved({
+        settlement_id: event.settlement_id,
+        settlement_number: event.settlement_number ?? `#${event.settlement_id}`,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
+        employee_name: event.employee_name ?? '',
+        severance: Number(event.severance || 0),
+        severance_interest: Number(event.severance_interest || 0),
+        bonus: Number(event.bonus || 0),
+        vacation: Number(event.vacation || 0),
+        pending_salary: Number(event.pending_salary || 0),
+        indemnification: Number(event.indemnification || 0),
+        user_id: event.approved_by,
+      });
+      this.logger.log(
+        `Auto-entry (accrual) created for settlement.approved #${event.settlement_id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for settlement.approved #${event.settlement_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
 
   @OnEvent('settlement.paid')
   async handleSettlementPaid(event: {
@@ -1095,6 +1187,50 @@ export class AccountingEventsListener {
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for cash_register.movement #${event.movement_id}: ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  // ===== DISPATCH ROUTES (PLANILLAS DSD) =====
+
+  /**
+   * dispatch_route.closed — contabiliza SOLO el cuadre de efectivo
+   * (cash_variance) del conductor al cerrar la planilla. El recaudo y las
+   * retenciones por parada ya se contabilizan al liquidar cada parada vía
+   * payment.received / withholding; este handler NO los re-contabiliza.
+   */
+  @OnEvent('dispatch_route.closed')
+  async handleDispatchRouteClosed(event: {
+    route_id: number;
+    route_number: string;
+    store_id: number;
+    organization_id?: number;
+    cash_variance?: number;
+    driver_user_id?: number;
+    driver_label?: string;
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'cash_register'))) return;
+      const organization_id =
+        event.organization_id || (await this.resolveOrgId(event.store_id));
+      await this.auto_entry_service.onDispatchRouteClosed({
+        route_id: event.route_id,
+        route_number: event.route_number,
+        organization_id,
+        store_id: event.store_id,
+        cash_variance: Number(event.cash_variance || 0),
+        driver_user_id: event.driver_user_id,
+        driver_label: event.driver_label,
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry processed for dispatch_route.closed route ${event.route_number}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for dispatch_route.closed route ${event.route_number}: ${error.message}`,
         error.stack,
       );
     }

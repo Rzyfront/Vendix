@@ -247,6 +247,12 @@ export interface ReceivePurchaseOrderItemDto {
   // QUI-431: real serial numbers captured during reception (manual/bulk).
   // Optional: backend auto-generates placeholders for any missing serials.
   serial_numbers?: string[];
+  // ===== QUI-425 (D2) margin UX =====
+  // Optional pricing overrides captured in the confirmation modal. When
+  // omitted the backend applies the cost-anchor rule (keeps base_price,
+  // recomputes profit_margin from the new cost_price).
+  new_base_price?: number;
+  new_profit_margin?: number;
 }
 
 export interface PurchaseOrderQueryDto {
@@ -626,6 +632,16 @@ export interface CostPreviewItem {
   global_stock: number;
   global_cost_per_unit: number;
   is_reactivation: boolean;
+  // ===== QUI-425 (D1) margin UX =====
+  // Snapshot of the product (or variant, when present) base_price and
+  // profit_margin at preview time. The confirmation modal uses these to
+  // derive the *resulting* margin if the operator accepts the new cost
+  // without overrides, and to anchor the editable margin/price inputs.
+  current_base_price: number;
+  current_profit_margin: number;
+  // `null` when the new cost is 0 (e.g. reactivation of orphaned stock) so
+  // the UI can avoid a divide-by-zero display.
+  resulting_margin: number | null;
 }
 
 export interface CostPreviewResponse {

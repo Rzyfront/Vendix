@@ -99,6 +99,10 @@ const MAPPING_LABELS: Record<string, string> = {
   'layaway.completed.customer_advance':
     'Anticipos de Clientes (Separe Completado)',
   'layaway.completed.revenue': 'Ingresos por Ventas (Separe Completado)',
+  'layaway.cancelled.advance': 'Anticipos de Clientes (Reversa Separe Cancelado)',
+  'layaway.cancelled.refund': 'Caja/Banco (Devolucion Separe Cancelado)',
+  'layaway.cancelled.forfeit_income':
+    'Otros Ingresos (Penalizacion Separe Cancelado)',
   // Fixed Assets - Depreciation
   'depreciation.monthly.depreciation_expense': 'Gasto por Depreciacion',
   'depreciation.monthly.accumulated_depreciation': 'Depreciacion Acumulada',
@@ -114,6 +118,17 @@ const MAPPING_LABELS: Record<string, string> = {
   'withholding.applied.withholding_payable': 'Retencion en la Fuente por Pagar',
   'withholding.applied.accounts_payable': 'Proveedores (Neto tras Retencion)',
   // Settlement (Liquidacion por Terminacion)
+  'settlement.approved.severance': 'Cesantias (Causacion Liquidacion)',
+  'settlement.approved.severance_interest':
+    'Intereses Cesantias (Causacion Liquidacion)',
+  'settlement.approved.bonus': 'Prima de Servicios (Causacion Liquidacion)',
+  'settlement.approved.vacation': 'Vacaciones (Causacion Liquidacion)',
+  'settlement.approved.pending_salary':
+    'Gastos de Personal - Salario Pendiente (Causacion)',
+  'settlement.approved.indemnification':
+    'Gastos de Personal - Indemnizacion (Causacion)',
+  'settlement.approved.salaries_payable':
+    'Salarios por Pagar (Causacion Liquidacion)',
   'settlement.paid.severance': 'Cesantias Consolidadas',
   'settlement.paid.severance_interest': 'Intereses sobre Cesantias',
   'settlement.paid.bonus': 'Prima de Servicios por Pagar',
@@ -122,6 +137,8 @@ const MAPPING_LABELS: Record<string, string> = {
   'settlement.paid.indemnification': 'Gastos de Personal (Indemnizacion)',
   'settlement.paid.social_deductions': 'Retenciones y Aportes de Nomina',
   'settlement.paid.bank': 'Bancos (Pago Liquidacion)',
+  'settlement.paid.salaries_payable':
+    'Salarios por Pagar (Drenaje Pago Liquidacion)',
   // Wallet / Monedero
   'wallet.topup.customer_advance': 'Anticipos de Clientes (Recarga Wallet)',
   'wallet.topup.cash_bank': 'Caja/Banco (Recarga Wallet)',
@@ -187,6 +204,10 @@ const MAPPING_LABELS: Record<string, string> = {
   'cash_register.closed.shortage': 'Faltante de Caja',
   'cash_register.movement.cash': 'Caja (Movimiento Manual)',
   'cash_register.movement.other': 'Contrapartida (Movimiento Manual)',
+  'dispatch_route.closed.cash': 'Caja (Cuadre Planilla de Ruta)',
+  'dispatch_route.closed.surplus': 'Otros Ingresos (Sobrante de Ruta)',
+  'dispatch_route.closed.shortage_receivable':
+    'CxC al Conductor (Faltante de Ruta)',
   // Transferencias de Stock
   'stock_transfer.completed.inventory_origin': 'Inventario (Tienda Origen)',
   'stock_transfer.completed.inventory_destination':
@@ -251,7 +272,7 @@ const GROUP_DEFINITIONS: Array<{
     key: 'layaway',
     label: 'Plan Separe',
     icon: 'clock',
-    prefixes: ['layaway.payment.', 'layaway.completed.'],
+    prefixes: ['layaway.payment.', 'layaway.completed.', 'layaway.cancelled.'],
   },
   {
     key: 'fixed_assets',
@@ -269,7 +290,7 @@ const GROUP_DEFINITIONS: Array<{
     key: 'settlements',
     label: 'Liquidaciones',
     icon: 'user-minus',
-    prefixes: ['settlement.paid.'],
+    prefixes: ['settlement.approved.', 'settlement.paid.'],
   },
   {
     key: 'wallet',
@@ -316,6 +337,12 @@ const GROUP_DEFINITIONS: Array<{
       'cash_register.closed.',
       'cash_register.movement.',
     ],
+  },
+  {
+    key: 'dispatch_routes',
+    label: 'Planillas de Ruta (DSD)',
+    icon: 'truck',
+    prefixes: ['dispatch_route.closed.'],
   },
 ];
 

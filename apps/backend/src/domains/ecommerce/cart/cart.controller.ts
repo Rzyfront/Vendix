@@ -10,8 +10,14 @@ import {
   Header,
 } from '@nestjs/common';
 import { CartService } from './cart.service';
-import { AddToCartDto, UpdateCartItemDto, SyncCartDto } from './dto/cart.dto';
+import {
+  AddToCartDto,
+  UpdateCartItemDto,
+  SyncCartDto,
+  CartSummaryDto,
+} from './dto/cart.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
+import { OptionalAuth } from '@common/decorators/optional-auth.decorator';
 
 @Controller('ecommerce/cart')
 @UseGuards(JwtAuthGuard)
@@ -65,6 +71,20 @@ export class CartController {
   async syncCart(@Body() dto: SyncCartDto) {
     // store_id y user_id se resuelven automáticamente
     const data = await this.cart_service.syncFromLocalStorage(dto);
+    return { success: true, data };
+  }
+
+  /**
+   * Guest-friendly cart summary. Quotes automatic promotional discounts for a
+   * set of items sent by the storefront (localStorage cart) without touching
+   * the persisted cart. @OptionalAuth so guests can call it; store context is
+   * resolved from the domain.
+   */
+  @Post('summary')
+  @OptionalAuth()
+  @Header('Cache-Control', 'no-store')
+  async getSummary(@Body() dto: CartSummaryDto) {
+    const data = await this.cart_service.getCartSummary(dto.items);
     return { success: true, data };
   }
 }

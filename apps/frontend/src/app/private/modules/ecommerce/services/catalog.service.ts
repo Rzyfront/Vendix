@@ -20,6 +20,15 @@ export interface ActiveProductPromotion {
   promotional_price: number;
   badge_label: string;
   priority: number;
+  /**
+   * True when the promotion is a quantity-tiered rule. In this case there is
+   * no instant single-unit discount (`promotional_price === unit price`), so
+   * the card must show only the informative badge (e.g. "Desde 3 und:
+   * descuento") without a struck-through / discounted price.
+   */
+  is_quantity_tiered?: boolean;
+  /** Minimum discount preview across the tier ladder (informative only). */
+  preview_min_discount?: number;
 }
 
 export interface EcommerceProduct {

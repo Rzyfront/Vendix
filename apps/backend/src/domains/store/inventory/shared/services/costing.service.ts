@@ -244,7 +244,12 @@ export class CostingService {
     const prisma = tx || this.prisma;
 
     if (params.costing_method === 'weighted_average') {
-      // For weighted average, COGS is simply quantity * current cost_per_unit
+      // For weighted average, COGS is quantity * current cost_per_unit (the
+      // average). We ALSO decrement cost layers (received_at ASC) so that the
+      // layers stay in sync with stock_levels; otherwise the layers would sum
+      // to more than the real stock and break a future FIFO switch or the
+      // historical valuation. The COGS amount is unaffected by which layers we
+      // touch: we always cost consumed units at the average cost_per_unit.
       const stockLevel = await prisma.stock_levels.findFirst({
         where: {
           product_id: params.product_id,
@@ -253,7 +258,53 @@ export class CostingService {
         },
       });
       const costPerUnit = Number(stockLevel?.cost_per_unit ?? 0);
-      return params.quantity * costPerUnit;
+
+      const cppLayers = await prisma.inventory_cost_layers.findMany({
+        where: {
+          product_id: params.product_id,
+          product_variant_id: params.variant_id || null,
+          location_id: params.location_id,
+          quantity_remaining: { gt: 0 },
+        },
+        orderBy: { received_at: 'asc' },
+      });
+
+      let remainingToConsume = params.quantity;
+      let totalCogs = 0;
+
+      for (const layer of cppLayers) {
+        if (remainingToConsume <= 0) break;
+
+        const consumeFromLayer = Math.min(
+          remainingToConsume,
+          layer.quantity_remaining,
+        );
+
+        // Average costing: cost consumed units at the average cost_per_unit,
+        // NOT at the individual layer.unit_cost.
+        totalCogs += consumeFromLayer * costPerUnit;
+        remainingToConsume -= consumeFromLayer;
+
+        await prisma.inventory_cost_layers.update({
+          where: { id: layer.id },
+          data: {
+            quantity_remaining: layer.quantity_remaining - consumeFromLayer,
+          },
+        });
+      }
+
+      if (remainingToConsume > 0) {
+        this.logger.warn(
+          `Insufficient cost layers for product ${params.product_id}. ` +
+            `${remainingToConsume} units consumed without layer data.`,
+        );
+        // Preserve legacy CPP behavior: COGS must remain exactly
+        // quantity * cost_per_unit even when layers are insufficient, so we
+        // still charge the missing units at the average cost.
+        totalCogs += remainingToConsume * costPerUnit;
+      }
+
+      return totalCogs;
     }
 
     // FIFO or LIFO: consume layers in order

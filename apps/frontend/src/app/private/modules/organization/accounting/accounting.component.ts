@@ -168,6 +168,13 @@ const TAB_DEFINITIONS: StickyHeaderTab[] = [
     route: '/admin/accounting/fiscal-periods',
   },
   {
+    id: 'consolidation',
+    label: 'Consolidación',
+    shortLabel: 'Consol.',
+    icon: 'layers',
+    route: '/admin/accounting/consolidation',
+  },
+  {
     id: 'configuration',
     label: 'Configuración',
     shortLabel: 'Config.',

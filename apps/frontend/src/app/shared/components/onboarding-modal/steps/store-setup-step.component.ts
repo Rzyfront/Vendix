@@ -1,4 +1,4 @@
-import {Component, input, output, ChangeDetectionStrategy, OnInit, inject, DestroyRef} from '@angular/core';
+import {Component, input, output, ChangeDetectionStrategy, OnInit, inject, DestroyRef, signal} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -428,7 +428,7 @@ import { StoreIndustry } from '../../../../shared/constants/industry-modules.con
             </div>
           </div>
           <div class="store-header-content">
-            <h2 class="store-title">Configura tu tienda</h2>
+            <h2 class="store-title">Configura tu comercio</h2>
             <p class="store-subtitle">
               Prepara tu punto de venta para empezar a vender
             </p>
@@ -454,9 +454,9 @@ import { StoreIndustry } from '../../../../shared/constants/industry-modules.con
               <div class="form-field">
                 <app-input
                   formControlName="name"
-                  [label]="'Nombre de la tienda'"
+                  [label]="'Nombre del comercio'"
                   styleVariant="modern"
-                  placeholder="Tienda Principal"
+                  placeholder="Comercio Principal"
                   tooltipText="El nombre visible para tus clientes"
                   [required]="true"
                 ></app-input>
@@ -497,7 +497,7 @@ import { StoreIndustry } from '../../../../shared/constants/industry-modules.con
                   class="section-icon-element"
                 ></app-icon>
               </div>
-              <h3 class="section-title">Tipo de tienda</h3>
+              <h3 class="section-title">Tipo de comercio</h3>
             </div>
     
             <div class="store-type-selector">
@@ -514,7 +514,7 @@ import { StoreIndustry } from '../../../../shared/constants/industry-modules.con
                   ></app-icon>
                 </div>
                 <div class="store-type-content">
-                  <h4 class="store-type-title">Tienda Híbrida</h4>
+                  <h4 class="store-type-title">Comercio Híbrido</h4>
                   <p class="store-type-description">
                     Ventas en persona y online
                   </p>
@@ -543,7 +543,7 @@ import { StoreIndustry } from '../../../../shared/constants/industry-modules.con
                   ></app-icon>
                 </div>
                 <div class="store-type-content">
-                  <h4 class="store-type-title">Tienda Online</h4>
+                  <h4 class="store-type-title">Comercio Online</h4>
                   <p class="store-type-description">
                     Ventas por internet y delivery
                   </p>
@@ -572,7 +572,7 @@ import { StoreIndustry } from '../../../../shared/constants/industry-modules.con
                   ></app-icon>
                 </div>
                 <div class="store-type-content">
-                  <h4 class="store-type-title">Tienda Física</h4>
+                  <h4 class="store-type-title">Comercio Físico</h4>
                   <p class="store-type-description">
                     Ventas en persona con caja física
                   </p>
@@ -662,7 +662,7 @@ import { StoreIndustry } from '../../../../shared/constants/industry-modules.con
                   [label]="'Calle y número'"
                   styleVariant="modern"
                   placeholder="Calle Principal #123"
-                  tooltipText="Dirección principal de la tienda"
+                  tooltipText="Dirección principal del comercio"
                 ></app-input>
               </div>
             </div>
@@ -775,9 +775,14 @@ export class StoreSetupStepComponent implements OnInit {
 
   countries: Country[] = [];
   timezones: Timezone[] = [];
-  departments: Department[] = [];
-  cities: City[] = [];
-  currencies: { value: string; label: string }[] = [];
+  // Async-loaded lists MUST be signals: they are populated after an `await`
+  // in ngOnInit / valueChanges handlers, and under Zoneless change detection a
+  // plain-field mutation post-await never re-renders the `[options]` bindings
+  // (the select stays empty). `countries`/`timezones` above load synchronously
+  // so they render on first CD and can stay plain fields.
+  readonly departments = signal<Department[]>([]);
+  readonly cities = signal<City[]>([]);
+  readonly currencies = signal<{ value: string; label: string }[]>([]);
   locationOptions: { value: number; label: string }[] = [];
 
   /**
@@ -835,8 +840,8 @@ export class StoreSetupStepComponent implements OnInit {
       if (code === 'CO') {
         this.loadDepartments();
       } else {
-        this.departments = [];
-        this.cities = [];
+        this.departments.set([]);
+        this.cities.set([]);
         depControl.setValue(null);
         cityControl.setValue(null);
       }
@@ -848,7 +853,7 @@ export class StoreSetupStepComponent implements OnInit {
         const numericDepId = Number(depId);
         this.loadCities(numericDepId);
       } else {
-        this.cities = [];
+        this.cities.set([]);
         cityControl.setValue(null);
       }
     });
@@ -884,24 +889,39 @@ export class StoreSetupStepComponent implements OnInit {
   }
 
   async loadDepartments(): Promise<void> {
-    this.departments = await this.countryService.getDepartments();
+    this.departments.set(await this.countryService.getDepartments());
   }
 
   async loadCities(depId: number): Promise<void> {
-    this.cities = await this.countryService.getCitiesByDepartment(depId);
+    this.cities.set(await this.countryService.getCitiesByDepartment(depId));
   }
 
   private async loadCurrencies(): Promise<void> {
     try {
       const active = await this.currencyService.getActiveCurrencies();
-      this.currencies = active.map(c => ({ value: c.code, label: `${c.name} (${c.code})` }));
+      // Fall back to the hardcoded list when the endpoint responds with an
+      // empty set (getActiveCurrencies swallows HTTP errors and returns []),
+      // otherwise MONEDA — a required field — would have no options and the
+      // owner could never finish the store step of onboarding.
+      if (active.length > 0) {
+        this.currencies.set(
+          active.map(c => ({ value: c.code, label: `${c.name} (${c.code})` })),
+        );
+      } else {
+        this.currencies.set(this.fallbackCurrencies());
+      }
     } catch {
-      this.currencies = [
-        { value: 'COP', label: 'Peso Colombiano (COP)' },
-        { value: 'USD', label: 'Dólar Americano (USD)' },
-        { value: 'EUR', label: 'Euro (EUR)' },
-      ];
+      this.currencies.set(this.fallbackCurrencies());
     }
+  }
+
+  /** Minimal currency list used when the backend has none active / errors. */
+  private fallbackCurrencies(): { value: string; label: string }[] {
+    return [
+      { value: 'COP', label: 'Peso Colombiano (COP)' },
+      { value: 'USD', label: 'Dólar Americano (USD)' },
+      { value: 'EUR', label: 'Euro (EUR)' },
+    ];
   }
 
   /**
@@ -937,7 +957,7 @@ export class StoreSetupStepComponent implements OnInit {
   }
 
   get currencyOptions() {
-    return this.currencies;
+    return this.currencies();
   }
 
   get timezoneOptions() {
@@ -949,10 +969,10 @@ export class StoreSetupStepComponent implements OnInit {
   }
 
   get departmentOptions() {
-    return this.departments.map(d => ({ value: d.id, label: d.name }));
+    return this.departments().map(d => ({ value: d.id, label: d.name }));
   }
 
   get cityOptions() {
-    return this.cities.map(c => ({ value: c.id, label: c.name }));
+    return this.cities().map(c => ({ value: c.id, label: c.name }));
   }
 }

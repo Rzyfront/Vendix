@@ -22,9 +22,18 @@ import { SetupAppConfigWizardDto } from './dto/setup-app-config-wizard.dto';
 import { SelectAppTypeDto } from './dto/select-app-type.dto';
 import { ResponseService } from '@common/responses/response.service';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
+import { AllowCrossDomain } from '@common/decorators/allow-cross-domain.decorator';
 
 @ApiTags('Onboarding Wizard')
 @ApiBearerAuth()
+// Onboarding is a domain-transition surface: an owner who picked the
+// single-commerce (STORE) path has `user_settings.app_type = STORE_ADMIN`, so on
+// re-login their JWT is STORE_ADMIN-scoped. Without this, DomainScopeGuard would
+// 403 every wizard call (endpoints live under /organization/*), locking the
+// owner out of *finishing* onboarding (status/select-app-type/setup-*/complete
+// all fail). @AllowCrossDomain skips ONLY domain isolation; PermissionsGuard and
+// the service-level owner checks stay active.
+@AllowCrossDomain()
 @Controller('organization/onboarding-wizard')
 export class OnboardingWizardController {
   constructor(

@@ -70,7 +70,35 @@ export class CartService {
       });
     }
 
-    return await this.mapCartToResponse(cart);
+    const mapped = await this.mapCartToResponse(cart);
+
+    // Surface the automatic promotional discount alongside the existing cart
+    // shape (additive: never removes fields). Degrade silently on any failure
+    // so the cart view never breaks because of promotions.
+    let promotion_discount = 0;
+    let promotional_subtotal = mapped.subtotal;
+    let applied_promotions: Array<{
+      promotion_id: number;
+      name: string;
+      discount_amount: number;
+    }> = [];
+    try {
+      const summary = await this.getCartSummary();
+      promotion_discount = summary.promotion_discount;
+      promotional_subtotal = summary.promotional_subtotal;
+      applied_promotions = summary.applied_promotions;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to resolve cart promotions summary: ${error?.message ?? error}`,
+      );
+    }
+
+    return {
+      ...mapped,
+      promotion_discount,
+      promotional_subtotal,
+      applied_promotions,
+    };
   }
 
   async addItem(dto: AddToCartDto) {

@@ -282,6 +282,14 @@
         color: var(--color-success);
     }
 
+    &.discount {
+        color: var(--color-success);
+
+        .discount-amount {
+            font-weight: var(--fw-semibold);
+        }
+    }
+
     &.total {
         font-size: var(--fs-lg);
         font-weight: var(--fw-bold);

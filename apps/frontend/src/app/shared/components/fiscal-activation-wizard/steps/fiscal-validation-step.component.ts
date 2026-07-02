@@ -4,6 +4,7 @@ import { CommonModule } from '@angular/common';
 import { FiscalActivationWizardService } from '../../../../core/services/fiscal-activation-wizard.service';
 import {
   FISCAL_STEP_LABELS,
+  FISCAL_STEP_ORDER,
   FiscalArea,
   FiscalWizardStepId,
   REQUIRED_STEPS_BY_AREA,
@@ -276,7 +277,25 @@ export class FiscalValidationStepComponent
         .filter((s) => s !== 'validation' && s !== 'area_selection')
         .forEach((s) => acc.add(s));
     });
-    return Array.from(acc);
+
+    // Union with any step the backend explicitly flagged as missing on the
+    // last `finalize()` 409 (`details.missing_steps`). The frontend's
+    // `REQUIRED_STEPS_BY_AREA` and the backend's `REQUIRED_STEPS_BY_FISCAL_AREA`
+    // are two copies of the same contract; if they ever drift, a server-flagged
+    // step that the frontend doesn't list would otherwise be swallowed — the
+    // user would see the generic "faltan pasos" banner with no actionable row
+    // to navigate to. Folding the flagged steps in here guarantees every 409
+    // missing step renders as a navigable row, regardless of contract drift.
+    const missingByArea = this.service.finalizeMissingSteps();
+    (Object.keys(missingByArea) as FiscalArea[]).forEach((area) => {
+      (missingByArea[area] ?? [])
+        .filter((s) => s !== 'validation' && s !== 'area_selection')
+        .forEach((s) => acc.add(s));
+    });
+
+    // Keep the rows in the canonical wizard order so the list reads top-to-bottom
+    // the same way the stepper does, instead of selection/insertion order.
+    return FISCAL_STEP_ORDER.filter((step) => acc.has(step));
   });
 
   /**

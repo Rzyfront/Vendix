@@ -127,6 +127,8 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
             }
             @if (hasActiveDiscount()) {
               <span class="original-price">{{ product().base_price | currency }}</span>
+            }
+            @if (hasActiveDiscount() || isQuantityTiered()) {
               <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
             }
           </div>
@@ -560,6 +562,17 @@ export class ProductCardComponent {
 
     if (!product.is_on_sale) return false;
     return basePrice > 0 && promoPrice > 0 && promoPrice < basePrice;
+  }
+
+  /**
+   * True when the active promotion is quantity-tiered. These promotions have
+   * no single-unit discount (`promotional_price === unit price`), so
+   * `hasActiveDiscount()` returns false and the price stays normal — but we
+   * still want to surface the informative badge (e.g. "Desde 3 und:
+   * descuento").
+   */
+  isQuantityTiered(): boolean {
+    return this.product().active_promotion?.is_quantity_tiered === true;
   }
 
   discountPercentage(): number {

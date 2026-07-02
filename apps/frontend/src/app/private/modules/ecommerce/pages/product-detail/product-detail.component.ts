@@ -189,6 +189,9 @@ import { EmptyStateComponent } from '../../../../../shared/components/empty-stat
                     >{{ selectedPriceResolution()?.compareAtPrice | currency }}</span
                   >
                 }
+                @if (isQuantityTiered() && promotionBadgeLabel()) {
+                  <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
+                }
               </div>
 
               <!-- Options: Attribute-based groups -->
@@ -806,6 +809,20 @@ import { EmptyStateComponent } from '../../../../../shared/components/empty-stat
           font-size: 1.25rem;
           color: var(--color-text-muted);
           text-decoration: line-through;
+        }
+        .discount-badge {
+          display: inline-flex;
+          align-items: center;
+          min-height: 20px;
+          padding: 0.2rem 0.5rem;
+          border-radius: 999px;
+          background: var(--color-success-light);
+          color: var(--color-success);
+          font-size: var(--fs-xs);
+          font-weight: var(--fw-bold);
+          line-height: 1;
+          white-space: nowrap;
+          align-self: center;
         }
       }
 
@@ -1554,6 +1571,21 @@ export class ProductDetailComponent implements OnInit {
     const max = Math.max(...prices);
     if (max - min < 0.01) return null;
     return 'Desde';
+  });
+
+  /**
+   * True when the active promotion is quantity-tiered. These promotions have
+   * no single-unit discount (`promotional_price === unit price`), so the price
+   * stays normal, but we still surface the informative badge (e.g. "Desde 3
+   * und: descuento"). Mirrors ProductCardComponent.isQuantityTiered().
+   */
+  isQuantityTiered = computed((): boolean => {
+    return this.product()?.active_promotion?.is_quantity_tiered === true;
+  });
+
+  /** Informative label for the active promotion badge. */
+  promotionBadgeLabel = computed((): string => {
+    return this.product()?.active_promotion?.badge_label ?? '';
   });
 
   displayStock = computed((): number => {

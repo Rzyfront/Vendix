@@ -1,7 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
 import { parseDateRange } from '../utils/date.util';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class FinancialAnalyticsService {
@@ -221,9 +223,15 @@ export class FinancialAnalyticsService {
   async getProfitLossSummary(query: AnalyticsQueryDto) {
     const { startDate, endDate } = parseDateRange(query);
 
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const storeId = context.store_id;
+
     const [
       orderAggregates,
-      cogsResult,
+      cogsRows,
       refundAggregates,
       expenseAggregates,
     ] = await Promise.all([
@@ -243,18 +251,19 @@ export class FinancialAnalyticsService {
           id: true,
         },
       }),
-      this.prisma.order_items.aggregate({
-        where: {
-          orders: {
-            state: { in: this.COMPLETED_STATES },
-            created_at: { gte: startDate, lte: endDate },
-          },
-        },
-        _sum: {
-          cost_price: true,
-          quantity: true,
-        },
-      }),
+      // COGS = SUM(cost_price * quantity) per line item.
+      // Must be computed in SQL: SUM(a)*SUM(b) != SUM(a*b).
+      // withoutScope() needed: $queryRaw is not available on the scoped client.
+      // storeId is validated above and used in the WHERE clause.
+      (this.prisma.withoutScope() as any).$queryRaw<Array<{ cogs: any }>>`
+        SELECT COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cogs
+        FROM order_items oi
+        INNER JOIN orders o ON o.id = oi.order_id
+        WHERE o.store_id = ${storeId}
+          AND o.state IN ('delivered', 'finished')
+          AND o.created_at >= ${startDate}
+          AND o.created_at <= ${endDate}
+      `,
       this.prisma.refunds.aggregate({
         where: {
           state: { in: ['completed', 'approved'] },
@@ -281,9 +290,7 @@ export class FinancialAnalyticsService {
     const revenue = Number(orderAggregates._sum.subtotal_amount || 0);
     const discounts = Number(orderAggregates._sum.discount_amount || 0);
     const netRevenue = revenue - discounts;
-    const totalCOGS =
-      Number(cogsResult._sum.cost_price || 0) *
-      Number(cogsResult._sum.quantity || 0);
+    const totalCOGS = Number(cogsRows[0]?.cogs ?? 0);
     const grossProfit = netRevenue - totalCOGS;
     const grossMargin = netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0;
     const taxCollected = Number(orderAggregates._sum.tax_amount || 0);

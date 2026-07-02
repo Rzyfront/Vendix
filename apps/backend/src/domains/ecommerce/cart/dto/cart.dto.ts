@@ -47,3 +47,24 @@ export class SyncCartDto {
   @Type(() => SyncCartItemDto)
   items: SyncCartItemDto[];
 }
+
+export class CartSummaryItemDto {
+  @IsInt()
+  @Min(1)
+  product_id: number;
+
+  @IsOptional()
+  @IsInt()
+  product_variant_id?: number | null;
+
+  @IsInt()
+  @Min(1)
+  quantity: number;
+}
+
+export class CartSummaryDto {
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CartSummaryItemDto)
+  items: CartSummaryItemDto[];
+}

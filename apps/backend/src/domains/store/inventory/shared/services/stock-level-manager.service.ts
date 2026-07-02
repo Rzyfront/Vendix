@@ -14,6 +14,11 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 import { mergeStoreSettingsWithDefaults } from '../../../settings/defaults/default-store-settings';
 import type { StoreSettings } from '../../../settings/interfaces/store-settings.interface';
 import { resolveStockLevelLowStockThreshold } from '../helpers/low-stock-threshold.helper';
+import { CostingService } from './costing.service';
+import {
+  CostingMethodResolverService,
+  ResolvedCostingMethod,
+} from './costing-method-resolver.service';
 
 export interface UpdateStockParams {
   product_id: number;
@@ -49,6 +54,16 @@ export interface UpdateStockParams {
    * sobrescribir el CPP del stock.
    */
   movement_unit_cost?: number;
+  /**
+   * Método de costeo a aplicar en movimientos de salida (consumo negativo).
+   * Si no se provee, `executeStockUpdate` lo resuelve internamente vía
+   * `CostingMethodResolverService` (precedencia ORG → STORE → default
+   * `'weighted_average'`) usando el contexto de request o el store_id del
+   * stock_level como fallback. Pasar el método resuelto explícitamente
+   * mejora la observabilidad y evita una segunda lectura cuando el caller
+   * ya lo conoce (e.g. `PurchaseOrdersService` en recepción).
+   */
+  costing_method?: ResolvedCostingMethod;
 }
 
 export interface StockUpdateResult {
@@ -79,6 +94,8 @@ export class StockLevelManager {
     private transactionsService: InventoryTransactionsService,
     private eventEmitter: EventEmitter2,
     private readonly operatingScopeService: OperatingScopeService,
+    private readonly costingService: CostingService,
+    private readonly costingMethodResolver: CostingMethodResolverService,
   ) {}
 
   /**
@@ -319,6 +336,15 @@ export class StockLevelManager {
       organizationId,
       prisma,
     );
+    // El `costing_method` persistido en el snapshot debe reflejar el método
+    // que efectivamente se aplicó al consumo (FIFO vs CPP), no un literal
+    // fijo. Para recepciones (+) siempre aplicamos CPP; para salidas (-) el
+    // caller o el resolver ya decidió. Fallback = CPP.
+    const snapshotCostingMethod: ResolvedCostingMethod =
+      params.costing_method ??
+      (params.quantity_change < 0
+        ? await this.resolveCostingMethodForStockUpdate(prisma, params, stockLevel)
+        : 'weighted_average');
     // unit_cost del snapshot = costo del movimiento individual
     // (no el CPP del stock; ese se usa para valorar el inventario abajo).
     const unitCost =
@@ -353,7 +379,7 @@ export class StockLevelManager {
         ),
         unit_cost: new Prisma.Decimal(unitCost),
         total_value: new Prisma.Decimal(stockValue),
-        costing_method: 'weighted_average',
+        costing_method: snapshotCostingMethod,
         operating_scope: operatingScope,
         source_type: params.movement_type,
         source_id: transactionId ?? null,
@@ -384,40 +410,87 @@ export class StockLevelManager {
       return { unit_cost: unitCost, total_cost: unitCost * quantity };
     }
 
-    const layers = await prisma.inventory_cost_layers.findMany({
-      where: {
+    // Consumo negativo (COGS): delegar al helper que respeta el método
+    // configurado (FIFO / weighted_average) en lugar de quemar FIFO
+    // hardcodeado. `costing_method` se resuelve aquí mismo si el caller
+    // no lo proveyó.
+    const costingMethod =
+      params.costing_method ??
+      (await this.resolveCostingMethodForStockUpdate(prisma, params, stockLevel));
+
+    const totalCost = await this.costingService.consumeCostLayers(
+      {
         product_id: params.product_id,
-        product_variant_id: params.variant_id ?? null,
+        variant_id: params.variant_id,
         location_id: params.location_id,
-        quantity_remaining: { gt: 0 },
+        quantity,
+        costing_method: costingMethod,
       },
-      orderBy: { received_at: 'asc' },
-    });
-
-    let remaining = quantity;
-    let totalCost = 0;
-
-    for (const layer of layers) {
-      if (remaining <= 0) break;
-      const consumed = Math.min(remaining, layer.quantity_remaining);
-      totalCost += consumed * Number(layer.unit_cost || 0);
-      remaining -= consumed;
-
-      await prisma.inventory_cost_layers.update({
-        where: { id: layer.id },
-        data: { quantity_remaining: layer.quantity_remaining - consumed },
-      });
-    }
-
-    if (remaining > 0) {
-      totalCost += remaining * Number(stockLevel.cost_per_unit || 0);
-    }
+      prisma,
+    );
 
     const unitCost =
       totalCost > 0
         ? totalCost / quantity
-        : Number(stockLevel.cost_per_unit || 0);
+        : Number(stockLevel.cost_per_unit ?? 0);
     return { unit_cost: unitCost, total_cost: totalCost };
+  }
+
+  /**
+   * Resuelve el `costing_method` efectivo para un movimiento de salida
+   * usando el precedence ORG → STORE → default `'weighted_average'`.
+   *
+   * El contexto (organization_id, store_id) puede venir del AsyncLocalStorage
+   * vía `RequestContextService`. Si no hay contexto suficiente (e.g. jobs /
+   * listeners fuera de una request HTTP), hace fallback leyendo el
+   * `stock_level` (`products.store_id` y `inventory_locations.organization_id`).
+   * Nunca lanza: cualquier error cae al default.
+   */
+  private async resolveCostingMethodForStockUpdate(
+    prisma: any,
+    params: UpdateStockParams,
+    stockLevel: any,
+  ): Promise<ResolvedCostingMethod> {
+    const context = RequestContextService.getContext();
+    let organizationId: number | undefined = context?.organization_id ?? undefined;
+    let storeId: number | undefined = context?.store_id ?? undefined;
+
+    if (!organizationId || storeId === undefined) {
+      try {
+        if (!organizationId) {
+          const location = await prisma.inventory_locations.findUnique({
+            where: { id: params.location_id },
+            select: { organization_id: true },
+          });
+          organizationId = location?.organization_id ?? undefined;
+        }
+        if (storeId === undefined) {
+          const product = await prisma.products.findUnique({
+            where: { id: params.product_id },
+            select: { store_id: true },
+          });
+          storeId = product?.store_id ?? undefined;
+        }
+        if (storeId === undefined && stockLevel) {
+          const location = await prisma.inventory_locations.findUnique({
+            where: { id: stockLevel.location_id },
+            select: { store_id: true },
+          });
+          storeId = location?.store_id ?? undefined;
+        }
+      } catch (err) {
+        // Ignore — resolveCostingMethod will fall back to default.
+      }
+    }
+
+    if (!organizationId) {
+      return 'weighted_average';
+    }
+
+    return this.costingMethodResolver.resolveCostingMethod(
+      organizationId,
+      storeId ?? undefined,
+    );
   }
 
   private async createTransferCostLayer(

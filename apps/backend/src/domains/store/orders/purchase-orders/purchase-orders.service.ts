@@ -22,6 +22,7 @@ import {
   CostCalculationResult,
 } from '../../inventory/shared/services/costing.service';
 import { CostingMethodResolverService } from '../../inventory/shared/services/costing-method-resolver.service';
+import { toPublicCostingMethod } from '../../inventory/shared/helpers/costing-method.mapper';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/serial-number-enforcement.service';
 import { AuditService } from '@common/audit/audit.service';
@@ -942,6 +943,61 @@ export class PurchaseOrdersService {
     return result;
   }
 
+  /**
+   * Centralised margin↔price resolution used by `receive()` (and exposed for
+   * future call-sites). It encapsulates the "cost anchor" rule used when the
+   * confirmation modal does NOT pass any override:
+   *
+   *   - When an override is provided, that override wins.
+   *   - Otherwise the existing base_price is preserved and the margin is
+   *     recomputed from the new cost_price. This matches the operator's
+   *     mental model: receiving a PO at a higher cost shouldn't silently
+   *     change the listing price; the margin absorbs the difference.
+   *
+   * Returns the final `base_price` and `profit_margin` to persist. Both are
+   * numbers (not Decimal) — Prisma will coerce back to Decimal at the column.
+   *
+   * `costPrice` must already be the *stock* unit cost (post UoM conversion
+   * when applicable); margin math is always against the minimum stock unit.
+   */
+  static resolvePricingAfterReceipt(args: {
+    costPrice: number;
+    existingBasePrice: number;
+    newBasePrice?: number;
+    newProfitMargin?: number;
+  }): { basePrice: number; profitMargin: number } {
+    const { costPrice, existingBasePrice } = args;
+    const { newBasePrice, newProfitMargin } = args;
+
+    if (newBasePrice !== undefined && newBasePrice !== null) {
+      // Operator pinned the listing price → margin derived from new cost.
+      const margin =
+        costPrice > 0
+          ? Math.round(((newBasePrice - costPrice) / costPrice) * 10000) /
+            100
+          : 0;
+      return { basePrice: newBasePrice, profitMargin: margin };
+    }
+
+    if (newProfitMargin !== undefined && newProfitMargin !== null) {
+      // Operator pinned the margin → listing price derived from new cost.
+      const basePrice = costPrice * (1 + newProfitMargin / 100);
+      return {
+        basePrice: Math.round(basePrice * 100) / 100,
+        profitMargin: newProfitMargin,
+      };
+    }
+
+    // Cost-anchor default: keep the existing base_price, recompute margin.
+    const margin =
+      costPrice > 0
+        ? Math.round(
+            ((existingBasePrice - costPrice) / costPrice) * 10000,
+          ) / 100
+        : 0;
+    return { basePrice: existingBasePrice, profitMargin: margin };
+  }
+
   async receive(id: number, dto: ReceivePurchaseOrderDto) {
     const result = await this.prisma.$transaction(async (tx) => {
       // Create reception record
@@ -1121,6 +1177,110 @@ export class PurchaseOrdersService {
               purchaseOrder.location_id!,
               tx,
             );
+          }
+
+          // ===== QUI-425 (D2): apply optional pricing overrides =====
+          // When the confirmation modal sends new_base_price or
+          // new_profit_margin, persist them to the product (and variant when
+          // applicable). When neither override is provided we still re-anchor
+          // the existing base_price against the *new* cost_price so the
+          // stored margin reflects reality — this is the cost-anchor rule
+          // and matches what the modal displays in `resulting_margin`.
+          if (item.new_base_price !== undefined || item.new_profit_margin !== undefined) {
+            const dtoItem = item;
+            const costForPricing = costResult?.new_cost_per_unit ?? receiptUnitCost;
+
+            // Persist on the variant first (if present), then on the product
+            // for variant-less items. Variants use price_override (NOT
+            // base_price) per the product-pricing skill.
+            if (productVariantId) {
+              const existingVariant = await tx.product_variants.findUnique({
+                where: { id: productVariantId },
+                select: { price_override: true, profit_margin: true },
+              });
+              const resolved = PurchaseOrdersService.resolvePricingAfterReceipt(
+                {
+                  costPrice: Number(costForPricing),
+                  existingBasePrice: Number(
+                    existingVariant?.price_override ?? 0,
+                  ),
+                  newBasePrice: dtoItem.new_base_price,
+                  newProfitMargin: dtoItem.new_profit_margin,
+                },
+              );
+              await tx.product_variants.update({
+                where: { id: productVariantId },
+                data: {
+                  price_override: resolved.basePrice,
+                  profit_margin: resolved.profitMargin,
+                },
+              });
+            } else {
+              const existingProduct = await tx.products.findUnique({
+                where: { id: productId },
+                select: { base_price: true, profit_margin: true },
+              });
+              const resolved = PurchaseOrdersService.resolvePricingAfterReceipt(
+                {
+                  costPrice: Number(costForPricing),
+                  existingBasePrice: Number(existingProduct?.base_price ?? 0),
+                  newBasePrice: dtoItem.new_base_price,
+                  newProfitMargin: dtoItem.new_profit_margin,
+                },
+              );
+              await tx.products.update({
+                where: { id: productId },
+                data: {
+                  base_price: resolved.basePrice,
+                  profit_margin: resolved.profitMargin,
+                },
+              });
+            }
+          } else {
+            // No override — apply the cost-anchor rule so the persisted
+            // margin tracks the new cost. Without this, the displayed
+            // resulting_margin in the preview would diverge from the stored
+            // margin on the product.
+            const costForPricing = costResult?.new_cost_per_unit ?? receiptUnitCost;
+            if (costForPricing > 0) {
+              if (productVariantId) {
+                const existingVariant = await tx.product_variants.findUnique({
+                  where: { id: productVariantId },
+                  select: { price_override: true, profit_margin: true },
+                });
+                const resolved =
+                  PurchaseOrdersService.resolvePricingAfterReceipt({
+                    costPrice: Number(costForPricing),
+                    existingBasePrice: Number(
+                      existingVariant?.price_override ?? 0,
+                    ),
+                  });
+                await tx.product_variants.update({
+                  where: { id: productVariantId },
+                  data: {
+                    price_override: resolved.basePrice,
+                    profit_margin: resolved.profitMargin,
+                  },
+                });
+              } else {
+                const existingProduct = await tx.products.findUnique({
+                  where: { id: productId },
+                  select: { base_price: true, profit_margin: true },
+                });
+                const resolved =
+                  PurchaseOrdersService.resolvePricingAfterReceipt({
+                    costPrice: Number(costForPricing),
+                    existingBasePrice: Number(existingProduct?.base_price ?? 0),
+                  });
+                await tx.products.update({
+                  where: { id: productId },
+                  data: {
+                    base_price: resolved.basePrice,
+                    profit_margin: resolved.profitMargin,
+                  },
+                });
+              }
+            }
           }
         }
       }
@@ -1593,6 +1753,9 @@ export class PurchaseOrdersService {
       incoming_quantity: number;
       incoming_cost: number;
       is_reactivation: boolean;
+      current_base_price: number;
+      current_profit_margin: number;
+      resulting_margin: number | null;
     }> = [];
 
     for (const item of dto.items) {
@@ -1644,20 +1807,56 @@ export class PurchaseOrdersService {
       // Round to 2 decimals for display
       newCostPerUnit = Math.round(newCostPerUnit * 100) / 100;
 
-      // Fetch product name
+      // Fetch product name + current pricing snapshot for the margin UX.
+      // We read base_price + profit_margin so the confirmation modal can show
+      // the *resulting* margin if the operator accepts the new cost without
+      // overrides, and let them know what they're about to overwrite.
       const product = await this.prisma.products.findUnique({
         where: { id: item.product_id },
-        select: { name: true },
+        select: { name: true, base_price: true, profit_margin: true },
       });
 
       let variantName: string | undefined;
+      let variantBasePrice: number | null = null;
+      let variantMargin: number | null = null;
       if (item.product_variant_id) {
+        // Variants carry their own price_override (NOT base_price) and
+        // profit_margin. We read both so the margin UX reflects the variant
+        // pricing when a variant is involved.
         const variant = await this.prisma.product_variants.findUnique({
           where: { id: item.product_variant_id },
-          select: { name: true },
+          select: { name: true, price_override: true, profit_margin: true },
         });
         variantName = variant?.name || undefined;
+        variantBasePrice = variant?.price_override != null
+          ? Number(variant.price_override)
+          : null;
+        variantMargin = variant?.profit_margin != null
+          ? Number(variant.profit_margin)
+          : null;
       }
+
+      // Current selling price: variant override wins, otherwise product base.
+      // current_profit_margin: variant margin wins, otherwise product margin.
+      const currentBasePrice =
+        variantBasePrice !== null
+          ? variantBasePrice
+          : Number(product?.base_price ?? 0);
+      const currentProfitMargin =
+        variantMargin !== null
+          ? variantMargin
+          : Number(product?.profit_margin ?? 0);
+
+      // Resulting margin reflects what the margin will become if the operator
+      // accepts the new cost without changing the base price. Null when the
+      // new cost is 0 (e.g. reactivation of a previously-orphaned stock) to
+      // avoid a divide-by-zero display.
+      const resultingMargin =
+        newCostPerUnit > 0
+          ? Math.round(
+              ((currentBasePrice - newCostPerUnit) / newCostPerUnit) * 10000,
+            ) / 100
+          : null;
 
       items.push({
         product_id: item.product_id,
@@ -1675,10 +1874,13 @@ export class PurchaseOrdersService {
         incoming_quantity: item.quantity,
         incoming_cost: item.unit_cost,
         is_reactivation: isReactivation,
+        current_base_price: currentBasePrice,
+        current_profit_margin: currentProfitMargin,
+        resulting_margin: resultingMargin,
       });
     }
 
-    return { costing_method: costingMethod, items };
+    return { costing_method: toPublicCostingMethod(costingMethod), items };
   }
 
   remove(id: number) {

@@ -241,10 +241,21 @@ export class SettlementFlowService {
 
     this.event_emitter.emit('settlement.approved', {
       settlement_id: id,
+      settlement_number: settlement.settlement_number,
       organization_id: settlement.organization_id,
       store_id: settlement.store_id,
       accounting_entity_id: settlement.accounting_entity_id,
       employee_id: settlement.employee_id,
+      employee_name:
+        `${settlement.employee?.first_name || ''} ${settlement.employee?.last_name || ''}`.trim(),
+      // Conceptos devengados — necesarios para el asiento de causación (DR
+      // gasto/provisiones / CR 2505) que se reconoce en este momento.
+      severance: Number(settlement.severance),
+      severance_interest: Number(settlement.severance_interest),
+      bonus: Number(settlement.bonus),
+      vacation: Number(settlement.vacation),
+      pending_salary: Number(settlement.pending_salary),
+      indemnification: Number(settlement.indemnification),
       net_settlement: Number(settlement.net_settlement),
       approved_by: context.user_id,
     });

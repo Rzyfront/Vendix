@@ -4,6 +4,7 @@ import {
   IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -19,6 +20,10 @@ import {
   fiscal_evidence_type_enum,
   tax_declaration_type_enum,
 } from '@prisma/client';
+import {
+  FISCAL_CLOSE_TYPES,
+  FiscalCloseType,
+} from '../services/fiscal-period.util';
 
 export class FiscalListQueryDto {
   @IsOptional()
@@ -212,9 +217,15 @@ export class CreateFiscalCloseSessionDto {
   @Max(12)
   period_month?: number;
 
+  /**
+   * Periodicidad de cierre. Conjunto cerrado alineado a periodos DIAN reales
+   * (no trimestral/semestral). Reutiliza la convención de periodicidad IVA:
+   * monthly, bimonthly (bimestral), four_monthly (cuatrimestral) y annual.
+   * Por defecto 'monthly' en el servicio (compatibilidad con valores previos).
+   */
   @IsOptional()
-  @IsString()
-  close_type?: string;
+  @IsIn(FISCAL_CLOSE_TYPES)
+  close_type?: FiscalCloseType;
 
   @IsOptional()
   @Type(() => Number)

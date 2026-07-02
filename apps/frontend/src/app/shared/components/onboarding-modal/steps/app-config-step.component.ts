@@ -646,7 +646,7 @@ import { ButtonComponent, IconComponent } from '../../index';
                   class="section-icon-element"
                 ></app-icon>
               </div>
-              <h3 class="section-title">Dominio de tu tienda</h3>
+              <h3 class="section-title">Dominio de tu comercio</h3>
             </div>
 
             <!-- Auto-generated Domain -->
@@ -662,7 +662,7 @@ import { ButtonComponent, IconComponent } from '../../index';
                 <h4>Dominio automático</h4>
                 <span class="domain-url">{{ generatedDomain }}</span>
                 <p class="domain-description">
-                  Tu tienda estará disponible en este dominio gratuito
+                  Tu comercio estará disponible en este dominio gratuito
                 </p>
               </div>
             </div>
@@ -689,7 +689,7 @@ import { ButtonComponent, IconComponent } from '../../index';
                 <input
                   type="text"
                   class="field-input"
-                  placeholder="mitienda.com"
+                  placeholder="micomercio.com"
                   formControlName="customDomain"
                 />
                 <div class="field-hint">
@@ -749,7 +749,7 @@ export class AppConfigStepComponent implements OnInit {
   ];
 
   // Domain properties
-  generatedDomain: string = 'mi-tienda.vendix.app';
+  generatedDomain: string = 'mi-comercio.vendix.app';
   useCustomDomain: boolean = false;
 
   onPrimaryColorChange(event: any): void {

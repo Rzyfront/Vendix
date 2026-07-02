@@ -1,16 +1,45 @@
-import { Component, input, output } from '@angular/core';
-import { DatePipe } from '@angular/common';
+import { Component, computed, input, output, signal } from '@angular/core';
+import { DatePipe, DecimalPipe } from '@angular/common';
+import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { PopCartState } from '../interfaces/pop-cart.interface';
-import { CostPreviewResponse } from '../../interfaces';
+import { CostPreviewItem, CostPreviewResponse } from '../../interfaces';
+
+/**
+ * Shape of a per-line pricing override edited in the modal. Matches the
+ * optional fields on the backend `ReceiveItemDto` so the parent can thread
+ * the same value into `receivePurchaseOrder()` without remapping.
+ */
+export interface PricingOverride {
+  new_base_price?: number;
+  new_profit_margin?: number;
+}
+
+/**
+ * Map of pricing overrides keyed by `${product_id}-${product_variant_id || 0}`
+ * (the same key the modal already uses to track the @for loop). Keeping the
+ * key shape consistent across the preview loop and the override Map avoids
+ * subtle "value exists but key doesn't match" bugs at the call site.
+ */
+export type PricingOverridesMap = Map<string, PricingOverride>;
 
 @Component({
   selector: 'app-pop-order-confirmation-modal',
   standalone: true,
-  imports: [DatePipe, ModalComponent, ButtonComponent, IconComponent, CurrencyPipe],
+  imports: [
+    DatePipe,
+    DecimalPipe,
+    FormsModule,
+    ModalComponent,
+    ButtonComponent,
+    IconComponent,
+    InputComponent,
+    CurrencyPipe,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -96,8 +125,8 @@ import { CostPreviewResponse } from '../../interfaces';
               </div>
             } @else {
               <div class="rounded-md overflow-hidden border border-[var(--color-border)]">
-                @for (item of costPreview()?.items; track item.product_id + '-' + (item.product_variant_id || 0); let idx = $index) {
-                  <div class="px-2.5 py-2 text-xs"
+                @for (item of costPreview()?.items; track previewKey(item); let idx = $index) {
+                  <div class="px-2.5 py-2 text-xs space-y-1.5"
                        [class]="idx % 2 === 0 ? 'bg-[var(--color-surface)]' : 'bg-[var(--color-surface-elevated)]'">
                     <div class="font-medium text-[var(--color-text-primary)] mb-0.5">
                       {{ item.product_name }}
@@ -113,6 +142,9 @@ import { CostPreviewResponse } from '../../interfaces';
                         </span>
                         — {{ item.incoming_quantity }} uds @ {{ item.incoming_cost | currency }}
                       </div>
+                      <div class="text-[var(--color-text-secondary)]">
+                        Costo nuevo: <span class="font-medium text-[var(--color-text-primary)]">{{ item.new_cost_per_unit | currency }}</span>
+                      </div>
                     } @else if (costPreview()?.costing_method === 'cpp') {
                       <div class="flex items-center gap-3 text-[var(--color-text-secondary)]">
                         <span>Stock: {{ item.global_stock }} → <span class="font-medium text-[var(--color-text-primary)]">{{ item.new_stock }}</span></span>
@@ -124,6 +156,57 @@ import { CostPreviewResponse } from '../../interfaces';
                         Nueva capa: {{ item.incoming_quantity }} uds @ {{ item.incoming_cost | currency }}
                       </div>
                     }
+
+                    <!-- ===== QUI-425 (D3): editable margin UX ===== -->
+                    <div class="pt-1.5 border-t border-[var(--color-border)]/60 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div class="text-[var(--color-text-secondary)] flex flex-col">
+                        <span class="text-[10px] uppercase tracking-wider">Costo nuevo</span>
+                        <span class="font-medium text-[var(--color-text-primary)]">{{ item.new_cost_per_unit | currency }}</span>
+                      </div>
+                      <div class="text-[var(--color-text-secondary)] flex flex-col">
+                        <span class="text-[10px] uppercase tracking-wider">Margen resultante</span>
+                        <span class="font-medium text-[var(--color-text-primary)]">
+                          @if (previewMargin(item) !== null) {
+                            {{ previewMargin(item) | number:'1.0-1' }}%
+                          } @else {
+                            —
+                          }
+                        </span>
+                      </div>
+                      <div class="text-[var(--color-text-secondary)] flex flex-col">
+                        <span class="text-[10px] uppercase tracking-wider">Precio base actual</span>
+                        <span class="font-medium text-[var(--color-text-primary)]">{{ item.current_base_price | currency }}</span>
+                      </div>
+
+                      <div class="sm:col-span-1">
+                        <app-input
+                          type="number"
+                          [label]="'Nuevo margen (%)'"
+                          [customInputClass]="'text-sm'"
+                          [ngModel]="marginDraftFor(item)"
+                          (ngModelChange)="onMarginDraftChange(item, $event)"
+                        ></app-input>
+                      </div>
+                      <div class="sm:col-span-1">
+                        <app-input
+                          [currency]="true"
+                          [currencyDecimals]="2"
+                          [label]="'Nuevo precio base'"
+                          [customInputClass]="'text-sm'"
+                          [ngModel]="priceDraftFor(item)"
+                          (ngModelChange)="onPriceDraftChange(item, $event)"
+                        ></app-input>
+                      </div>
+                      <div class="sm:col-span-1 flex items-end">
+                        @if (hasOverride(item)) {
+                          <button type="button"
+                                  class="text-[10px] text-[var(--color-primary)] hover:underline font-medium"
+                                  (click)="clearOverride(item)">
+                            Restablecer (anclar a costo)
+                          </button>
+                        }
+                      </div>
+                    </div>
                   </div>
                 }
               </div>
@@ -218,6 +301,20 @@ export class PopOrderConfirmationModalComponent {
   readonly confirmed = output<void>();
   readonly cancelled = output<void>();
   readonly navigateToSettings = output<void>();
+  // ===== QUI-425 (D3) margin UX =====
+  // Emitted on every override change so the parent can keep a fresh Map
+  // ready when the operator clicks "Crear y Recibir" without forcing a
+  // round-trip through the modal. The parent decides what to do with it
+  // (e.g. gate the submit button, surface a summary, etc.).
+  readonly pricingOverridesChange = output<PricingOverridesMap>();
+
+  /**
+   * Signal-backed Map of overrides keyed by the same string used in the
+   * preview `@for` loop. Plain Maps are not reactive in zoneless, so we
+   * hold the Map itself inside a signal and call `.set(new Map(...))` on
+   * every mutation to trigger downstream `computed()` re-evaluation.
+   */
+  readonly pricingOverrides = signal<PricingOverridesMap>(new Map());
 
   get modalTitle(): string {
     return this.actionType() === 'create-receive'
@@ -235,7 +332,126 @@ export class PopOrderConfirmationModalComponent {
     return labels[this.cartState()?.shippingMethod || ''] || this.cartState()?.shippingMethod || '';
   }
 
+  /** Stable key for the preview @for loop AND the override Map. */
+  previewKey(item: CostPreviewItem): string {
+    return `${item.product_id}-${item.product_variant_id || 0}`;
+  }
+
+  /** True when the operator has set at least one override for this line. */
+  hasOverride(item: CostPreviewItem): boolean {
+    const o = this.pricingOverrides().get(this.previewKey(item));
+    return !!(o && (o.new_base_price !== undefined || o.new_profit_margin !== undefined));
+  }
+
+  /**
+   * Margin displayed in the "Margen resultante" column. When the operator
+   * has set a margin override we show that override (so the value matches
+   * what will be persisted); when they set a price override we re-derive
+   * the margin from the override; otherwise we fall back to the backend's
+   * `resulting_margin` (cost-anchor default).
+   */
+  previewMargin(item: CostPreviewItem): number | null {
+    const o = this.pricingOverrides().get(this.previewKey(item));
+    if (o?.new_profit_margin !== undefined) return o.new_profit_margin;
+    if (o?.new_base_price !== undefined && item.new_cost_per_unit > 0) {
+      return Math.round(
+        ((o.new_base_price - item.new_cost_per_unit) / item.new_cost_per_unit) *
+          10000,
+      ) / 100;
+    }
+    return item.resulting_margin;
+  }
+
+  /** Display value for the "Nuevo margen" input (string for app-input). */
+  marginDraftFor(item: CostPreviewItem): string {
+    const o = this.pricingOverrides().get(this.previewKey(item));
+    if (o?.new_profit_margin !== undefined) return String(o.new_profit_margin);
+    // Default suggestion: backend's resulting_margin (cost-anchor default).
+    return item.resulting_margin !== null ? String(item.resulting_margin) : '';
+  }
+
+  /** Display value for the "Nuevo precio base" input (string for app-input). */
+  priceDraftFor(item: CostPreviewItem): string {
+    const o = this.pricingOverrides().get(this.previewKey(item));
+    if (o?.new_base_price !== undefined) return String(o.new_base_price);
+    return String(item.current_base_price ?? 0);
+  }
+
+  /**
+   * Handler for the margin input. Parses the string from app-input, then does
+   * a LIVE cross-recalculation anchored on the NEW cost (`new_cost_per_unit`):
+   *  - Empty input → anchor-to-cost: drop the override entirely (same as
+   *    "Restablecer") so the inputs fall back to the cost-anchor defaults.
+   *  - With a value `m` → derive the base price from the new cost and store
+   *    BOTH fields, so the price input reflects the recalculated value live
+   *    (the draft getters read straight from the override Map).
+   */
+  onMarginDraftChange(item: CostPreviewItem, raw: string): void {
+    const value = this.parseOptionalNumber(raw);
+    if (value === null) {
+      // Empty input → anchor-to-cost (drop the whole override entry).
+      this.clearOverride(item);
+      return;
+    }
+    const key = this.previewKey(item);
+    const cost = Number(item.new_cost_per_unit);
+    const base = Math.round(cost * (1 + value / 100) * 100) / 100;
+    const next = new Map(this.pricingOverrides());
+    next.set(key, { new_profit_margin: value, new_base_price: base });
+    this.pricingOverrides.set(next);
+    this.pricingOverridesChange.emit(next);
+  }
+
+  /**
+   * Handler for the price input. LIVE cross-recalculation anchored on the NEW
+   * cost (`new_cost_per_unit`):
+   *  - Empty input → anchor-to-cost: drop the override entirely.
+   *  - With a value `p` → derive the margin from the new cost (guarding
+   *    against division by zero) and store BOTH fields so the margin input
+   *    reflects the recalculated value live.
+   */
+  onPriceDraftChange(item: CostPreviewItem, raw: string): void {
+    const value = this.parseOptionalNumber(raw);
+    if (value === null) {
+      this.clearOverride(item);
+      return;
+    }
+    const key = this.previewKey(item);
+    const cost = Number(item.new_cost_per_unit);
+    const margin =
+      cost > 0
+        ? Math.round(((value - cost) / cost) * 100 * 100) / 100
+        : 0;
+    const next = new Map(this.pricingOverrides());
+    next.set(key, { new_base_price: value, new_profit_margin: margin });
+    this.pricingOverrides.set(next);
+    this.pricingOverridesChange.emit(next);
+  }
+
+  clearOverride(item: CostPreviewItem): void {
+    const key = this.previewKey(item);
+    const next = new Map(this.pricingOverrides());
+    next.delete(key);
+    this.pricingOverrides.set(next);
+    this.pricingOverridesChange.emit(next);
+  }
+
+  /**
+   * Tolerates "", null and NaN so an empty app-input value is treated as
+   * "no override" rather than crashing the price parser downstream.
+   */
+  private parseOptionalNumber(raw: string | null | undefined): number | null {
+    if (raw === null || raw === undefined || raw === '') return null;
+    const cleaned = String(raw).replace(/,/g, '.').trim();
+    if (cleaned === '') return null;
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : null;
+  }
+
   onConfirm(): void {
+    // Forward the current overrides so the parent can grab them in the same
+    // tick without subscribing to the output (cheaper than toSignal here).
+    this.pricingOverridesChange.emit(this.pricingOverrides());
     this.confirmed.emit();
   }
 
