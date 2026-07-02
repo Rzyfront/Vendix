@@ -413,7 +413,7 @@ import { IconComponent } from '../../index';
         <!-- Title & Subtitle -->
         <div class="completion-header">
           <h2 class="completion-title">¡Configuración completada!</h2>
-          <p class="completion-subtitle">Tu tienda está lista para comenzar</p>
+          <p class="completion-subtitle">Tu comercio está listo para comenzar</p>
         </div>
 
         <!-- Stats with Separator -->
@@ -451,14 +451,14 @@ import { IconComponent } from '../../index';
               </div>
             </div>
 
-            <!-- Tienda -->
+            <!-- Comercio -->
             <div class="summary-card">
               <div class="summary-card-left">
                 <div class="summary-card-icon">
                   <app-icon name="store" size="18"></app-icon>
                 </div>
                 <div class="summary-card-info">
-                  <span class="summary-card-title">Tienda</span>
+                  <span class="summary-card-title">Comercio</span>
                   <span class="summary-card-subtitle">{{
                     wizardData()?.store?.name || 'Configurada'
                   }}</span>
