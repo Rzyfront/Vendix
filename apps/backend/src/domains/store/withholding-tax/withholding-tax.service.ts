@@ -15,7 +15,14 @@ import {
   CalculationsQueryDto,
 } from './dto';
 import { WithholdingCertificateData } from './interfaces/withholding.interface';
-import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
+import {
+  WithholdingLine,
+  WithholdingRoleValue,
+  WithholdingTypeValue,
+  buildWithholdingAccountRole,
+} from 'src/common/interfaces/withholding-breakdown.interface';
+import { deriveCounterpartyType } from './withholding-classification.util';
+import { scaleBreakdownToTotal } from 'src/common/interfaces/tax-breakdown.interface';
 
 @Injectable()
 export class WithholdingTaxService {
@@ -257,7 +264,15 @@ export class WithholdingTaxService {
     const invoice = await this.prisma.invoices.findFirst({
       where: { id: invoice_id },
       include: {
-        supplier: { select: { id: true, name: true, tax_id: true } },
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            tax_id: true,
+            tax_regime: true,
+            person_type: true,
+          },
+        },
       },
     });
 
@@ -305,7 +320,23 @@ export class WithholdingTaxService {
       },
     });
 
-    // Save the calculation
+    // ----- Typed fields (A5) -----
+    // Legacy `applyWithholding` is always PRACTICED (tenant buys from supplier).
+    // The `role` / `withholding_type` / `counterparty_type` columns were added
+    // in migration 20260609130300_add_withholding_calc_role_counterparty; the
+    // legacy path now persists typed values to keep audit rows homogeneous with
+    // the FLOW path (withholding-flow.service.persistWithholdingLines).
+    const role: WithholdingRoleValue = 'practiced';
+    const withholding_type = (result.withholding_type ??
+      concept.withholding_type) as WithholdingTypeValue;
+    const counterparty_type = invoice.supplier
+      ? deriveCounterpartyType(
+          invoice.supplier.tax_regime,
+          invoice.supplier.person_type,
+        )
+      : null;
+
+    // Save the calculation with typed fields
     const calculation = await this.prisma.withholding_calculations.create({
       data: {
         organization_id: context.organization_id,
@@ -314,6 +345,9 @@ export class WithholdingTaxService {
         invoice_id,
         supplier_id: invoice.supplier_id || null,
         concept_id: concept.id,
+        role,
+        counterparty_type,
+        withholding_type,
         base_amount: new Prisma.Decimal(base_amount),
         withholding_rate: new Prisma.Decimal(result.rate),
         withholding_amount: new Prisma.Decimal(result.withholding_amount),
@@ -322,18 +356,54 @@ export class WithholdingTaxService {
       },
     });
 
-    // Emit event for auto-entry creation
+    // Build the typed withholding breakdown (single line — legacy path is one
+    // concept per call). Reuse `scaleBreakdownToTotal` from the tax-breakdown
+    // contract to ensure rounding-consistent totals with the scalar
+    // `withholding_amount` (no-op for the single-line legacy case, but locks
+    // the invariant: sum(breakdown.amount) === withholding_amount).
+    const baseLine: WithholdingLine = {
+      withholding_type,
+      concept_code: concept.code,
+      concept_id: concept.id,
+      rate: result.rate,
+      base: base_amount,
+      amount: result.withholding_amount,
+      role,
+      account_role: buildWithholdingAccountRole(role, withholding_type),
+      // Regresión cero: el handler legacy `onWithholdingApplied` siempre postea
+      // al padre 2365 (no consulta `concept.account_code`). Pinning `account_code`
+      // aquí preserva el asiento actual (DR 5195 / CR 2365 / CR 2205) con cuentas
+      // y montos idénticos. El `account_role` queda tipado para futura expansión
+      // y queda visible en el payload del evento.
+      account_code: '2365',
+    };
+    const scaled = scaleBreakdownToTotal(
+      [{ tax_type: 'withholding', tax_amount: baseLine.amount }],
+      baseLine.amount,
+    );
+    const breakdown: WithholdingLine[] =
+      scaled.length > 0 ? [{ ...baseLine, amount: scaled[0].tax_amount }] : [baseLine];
+
+    // Emit event for auto-entry creation (typed payload: role + type + counterparty
+    // type + breakdown). The listener (`accounting-events.listener.ts:1016`) and
+    // handler (`auto-entry.service.onWithholdingApplied:2763`) already accept
+    // `withholding_breakdown: WithholdingLine[]` and route through
+    // `resolveWithholdingLines` → typed mapping fallback chain.
     const net_amount = base_amount - result.withholding_amount;
     this.event_emitter.emit('withholding.applied', {
       organization_id: context.organization_id,
       store_id: context.store_id,
       accounting_entity_id: accounting_entity.id,
       invoice_id,
+      role,
+      withholding_type,
+      counterparty_type,
       base_amount,
       withholding_amount: result.withholding_amount,
       net_amount,
       concept_name: result.concept_name,
       supplier_name: invoice.supplier?.name || 'N/A',
+      withholding_breakdown: breakdown,
       user_id: context.user_id,
     });
 
