@@ -129,6 +129,15 @@ export class MenuFilterService {
     Mesas: 'restaurant_ops_tables',
     Cartas: 'restaurant_ops_menus',
 
+    // Gym Operations (Ola 1) — padre + 3 submódulos. El padre "Gimnasio"
+    // mapea al key padre para que el sidebar renderice el grupo cuando la
+    // industria `gym` lo permita; cada submódulo se mapea a su propia key
+    // para que "Módulos del Panel" pueda prender/apagar granularmente.
+    Gimnasio: 'gym_ops',
+    Planes: 'gym_ops_plans',
+    Socios: 'gym_ops_members',
+    Accesos: 'gym_ops_access',
+
     // ERP Modules
     Facturación: 'invoicing',
     Facturas: 'invoicing_invoices',

@@ -3,6 +3,7 @@ export const STORE_INDUSTRIES = [
   'restaurant',
   'manufacturing',
   'service',
+  'gym',
 ] as const;
 
 export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
@@ -19,12 +20,21 @@ export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
  * never see it; the OR-semantics in `getModulesHiddenByIndustries` keeps a
  * multi-industry store (e.g. hotel = `service` + `restaurant`) visible because
  * the module is NOT hidden in the `restaurant` half of the intersection.
+ *
+ * Ola 1 (Gym Suite): mirrors the same inverse rule for `gym_ops`. The parent
+ * `gym_ops` module is hidden for every industry EXCEPT `gym`; only `gym` keeps
+ * it visible (its hidden list omits `gym_ops`). A gym that also sells shakes
+ * adds `restaurant` to its industries to unlock the restaurant suite too — the
+ * intersection empties for both `gym_ops` and `restaurant_ops`, so a
+ * `['gym','restaurant']` store sees BOTH suites. Note `gym` still hides
+ * `restaurant_ops` on its own, so a pure gym never sees the restaurant suite.
  */
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
-  retail: ['restaurant_ops'],
-  restaurant: [],
-  manufacturing: ['restaurant_ops'],
-  service: ['restaurant_ops'],
+  retail: ['restaurant_ops', 'gym_ops'],
+  restaurant: ['gym_ops'],
+  manufacturing: ['restaurant_ops', 'gym_ops'],
+  service: ['restaurant_ops', 'gym_ops'],
+  gym: ['restaurant_ops'],
 };
 
 /**

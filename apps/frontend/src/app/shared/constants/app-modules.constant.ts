@@ -418,6 +418,33 @@ export const APP_MODULES: {
       ],
     },
 
+    // Gym Operations (Gym Suite \u2014 Ola 1). Parent module hidden by
+    // `INDUSTRY_HIDDEN_MODULES` for retail/restaurant/manufacturing/service;
+    // visible only when the store's industry includes `gym`.
+    {
+      key: 'gym_ops',
+      label: 'Gimnasio',
+      description: 'Planes, socios y control de accesos del gimnasio',
+      isParent: true,
+      children: [
+        {
+          key: 'gym_ops_plans',
+          label: 'Planes',
+          description: 'Planes y membres\u00edas del gimnasio',
+        },
+        {
+          key: 'gym_ops_members',
+          label: 'Socios',
+          description: 'Directorio y estado de socios del gimnasio',
+        },
+        {
+          key: 'gym_ops_access',
+          label: 'Accesos',
+          description: 'Control de accesos y check-in de socios',
+        },
+      ],
+    },
+
     // Facturaci\u00f3n (padre con hijos)
     {
       key: 'invoicing',

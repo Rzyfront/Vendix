@@ -137,6 +137,19 @@ export class DefaultPanelUIService {
         restaurant_ops_kds: true,
         restaurant_ops_tables: true,
         restaurant_ops_menus: true,
+        // Gym Operations (Gym Suite — Ola 1).
+        // Ola 1 decisions: `default_visible_for_privileged_users=true`
+        // (owner/admin see the parent + submodules on next login for any
+        // store whose industry includes `gym`), `show_new_badge=yes` (user
+        // dropdown banner + Settings → "Módulos del Panel" surface the keys
+        // as new until the privileged user activates/toggles them).
+        // Industry gating is enforced separately in
+        // `INDUSTRY_HIDDEN_MODULES` (retail/restaurant/manufacturing/service
+        // hide it outright; only `gym` keeps it visible).
+        gym_ops: true,
+        gym_ops_plans: true,
+        gym_ops_members: true,
+        gym_ops_access: true,
         reports: true,
         invoicing: true,
         invoicing_invoices: true,
