@@ -131,6 +131,12 @@ export class ScheduleManagementComponent {
       | 'fixed_term'
       | 'service'
       | 'apprentice',
+    // Contact channels — both optional but exposed in the inline form.
+    // Backend DTO now declares @IsOptional @IsEmail email and
+    // @IsOptional @IsString @MaxLength(20) phone so the previous 400
+    // 'property email should not exist' is resolved at the source.
+    email: '',
+    phone: '',
   });
   newEmployeeValid = computed(() => {
     const e = this.newEmployee();
@@ -440,6 +446,8 @@ export class ScheduleManagementComponent {
         | 'fixed_term'
         | 'service'
         | 'apprentice',
+      email: '',
+      phone: '',
     });
   }
 

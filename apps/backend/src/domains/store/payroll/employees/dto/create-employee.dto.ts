@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsDateString,
   IsBoolean,
+  IsEmail,
   MaxLength,
   Min,
   IsInt,
@@ -107,6 +108,22 @@ export class CreateEmployeeDto {
   @IsString()
   @MaxLength(100)
   compensation_fund?: string;
+
+  // Contact channels — added so the quick-create inline form (in
+  // schedule-management.component.ts) can submit them without the
+  // backend rejecting unknown properties via whitelist +
+  // forbidNonWhitelisted in the global ValidationPipe.
+  // Without these, the inline form sent email + phone as empty
+  // strings, the ValidationPipe flagged them as non-whitelisted,
+  // and POST /store/payroll/employees returned 400.
+  @IsOptional()
+  @IsEmail()
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  phone?: string;
 
   @IsOptional()
   @IsBoolean()

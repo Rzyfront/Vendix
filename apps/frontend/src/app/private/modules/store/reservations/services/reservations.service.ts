@@ -207,6 +207,8 @@ export class ReservationsService {
     contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
     base_salary: number;
     position?: string;
+    email?: string;
+    phone?: string;
   }): Observable<{ id: number; first_name: string; last_name: string; position?: string }> {
     return this.http
       .post<any>(`${environment.apiUrl}/store/payroll/employees`, dto)
