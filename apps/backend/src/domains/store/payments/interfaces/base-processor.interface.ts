@@ -50,10 +50,16 @@ export abstract class BasePaymentProcessor {
   }
 
   isEnabled(): boolean {
-    return this.config.enabled;
+    // `config` is undefined for processors instantiated via Nest DI (the
+    // `PaymentProcessorConfig` constructor param is an interface, not an
+    // injectable token, so Nest passes nothing). Per-store enablement is
+    // already enforced by `PaymentValidatorService.validatePaymentMethod`
+    // before this runs, so default to enabled when no processor-level config
+    // was wired instead of throwing a TypeError on `undefined.enabled`.
+    return this.config?.enabled ?? true;
   }
 
   isTestMode(): boolean {
-    return this.config.testMode;
+    return this.config?.testMode ?? false;
   }
 }
