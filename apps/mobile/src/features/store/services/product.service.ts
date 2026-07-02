@@ -163,6 +163,43 @@ export const ProductService = {
   },
 
   /**
+   * Genera (o regenera) el link público de compra online + QR del
+   * producto. El backend busca el dominio ecommerce principal de la
+   * tienda y construye la URL + QR code. Devuelve el QR como data URL
+   * listo para renderizar en un `<Image>`.
+   */
+  async generateOnlinePurchaseLink(productId: number): Promise<{
+    generated: boolean;
+    product_id: number;
+    online_purchase_url: string | null;
+    online_purchase_qr_code: string | null;
+    qr_data_url: string | null;
+    online_purchase_domain_id: number | null;
+    domain_hostname: string | null;
+    online_purchase_generated_at: string | null;
+    online_purchase_ready: boolean;
+    online_purchase_status_reason: string | null;
+    online_purchase_status_message: string | null;
+  }> {
+    const res = await apiClient.post(
+      `/store/products/${productId}/online-purchase-link`,
+    );
+    return unwrap<{
+      generated: boolean;
+      product_id: number;
+      online_purchase_url: string | null;
+      online_purchase_qr_code: string | null;
+      qr_data_url: string | null;
+      online_purchase_domain_id: number | null;
+      domain_hostname: string | null;
+      online_purchase_generated_at: string | null;
+      online_purchase_ready: boolean;
+      online_purchase_status_reason: string | null;
+      online_purchase_status_message: string | null;
+    }>(res);
+  },
+
+  /**
    * Crea/actualiza el override de precio y unidades por empaque de
    * una tarifa específica sobre un producto. El backend reconcilia con
    * la tabla `product_price_tier_overrides`.

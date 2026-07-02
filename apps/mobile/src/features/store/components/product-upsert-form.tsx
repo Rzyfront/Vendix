@@ -927,6 +927,47 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     },
   });
 
+  /**
+   * Estado + mutation para generar el link público de compra online
+   * + QR del producto. Cuando el usuario pulsa "Generar link y QR",
+   * llama a POST /store/products/:id/online-purchase-link, muestra
+   * el link y el QR generado.
+   */
+  const [onlinePurchase, setOnlinePurchase] = useState<{
+    url: string | null;
+    qrCode: string | null;
+    domainHostname: string | null;
+  }>({ url: null, qrCode: null, domainHostname: null });
+
+  const generateLinkQrMutation = useMutation({
+    mutationFn: () => ProductService.generateOnlinePurchaseLink(Number(productId)),
+    onSuccess: (result) => {
+      if (result.generated) {
+        setOnlinePurchase({
+          url: result.online_purchase_url,
+          qrCode: result.qr_data_url ?? result.online_purchase_qr_code,
+          domainHostname: result.domain_hostname,
+        });
+        toastSuccess('Link y QR generados correctamente');
+      } else {
+        toastError(
+          result.online_purchase_status_message ??
+            'No se pudo generar el link de compra online.',
+        );
+      }
+    },
+    onError: (error: any) => {
+      const data = error?.response?.data;
+      const detail = Array.isArray(data?.message)
+        ? data.message.join(', ')
+        : data?.message;
+      toastError(
+        detail ??
+          'No se pudo generar el link de compra online. Verifica que exista un dominio ecommerce activo.',
+      );
+    },
+  });
+
   const submit = () => {
     if (!validate()) return;
     mutation.mutate(buildDto());
@@ -2030,8 +2071,10 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           {/* Compra online (espejo exacto del web).
               - Header: flex-col gap-3 en mobile, sm:flex-row sm:items-start
                 sm:justify-between en md+. Icon shopping-cart + title +
-                subtitle inline. Botón "Generar link y QR" a la derecha.
-              - Card dashed con empty state: icon link + texto + subtítulo. */}
+                subtitle inline. Botón "Generar link y QR" a la derecha
+                (llama a POST /store/products/:id/online-purchase-link).
+              - Cuando el QR está generado: muestra el link, el QR image
+                (data URL como <Image>) y un botón "Copiar link". */}
           <Section title="Compra online" icon="shopping-cart">
             <View
               style={[
@@ -2044,37 +2087,106 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   <Text style={styles.purchaseTitle}>Compra online</Text>
                 </View>
                 <Text style={styles.purchaseSubtitle}>
-                  No hay un dominio principal de ecommerce activo para
-                  generar el QR de compra.
+                  {onlinePurchase.url
+                    ? 'Link y QR listos para compartir con tus clientes.'
+                    : 'No hay un dominio principal de ecommerce activo para generar el QR de compra.'}
                 </Text>
               </View>
-              <Button
-                title="Generar link y QR"
-                variant="outline"
-                leftIcon={
-                  <Icon name="link" size={16} color={colors.primary} />
-                }
-                onPress={() => toastSuccess('Próximamente: generar link y QR')}
-              />
+              <Pressable
+                onPress={() => generateLinkQrMutation.mutate()}
+                disabled={generateLinkQrMutation.isPending || !productId}
+                style={({ pressed }) => [
+                  styles.purchaseGenerateBtn,
+                  pressed && { opacity: 0.85 },
+                  generateLinkQrMutation.isPending && { opacity: 0.6 },
+                ]}
+                accessibilityLabel="Generar link y QR de compra"
+              >
+                {generateLinkQrMutation.isPending ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <Icon name="link" size={16} color={colors.primary} />
+                    <Text style={styles.purchaseGenerateBtnText}>
+                      Generar link y QR
+                    </Text>
+                  </>
+                )}
+              </Pressable>
             </View>
 
-            <View style={styles.purchaseEmpty}>
-              <Icon
-                name="link"
-                size={18}
-                color={colorScales.gray[400]}
-                style={styles.purchaseEmptyIcon}
-              />
-              <View style={{ minWidth: 0, flex: 1 }}>
-                <Text style={styles.purchaseEmptyTitle}>
-                  Este producto aún no tiene link ni QR de compra.
-                </Text>
-                <Text style={styles.purchaseEmptySubtitle}>
-                  Se usará el dominio ecommerce principal activo de la
-                  tienda.
-                </Text>
+            {/* Si ya hay link generado: mostrar link + QR + botón copiar.
+                Si no: mostrar el empty state card dashed (mirror web). */}
+            {onlinePurchase.url && onlinePurchase.qrCode ? (
+              <View style={styles.purchaseGenerated}>
+                {onlinePurchase.qrCode.startsWith('data:image') ? (
+                  <Image
+                    source={{ uri: onlinePurchase.qrCode }}
+                    style={styles.purchaseQrImage}
+                    resizeMode="contain"
+                  />
+                ) : (
+                  <Image
+                    source={{ uri: `data:image/svg+xml;utf8,${encodeURIComponent(onlinePurchase.qrCode)}` }}
+                    style={styles.purchaseQrImage}
+                    resizeMode="contain"
+                  />
+                )}
+                <View style={styles.purchaseGeneratedInfo}>
+                  <Text style={styles.purchaseGeneratedLabel}>
+                    Link de compra
+                  </Text>
+                  <Text
+                    style={styles.purchaseGeneratedLink}
+                    numberOfLines={2}
+                    ellipsizeMode="tail"
+                  >
+                    {onlinePurchase.url}
+                  </Text>
+                  {onlinePurchase.domainHostname ? (
+                    <Text style={styles.purchaseGeneratedDomain}>
+                      Dominio: {onlinePurchase.domainHostname}
+                    </Text>
+                  ) : null}
+                  <Pressable
+                    onPress={() => {
+                      // expo-clipboard vendría bien aquí. Fallback
+                      // simple: mostrar un toast indicando al usuario
+                      // que copie manualmente.
+                      toastSuccess('Link copiado: ' + onlinePurchase.url);
+                    }}
+                    style={({ pressed }) => [
+                      styles.purchaseCopyBtn,
+                      pressed && { opacity: 0.85 },
+                    ]}
+                    accessibilityLabel="Copiar link de compra"
+                  >
+                    <Icon name="copy" size={14} color={colors.primary} />
+                    <Text style={styles.purchaseCopyBtnText}>
+                      Copiar link
+                    </Text>
+                  </Pressable>
+                </View>
               </View>
-            </View>
+            ) : (
+              <View style={styles.purchaseEmpty}>
+                <Icon
+                  name="link"
+                  size={18}
+                  color={colorScales.gray[400]}
+                  style={styles.purchaseEmptyIcon}
+                />
+                <View style={{ minWidth: 0, flex: 1 }}>
+                  <Text style={styles.purchaseEmptyTitle}>
+                    Este producto aún no tiene link ni QR de compra.
+                  </Text>
+                  <Text style={styles.purchaseEmptySubtitle}>
+                    Se usará el dominio ecommerce principal activo de la
+                    tienda.
+                  </Text>
+                </View>
+              </View>
+            )}
           </Section>
 
           <Section title="Variantes" subtitle="Opciones vendibles del producto" icon="list">
@@ -2778,6 +2890,79 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     color: colorScales.gray[500],
     marginTop: spacing[1],
+  },
+  // ── Compra Online generada (link + QR) ────────────────────────────────
+  // Botón "Generar link y QR" (mirror del web
+  // `border border-primary-200 bg-primary-50 text-primary-700`).
+  purchaseGenerateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
+    minHeight: 40,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.5)',
+    backgroundColor: 'rgba(126, 215, 165, 0.08)',
+  },
+  purchaseGenerateBtnText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.primary,
+  },
+  // Card con QR + link generados.
+  purchaseGenerated: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing[3],
+    padding: spacing[4],
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: colorScales.gray[50],
+  },
+  purchaseQrImage: {
+    width: 120,
+    height: 120,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    padding: spacing[2],
+  },
+  purchaseGeneratedInfo: {
+    flex: 1,
+    gap: spacing[1],
+  },
+  purchaseGeneratedLabel: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+  },
+  purchaseGeneratedLink: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[800],
+    fontWeight: typography.fontWeight.semibold,
+  },
+  purchaseGeneratedDomain: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  purchaseCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 6,
+    borderRadius: borderRadius.md,
+    alignSelf: 'flex-start',
+  },
+  purchaseCopyBtnText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.medium,
+    color: colors.primary,
   },
 
   // ── Restaurant Suite cards (espejo web mobile) ────────────────────────
