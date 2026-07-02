@@ -248,7 +248,7 @@ interface WizardStep {
                     [disabled]="isSubmitting() || isProcessing()"
                     (clicked)="completeWizard()"
                     >
-                    {{ isSubmitting() ? 'Finalizando...' : 'Ir a mi tienda' }}
+                    {{ isSubmitting() ? 'Finalizando...' : 'Ir a mi comercio' }}
                     @if (!isSubmitting()) {
                       <app-icon
                         name="arrow-right"
@@ -380,7 +380,7 @@ export class OnboardingModalComponent {
     {
       id: 1,
       title: '¡Bienvenido a Vendix!',
-      description: 'Vamos a configurar tu tienda',
+      description: 'Vamos a configurar tu comercio',
       icon: 'sparkles',
     },
     {
@@ -397,7 +397,7 @@ export class OnboardingModalComponent {
     },
     {
       id: 4,
-      title: 'Configura tu tienda',
+      title: 'Configura tu comercio',
       description: 'Datos básicos de tu negocio',
       icon: 'store',
     },
@@ -416,7 +416,7 @@ export class OnboardingModalComponent {
     {
       id: 7,
       title: '¡Todo listo!',
-      description: 'Tu tienda está configurada',
+      description: 'Tu comercio está configurado',
       icon: 'check-circle',
     },
   ];
@@ -449,7 +449,7 @@ export class OnboardingModalComponent {
     },
     {
       id: 5,
-      title: 'Configura tu tienda',
+      title: 'Configura tu comercio',
       description: 'Tu punto de venta principal',
       icon: 'store',
     },
@@ -615,7 +615,7 @@ export class OnboardingModalComponent {
             const baseName = orgData.name.replace(/\s+Org$/i, '');
             this.storeForm.patchValue({
               name: baseName,
-              description: `Tienda principal de ${orgData.name}`,
+              description: `Comercio principal de ${orgData.name}`,
               phone: orgData.phone || '',
             });
           }
@@ -737,7 +737,7 @@ export class OnboardingModalComponent {
           this.storeForm.patchValue(
             {
               name: baseName,
-              description: `Tienda principal de ${orgData.name}`,
+              description: `Comercio principal de ${orgData.name}`,
               phone: orgData.phone || '',
             },
             { emitEvent: false },
@@ -1080,7 +1080,7 @@ export class OnboardingModalComponent {
         this.storeForm.get(key)?.markAsTouched();
       });
       this.toastService.warning(
-        'Por favor completa los campos requeridos de la tienda',
+        'Por favor completa los campos requeridos del comercio',
       );
       this.isProcessing.set(false);
       return;
@@ -1125,12 +1125,12 @@ export class OnboardingModalComponent {
         this.isProcessing.set(false);
         if (response.success) {
           this.wizardData.update((d) => ({ ...d, store: storeData }));
-          this.toastService.success('Tienda configurada correctamente');
+          this.toastService.success('Comercio configurado correctamente');
           // The service already calls nextStep() automatically
         }
       },
       error: (error) =>
-        this.handleOnboardingError(error, 'Error al configurar la tienda'),
+        this.handleOnboardingError(error, 'Error al configurar el comercio'),
     });
   }
 
@@ -1282,14 +1282,14 @@ export class OnboardingModalComponent {
               );
             } catch (switchError) {
               console.error('Error switching environment:', switchError);
-              this.toastService.error('Error al cambiar al entorno de tienda');
+              this.toastService.error('Error al cambiar al entorno de comercio');
               // Fallback reload to ensure clean state
               window.location.reload();
             }
           } else {
             // Si no hay slug, redirigir al dashboard general sin switch de entorno
             this.toastService.warning(
-              'No se pudo identificar la tienda específica, redirigiendo al panel general',
+              'No se pudo identificar el comercio específico, redirigiendo al panel general',
             );
             // Fallback reload to ensure clean state
             window.location.reload();
@@ -1362,7 +1362,7 @@ export class OnboardingModalComponent {
             case 'organization_setup':
               return 'Configuración de Organización';
             case 'store_setup':
-              return 'Configuración de Tienda';
+              return 'Configuración de Comercio';
             case 'app_configuration':
               return 'Configuración de Aplicación';
             default:

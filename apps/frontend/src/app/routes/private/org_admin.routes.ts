@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { AuthGuard } from '../../core/guards/auth.guard';
 import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard';
+import { onboardingGuard } from '../../core/guards/onboarding.guard';
 
 export const orgAdminRoutes: Routes = [
   {
@@ -9,12 +10,27 @@ export const orgAdminRoutes: Routes = [
       import('../../private/layouts/organization-admin/organization-admin-layout.component').then(
         (c) => c.OrganizationAdminLayoutComponent,
       ),
-    canActivate: [AuthGuard],
+    canActivate: [AuthGuard, onboardingGuard],
+    // canActivateChild re-runs onboardingGuard on EVERY child navigation
+    // (including sibling→sibling SPA nav where the parent `admin` stays
+    // mounted and its canActivate would NOT re-fire). This is what makes the
+    // owner onboarding truly unavoidable, not just on hard reload.
+    canActivateChild: [onboardingGuard],
     children: [
       {
         path: '',
         pathMatch: 'full',
         redirectTo: 'dashboard',
+      },
+      // Owner onboarding host — gated by `onboardingGuard` on the `admin`
+      // root. Only an OWNER with `organizations.onboarding !== true` ever
+      // resolves here; everyone else is bounced to the dashboard.
+      {
+        path: 'onboarding',
+        loadComponent: () =>
+          import('../../private/pages/onboarding/onboarding-page.component').then(
+            (m) => m.OnboardingPageComponent,
+          ),
       },
       {
         path: 'dashboard',

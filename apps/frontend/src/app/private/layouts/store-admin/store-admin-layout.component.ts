@@ -22,7 +22,6 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { ConfigFacade } from '../../../core/store/config';
-import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
 import { TourModalComponent } from '../../../shared/components/tour/tour-modal/tour-modal.component';
 import { TourService } from '../../../shared/components/tour/services/tour.service';
 import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
@@ -46,7 +45,6 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     SidebarComponent,
     HeaderComponent,
     IconComponent,
-    OnboardingModalComponent,
     TourModalComponent,
     SubscriptionBannerComponent,
     FiscalObligationBannerComponent,
@@ -182,14 +180,6 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
       </div>
     </div>
 
-    <!-- Onboarding Modal - Only render if onboarding is needed -->
-    @if (needsOnboarding()) {
-      <app-onboarding-modal
-        [(isOpen)]="showOnboardingModal"
-        (completed)="onOnboardingCompleted($event)"
-      ></app-onboarding-modal>
-    }
-
     <!-- Weekly Report Takeover (Tu Semana en Vendix) -->
     @if (showWeeklyReportTakeover() && weeklyReportSnapshot(); as wr) {
       <app-weekly-report-stories
@@ -221,8 +211,6 @@ export class StoreAdminLayoutComponent {
   // --- UI state signals ---
   readonly sidebarCollapsed = signal(false);
   readonly sidebarReady = signal(false);
-  readonly showOnboardingModal = signal(false);
-  readonly needsOnboarding = signal(false);
   readonly showTourModal = signal(false);
   readonly sidebarShimmer = signal(false);
 
@@ -943,15 +931,6 @@ export class StoreAdminLayoutComponent {
         }, 950);
       });
 
-    // Onboarding needs subscription
-    this.authFacade.needsOnboarding$
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
-        this.needsOnboarding.set(false); // Temporalmente deshabilitado hasta desarrollar workflow
-        this.updateOnboardingModal();
-      });
-
-    this.checkOnboardingWithRoleValidation();
     this.checkAndStartPosTour();
 
     // S1.2 — Notify the subscription feature about store-context changes
@@ -974,40 +953,28 @@ export class StoreAdminLayoutComponent {
    */
   private checkAndStartPosTour(): void {
     const tourId = 'pos-first-sale';
+
+    // Gate: the welcome/POS tour is an OWNER-only, post-onboarding flow.
+    // - It must NEVER overlay the onboarding wizard. An owner with pending
+    //   onboarding is held on /admin/onboarding by onboardingGuard, but this
+    //   STORE_ADMIN layout still mounts underneath the overlay and would
+    //   otherwise fire the tour on top of it.
+    // - It must NEVER reach a non-owner (store staff share this layout).
+    // Mirrors onboardingGuard exactly: owner = hasAnyRole(['owner','OWNER']),
+    // done = organizations.onboarding === true (fail-closed when the flag is
+    // absent, so an unknown state never leaks the tour).
+    const isOwner = this.authFacade.hasAnyRole(['owner', 'OWNER']);
+    const onboardingDone =
+      this.authFacade.getCurrentUser()?.organizations?.onboarding === true;
+    if (!isOwner || !onboardingDone) {
+      return;
+    }
+
     if (this.tourService.canShowTour(tourId)) {
       setTimeout(() => {
         this.showTourModal.set(true);
       }, 1500);
     }
-  }
-
-  private checkOnboardingWithRoleValidation(): void {
-    const isOwner = this.authFacade.isOwner();
-    if (!isOwner) {
-      this.needsOnboarding.set(false);
-      this.showOnboardingModal.set(false);
-      return;
-    }
-
-    // this.needsOnboarding.set(!storeOnboarding);
-    this.needsOnboarding.set(false); // Temporalmente deshabilitado hasta desarrollar workflow
-    this.updateOnboardingModal();
-  }
-
-  private updateOnboardingModal(): void {
-    const isOwner = this.authFacade.isOwner();
-    if (!isOwner) {
-      this.showOnboardingModal.set(false);
-      return;
-    }
-
-    const currentUser = this.authFacade.getCurrentUser();
-    const storeOnboarding = currentUser?.stores?.onboarding;
-    const actuallyNeedsOnboarding = !storeOnboarding;
-
-    this.showOnboardingModal.set(
-      actuallyNeedsOnboarding && this.needsOnboarding(),
-    );
   }
 
   toggleSidebar() {
@@ -1016,10 +983,5 @@ export class StoreAdminLayoutComponent {
     } else {
       this.sidebarCollapsed.update((v) => !v);
     }
-  }
-
-  onOnboardingCompleted(event: any): void {
-    this.authFacade.setOnboardingCompleted(true);
-    this.authFacade.loadUser();
   }
 }
