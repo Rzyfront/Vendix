@@ -2781,6 +2781,8 @@ enum notification_type_enum {
   weekly_report
   pqr_new
   pqr_update
+  gym_membership_expiring
+  gym_membership_expired
 }
 
 model notifications {
