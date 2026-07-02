@@ -1638,7 +1638,9 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           {/* Inventario / Stock (espejo exacto del web lg:hidden)
               Header: icon archive + h2 'Inventario / Stock' (sin subtitle)
               Stats: 2 cards (Físico / Disponible) con label uppercase 9px + valor text-lg bold
-              Acción: button 'Inventario' con cart icon (placeholder hasta integración inventario)
+              Acciones:
+                - Fila 1: 'Inventario' (outline primary) + 'Ajustar' (primary filled, white)
+                - Fila 2: 'Ver detalle completo' (link primary)
           */}
           <Section title="Inventario / Stock" icon="archive">
             <View style={styles.inventoryStatsGrid}>
@@ -1653,20 +1655,52 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 </Text>
               </View>
             </View>
+            <View style={styles.inventoryActionsRow}>
+              <Pressable
+                onPress={() => {
+                  // Gestión detallada de inventario desde un modal dedicado.
+                  // El inventario por bodega/seriales requiere UI especializada
+                  // que se desarrolla en PR futuro.
+                  toastSuccess('Gestión de inventario próximamente');
+                }}
+                style={({ pressed }) => [
+                  styles.inventoryActionOutline,
+                  pressed && { backgroundColor: colorScales.green[100] },
+                ]}
+              >
+                <Icon name="cart" size={14} color={colors.primary} />
+                <Text style={styles.inventoryActionOutlineText}>Inventario</Text>
+              </Pressable>
+              <Pressable
+                onPress={() => {
+                  // Abre modal de ajuste de stock (BulkAdjustmentModal reutilizable).
+                  // En esta versión mobile, el ajuste de stock se gestiona desde
+                  // la sección de Inventario > Ajustes de Stock.
+                  toastSuccess('Ajustar próximamente');
+                }}
+                style={({ pressed }) => [
+                  styles.inventoryActionPrimary,
+                  pressed && { backgroundColor: colorScales.green[700] },
+                ]}
+              >
+                <Icon name="sliders" size={14} color={colors.background} />
+                <Text style={styles.inventoryActionPrimaryText}>Ajustar</Text>
+              </Pressable>
+            </View>
             <Pressable
               onPress={() => {
-                // Gestión detallada de inventario desde un modal dedicado.
-                // El inventario por bodega/seriales requiere UI especializada
-                // que se desarrolla en PR futuro.
-                toastSuccess('Gestión de inventario próximamente');
+                // Navega a vista detallada de stock por bodega/serial.
+                // En esta versión mobile, la gestión detallada de stock
+                // se encuentra en la sección de Inventario.
+                toastSuccess('Detalle próximamente');
               }}
               style={({ pressed }) => [
-                styles.inventoryActionButton,
-                pressed && { backgroundColor: 'rgba(126, 215, 165, 0.12)' },
+                styles.inventoryLinkButton,
+                pressed && { backgroundColor: colorScales.green[50] },
               ]}
             >
-              <Icon name="cart" size={14} color={colors.primary} />
-              <Text style={styles.inventoryActionText}>Inventario</Text>
+              <Icon name="list" size={14} color={colors.primary} />
+              <Text style={styles.inventoryLinkButtonText}>Ver detalle completo</Text>
             </Pressable>
           </Section>
 
@@ -2768,10 +2802,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     flexWrap: 'wrap' as const,
   },
-  // Mobile: 2 columnas (Largo+Ancho, Alto+Peso). Sin flexGrow para
-  // forzar wrap a 2 por fila. El 48% + gap deja 4% libre.
+  // Mobile: 2 columnas (Largo+Ancho, Alto+Peso). 48% de flexBasis
+  // menos el gap deja espacio para que las 2 celdas quepan en una
+  // fila sin wrap (gap = 12px → cada celda ~47%).
   dimensionCellHalf: {
-    flexBasis: '48%' as const,
+    flexBasis: '47%' as const,
   },
   // md+: 4 columnas. flexGrow:1 reparte el espacio sobrante.
   dimensionCellQuarter: {
@@ -3295,5 +3330,59 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     fontWeight: '700' as any,
     color: colorScales.green[700],
+  },
+  // Fila 1: 2 botones (Inventario outline + Ajustar primary filled)
+  inventoryActionsRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+  },
+  inventoryActionOutline: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2.5],
+    paddingHorizontal: spacing[3],
+    backgroundColor: colorScales.green[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.3)',
+  },
+  inventoryActionOutlineText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: '700' as any,
+    color: colorScales.green[700],
+  },
+  inventoryActionPrimary: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2.5],
+    paddingHorizontal: spacing[3],
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.lg,
+  },
+  inventoryActionPrimaryText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: '700' as any,
+    color: colors.background,
+  },
+  // Fila 2: Ver detalle completo (link primary)
+  inventoryLinkButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[3],
+    borderRadius: borderRadius.lg,
+  },
+  inventoryLinkButtonText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: '500' as any,
+    color: colors.primary,
   },
 });
