@@ -306,6 +306,15 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     queryFn: () => ProductService.getBrands(),
   });
 
+  // Bodegas / ubicaciones de la tienda actual (para el modal de ajuste
+  // de stock y el selector de ubicación en StockAdjustmentLocationModal).
+  // Se carga lazy cuando el modal se abre por primera vez.
+  const locationsQuery = useQuery({
+    queryKey: ['inventory-locations'],
+    queryFn: () => InventoryService.getLocations({ limit: 100 }),
+  });
+  const inventoryLocations = locationsQuery.data?.data ?? [];
+
   // Promociones activas (para la sección Promociones & Operaciones).
   // TODO: implementar getPromotions en el service cuando el backend
   // exponga el endpoint de promociones. Mientras tanto, array vacío
@@ -1656,19 +1665,16 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           <PopConfigModal
             visible={showPopConfig}
             product={
-              product
-                ? ({
-                    id: Number(product.id),
-                    name: product.name ?? '',
-                    cost: product.cost_price ?? product.cost ?? 0,
-                    pricing_type: 'unit',
-                  } as any)
-                : null
+              {
+                id: product ? Number(product.id) : Date.now(),
+                name: product?.name ?? form.name ?? 'Nuevo producto',
+                cost: Number(product?.cost_price ?? form.cost_price ?? 0),
+                pricing_type: 'unit',
+              } as any
             }
             onConfirm={(result) => {
               setShowPopConfig(false);
               toastSuccess('Configuración aplicada');
-              // Aquí iría la lógica para guardar el resultado en el producto
             }}
             onCancel={() => setShowPopConfig(false)}
           />
@@ -1681,7 +1687,10 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           */}
           <StockAdjustmentLocationModal
             visible={showStockLocationModal}
-            locations={LOCATIONS}
+            locations={inventoryLocations.map((l) => ({
+              id: Number(l.id),
+              name: l.name,
+            }))}
             onClose={() => setShowStockLocationModal(false)}
             onConfirm={(locationId) => {
               setShowStockLocationModal(false);
