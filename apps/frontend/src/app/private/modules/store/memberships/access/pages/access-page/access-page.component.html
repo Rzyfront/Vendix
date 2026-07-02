@@ -1,0 +1,187 @@
+<div class="w-full overflow-x-hidden">
+  <app-sticky-header
+    title="Control de Accesos"
+    subtitle="Bitácora de ingresos y credenciales de tus socios"
+    icon="door-open"
+    variant="glass"
+    [tabs]="tabs"
+    [activeTab]="activeTab()"
+    [actions]="headerActions()"
+    (tabChanged)="onTabChanged($event)"
+    (actionClicked)="onHeaderAction($event)"
+  />
+
+  <div
+    class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
+  >
+    <app-stats
+      title="Eventos de acceso"
+      [value]="logsTotal()"
+      smallText="Registros en la bitácora"
+      iconName="history"
+      iconBgColor="bg-blue-100"
+      iconColor="text-blue-600"
+    />
+    <app-stats
+      title="Concedidos hoy"
+      [value]="grantedToday()"
+      smallText="Ingresos permitidos hoy (página actual)"
+      iconName="check-circle"
+      iconBgColor="bg-green-100"
+      iconColor="text-green-600"
+    />
+    <app-stats
+      title="Credenciales"
+      [value]="credsTotal()"
+      smallText="Credenciales registradas"
+      iconName="key-round"
+      iconBgColor="bg-purple-100"
+      iconColor="text-purple-600"
+    />
+  </div>
+
+  <!-- ══════════════════ Bitácora ══════════════════ -->
+  @if (activeTab() === 'logs') {
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <div
+        class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+      >
+        <div
+          class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+        >
+          <h2
+            class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+          >
+            Bitácora ({{ logsTotal() }})
+          </h2>
+          <app-options-dropdown
+            class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px] self-end"
+            [filters]="logsFilterConfigs"
+            [filterValues]="logsFilterValues"
+            [actions]="logsActions()"
+            [isLoading]="isLoading()"
+            (filterChange)="onLogsFilterChange($event)"
+            (clearAllFilters)="clearLogsFilters()"
+            (actionClick)="onHeaderAction($event)"
+          />
+        </div>
+      </div>
+
+      @if (isLoading()) {
+        <div class="p-4 md:p-6 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-text-secondary">Cargando bitácora...</p>
+        </div>
+      }
+
+      @if (!isLoading() && logs().length === 0) {
+        <app-empty-state
+          icon="door-open"
+          title="Sin registros de acceso"
+          [description]="
+            hasLogsFilters
+              ? 'Ningún evento coincide con el filtro seleccionado.'
+              : 'Aún no se han registrado ingresos de socios.'
+          "
+          [showActionButton]="false"
+          [showRefreshButton]="true"
+          [showClearFilters]="hasLogsFilters"
+          (refreshClick)="loadLogs()"
+          (clearFiltersClick)="clearLogsFilters()"
+        />
+      }
+
+      @if (!isLoading() && logs().length > 0) {
+        <div class="px-2 pb-2 pt-3 md:p-4">
+          <app-responsive-data-view
+            [data]="logs()"
+            [columns]="logsColumns"
+            [cardConfig]="logsCardConfig"
+            [loading]="isLoading()"
+            [sortable]="true"
+            emptyMessage="Sin registros de acceso"
+            emptyIcon="door-open"
+          />
+          <div class="mt-4 flex justify-center">
+            <app-pagination
+              [currentPage]="logsFilters().page"
+              [totalPages]="logsTotalPages()"
+              [total]="logsTotal()"
+              [limit]="logsFilters().limit"
+              (pageChange)="onLogsPageChange($event)"
+            />
+          </div>
+        </div>
+      }
+    </app-card>
+  }
+
+  <!-- ══════════════════ Credenciales ══════════════════ -->
+  @if (activeTab() === 'credentials') {
+    <app-card [responsive]="true" [padding]="false" overflow="visible">
+      <div
+        class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+      >
+        <h2
+          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
+        >
+          Credenciales ({{ credsTotal() }})
+        </h2>
+      </div>
+
+      @if (isLoading()) {
+        <div class="p-4 md:p-6 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-text-secondary">Cargando credenciales...</p>
+        </div>
+      }
+
+      @if (!isLoading() && credentials().length === 0) {
+        <app-empty-state
+          icon="key-round"
+          title="Sin credenciales"
+          description="Registra una credencial (QR, PIN o referencia externa) para que un socio pueda ingresar."
+          actionButtonText="Nueva credencial"
+          [showActionButton]="true"
+          [showRefreshButton]="true"
+          (actionClick)="newCredential()"
+          (refreshClick)="loadCredentials()"
+        />
+      }
+
+      @if (!isLoading() && credentials().length > 0) {
+        <div class="px-2 pb-2 pt-3 md:p-4">
+          <app-responsive-data-view
+            [data]="credentials()"
+            [columns]="credsColumns"
+            [cardConfig]="credsCardConfig"
+            [actions]="credsActions()"
+            [loading]="isLoading()"
+            [sortable]="false"
+            emptyMessage="Sin credenciales"
+            emptyIcon="key-round"
+          />
+          <div class="mt-4 flex justify-center">
+            <app-pagination
+              [currentPage]="credsFilters().page"
+              [totalPages]="credsTotalPages()"
+              [total]="credsTotal()"
+              [limit]="credsFilters().limit"
+              (pageChange)="onCredsPageChange($event)"
+            />
+          </div>
+        </div>
+      }
+    </app-card>
+  }
+
+  <app-membership-credential-form-modal
+    [(open)]="showCredentialModal"
+    [credential]="editingCredential()"
+    (saved)="onCredentialSaved()"
+  />
+</div>

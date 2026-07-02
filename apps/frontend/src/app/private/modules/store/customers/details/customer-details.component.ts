@@ -707,9 +707,10 @@ export class CustomerDetailsComponent {
   walletError = signal<string | null>(null);
   topUpError = signal<string | null>(null);
 
-  // Deep-link to the gym member profile (Gym Suite — Ola 1). Only meaningful
-  // for `gym`-industry stores; the destination page is gated by the
-  // store:gym_memberships:read permission and the gym_ops panel_ui visibility.
+  // Deep-link to the member profile (Membership Suite). Only meaningful for
+  // `gym`/`service`-industry stores; the destination page is gated by the
+  // store:gym_memberships:read permission and the memberships panel_ui
+  // visibility.
   gymProfileActions = computed<StickyHeaderActionButton[]>(() =>
     this.customerId() != null
       ? [
@@ -726,7 +727,7 @@ export class CustomerDetailsComponent {
   onHeaderAction(actionId: string): void {
     if (actionId === 'gym-profile' && this.customerId() != null) {
       this.router.navigate([
-        '/admin/gym-ops/members/profile',
+        '/admin/memberships/members/profile',
         this.customerId(),
       ]);
     }

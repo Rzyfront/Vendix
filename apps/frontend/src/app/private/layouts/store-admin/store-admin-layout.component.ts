@@ -669,28 +669,29 @@ export class StoreAdminLayoutComponent {
       ],
     },
     {
-      // Gym Operations (Gym Suite — Ola 1). Hidden by INDUSTRY_HIDDEN_MODULES
-      // for every industry except `gym`; visible only when the store's industry
-      // includes `gym`. Labels map to panel_ui keys via MenuFilterService
-      // (Gimnasio → gym_ops, Planes → gym_ops_plans, Socios → gym_ops_members,
-      // Accesos → gym_ops_access).
-      label: 'Gimnasio',
+      // Memberships (Membership Suite). Hidden by INDUSTRY_HIDDEN_MODULES for
+      // every industry except `gym` and `service`; visible only when the
+      // store's industry includes `gym` or `service`. Labels map to panel_ui
+      // keys via MenuFilterService (Membresías → memberships, Planes →
+      // memberships_plans, Socios → memberships_members, Accesos →
+      // memberships_access).
+      label: 'Membresías',
       icon: 'dumbbell',
       children: [
         {
           label: 'Planes',
           icon: 'tag',
-          route: '/admin/gym-ops/plans',
+          route: '/admin/memberships/plans',
         },
         {
           label: 'Socios',
           icon: 'users',
-          route: '/admin/gym-ops/members',
+          route: '/admin/memberships/members',
         },
         {
           label: 'Accesos',
           icon: 'door-open',
-          route: '/admin/gym-ops/access',
+          route: '/admin/memberships/access',
         },
       ],
     },

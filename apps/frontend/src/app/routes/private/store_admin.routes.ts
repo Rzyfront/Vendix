@@ -723,13 +723,14 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
-      // Gym Ops (Gym Suite — Ola 1: Planes, Socios/Membresías, Accesos). The
+      // Memberships (Membership Suite: Planes, Socios/Membresías, Accesos). The
       // whole group is hidden by INDUSTRY_HIDDEN_MODULES for every industry
-      // except `gym`; visible only when the store's industry includes `gym`.
-      // Panel_ui keys: gym_ops (parent) · gym_ops_plans · gym_ops_members ·
-      // gym_ops_access. The root /admin/gym-ops defaults to Planes.
+      // except `gym` and `service`; visible only when the store's industry
+      // includes `gym` or `service`. Panel_ui keys: memberships (parent) ·
+      // memberships_plans · memberships_members · memberships_access. The root
+      // /admin/memberships defaults to Planes.
       {
-        path: 'gym-ops',
+        path: 'memberships',
         children: [
           {
             path: '',
@@ -740,22 +741,22 @@ export const storeAdminRoutes: Routes = [
             path: 'plans',
             loadChildren: () =>
               import(
-                '../../private/modules/store/gym-ops/plans/routes/gym-plans.routes'
-              ).then((m) => m.gymPlansRoutes),
+                '../../private/modules/store/memberships/plans/routes/membership-plans.routes'
+              ).then((m) => m.membershipPlansRoutes),
           },
           {
             path: 'members',
             loadChildren: () =>
               import(
-                '../../private/modules/store/gym-ops/members/routes/gym-members.routes'
-              ).then((m) => m.gymMembersRoutes),
+                '../../private/modules/store/memberships/members/routes/membership-members.routes'
+              ).then((m) => m.membershipMembersRoutes),
           },
           {
             path: 'access',
             loadChildren: () =>
               import(
-                '../../private/modules/store/gym-ops/access/routes/gym-access.routes'
-              ).then((m) => m.gymAccessRoutes),
+                '../../private/modules/store/memberships/access/routes/membership-access.routes'
+              ).then((m) => m.membershipAccessRoutes),
           },
         ],
       },
