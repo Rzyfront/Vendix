@@ -6,6 +6,8 @@ import {
   effect,
   DestroyRef,
 } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
+import { switchMap, tap } from 'rxjs/operators';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterModule } from '@angular/router';
@@ -97,15 +99,47 @@ export class ProviderAvailabilityComponent {
   });
 
   constructor() {
-    // Auto-refresh when any input changes
-    effect(() => {
-      const from = this.dateFrom();
-      const to = this.dateTo();
-      const slot = this.slotMinutes();
+    // Auto-refresh when any input changes.
+    //
+    // The previous version used `effect()` + `loadOverview()` which
+    // subscribed with `takeUntilDestroyed(this.destroyRef)` on every
+    // effect run. `takeUntilDestroyed` only cancels on component
+    // destroy — it does NOT cancel an in-flight request when the
+    // effect re-runs because some other signal changed. So if the
+    // operator changes dateFrom/dateTo/slotMinutes rapidly, you
+    // get N parallel GET /availability/overview calls and the
+    // dashboard paints whichever one resolves last (race condition).
+    //
+    // Fix: lift the params into a `computed` signal, convert to
+    // observable, and use `switchMap` — the operator's natural
+    // semantics for "the latest request wins". switchMap
+    // automatically unsubscribes from the previous inner observable.
+    const params = computed(() => {
       const prov = this.providerFilter();
-      // Trigger initial load + re-load on input changes
-      this.loadOverview({ date_from: from, date_to: to, slot_minutes: slot, provider_id: prov ?? undefined });
+      return {
+        date_from: this.dateFrom(),
+        date_to: this.dateTo(),
+        slot_minutes: this.slotMinutes(),
+        provider_id: prov ?? undefined,
+      };
     });
+
+    toObservable(params)
+      .pipe(
+        tap(() => this.loading.set(true)),
+        switchMap((p) => this.service.getAvailabilityOverview(p)),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe({
+        next: (data) => {
+          this.overview.set(data);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.toast.error('Error al cargar disponibilidad de proveedores');
+          this.loading.set(false);
+        },
+      });
   }
 
   loadOverview(params: {
