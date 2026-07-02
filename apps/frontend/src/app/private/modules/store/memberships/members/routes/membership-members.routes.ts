@@ -7,8 +7,8 @@ import { Routes } from '@angular/router';
  * `routes/private/store_admin.routes.ts`. Panel_ui key: `memberships_members`.
  *
  * Backend permission enforcement:
- *   - store/memberships          → store:gym_memberships:read | create | update
- *   - store/memberships/member-profiles → store:gym_memberships:read | update
+ *   - store/memberships          → store:memberships:read | create | update
+ *   - store/memberships/member-profiles → store:memberships:read | update
  */
 export const membershipMembersRoutes: Routes = [
   {
@@ -18,7 +18,7 @@ export const membershipMembersRoutes: Routes = [
       import('../pages/members-list-page/members-list-page.component').then(
         (c) => c.MembershipMembersListPageComponent,
       ),
-    data: { permission: 'store:gym_memberships:read' },
+    data: { permission: 'store:memberships:read' },
   },
   {
     path: 'new',
@@ -26,7 +26,7 @@ export const membershipMembersRoutes: Routes = [
       import(
         '../pages/membership-form-page/membership-form-page.component'
       ).then((c) => c.MembershipFormPageComponent),
-    data: { permission: 'store:gym_memberships:create' },
+    data: { permission: 'store:memberships:create' },
   },
   {
     // Member profile keyed by customerId (deep-link target from customers).
@@ -36,7 +36,7 @@ export const membershipMembersRoutes: Routes = [
       import('../pages/member-profile-page/member-profile-page.component').then(
         (c) => c.MembershipMemberProfilePageComponent,
       ),
-    data: { permission: 'store:gym_memberships:read' },
+    data: { permission: 'store:memberships:read' },
   },
   {
     path: ':id',
@@ -44,6 +44,6 @@ export const membershipMembersRoutes: Routes = [
       import(
         '../pages/membership-detail-page/membership-detail-page.component'
       ).then((c) => c.MembershipDetailPageComponent),
-    data: { permission: 'store:gym_memberships:read' },
+    data: { permission: 'store:memberships:read' },
   },
 ];

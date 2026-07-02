@@ -709,7 +709,7 @@ export class CustomerDetailsComponent {
 
   // Deep-link to the member profile (Membership Suite). Only meaningful for
   // `gym`/`service`-industry stores; the destination page is gated by the
-  // store:gym_memberships:read permission and the memberships panel_ui
+  // store:memberships:read permission and the memberships panel_ui
   // visibility.
   gymProfileActions = computed<StickyHeaderActionButton[]>(() =>
     this.customerId() != null
