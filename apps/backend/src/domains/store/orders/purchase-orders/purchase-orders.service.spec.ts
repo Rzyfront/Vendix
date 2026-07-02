@@ -5,6 +5,8 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { CostingService } from '../../inventory/shared/services/costing.service';
 import { CostingMethodResolverService } from '../../inventory/shared/services/costing-method-resolver.service';
+import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
+import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/serial-number-enforcement.service';
 import { AuditService } from '@common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
@@ -78,6 +80,26 @@ describe('PurchaseOrdersService.receive()', () => {
       purchase_order_receptions: { create: jest.fn().mockResolvedValue({ id: 1 }) },
       purchase_order_reception_items: { create: jest.fn().mockResolvedValue({}) },
       purchase_order_items: { update: jest.fn().mockResolvedValue({}) },
+      // Pre-existing dependencies this spec never mocked:
+      // - findFirst: Fase 2 UoM conversion (resolveUoMConversion).
+      //   is_ingredient=false preserves the exact retail behaviour the
+      //   existing assertions expect (factor=1, no quantity/cost scaling).
+      // - findUnique/update: QUI-425 (D2) cost-anchor pricing rule that runs
+      //   unconditionally after stock update for variant-less items.
+      products: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: PRODUCT_ID,
+          is_ingredient: false,
+          purchase_to_stock_factor: null,
+          stock_uom_id: null,
+          purchase_uom_id: null,
+        }),
+        findUnique: jest.fn().mockResolvedValue({
+          base_price: 3000,
+          profit_margin: 20,
+        }),
+        update: jest.fn().mockResolvedValue({}),
+      },
       purchase_orders: {
         findUnique: jest.fn().mockResolvedValue(mockPurchaseOrder),
         update: jest.fn().mockResolvedValue({
@@ -96,6 +118,15 @@ describe('PurchaseOrdersService.receive()', () => {
       $transaction: jest.fn().mockImplementation(async (callback: any) => {
         return callback(buildTxMock());
       }),
+      // D2: used OUTSIDE the transaction, only on the reception that fully
+      // completes the order, to compute the remainder against what
+      // accounting already posted for this order's prior receptions.
+      purchase_order_receptions: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      accounting_entries: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
 
     const mockStockLevelManager = {
@@ -124,6 +155,17 @@ describe('PurchaseOrdersService.receive()', () => {
     const mockS3Service = {} as any;
     const mockSettingsService = {} as any;
 
+    // Pre-existing constructor deps (QUI-431 serial numbers) that this spec
+    // never mocked — required for Test.createTestingModule to compile the
+    // module at all, independent of the D2 accounting changes below.
+    const mockSerialNumbersService = {
+      populatePoolOnReceipt: jest.fn().mockResolvedValue(undefined),
+    };
+    const mockSerialEnforcement = {
+      isSerialized: jest.fn().mockResolvedValue(false),
+      assertParityForLocation: jest.fn().mockResolvedValue(undefined),
+    };
+
     const mockEventEmitter = {
       emit: jest.fn(),
     };
@@ -137,6 +179,14 @@ describe('PurchaseOrdersService.receive()', () => {
         {
           provide: CostingMethodResolverService,
           useValue: mockCostingMethodResolver,
+        },
+        {
+          provide: InventorySerialNumbersService,
+          useValue: mockSerialNumbersService,
+        },
+        {
+          provide: SerialNumberEnforcementService,
+          useValue: mockSerialEnforcement,
         },
         { provide: AuditService, useValue: mockAuditService },
         { provide: S3Service, useValue: mockS3Service },

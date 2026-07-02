@@ -2358,9 +2358,22 @@ export class AutoEntryService {
 
   /**
    * purchase_order.received: Debit Inventory, Credit Accounts Payable
+   *
+   * D2: fired on EVERY reception (partial or final) of a purchase order, not
+   * only when it becomes fully received. `data.total_amount` here is already
+   * the prorated amount for THIS specific reception batch (or the remainder
+   * on the final reception) — computed by the emitter in
+   * purchase-orders.service.ts, never recomputed here.
    */
   async onPurchaseOrderReceived(data: {
     purchase_order_id: number;
+    /**
+     * `purchase_order_receptions.id` — used as `source_id` instead of
+     * `purchase_order_id` so createAutoEntry's (source_type, source_id)
+     * duplicate guard treats each partial reception of the same order as a
+     * distinct event instead of skipping the 2nd/3rd reception as a dup.
+     */
+    reception_id: number;
     organization_id: number;
     store_id?: number;
     total_amount: number;
@@ -2402,9 +2415,10 @@ export class AutoEntryService {
 
     return this.createAutoEntry({
       source_type: 'purchase_order.received',
-      source_id: data.purchase_order_id,
+      source_id: data.reception_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,      description: `Purchase order received #${data.purchase_order_id}`,
+      store_id: data.store_id,
+      description: `Purchase order received #${data.purchase_order_id} (reception #${data.reception_id})`,
       lines,
       user_id: data.user_id,
     });

@@ -619,6 +619,13 @@ export class AccountingEventsListener {
   @OnEvent('purchase_order.received')
   async handlePurchaseOrderReceived(event: {
     purchase_order_id: number;
+    /**
+     * D2: id of the specific `purchase_order_receptions` row that triggered
+     * this event. Used as the auto-entry `source_id` (NOT purchase_order_id)
+     * so each partial reception of the same order gets its own idempotency
+     * key instead of being skipped as a duplicate of the first.
+     */
+    reception_id: number;
     organization_id: number;
     store_id?: number;
     total_amount: number;
@@ -630,6 +637,7 @@ export class AccountingEventsListener {
       if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
       await this.auto_entry_service.onPurchaseOrderReceived({
         purchase_order_id: event.purchase_order_id,
+        reception_id: event.reception_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
         total_amount: Number(event.total_amount),
@@ -637,11 +645,11 @@ export class AccountingEventsListener {
         supplier: event.supplier,
       });
       this.logger.log(
-        `Auto-entry created for purchase_order.received #${event.purchase_order_id}`,
+        `Auto-entry created for purchase_order.received #${event.purchase_order_id} (reception #${event.reception_id})`,
       );
     } catch (error) {
       this.logger.error(
-        `Failed to create auto-entry for purchase_order.received #${event.purchase_order_id}: ${error.message}`,
+        `Failed to create auto-entry for purchase_order.received #${event.purchase_order_id} (reception #${event.reception_id}): ${error.message}`,
         error.stack,
       );
     }

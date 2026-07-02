@@ -1054,6 +1054,13 @@ export class PurchaseOrdersService {
         storeId ?? undefined,
       );
 
+      // D2: accumulate the purchase-unit subtotal received in THIS specific
+      // reception batch (quantity_received_now × unit_cost, in purchase-order
+      // currency, matching the same basis used for `subtotal` at PO creation
+      // — see the `subtotal = sum(quantity * unit_price)` calc above in
+      // create()). Used below to prorate the accounting entry amount.
+      let receivedBatchSubtotal = 0;
+
       // Create inventory movements, update stock, and calculate cost for received items
       for (const item of dto.items) {
         if (item.quantity_received <= 0) continue;
@@ -1066,6 +1073,7 @@ export class PurchaseOrdersService {
 
         if (productId) {
           const purchaseUnitCost = Number(orderItem?.unit_cost || 0);
+          receivedBatchSubtotal += item.quantity_received * purchaseUnitCost;
 
           // ===== UoM conversion (purchase unit → minimum stock unit) =====
           // The frontend sends `item.quantity_received` in the purchase unit
@@ -1323,7 +1331,22 @@ export class PurchaseOrdersService {
         },
       });
 
-      return { updated_po, all_items_received };
+      // D2: order-wide subtotal at the same basis as `subtotal` in create()
+      // (quantity_ordered × unit_cost across ALL items, not just this batch).
+      // Used to derive the proportional share of `total_amount` (which already
+      // folds in discount/tax/shipping at header level) for THIS reception.
+      const orderSubtotal = updated_po.purchase_order_items.reduce(
+        (sum, i) => sum + i.quantity_ordered * Number(i.unit_cost || 0),
+        0,
+      );
+
+      return {
+        updated_po,
+        all_items_received,
+        reception_id: reception.id,
+        received_batch_subtotal: receivedBatchSubtotal,
+        order_subtotal: orderSubtotal,
+      };
     });
 
     // Audit log after transaction
@@ -1345,33 +1368,97 @@ export class PurchaseOrdersService {
       );
     }
 
-    // Emit purchase_order.received for accounting ONLY when fully received
-    if (result.all_items_received) {
-      try {
-        const total_amount = Number(result.updated_po.total_amount || 0);
-        if (total_amount > 0) {
-          this.eventEmitter.emit('purchase_order.received', {
-            purchase_order_id: result.updated_po.id,
-            organization_id: result.updated_po.organization_id,
-            store_id: result.updated_po.location?.store_id,
-            total_amount,
-            user_id: RequestContextService.getUserId(),
-            // C4-followup: result.updated_po.suppliers ya viene completo del
-            // include de la transacción — sin lookup adicional.
-            supplier: result.updated_po.suppliers
-              ? {
-                  id: result.updated_po.suppliers.id,
-                  name: result.updated_po.suppliers.name,
-                  tax_id: result.updated_po.suppliers.tax_id ?? undefined,
-                }
-              : undefined,
+    // D2: emit purchase_order.received on EVERY reception (partial or final)
+    // so inventory (DR 1435) recognized at receipt time is matched by
+    // accounts payable (CR 2205) in the SAME event — no more waiting for the
+    // order to be fully received. The amount is prorated from this batch's
+    // share of the order subtotal against `total_amount` (which already
+    // folds in header-level discount/tax/shipping), following the same
+    // ratio pattern used in return-orders.service.ts for partial refunds.
+    //
+    // Idempotency: `source_id` is the reception id (`purchase_order_receptions.id`,
+    // unique per reception, not per order), NOT the purchase_order_id. This
+    // lets createAutoEntry's (source_type, source_id) duplicate guard allow a
+    // second/third partial reception of the SAME order to post its own entry
+    // instead of being skipped as a duplicate of the first.
+    //
+    // The reception that completes the order (all_items_received) posts only
+    // the REMAINDER against total_amount — not its own prorated share — so
+    // rounding drift from prior partial receptions never leaves a gap or a
+    // double-count. The remainder is computed against what accounting has
+    // ACTUALLY posted so far (sum of total_debit for this order's previous
+    // reception ids), not against a business-side running total, so a prior
+    // reception whose emit failed (see catch below) is naturally recovered
+    // here instead of being silently lost.
+    try {
+      const total_amount = Number(result.updated_po.total_amount || 0);
+      const supplier = result.updated_po.suppliers
+        ? {
+            id: result.updated_po.suppliers.id,
+            name: result.updated_po.suppliers.name,
+            tax_id: result.updated_po.suppliers.tax_id ?? undefined,
+          }
+        : undefined;
+
+      let batch_amount: number;
+      if (result.all_items_received) {
+        // Sum what accounting already posted for THIS order's earlier
+        // receptions (source_type is fixed; source_id ranges over this
+        // order's other reception ids).
+        const priorReceptionIds = (
+          await this.prisma.purchase_order_receptions.findMany({
+            where: { purchase_order_id: id, id: { not: result.reception_id } },
+            select: { id: true },
+          })
+        ).map((r) => r.id);
+
+        let alreadyPosted = 0;
+        if (priorReceptionIds.length > 0) {
+          const priorEntries = await this.prisma.accounting_entries.findMany({
+            where: {
+              source_type: 'purchase_order.received',
+              source_id: { in: priorReceptionIds },
+            },
+            select: { total_debit: true },
           });
+          alreadyPosted = priorEntries.reduce(
+            (sum, e) => sum + Number(e.total_debit || 0),
+            0,
+          );
         }
-      } catch (error) {
-        this.logger.error(
-          `Failed to emit purchase_order.received for PO #${id}: ${error.message}`,
-        );
+        batch_amount =
+          Math.round((total_amount - alreadyPosted) * 100) / 100;
+      } else if (result.order_subtotal > 0) {
+        // Proportional share of this batch vs. the order's full subtotal,
+        // scaled onto total_amount (same ratio pattern as
+        // return-orders.service.ts: amount / order_total * header_charge).
+        batch_amount =
+          Math.round(
+            (result.received_batch_subtotal / result.order_subtotal) *
+              total_amount *
+              100,
+          ) / 100;
+      } else {
+        batch_amount = 0;
       }
+
+      if (batch_amount > 0) {
+        this.eventEmitter.emit('purchase_order.received', {
+          purchase_order_id: result.updated_po.id,
+          reception_id: result.reception_id,
+          organization_id: result.updated_po.organization_id,
+          store_id: result.updated_po.location?.store_id,
+          total_amount: batch_amount,
+          user_id: RequestContextService.getUserId(),
+          // C4-followup: result.updated_po.suppliers ya viene completo del
+          // include de la transacción — sin lookup adicional.
+          supplier,
+        });
+      }
+    } catch (error) {
+      this.logger.error(
+        `Failed to emit purchase_order.received for PO #${id} (reception #${result.reception_id}): ${error.message}`,
+      );
     }
 
     return result.updated_po;
