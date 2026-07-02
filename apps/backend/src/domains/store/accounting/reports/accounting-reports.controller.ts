@@ -7,9 +7,11 @@ import {
 import { UseGuards } from '@nestjs/common';
 import { Controller, Get, Query } from '@nestjs/common';
 import { AccountingReportsService } from './accounting-reports.service';
+import { InventoryReconciliationService } from './inventory-reconciliation.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { ReportQueryDto } from './dto/report-query.dto';
 import { SubsidiaryLedgerQueryDto } from './dto/subsidiary-ledger-query.dto';
+import { InventoryReconciliationQueryDto } from './dto/inventory-reconciliation-query.dto';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 
 @Controller('store/accounting/reports')
@@ -18,6 +20,7 @@ import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 export class AccountingReportsController {
   constructor(
     private readonly accounting_reports_service: AccountingReportsService,
+    private readonly inventory_reconciliation_service: InventoryReconciliationService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -103,5 +106,25 @@ export class AccountingReportsController {
       ErrorCodes.ACC_VALIDATE_001,
       'Provide account_code OR both third_party_type and third_party_id',
     );
+  }
+
+  /**
+   * Conciliación auxiliar-vs-mayor de inventario (C5, Ola 3). Papel de
+   * trabajo de auditoría READ-ONLY: compara el último snapshot de
+   * `inventory_valuation_snapshots` por (location, product, variant) con
+   * `snapshot_at <= period_end` contra el saldo de la cuenta 1435 y sus
+   * descendientes (asientos `posted`, `entry_date <= period_end`), agrupado
+   * por `accounting_entity_id`. No persiste nada.
+   */
+  @Get('inventory-reconciliation')
+  @Permissions('store:accounting:reports:read')
+  async getInventoryReconciliation(
+    @Query() query_dto: InventoryReconciliationQueryDto,
+  ) {
+    const result =
+      await this.inventory_reconciliation_service.getInventoryReconciliation(
+        query_dto,
+      );
+    return this.response_service.success(result);
   }
 }

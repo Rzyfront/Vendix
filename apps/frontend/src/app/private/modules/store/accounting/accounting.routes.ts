@@ -103,6 +103,12 @@ const REPORTS_SUB_TABS: AccountingSubTab[] = [
     icon: 'book-open',
     route: '/admin/accounting/reports/subsidiary-ledger',
   },
+  {
+    id: 'inventory-reconciliation',
+    label: 'Conciliación Inventario',
+    icon: 'scale',
+    route: '/admin/accounting/reports/inventory-reconciliation',
+  },
 ];
 
 export const accountingRoutes: Routes = [
@@ -399,6 +405,13 @@ export const accountingRoutes: Routes = [
             loadComponent: () =>
               import('./components/reports/subsidiary-ledger/subsidiary-ledger.component').then(
                 (c) => c.SubsidiaryLedgerComponent,
+              ),
+          },
+          {
+            path: 'inventory-reconciliation',
+            loadComponent: () =>
+              import('./components/reports/inventory-reconciliation/inventory-reconciliation.component').then(
+                (c) => c.InventoryReconciliationComponent,
               ),
           },
         ],
