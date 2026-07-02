@@ -131,8 +131,6 @@ export class ScheduleManagementComponent {
       | 'fixed_term'
       | 'service'
       | 'apprentice',
-    email: '',
-    phone: '',
   });
   newEmployeeValid = computed(() => {
     const e = this.newEmployee();
@@ -442,8 +440,6 @@ export class ScheduleManagementComponent {
         | 'fixed_term'
         | 'service'
         | 'apprentice',
-      email: '',
-      phone: '',
     });
   }
 
