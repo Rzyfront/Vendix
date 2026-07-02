@@ -184,6 +184,13 @@ export class PayrollFlowService {
   }
 
   private emitPayrollDianAcceptedAccounting(run: any, user_id?: number) {
+    // B1: propagar `total_retention` (SUM de `payroll_items.deductions.retention`)
+    // para que el asiento segregue la retefuente laboral en 236505.
+    const total_retention = (run.payroll_items || []).reduce(
+      (sum: number, item: any) =>
+        sum + Number(item?.deductions?.retention || 0),
+      0,
+    );
     this.event_emitter.emit('payroll.dian_accepted', {
       payroll_run_id: run.id,
       organization_id: run.organization_id,
@@ -195,6 +202,7 @@ export class PayrollFlowService {
       total_net_pay: Number(run.total_net_pay || 0),
       health_deduction: Number(run.health_deduction || 0),
       pension_deduction: Number(run.pension_deduction || 0),
+      total_retention,
       approved_by: user_id ?? run.approved_by_user_id,
       cost_center_breakdown: this.buildCostCenterBreakdown(run),
     });

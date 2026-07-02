@@ -104,6 +104,13 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'payroll.approved.health_payable': { code: '2370', description: 'EPS' },
   'payroll.approved.pension_payable': { code: '2380', description: 'Pension' },
   'payroll.approved.withholdings': { code: '2365', description: 'Retenciones' },
+  // B1: segregación de retefuente laboral en 236505 (child of 2365).
+  // El resto de retenciones distintas a retención en la fuente laboral se
+  // sigue acreditando a la cuenta 2365 genérica vía `payroll.approved.withholdings`.
+  'payroll.approved.labor_withholding': {
+    code: '236505',
+    description: 'Retención en la Fuente - Laboral',
+  },
   'payroll.paid.salaries_payable': {
     code: '2505',
     description: 'Salarios por Pagar',

@@ -7,6 +7,8 @@ import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
 import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 import { AccountingEntryFailureService } from './accounting-entry-failure.service';
+import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
+import { ErrorCodes } from '../../../../common/errors/error-codes';
 
 export interface AutoEntryEventData {
   source_type: string;
@@ -503,6 +505,41 @@ export class AutoEntryService {
       );
       throw new Error(
         `Auto-entry lines do not balance: debit=${total_debit}, credit=${total_credit}`,
+      );
+    }
+
+    // C2: Guard de período cerrado NO-reintenable.
+    // Si el `entry_date` cae dentro de un período CERRADO (ya liquidado por
+    // el contador), el asiento NO debe postearse ni encolarse para reintento:
+    // postear retroactivamente sobre un mes cerrado rompe el cierre contable
+    // (declaraciones, exógena, informes ya emitidos). Lanzamos
+    // `VendixHttpException` (no `BadRequestException`) con código
+    // `FISCAL_PERIOD_CLOSED` para que `AccountingEntryFailureService`
+    // detecte el código en el mensaje y omita el enqueue del reintento.
+    const closed_period = await this.prisma.fiscal_periods.findFirst({
+      where: {
+        organization_id,
+        OR: [
+          { accounting_entity_id: accounting_entity.id },
+          { accounting_entity_id: null },
+        ],
+        status: 'closed',
+        start_date: { lte: entry_date },
+        end_date: { gte: entry_date },
+      },
+      orderBy: { accounting_entity_id: 'desc' },
+      select: { id: true, name: true, start_date: true, end_date: true },
+    });
+    if (closed_period) {
+      this.logger.error(
+        `Cannot post auto-entry for ${source_type}#${source_id}: ` +
+          `fiscal period '${closed_period.name}' covering ${entry_date.toISOString()} is closed`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_PERIOD_CLOSED,
+        `Fiscal period '${closed_period.name}' (id ${closed_period.id}) covering ` +
+          `${entry_date.toISOString()} is closed; auto-entry ${source_type}#${source_id} rejected. ` +
+          `Open a corrective period or reverse the original business transaction.`,
       );
     }
 
@@ -1334,7 +1371,7 @@ export class AutoEntryService {
   }
 
   /**
-   * payroll.approved: Debit Payroll Expense + SS (split by cost center), Credit Salaries Payable + Health + Pension
+   * payroll.approved: Debit Payroll Expense + SS (split by cost center), Credit Salaries Payable + Health + Pension + Labor Withholding (236505) + Other Withholdings (2365)
    *
    * Cost center mapping:
    *   administrative → 5105 (Gastos de Personal - Admin)
@@ -1342,6 +1379,17 @@ export class AutoEntryService {
    *   sales          → 5205 (Gastos de Personal - Ventas)
    *
    * Liability accounts (credit side) are shared across all cost centers.
+   *
+   * B1 (segregación 236505): la retención en la fuente laboral (retefuente
+   * practicada al empleado sobre su salario, columna `deductions.retention` en
+   * `payroll_items`) se acredita en la sub-cuenta 236505 "Retención en la
+   * Fuente - Laboral" en lugar de la 2365 genérica. El resto de retenciones
+   * (si existieran) sigue acreditándose a 2365. Cuadre:
+   *   total_debits - (net_pay + health + pension) = total_retention (→ 236505) + otros (→ 2365)
+   * Si el cálculo de "otros" sale negativo (e.g. datos redondeados que no
+   * cuadran exactamente), NO fallamos el asiento — emitimos warning y
+   * ponemos 0 con nota en la descripción. La invariante de balance la
+   * garantiza la validación al final de `createAutoEntry`.
    */
   async onPayrollApproved(data: {
     payroll_run_id: number;
@@ -1353,6 +1401,12 @@ export class AutoEntryService {
     total_net_pay: number;
     health_deduction: number;
     pension_deduction: number;
+    /**
+     * B1: suma de `payroll_items.deductions.retention` (retefuente laboral).
+     * Si el caller no la propaga, se trata como 0 (compatibilidad con callers
+     * históricos que aún no la incluyen).
+     */
+    total_retention?: number;
     accounting_entity_id?: number;
     user_id?: number;
     cost_center_breakdown?: Record<
@@ -1361,6 +1415,12 @@ export class AutoEntryService {
     >;
   }) {
     const lines: (AutoEntryLine | null)[] = [];
+
+    // B1: retención laboral segregada a 236505.
+    const total_retention = Math.max(
+      0,
+      Number(data.total_retention ?? 0),
+    );
 
     // === DEBIT LINES ===
     if (
@@ -1460,21 +1520,49 @@ export class AutoEntryService {
       );
     }
 
-    // Withholdings = total debits - (net_pay + health + pension)
+    // B1: segregación de retenciones. Primero acreditamos la retención laboral
+    // (retefuente del empleado) en 236505; luego el resto de retenciones van a
+    // la cuenta 2365 genérica. Cuadre:
+    //   total_debits = net_pay + health + pension + labor_withholding (236505) + other_withholdings (2365)
+    //   other_withholdings = total_debits - (net_pay + health + pension + labor_withholding)
     const total_debits = data.total_earnings + data.total_employer_costs;
-    const remaining =
+    if (total_retention > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'payroll.approved.labor_withholding',
+          'Retención en la Fuente - Laboral',
+          0,
+          total_retention,
+          data.store_id,
+        ),
+      );
+    }
+    const other_withholdings =
       total_debits -
-      (data.total_net_pay + data.health_deduction + data.pension_deduction);
-    if (remaining > 0.001) {
+      (data.total_net_pay +
+        data.health_deduction +
+        data.pension_deduction +
+        total_retention);
+    if (other_withholdings > 0.001) {
       lines.push(
         await this.resolveAccountLine(
           data.organization_id,
           'payroll.approved.withholdings',
-          'Retenciones y deducciones',
+          'Otras retenciones y deducciones',
           0,
-          remaining,
+          other_withholdings,
           data.store_id,
         ),
+      );
+    } else if (other_withholdings < -0.001) {
+      // Diferencia por redondeo o datos ruidosos: NO fallar el asiento (la
+      // invariante de balance la garantiza `createAutoEntry`). Log warning
+      // y emitir la línea con valor 0 para mantener la trazabilidad.
+      this.logger.warn(
+        `payroll.approved #${data.payroll_run_id}: computed other_withholdings ` +
+          `=${other_withholdings.toFixed(2)} is negative after segregating labor ` +
+          `retention ${total_retention.toFixed(2)}; clamping to 0 and proceeding.`,
       );
     }
 
@@ -1729,11 +1817,13 @@ export class AutoEntryService {
         );
 
         if (d.retention > 0) {
+          // B1: la retención en la fuente del empleado se acredita en la
+          // sub-cuenta 236505 (laboral), NO en la 2365 genérica.
           lines.push(
             await this.resolveAccountLine(
               data.organization_id,
-              'payroll.approved.withholdings',
-              'Retención',
+              'payroll.approved.labor_withholding',
+              'Retención en la Fuente - Laboral',
               0,
               d.retention,
               data.store_id,

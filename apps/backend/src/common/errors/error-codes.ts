@@ -1246,6 +1246,12 @@ export const ErrorCodes = {
     httpStatus: 412,
     devMessage: 'Fiscal accounting is blocked until DIAN acceptance exists',
   },
+  FISCAL_PERIOD_CLOSED: {
+    code: 'FISCAL_PERIOD_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'Fiscal period covering entry_date is closed; auto-entry cannot be posted',
+  },
   FISCAL_DOCUMENT_UNSUPPORTED: {
     code: 'FISCAL_DOCUMENT_UNSUPPORTED',
     httpStatus: 501,
@@ -1380,6 +1386,17 @@ export const ErrorCodes = {
     code: 'PAYROLL_VALIDATE_002',
     httpStatus: 400,
     devMessage: 'User with CUSTOMER role cannot be linked as employee',
+  },
+  PAYROLL_FISCAL_PROFILE_001: {
+    code: 'PAYROLL_FISCAL_PROFILE_001',
+    httpStatus: 400,
+    devMessage:
+      'fixed_retention_rate is required when retention_procedure is proc2',
+  },
+  PAYROLL_FISCAL_PROFILE_002: {
+    code: 'PAYROLL_FISCAL_PROFILE_002',
+    httpStatus: 404,
+    devMessage: 'Employee fiscal profile not found',
   },
 
   // Payroll novelties

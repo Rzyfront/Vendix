@@ -42,6 +42,8 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'payroll.approved.health_payable': '2370',
   'payroll.approved.pension_payable': '2380',
   'payroll.approved.withholdings': '2365',
+  // B1: segregación de retefuente laboral en 236505 (child of 2365).
+  'payroll.approved.labor_withholding': '236505',
   'payroll.paid.salaries_payable': '2505',
   'payroll.paid.bank': '1110',
   'order.completed.cogs': '6135',

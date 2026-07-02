@@ -379,6 +379,8 @@ export class AccountingEventsListener {
     total_net_pay: number;
     health_deduction: number;
     pension_deduction: number;
+    /** B1: suma de retenciones laborales (retefuente del empleado). */
+    total_retention?: number;
     approved_by: number;
     cost_center_breakdown?: Record<
       string,
@@ -399,6 +401,8 @@ export class AccountingEventsListener {
     total_net_pay: number;
     health_deduction: number;
     pension_deduction: number;
+    /** B1: suma de retenciones laborales (retefuente del empleado). */
+    total_retention?: number;
     approved_by: number;
     cost_center_breakdown?: Record<
       string,
@@ -418,6 +422,10 @@ export class AccountingEventsListener {
         total_net_pay: Number(event.total_net_pay),
         health_deduction: Number(event.health_deduction),
         pension_deduction: Number(event.pension_deduction),
+        total_retention:
+          event.total_retention !== undefined
+            ? Number(event.total_retention)
+            : undefined,
         user_id: event.approved_by,
         cost_center_breakdown: event.cost_center_breakdown,
       });
