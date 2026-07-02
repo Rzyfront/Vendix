@@ -56,6 +56,22 @@ export interface InventorySummary {
   total_value: number;
 }
 
+/**
+ * Fila individual de "Ventas por Producto" (analytics/sales/by-product).
+ * Paridad con apps/frontend `sales-by-product.component.ts`:
+ *   product_id, product_name, units_sold, revenue, orders_count.
+ * `image_url` es opcional — backend puede no devolverlo si el producto
+ * no tiene imagen principal configurada.
+ */
+export interface SalesByProduct {
+  product_id: number;
+  product_name: string;
+  units_sold: number;
+  revenue: number;
+  orders_count: number;
+  image_url?: string | null;
+}
+
 export type DatePreset =
   | 'today'
   | 'yesterday'
@@ -64,6 +80,7 @@ export type DatePreset =
   | 'thisMonth'
   | 'lastMonth'
   | 'thisYear'
+  | 'lastYear'
   | 'custom';
 
 export interface DateRange {
