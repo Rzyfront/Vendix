@@ -35,7 +35,7 @@ const LocationCard = ({ item }: { item: LocationStock }) => {
       <View style={styles.cardHeader}>
         <View style={styles.cardHeaderLeft}>
           <Text style={styles.cardTitle} numberOfLines={1}>{item.locationName}</Text>
-          <Badge label={LOCATION_TYPE_LABELS[item.type as keyof typeof LOCATION_TYPE_LABELS] || item.type} variant={variant} size="sm" />
+          <Badge label={LOCATION_TYPE_LABELS[item.type] ?? item.type} variant={variant} size="sm" />
         </View>
       </View>
       <View style={styles.statsRow}>
