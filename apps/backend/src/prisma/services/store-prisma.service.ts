@@ -87,14 +87,14 @@ export class StorePrismaService extends BasePrismaService {
     'menus',
     'menu_sections',
     'menu_availability_windows',
-    // ===== Gym Suite (Ola 1) =====
-    // Las 5 tablas gym llevan store_id directo → scoping directo por tienda.
-    // gym_access_logs también scopea por store_id (bitácora por tienda).
-    'gym_plans',
-    'gym_memberships',
-    'gym_member_profiles',
-    'gym_access_credentials',
-    'gym_access_logs',
+    // ===== Membership core (generalized) =====
+    // Las 5 tablas de membresía llevan store_id directo → scoping directo por
+    // tienda. membership_access_logs también scopea por store_id (bitácora).
+    'membership_plans',
+    'memberships',
+    'membership_profiles',
+    'membership_access_credentials',
+    'membership_access_logs',
   ];
 
   private readonly fiscal_entity_scoped_models = [
@@ -1635,25 +1635,25 @@ export class StorePrismaService extends BasePrismaService {
     return this.scoped_client.menu_availability_windows;
   }
 
-  // ===== Gym Suite (Ola 1) — scoped getters =====
-  get gym_plans() {
-    return this.scoped_client.gym_plans;
+  // ===== Membership core (generalized) — scoped getters =====
+  get membership_plans() {
+    return this.scoped_client.membership_plans;
   }
 
-  get gym_memberships() {
-    return this.scoped_client.gym_memberships;
+  get memberships() {
+    return this.scoped_client.memberships;
   }
 
-  get gym_member_profiles() {
-    return this.scoped_client.gym_member_profiles;
+  get membership_profiles() {
+    return this.scoped_client.membership_profiles;
   }
 
-  get gym_access_credentials() {
-    return this.scoped_client.gym_access_credentials;
+  get membership_access_credentials() {
+    return this.scoped_client.membership_access_credentials;
   }
 
-  get gym_access_logs() {
-    return this.scoped_client.gym_access_logs;
+  get membership_access_logs() {
+    return this.scoped_client.membership_access_logs;
   }
 
   /**

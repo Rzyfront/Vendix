@@ -25,7 +25,7 @@ import { SubscriptionWebhookReconcilerJob } from './subscription-webhook-reconci
 import { SubscriptionWebhookReconcilerController } from './subscription-webhook-reconciler.controller';
 import { SubscriptionTrialNotifierJob } from './subscription-trial-notifier.job';
 import { PaymentMethodExpiryNotifierJob } from './payment-method-expiry-notifier.job';
-import { GymMembershipExpiryNotifierJob } from './gym-membership-expiry-notifier.job';
+import { MembershipExpiryNotifierJob } from './membership-expiry-notifier.job';
 import { PromotionalActivationJob } from './promotional-activation.job';
 import { PartnerPayoutBatchJob } from './partner-payout-batch.job';
 import { CommissionAccrualJob } from './commission-accrual.job';
@@ -99,7 +99,7 @@ import { ResponseModule } from '../common/responses/response.module';
     SubscriptionWebhookReconcilerJob,
     SubscriptionTrialNotifierJob,
     PaymentMethodExpiryNotifierJob,
-    GymMembershipExpiryNotifierJob,
+    MembershipExpiryNotifierJob,
     PromotionalActivationJob,
     PartnerPayoutBatchJob,
     CommissionAccrualJob,

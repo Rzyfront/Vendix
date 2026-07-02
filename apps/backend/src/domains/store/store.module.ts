@@ -60,9 +60,9 @@ import { ProductionOrdersModule } from './production/production.module';
 import { KitchenFireModule } from './kitchen-fire/kitchen-fire.module';
 import { TablesModule } from './tables/tables.module';
 import { MenusModule } from './menus/menus.module';
-import { GymPlansModule } from './gym-plans/gym-plans.module';
-import { GymMembershipsModule } from './gym-memberships/gym-memberships.module';
-import { GymAccessModule } from './gym-access/gym-access.module';
+import { MembershipPlansModule } from './membership-plans/membership-plans.module';
+import { MembershipsModule } from './memberships/memberships.module';
+import { MembershipAccessModule } from './membership-access/membership-access.module';
 import { UomModule } from './uom/uom.module';
 import { WeeklyReportModule } from './weekly-report/weekly-report.module';
 
@@ -127,9 +127,9 @@ import { WeeklyReportModule } from './weekly-report/weekly-report.module';
     KitchenFireModule,
     TablesModule,
     MenusModule,
-    GymPlansModule,
-    GymMembershipsModule,
-    GymAccessModule,
+    MembershipPlansModule,
+    MembershipsModule,
+    MembershipAccessModule,
     UomModule,
     WeeklyReportModule,
   ],
