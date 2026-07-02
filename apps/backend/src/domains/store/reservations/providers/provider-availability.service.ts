@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { booking_status_enum } from '@prisma/client';
+import { booking_status_enum, Prisma } from '@prisma/client';
 
 export interface ProviderAvailabilityDay {
   date: string;
@@ -89,7 +89,9 @@ export class ProviderAvailabilityService {
     }
 
     // Load providers
-    const providerWhere: any = { is_active: true };
+    const providerWhere: Prisma.service_providersWhereInput = {
+      is_active: true,
+    };
     if (params.provider_id) providerWhere.id = params.provider_id;
     const providers = await this.prisma.service_providers.findMany({
       where: providerWhere,
