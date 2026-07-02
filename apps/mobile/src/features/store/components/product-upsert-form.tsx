@@ -1827,6 +1827,62 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </Pressable>
           </Section>
 
+          {/* Números de serie (espejo exacto del web lg:hidden)
+              - Header: flex-col gap-3 en mobile, sm:flex-row sm:items-start
+                sm:justify-between en md+. Icon hash (18, primary) + título
+                'Números de serie' + subtítulo.
+              - Botón 'Gestionar seriales' (variant primary, icon settings)
+                a la derecha.
+              - Grid 2 cols mobile / 4 cols sm+ con stats:
+                Total / En stock / Vendidos / Garantía por vencer. */}
+          <Section title="" icon="hash">
+            <View
+              style={[
+                styles.serialHeader,
+                isMdUp && styles.serialHeaderRow,
+              ]}
+            >
+              <View style={styles.serialHeaderLeft}>
+                <View style={styles.serialTitleRow}>
+                  <Text style={styles.serialTitle}>Números de serie</Text>
+                </View>
+                <Text style={styles.serialSubtitle}>
+                  Resumen del pool de seriales. Usa 'Gestionar
+                  seriales' para registrar, editar o cargar en lote.
+                </Text>
+              </View>
+              <Button
+                title="Gestionar seriales"
+                variant="primary"
+                leftIcon={
+                  <Icon name="settings" size={16} color={colors.background} />
+                }
+                onPress={() =>
+                  toastSuccess('Gestionar seriales próximamente')
+                }
+              />
+            </View>
+
+            <View style={styles.serialStatsGrid}>
+              <View style={styles.serialStatCell}>
+                <Text style={styles.serialStatLabel}>Total</Text>
+                <Text style={styles.serialStatValuePrimary}>0</Text>
+              </View>
+              <View style={styles.serialStatCell}>
+                <Text style={styles.serialStatLabel}>En stock</Text>
+                <Text style={styles.serialStatValuePrimary700}>0</Text>
+              </View>
+              <View style={styles.serialStatCell}>
+                <Text style={styles.serialStatLabel}>Vendidos</Text>
+                <Text style={styles.serialStatValuePrimary}>0</Text>
+              </View>
+              <View style={styles.serialStatCell}>
+                <Text style={styles.serialStatLabel}>Garantía por vencer</Text>
+                <Text style={styles.serialStatValueMuted}>0</Text>
+              </View>
+            </View>
+          </Section>
+
           {/* Disponibilidad y Estado (espejo exacto del web)
               - Header: icon check-circle + h2 (sin subtitle)
               - Estado segmented (Activo/Inactivo/Archivado)
@@ -3550,5 +3606,66 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     fontWeight: '500' as any,
     color: colors.primary,
+  },
+
+  // ── Números de serie (espejo web lg:hidden) ───────────────────────
+  serialHeader: {
+    flexDirection: 'column' as const,
+    gap: spacing[3],
+  },
+  serialHeaderRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'flex-start' as const,
+    justifyContent: 'space-between' as const,
+  },
+  serialHeaderLeft: {
+    flex: 1,
+  },
+  serialTitleRow: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing[2],
+  },
+  serialTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  serialSubtitle: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  serialStatsGrid: {
+    flexDirection: 'row' as const,
+    gap: spacing[3],
+    flexWrap: 'wrap' as const,
+  },
+  serialStatCell: {
+    flexBasis: '48%' as const,
+    flexGrow: 1,
+  },
+  serialStatLabel: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  serialStatValuePrimary: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  serialStatValuePrimary700: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: 'rgba(46, 204, 113, 0.85)',
+  },
+  serialStatValueMuted: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[500],
   },
 });
