@@ -81,7 +81,8 @@ export function MultiSelector<T = string | number>({
       {label && <Text style={styles.label}>{label}</Text>}
 
       <Pressable
-        onPress={() => !disabled && setOpen(true)}
+        ref={triggerRef}
+        onPress={() => !disabled && measureTrigger()}
         disabled={disabled}
         style={({ pressed }) => [
           styles.trigger,
