@@ -2781,8 +2781,8 @@ enum notification_type_enum {
   weekly_report
   pqr_new
   pqr_update
-  gym_membership_expiring
-  gym_membership_expired
+  membership_expiring
+  membership_expired
 }
 
 model notifications {
@@ -3234,15 +3234,21 @@ enum industry_enum {
   gym
 }
 
-// ===================== GYM INDUSTRY (Ola 1) =====================
-// Suite de industria "gym" bajo el dominio `store` (hermana de recipes/tables/menus).
-// El socio es un `users` rol customer (+ store_users); las tablas cuelgan de
-// customer_id (scalar FK, constraints reales en la migración — sin relación Prisma
-// hacia users/stores/orders/products para no tocar esos modelos compartidos).
-// Nunca se almacenan plantillas biométricas: gym_access_credentials guarda solo
+// ===================== MEMBERSHIPS (industria-genérico, Ola 1) =====================
+// Núcleo de membresías REUTILIZABLE por cualquier industria (gym, service, generic…).
+// Nace de la suite `gym` y se generaliza (rename total, Opción A): las tablas y enums
+// dejan el prefijo gym_ y ganan un discriminador `kind` (membership_kind_enum) para que
+// un gimnasio, un club de servicios o cualquier comercio vendan membresías con el mismo
+// modelo, sin crear tablas por industria.
+// El socio es un `users` rol customer (+ store_users); las tablas cuelgan de customer_id
+// (scalar FK, constraints reales en la migración — sin relación Prisma hacia
+// users/stores/orders/products para no tocar esos modelos compartidos).
+// Límites específicos de industria (accesos/clases por periodo) viven en `features` Json,
+// no en columnas dedicadas, para no re-migrar por cada industria.
+// Nunca se almacenan plantillas biométricas: membership_access_credentials guarda solo
 // QR/PIN/external_ref (dato de referencia), la huella vive en el dispositivo.
 
-enum gym_membership_status_enum {
+enum membership_status_enum {
   active
   expired
   suspended
@@ -3251,13 +3257,13 @@ enum gym_membership_status_enum {
   cancelled
 }
 
-enum gym_credential_type_enum {
+enum membership_credential_type_enum {
   qr
   pin
   external_ref
 }
 
-enum gym_access_result_enum {
+enum membership_access_result_enum {
   granted
   denied_no_membership
   denied_expired
@@ -3266,50 +3272,61 @@ enum gym_access_result_enum {
   denied_quota_exceeded
 }
 
-model gym_plans {
-  id                      Int      @id @default(autoincrement())
-  store_id                Int
-  code                    String   @db.VarChar(60)
-  name                    String   @db.VarChar(160)
-  description             String?
-  price                   Decimal  @default(0) @db.Decimal(12, 2)
-  currency                String   @default("COP") @db.VarChar(3)
-  duration_days           Int      @default(30)
-  access_limit_per_period Int?
-  class_limit_per_period  Int?
-  features                Json?
-  product_id              Int?
-  is_active               Boolean  @default(true)
-  sort_order              Int      @default(0)
-  created_at              DateTime @default(now())
-  updated_at              DateTime @updatedAt
+// Discriminador de industria/uso de la membresía. `generic` es el default reutilizable;
+// `gym`/`service` etiquetan el origen para gating y reportes sin ramificar el modelo.
+enum membership_kind_enum {
+  generic
+  gym
+  service
+}
+
+model membership_plans {
+  id            Int                  @id @default(autoincrement())
+  store_id      Int
+  kind          membership_kind_enum @default(generic)
+  code          String               @db.VarChar(60)
+  name          String               @db.VarChar(160)
+  description   String?
+  price         Decimal              @default(0) @db.Decimal(12, 2)
+  currency      String               @default("COP") @db.VarChar(3)
+  duration_days Int                  @default(30)
+  // Límites por periodo (accesos, clases, etc.) y cualquier atributo específico de la
+  // industria viven aquí: { access_limit_per_period, class_limit_per_period, ... }.
+  features      Json?
+  product_id    Int?
+  is_active     Boolean              @default(true)
+  sort_order    Int                  @default(0)
+  created_at    DateTime             @default(now())
+  updated_at    DateTime             @updatedAt
 
   @@unique([store_id, code])
   @@index([store_id])
   @@index([store_id, is_active])
+  @@index([store_id, kind])
 }
 
-model gym_memberships {
-  id              Int                        @id @default(autoincrement())
+model memberships {
+  id              Int                    @id @default(autoincrement())
   store_id        Int
   customer_id     Int
-  gym_plan_id     Int
-  status          gym_membership_status_enum @default(pending_payment)
+  plan_id         Int
+  kind            membership_kind_enum   @default(generic)
+  status          membership_status_enum @default(pending_payment)
   period_start    DateTime?
   period_end      DateTime?
-  auto_renew      Boolean                    @default(false)
+  auto_renew      Boolean                @default(false)
   source_order_id Int?
   notes           String?
-  created_at      DateTime                   @default(now())
-  updated_at      DateTime                   @updatedAt
+  created_at      DateTime               @default(now())
+  updated_at      DateTime               @updatedAt
 
   @@index([store_id, customer_id])
   @@index([store_id, status])
   @@index([store_id, period_end])
-  @@index([gym_plan_id])
+  @@index([plan_id])
 }
 
-model gym_member_profiles {
+model membership_profiles {
   id                      Int       @id @default(autoincrement())
   store_id                Int
   customer_id             Int
@@ -3328,30 +3345,30 @@ model gym_member_profiles {
   @@index([store_id])
 }
 
-model gym_access_credentials {
-  id               Int                      @id @default(autoincrement())
+model membership_access_credentials {
+  id               Int                              @id @default(autoincrement())
   store_id         Int
   customer_id      Int
-  credential_type  gym_credential_type_enum
-  credential_value String                   @db.VarChar(255)
-  is_active        Boolean                  @default(true)
-  created_at       DateTime                 @default(now())
-  updated_at       DateTime                 @updatedAt
+  credential_type  membership_credential_type_enum
+  credential_value String                           @db.VarChar(255)
+  is_active        Boolean                          @default(true)
+  created_at       DateTime                         @default(now())
+  updated_at       DateTime                         @updatedAt
 
-  @@unique([store_id, credential_type, credential_value], map: "gym_access_cred_uq")
+  @@unique([store_id, credential_type, credential_value], map: "membership_access_cred_uq")
   @@index([store_id, customer_id])
 }
 
-model gym_access_logs {
-  id            Int                    @id @default(autoincrement())
+model membership_access_logs {
+  id            Int                            @id @default(autoincrement())
   store_id      Int
   customer_id   Int?
   membership_id Int?
   credential_id Int?
-  result        gym_access_result_enum
-  reason        String?                @db.VarChar(120)
-  device_id     String?                @db.VarChar(120)
-  access_at     DateTime               @default(now())
+  result        membership_access_result_enum
+  reason        String?                        @db.VarChar(120)
+  device_id     String?                        @db.VarChar(120)
+  access_at     DateTime                       @default(now())
 
   @@index([store_id, access_at])
   @@index([store_id, customer_id])
