@@ -196,13 +196,8 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
         }
         h = newH;
       } else {
-        // Cambio en alto, ajustar ancho
-        const newW = h * aspectRatio;
-        if (handle === 'l' || handle === 'r') {
-          // Para 'l'/'r' el cambio es en x, ajustar w
-          // (no aplica directamente)
-        }
-        w = newW;
+        // Cambio en alto, ajustar ancho (proporcional al aspect ratio)
+        w = h * aspectRatio;
       }
     }
     return clampFrame({ x, y, w, h });
