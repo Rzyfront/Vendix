@@ -2656,10 +2656,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row' as const,
     flexWrap: 'wrap' as const,
   },
+  // Mobile: 2 columnas (Largo+Ancho, Alto+Peso). Sin flexGrow para
+  // forzar wrap a 2 por fila. El 48% + gap deja 4% libre.
   dimensionCellHalf: {
     flexBasis: '48%' as const,
-    flexGrow: 1,
   },
+  // md+: 4 columnas. flexGrow:1 reparte el espacio sobrante.
   dimensionCellQuarter: {
     flexBasis: '23%' as const,
     flexGrow: 1,
