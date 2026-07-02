@@ -148,6 +148,19 @@ export class ReservationFormModalComponent {
   readonly customerStep = computed(() => this.isFreeBooking() ? 2 : 3);
   readonly confirmStep = computed(() => this.isFreeBooking() ? 3 : 4);
 
+  /**
+   * Total free slots across the visible week. Used by the
+   * template to render the empty-state message when no slots
+   * are available — without this, the calendar shows an empty
+   * grid and the user has no idea why.
+   */
+  readonly freeSlotsCount = computed(() =>
+    Object.values(this.freeSlotsByDate()).reduce(
+      (sum, slots) => sum + slots.length,
+      0,
+    ),
+  );
+
   readonly canGoNext = computed(() => {
     const step = this.currentStep();
     // Step 0: Service + Date required
