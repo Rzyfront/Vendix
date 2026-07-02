@@ -87,6 +87,14 @@ export class StorePrismaService extends BasePrismaService {
     'menus',
     'menu_sections',
     'menu_availability_windows',
+    // ===== Gym Suite (Ola 1) =====
+    // Las 5 tablas gym llevan store_id directo → scoping directo por tienda.
+    // gym_access_logs también scopea por store_id (bitácora por tienda).
+    'gym_plans',
+    'gym_memberships',
+    'gym_member_profiles',
+    'gym_access_credentials',
+    'gym_access_logs',
   ];
 
   private readonly fiscal_entity_scoped_models = [

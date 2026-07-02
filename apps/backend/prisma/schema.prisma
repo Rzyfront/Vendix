@@ -3229,6 +3229,130 @@ enum industry_enum {
   restaurant
   manufacturing
   service
+  gym
+}
+
+// ===================== GYM INDUSTRY (Ola 1) =====================
+// Suite de industria "gym" bajo el dominio `store` (hermana de recipes/tables/menus).
+// El socio es un `users` rol customer (+ store_users); las tablas cuelgan de
+// customer_id (scalar FK, constraints reales en la migración — sin relación Prisma
+// hacia users/stores/orders/products para no tocar esos modelos compartidos).
+// Nunca se almacenan plantillas biométricas: gym_access_credentials guarda solo
+// QR/PIN/external_ref (dato de referencia), la huella vive en el dispositivo.
+
+enum gym_membership_status_enum {
+  active
+  expired
+  suspended
+  frozen
+  pending_payment
+  cancelled
+}
+
+enum gym_credential_type_enum {
+  qr
+  pin
+  external_ref
+}
+
+enum gym_access_result_enum {
+  granted
+  denied_no_membership
+  denied_expired
+  denied_suspended
+  denied_frozen
+  denied_quota_exceeded
+}
+
+model gym_plans {
+  id                      Int      @id @default(autoincrement())
+  store_id                Int
+  code                    String   @db.VarChar(60)
+  name                    String   @db.VarChar(160)
+  description             String?
+  price                   Decimal  @default(0) @db.Decimal(12, 2)
+  currency                String   @default("COP") @db.VarChar(3)
+  duration_days           Int      @default(30)
+  access_limit_per_period Int?
+  class_limit_per_period  Int?
+  features                Json?
+  product_id              Int?
+  is_active               Boolean  @default(true)
+  sort_order              Int      @default(0)
+  created_at              DateTime @default(now())
+  updated_at              DateTime @updatedAt
+
+  @@unique([store_id, code])
+  @@index([store_id])
+  @@index([store_id, is_active])
+}
+
+model gym_memberships {
+  id              Int                        @id @default(autoincrement())
+  store_id        Int
+  customer_id     Int
+  gym_plan_id     Int
+  status          gym_membership_status_enum @default(pending_payment)
+  period_start    DateTime?
+  period_end      DateTime?
+  auto_renew      Boolean                    @default(false)
+  source_order_id Int?
+  notes           String?
+  created_at      DateTime                   @default(now())
+  updated_at      DateTime                   @updatedAt
+
+  @@index([store_id, customer_id])
+  @@index([store_id, status])
+  @@index([store_id, period_end])
+  @@index([gym_plan_id])
+}
+
+model gym_member_profiles {
+  id                      Int       @id @default(autoincrement())
+  store_id                Int
+  customer_id             Int
+  date_of_birth           DateTime? @db.Date
+  gender                  String?   @db.VarChar(20)
+  emergency_contact_name  String?   @db.VarChar(160)
+  emergency_contact_phone String?   @db.VarChar(40)
+  medical_notes           String?
+  goals                   String?
+  height_cm               Int?
+  weight_kg               Decimal?  @db.Decimal(5, 2)
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  @@unique([store_id, customer_id])
+  @@index([store_id])
+}
+
+model gym_access_credentials {
+  id               Int                      @id @default(autoincrement())
+  store_id         Int
+  customer_id      Int
+  credential_type  gym_credential_type_enum
+  credential_value String                   @db.VarChar(255)
+  is_active        Boolean                  @default(true)
+  created_at       DateTime                 @default(now())
+  updated_at       DateTime                 @updatedAt
+
+  @@unique([store_id, credential_type, credential_value], map: "gym_access_cred_uq")
+  @@index([store_id, customer_id])
+}
+
+model gym_access_logs {
+  id            Int                    @id @default(autoincrement())
+  store_id      Int
+  customer_id   Int?
+  membership_id Int?
+  credential_id Int?
+  result        gym_access_result_enum
+  reason        String?                @db.VarChar(120)
+  device_id     String?                @db.VarChar(120)
+  access_at     DateTime               @default(now())
+
+  @@index([store_id, access_at])
+  @@index([store_id, customer_id])
 }
 
 enum api_key_status_enum {
