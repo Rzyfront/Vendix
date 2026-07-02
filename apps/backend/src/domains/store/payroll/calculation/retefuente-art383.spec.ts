@@ -4,6 +4,7 @@ import {
   EXEMPT_RATE_ART_206,
   applyArt387Caps,
   applyGlobalCapArt336,
+  calculateFixedRateSemester,
   calculateLaborWithholding,
   getArt383Table,
 } from './retefuente-art383';
@@ -444,6 +445,142 @@ describe('retefuente-art383 (art. 383 ET, procedimiento 1)', () => {
 
       expect(result.method).toBe('art383_proc1');
       expect(result.proc2_fallback).toBe(true);
+    });
+  });
+
+  describe('calculateFixedRateSemester — B5 cálculo semestral del porcentaje fijo (art. 386 ET)', () => {
+    const flatMonths = (n: number, earnings: number, health: number, pension: number) =>
+      Array.from({ length: n }, () => ({
+        taxable_earnings: earnings,
+        health_deduction: health,
+        pension_deduction: pension,
+      }));
+
+    it('calcula la tasa efectiva (retención÷base) sobre el promedio de 12 meses, NO la tarifa marginal', () => {
+      // 12 meses iguales a 10.000.000 → promedio = 10.000.000
+      // Reutilizando el caso hand-verified: base_depurada 6.900.000,
+      // retention proc1 365.600, marginal_rate 0.19
+      // tasa efectiva = 365.600 / 6.900.000 = 0.05298550...
+      const result = calculateFixedRateSemester(
+        flatMonths(12, 10_000_000, 400_000, 400_000),
+        UVT_2026,
+        2026,
+      );
+
+      expect(result.months_used).toBe(12);
+      expect(result.average_taxable_earnings).toBe(10_000_000);
+      expect(result.average_base_depurada).toBe(6_900_000);
+      expect(result.average_retention_proc1).toBe(365_600);
+      expect(result.marginal_rate).toBe(0.19);
+      // Tasa efectiva ≠ tarifa marginal (0.19) — es menor porque la tabla
+      // resta un umbral exento antes de aplicar la marginal.
+      expect(result.fixed_retention_rate).toBeCloseTo(365_600 / 6_900_000, 4);
+      expect(result.fixed_retention_rate).not.toBe(result.marginal_rate);
+    });
+
+    it('promedia ingresos variables mes a mes (no solo el último mes)', () => {
+      const months = [
+        ...flatMonths(6, 8_000_000, 320_000, 320_000),
+        ...flatMonths(6, 12_000_000, 480_000, 480_000),
+      ];
+      // promedio = (8M*6 + 12M*6)/12 = 10.000.000 → mismo resultado que el caso plano
+      const result = calculateFixedRateSemester(months, UVT_2026, 2026);
+      expect(result.average_taxable_earnings).toBe(10_000_000);
+    });
+
+    it('ingreso promedio bajo el umbral exento (≤95 UVT depurados) → tasa fija 0, sin división por cero', () => {
+      const result = calculateFixedRateSemester(
+        flatMonths(12, 3_000_000, 120_000, 120_000),
+        UVT_2026,
+        2026,
+      );
+      expect(result.average_base_depurada).toBeLessThan(95 * UVT_2026);
+      expect(result.average_retention_proc1).toBe(0);
+      expect(result.fixed_retention_rate).toBe(0);
+    });
+
+    it('incorpora deducciones art. 387 promediadas en la depuración', () => {
+      const months: Array<{
+        taxable_earnings: number;
+        health_deduction: number;
+        pension_deduction: number;
+        art_387_deductions: {
+          dependents_count: number;
+          housing_interest_monthly: number;
+          prepaid_medicine_monthly: number;
+          voluntary_pension_monthly: number;
+          afc_monthly: number;
+        };
+      }> = Array.from({ length: 12 }, () => ({
+        taxable_earnings: 10_000_000,
+        health_deduction: 400_000,
+        pension_deduction: 400_000,
+        art_387_deductions: {
+          dependents_count: 2,
+          housing_interest_monthly: 9_000_000,
+          prepaid_medicine_monthly: 1_500_000,
+          voluntary_pension_monthly: 0,
+          afc_monthly: 0,
+        },
+      }));
+      const result = calculateFixedRateSemester(months, UVT_2026, 2026);
+      // Mismo caso que el spec de integración art. 387 → base_depurada 5.520.000
+      expect(result.average_base_depurada).toBe(5_520_000);
+      expect(result.average_retention_proc1).toBe(103_400);
+      expect(result.fixed_retention_rate).toBeCloseTo(103_400 / 5_520_000, 4);
+    });
+
+    it('acepta menos de 12 meses (empleado con menos antigüedad) sin bloquear el cálculo', () => {
+      const result = calculateFixedRateSemester(
+        flatMonths(3, 10_000_000, 400_000, 400_000),
+        UVT_2026,
+        2026,
+      );
+      expect(result.months_used).toBe(3);
+      expect(result.average_taxable_earnings).toBe(10_000_000);
+    });
+
+    it('lanza error si no hay ningún mes de historia (nunca calcular sobre 0 datos)', () => {
+      expect(() => calculateFixedRateSemester([], UVT_2026, 2026)).toThrow(
+        /at least 1 month/,
+      );
+    });
+
+    it('lanza error si uvt_value no es positivo', () => {
+      expect(() =>
+        calculateFixedRateSemester(
+          flatMonths(12, 10_000_000, 400_000, 400_000),
+          0,
+          2026,
+        ),
+      ).toThrow(/uvt_value must be > 0/);
+    });
+
+    it('el porcentaje resultante, usado luego en proc2, retiene un valor cercano al proc1 promedio (integración)', () => {
+      const semesterResult = calculateFixedRateSemester(
+        flatMonths(12, 10_000_000, 400_000, 400_000),
+        UVT_2026,
+        2026,
+      );
+
+      // Aplicar el porcentaje fijo calculado a un mes con el MISMO ingreso
+      // (escenario estable) debe reproducir aproximadamente la misma
+      // retención que proc1 arrojaría — la tasa efectiva está diseñada para eso.
+      const proc2 = calculateLaborWithholding({
+        taxable_earnings: 10_000_000,
+        health_deduction: 400_000,
+        pension_deduction: 400_000,
+        uvt_value: UVT_2026,
+        year: 2026,
+        procedure: 'proc2',
+        fixed_retention_rate: semesterResult.fixed_retention_rate,
+      });
+
+      expect(proc2.method).toBe('art386_proc2');
+      // Redondeo a múltiplos de 100 en ambos lados; deben quedar muy cerca.
+      expect(
+        Math.abs(proc2.retention - semesterResult.average_retention_proc1),
+      ).toBeLessThanOrEqual(100);
     });
   });
 });

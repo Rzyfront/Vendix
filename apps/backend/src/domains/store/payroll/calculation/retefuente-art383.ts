@@ -205,6 +205,9 @@ const round2 = (value: number): number => Math.round(value * 100) / 100;
 /** Aproximación al múltiplo de 100 más cercano (art. 802 ET). */
 const roundToHundred = (value: number): number => Math.round(value / 100) * 100;
 
+/** Redondeo a 4 decimales — precisión suficiente para una tasa (ej. 0.0512 = 5,12%). */
+const round4 = (value: number): number => Math.round(value * 10000) / 10000;
+
 /**
  * Aplica los topes INDIVIDUALES de las deducciones art. 387 ET.
  *
@@ -316,6 +319,156 @@ export function applyGlobalCapArt336(
   const capped_deductions = round2(Math.min(subtotal_deductions, cap));
   const global_cap_applied = round2(Math.max(0, subtotal_deductions - cap));
   return { capped_deductions, global_cap_applied, cap_40_pct, cap_1340_uvt };
+}
+
+/**
+ * Entrada mensual para el cálculo del porcentaje fijo semestral (art. 386 ET).
+ * Cada elemento representa UN mes de los 12 anteriores al semestre a fijar.
+ */
+export interface MonthlyIncomeForSemesterRate {
+  /** Devengos laborales gravables del mes (misma base que `taxable_earnings`). */
+  taxable_earnings: number;
+  /** Aporte obligatorio del trabajador a salud del mes (INCRNGO). */
+  health_deduction: number;
+  /** Aporte obligatorio del trabajador a pensión del mes (INCRNGO). */
+  pension_deduction: number;
+  /** Deducciones art. 387 ET acreditadas ese mes (opcional). */
+  art_387_deductions?: Art387Deductions;
+}
+
+export interface FixedRateSemesterResult {
+  /**
+   * Porcentaje fijo resultante, decimal 0..1 (ej. 0.05 = 5%). Es la TASA
+   * EFECTIVA (retención_promedio / base_depurada_promedio), NO la tarifa
+   * marginal del tramo — así lo exige el art. 386 ET: el porcentaje fijo
+   * reproduce el valor que arrojaría la tabla progresiva sobre el ingreso
+   * promedio, expresado como un único porcentaje aplicable luego mes a mes.
+   */
+  fixed_retention_rate: number;
+  /** Promedio mensual de la base gravable (`taxable_earnings`) de los meses recibidos. */
+  average_taxable_earnings: number;
+  /** Promedio mensual de la base YA depurada (tras art. 387 + exenta 25% + tope 336). */
+  average_base_depurada: number;
+  /** Promedio de la base depurada expresado en UVT. */
+  average_base_uvt: number;
+  /** Retención mensual promedio que resultaría de aplicar la tabla art. 383 (proc1) sobre el promedio. */
+  average_retention_proc1: number;
+  /** Tarifa marginal de la tabla art. 383 del tramo que cae el promedio depurado (informativo). */
+  marginal_rate: number;
+  /** Cantidad de meses efectivamente usados en el promedio. */
+  months_used: number;
+}
+
+/**
+ * Calcula el porcentaje fijo de retención para el Procedimiento 2 (art. 386
+ * ET), vigente para un semestre.
+ *
+ * Regla legal (art. 386 num. 2 ET): el agente retenedor calcula, en junio y
+ * diciembre, un porcentaje fijo que se aplicará a los pagos gravables del
+ * semestre siguiente. Ese porcentaje se obtiene:
+ *   1) Promediando los ingresos gravables (mismos rubros del Procedimiento 1)
+ *      de los 12 meses anteriores al cálculo.
+ *   2) Depurando esa base promedio con las MISMAS reglas del art. 383/387/336
+ *      ET (nunca un régimen de depuración paralelo).
+ *   3) Aplicando la tabla progresiva del art. 383 ET sobre la base promedio
+ *      depurada para obtener la retención que correspondería a ese ingreso
+ *      promedio.
+ *   4) El "porcentaje fijo" es la TASA EFECTIVA resultante:
+ *      retención_promedio ÷ base_depurada_promedio — NO la tarifa marginal
+ *      del tramo (serían regímenes distintos y subestimaría el recaudo en
+ *      los tramos con "+ X UVT" fijas de la tabla).
+ * Ese porcentaje fijo, una vez calculado, se aplica cada mes del semestre
+ * siguiente sobre la base depurada de CADA mes (no sobre el promedio).
+ *
+ * Requiere al menos 1 mes de historia; en la práctica se espera que el
+ * llamador pase hasta 12 (o los meses disponibles si el empleado tiene
+ * menos de 12 meses de antigüedad — regla de tolerancia operativa, no
+ * hay bloqueo legal expreso para el primer semestre de vinculación).
+ *
+ * NO persiste nada: es una función pura. La persistencia de
+ * `fixed_retention_rate` + `rate_semester` es responsabilidad del llamador
+ * (servicio/job), igual que el resto de este módulo.
+ */
+export function calculateFixedRateSemester(
+  months: MonthlyIncomeForSemesterRate[],
+  uvt_value: number,
+  year: number,
+): FixedRateSemesterResult {
+  if (!(uvt_value > 0)) {
+    throw new Error(
+      `calculateFixedRateSemester: uvt_value must be > 0 (received ${uvt_value})`,
+    );
+  }
+  if (!months.length) {
+    throw new Error(
+      'calculateFixedRateSemester: at least 1 month of income history is required',
+    );
+  }
+
+  const months_used = months.length;
+  const average = (selector: (m: MonthlyIncomeForSemesterRate) => number) =>
+    round2(
+      months.reduce((sum, m) => sum + selector(m), 0) / months_used,
+    );
+
+  const average_taxable_earnings = average((m) => m.taxable_earnings);
+  const average_health_deduction = average((m) => m.health_deduction);
+  const average_pension_deduction = average((m) => m.pension_deduction);
+
+  // Promedio simple de las deducciones art. 387 acreditadas mes a mes
+  // (si un mes no trae perfil, cuenta como 0 en ese rubro — comportamiento
+  // histórico de calculateLaborWithholding).
+  const has_any_387 = months.some((m) => !!m.art_387_deductions);
+  const average_387: Art387Deductions | undefined = has_any_387
+    ? {
+        dependents_count: Math.round(
+          average((m) => m.art_387_deductions?.dependents_count ?? 0),
+        ),
+        housing_interest_monthly: average(
+          (m) => m.art_387_deductions?.housing_interest_monthly ?? 0,
+        ),
+        prepaid_medicine_monthly: average(
+          (m) => m.art_387_deductions?.prepaid_medicine_monthly ?? 0,
+        ),
+        voluntary_pension_monthly: average(
+          (m) => m.art_387_deductions?.voluntary_pension_monthly ?? 0,
+        ),
+        afc_monthly: average((m) => m.art_387_deductions?.afc_monthly ?? 0),
+      }
+    : undefined;
+
+  // Depuración de la base PROMEDIO reutilizando la misma pipeline de
+  // Procedimiento 1 (nunca se inventa una depuración paralela).
+  const depurated = calculateLaborWithholding({
+    taxable_earnings: average_taxable_earnings,
+    health_deduction: average_health_deduction,
+    pension_deduction: average_pension_deduction,
+    uvt_value,
+    year,
+    ...(average_387 ? { art_387_deductions: average_387 } : {}),
+    procedure: 'proc1',
+  });
+
+  // Tasa efectiva = retención resultante ÷ base depurada promedio.
+  // Si la base depurada es 0 (ingreso promedio por debajo del umbral exento),
+  // la tasa efectiva es 0 — NO un NaN/Infinity.
+  const fixed_retention_rate =
+    depurated.base_depurada > 0
+      ? Math.min(
+          Math.max(depurated.retention / depurated.base_depurada, 0),
+          1,
+        )
+      : 0;
+
+  return {
+    fixed_retention_rate: round4(fixed_retention_rate),
+    average_taxable_earnings,
+    average_base_depurada: depurated.base_depurada,
+    average_base_uvt: depurated.base_uvt,
+    average_retention_proc1: depurated.retention,
+    marginal_rate: depurated.marginal_rate,
+    months_used,
+  };
 }
 
 /**

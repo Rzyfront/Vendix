@@ -79,3 +79,20 @@ export class EmployeeFiscalProfileDto {
   })
   rate_semester?: string;
 }
+
+/**
+ * Body de la acción de cálculo automático del porcentaje fijo semestral
+ * (Procedimiento 2, art. 386 ET). `semester` es opcional: si se omite, el
+ * servicio resuelve el semestre vigente a partir de la fecha del servidor
+ * (jun→semestre 2 del año en curso, dic→semestre 1 del año siguiente en la
+ * práctica operativa, aunque el cálculo real solo depende de la fecha de
+ * corte, no del mes de ejecución).
+ */
+export class CalculateSemesterRateDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-[12]$/, {
+    message: 'semester must match YYYY-1 or YYYY-2',
+  })
+  semester?: string;
+}

@@ -40,6 +40,8 @@ import {
   PilaSubmissionListResponse,
   EmployeeFiscalProfile,
   EmployeeFiscalProfileUpdateDto,
+  CalculateSemesterRateDto,
+  CalculateSemesterRateResult,
 } from '../interfaces/payroll.interface';
 import {
   BulkEmployeeAnalysisResult,
@@ -108,6 +110,21 @@ export class PayrollService {
   ): Observable<ApiResponse<EmployeeFiscalProfile>> {
     return this.http.put<ApiResponse<EmployeeFiscalProfile>>(
       this.getApiUrl(`employees/${id}/fiscal-profile`),
+      dto,
+    );
+  }
+
+  /**
+   * B5 — Procedimiento 2 (art. 386 ET): calcula el porcentaje fijo del
+   * semestre indicado (o el vigente si se omite) a partir del histórico de
+   * 12 meses de nómina, y lo persiste en el perfil fiscal del empleado.
+   */
+  calculateSemesterRate(
+    id: number,
+    dto: CalculateSemesterRateDto = {},
+  ): Observable<ApiResponse<CalculateSemesterRateResult>> {
+    return this.http.post<ApiResponse<CalculateSemesterRateResult>>(
+      this.getApiUrl(`employees/${id}/fiscal-profile/calculate-semester-rate`),
       dto,
     );
   }

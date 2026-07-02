@@ -1398,6 +1398,12 @@ export const ErrorCodes = {
     httpStatus: 404,
     devMessage: 'Employee fiscal profile not found',
   },
+  PAYROLL_FISCAL_PROFILE_003: {
+    code: 'PAYROLL_FISCAL_PROFILE_003',
+    httpStatus: 400,
+    devMessage:
+      'No payroll income history found in the lookback window to calculate the fixed semester rate (art. 386 ET)',
+  },
 
   // Payroll novelties
   NOV_FIND_001: {

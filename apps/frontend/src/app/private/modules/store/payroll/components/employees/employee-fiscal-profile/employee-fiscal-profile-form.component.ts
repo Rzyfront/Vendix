@@ -8,6 +8,7 @@ import {
   computed,
   DestroyRef,
 } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
@@ -22,6 +23,7 @@ import {
   EmployeeFiscalProfile,
   EmployeeFiscalProfileUpdateDto,
   RetentionProcedure,
+  CalculateSemesterRateResult,
 } from '../../../interfaces/payroll.interface';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
@@ -56,6 +58,7 @@ import {
     ButtonComponent,
     InputComponent,
     SelectorComponent,
+    DecimalPipe,
   ],
   template: `
     <div class="space-y-4">
@@ -167,12 +170,41 @@ import {
                 [control]="fiscalForm.get('rate_semester')"
                 placeholder="2026-1 o 2026-2"
               ></app-input>
-              <div class="md:col-span-2 text-xs text-text-secondary">
-                El porcentaje fijo se calcula semestralmente (jun/dic) sobre
-                los ingresos de los 12 meses anteriores. Si no hay
-                porcentaje para el semestre vigente, se aplica proc1
-                automáticamente (no se retiene 0 silenciosamente).
+              <div class="md:col-span-2 flex items-center justify-between gap-3">
+                <div class="text-xs text-text-secondary">
+                  El porcentaje fijo se calcula semestralmente (jun/dic) sobre
+                  los ingresos de los 12 meses anteriores. Si no hay
+                  porcentaje para el semestre vigente, se aplica proc1
+                  automáticamente (no se retiene 0 silenciosamente).
+                </div>
+                <app-button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  (clicked)="onCalculateSemesterRate()"
+                  [disabled]="calculatingRate() || employeeId() == null"
+                  [loading]="calculatingRate() || false"
+                >
+                  Calcular automáticamente
+                </app-button>
               </div>
+              @if (calculationDetail(); as detail) {
+                <div
+                  class="md:col-span-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900 space-y-1"
+                >
+                  <div>
+                    Calculado sobre {{ detail.months_used }} mes(es) de
+                    histórico. Ingreso gravable promedio:
+                    {{ detail.average_taxable_earnings | number: '1.0-0' }}.
+                  </div>
+                  <div>
+                    Base depurada promedio:
+                    {{ detail.average_base_depurada | number: '1.0-0' }} —
+                    retención proc1 equivalente:
+                    {{ detail.average_retention_proc1 | number: '1.0-0' }}.
+                  </div>
+                </div>
+              }
             }
           </div>
         </div>
@@ -219,6 +251,11 @@ export class EmployeeFiscalProfileFormComponent {
   readonly errorMessage = signal<string | null>(null);
   readonly successMessage = signal<string | null>(null);
   readonly loaded = signal<EmployeeFiscalProfile | null>(null);
+
+  /** B5 — Procedimiento 2: estado de la acción de cálculo automático. */
+  readonly calculatingRate = signal(false);
+  readonly calculationDetail =
+    signal<CalculateSemesterRateResult['calculation_detail'] | null>(null);
 
   readonly procedureOptions: SelectorOption[] = [
     { label: 'Procedimiento 1 (art. 383 ET — tabla progresiva)', value: 'proc1' },
@@ -341,6 +378,53 @@ export class EmployeeFiscalProfileFormComponent {
           this.errorMessage.set(
             err?.error?.message ??
               'No se pudo guardar el perfil fiscal del empleado.',
+          );
+        },
+      });
+  }
+
+  /**
+   * B5 — Procedimiento 2 (art. 386 ET): dispara el cálculo automático del
+   * porcentaje fijo del semestre vigente (el backend resuelve el semestre
+   * si no se especifica) y refresca `fixed_retention_rate` + `rate_semester`
+   * en el formulario con el resultado persistido.
+   */
+  onCalculateSemesterRate(): void {
+    const id = this.employeeId();
+    if (id == null) {
+      this.errorMessage.set('No hay empleado seleccionado.');
+      return;
+    }
+    this.calculatingRate.set(true);
+    this.errorMessage.set(null);
+    this.successMessage.set(null);
+    this.calculationDetail.set(null);
+
+    this.payrollService
+      .calculateSemesterRate(id, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.calculatingRate.set(false);
+          this.loaded.set(response.data);
+          this.calculationDetail.set(response.data.calculation_detail);
+          this.fiscalForm.patchValue({
+            retention_procedure: response.data.retention_procedure,
+            fixed_retention_rate: response.data.fixed_retention_rate,
+            rate_semester: response.data.rate_semester,
+          });
+          this.successMessage.set(
+            `Porcentaje fijo calculado: ${response.data.fixed_retention_rate}% ` +
+              `para el semestre ${response.data.rate_semester}.`,
+          );
+          this.saved.emit(response.data);
+        },
+        error: (err) => {
+          this.calculatingRate.set(false);
+          this.errorMessage.set(
+            err?.error?.message ??
+              'No se pudo calcular el porcentaje fijo semestral. Verifica que ' +
+                'el empleado tenga histórico de nómina en los últimos 12 meses.',
           );
         },
       });

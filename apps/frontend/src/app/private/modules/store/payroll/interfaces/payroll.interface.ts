@@ -663,3 +663,22 @@ export interface EmployeeFiscalProfileUpdateDto {
   rate_semester?: string;
 }
 
+/**
+ * B5 — Procedimiento 2 (art. 386 ET): body/response de la acción de
+ * cálculo automático del porcentaje fijo semestral.
+ */
+export interface CalculateSemesterRateDto {
+  /** YYYY-1|YYYY-2. Si se omite, el backend resuelve el semestre vigente. */
+  semester?: string;
+}
+
+export interface CalculateSemesterRateResult extends EmployeeFiscalProfile {
+  calculation_detail: {
+    months_used: number;
+    average_taxable_earnings: number;
+    average_base_depurada: number;
+    average_retention_proc1: number;
+    marginal_rate: number;
+  };
+}
+
