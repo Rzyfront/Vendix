@@ -109,21 +109,18 @@ export class CreateEmployeeDto {
   @MaxLength(100)
   compensation_fund?: string;
 
-  // Contact channels — added so the quick-create inline form (in
-  // schedule-management.component.ts) can submit them without the
-  // backend rejecting unknown properties via whitelist +
-  // forbidNonWhitelisted in the global ValidationPipe.
-  // Without these, the inline form sent email + phone as empty
-  // strings, the ValidationPipe flagged them as non-whitelisted,
-  // and POST /store/payroll/employees returned 400.
-  @IsOptional()
-  @IsEmail()
-  email?: string;
+  // Contact channels — required for the inline create-employee
+  // form in schedule-management (so the operator can capture them
+  // at booking-creation time instead of routing through Payroll
+  // later). Friendlier Spanish messages replace the default
+  // class-validator copy so the operator understands the failure.
+  @IsString({ message: 'El correo es obligatorio' })
+  @IsEmail({}, { message: 'El correo debe tener un formato válido (ej: usuario@empresa.com)' })
+  email: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(20)
-  phone?: string;
+  @IsString({ message: 'El teléfono es obligatorio' })
+  @MaxLength(20, { message: 'El teléfono no puede exceder 20 caracteres' })
+  phone: string;
 
   @IsOptional()
   @IsBoolean()

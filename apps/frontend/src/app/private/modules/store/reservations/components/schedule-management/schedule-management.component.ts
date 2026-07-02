@@ -140,17 +140,25 @@ export class ScheduleManagementComponent {
   });
   newEmployeeValid = computed(() => {
     const e = this.newEmployee();
-    // Mirror the backend CreateEmployeeDto requirements: first_name,
-    // last_name (>=2 chars each), document_number (required, min 4
-    // for any Colombian doc type), and base_salary (>=0 per
-    // @Min(0)). Without these checks the submit button would be
-    // enabled but the backend would reject with 400.
+    // Mirror the backend CreateEmployeeDto requirements:
+    // - first_name, last_name >= 2 chars
+    // - document_number required, min 4 chars (any Colombian doc type)
+    // - base_salary >= 0 per @Min(0)
+    // - email required + valid format (matches @IsEmail)
+    // - phone required, max 20 chars (matches @MaxLength(20))
+    // Email format check is intentionally simple — same regex the
+    // input[type=email] uses natively. If we got fancier we'd
+    // import validators from a lib (eg. validator.js).
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return (
       e.first_name.trim().length >= 2 &&
       e.last_name.trim().length >= 2 &&
       e.document_number.trim().length >= 4 &&
       Number.isFinite(e.base_salary) &&
-      e.base_salary >= 0
+      e.base_salary >= 0 &&
+      emailRegex.test(e.email.trim()) &&
+      e.phone.trim().length >= 7 &&
+      e.phone.trim().length <= 20
     );
   });
 
@@ -421,10 +429,33 @@ export class ScheduleManagementComponent {
           this.resetNewEmployee();
         },
         error: (err) => {
-          const msg =
-            err?.error?.message?.message ||
-            err?.error?.message ||
-            'Error al crear empleado';
+          // Backend returns structured validation errors at
+          // err.error.details.validationErrors (array of strings) when
+          // the ValidationPipe rejects. The default Nest message
+          // ('Validation failed') is uninformative for operators, so
+          // we surface the specific field-level messages.
+          //
+          // Fallback ladder:
+          //   1. err.error.details.validationErrors (array of human
+          //      messages from the Spanish DTO annotations)
+          //   2. err.error.message?.message (legacy single-message path)
+          //   3. err.error.message (top-level)
+          //   4. Generic fallback
+          const details = err?.error?.details?.validationErrors;
+          const legacy = err?.error?.message?.message;
+          const topLevel = err?.error?.message;
+          let msg: string;
+          if (Array.isArray(details) && details.length > 0) {
+            msg = details.join(' • ');
+          } else if (Array.isArray(legacy)) {
+            msg = legacy.join(' • ');
+          } else if (typeof legacy === 'string') {
+            msg = legacy;
+          } else if (typeof topLevel === 'string') {
+            msg = topLevel;
+          } else {
+            msg = 'Error al crear empleado. Verifica los datos e intenta de nuevo.';
+          }
           this.toastService.error(msg);
         },
       });
