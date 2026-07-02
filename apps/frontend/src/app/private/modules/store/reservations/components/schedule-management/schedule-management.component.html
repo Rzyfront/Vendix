@@ -110,14 +110,21 @@
               Aún no hay empleados registrados en tu tienda. Creá el primero:
             </p>
           }
-          <app-button
-            variant="primary"
-            size="sm"
-            (clicked)="toggleEmployeeForm()"
-          >
-            <app-icon name="plus" [size]="14" slot="icon" />
-            Crear empleado
-          </app-button>
+          <!-- Center the CTA so it visually anchors the empty state.
+               The wrapping div uses flex justify-center because the
+               outer parent has text-left for the bullet list above;
+               without an explicit centering rule, the button would
+               inherit the parent's left-alignment. -->
+          <div class="flex justify-center">
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="toggleEmployeeForm()"
+            >
+              <app-icon name="plus" [size]="14" slot="icon" />
+              Crear empleado
+            </app-button>
+          </div>
         </div>
       } @else {
         <app-selector
