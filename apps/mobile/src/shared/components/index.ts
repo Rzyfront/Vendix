@@ -21,12 +21,14 @@ export { ConfirmDialog } from './confirm-dialog/confirm-dialog';
 export { BottomSheet } from './bottom-sheet/bottom-sheet';
 export { Skeleton, SkeletonCard } from './skeleton/skeleton';
 export { PullToRefresh } from './pull-to-refresh/pull-to-refresh';
+export { ScrollableTabs } from './scrollable-tabs';
+export type { ScrollableTab } from './scrollable-tabs';
 
 // Phase A — new shared primitives
 export { Fab } from './fab/fab';
 export type { FabProps, FabPosition } from './fab/fab';
 export { Selector } from './selector/selector';
-export type { SelectorProps, SelectorOption } from './selector/selector';
+export type { SelectorOption } from './selector/selector';
 export { MultiSelector } from './multi-selector/multi-selector';
 export type { MultiSelectorProps, MultiSelectorOption } from './multi-selector/multi-selector';
 export { Toggle } from './toggle/toggle';
@@ -42,13 +44,11 @@ export type {
   StickyHeaderTab,
 } from './sticky-header/sticky-header';
 export { OptionsDropdown } from './options-dropdown/options-dropdown';
-export type {
-  OptionsDropdownProps,
-  OptionsDropdownSection,
-  OptionsDropdownFilter,
-  OptionsDropdownAction,
-} from './options-dropdown/options-dropdown';
 export { Pagination } from './pagination/pagination';
 export type { PaginationProps } from './pagination/pagination';
 export { ImageCarousel } from './image-carousel/image-carousel';
 export type { ImageCarouselProps, CarouselImage } from './image-carousel/image-carousel';
+export { AnimatedPressable } from './animated-pressable/animated-pressable';
+export type { AnimatedPressableProps } from './animated-pressable/animated-pressable';
+export { RowActionsMenu } from './row-actions-menu/row-actions-menu';
+export type { RowAction } from './row-actions-menu/row-actions-menu';

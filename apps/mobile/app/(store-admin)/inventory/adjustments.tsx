@@ -346,7 +346,7 @@ function BulkAdjustmentModal({
                     onPress={() => setShowTypeDropdown((v) => !v)}
                     style={[
                       bulkStyles.selectTrigger,
-                      (showTypeDropdown || selectedLocationId) && bulkStyles.selectTriggerActive,
+                      Boolean(showTypeDropdown || selectedLocationId) && bulkStyles.selectTriggerActive,
                     ]}
                   >
                     <Text
@@ -779,9 +779,9 @@ export default function AdjustmentsScreen() {
     (productsQuery.data?.data ?? []).map((p) => ({
       id: Number(p.id),
       name: p.name,
-      sku: p.sku,
+      sku: p.sku ?? undefined,
       stock: p.stock_quantity ?? 0,
-      category: p.category?.name,
+      category: p.categories?.[0]?.name,
     }));
   const selectedLocationName = selectedLocation ? LOCATIONS.find((l) => l.value === selectedLocation)?.label : '';
 
