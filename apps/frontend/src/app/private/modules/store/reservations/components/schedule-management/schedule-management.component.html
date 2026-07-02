@@ -73,14 +73,24 @@
   >
     <div class="space-y-4">
       @if (availableEmployees().length === 0 && !showEmployeeForm()) {
-        <!-- Empty state: no employees to pick from -->
+        <!-- Empty state: no candidates left to assign as provider for
+             THIS service. The earlier copy ('Aún no tienes empleados
+             registrados') was misleading when the store has employees
+             who are already linked as providers for this service.
+             The new copy is honest and includes a fallback CTA that
+             is still useful if the operator really needs a new
+             employee. The console.debug in startAddProvider logs
+             the raw response so we can diagnose if the backend
+             query is excluding the candidate correctly. -->
         <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-center">
           <app-icon name="user-plus" [size]="28" class="text-amber-600 mb-2"></app-icon>
           <p class="text-sm font-medium text-amber-900 mb-1">
-            Aún no tienes empleados registrados
+            No hay empleados disponibles para asignar
           </p>
           <p class="text-xs text-amber-700 mb-3">
-            Crea uno rápido aquí mismo para empezar a asignar reservas.
+            Puede que aún no tengas empleados, o que todos estén ya
+            asignados a este servicio. Si necesitás un nuevo proveedor,
+            creá uno aquí mismo.
           </p>
           <app-button
             variant="primary"
