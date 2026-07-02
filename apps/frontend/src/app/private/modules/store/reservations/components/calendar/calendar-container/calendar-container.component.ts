@@ -170,9 +170,16 @@ export class CalendarContainerComponent {
   }
 
   formatDate(d: Date): string {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
+    // Use UTC methods to match backend storage. The backend stores
+    // bookings.date as DateTime @db.Date via `new Date(dto.date)`
+    // which JS interprets as UTC midnight (e.g. 2026-07-02T00:00:00Z).
+    // Using local methods (getFullYear/getMonth/getDate) would render
+    // the booking on the previous day in any tz west of UTC, because
+    // UTC midnight of Jul 2 is Jul 1 19:00 in Colombia (UTC-5).
+    // UTC methods preserve the original date the operator picked.
+    const year = d.getUTCFullYear();
+    const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(d.getUTCDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
 
