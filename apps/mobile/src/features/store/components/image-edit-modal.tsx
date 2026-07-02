@@ -184,20 +184,30 @@ export function ImageEditModal({ visible, imageUri, onClose, onApply }: ImageEdi
     } else if (handle === 'r') {
       w = current.w + dx / containerSizeRef.current.w;
     }
-    // Si el aspect ratio está bloqueado, ajustar manteniendo la proporción
-    if (aspectRatio && (handle === 'tl' || handle === 'tr' || handle === 'bl' || handle === 'br' || handle === 'l' || handle === 'r' || handle === 't' || handle === 'b')) {
-      // Ajustar h según w (o viceversa) manteniendo aspect ratio
-      if (handle === 'tl' || handle === 'tr' || handle === 'bl' || handle === 'br' || handle === 'l' || handle === 'r') {
+    // Si el aspect ratio está bloqueado, ajustar manteniendo la proporción.
+    // El outer if se ejecuta para cualquier handle con aspectRatio > 0
+    // (en la práctica todos los resize handles, ya que 'move' se filtra
+    // antes). Dentro, separamos "cambia ancho" de "cambia alto".
+    if (aspectRatio) {
+      const isHorizontal = handle === 'l' || handle === 'r';
+      const isTopCorner = handle === 'tl' || handle === 'tr';
+      if (isHorizontal) {
         // Cambio en ancho, ajustar alto
         const newH = w / aspectRatio;
-        if (handle === 'tl' || handle === 'tr') {
-          // El alto decrece, mover y también
-          y = y + (h - newH);
-        }
         h = newH;
-      } else {
-        // Cambio en alto, ajustar ancho (proporcional al aspect ratio)
+      } else if (handle === 't' || handle === 'b') {
+        // Cambio en alto, ajustar ancho
         w = h * aspectRatio;
+      } else {
+        // Esquina: cambia ambos. Si es corner superior, mover y también.
+        if (isTopCorner) {
+          const newH = w / aspectRatio;
+          y = y + (h - newH);
+          h = newH;
+        } else if (handle === 'bl' || handle === 'br') {
+          const newH = w / aspectRatio;
+          h = newH;
+        }
       }
     }
     return clampFrame({ x, y, w, h });
