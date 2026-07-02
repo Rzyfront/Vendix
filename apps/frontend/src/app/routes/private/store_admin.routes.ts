@@ -723,6 +723,42 @@ export const storeAdminRoutes: Routes = [
           },
         ],
       },
+      // Gym Ops (Gym Suite — Ola 1: Planes, Socios/Membresías, Accesos). The
+      // whole group is hidden by INDUSTRY_HIDDEN_MODULES for every industry
+      // except `gym`; visible only when the store's industry includes `gym`.
+      // Panel_ui keys: gym_ops (parent) · gym_ops_plans · gym_ops_members ·
+      // gym_ops_access. The root /admin/gym-ops defaults to Planes.
+      {
+        path: 'gym-ops',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'plans',
+          },
+          {
+            path: 'plans',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/gym-ops/plans/routes/gym-plans.routes'
+              ).then((m) => m.gymPlansRoutes),
+          },
+          {
+            path: 'members',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/gym-ops/members/routes/gym-members.routes'
+              ).then((m) => m.gymMembersRoutes),
+          },
+          {
+            path: 'access',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/gym-ops/access/routes/gym-access.routes'
+              ).then((m) => m.gymAccessRoutes),
+          },
+        ],
+      },
       // Subscription Routes
       {
         path: 'subscription',

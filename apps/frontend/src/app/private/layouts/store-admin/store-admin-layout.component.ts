@@ -669,6 +669,32 @@ export class StoreAdminLayoutComponent {
       ],
     },
     {
+      // Gym Operations (Gym Suite — Ola 1). Hidden by INDUSTRY_HIDDEN_MODULES
+      // for every industry except `gym`; visible only when the store's industry
+      // includes `gym`. Labels map to panel_ui keys via MenuFilterService
+      // (Gimnasio → gym_ops, Planes → gym_ops_plans, Socios → gym_ops_members,
+      // Accesos → gym_ops_access).
+      label: 'Gimnasio',
+      icon: 'dumbbell',
+      children: [
+        {
+          label: 'Planes',
+          icon: 'tag',
+          route: '/admin/gym-ops/plans',
+        },
+        {
+          label: 'Socios',
+          icon: 'users',
+          route: '/admin/gym-ops/members',
+        },
+        {
+          label: 'Accesos',
+          icon: 'door-open',
+          route: '/admin/gym-ops/access',
+        },
+      ],
+    },
+    {
       // Fiscal umbrella — one sidebar group consolidating every fiscal surface
       // for stores that OWN their fiscal scope. Each child is a leaf whose
       // module renders its own sub-sections as internal sticky-header tabs
