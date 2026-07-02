@@ -574,6 +574,68 @@ export async function seedPermissionsAndRoles(
       method: 'GET',
     },
 
+    // Gimnasio — Planes / Membresías / Accesos (Gym Suite — Ola 1)
+    {
+      name: 'store:gym_plans:read',
+      description: 'Ver planes de gimnasio',
+      path: '/api/store/gym-plans',
+      method: 'GET',
+    },
+    {
+      name: 'store:gym_plans:create',
+      description: 'Crear plan de gimnasio',
+      path: '/api/store/gym-plans',
+      method: 'POST',
+    },
+    {
+      name: 'store:gym_plans:update',
+      description: 'Actualizar plan de gimnasio',
+      path: '/api/store/gym-plans/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:gym_plans:delete',
+      description: 'Eliminar plan de gimnasio',
+      path: '/api/store/gym-plans/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:gym_memberships:read',
+      description: 'Ver membresías de gimnasio',
+      path: '/api/store/gym-memberships',
+      method: 'GET',
+    },
+    {
+      name: 'store:gym_memberships:create',
+      description: 'Crear membresías de gimnasio',
+      path: '/api/store/gym-memberships',
+      method: 'POST',
+    },
+    {
+      name: 'store:gym_memberships:update',
+      description: 'Actualizar membresías de gimnasio',
+      path: '/api/store/gym-memberships/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:gym_access:read',
+      description: 'Ver accesos de gimnasio',
+      path: '/api/store/gym-access',
+      method: 'GET',
+    },
+    {
+      name: 'store:gym_access:create',
+      description: 'Registrar accesos de gimnasio',
+      path: '/api/store/gym-access',
+      method: 'POST',
+    },
+    {
+      name: 'store:gym_access:update',
+      description: 'Gestionar accesos de gimnasio',
+      path: '/api/store/gym-access/:id',
+      method: 'PATCH',
+    },
+
     // Órdenes
     {
       name: 'store:orders:create',
