@@ -360,7 +360,17 @@ export class ScheduleManagementComponent {
       .getAvailableEmployees()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (employees) => this.availableEmployees.set(employees),
+        next: (employees) => {
+          // Temporary debug log — helps diagnose empty-state reports
+          // where the operator claims 'I have an employee' but the
+          // available list is empty. Removable after confirmation
+          // that the backend query is correct.
+          console.debug(
+            '[schedule-management] getAvailableEmployees returned:',
+            employees,
+          );
+          this.availableEmployees.set(employees);
+        },
         error: () => this.toastService.error('Error al cargar empleados disponibles'),
       });
   }
