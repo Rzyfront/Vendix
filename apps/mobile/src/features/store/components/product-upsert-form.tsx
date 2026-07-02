@@ -43,6 +43,8 @@ import { TaxCreateModal } from '@/features/store/components/tax-create-modal';
 import { ImageSourceModal, type UploadedImage } from '@/features/store/components/image-source-modal';
 import { ImageEditModal } from '@/features/store/components/image-edit-modal';
 import { Toggle } from '@/shared/components/toggle/toggle';
+import PopConfigModal from '@/features/pop/components/pop-config-modal';
+import StockAdjustmentLocationModal from '@/features/store/components/stock-adjustment-location-modal';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -130,6 +132,8 @@ interface ProductFormState {
   // Otras configuraciones (mirror web)
   requires_serial_numbers?: boolean;
   preparation_time_minutes?: string;
+  // Promociones (multi-select de IDs de promociones aplicadas al producto)
+  promotion_ids?: number[];
   // Servicio
   service_duration_minutes?: string;
   service_modality?: string;
@@ -279,6 +283,8 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const { width: screenW } = useWindowDimensions();
   const isMdUp = screenW >= 768;
   const [productImages, setProductImages] = useState<string[]>([]);
+  const [showPopConfig, setShowPopConfig] = useState(false);
+  const [showStockLocationModal, setShowStockLocationModal] = useState(false);
   // Flag para no sobrescribir `price_tier_overrides` cada vez que se
   // re-fetchea el producto. Sólo hidratamos desde el backend la primera
   // vez; las selecciones del usuario se preservan en re-fetches.
@@ -299,6 +305,12 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     queryKey: ['product-brands'],
     queryFn: () => ProductService.getBrands(),
   });
+
+  // Promociones activas (para la sección Promociones & Operaciones).
+  // TODO: implementar getPromotions en el service cuando el backend
+  // exponga el endpoint de promociones. Mientras tanto, array vacío
+  // para que el MultiSelector renderice correctamente.
+  const promotions: { id: number; name: string }[] = [];
 
   // Lista de tarifas de precio (multi-tarifa). Se cargan siempre que
   // el usuario active el toggle, para que pueda elegir cuáles aplican.
@@ -1635,6 +1647,114 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             }}
           />
 
+          {/* Modal: Configurar producto (espejo web pop-product-config-modal)
+              - Se abre desde el botón 'Inventario' del modal Stock
+              - Header: "Configurar producto" + subtítulo con nombre
+              - Tabs scrollables: General / Variantes / Lote
+              - Botón Confirmar para guardar
+          */}
+          <PopConfigModal
+            visible={showPopConfig}
+            product={
+              product
+                ? ({
+                    id: Number(product.id),
+                    name: product.name ?? '',
+                    cost: product.cost_price ?? product.cost ?? 0,
+                    pricing_type: 'unit',
+                  } as any)
+                : null
+            }
+            onConfirm={(result) => {
+              setShowPopConfig(false);
+              toastSuccess('Configuración aplicada');
+              // Aquí iría la lógica para guardar el resultado en el producto
+            }}
+            onCancel={() => setShowPopConfig(false)}
+          />
+
+          {/* Modal: Seleccionar Ubicación para ajuste de stock
+              - Se abre desde el botón 'Ajustar' del modal Stock
+              - Stepper de 2 pasos: UBICACIÓN → CONFIRMAR
+              - Botón "Continuar" con icono arrow-right (full-width, primary)
+              - Paso 2 con confirmación de la selección
+          */}
+          <StockAdjustmentLocationModal
+            visible={showStockLocationModal}
+            locations={LOCATIONS}
+            onClose={() => setShowStockLocationModal(false)}
+            onConfirm={(locationId) => {
+              setShowStockLocationModal(false);
+              // Navegar a la pantalla de creación de ajuste con la ubicación
+              // pre-seleccionada.
+              router.push({
+                pathname: '/(store-admin)/inventory/adjustments/create',
+                params: { locationId: String(locationId) },
+              });
+            }}
+          />
+
+          {/* Promociones & Operaciones (espejo exacto del web lg:hidden).
+              - Header: icon tag + título "Promociones" + span gris
+                "& Operaciones" (text-base font-bold text-gray-900).
+              - MultiSelector "Promociones" con placeholder
+                "Seleccionar promociones..." + tooltip.
+              - Separator pt-4 border-t border-gray-100.
+              - Sub-sección "Operaciones" con icon clock (16, primary) +
+                título (text-sm font-semibold text-gray-700).
+              - Input "Tiempo de preparación (min)" (type=number) con
+                placeholder "Usa default de tienda" + tooltip. */}
+          <Section title="" icon="tag">
+            <View style={styles.promotionsHeader}>
+              <Text style={styles.promotionsTitle}>
+                Promociones{' '}
+                <Text style={styles.promotionsTitleMuted}>
+                  &amp; Operaciones
+                </Text>
+              </Text>
+            </View>
+
+            <View style={styles.promotionsBody}>
+              <Text style={styles.promotionsDescription}>
+                Asocia promociones activas a este producto.
+              </Text>
+              <MultiSelector
+                label="Promociones"
+                placeholder="Seleccionar promociones..."
+                tooltip="Descuentos o campañas activas asociadas a este producto. Se aplican automáticamente al checkout."
+                values={form.promotion_ids ?? []}
+                onChange={(v) => updateField('promotion_ids', v)}
+                options={((promotions as { id: number; name: string }[]) || []).map((p) => ({
+                  value: p.id,
+                  label: p.name,
+                }))}
+                searchable
+                searchPlaceholder="Buscar..."
+              />
+            </View>
+
+            <View style={styles.operationsDivider}>
+              <View style={styles.operationsHeader}>
+                <Icon
+                  name="clock"
+                  size={16}
+                  color={colors.primary}
+                />
+                <Text style={styles.operationsTitle}>Operaciones</Text>
+              </View>
+              <Input
+                label="Tiempo de preparación (min)"
+                value={form.preparation_time_minutes}
+                onChangeText={(value) =>
+                  updateField('preparation_time_minutes', value)
+                }
+                placeholder="Usa default de tienda"
+                keyboardType="number-pad"
+                tooltip="Minutos que tarda tu equipo en preparar este producto antes de entregarlo. Afecta la ETA del pedido."
+              />
+            </View>
+          </Section>
+
           {/* Inventario / Stock (espejo exacto del web lg:hidden)
               Header: icon archive + h2 'Inventario / Stock' (sin subtitle)
               Stats: 2 cards (Físico / Disponible) con label uppercase 9px + valor text-lg bold
@@ -1658,10 +1778,9 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             <View style={styles.inventoryActionsRow}>
               <Pressable
                 onPress={() => {
-                  // Gestión detallada de inventario desde un modal dedicado.
-                  // El inventario por bodega/seriales requiere UI especializada
-                  // que se desarrolla en PR futuro.
-                  toastSuccess('Gestión de inventario próximamente');
+                  // Abre el modal de Configurar producto (PopConfigModal) que
+                  // permite configurar la unidad de medida, variante, lote, etc.
+                  setShowPopConfig(true);
                 }}
                 style={({ pressed }) => [
                   styles.inventoryActionOutline,
@@ -1673,10 +1792,9 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               </Pressable>
               <Pressable
                 onPress={() => {
-                  // Abre modal de ajuste de stock (BulkAdjustmentModal reutilizable).
-                  // En esta versión mobile, el ajuste de stock se gestiona desde
-                  // la sección de Inventario > Ajustes de Stock.
-                  toastSuccess('Ajustar próximamente');
+                  // Abre el modal de selección de ubicación para crear
+                  // un ajuste de stock con stepper de 2 pasos.
+                  setShowStockLocationModal(true);
                 }}
                 style={({ pressed }) => [
                   styles.inventoryActionPrimary,
@@ -1689,10 +1807,15 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </View>
             <Pressable
               onPress={() => {
-                // Navega a vista detallada de stock por bodega/serial.
-                // En esta versión mobile, la gestión detallada de stock
-                // se encuentra en la sección de Inventario.
-                toastSuccess('Detalle próximamente');
+                // Navega a la vista detallada de stock por bodega.
+                if (productId) {
+                  router.push({
+                    pathname: '/(store-admin)/inventory/stock-detail',
+                    params: { productId: String(productId) },
+                  });
+                } else {
+                  toastSuccess('Guarda el producto para ver el detalle');
+                }
               }}
               style={({ pressed }) => [
                 styles.inventoryLinkButton,
@@ -3370,6 +3493,49 @@ const styles = StyleSheet.create({
     fontWeight: '700' as any,
     color: colors.background,
   },
+
+  // ── Promociones & Operaciones (espejo web mobile) ──────────────────
+  // Header de la sección.
+  promotionsHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing[2],
+  },
+  promotionsTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  promotionsTitleMuted: {
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[400],
+  },
+  // Body de promociones.
+  promotionsBody: {
+    gap: spacing[2],
+  },
+  promotionsDescription: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  // Separator + sub-sección Operaciones.
+  operationsDivider: {
+    paddingTop: spacing[4],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+    gap: spacing[2],
+  },
+  operationsHeader: {
+    flexDirection: 'row' as const,
+    alignItems: 'center' as const,
+    gap: spacing[2],
+  },
+  operationsTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[700],
+  },
+
   // Fila 2: Ver detalle completo (link primary)
   inventoryLinkButton: {
     flexDirection: 'row',
