@@ -115,15 +115,19 @@ export class AccountingReportsService {
       (a) => a.account_type === 'equity',
     );
 
-    const total_assets = assets.reduce((sum, a) => sum + a.balance, 0);
+    // Signo por naturaleza: cuentas de naturaleza 'credit' (pasivo/patrimonio)
+    // se muestran con su signo natural (CR - DR); un saldo contrario a
+    // naturaleza (ej. devoluciones 4175) refleja negativo.
+    // Ver skill vendix-accounting-rules: nunca Math.abs en saldos.
+    const signedBalance = (a: any) =>
+      a.nature === 'credit' ? -a.balance : a.balance;
+
+    const total_assets = assets.reduce((sum, a) => sum + signedBalance(a), 0);
     const total_liabilities = liabilities.reduce(
-      (sum, a) => sum + Math.abs(a.balance),
+      (sum, a) => sum + signedBalance(a),
       0,
     );
-    const total_equity = equity.reduce(
-      (sum, a) => sum + Math.abs(a.balance),
-      0,
-    );
+    const total_equity = equity.reduce((sum, a) => sum + signedBalance(a), 0);
 
     return {
       fiscal_period: trial_balance.fiscal_period,
@@ -161,12 +165,17 @@ export class AccountingReportsService {
       (a) => a.account_type === 'expense',
     );
 
+    // Mismo criterio C3: signo por naturaleza. Revenue es credit-nature,
+    // expense es debit-nature. Sin Math.abs — el signo refleja la realidad.
+    const signedBalance = (a: any) =>
+      a.nature === 'credit' ? -a.balance : a.balance;
+
     const total_revenue = revenue_accounts.reduce(
-      (sum, a) => sum + Math.abs(a.balance),
+      (sum, a) => sum + signedBalance(a),
       0,
     );
     const total_expenses = expense_accounts.reduce(
-      (sum, a) => sum + Math.abs(a.balance),
+      (sum, a) => sum + signedBalance(a),
       0,
     );
     const net_income = total_revenue - total_expenses;
