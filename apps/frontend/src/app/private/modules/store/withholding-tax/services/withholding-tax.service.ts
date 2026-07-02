@@ -11,6 +11,8 @@ import {
   WithholdingCalculation,
   WithholdingCalculationsQuery,
   WithholdingCertificateData,
+  SufferedWithholdingCertificateData,
+  EmployeeIncomeCertificateData,
   PaginatedApiResponse,
 } from '../interfaces/withholding.interface';
 
@@ -101,6 +103,29 @@ export class WithholdingTaxService {
   ): Observable<{ data: WithholdingCertificateData }> {
     return this.http.get<{ data: WithholdingCertificateData }>(
       `/store/withholding-tax/certificates/${supplierId}`,
+      { params: { year } },
+    );
+  }
+
+  /** Certificado de Ingresos y Retenciones (Formulario 220 DIAN) por empleado y año. */
+  getEmployeeCertificate(
+    employeeId: number,
+    year: number,
+  ): Observable<{ data: EmployeeIncomeCertificateData }> {
+    return this.http.get<{ data: EmployeeIncomeCertificateData }>(
+      `/store/withholding-tax/certificates/employee/${employeeId}`,
+      { params: { year } },
+    );
+  }
+
+  /** Certificado de retención "sufrida" (customer/supplier retuvo al tenant). */
+  getSufferedCertificate(
+    counterpartyType: 'customer' | 'supplier',
+    counterpartyId: number,
+    year: number,
+  ): Observable<{ data: SufferedWithholdingCertificateData }> {
+    return this.http.get<{ data: SufferedWithholdingCertificateData }>(
+      `/store/withholding-tax/certificates/suffered/${counterpartyType}/${counterpartyId}`,
       { params: { year } },
     );
   }

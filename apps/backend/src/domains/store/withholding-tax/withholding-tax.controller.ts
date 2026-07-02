@@ -18,6 +18,7 @@ import {
   CalculationsQueryDto,
 } from './dto';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Controller('store/withholding-tax')
 export class WithholdingTaxController {
@@ -141,6 +142,58 @@ export class WithholdingTaxController {
   }
 
   // ===== Certificates =====
+  // NOTE: literal sub-paths (`employee/:id`, `suffered/:type/:id`) MUST be
+  // declared before the generic `:supplierId` route below — Nest matches
+  // routes in declaration order and would otherwise treat "employee"/
+  // "suffered" as a numeric supplierId param.
+
+  /**
+   * Certificado de Ingresos y Retenciones (Formulario 220 DIAN) por empleado
+   * y año gravable: salarios, aportes salud/pensión y retefuente laboral
+   * total del año (deductions.retention, segregada a 236505 desde B1).
+   */
+  @Get('certificates/employee/:employeeId')
+  @Permissions('withholding:read')
+  async generateEmployeeCertificate(
+    @Param('employeeId') employee_id: string,
+    @Query('year') year: string,
+  ) {
+    const certificate_year = year ? +year : new Date().getFullYear();
+    const result =
+      await this.withholding_tax_service.generateEmployeeCertificate(
+        +employee_id,
+        certificate_year,
+      );
+    return this.response_service.success(result);
+  }
+
+  /**
+   * Certificado de retención "sufrida": desglose de las retenciones que un
+   * customer o supplier (actuando como agente retenedor) le practicó al
+   * tenant en un año gravable (role='suffered').
+   */
+  @Get('certificates/suffered/:counterpartyType/:counterpartyId')
+  @Permissions('withholding:read')
+  async generateSufferedCertificate(
+    @Param('counterpartyType') counterparty_type: string,
+    @Param('counterpartyId') counterparty_id: string,
+    @Query('year') year: string,
+  ) {
+    if (counterparty_type !== 'customer' && counterparty_type !== 'supplier') {
+      throw new VendixHttpException(
+        ErrorCodes.WHT_CALCULATION_ERROR,
+        'counterpartyType must be "customer" or "supplier"',
+      );
+    }
+    const certificate_year = year ? +year : new Date().getFullYear();
+    const result =
+      await this.withholding_tax_service.generateSufferedCertificate(
+        counterparty_type,
+        +counterparty_id,
+        certificate_year,
+      );
+    return this.response_service.success(result);
+  }
 
   @Get('certificates/:supplierId')
   @Permissions('withholding:read')

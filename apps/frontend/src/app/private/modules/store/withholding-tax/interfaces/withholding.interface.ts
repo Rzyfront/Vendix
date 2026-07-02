@@ -148,7 +148,7 @@ export interface WithholdingCertificateRow {
   amount: number;
 }
 
-/** Shape returned by the backend certificate generator. */
+/** Shape returned by the backend certificate generator (retención practicada a proveedor). */
 export interface WithholdingCertificateData {
   supplier_name: string;
   supplier_nit: string;
@@ -156,4 +156,51 @@ export interface WithholdingCertificateData {
   total_base: number;
   total_withheld: number;
   monthly_breakdown: WithholdingCertificateRow[];
+}
+
+// ── Suffered withholding certificate (`GET .../certificates/suffered/:type/:id`) ──
+
+export interface SufferedWithholdingCertificateRow {
+  month: number;
+  concept: string;
+  withholding_type: WithholdingType;
+  base: number;
+  rate: number;
+  amount: number;
+}
+
+/** Certificado de retención "sufrida": un customer/supplier retuvo al tenant. */
+export interface SufferedWithholdingCertificateData {
+  counterparty_type: 'customer' | 'supplier';
+  counterparty_name: string;
+  counterparty_nit: string;
+  year: number;
+  total_base: number;
+  total_withheld: number;
+  monthly_breakdown: SufferedWithholdingCertificateRow[];
+}
+
+// ── Employee income certificate / Form 220 (`GET .../certificates/employee/:id`) ──
+
+export interface EmployeeIncomeCertificateRow {
+  month: number;
+  salary: number;
+  health_deduction: number;
+  pension_deduction: number;
+  withholding: number;
+}
+
+/** Certificado de Ingresos y Retenciones (Formulario 220 DIAN) por empleado y año. */
+export interface EmployeeIncomeCertificateData {
+  employee_name: string;
+  employee_document_type: string;
+  employee_document_number: string;
+  employer_name: string;
+  employer_nit: string;
+  year: number;
+  total_salaries: number;
+  total_health_deduction: number;
+  total_pension_deduction: number;
+  total_withholding: number;
+  monthly_breakdown: EmployeeIncomeCertificateRow[];
 }
