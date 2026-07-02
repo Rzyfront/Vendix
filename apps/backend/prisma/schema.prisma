@@ -179,6 +179,9 @@ model users {
   vendor_support_documents_created vendor_support_documents[]  @relation("vendor_doc_created_by")
   tax_declarations_approved        tax_declaration_drafts[]    @relation("tax_declarations_approved_by")
   tax_declarations_created         tax_declaration_drafts[]    @relation("tax_declarations_created_by")
+  pila_submissions_exported        pila_submissions[]          @relation("pila_submissions_exported_by")
+  pila_submissions_voided          pila_submissions[]          @relation("pila_submissions_voided_by")
+  pila_submissions_created         pila_submissions[]          @relation("pila_submissions_created_by")
   fiscal_close_sessions_started    fiscal_close_sessions[]     @relation("fiscal_close_sessions_started_by")
   fiscal_close_sessions_approved   fiscal_close_sessions[]     @relation("fiscal_close_sessions_approved_by")
   fiscal_close_sessions_closed     fiscal_close_sessions[]     @relation("fiscal_close_sessions_closed_by")
@@ -382,6 +385,7 @@ model organizations {
   created_at                    DateTime?                         @default(now()) @db.Timestamp(6)
   updated_at                    DateTime?                         @default(now()) @db.Timestamp(6)
   onboarding                    Boolean                           @default(false)
+  ciiu_code                     String?                           @db.VarChar(10)
   mode                          organization_mode_enum            @default(production)
   is_partner                    Boolean                           @default(false)
   partner_settings              Json?
@@ -424,6 +428,8 @@ model organizations {
   accounting_entries            accounting_entries[]
   accounting_entities           accounting_entities[]
   employees                     employees[]
+  employee_fiscal_profiles      employee_fiscal_profiles[]
+  pila_submissions              pila_submissions[]
   payroll_runs                  payroll_runs[]
   payroll_novelties             payroll_novelties[]
   dian_configurations           dian_configurations[]
@@ -642,6 +648,9 @@ model stores {
   timezone                    String?                       @db.VarChar(50)
   operating_hours             Json?
   onboarding                  Boolean                       @default(false)
+  municipality_code           String?                       @db.VarChar(10)
+  department_code             String?                       @db.VarChar(10)
+  ciiu_code                   String?                       @db.VarChar(10)
   default_location_id         Int?                          @unique
   default_location            inventory_locations?          @relation("StoreDefaultLocation", fields: [default_location_id], references: [id])
   addresses                   addresses[]
@@ -3647,6 +3656,17 @@ enum payroll_frequency_enum {
   weekly
 }
 
+enum retention_procedure_enum {
+  proc1
+  proc2
+}
+
+enum pila_submission_status_enum {
+  generated
+  exported
+  void
+}
+
 enum employee_status_enum {
   active
   inactive
@@ -4449,6 +4469,7 @@ model accounting_entities {
   inventory_valuation_snapshots inventory_valuation_snapshots[]
   fiscal_obligations            fiscal_obligations[]
   tax_declaration_drafts        tax_declaration_drafts[]
+  pila_submissions              pila_submissions[]
   fiscal_close_sessions         fiscal_close_sessions[]
   fiscal_rule_sets              fiscal_rule_sets[]
   fiscal_operation_events       fiscal_operation_events[]
@@ -4613,19 +4634,25 @@ model accounting_entry_failures {
 }
 
 model accounting_entry_lines {
-  id            Int       @id @default(autoincrement())
-  entry_id      Int
-  account_id    Int
-  description   String?   @db.VarChar(500)
-  debit_amount  Decimal   @default(0) @db.Decimal(12, 2)
-  credit_amount Decimal   @default(0) @db.Decimal(12, 2)
-  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  id                 Int       @id @default(autoincrement())
+  entry_id           Int
+  account_id         Int
+  description        String?   @db.VarChar(500)
+  debit_amount       Decimal   @default(0) @db.Decimal(12, 2)
+  credit_amount      Decimal   @default(0) @db.Decimal(12, 2)
+  third_party_id     Int?
+  third_party_type   String?   @db.VarChar(40)
+  third_party_name   String?   @db.VarChar(255)
+  third_party_tax_id String?   @db.VarChar(50)
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
 
   entry   accounting_entries @relation(fields: [entry_id], references: [id], onDelete: Cascade)
   account chart_of_accounts  @relation(fields: [account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([entry_id])
   @@index([account_id])
+  @@index([third_party_tax_id], map: "accounting_entry_lines_third_party_tax_id_idx")
+  @@index([third_party_type, third_party_id], map: "accounting_entry_lines_third_party_lookup_idx")
 }
 
 // ===== PAYROLL DOMAIN =====
@@ -4672,6 +4699,7 @@ model employees {
   employee_advances   employee_advances[]
   payroll_novelties   payroll_novelties[]
   service_providers   service_providers[]
+  employee_fiscal_profile employee_fiscal_profiles?
 
   @@unique([organization_id, employee_code])
   @@unique([organization_id, document_type, document_number])
@@ -4778,6 +4806,60 @@ model payroll_items {
   @@index([employee_id])
   @@index([accounting_entity_id])
   @@index([accounting_entity_id, dian_status])
+}
+
+model employee_fiscal_profiles {
+  id                        Int                          @id @default(autoincrement())
+  employee_id               Int                          @unique
+  organization_id           Int
+  certificate_year          Int
+  dependents_count          Int                          @default(0)
+  housing_interest_monthly  Decimal                      @default(0) @db.Decimal(12, 2)
+  prepaid_medicine_monthly  Decimal                      @default(0) @db.Decimal(12, 2)
+  voluntary_pension_monthly Decimal                      @default(0) @db.Decimal(12, 2)
+  afc_monthly               Decimal                      @default(0) @db.Decimal(12, 2)
+  retention_procedure       retention_procedure_enum     @default(proc1)
+  fixed_retention_rate      Decimal?                     @db.Decimal(5, 2)
+  rate_semester             String?                      @db.VarChar(7)
+  last_calculated_at        DateTime?                    @db.Timestamp(6)
+  created_at                DateTime?                    @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?                    @default(now()) @db.Timestamp(6)
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  employee     employees     @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  @@index([organization_id])
+  @@index([certificate_year])
+}
+
+model pila_submissions {
+  id                   Int                            @id @default(autoincrement())
+  organization_id      Int
+  accounting_entity_id Int
+  period_year          Int
+  period_month         Int
+  status               pila_submission_status_enum    @default(generated)
+  employees_count      Int                            @default(0)
+  total_earnings       Decimal                        @default(0) @db.Decimal(14, 2)
+  total_contributions  Decimal                        @default(0) @db.Decimal(14, 2)
+  metadata             Json?
+  exported_at          DateTime?                      @db.Timestamp(6)
+  exported_by_user_id  Int?
+  voided_at            DateTime?                      @db.Timestamp(6)
+  voided_by_user_id    Int?
+  void_reason          String?
+  created_by_user_id   Int?
+  created_at           DateTime?                      @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                      @default(now()) @db.Timestamp(6)
+
+  organization      organizations      @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  accounting_entity accounting_entities @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  exported_by_user  users?             @relation("pila_submissions_exported_by", fields: [exported_by_user_id], references: [id], onDelete: SetNull)
+  voided_by_user    users?             @relation("pila_submissions_voided_by", fields: [voided_by_user_id], references: [id], onDelete: SetNull)
+  created_by_user   users?             @relation("pila_submissions_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+
+  @@index([accounting_entity_id, period_year, period_month])
+  @@index([status, period_year, period_month])
 }
 
 model payroll_novelties {
