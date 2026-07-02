@@ -585,3 +585,36 @@ export interface PilaReport {
   employees: PilaEmployeeRow[];
   totals: PilaTotals;
 }
+
+// ── Perfil fiscal (art. 387 ET) ────────────────────────────────────────
+
+export type RetentionProcedure = 'proc1' | 'proc2';
+
+export interface EmployeeFiscalProfile {
+  id?: number;
+  employee_id?: number;
+  certificate_year?: number;
+  dependents_count: number;
+  housing_interest_monthly: number;
+  prepaid_medicine_monthly: number;
+  voluntary_pension_monthly: number;
+  afc_monthly: number;
+  retention_procedure: RetentionProcedure;
+  fixed_retention_rate: number | null;
+  rate_semester: string | null;
+  last_calculated_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EmployeeFiscalProfileUpdateDto {
+  dependents_count?: number;
+  housing_interest_monthly?: number;
+  prepaid_medicine_monthly?: number;
+  voluntary_pension_monthly?: number;
+  afc_monthly?: number;
+  retention_procedure?: RetentionProcedure;
+  fixed_retention_rate?: number;
+  rate_semester?: string;
+}
+

@@ -36,6 +36,8 @@ import {
   QueryNoveltyDto,
   NoveltyListResponse,
   PilaReport,
+  EmployeeFiscalProfile,
+  EmployeeFiscalProfileUpdateDto,
 } from '../interfaces/payroll.interface';
 import {
   BulkEmployeeAnalysisResult,
@@ -86,6 +88,26 @@ export class PayrollService {
 
   getAvailableUsers(): Observable<ApiResponse<AvailableUser[]>> {
     return this.http.get<ApiResponse<AvailableUser[]>>(this.getApiUrl('employees/available-users'));
+  }
+
+  // ─── Fiscal profile (art. 387 ET — deducciones retefuente laboral) ───
+
+  getEmployeeFiscalProfile(
+    id: number,
+  ): Observable<ApiResponse<EmployeeFiscalProfile>> {
+    return this.http.get<ApiResponse<EmployeeFiscalProfile>>(
+      this.getApiUrl(`employees/${id}/fiscal-profile`),
+    );
+  }
+
+  upsertEmployeeFiscalProfile(
+    id: number,
+    dto: EmployeeFiscalProfileUpdateDto,
+  ): Observable<ApiResponse<EmployeeFiscalProfile>> {
+    return this.http.put<ApiResponse<EmployeeFiscalProfile>>(
+      this.getApiUrl(`employees/${id}/fiscal-profile`),
+      dto,
+    );
   }
 
   // ─── Bulk Upload (Session-based) ──────────────────────
