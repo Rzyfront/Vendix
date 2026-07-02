@@ -279,6 +279,8 @@ export class GeneralSettingsForm implements OnInit {
         return 'Manufactura';
       case 'service':
         return 'Servicios';
+      case 'gym':
+        return 'Gimnasio';
     }
   }
 }

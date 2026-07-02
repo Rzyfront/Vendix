@@ -349,6 +349,8 @@ export class StoreEditModalComponent {
         return 'Manufactura';
       case 'service':
         return 'Servicios';
+      case 'gym':
+        return 'Gimnasio';
     }
   }
 

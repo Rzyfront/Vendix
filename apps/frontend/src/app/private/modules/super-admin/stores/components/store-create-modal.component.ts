@@ -352,6 +352,8 @@ export class StoreCreateModalComponent {
         return 'Manufactura';
       case 'service':
         return 'Servicios';
+      case 'gym':
+        return 'Gimnasio';
     }
   }
 
