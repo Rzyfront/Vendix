@@ -243,7 +243,14 @@ export const MOVEMENT_OUTBOUND_TYPES: ReadonlySet<MovementType> = new Set<Moveme
   'expiration',
 ]);
 
-export const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
+/**
+ * Labels para `LocationType`. Tipo es `Record<string, string>` (no
+ * `Record<LocationType, string>`) para tolerar valores legacy
+ * (`virtual`, `transit`) que pueden existir en bases de datos antiguas
+ * antes del alineamiento con `location_type_enum` del backend.
+ * Cualquier valor desconocido cae al raw string vía `?? item.type`.
+ */
+export const LOCATION_TYPE_LABELS: Record<string, string> = {
   warehouse: 'Bodega',
   store: 'Tienda',
   production_area: 'Área de Producción',
@@ -251,6 +258,9 @@ export const LOCATION_TYPE_LABELS: Record<LocationType, string> = {
   shipping_area: 'Área de Despacho',
   quarantine: 'Cuarentena',
   damaged_goods: 'Mercancía Dañada',
+  // Backward-compat para data legacy en DBs previas al enum alignment
+  virtual: 'Virtual',
+  transit: 'En Tránsito',
 };
 
 export interface ConsolidatedStock {

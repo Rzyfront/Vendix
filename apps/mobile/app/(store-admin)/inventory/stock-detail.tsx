@@ -19,7 +19,13 @@ import { STOCK_DETAIL_STATS } from '@/features/store/constants/inventory-labels'
 const TYPE_VARIANT: Record<string, 'info' | 'success' | 'warning'> = {
   warehouse: 'info',
   store: 'success',
+  production_area: 'info',
+  receiving_area: 'info',
+  shipping_area: 'info',
+  quarantine: 'warning',
+  damaged_goods: 'warning',
   virtual: 'warning',
+  transit: 'warning',
 };
 
 const LocationCard = ({ item }: { item: LocationStock }) => {
