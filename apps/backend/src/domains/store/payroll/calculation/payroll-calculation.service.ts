@@ -8,6 +8,8 @@ import { AdvancesService } from '../advances/advances.service';
 import { NoveltiesService } from '../novelties/novelties.service';
 import { valuateNovelty, ValuatedNovelty } from './novelty-valuation';
 import {
+  Art387Deductions,
+  RetentionProcedure,
   calculateLaborWithholding,
   LaborWithholdingResult,
 } from './retefuente-art383';
@@ -16,6 +18,20 @@ interface EmployeeCalculationInput {
   id: number;
   base_salary: Prisma.Decimal;
   arl_risk_level: number | null;
+  /**
+   * Snapshot del perfil fiscal (art. 387 ET) del empleado, resuelto fuera
+   * del cálculo para que la función pura no consulte Prisma. Si llega
+   * `undefined`, el cálculo cae al comportamiento histórico (sin art. 387).
+   */
+  fiscal_profile?: {
+    dependents_count: number;
+    housing_interest_monthly: number;
+    prepaid_medicine_monthly: number;
+    voluntary_pension_monthly: number;
+    afc_monthly: number;
+    retention_procedure: RetentionProcedure;
+    fixed_retention_rate: number | null;
+  };
 }
 
 /**
@@ -227,6 +243,42 @@ export class PayrollCalculationService {
       );
     }
 
+    // Resolve art. 387 ET fiscal profiles for all employees in one query
+    // (so a N+1 doesn't sneak into the calculation loop). Missing profiles
+    // are silently treated as "no deductions" — historical behavior.
+    const fiscal_profiles_map = new Map<
+      number,
+      {
+        dependents_count: number;
+        housing_interest_monthly: number;
+        prepaid_medicine_monthly: number;
+        voluntary_pension_monthly: number;
+        afc_monthly: number;
+        retention_procedure: RetentionProcedure;
+        fixed_retention_rate: number | null;
+      }
+    >();
+    if (employee_ids.length > 0) {
+      const unscoped = this.prisma.withoutScope() as any;
+      const profiles = await unscoped.employee_fiscal_profiles.findMany({
+        where: { employee_id: { in: employee_ids } },
+      });
+      for (const row of profiles) {
+        fiscal_profiles_map.set(row.employee_id, {
+          dependents_count: row.dependents_count,
+          housing_interest_monthly: Number(row.housing_interest_monthly),
+          prepaid_medicine_monthly: Number(row.prepaid_medicine_monthly),
+          voluntary_pension_monthly: Number(row.voluntary_pension_monthly),
+          afc_monthly: Number(row.afc_monthly),
+          retention_procedure: row.retention_procedure as RetentionProcedure,
+          fixed_retention_rate:
+            row.fixed_retention_rate != null
+              ? Number(row.fixed_retention_rate)
+              : null,
+        });
+      }
+    }
+
     for (const employee of employees) {
       const advance_deduction = advance_deductions_map.get(employee.id) || 0;
       const calc = this.calculateEmployeePayroll(
@@ -234,6 +286,7 @@ export class PayrollCalculationService {
           id: employee.id,
           base_salary: employee.base_salary,
           arl_risk_level: employee.arl_risk_level,
+          fiscal_profile: fiscal_profiles_map.get(employee.id),
         },
         worked_days,
         rules,
@@ -498,7 +551,12 @@ export class PayrollCalculationService {
     );
 
     // Labor withholding (retefuente):
-    // - With a UVT configured: art. 383 ET progressive table, procedure 1.
+    // - With a UVT configured: art. 383 ET progressive table (procedure 1)
+    //   or art. 386 ET fixed-rate (procedure 2), gated by
+    //   employee_fiscal_profiles.retention_procedure. art. 387 ET
+    //   deductions (dependientes, intereses vivienda, medicina prepagada,
+    //   pensión voluntaria, AFC) are applied before the 25% exempt income
+    //   and the global 40% / 1.340 UVT cap of art. 336 ET.
     //   Base = salary earnings of the period (proportional salary plus
     //   salary novelties: overtime, surcharges, commissions, salary bonuses;
     //   the transport subsidy is NOT salary income for withholding purposes).
@@ -507,13 +565,44 @@ export class PayrollCalculationService {
     let retention: number;
     let retention_details: LaborWithholdingResult | undefined;
     if (uvt_value !== null && uvt_value > 0) {
+      const fiscal_profile = employee.fiscal_profile;
+      const has_art_387_deductions =
+        !!fiscal_profile &&
+        (fiscal_profile.dependents_count > 0 ||
+          fiscal_profile.housing_interest_monthly > 0 ||
+          fiscal_profile.prepaid_medicine_monthly > 0 ||
+          fiscal_profile.voluntary_pension_monthly > 0 ||
+          fiscal_profile.afc_monthly > 0);
+      const art_387_deductions: Art387Deductions | undefined = has_art_387_deductions
+        ? {
+            dependents_count: fiscal_profile!.dependents_count,
+            housing_interest_monthly: fiscal_profile!.housing_interest_monthly,
+            prepaid_medicine_monthly: fiscal_profile!.prepaid_medicine_monthly,
+            voluntary_pension_monthly:
+              fiscal_profile!.voluntary_pension_monthly,
+            afc_monthly: fiscal_profile!.afc_monthly,
+          }
+        : undefined;
       retention_details = calculateLaborWithholding({
         taxable_earnings: ibc_base,
         health_deduction,
         pension_deduction,
         uvt_value,
         year,
+        ...(art_387_deductions ? { art_387_deductions } : {}),
+        ...(fiscal_profile?.retention_procedure
+          ? { procedure: fiscal_profile.retention_procedure }
+          : {}),
+        ...(fiscal_profile?.fixed_retention_rate != null
+          ? { fixed_retention_rate: fiscal_profile.fixed_retention_rate / 100 }
+          : {}),
       });
+      if (retention_details.proc2_fallback) {
+        this.logger.warn(
+          `Employee #${employee.id} requested proc2 but no fixed_retention_rate ` +
+            `is set for the current semester. Falling back to proc1.`,
+        );
+      }
       retention = retention_details.retention;
     } else {
       this.logger.warn(
