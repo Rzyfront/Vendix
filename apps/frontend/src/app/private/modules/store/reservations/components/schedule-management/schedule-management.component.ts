@@ -424,7 +424,7 @@ export class ScheduleManagementComponent {
       });
   }
 
-  private resetNewEmployee(): void {
+  resetNewEmployee(): void {
     this.newEmployee.set({
       first_name: '',
       last_name: '',
