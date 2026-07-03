@@ -22,11 +22,16 @@ import {
   IconComponent,
   SettingToggleComponent,
   SpinnerComponent,
+  StatsComponent,
   StickyHeaderActionButton,
+  StickyHeaderBadgeColor,
   StickyHeaderComponent,
   TextareaComponent,
+  TimelineComponent,
+  TimelineStep,
   ToastService,
 } from '../../../../../../../shared/components/index';
+import { CurrencyPipe, CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
 import {
@@ -38,10 +43,23 @@ import {
 import { MembershipsService } from '../../services';
 import { RenewMembershipModalComponent } from '../../components/renew-membership-modal/renew-membership-modal.component';
 
+import { MembershipAccessService } from '../../../access/services/membership-access.service';
+import {
+  GymAccessCredential,
+  GymAccessLog,
+  GymAccessResult,
+  GymCredentialType,
+  GYM_ACCESS_RESULT_COLORS,
+  GYM_ACCESS_RESULT_LABELS,
+  GYM_CREDENTIAL_TYPE_LABELS,
+} from '../../../access/interfaces';
+
 interface MetaFormShape {
   auto_renew: FormControl<boolean>;
   notes: FormControl<string>;
 }
+
+const MS_PER_DAY = 86_400_000;
 
 @Component({
   selector: 'app-membership-detail-page',
@@ -53,15 +71,21 @@ interface MetaFormShape {
     ButtonComponent,
     IconComponent,
     SpinnerComponent,
+    StatsComponent,
+    TimelineComponent,
     SettingToggleComponent,
     TextareaComponent,
+    CurrencyPipe,
     RenewMembershipModalComponent,
   ],
   templateUrl: './membership-detail-page.component.html',
+  styleUrls: ['./membership-detail-page.component.css'],
 })
 export class MembershipDetailPageComponent implements OnInit {
   private readonly fb = inject(FormBuilder);
   private readonly membershipsService = inject(MembershipsService);
+  private readonly accessService = inject(MembershipAccessService);
+  private readonly currencyService = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
@@ -73,6 +97,11 @@ export class MembershipDetailPageComponent implements OnInit {
   readonly actionInProgress = signal(false);
   readonly showRenewModal = signal(false);
 
+  // ── Access enrichment (credentials + recent access logs) ──────────
+  readonly credentials = signal<GymAccessCredential[]>([]);
+  readonly accessLogs = signal<GymAccessLog[]>([]);
+  readonly isLoadingAccess = signal(false);
+
   readonly statusLabel = computed(() => {
     const s = this.membership()?.status;
     return s ? (GYM_MEMBERSHIP_STATUS_LABELS[s] ?? s) : '';
@@ -83,6 +112,93 @@ export class MembershipDetailPageComponent implements OnInit {
     return s ? (GYM_MEMBERSHIP_STATUS_COLORS[s] ?? '#6b7280') : '#6b7280';
   });
 
+  /** Sticky-header badge uses named colors, not hex. */
+  readonly headerBadgeColor = computed<StickyHeaderBadgeColor>(() => {
+    const s = this.membership()?.status;
+    if (!s) return 'gray';
+    const map: Record<GymMembershipStatus, StickyHeaderBadgeColor> = {
+      active: 'green',
+      pending_payment: 'yellow',
+      frozen: 'blue',
+      suspended: 'gray',
+      expired: 'red',
+      cancelled: 'red',
+    };
+    return map[s] ?? 'gray';
+  });
+
+  readonly headerSubtitle = computed(() => {
+    const m = this.membership();
+    if (!m) return '';
+    const plan = m.plan?.name ?? `Plan #${m.plan_id}`;
+    return `${this.customerName()} • ${plan}`;
+  });
+
+  readonly customerInitial = computed(() => {
+    const m = this.membership();
+    const c = m?.customer;
+    const raw =
+      c?.first_name?.charAt(0) || c?.last_name?.charAt(0) || c?.email?.charAt(0) || 'S';
+    return raw.toUpperCase();
+  });
+
+  readonly planName = computed(() => {
+    const m = this.membership();
+    return m?.plan?.name ?? (m ? `Plan #${m.plan_id}` : '');
+  });
+
+  readonly planPrice = computed<number>(
+    () => Number(this.membership()?.plan?.price ?? 0) || 0,
+  );
+
+  readonly planPriceDisplay = computed(() =>
+    this.currencyService.format(this.planPrice()),
+  );
+
+  // ── Vigencia / progreso ───────────────────────────────────────────
+  readonly daysRemaining = computed<number | null>(() => {
+    const end = this.membership()?.period_end;
+    if (!end) return null;
+    return this.calendarDaysBetween(new Date(), new Date(end));
+  });
+
+  readonly daysRemainingDisplay = computed<string>(() => {
+    const d = this.daysRemaining();
+    if (d === null) return '—';
+    if (d < 0) return 'Vencida';
+    return `${d}`;
+  });
+
+  readonly daysRemainingSmall = computed<string>(() => {
+    const d = this.daysRemaining();
+    if (d === null) return 'Sin vigencia definida';
+    if (d < 0) return `Venció hace ${Math.abs(d)} día(s)`;
+    if (d === 0) return 'Vence hoy';
+    return 'Días para el vencimiento';
+  });
+
+  readonly vigencia = computed(() => {
+    const m = this.membership();
+    const start = m?.period_start ? new Date(m.period_start) : null;
+    const end = m?.period_end ? new Date(m.period_end) : null;
+    if (!start || !end) {
+      return { totalDays: 0, elapsedDays: 0, percent: 0, hasRange: false };
+    }
+    const totalDays = Math.max(this.calendarDaysBetween(start, end), 0);
+    const rawElapsed = this.calendarDaysBetween(start, new Date());
+    const elapsedDays = Math.min(Math.max(rawElapsed, 0), totalDays);
+    const percent =
+      totalDays > 0 ? Math.min(Math.round((elapsedDays / totalDays) * 100), 100) : 0;
+    return { totalDays, elapsedDays, percent, hasRange: true };
+  });
+
+  readonly membershipAgeDays = computed<number>(() => {
+    const created = this.membership()?.created_at;
+    if (!created) return 0;
+    return Math.max(this.calendarDaysBetween(new Date(created), new Date()), 0);
+  });
+
+  // ── Transition guards (unchanged) ─────────────────────────────────
   readonly canSuspend = computed(() =>
     this.statusIn('active', 'frozen', 'pending_payment'),
   );
@@ -90,8 +206,14 @@ export class MembershipDetailPageComponent implements OnInit {
   readonly canCancel = computed(() =>
     this.statusIn('active', 'frozen', 'suspended', 'pending_payment', 'expired'),
   );
-  readonly canReactivate = computed(() =>
-    this.statusIn('suspended', 'frozen'),
+  readonly canReactivate = computed(() => this.statusIn('suspended', 'frozen'));
+
+  readonly hasTransitions = computed(
+    () =>
+      this.canReactivate() ||
+      this.canFreeze() ||
+      this.canSuspend() ||
+      this.canCancel(),
   );
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => [
@@ -103,6 +225,17 @@ export class MembershipDetailPageComponent implements OnInit {
       disabled: !this.membership() || this.actionInProgress(),
     },
   ]);
+
+  // ── Access log timeline (most recent first) ───────────────────────
+  readonly accessTimelineSteps = computed<TimelineStep[]>(() =>
+    this.accessLogs().map((log, i) => ({
+      key: `access-${log.id}`,
+      label: this.accessResultLabel(log.result),
+      status: i === 0 ? ('current' as const) : ('completed' as const),
+      date: this.formatAccessDateTime(log.access_at),
+      data: log,
+    })),
+  );
 
   readonly metaForm: FormGroup<MetaFormShape> =
     this.fb.nonNullable.group<MetaFormShape>({
@@ -120,6 +253,7 @@ export class MembershipDetailPageComponent implements OnInit {
   );
 
   ngOnInit(): void {
+    this.currencyService.loadCurrency();
     const id = this.route.snapshot.paramMap.get('id');
     if (!id) {
       this.router.navigate(['/admin/memberships/members']);
@@ -133,6 +267,12 @@ export class MembershipDetailPageComponent implements OnInit {
     return s != null && statuses.includes(s);
   }
 
+  private calendarDaysBetween(from: Date, to: Date): number {
+    const a = Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate());
+    const b = Date.UTC(to.getUTCFullYear(), to.getUTCMonth(), to.getUTCDate());
+    return Math.round((b - a) / MS_PER_DAY);
+  }
+
   private loadMembership(id: number): void {
     this.isLoading.set(true);
     this.membershipsService
@@ -142,6 +282,8 @@ export class MembershipDetailPageComponent implements OnInit {
         next: (membership) => {
           this.applyMembership(membership);
           this.isLoading.set(false);
+          // Enrich with access data — never blocks the view.
+          this.loadAccessData(membership.customer_id);
         },
         error: (err: unknown) => {
           this.toastService.error(
@@ -149,6 +291,42 @@ export class MembershipDetailPageComponent implements OnInit {
           );
           this.isLoading.set(false);
           this.router.navigate(['/admin/memberships/members']);
+        },
+      });
+  }
+
+  /**
+   * Fetches credentials + recent access logs for the member. Degrades
+   * gracefully: on error / forbidden / empty, the signals stay empty and the
+   * cards render their empty state — the detail view is never broken.
+   */
+  private loadAccessData(customerId: number): void {
+    if (!customerId) return;
+    this.isLoadingAccess.set(true);
+
+    this.accessService
+      .listCredentials({ customer_id: customerId, limit: 20 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => this.credentials.set(res?.data ?? []),
+        error: () => this.credentials.set([]),
+      });
+
+    this.accessService
+      .listLogs({ customer_id: customerId, limit: 8 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const logs = [...(res?.data ?? [])].sort(
+            (a, b) =>
+              new Date(b.access_at).getTime() - new Date(a.access_at).getTime(),
+          );
+          this.accessLogs.set(logs);
+          this.isLoadingAccess.set(false);
+        },
+        error: () => {
+          this.accessLogs.set([]);
+          this.isLoadingAccess.set(false);
         },
       });
   }
@@ -176,6 +354,39 @@ export class MembershipDetailPageComponent implements OnInit {
 
   formatDate(value?: string | null): string {
     return value ? formatDateOnlyUTC(value) : 'Sin definir';
+  }
+
+  /** Access logs are timestamps → local date + time is acceptable. */
+  formatAccessDateTime(value: string | Date): string {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleString('es-CO', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+
+  credentialTypeLabel(type: GymCredentialType): string {
+    return GYM_CREDENTIAL_TYPE_LABELS[type] ?? type;
+  }
+
+  credentialIcon(type: GymCredentialType): string {
+    const map: Record<GymCredentialType, string> = {
+      qr: 'scan-line',
+      pin: 'hash',
+      external_ref: 'fingerprint',
+    };
+    return map[type] ?? 'key-round';
+  }
+
+  accessResultLabel(result: GymAccessResult): string {
+    return GYM_ACCESS_RESULT_LABELS[result] ?? result;
+  }
+
+  accessResultColor(result: GymAccessResult): string {
+    return GYM_ACCESS_RESULT_COLORS[result] ?? '#6b7280';
   }
 
   onHeaderAction(actionId: string): void {
@@ -234,5 +445,7 @@ export class MembershipDetailPageComponent implements OnInit {
 
   onRenewed(updated: GymMembership): void {
     this.applyMembership(updated);
+    // Refresh access data after a renewal (status may have changed).
+    this.loadAccessData(updated.customer_id);
   }
 }
