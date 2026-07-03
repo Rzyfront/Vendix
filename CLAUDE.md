@@ -94,6 +94,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Binding form controls in Angular templates | `vendix-angular-forms` |
 | Bootstrapping local Linear credentials for Vendix | `linear-connect` |
 | Branching off or rebasing onto origin/dev before work | `git-workflow` |
+| Building an HTML slide-deck of bugs found and tickets validated in a sprint window | `qa-report` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
@@ -128,6 +129,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating Frontend Modules | `vendix-frontend-module` |
 | Creating SaaS subscription invoices or rev-share splits | `vendix-saas-billing` |
 | Creating Seeds | `vendix-prisma-seed` |
+| Creating a QA sprint report as a web presentation | `qa-report` |
 | Creating a bug in Linear for Vendix | `linear-issues` |
 | Creating a new skill | `skill-creator` |
 | Creating a ticket in Linear | `linear-issues` |
@@ -241,6 +243,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Reaching the app via the local vhost vendix.com instead of localhost | `how-to-test` |
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
+| Reporting QA results with charts and a critical/urgent section | `qa-report` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
 | Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json | `linear-connect` |
@@ -262,6 +265,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
+| Summarizing Linear bugs and validated tickets for a sprint into a visual report | `qa-report` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
 | Understanding AI cost tracking | `vendix-ai-platform-core` |
