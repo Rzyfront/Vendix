@@ -44,6 +44,29 @@ export class InventoryReconciliationService {
       );
     }
 
+    // SEGURIDAD CROSS-TENANT: accounting_entity_id puede llegar explícito por
+    // query param (no solo derivado del fiscal_period), y el lado inventario
+    // de esta conciliación usa withoutScope() (ver getInventorySideTotal) —
+    // por lo tanto DEBE validarse aquí, ANTES de esa query sin scope, que la
+    // entidad pertenece a la organización del contexto actual. Reutilizamos
+    // el scoping ya existente de `accounting_entities` (org_scoped_models en
+    // StorePrismaService): si no pertenece a la organización, la query no
+    // devuelve nada y cae en el 404 de abajo. No se re-implementa lógica de
+    // scoping aquí, solo se apoya en la ya existente.
+    const accounting_entity = await this.prisma.accounting_entities.findFirst(
+      {
+        where: { id: accounting_entity_id },
+        select: { id: true },
+      },
+    );
+
+    if (!accounting_entity) {
+      throw new VendixHttpException(
+        ErrorCodes.ACC_PERM_001,
+        'accounting_entity_id no pertenece a la organización del contexto actual',
+      );
+    }
+
     // period_end: override explícito > fin del período fiscal.
     const period_end = query.period_end
       ? new Date(query.period_end)
@@ -91,13 +114,37 @@ export class InventoryReconciliationService {
    * clave (location_id, product_id, product_variant_id) en JS — el volumen
    * por entidad fiscal es razonable para un papel de trabajo puntual (no un
    * job masivo), y evita SQL crudo con DISTINCT ON fuera de Prisma.
+   *
+   * BUGFIX (fuga de scope, ver code review C5): `inventory_valuation_snapshots`
+   * NO está en `fiscal_entity_scoped_models` de StorePrismaService, por lo que
+   * el getter scoped cae en el fallback relacional `{ store_id:
+   * context.store_id }` (store-prisma.service.ts). Ese filtro se fusiona con
+   * AND sobre todo el where de esta query, así que para una organización
+   * fiscal_scope=ORGANIZATION con varias tiendas bajo la misma entidad fiscal,
+   * la query solo veía los snapshots de LA TIENDA del contexto de la request,
+   * mientras el lado contable (getAccountingSideTotal, que sí usa
+   * fiscal_entity_scoped_models) consolida TODAS las tiendas de la entidad.
+   * Eso producía `is_reconciled: false` sistemáticamente para orgs
+   * multi-tienda con fiscal_scope=ORGANIZATION.
+   *
+   * Fix: withoutScope() SOLO aquí. No se agregó `inventory_valuation_snapshots`
+   * a `fiscal_entity_scoped_models` globalmente porque otros consumidores del
+   * modelo (stock-level-manager.service.ts al crear snapshots,
+   * inventory-analytics.service.ts que ya usa baseClient directamente,
+   * fiscal-close.service.ts) no dependen de scoping por tienda de la misma
+   * manera agregada — cambiar el registro global habría alterado su
+   * comportamiento sin que lo pidieran. El filtro de tenant se reemplaza aquí
+   * manualmente por `accounting_entity_id` (ya explícito abajo), y ese
+   * accounting_entity_id se valida contra `context.organization_id` ANTES de
+   * llegar a esta query (ver el findFirst de accounting_entities en
+   * getInventoryReconciliation) para no abrir una fuga cross-tenant nueva.
    */
   private async getInventorySideTotal(
     accounting_entity_id: number,
     period_end: Date,
   ) {
-    const snapshots = await this.prisma.inventory_valuation_snapshots.findMany(
-      {
+    const snapshots =
+      await this.prisma.withoutScope().inventory_valuation_snapshots.findMany({
         where: {
           accounting_entity_id,
           snapshot_at: { lte: period_end },
@@ -108,8 +155,7 @@ export class InventoryReconciliationService {
           product_variant: { select: { id: true, name: true, sku: true } },
         },
         orderBy: { snapshot_at: 'desc' },
-      },
-    );
+      });
 
     const latest_by_key = new Map<string, (typeof snapshots)[number]>();
     for (const snap of snapshots) {
