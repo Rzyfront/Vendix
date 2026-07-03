@@ -38,12 +38,12 @@ import { borderRadius, colorScales, colors } from '../../../src/shared/theme';
 const LOCATION_TYPE_LABELS: Record<string, string> = {
   warehouse: 'Almacen / Bodega',
   store: 'Tienda / Local',
-  virtual: 'Virtual',
+  production_area: 'Área de Producción',
 };
 
-const LOCATION_TYPES = ['warehouse', 'store', 'virtual'] as const;
+const LOCATION_TYPES = ['warehouse', 'store', 'production_area'] as const;
 
-function LocationTypeSelector({ value, onChange }: { value: string; onChange: (t: 'warehouse' | 'store' | 'virtual') => void }) {
+function LocationTypeSelector({ value, onChange }: { value: string; onChange: (t: 'warehouse' | 'store' | 'production_area') => void }) {
   const [showPicker, setShowPicker] = useState(false);
   return (
     <View>
@@ -105,7 +105,7 @@ export default function PopScreen() {
   const [showLocationCreate, setShowLocationCreate] = useState(false);
 
   const [supplierForm, setSupplierForm] = useState({ name: '', code: '', email: '', phone: '', tax_id: '', payment_terms: '' });
-  const [locationForm, setLocationForm] = useState({ name: '', code: '', type: 'warehouse' as 'warehouse' | 'store' | 'virtual' });
+  const [locationForm, setLocationForm] = useState({ name: '', code: '', type: 'warehouse' as 'warehouse' | 'store' | 'production_area' });
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [creatingLocation, setCreatingLocation] = useState(false);
 

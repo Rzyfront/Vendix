@@ -31,6 +31,8 @@ interface StickyHeaderProps {
   tabs?: StickyHeaderTab[];
   variant?: 'default' | 'glass';
   style?: ViewStyle;
+  /** Show close (X) button alongside back arrow. Default false. */
+  showCloseButton?: boolean;
 }
 
 export function StickyHeader({
@@ -42,6 +44,7 @@ export function StickyHeader({
   tabs,
   variant = 'default',
   style,
+  showCloseButton = false,
 }: StickyHeaderProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -67,6 +70,11 @@ export function StickyHeader({
         {(backHref || onBack) && (
           <Pressable onPress={handleBack} hitSlop={12} style={styles.backButton}>
             <Icon name="chevron-left" size={24} color={colors.text.primary} />
+          </Pressable>
+        )}
+        {showCloseButton && (
+          <Pressable onPress={handleBack} hitSlop={12} style={styles.backButton}>
+            <Icon name="x" size={22} color={colors.text.primary} />
           </Pressable>
         )}
         <View style={styles.titleBlock}>

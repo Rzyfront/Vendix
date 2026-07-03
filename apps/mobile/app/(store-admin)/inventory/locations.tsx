@@ -22,16 +22,22 @@ import { COUNTRY_OPTIONS, LOCATION_STATS, LOCATION_TYPE_OPTIONS, LOCATION_TYPE_M
 const TYPE_VARIANT: Record<LocationType, 'info' | 'warning' | 'default'> = {
   warehouse: 'info',
   store: 'warning',
-  virtual: 'default',
-  transit: 'info',
-} as any;
+  production_area: 'default',
+  receiving_area: 'info',
+  shipping_area: 'info',
+  quarantine: 'warning',
+  damaged_goods: 'warning',
+};
 
 const TYPE_ICON: Record<LocationType, string> = {
   warehouse: 'warehouse',
   store: 'store',
-  virtual: 'package',
-  transit: 'truck',
-} as any;
+  production_area: 'package',
+  receiving_area: 'package',
+  shipping_area: 'truck',
+  quarantine: 'package',
+  damaged_goods: 'package',
+};
 
 const STATE_VARIANT: Record<string, 'success' | 'default'> = {
   active: 'success',
@@ -183,10 +189,7 @@ export default function LocationsScreen() {
 
   const FILTER_OPTIONS: { label: string; value: LocationType | 'all' }[] = [
     { label: 'Todos los tipos', value: 'all' },
-    { label: LOCATION_TYPE_OPTIONS[0].label, value: 'warehouse' },
-    { label: LOCATION_TYPE_OPTIONS[1].label, value: 'store' },
-    { label: LOCATION_TYPE_OPTIONS[2].label, value: 'virtual' },
-    { label: LOCATION_TYPE_OPTIONS[3].label, value: 'transit' },
+    ...LOCATION_TYPE_OPTIONS.map((o) => ({ label: o.label, value: o.value as LocationType })),
   ];
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, refetch, isRefetching } = useInfiniteQuery({

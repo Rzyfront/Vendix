@@ -19,7 +19,13 @@ import { STOCK_DETAIL_STATS } from '@/features/store/constants/inventory-labels'
 const TYPE_VARIANT: Record<string, 'info' | 'success' | 'warning'> = {
   warehouse: 'info',
   store: 'success',
+  production_area: 'info',
+  receiving_area: 'info',
+  shipping_area: 'info',
+  quarantine: 'warning',
+  damaged_goods: 'warning',
   virtual: 'warning',
+  transit: 'warning',
 };
 
 const LocationCard = ({ item }: { item: LocationStock }) => {
@@ -29,7 +35,7 @@ const LocationCard = ({ item }: { item: LocationStock }) => {
       <View style={styles.cardHeader}>
         <View style={styles.cardHeaderLeft}>
           <Text style={styles.cardTitle} numberOfLines={1}>{item.locationName}</Text>
-          <Badge label={LOCATION_TYPE_LABELS[item.type as keyof typeof LOCATION_TYPE_LABELS] || item.type} variant={variant} size="sm" />
+          <Badge label={LOCATION_TYPE_LABELS[item.type] ?? item.type} variant={variant} size="sm" />
         </View>
       </View>
       <View style={styles.statsRow}>
