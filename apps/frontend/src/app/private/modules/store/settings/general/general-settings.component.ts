@@ -78,7 +78,7 @@ export class GeneralSettingsComponent implements OnInit {
   readonly isRestaurant = this.authFacade.isRestaurant;
 
   /**
-   * True when the active store is a gym. Gates the "Membresías" settings
+   * True when the active store is a gym. Gates the "Zona Fit" settings
    * section (tab + toggle). Source of truth is the industries cascade resolved
    * by `AuthFacade.isGym` (settings → login → []).
    */
@@ -101,9 +101,9 @@ export class GeneralSettingsComponent implements OnInit {
       base.splice(dispatchIndex, 0, { id: 'restaurant', label: 'Mesas', icon: 'utensils' });
     }
     if (this.isGym()) {
-      // Insert "Membresías" right before "Despacho" for gyms only.
+      // Insert "Zona Fit" right before "Despacho" for gyms only.
       const dispatchIndex = base.findIndex((s) => s.id === 'dispatch');
-      base.splice(dispatchIndex, 0, { id: 'membership', label: 'Membresías', icon: 'dumbbell' });
+      base.splice(dispatchIndex, 0, { id: 'membership', label: 'Zona Fit', icon: 'dumbbell' });
     }
     return base;
   });

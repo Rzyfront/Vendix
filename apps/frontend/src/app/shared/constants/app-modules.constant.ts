@@ -423,7 +423,7 @@ export const APP_MODULES: {
     // visible only when the store's industry includes `gym` or `service`.
     {
       key: 'memberships',
-      label: 'Membres\u00edas',
+      label: 'Zona Fit',
       description: 'Planes, socios y control de accesos de membres\u00edas',
       isParent: true,
       children: [
@@ -434,8 +434,8 @@ export const APP_MODULES: {
         },
         {
           key: 'memberships_members',
-          label: 'Socios',
-          description: 'Directorio y estado de socios',
+          label: 'Miembros',
+          description: 'Directorio y estado de miembros',
         },
         {
           key: 'memberships_access',

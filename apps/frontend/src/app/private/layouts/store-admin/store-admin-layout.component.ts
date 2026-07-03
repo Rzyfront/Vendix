@@ -369,6 +369,68 @@ export class StoreAdminLayoutComponent {
       route: '/admin/pos',
     },
     {
+      // Restaurant Operations (Restaurant Suite — Fase I). The whole group
+      // is hidden by INDUSTRY_HIDDEN_MODULES for retail/manufacturing/service
+      // stores; visible only when the store's industry includes `restaurant`.
+      // Industry gating runs upstream in MenuFilterService.getModulesHiddenByIndustries.
+      label: 'Operaciones de Restaurante',
+      icon: 'utensils-crossed',
+      children: [
+        {
+          label: 'Mesas',
+          icon: 'square-stack',
+          route: '/admin/restaurant-ops/tables',
+        },
+        {
+          label: 'Comandas',
+          icon: 'flame',
+          route: '/admin/restaurant-ops/kds',
+        },
+        {
+          label: 'Producción',
+          icon: 'chef-hat',
+          route: '/admin/restaurant-ops/production',
+        },
+        {
+          label: 'Recetas',
+          icon: 'book-open',
+          route: '/admin/restaurant-ops/recipes',
+        },
+        {
+          label: 'Cartas',
+          icon: 'menu-square',
+          route: '/admin/restaurant-ops/menus',
+        },
+      ],
+    },
+    {
+      // Memberships (Membership Suite). Hidden by INDUSTRY_HIDDEN_MODULES for
+      // every industry except `gym` and `service`; visible only when the
+      // store's industry includes `gym` or `service`. Labels map to panel_ui
+      // keys via MenuFilterService ('Zona Fit' → memberships, Accesos →
+      // memberships_access, Miembros → memberships_members, Planes →
+      // memberships_plans).
+      label: 'Zona Fit',
+      icon: 'dumbbell',
+      children: [
+        {
+          label: 'Accesos',
+          icon: 'door-open',
+          route: '/admin/memberships/access',
+        },
+        {
+          label: 'Miembros',
+          icon: 'users',
+          route: '/admin/memberships/members',
+        },
+        {
+          label: 'Planes',
+          icon: 'tag',
+          route: '/admin/memberships/plans',
+        },
+      ],
+    },
+    {
       label: 'Órdenes',
       icon: 'cart',
       children: [
@@ -649,68 +711,6 @@ export class StoreAdminLayoutComponent {
       label: 'Gastos',
       icon: 'wallet',
       route: '/admin/expenses',
-    },
-    {
-      // Restaurant Operations (Restaurant Suite — Fase I). The whole group
-      // is hidden by INDUSTRY_HIDDEN_MODULES for retail/manufacturing/service
-      // stores; visible only when the store's industry includes `restaurant`.
-      // Industry gating runs upstream in MenuFilterService.getModulesHiddenByIndustries.
-      label: 'Operaciones de Restaurante',
-      icon: 'utensils-crossed',
-      children: [
-        {
-          label: 'Recetas',
-          icon: 'book-open',
-          route: '/admin/restaurant-ops/recipes',
-        },
-        {
-          label: 'Producción',
-          icon: 'chef-hat',
-          route: '/admin/restaurant-ops/production',
-        },
-        {
-          label: 'Comandas',
-          icon: 'flame',
-          route: '/admin/restaurant-ops/kds',
-        },
-        {
-          label: 'Mesas',
-          icon: 'square-stack',
-          route: '/admin/restaurant-ops/tables',
-        },
-        {
-          label: 'Cartas',
-          icon: 'menu-square',
-          route: '/admin/restaurant-ops/menus',
-        },
-      ],
-    },
-    {
-      // Memberships (Membership Suite). Hidden by INDUSTRY_HIDDEN_MODULES for
-      // every industry except `gym` and `service`; visible only when the
-      // store's industry includes `gym` or `service`. Labels map to panel_ui
-      // keys via MenuFilterService (Membresías → memberships, Planes →
-      // memberships_plans, Socios → memberships_members, Accesos →
-      // memberships_access).
-      label: 'Membresías',
-      icon: 'dumbbell',
-      children: [
-        {
-          label: 'Planes',
-          icon: 'tag',
-          route: '/admin/memberships/plans',
-        },
-        {
-          label: 'Socios',
-          icon: 'users',
-          route: '/admin/memberships/members',
-        },
-        {
-          label: 'Accesos',
-          icon: 'door-open',
-          route: '/admin/memberships/access',
-        },
-      ],
     },
     {
       // Fiscal umbrella — one sidebar group consolidating every fiscal surface
