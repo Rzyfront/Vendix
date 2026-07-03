@@ -1103,6 +1103,14 @@ model order_items {
   // el descuento NO se vuelva a aplicar al pagar. Default false → no afecta
   // el flujo retail existente.
   inventory_consumed_at_fire       Boolean                  @default(false)
+  // Refactor inventario (Ola 0) — commit unico de stock, anti-doble-descuento.
+  // inventory_committed marca que el stock de este item YA fue descontado. El
+  // servicio unificado de commit salta el item si esta en true, garantizando que
+  // el descuento nunca se aplique dos veces. inventory_committed_at registra el
+  // instante del commit (null en historicos backfilleados). Default false preserva
+  // el flujo existente (retail, ecommerce, POS).
+  inventory_committed              Boolean                  @default(false)
+  inventory_committed_at           DateTime?                @db.Timestamp(6)
   // Restaurant Suite Fase K / Plan KDS fire-flows: marca persistida de la intencion
   // del cajero al aniadir el item al carrito ("usar stock" en pos-prepared-choice-modal).
   // - skip_kds=true: el item NO se enviara a cocina; su stock se descuenta en el
