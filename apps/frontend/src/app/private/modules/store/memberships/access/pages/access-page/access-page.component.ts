@@ -216,7 +216,13 @@ export class MembershipAccessPageComponent implements OnInit {
       transform: (value: GymCredentialType) =>
         GYM_CREDENTIAL_TYPE_LABELS[value] ?? value,
     },
-    { key: 'credential_value', label: 'Valor', sortable: false, priority: 1 },
+    {
+      key: 'credential_value_masked',
+      label: 'Valor',
+      sortable: false,
+      priority: 1,
+      defaultValue: '••••',
+    },
     {
       key: 'is_active',
       label: 'Estado',
@@ -247,7 +253,7 @@ export class MembershipAccessPageComponent implements OnInit {
   ]);
 
   readonly credsCardConfig: ItemListCardConfig = {
-    titleKey: 'credential_value',
+    titleKey: 'credential_value_masked',
     subtitleKey: 'credential_type',
     subtitleTransform: (row: GymAccessCredential) =>
       GYM_CREDENTIAL_TYPE_LABELS[row.credential_type] ?? row.credential_type,
@@ -409,7 +415,7 @@ export class MembershipAccessPageComponent implements OnInit {
     this.dialogService
       .confirm({
         title: 'Desactivar credencial',
-        message: `¿Desactivar la credencial "${credential.credential_value}"? El socio no podrá usarla para ingresar.`,
+        message: `¿Desactivar la credencial "${credential.credential_value_masked}"? El socio no podrá usarla para ingresar.`,
         confirmText: 'Desactivar',
         cancelText: 'Cancelar',
         confirmVariant: 'danger',

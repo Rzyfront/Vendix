@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   DestroyRef,
   effect,
   inject,
@@ -89,8 +90,9 @@ interface CredentialFormShape {
         <app-input
           formControlName="credential_value"
           label="Valor de la credencial"
-          placeholder="Ej. código QR, PIN o referencia del dispositivo"
-          [required]="true"
+          [placeholder]="valuePlaceholder()"
+          [helperText]="valueHelper()"
+          [required]="!credential()"
         />
 
         <label class="flex items-center gap-2 text-sm text-text-primary">
@@ -129,10 +131,29 @@ export class MembershipCredentialFormModalComponent {
   readonly saved = output<void>();
 
   readonly typeOptions: SelectorOption[] = [
-    { value: 'qr', label: 'Código QR' },
-    { value: 'pin', label: 'PIN' },
-    { value: 'external_ref', label: 'Referencia externa' },
+    { value: 'qr', label: 'Código QR', icon: 'scan-line' },
+    { value: 'pin', label: 'PIN', icon: 'hash' },
+    {
+      value: 'external_ref',
+      label: 'Huella (lector biométrico)',
+      icon: 'fingerprint',
+      description: 'Solo referencia; la huella vive en el dispositivo',
+    },
   ];
+
+  /** Edit shows the masked value as a hint; create keeps the generic prompt. */
+  readonly valuePlaceholder = computed(() => {
+    const existing = this.credential();
+    return existing
+      ? existing.credential_value_masked || 'Valor actual oculto'
+      : 'Ej. código QR, PIN o referencia del dispositivo';
+  });
+
+  readonly valueHelper = computed(() =>
+    this.credential()
+      ? 'Déjalo vacío para mantener el valor actual. Escribe uno nuevo solo si deseas cambiarlo.'
+      : '',
+  );
 
   readonly customerOptions = signal<SelectorOption[]>([]);
   readonly isLoadingCustomers = signal(false);
@@ -158,24 +179,39 @@ export class MembershipCredentialFormModalComponent {
       if (!isOpen) return;
 
       if (existing) {
-        // Edit: customer + type immutable; only value + active editable.
+        // Edit: customer + type immutable; value is a sensitive field. The API
+        // returns only a masked hint, so the input starts EMPTY — an empty
+        // submit means "keep the current value" (see submit()).
         this.form.controls.customer_id.clearValidators();
         this.form.controls.customer_id.updateValueAndValidity({
+          emitEvent: false,
+        });
+        this.form.controls.credential_value.setValidators([
+          Validators.maxLength(255),
+        ]);
+        this.form.controls.credential_value.updateValueAndValidity({
           emitEvent: false,
         });
         this.form.patchValue(
           {
             customer_id: existing.customer_id,
             credential_type: existing.credential_type,
-            credential_value: existing.credential_value,
+            credential_value: '',
             is_active: existing.is_active,
           },
           { emitEvent: false },
         );
       } else {
-        // Create: customer required; load the customer list once.
+        // Create: customer + value required; load the customer list once.
         this.form.controls.customer_id.setValidators([Validators.required]);
         this.form.controls.customer_id.updateValueAndValidity({
+          emitEvent: false,
+        });
+        this.form.controls.credential_value.setValidators([
+          Validators.required,
+          Validators.maxLength(255),
+        ]);
+        this.form.controls.credential_value.updateValueAndValidity({
           emitEvent: false,
         });
         if (!this.customersLoaded) {
@@ -227,10 +263,15 @@ export class MembershipCredentialFormModalComponent {
     this.isSubmitting.set(true);
 
     if (existing) {
+      // Sensitive field: only send a new value if the user actually typed one.
+      // An empty input keeps the stored credential untouched.
+      const newValue = raw.credential_value.trim();
       const dto: UpdateCredentialDto = {
-        credential_value: raw.credential_value.trim(),
         is_active: raw.is_active,
       };
+      if (newValue) {
+        dto.credential_value = newValue;
+      }
       this.accessService
         .updateCredential(existing.id, dto)
         .pipe(takeUntilDestroyed(this.destroyRef))

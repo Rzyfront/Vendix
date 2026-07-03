@@ -25,7 +25,12 @@ export interface GymAccessCredential {
   store_id: number;
   customer_id: number;
   credential_type: GymCredentialType;
-  credential_value: string;
+  /**
+   * Masked reference of the credential value (e.g. `'****1234'` for qr /
+   * external_ref, `'****'` for pin). The backend never returns the raw value
+   * on read; only this masked hint is exposed to the UI (Ley 1581).
+   */
+  credential_value_masked: string;
   is_active: boolean;
   created_at: string | Date;
   updated_at: string | Date;
@@ -88,7 +93,9 @@ export interface AccessValidationResult {
 export const GYM_CREDENTIAL_TYPE_LABELS: Record<GymCredentialType, string> = {
   qr: 'Código QR',
   pin: 'PIN',
-  external_ref: 'Referencia externa',
+  // Biometrics are modeled as an external reference: Vendix never stores the
+  // fingerprint template (Ley 1581); only a device reference lives here.
+  external_ref: 'Huella (lector biométrico)',
 };
 
 export const GYM_ACCESS_RESULT_LABELS: Record<GymAccessResult, string> = {

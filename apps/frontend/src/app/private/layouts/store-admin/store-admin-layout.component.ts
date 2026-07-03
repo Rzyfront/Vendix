@@ -7,6 +7,7 @@ import {
   DestroyRef,
   afterNextRender,
   effect,
+  untracked,
 } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import {
@@ -34,6 +35,8 @@ import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/
 import { WeeklyReportSnapshot } from '../../modules/store/weekly-report/interfaces/weekly-report.interface';
 import { WeeklyReportService } from '../../modules/store/weekly-report/services/weekly-report.service';
 import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
+import { MembershipAmbientAccessService } from '../../../core/services/membership-ambient-access.service';
+import type { StoreSettings } from '../../../core/models/store-settings.interface';
 import { combineLatest } from 'rxjs';
 import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
 
@@ -206,7 +209,21 @@ export class StoreAdminLayoutComponent {
   private tourService = inject(TourService);
   private menuFilterService = inject(MenuFilterService);
   private subscriptionFacade = inject(SubscriptionFacade);
+  private ambientAccess = inject(MembershipAmbientAccessService);
   private destroyRef = inject(DestroyRef);
+
+  /**
+   * W4 — Ambient membership-access validation. Reads the store setting
+   * `membership.ambient_access_enabled` from the auth-facade store-settings
+   * signal. Combined with `authFacade.isGym()` it gates the background SSE
+   * connection that pops a toast per gym access (see the effect in the
+   * constructor).
+   */
+  readonly ambientAccessEnabled = computed<boolean>(
+    () =>
+      (this.authFacade.storeSettings() as StoreSettings | null)?.membership
+        ?.ambient_access_enabled === true,
+  );
 
   // --- UI state signals ---
   readonly sidebarCollapsed = signal(false);
@@ -902,6 +919,26 @@ export class StoreAdminLayoutComponent {
   };
 
   constructor() {
+    // ─── W4: Ambient membership-access validation ──────────────────────────
+    // Connect the background SSE stream ONLY when the gym industry is active
+    // AND the store setting `membership.ambient_access_enabled` is on;
+    // disconnect otherwise. The effect tracks both signals; the connect/
+    // disconnect side-effects run under `untracked` so we don't re-run on the
+    // service's own connection-state signals (same pattern as KdsSseService).
+    effect(() => {
+      const shouldConnect =
+        this.authFacade.isGym() && this.ambientAccessEnabled();
+      untracked(() => {
+        if (shouldConnect) {
+          this.ambientAccess.connect();
+        } else {
+          this.ambientAccess.disconnect();
+        }
+      });
+    });
+    // Tear down the EventSource explicitly when the shell is destroyed.
+    this.destroyRef.onDestroy(() => this.ambientAccess.disconnect());
+
     // ─── Weekly Report: fetch inicial cuando el store está disponible ───
     // Se ejecuta desde el layout (no desde el banner) para garantizar que
     // el reporte se cargue apenas el usuario llega al dashboard, sin

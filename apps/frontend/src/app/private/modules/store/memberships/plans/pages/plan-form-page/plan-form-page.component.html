@@ -157,4 +157,21 @@
       />
     </div>
   </app-card>
+
+  <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">
+    <div class="space-y-4">
+      <div class="flex items-start gap-2">
+        <app-icon name="clock" size="18" class="text-primary-600 mt-0.5" />
+        <div>
+          <h2 class="text-base font-bold text-gray-900">Horario de acceso</h2>
+          <p class="text-xs text-gray-500 mt-0.5">
+            Opcional. Restringe el ingreso a franjas horarias por día. Sin
+            franjas: acceso a toda hora.
+          </p>
+        </div>
+      </div>
+
+      <app-access-schedule-editor formControlName="access_schedule" />
+    </div>
+  </app-card>
 </form>

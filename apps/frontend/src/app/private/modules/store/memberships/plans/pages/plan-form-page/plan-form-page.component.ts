@@ -31,8 +31,14 @@ import {
 } from '../../../../../../../shared/components/index';
 import { CurrencyInputDirective } from '../../../../../../../shared/directives/currency-input.directive';
 
-import { CreateGymPlanDto, GymPlan, UpdateGymPlanDto } from '../../interfaces';
+import {
+  AccessScheduleWindow,
+  CreateGymPlanDto,
+  GymPlan,
+  UpdateGymPlanDto,
+} from '../../interfaces';
 import { MembershipPlansService } from '../../services';
+import { AccessScheduleEditorComponent } from '../../components/access-schedule-editor/access-schedule-editor.component';
 
 interface PlanFormShape {
   code: FormControl<string>;
@@ -46,6 +52,7 @@ interface PlanFormShape {
   sort_order: FormControl<number | null>;
   is_active: FormControl<boolean>;
   benefits: FormControl<string>;
+  access_schedule: FormControl<AccessScheduleWindow[]>;
 }
 
 @Component({
@@ -61,6 +68,7 @@ interface PlanFormShape {
     TextareaComponent,
     IconComponent,
     CurrencyInputDirective,
+    AccessScheduleEditorComponent,
   ],
   templateUrl: './plan-form-page.component.html',
 })
@@ -112,6 +120,7 @@ export class MembershipPlanFormPageComponent implements OnInit {
     }),
     is_active: this.fb.nonNullable.control(true),
     benefits: this.fb.nonNullable.control(''),
+    access_schedule: this.fb.nonNullable.control<AccessScheduleWindow[]>([]),
   });
 
   private readonly formStatus = toSignal(
@@ -167,6 +176,9 @@ export class MembershipPlanFormPageComponent implements OnInit {
             sort_order: plan.sort_order ?? 0,
             is_active: plan.is_active ?? true,
             benefits: this.benefitsToText(plan.features),
+            access_schedule: Array.isArray(plan.access_schedule)
+              ? plan.access_schedule
+              : [],
           });
           this.isLoadingPlan.set(false);
         },
@@ -211,6 +223,10 @@ export class MembershipPlanFormPageComponent implements OnInit {
       sort_order: Number(raw.sort_order ?? 0),
       is_active: raw.is_active,
       features: this.textToBenefits(raw.benefits),
+      // Flat top-level field (parallel to `features`); the backend folds it into
+      // `features.access_schedule` without touching `features.benefits`. Sending
+      // the array — even empty — lets the user clear the schedule on edit.
+      access_schedule: raw.access_schedule ?? [],
     };
 
     this.isSubmitting.set(true);
