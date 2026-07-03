@@ -112,6 +112,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Configuring middleware | `vendix-backend-middleware` |
 | Configuring panel_ui visibility | `vendix-panel-ui` |
 | Configuring the Vendix Linear API key | `linear-connect` |
+| Confirming a production fix matches its requirement or reporting defects | `verify-ticket-prod` |
 | Consulting or updating keys/README.md production runbook | `vendix-cloud-operations` |
 | Creating AI queue processors | `vendix-ai-queue` |
 | Creating AI-powered features | `vendix-ai-engine` |
@@ -218,6 +219,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying the POS for restaurant flow (fire, open table, split bill) | `vendix-restaurant-ops` |
 | Modifying the POS open-table flow that propagates an optional customer to the session and draft order | `vendix-restaurant-ops` |
 | Modifying the POS payment close-out against an open table (table_session_id, applyPosPaymentToTableSession, table status cleaning) | `vendix-restaurant-ops` |
+| Non-destructive production verification with the demo account | `verify-ticket-prod` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
@@ -239,6 +241,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json | `linear-connect` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
+| Running a controlled E2E verification of a shipped ticket on www.vendix.online | `verify-ticket-prod` |
 | Running an automated code review (pr-code-review) on a PR before merging | `git-workflow` |
 | Running an end-to-end frontend flow in a browser | `how-to-test` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
@@ -275,6 +278,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Using toSignal() in facades — validating initialValue presence | `vendix-zoneless-signals` |
 | Validating variant availability in ecommerce, POS, cart, checkout, reservations, or catalog | `vendix-product-variants` |
 | Verifying Build | `buildcheck-dev` |
+| Verifying a Linear ticket is correctly applied in production | `verify-ticket-prod` |
 | Verifying an API endpoint or auth boundary with curl | `how-to-test` |
 | Verifying plan completeness before approval | `how-to-plan` |
 | When adding icons to components, buttons, menus, or using <app-icon> | `vendix-frontend-icons` |

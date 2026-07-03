@@ -2,12 +2,14 @@ import {
   Body,
   Controller,
   Get,
+  HttpException,
   Param,
   ParseIntPipe,
   Put,
   UseGuards,
 } from '@nestjs/common';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { MemberProfilesService } from './member-profiles.service';
 import { UpsertMemberProfileDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
@@ -28,12 +30,21 @@ export class MemberProfilesController {
     private readonly responseService: ResponseService,
   ) {}
 
-  private fail(error: any, fallback: string) {
-    return this.responseService.error(
-      error.response?.message || error.message || fallback,
-      error.response?.message || error.message,
-      error.getStatus?.() ?? error.status ?? 400,
-      error.errorCode,
+  /**
+   * Fix: previously this returned `responseService.error(...)`, which made
+   * NestJS answer with HTTP 2xx carrying an error body — a client reading only
+   * the HTTP status treated not-found as success. Now we THROW so the global
+   * filter emits the correct HTTP status + error code. Typed exceptions from
+   * the service (VendixHttp / HttpException) are rethrown verbatim; any opaque
+   * error is wrapped with an existing code. Mirrors `MembershipsController.fail`.
+   */
+  private fail(error: any, fallback: string): never {
+    if (error instanceof VendixHttpException || error instanceof HttpException) {
+      throw error;
+    }
+    throw new VendixHttpException(
+      ErrorCodes.SYS_CONFLICT_001,
+      error?.message || fallback,
     );
   }
 

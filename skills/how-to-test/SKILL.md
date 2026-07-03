@@ -141,6 +141,15 @@ user-accepted risk). Report the matrix as the test result — not a single "it w
   `GET /api/public/domains/resolve/{hostname}` (`apps/frontend/src/app/core/services/app-config.service.ts`).
   `localhost` has no `domain_settings` row, so the app cannot resolve which app to render and
   bootstraps wrong. The hostname *is* the test fixture.
+- **A dedicated store/org subdomain is OPTIONAL — the default vhost `vendix.com` (frontend) and
+  `api.vendix.com/api` (backend) serve EVERY tenant.** If a store or organization has no subdomain
+  provisioned (no `domain_settings` row for it), do **not** treat that as a blocker: log in on the
+  default vhost and pass the `organization_slug` (or `store_slug`) in the login payload — the slug,
+  not the hostname, selects the tenant in that case. `curl` against `https://api.vendix.com/api` with
+  `{"...","organization_slug":"<slug>"}` and `agent-browser` against `https://vendix.com` both work
+  for any tenant this way. Use a subdomain only when the flow under test specifically depends on
+  hostname-based `app_type` resolution (e.g. a storefront ecommerce render); for admin/API flows the
+  default vhost + slug is sufficient and preferred when no subdomain exists.
 - **Credentials come from seed accounts or from the user — never invent them.** Default to a seed
   owner account; if the flow needs a specific tenant/role the seeds don't cover, ask the user for
   `slug`, `email`, `password`.
@@ -155,8 +164,11 @@ The app runs in Docker with an nginx vhost in front. Before any E2E test:
    ```
    127.0.0.1 vendix.com www.vendix.com api.vendix.com
    ```
-   Add any store/org subdomain you intend to test (the full set lives in
-   `apps/backend/prisma/seeds/domains.seed.ts`).
+   These three defaults are enough for **any** tenant: a per-store/org subdomain is **optional**.
+   Add one only if the flow needs hostname-based `app_type` resolution (e.g. a storefront render);
+   the full set lives in `apps/backend/prisma/seeds/domains.seed.ts`. For admin/API flows, stay on
+   `vendix.com` / `api.vendix.com` and select the tenant with `organization_slug` (or `store_slug`)
+   in the login payload — no subdomain, no extra `/etc/hosts` entry required.
 2. **Bring the stack up and confirm it is actually healthy** — this is the Step 0 gate; delegate the
    detail to `buildcheck-dev`:
    ```bash
@@ -201,8 +213,11 @@ All seed users share password `1125634q`. Source of truth:
 | `admin@techsolutions.co` | admin | `tech-solutions` | `tech-bogota` | `admin-techsolutions.vendix.com` |
 | `cliente1@example.com` | customer | `tech-solutions` | `tech-bogota` | store ecommerce subdomain |
 
-Need a role/tenant the seeds don't cover → **ask the user** for `slug`, `email`, `password`. Confirm
-the exact subdomain per persona in `domains.seed.ts` and add it to `/etc/hosts`.
+Need a role/tenant the seeds don't cover → **ask the user** for `slug`, `email`, `password`. The
+"typical vhost" column is the convenience subdomain, **not** a requirement: any persona also logs in
+on the default `vendix.com` / `api.vendix.com` by supplying its `organization_slug` (or `store_slug`).
+Only when you deliberately test hostname-based `app_type` resolution do you confirm the subdomain in
+`domains.seed.ts` and add it to `/etc/hosts`.
 
 ## Mechanism 1 — curl (API & auth)
 

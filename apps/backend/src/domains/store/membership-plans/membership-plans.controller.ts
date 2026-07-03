@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  HttpException,
   Param,
   ParseIntPipe,
   Patch,
@@ -11,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { MembershipPlansService } from './membership-plans.service';
 import {
   CreateMembershipPlanDto,
@@ -37,6 +39,25 @@ export class MembershipPlansController {
     private readonly responseService: ResponseService,
   ) {}
 
+  /**
+   * Fix: previously each handler returned `responseService.error(...)` on
+   * failure, which made NestJS answer with HTTP 2xx carrying an error body —
+   * a client reading only the HTTP status treated not-found/conflict as
+   * success. Now we THROW so the global filter emits the correct HTTP status +
+   * error code. Typed exceptions from the service (VendixHttp / HttpException)
+   * are rethrown verbatim; any opaque error is wrapped with an existing code.
+   * Mirrors `MembershipsController.fail`.
+   */
+  private fail(error: any, fallback: string): never {
+    if (error instanceof VendixHttpException || error instanceof HttpException) {
+      throw error;
+    }
+    throw new VendixHttpException(
+      ErrorCodes.SYS_CONFLICT_001,
+      error?.message || fallback,
+    );
+  }
+
   @Post()
   @Permissions('store:membership_plans:create')
   async create(@Body() dto: CreateMembershipPlanDto) {
@@ -44,12 +65,7 @@ export class MembershipPlansController {
       const result = await this.membershipPlansService.create(dto);
       return this.responseService.created(result, 'Plan creado exitosamente');
     } catch (error: any) {
-      return this.responseService.error(
-        error.response?.message || error.message || 'Error al crear el plan',
-        error.response?.message || error.message,
-        error.getStatus?.() ?? error.status ?? 400,
-        error.errorCode,
-      );
+      return this.fail(error, 'Error al crear el plan');
     }
   }
 
@@ -66,12 +82,7 @@ export class MembershipPlansController {
         'Planes obtenidos exitosamente',
       );
     } catch (error: any) {
-      return this.responseService.error(
-        error.response?.message || error.message || 'Error al obtener los planes',
-        error.response?.message || error.message,
-        error.getStatus?.() ?? error.status ?? 400,
-        error.errorCode,
-      );
+      return this.fail(error, 'Error al obtener los planes');
     }
   }
 
@@ -82,12 +93,7 @@ export class MembershipPlansController {
       const result = await this.membershipPlansService.findOne(id);
       return this.responseService.success(result, 'Plan obtenido exitosamente');
     } catch (error: any) {
-      return this.responseService.error(
-        error.response?.message || error.message || 'Error al obtener el plan',
-        error.response?.message || error.message,
-        error.getStatus?.() ?? error.status ?? 400,
-        error.errorCode,
-      );
+      return this.fail(error, 'Error al obtener el plan');
     }
   }
 
@@ -104,14 +110,7 @@ export class MembershipPlansController {
         'Plan actualizado exitosamente',
       );
     } catch (error: any) {
-      return this.responseService.error(
-        error.response?.message ||
-          error.message ||
-          'Error al actualizar el plan',
-        error.response?.message || error.message,
-        error.getStatus?.() ?? error.status ?? 400,
-        error.errorCode,
-      );
+      return this.fail(error, 'Error al actualizar el plan');
     }
   }
 
@@ -127,12 +126,7 @@ export class MembershipPlansController {
           : 'Plan desactivado (tiene membresías asociadas)',
       );
     } catch (error: any) {
-      return this.responseService.error(
-        error.response?.message || error.message || 'Error al eliminar el plan',
-        error.response?.message || error.message,
-        error.getStatus?.() ?? error.status ?? 400,
-        error.errorCode,
-      );
+      return this.fail(error, 'Error al eliminar el plan');
     }
   }
 }
