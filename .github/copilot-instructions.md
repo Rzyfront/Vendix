@@ -160,12 +160,15 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
 | Declaring MCP servers, CLI commands, or web research alongside skills in a plan | `how-to-plan` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
+| Designing happy-path, sad-path, or brute-force test flows for a feature | `how-to-test` |
 | Developing features for the mobile app | `mobile-dev` |
 | Discovering reusable assets before proposing new code | `how-to-plan` |
 | Displaying data lists, implementing responsive tables, creating mobile card views | `vendix-frontend-data-display` |
 | Displaying or formatting dates in frontend | `vendix-date-timezone` |
 | Displaying or formatting money/currency values | `vendix-currency-formatting` |
 | Distinguishing panel_ui visibility from backend authorization | `vendix-permissions` |
+| Documenting user stories or writing HU-X.Y stories for a feature | `user-story-flows` |
+| Drawing graphical user-story flow diagrams (nodes, branches, states) | `user-story-flows` |
 | Driving a browser to confirm UI behavior with agent-browser | `how-to-test` |
 | EC2 maintenance, deployment disk issues, or Docker layer/pull failures | `vendix-ec2-maintenance` |
 | Editing @Permissions decorators | `vendix-permissions` |
@@ -226,6 +229,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Picking concrete verification mechanisms (curl, build, audit, log inspection) per step | `how-to-plan` |
 | Planning structural changes, multi-file changes, broad refactors, or new features | `how-to-plan` |
 | Printing documents with date fields | `vendix-date-timezone` |
+| Producing an animated flow view of a feature to share as a Claude Artifact | `user-story-flows` |
 | Protecting backend endpoints with auth, roles, or permissions | `vendix-backend-auth` |
 | Protecting store write operations behind a subscription | `vendix-subscription-gate` |
 | Pulling the latest Engram memories (engram sync --import) before starting work | `git-workflow` |
@@ -246,8 +250,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |
 | Saving or consulting persistent project memory with Engram (mem_save, mem_search, mem_context, mem_sync) | `vendix-engram` |
+| Saving user-story artifacts as HTML under docs/ at the repo root | `user-story-flows` |
 | Scoping inventory, suppliers, purchases, accounting, reports, or transfers by store vs organization | `vendix-operating-scope` |
 | Searching for an existing Vendix issue in Linear | `linear-issues` |
+| Security, abuse, or data-integrity probing of a specific flow | `how-to-test` |
 | Selecting the correct skills for each plan step using the Skill Selection Matrix | `how-to-plan` |
 | Self-bootstrap Engram on a fresh dev machine | `vendix-engram` |
 | Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
