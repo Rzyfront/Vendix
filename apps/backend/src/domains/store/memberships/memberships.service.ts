@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   Prisma,
   membership_status_enum,
@@ -9,6 +9,7 @@ import { StorePrismaService } from '../../../prisma/services/store-prisma.servic
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { PaymentsService } from '../payments/payments.service';
 import { MembershipPlansService } from '../membership-plans/membership-plans.service';
+import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import {
   CreateMembershipDto,
   UpdateMembershipDto,
@@ -42,10 +43,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  */
 @Injectable()
 export class MembershipsService {
+  private readonly logger = new Logger(MembershipsService.name);
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly membershipPlansService: MembershipPlansService,
     private readonly paymentsService: PaymentsService,
+    private readonly orderFlow: OrderFlowService,
   ) {}
 
   // ------------------------------------------------------------------ Helpers
@@ -432,6 +436,25 @@ export class MembershipsService {
         ...(sourceOrderId != null && { source_order_id: sourceOrderId }),
       },
     });
+
+    // A membership is delivered the instant it is paid → finalize the renewal
+    // order immediately instead of leaving it stuck in `processing`. The plan's
+    // backing product is a service (enforced in MembershipPlansService), so the
+    // canonical stock commit skips it — no inventory is deducted.
+    if (sourceOrderId != null) {
+      try {
+        await this.orderFlow.finishOrder(sourceOrderId, {
+          source: 'membership_renewal',
+        });
+      } catch (err) {
+        // The charge already succeeded and the membership is renewed; never fail
+        // the response if finishing trips. The order simply stays in `processing`.
+        this.logger.error(
+          `renew: finishOrder failed for order ${sourceOrderId} (membership ${id}); left in processing`,
+          err instanceof Error ? err.stack : String(err),
+        );
+      }
+    }
 
     return {
       membership: await this.findOne(id),

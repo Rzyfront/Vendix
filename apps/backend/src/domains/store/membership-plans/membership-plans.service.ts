@@ -300,12 +300,22 @@ export class MembershipPlansService {
   private async assertProductInStore(productId: number, storeId: number) {
     const product = await this.prisma.withoutScope().products.findFirst({
       where: { id: productId, store_id: storeId },
-      select: { id: true },
+      select: { id: true, product_type: true, track_inventory: true },
     });
     if (!product) {
       throw new VendixHttpException(
         ErrorCodes.SYS_NOT_FOUND_001,
         'El producto asociado al plan no existe en esta tienda',
+      );
+    }
+    // A membership is an intangible entitlement delivered on payment. Its
+    // backing product must NOT deduct stock, so it must be a service (or a
+    // product that does not track inventory). Otherwise finalizing the renewal
+    // order would wrongly discount inventory for an intangible.
+    if (product.product_type !== 'service' && product.track_inventory === true) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_VALIDATION_001,
+        'El producto de un plan de membresía debe ser un servicio o un producto sin control de inventario',
       );
     }
   }

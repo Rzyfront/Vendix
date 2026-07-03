@@ -7,6 +7,7 @@ import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { MembershipPlansModule } from '../membership-plans/membership-plans.module';
 import { PaymentsModule } from '../payments/payments.module';
+import { OrderFlowModule } from '../orders/order-flow/order-flow.module';
 
 /**
  * Store-scoped Memberships module (generalized membership core).
@@ -14,6 +15,8 @@ import { PaymentsModule } from '../payments/payments.module';
  * Depends on:
  *   - MembershipPlansModule → plan lookups (duration, price, backing product)
  *   - PaymentsModule        → PaymentsService.processPaymentWithOrder for renewal
+ *   - OrderFlowModule       → OrderFlowService.finishOrder to close the renewal
+ *     order immediately (a membership is delivered on payment).
  */
 @Module({
   imports: [
@@ -21,6 +24,7 @@ import { PaymentsModule } from '../payments/payments.module';
     PrismaModule,
     MembershipPlansModule,
     PaymentsModule,
+    OrderFlowModule,
   ],
   controllers: [MembershipsController, MemberProfilesController],
   providers: [MembershipsService, MemberProfilesService],
