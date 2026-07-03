@@ -344,6 +344,33 @@ export class OrderStockCommitService {
       return { cost: 0, committed: false };
     }
 
+    // 4. Atomic idempotency CLAIM — the single mutation that serializes this
+    //    line's deduction against a concurrent double-submit (double-click /
+    //    network retry). The read-check above (step 2) is only a cheap
+    //    fast-path: under READ COMMITTED two concurrent tx both read
+    //    inventory_committed=false and would both deduct. This conditional
+    //    UPDATE is the source of truth — the winner flips the flag (count=1),
+    //    the loser blocks on the row-lock, re-evaluates the WHERE (now
+    //    inventory_committed=true) and gets count=0 → skips WITHOUT releasing
+    //    the reservation or deducting. When a tx is present (order-flow finish /
+    //    POS), the claim lives inside the finish $transaction, so a later throw
+    //    (INV_STOCK_002 / serials) rolls the claim back. When absent (dispatch,
+    //    non-blocking, no serials) the conditional UPDATE serializes on its own
+    //    and there is no post-claim throw to undo. Lines with no order_item_id
+    //    (pure standalone remisión) keep their listener-side idempotency guard.
+    if (line.order_item_id != null) {
+      const claimed = await db.order_items.updateMany({
+        where: { id: line.order_item_id, inventory_committed: false },
+        data: {
+          inventory_committed: true,
+          inventory_committed_at: new Date(),
+        },
+      });
+      if (claimed.count === 0) {
+        return { cost: 0, committed: false };
+      }
+    }
+
     // Find the active reservation for this order/SO reference. Read WITHOUT
     // store scope (mirrors order-flow) so a cross-store reservation is still
     // found; tx (request context) already carries the right scope.
@@ -440,16 +467,8 @@ export class OrderStockCommitService {
       tx,
     );
 
-    if (line.order_item_id != null) {
-      await db.order_items.update({
-        where: { id: line.order_item_id },
-        data: {
-          inventory_committed: true,
-          inventory_committed_at: new Date(),
-        },
-      });
-    }
-
+    // inventory_committed was already set by the atomic claim above; no final
+    // write needed here.
     return {
       cost: Number(stockUpdate.cost_snapshot?.total_cost || 0),
       committed: true,
