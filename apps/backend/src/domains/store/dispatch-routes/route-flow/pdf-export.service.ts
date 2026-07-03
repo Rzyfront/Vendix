@@ -181,8 +181,9 @@ export class PdfExportService {
     this.hr(doc);
     doc.moveDown(0.3);
 
-    // Column layout (sums to the printable width = 564).
-    const col_widths = [90, 300, 74, 100];
+    // Column layout (sums to the printable width = 564). Código is widened
+    // (SKUs like ROKU-GAMI-NINT-0024-V38 are long) so it stays on one line.
+    const col_widths = [140, 250, 64, 110];
     const aligns: Array<'left' | 'right' | 'center'> = [
       'left',
       'left',
@@ -217,41 +218,47 @@ export class PdfExportService {
       doc.fillColor('black');
       y += 24;
     } else {
-      const ROW_H = 18;
-      doc.font('Helvetica').fontSize(9).fillColor('black');
+      // Dynamic row height: measure the tallest cell so a long código or
+      // descripción makes the ROW grow instead of overlapping the next one.
+      // The código keeps its full text (never truncated) — legibility matters
+      // on a picking sheet — at a slightly smaller font so most fit one line.
+      const CELL_PAD_Y = 5;
+      const CODE_FONT = 8;
+      const BODY_FONT = 9;
       for (const row of articles.rows) {
-        if (y > PAGE_HEIGHT - 60) {
+        doc.font('Helvetica').fontSize(CODE_FONT);
+        const codeH = doc.heightOfString(row.code, { width: col_widths[0] - 4 });
+        doc.font('Helvetica').fontSize(BODY_FONT);
+        const nameH = doc.heightOfString(row.name, { width: col_widths[1] - 4 });
+        const rowH = Math.max(codeH, nameH, 11) + CELL_PAD_Y * 2;
+
+        // Page break accounts for the FULL measured row height.
+        if (y + rowH > PAGE_HEIGHT - 60) {
           doc.addPage();
           y = drawColHeader(MARGIN);
-          doc.font('Helvetica').fontSize(9).fillColor('black');
         }
+
+        const cellY = y + CELL_PAD_Y;
         let x = startX;
-        // Col 0: código
-        doc.text(row.code, x, y, {
-          width: col_widths[0],
-          align: aligns[0],
-          lineBreak: false,
-          ellipsis: true,
-        });
+        // Col 0: código (smaller font, wraps within the widened column).
+        doc.font('Helvetica').fontSize(CODE_FONT).fillColor('black');
+        doc.text(row.code, x, cellY, { width: col_widths[0] - 4, align: aligns[0] });
         x += col_widths[0];
-        // Col 1: descripción
-        doc.text(row.name, x, y, {
-          width: col_widths[1],
-          align: aligns[1],
-          lineBreak: false,
-          ellipsis: true,
-        });
+        // Col 1: descripción (wraps within its column).
+        doc.font('Helvetica').fontSize(BODY_FONT);
+        doc.text(row.name, x, cellY, { width: col_widths[1] - 4, align: aligns[1] });
         x += col_widths[1];
         // Col 2: unidad
-        doc.text(row.unit, x, y, { width: col_widths[2], align: aligns[2] });
+        doc.text(row.unit, x, cellY, { width: col_widths[2], align: aligns[2] });
         x += col_widths[2];
         // Col 3: total und
-        doc.text(row.total_units.toLocaleString('es-CO'), x, y, {
+        doc.text(row.total_units.toLocaleString('es-CO'), x, cellY, {
           width: col_widths[3],
           align: aligns[3],
         });
-        y += ROW_H;
-        this.hr(doc, y - 5, MARGIN, PAGE_WIDTH - MARGIN * 2);
+
+        y += rowH;
+        this.hr(doc, y - 2, MARGIN, PAGE_WIDTH - MARGIN * 2);
       }
     }
 
