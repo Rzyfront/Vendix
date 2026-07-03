@@ -4,8 +4,10 @@ import {
   serial_status_enum,
   sales_document_item_type_enum,
 } from '@prisma/client';
+import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
 
 interface DispatchNoteEvent {
@@ -27,6 +29,11 @@ export class DispatchNoteEventsListener {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly stockLevelManager: StockLevelManager,
+    // Canonical delivery-commit path. Routes every remisión delivery through
+    // the single OrderStockCommitService so stock deduction behaves identically
+    // to order-flow / POS (fix stock fantasma + doble descuento standalone).
+    // Required in DI — OrderStockCommitModule is imported by DispatchNotesModule.
+    private readonly orderStockCommit: OrderStockCommitService,
     // QUI-431 — optional so the existing unit spec (2-arg construction) keeps
     // compiling/working: when absent (tests), the serial side-effects no-op.
     private readonly serials?: InventorySerialNumbersService,
@@ -116,75 +123,76 @@ export class DispatchNoteEventsListener {
         return;
       }
 
-      // Única fuente de verdad: la reserva. Si ya fue consumida (por
-      // order-flow finished o un re-disparo de este evento), NO se vuelve a
-      // deducir el stock. Espejo de order-flow.service.ts:241-253. Cuenta las
-      // reservas 'active' de la referencia del pedido (sales_order_id ->
-      // order_id -> dispatch_note.id para remisiones standalone).
-      const reservationRefId =
-        dispatch_note.sales_order_id ??
-        dispatch_note.order_id ??
-        dispatch_note.id;
-      const activeReservations = await this.prisma
-        .withoutScope()
-        .stock_reservations.count({
-          where: {
-            reserved_for_type: 'order',
-            reserved_for_id: reservationRefId,
-            status: 'active',
-          },
-        });
-
-      // 1. Deduct stock for each item — SOLO si todavía hay reservas activas.
-      // Si activeReservations === 0, el stock ya se dedujo por otro camino (o
-      // es un re-disparo) y deducir aquí sería un doble consumo prohibido.
-      if (activeReservations > 0) {
-        for (const item of dispatch_note.dispatch_note_items) {
-          const location_id =
-            item.location_id || dispatch_note.dispatch_location_id;
-
-          if (!location_id) continue;
-
-          try {
-            await this.stockLevelManager.updateStock({
-              product_id: item.product_id,
-              variant_id: item.product_variant_id ?? undefined,
-              location_id,
-              quantity_change: -item.dispatched_quantity,
-              movement_type: 'stock_out',
-              reason: `Despacho remisión #${event.dispatch_number}`,
-              create_movement: true,
-              validate_availability: false, // Already confirmed/reserved
-            });
-          } catch (err) {
-            this.logger.error(
-              `[delivered] Failed to deduct stock for product ${item.product_id} on dispatch note #${event.dispatch_number}: ${err.message}`,
-            );
-          }
+      // ── Guard anti re-deducción ─────────────────────────────────────────
+      // CONTRATO VERIFICADO: cuando este listener corre, la remisión YA quedó
+      // status:'delivered' con delivered_at seteado. Tanto el flujo directo
+      // (DispatchNoteFlowService.deliver) como la liquidación de ruta
+      // (RouteFlowService.markDispatchNoteDeliveredInTx) persisten la
+      // transición ANTES de emitir el evento — por eso delivered_at/status NO
+      // distinguen un primer disparo de un re-disparo.
+      //
+      // Idempotencia real por caso:
+      //  - Ligada a orden (order_id): el servicio canónico marca
+      //    order_items.inventory_committed por línea → un re-disparo es no-op.
+      //  - Standalone (sin orden ni SO): sus reservas se llavean por
+      //    dispatch_note.id (único). Un commit previo las dejó 'consumed' sin
+      //    ninguna 'active'; ese es el marcador de re-disparo para el caso que
+      //    NO tiene order_items que marcar. Una remisión cuya reserva se
+      //    liberó/canceló antes de entregar (caso stock fantasma) no deja
+      //    filas 'consumed', así que igual deduce (el bug que este refactor
+      //    corrige).
+      if (!dispatch_note.sales_order_id && !dispatch_note.order_id) {
+        const [active, consumed] = await Promise.all([
+          this.prisma.withoutScope().stock_reservations.count({
+            where: {
+              reserved_for_type: 'order',
+              reserved_for_id: dispatch_note.id,
+              status: 'active',
+            },
+          }),
+          this.prisma.withoutScope().stock_reservations.count({
+            where: {
+              reserved_for_type: 'order',
+              reserved_for_id: dispatch_note.id,
+              status: 'consumed',
+            },
+          }),
+        ]);
+        if (active === 0 && consumed > 0) {
+          this.logger.warn(
+            `[delivered] Remisión standalone #${event.dispatch_number}: reservas ya consumidas (active=0, consumed=${consumed}) — re-disparo, se omite la deducción para evitar doble descuento`,
+          );
+          return;
         }
-      } else {
-        this.logger.log(
-          `[delivered] Dispatch note #${event.dispatch_number}: reservas ya consumidas (activeReservations=0) — se omite deducción de stock para evitar doble consumo`,
-        );
       }
 
-      // 2. Handle sales order integration
+      // Deducción de stock unificada vía servicio canónico. blockOnInsufficient
+      // FALSE: la mercancía ya salió físicamente, no se bloquea — el canónico
+      // deduce con piso 0 y alerta el faltante (fix stock fantasma). Internamente
+      // consume la reserva activa de la referencia (SO ?? order ?? note.id),
+      // deduce una sola vez (movement_type stock_out), marca
+      // order_items.inventory_committed cuando la remisión liga a una orden, y su
+      // barrido defensivo libera residuales con decrementOnHand:false (fix doble
+      // descuento standalone). consumeSerials FALSE: el ciclo de vida de seriales
+      // de la remisión lo maneja markDispatchSerialsSold más abajo.
+      const userId = RequestContextService.getUserId();
+      const res = await this.orderStockCommit.commitDispatchDelivery(
+        dispatch_note,
+        {
+          movementType: 'stock_out',
+          blockOnInsufficient: false,
+          consumeSerials: false,
+          reason: `Despacho remisión #${dispatch_note.id}`,
+          userId: userId ?? undefined,
+        },
+      );
+
+      // Sincronización de estado del documento padre (idempotente). El servicio
+      // canónico ya liberó/consumió las reservas; aquí sólo avanzamos el estado
+      // de la orden / sales order cuando todas sus líneas quedaron despachadas.
+      // CONSERVADO: checkAndUpdateSalesOrderStatus / checkAndUpdateOrderStatus.
       if (dispatch_note.sales_order_id) {
         try {
-          // Release stock reservations made by the sales order. Step 1 above
-          // already decremented quantity_on_hand for every located item, so we
-          // MUST pass decrementOnHand:false here to avoid deducting the same
-          // stock twice (single source of truth = the reservation, consumed
-          // exactly once). Mirrors the order_id branch below.
-          await this.stockLevelManager.releaseReservationsByReference(
-            'order',
-            dispatch_note.sales_order_id,
-            'consumed',
-            undefined,
-            { decrementOnHand: false },
-          );
-
-          // Check if all items of the SO have been fully dispatched
           await this.checkAndUpdateSalesOrderStatus(
             dispatch_note.sales_order_id,
             'shipped',
@@ -196,20 +204,6 @@ export class DispatchNoteEventsListener {
         }
       } else if (dispatch_note.order_id) {
         try {
-          // Release stock reservations made by the order. The dispatch note
-          // already decremented on-hand above (step 1), so we MUST pass
-          // decrementOnHand:false here to avoid deducting the same stock twice.
-          await this.stockLevelManager.releaseReservationsByReference(
-            'order',
-            dispatch_note.order_id,
-            'consumed',
-            undefined,
-            { decrementOnHand: false },
-          );
-
-          // Sync the order state (processing -> shipped) once all its items
-          // have been fully dispatched. Idempotent: it only advances a
-          // 'processing' order and never re-fires order-flow side effects.
           await this.checkAndUpdateOrderStatus(
             dispatch_note.order_id,
             'shipped',
@@ -219,22 +213,9 @@ export class DispatchNoteEventsListener {
             `[delivered] Failed to update order #${dispatch_note.order_id}: ${err.message}`,
           );
         }
-      } else {
-        // Standalone dispatch: release reservations we made on confirm
-        try {
-          await this.stockLevelManager.releaseReservationsByReference(
-            'order',
-            dispatch_note.id,
-            'consumed',
-          );
-        } catch (err) {
-          this.logger.error(
-            `[delivered] Failed to release standalone reservations for dispatch note #${event.dispatch_number}: ${err.message}`,
-          );
-        }
       }
 
-      // 3. QUI-431 — serial lifecycle: the serials reserved + linked at confirm
+      // QUI-431 — serial lifecycle: the serials reserved + linked at confirm
       // are now sold. Transition reserved → sold for every serial linked to
       // this remisión's items. Idempotent (transition is a no-op when already
       // in the target status) and isolated: a serial failure never blocks the
@@ -245,7 +226,7 @@ export class DispatchNoteEventsListener {
       );
 
       this.logger.log(
-        `[delivered] Dispatch note #${event.dispatch_number} processed — stock deducted`,
+        `[delivered] Dispatch note #${event.dispatch_number} processed — ${res.committedItemCount} item(s) deducted (stock_out)`,
       );
     } catch (error) {
       this.logger.error(
