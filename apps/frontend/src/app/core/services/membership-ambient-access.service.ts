@@ -5,6 +5,10 @@ import {
   ToastVariant,
 } from '../../shared/components/toast/toast.service';
 import { formatDateOnlyUTC } from '../../shared/utils/date.util';
+import type {
+  Occupancy,
+  MembershipOccupancyEvent,
+} from '../../private/modules/store/memberships/access/interfaces';
 
 /**
  * Payload emitted by `GET /store/memberships/access/stream`
@@ -74,6 +78,15 @@ export class MembershipAmbientAccessService {
   readonly connectionState = signal<AmbientAccessConnectionState>('idle');
   readonly lastEvent = signal<MembershipAccessEvent | null>(null);
   readonly lastError = signal<string | null>(null);
+
+  /**
+   * Live occupancy (aforo) fed by `type: 'occupancy'` SSE events (C2).
+   * `null` until the first occupancy event arrives. The decision flow
+   * (`membership-access` events + toast) is unaffected by this signal.
+   */
+  private readonly _occupancy = signal<Occupancy | null>(null);
+  /** Read-only view of the live occupancy for consumers (C3). */
+  readonly occupancy = this._occupancy.asReadonly();
 
   /** Open the SSE stream. Idempotent — a no-op while already open/connecting. */
   connect(): void {
@@ -166,18 +179,50 @@ export class MembershipAmbientAccessService {
     if (typeof event.data !== 'string') return;
     // SSE comment lines (heartbeats) start with ":" — ignore them.
     if (event.data.startsWith(':')) return;
-    let parsed: MembershipAccessEvent;
+    let parsed: MembershipAccessEvent | MembershipOccupancyEvent;
     try {
-      parsed = JSON.parse(event.data) as MembershipAccessEvent;
+      parsed = JSON.parse(event.data) as
+        | MembershipAccessEvent
+        | MembershipOccupancyEvent;
     } catch {
       this.lastError.set('Payload SSE malformado');
       return;
     }
-    // The backend `/stream` endpoint already filters to `membership-access`,
-    // but we defend against any other payload reaching this handler.
-    if (parsed?.type !== 'membership-access') return;
-    this.lastEvent.set(parsed);
-    this.showToast(parsed);
+    // Branch by the discriminator. The stream now multiplexes access
+    // DECISIONS (`membership-access`) and occupancy TICKS (`occupancy`).
+    // Any other/unknown payload is ignored so it never disturbs either flow.
+    switch (parsed?.type) {
+      case 'membership-access':
+        this.lastEvent.set(parsed);
+        this.showToast(parsed);
+        break;
+      case 'occupancy':
+        this.applyOccupancyEvent(parsed);
+        break;
+      default:
+        return;
+    }
+  }
+
+  /**
+   * Map a live `occupancy` SSE event onto the `Occupancy` signal.
+   *
+   * The SSE event does NOT carry `turnstile_mode` nor `business_date`. We
+   * PRESERVE the last known values for those two fields (e.g. seeded by C3's
+   * REST `getOccupancy()`) so a live tick never wipes them, and fall back to
+   * safe defaults (`turnstile_mode: false`, `business_date: null`) before the
+   * first authoritative value is known.
+   */
+  private applyOccupancyEvent(ev: MembershipOccupancyEvent): void {
+    const prev = this._occupancy();
+    this._occupancy.set({
+      current_count: ev.current_count,
+      max_capacity: ev.max_capacity,
+      capacity_control_enabled: ev.capacity_control_enabled,
+      turnstile_mode: prev?.turnstile_mode ?? false,
+      business_date: prev?.business_date ?? null,
+      updated_at: ev.updated_at,
+    });
   }
 
   private showToast(ev: MembershipAccessEvent): void {
