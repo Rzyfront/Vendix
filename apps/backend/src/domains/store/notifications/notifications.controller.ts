@@ -11,7 +11,7 @@ import {
   MessageEvent,
 } from '@nestjs/common';
 import { Request } from 'express';
-import { Observable, map, merge } from 'rxjs';
+import { Observable, map, merge, filter } from 'rxjs';
 import { NotificationsService } from './notifications.service';
 import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
@@ -162,7 +162,16 @@ export class NotificationsController {
       ? merge(storeSubject, userSubject)
       : storeSubject;
 
+    // El subject por tienda es compartido: otros dominios (p.ej. el acceso
+    // ambiental de gym) multiplexan sus eventos en él. El bell solo debe
+    // emitir notificaciones reales — se excluyen los eventos foráneos para no
+    // inflar el badge ni disparar sonido. El stream dedicado
+    // /store/memberships/access/stream sí filtra su propio 'membership-access'.
     return merged.pipe(
+      filter(
+        (payload) =>
+          (payload as { type?: string })?.type !== 'membership-access',
+      ),
       map(
         (payload) =>
           ({
