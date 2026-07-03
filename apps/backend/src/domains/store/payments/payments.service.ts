@@ -9,6 +9,10 @@ import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import {
+  OrderStockCommitService,
+  CommitResult,
+} from '../inventory/shared/services/order-stock-commit.service';
 import { TaxesService } from '../taxes/taxes.service';
 import { LocationsService } from '../inventory/locations/locations.service';
 import {
@@ -80,6 +84,9 @@ export class PaymentsService {
     private prisma: StorePrismaService,
     private paymentGateway: PaymentGatewayService,
     private readonly stockLevelManager: StockLevelManager,
+    // Canonical, uniform delivery-commit (skips + reservation consume +
+    // availability BLOCK + serial consume + updateStock + inventory_committed).
+    private readonly orderStockCommit: OrderStockCommitService,
     private readonly taxes_service: TaxesService,
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
@@ -1100,11 +1107,13 @@ export class PaymentsService {
           // `updateInventoryFromOrder` can consume the operator-chosen serials
           // for serialized products. Ecommerce/credit/other channels reach the
           // same method with no DTO lines and auto-select FIFO.
-          inventoryCost = await this.updateInventoryFromOrder(
-            tx,
-            order,
-            createPosPaymentDto.items,
-          );
+          inventoryCost = (
+            await this.updateInventoryFromOrder(
+              tx,
+              order,
+              createPosPaymentDto.items,
+            )
+          ).totalCost;
         }
 
         // 4. Emit order/payment events — drafts skip ALL events because they
@@ -3196,154 +3205,43 @@ export class PaymentsService {
   }
 
   /**
-   * Update inventory from order
+   * Deduct stock for a delivered/finished POS order by delegating to the
+   * canonical `OrderStockCommitService.commitOrderDelivery`.
+   *
+   * That service runs, per line, the single uniform pipeline shared by every
+   * delivery path: skips (service / !track_inventory / inventory_consumed_at_fire
+   * / restaurant-prepared-pending), reservation consume (releaseReservation),
+   * availability validation that BLOCKS with INV_STOCK_002 on insufficient stock
+   * (blockOnInsufficient), serial consumption, the single net `updateStock`
+   * ('sale'), and marking `order_items.inventory_committed` — then a defensive
+   * sweep of residual active reservations.
+   *
+   * Serial correlation (QUI-431): the raw POS DTO lines are passed straight
+   * through as `posSelection`; the service matches them to each order line
+   * claim-once by (product_id, variant_id) to resolve the operator-chosen
+   * serials, falling back to FIFO auto-selection for lines with no manual
+   * selection (ecommerce / credit / other channels pass no `posItems`).
+   *
+   * Runs with the caller's payment `tx`, so a stock BLOCK rolls the entire
+   * payment back atomically.
    */
   private async updateInventoryFromOrder(
     tx: any,
     order: any,
     posItems?: PosOrderItemDto[],
-  ): Promise<number> {
-    let totalCost = 0;
-
-    // QUI-431 — Correlate the POS DTO lines (which carry serial selection) to
-    // the persisted order_items so we know which serials a given order_item
-    // should consume. Matching is by (product_id, variant_id), consuming each
-    // DTO line at most once so duplicate product lines map deterministically.
-    // Ecommerce / credit / other channels pass no `posItems`; those lines have
-    // no manual selection and fall back to FIFO auto-selection.
-    const claimedPosItems = new Set<number>();
-    const findPosSelectionForItem = (
-      orderItem: any,
-    ): { serial_ids?: number[]; serial_numbers?: string[] } | undefined => {
-      if (!posItems?.length) return undefined;
-      for (let i = 0; i < posItems.length; i++) {
-        if (claimedPosItems.has(i)) continue;
-        const dtoItem = posItems[i];
-        const sameProduct = dtoItem.product_id === orderItem.product_id;
-        const sameVariant =
-          (dtoItem.product_variant_id ?? null) ===
-          (orderItem.product_variant_id ?? null);
-        if (sameProduct && sameVariant) {
-          claimedPosItems.add(i);
-          return {
-            serial_ids: dtoItem.serial_ids,
-            serial_numbers: dtoItem.serial_numbers,
-          };
-        }
-      }
-      return undefined;
-    };
-
-    for (const item of order.order_items) {
-      if (!item.product_id) continue;
-
-      // Restaurant Suite Fase D — guard anti-doble-descuento.
-      // Items already consumed at fire-to-kitchen must NOT be touched here
-      // (their COGS is recognized at fire, not at payment). Skip them.
-      if (item.inventory_consumed_at_fire === true) {
-        continue;
-      }
-
-      const product = await tx.products.findUnique({
-        where: { id: item.product_id },
-        select: { track_inventory: true, product_type: true },
-      });
-      if (!product?.track_inventory || product.product_type === 'service')
-        continue;
-
-      const posSelection = findPosSelectionForItem(item);
-
-      // Find active reservation to get the correct location_id (matches Phase 1 reservation)
-      const reservation = await tx.stock_reservations.findFirst({
-        where: {
-          product_id: item.product_id,
-          product_variant_id: item.product_variant_id || null,
-          reserved_for_type: 'order',
-          reserved_for_id: order.id,
-          status: 'active',
-        },
-      });
-
-      if (reservation) {
-        // Release reservation FIRST so quantity_available is restored before validation
-        await this.stockLevelManager.releaseReservation(
-          item.product_id,
-          item.product_variant_id,
-          reservation.location_id,
-          'order',
-          order.id,
-          tx,
-        );
-
-        // Now deduct stock — available was restored, so validation passes
-        const stockUpdate = await this.stockLevelManager.updateStock(
-          {
-            product_id: item.product_id,
-            variant_id: item.product_variant_id,
-            location_id: reservation.location_id,
-            quantity_change: -item.quantity,
-            movement_type: 'sale',
-            reason: `POS Sale - Order ${order.order_number}`,
-            user_id: order.created_by,
-            order_item_id: item.id,
-            create_movement: true,
-            validate_availability: true,
-          },
-          tx,
-        );
-        totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
-
-        // QUI-431 — serial consumption inside the SAME tx as the stock move.
-        await this.consumeSerialsForOrderItem(
-          tx,
-          item,
-          reservation.location_id,
-          posSelection,
-        );
-      } else {
-        // Fallback: reservation failed silently in Phase 1, use default location.
-        // POS canal MUST exclude central warehouse and non-sellable types
-        // (quarantine / damaged_goods) per Plan §6.4.3 + regla 17/19.
-        const defaultLocation = await tx.inventory_locations.findFirst({
-          where: {
-            store_id: order.store_id,
-            is_active: true,
-            is_central_warehouse: false,
-            type: { notIn: ['quarantine', 'damaged_goods'] },
-          },
-          orderBy: { id: 'asc' },
-        });
-
-        if (!defaultLocation) continue;
-
-        const stockUpdate = await this.stockLevelManager.updateStock(
-          {
-            product_id: item.product_id,
-            variant_id: item.product_variant_id,
-            location_id: defaultLocation.id,
-            quantity_change: -item.quantity,
-            movement_type: 'sale',
-            reason: `POS Sale - Order ${order.order_number}`,
-            user_id: order.created_by,
-            order_item_id: item.id,
-            create_movement: true,
-            validate_availability: false,
-          },
-          tx,
-        );
-        totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
-
-        // QUI-431 — serial consumption inside the SAME tx as the stock move.
-        await this.consumeSerialsForOrderItem(
-          tx,
-          item,
-          defaultLocation.id,
-          posSelection,
-        );
-      }
-    }
-
-    return totalCost;
+  ): Promise<CommitResult> {
+    return this.orderStockCommit.commitOrderDelivery(
+      order.id,
+      {
+        movementType: 'sale',
+        blockOnInsufficient: true,
+        consumeSerials: true,
+        reason: 'POS Sale',
+        userId: order.created_by ?? RequestContextService.getUserId?.(),
+        posSelection: posItems,
+      },
+      tx,
+    );
   }
 
   /**
@@ -3375,123 +3273,6 @@ export class PaymentsService {
       select: { id: true },
     });
     return found.length > 0;
-  }
-
-  /**
-   * QUI-431 — Consume the serial numbers for ONE order_item of a serialized
-   * product, inside the caller's transaction (`tx`).
-   *
-   * No-op for non-serialized products (the enforcement service short-circuits),
-   * so this can be called unconditionally for every sold line.
-   *
-   * Resolution order:
-   *  1. POS selection (`serial_ids` and/or free-text `serial_numbers`). Free
-   *     text is resolved/created into real pool rows first, then merged with
-   *     the explicit ids. `requireConfirmedSerials` validates that exactly
-   *     `quantity` valid (in_stock|reserved) serials of this product were
-   *     provided → SERIAL_REQUIRED_001 otherwise.
-   *  2. Ecommerce / no selection: auto-select FIFO from `listAvailable`
-   *     (in_stock, oldest first) at the sale location until `quantity` is
-   *     covered. If fewer are available → SERIAL_REQUIRED_001 (never discount
-   *     stock silently for a serialized product).
-   *
-   * For each resolved serial: transition → `sold` and link to the `order_item`
-   * via `sales_document_serials` (the @@unique guard throws SERIAL_DUP_001 on a
-   * concurrent double-sale). Finally persists the CSV of serial_number strings
-   * into `order_items.serial_numbers_snapshot` (immutable legal snapshot).
-   */
-  private async consumeSerialsForOrderItem(
-    tx: any,
-    orderItem: any,
-    location_id: number,
-    posSelection?: { serial_ids?: number[]; serial_numbers?: string[] },
-  ): Promise<void> {
-    const product_id: number = orderItem.product_id;
-    const variant_id: number | undefined =
-      orderItem.product_variant_id ?? undefined;
-    const quantity: number = orderItem.quantity;
-
-    if (!(await this.serialEnforcement.isSerialized(product_id, tx))) {
-      return;
-    }
-
-    let serialIds: number[] = [];
-
-    const hasManualSelection =
-      (posSelection?.serial_ids?.length ?? 0) > 0 ||
-      (posSelection?.serial_numbers?.length ?? 0) > 0;
-
-    if (hasManualSelection) {
-      // Resolve any free-text serials into real pool rows first, then merge
-      // with the explicitly selected ids (de-duped).
-      const fromFreeText = await this.serialEnforcement.resolveOrCreateFromFreeText(
-        product_id,
-        location_id,
-        posSelection?.serial_numbers ?? [],
-        tx,
-        variant_id,
-      );
-      serialIds = Array.from(
-        new Set([...(posSelection?.serial_ids ?? []), ...fromFreeText]),
-      );
-
-      // Strict count/validity check → SERIAL_REQUIRED_001 on mismatch.
-      await this.serialEnforcement.requireConfirmedSerials(
-        product_id,
-        quantity,
-        serialIds,
-        tx,
-      );
-    } else {
-      // QUI-431 — Se eliminó la rama que lanzaba SERIAL_REQUIRED_001 para
-      // "entrega directa". Es seguro porque ahora las ventas POS con productos
-      // serializados se DESVÍAN antes de llegar aquí: en `processPosPayment` el
-      // gate `isDirectDeliveryFinished` incluye `!hasSerialized`, así que
-      // `updateInventoryFromOrder` (único caller de este método) jamás se
-      // ejecuta para una venta serializada de mostrador (su stock queda
-      // reservado y el serial se registra luego en una remisión). El FIFO
-      // diferido de abajo solo aplica a canales no-POS (ecommerce / orden con
-      // despacho), donde la confirmación del serial ocurre al alistar/despachar.
-      const available = await this.serialNumbers.listAvailable(
-        product_id,
-        location_id,
-        variant_id,
-        tx,
-      );
-      if (available.length < quantity) {
-        throw new VendixHttpException(
-          ErrorCodes.SERIAL_REQUIRED_001,
-          `No hay suficientes seriales disponibles (${available.length}/${quantity}) para el producto serializado`,
-          {
-            product_id,
-            product_variant_id: variant_id ?? null,
-            location_id,
-            requested_qty: quantity,
-            available_serials: available.length,
-          },
-        );
-      }
-      serialIds = available.slice(0, quantity).map((s: any) => s.id);
-    }
-
-    // Transition + link each serial inside the same tx.
-    const soldSerialNumbers: string[] = [];
-    for (const serial_id of serialIds) {
-      const sold = await this.serialNumbers.transition(serial_id, 'sold', tx);
-      await this.serialNumbers.linkToDocument(
-        serial_id,
-        'order_item',
-        orderItem.id,
-        tx,
-      );
-      if (sold?.serial_number) soldSerialNumbers.push(sold.serial_number);
-    }
-
-    // Immutable snapshot (CSV of serial_number strings, NOT ids) on the line.
-    await tx.order_items.updateMany({
-      where: { id: orderItem.id },
-      data: { serial_numbers_snapshot: soldSerialNumbers.join(', ') },
-    });
   }
 
   /**
