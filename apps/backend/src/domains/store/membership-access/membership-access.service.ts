@@ -14,12 +14,14 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { MenuAvailabilityCheckerService } from '../menus/menu-availability-checker.service';
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { SseNotificationPayload } from '../notifications/interfaces/notification-events.interface';
+import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
 import {
   ValidateAccessDto,
   CreateCredentialDto,
   UpdateCredentialDto,
   CredentialQueryDto,
   AccessLogQueryDto,
+  RegisterExitDto,
 } from './dto';
 
 /**
@@ -47,6 +49,52 @@ export interface AccessValidationResult {
   reason: string | null;
   customer_id: number | null;
   membership_id: number | null;
+}
+
+/**
+ * Live SSE event pushed on EVERY occupancy (aforo) change — grant increment,
+ * exit, manual adjust, cron reset, or cron leveling. Rides the SAME per-store
+ * hub as the `membership-access` decision event; the `type: 'occupancy'`
+ * discriminator lets the frontend branch. Cast at the push site (the hub only
+ * `JSON.stringify`s the payload).
+ */
+export interface MembershipOccupancySseEvent {
+  type: 'occupancy';
+  store_id: number;
+  current_count: number;
+  max_capacity: number;
+  capacity_control_enabled: boolean;
+  updated_at: string;
+}
+
+/**
+ * Occupancy snapshot returned by the occupancy read/mutation endpoints
+ * (get / exit / adjust / reset). Shared, stable contract consumed by the
+ * ambient-access UI.
+ */
+export interface OccupancySnapshot {
+  current_count: number;
+  max_capacity: number;
+  capacity_control_enabled: boolean;
+  turnstile_mode: boolean;
+  business_date: string | null;
+  updated_at: string;
+}
+
+/** Store capacity (aforo) configuration resolved from store settings. */
+export interface CapacityConfig {
+  enabled: boolean;
+  maxCapacity: number;
+  turnstile: boolean;
+  autoLeveling: boolean;
+  intervalHours: 1 | 2;
+}
+
+/** Raw occupancy row shape used by the leveling/reset cron (internal). */
+export interface OccupancyRow {
+  current_count: number;
+  business_date: Date | null;
+  last_leveled_at: Date | null;
 }
 
 /**
@@ -104,6 +152,10 @@ export class MembershipAccessService {
 
   private get membershipPlans() {
     return this.prisma.withoutScope().membership_plans;
+  }
+
+  private get occupancy() {
+    return this.prisma.withoutScope().membership_access_occupancy;
   }
 
   // ------------------------------------------------------------------ Validate
@@ -242,9 +294,39 @@ export class MembershipAccessService {
       }
     }
 
-    // 5. Grant → consume quota (dedup) after the decision.
+    // 4.5 Capacity (aforo) gate — read the store capacity config ONCE and, when
+    //     control is enabled with a positive cap, DENY before granting if the
+    //     area is already full (no quota consume, no increment). A stale
+    //     (previous-day) count reads as 0. `max_capacity <= 0` is treated as
+    //     "no cap configured" (never blocks) so enabling control without a cap
+    //     does not lock everyone out.
+    const capacityConfig = await this.getCapacityConfig(storeId);
+    if (capacityConfig.enabled && capacityConfig.maxCapacity > 0) {
+      const effective = await this.getEffectiveOccupancy(storeId, timezone);
+      if (effective >= capacityConfig.maxCapacity) {
+        return this.logAndReturn(storeId, {
+          result: membership_access_result_enum.denied_capacity_full,
+          reason: `Aforo completo (${capacityConfig.maxCapacity})`,
+          customer_id: customerId,
+          membership_id: active.id,
+          credential_id: credential.id,
+          device_id: dto.device_id,
+          customer_name: customerName,
+          status: active.status,
+          period_end: active.period_end,
+          days_remaining: this.daysRemaining(active.period_end, timezone),
+        });
+      }
+    }
+
+    // 5. Grant → consume quota (dedup) + increment occupancy (day-aware) after
+    //    the decision. Occupancy is only tracked when capacity control is on.
     if (limit && limit > 0) {
       await this.consumeQuota(storeId, customerId);
+    }
+    if (capacityConfig.enabled) {
+      await this.incrementOccupancyOnGrant(storeId, timezone);
+      await this.publishOccupancy(storeId, capacityConfig);
     }
 
     return this.logAndReturn(storeId, {
@@ -687,5 +769,279 @@ export class MembershipAccessService {
         `membership access quota consume failed store=${storeId} customer=${customerId}: ${(err as Error).message}`,
       );
     }
+  }
+
+  // -------------------------------------------------------- Occupancy (aforo)
+
+  /**
+   * Read the store's capacity (aforo) config from `store_settings.membership`.
+   * Uses `withoutScope()` + explicit `store_id` so it works both under an HTTP
+   * request context and from the leveling/reset cron. Never throws — a settings
+   * read failure falls back to "control disabled".
+   */
+  private async getCapacityConfig(storeId: number): Promise<CapacityConfig> {
+    try {
+      const row = await this.prisma
+        .withoutScope()
+        .store_settings.findFirst({
+          where: { store_id: storeId },
+          select: { settings: true },
+        });
+      const settings = mergeStoreSettingsWithDefaults(row?.settings);
+      const m = settings.membership;
+      const maxCapacity = Number(m?.max_capacity ?? 0);
+      return {
+        enabled: m?.capacity_control_enabled === true,
+        maxCapacity: Number.isFinite(maxCapacity) && maxCapacity > 0 ? maxCapacity : 0,
+        turnstile: m?.turnstile_mode === true,
+        autoLeveling: m?.auto_leveling_enabled === true,
+        intervalHours: Number(m?.auto_leveling_interval_hours) === 1 ? 1 : 2,
+      };
+    } catch {
+      return {
+        enabled: false,
+        maxCapacity: 0,
+        turnstile: false,
+        autoLeveling: false,
+        intervalHours: 2,
+      };
+    }
+  }
+
+  /** Local calendar day 'YYYY-MM-DD' in the store timezone. */
+  private localDay(timezone: string): string {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+  }
+
+  /** A 'YYYY-MM-DD' day as a UTC-midnight Date (round-trips for `@db.Date`). */
+  private dateOnlyUtc(day: string): Date {
+    return new Date(`${day}T00:00:00.000Z`);
+  }
+
+  /** Date part 'YYYY-MM-DD' of a `@db.Date` value (stored at UTC midnight). */
+  private formatDatePart(d: Date): string {
+    return d.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Effective current occupancy for the gate. If the stored count belongs to a
+   * PREVIOUS local day (stale — not yet reset by the cron) it reads as 0, so the
+   * first grant of a new day never sees yesterday's leftover as "full".
+   */
+  private async getEffectiveOccupancy(
+    storeId: number,
+    timezone: string,
+  ): Promise<number> {
+    const row = await this.occupancy.findFirst({
+      where: { store_id: storeId },
+      select: { current_count: true, business_date: true },
+    });
+    if (!row) return 0;
+    const storedDay = row.business_date
+      ? this.formatDatePart(row.business_date)
+      : null;
+    if (storedDay !== null && storedDay < this.localDay(timezone)) return 0;
+    return row.current_count;
+  }
+
+  /**
+   * Day-aware +1 on grant. The common (same-day) path uses an ATOMIC Prisma
+   * `increment: 1`. When the row belongs to a previous local day (stale, no cron
+   * reset yet) it starts fresh at 1 and stamps today — so a lingering count from
+   * a prior day never carries over into the new day's session.
+   */
+  private async incrementOccupancyOnGrant(
+    storeId: number,
+    timezone: string,
+  ): Promise<void> {
+    const localDay = this.localDay(timezone);
+    const localDayDate = this.dateOnlyUtc(localDay);
+    const row = await this.occupancy.findFirst({
+      where: { store_id: storeId },
+      select: { current_count: true, business_date: true },
+    });
+    if (!row) {
+      await this.occupancy.create({
+        data: { store_id: storeId, current_count: 1, business_date: localDayDate },
+      });
+      return;
+    }
+    const storedDay = row.business_date
+      ? this.formatDatePart(row.business_date)
+      : null;
+    if (storedDay !== null && storedDay < localDay) {
+      await this.occupancy.update({
+        where: { store_id: storeId },
+        data: { current_count: 1, business_date: localDayDate, last_leveled_at: null },
+      });
+    } else {
+      await this.occupancy.update({
+        where: { store_id: storeId },
+        data: { current_count: { increment: 1 }, business_date: localDayDate },
+      });
+    }
+  }
+
+  private buildSnapshot(
+    row: { current_count: number; business_date: Date | null; updated_at: Date } | null,
+    config: CapacityConfig,
+  ): OccupancySnapshot {
+    return {
+      current_count: row?.current_count ?? 0,
+      max_capacity: config.maxCapacity,
+      capacity_control_enabled: config.enabled,
+      turnstile_mode: config.turnstile,
+      business_date: row?.business_date
+        ? this.formatDatePart(row.business_date)
+        : null,
+      updated_at: (row?.updated_at ?? new Date()).toISOString(),
+    };
+  }
+
+  /** Fan out an `occupancy` SSE event on the per-store hub. Never throws. */
+  private pushOccupancy(
+    storeId: number,
+    row: { current_count: number; updated_at: Date } | null,
+    config: CapacityConfig,
+  ): void {
+    try {
+      const event: MembershipOccupancySseEvent = {
+        type: 'occupancy',
+        store_id: storeId,
+        current_count: row?.current_count ?? 0,
+        max_capacity: config.maxCapacity,
+        capacity_control_enabled: config.enabled,
+        updated_at: (row?.updated_at ?? new Date()).toISOString(),
+      };
+      this.sseService.push(storeId, event as unknown as SseNotificationPayload);
+    } catch (err) {
+      this.logger.warn(
+        `occupancy SSE push failed for store=${storeId}: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /** Re-read the current row and push an `occupancy` SSE event (post-grant). */
+  private async publishOccupancy(
+    storeId: number,
+    config?: CapacityConfig,
+  ): Promise<void> {
+    const cfg = config ?? (await this.getCapacityConfig(storeId));
+    const row = await this.occupancy.findFirst({
+      where: { store_id: storeId },
+      select: { current_count: true, updated_at: true },
+    });
+    this.pushOccupancy(storeId, row, cfg);
+  }
+
+  /** Current occupancy snapshot for the store. */
+  async getOccupancy(storeId: number): Promise<OccupancySnapshot> {
+    const config = await this.getCapacityConfig(storeId);
+    const row = await this.occupancy.findFirst({ where: { store_id: storeId } });
+    return this.buildSnapshot(row, config);
+  }
+
+  /** Register an exit → occupancy −1 (floored at 0). */
+  async registerExit(
+    storeId: number,
+    _dto?: RegisterExitDto,
+  ): Promise<OccupancySnapshot> {
+    return this.applyDelta(storeId, -1);
+  }
+
+  /** Manual adjustment → occupancy += delta (floored at 0). */
+  async adjustOccupancy(
+    storeId: number,
+    delta: number,
+  ): Promise<OccupancySnapshot> {
+    return this.applyDelta(storeId, delta);
+  }
+
+  /**
+   * Atomically apply a signed delta to the per-store occupancy row (created if
+   * missing) and floor the result at 0. The increment itself is atomic (Prisma
+   * `increment`); the floor is a rare corrective clamp. Publishes an `occupancy`
+   * SSE event and returns the fresh snapshot.
+   */
+  private async applyDelta(
+    storeId: number,
+    delta: number,
+  ): Promise<OccupancySnapshot> {
+    const config = await this.getCapacityConfig(storeId);
+    let row = await this.occupancy.upsert({
+      where: { store_id: storeId },
+      create: { store_id: storeId, current_count: Math.max(delta, 0) },
+      update: { current_count: { increment: delta } },
+    });
+    if (row.current_count < 0) {
+      row = await this.occupancy.update({
+        where: { store_id: storeId },
+        data: { current_count: 0 },
+      });
+    }
+    const snapshot = this.buildSnapshot(row, config);
+    this.pushOccupancy(storeId, row, config);
+    return snapshot;
+  }
+
+  /**
+   * Reset occupancy to 0 for a new business day: sets `current_count = 0`,
+   * `business_date` to today's local calendar day, and clears `last_leveled_at`.
+   * Publishes an `occupancy` SSE event. Used by the hourly aforo cron.
+   */
+  async resetOccupancy(storeId: number): Promise<OccupancySnapshot> {
+    const config = await this.getCapacityConfig(storeId);
+    const timezone = await this.availabilityChecker.getStoreTimezone(storeId);
+    const businessDate = this.dateOnlyUtc(this.localDay(timezone));
+    const row = await this.occupancy.upsert({
+      where: { store_id: storeId },
+      create: {
+        store_id: storeId,
+        current_count: 0,
+        business_date: businessDate,
+        last_leveled_at: null,
+      },
+      update: {
+        current_count: 0,
+        business_date: businessDate,
+        last_leveled_at: null,
+      },
+    });
+    const snapshot = this.buildSnapshot(row, config);
+    this.pushOccupancy(storeId, row, config);
+    return snapshot;
+  }
+
+  /**
+   * Raw occupancy row read for the leveling/reset cron (internal). Returns null
+   * when no one has been counted yet.
+   */
+  async peekOccupancy(storeId: number): Promise<OccupancyRow | null> {
+    const row = await this.occupancy.findFirst({
+      where: { store_id: storeId },
+      select: {
+        current_count: true,
+        business_date: true,
+        last_leveled_at: true,
+      },
+    });
+    return row ?? null;
+  }
+
+  /**
+   * Silent metadata update (no count change, no SSE) used by the cron to stamp
+   * the day baseline (`business_date`) or advance the leveling clock
+   * (`last_leveled_at`).
+   */
+  async updateOccupancyMeta(
+    storeId: number,
+    data: { business_date?: Date | null; last_leveled_at?: Date | null },
+  ): Promise<void> {
+    await this.occupancy.updateMany({ where: { store_id: storeId }, data });
   }
 }

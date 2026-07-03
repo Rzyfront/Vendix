@@ -28,6 +28,8 @@ import {
   UpdateCredentialDto,
   CredentialQueryDto,
   AccessLogQueryDto,
+  AdjustOccupancyDto,
+  RegisterExitDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -42,6 +44,9 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  *   - POST /credentials        → store:membership_access:create
  *   - PATCH /credentials/:id   → store:membership_access:update
  *   - DELETE /credentials/:id  → store:membership_access:update (soft baja)
+ *   - GET  /occupancy          → store:membership_access:read
+ *   - POST /exit               → store:membership_access:create (occupancy −1)
+ *   - PATCH /occupancy/adjust  → store:membership_access:update (manual delta)
  */
 @Controller('store/memberships/access')
 @UseGuards(PermissionsGuard)
@@ -103,9 +108,60 @@ export class MembershipAccessController {
     req.on('close', () => this.sseService.unsubscribe(store_id));
 
     return subject.pipe(
-      filter((payload: any) => payload?.type === 'membership-access'),
+      filter(
+        (payload: any) =>
+          payload?.type === 'membership-access' ||
+          payload?.type === 'occupancy',
+      ),
       map((payload) => ({ data: JSON.stringify(payload) }) as MessageEvent),
     );
+  }
+
+  /**
+   * Resolve the current store from the scoped request context (same rule as the
+   * service). The occupancy endpoints act on the caller's store; the client
+   * never supplies a store id.
+   */
+  private requireStoreId(): number {
+    const storeId = RequestContextService.getContext()?.store_id;
+    if (!storeId) throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    return storeId;
+  }
+
+  @Get('occupancy')
+  @Permissions('store:membership_access:read')
+  async getOccupancy() {
+    try {
+      const result = await this.service.getOccupancy(this.requireStoreId());
+      return this.responseService.success(result, 'Ocupación (aforo) obtenida');
+    } catch (error: any) {
+      return this.fail(error, 'Error al obtener la ocupación');
+    }
+  }
+
+  @Post('exit')
+  @Permissions('store:membership_access:create')
+  async registerExit(@Body() dto: RegisterExitDto) {
+    try {
+      const result = await this.service.registerExit(this.requireStoreId(), dto);
+      return this.responseService.success(result, 'Salida registrada');
+    } catch (error: any) {
+      return this.fail(error, 'Error al registrar la salida');
+    }
+  }
+
+  @Patch('occupancy/adjust')
+  @Permissions('store:membership_access:update')
+  async adjustOccupancy(@Body() dto: AdjustOccupancyDto) {
+    try {
+      const result = await this.service.adjustOccupancy(
+        this.requireStoreId(),
+        dto.delta,
+      );
+      return this.responseService.updated(result, 'Ocupación ajustada');
+    } catch (error: any) {
+      return this.fail(error, 'Error al ajustar la ocupación');
+    }
   }
 
   @Get('logs')
