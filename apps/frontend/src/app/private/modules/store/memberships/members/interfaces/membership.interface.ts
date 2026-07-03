@@ -37,7 +37,7 @@ export interface GymMembership {
   id: number;
   store_id: number;
   customer_id: number;
-  gym_plan_id: number;
+  plan_id: number;
   status: GymMembershipStatus;
   period_start?: string | null;
   period_end?: string | null;
@@ -52,7 +52,7 @@ export interface GymMembership {
 
 export interface CreateGymMembershipDto {
   customer_id: number;
-  gym_plan_id: number;
+  plan_id: number;
   period_start?: string;
   status?: GymMembershipStatus;
   auto_renew?: boolean;
@@ -70,7 +70,7 @@ export interface GymMembershipQuery {
   limit?: number;
   status?: GymMembershipStatus;
   customer_id?: number;
-  gym_plan_id?: number;
+  plan_id?: number;
 }
 
 export interface RenewMembershipDto {

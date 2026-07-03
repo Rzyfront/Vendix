@@ -38,7 +38,7 @@ import { MembershipsService } from '../../services';
 
 interface MembershipFormShape {
   customer_id: FormControl<number | null>;
-  gym_plan_id: FormControl<number | null>;
+  plan_id: FormControl<number | null>;
   period_start: FormControl<string>;
   auto_renew: FormControl<boolean>;
   notes: FormControl<string>;
@@ -80,7 +80,7 @@ export class MembershipFormPageComponent implements OnInit {
       customer_id: this.fb.nonNullable.control<number | null>(null, {
         validators: [Validators.required],
       }),
-      gym_plan_id: this.fb.nonNullable.control<number | null>(null, {
+      plan_id: this.fb.nonNullable.control<number | null>(null, {
         validators: [Validators.required],
       }),
       period_start: this.fb.nonNullable.control(''),
@@ -182,7 +182,7 @@ export class MembershipFormPageComponent implements OnInit {
     const raw = this.form.getRawValue();
     const dto: CreateGymMembershipDto = {
       customer_id: raw.customer_id as number,
-      gym_plan_id: raw.gym_plan_id as number,
+      plan_id: raw.plan_id as number,
       period_start: raw.period_start || undefined,
       auto_renew: raw.auto_renew,
       notes: raw.notes?.trim() || undefined,

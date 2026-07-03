@@ -118,7 +118,7 @@ export class MembershipMembersListPageComponent implements OnInit {
       sortable: false,
       priority: 2,
       transform: (_: unknown, row: GymMembership) =>
-        row.plan?.name ?? `Plan #${row.gym_plan_id}`,
+        row.plan?.name ?? `Plan #${row.plan_id}`,
     },
     {
       key: 'period_end',
@@ -153,7 +153,7 @@ export class MembershipMembersListPageComponent implements OnInit {
     titleTransform: (row: GymMembership) => this.customerName(row),
     subtitleKey: 'plan',
     subtitleTransform: (row: GymMembership) =>
-      row.plan?.name ?? `Plan #${row.gym_plan_id}`,
+      row.plan?.name ?? `Plan #${row.plan_id}`,
     avatarFallbackIcon: 'user',
     avatarShape: 'circle',
     badgeKey: 'status',

@@ -78,6 +78,24 @@ export class MembershipPlansService {
       : Prisma.JsonNull;
   }
 
+  /**
+   * Read-side inverse of {@link buildFeatures}: surface the per-period caps that
+   * live inside `features` as flat top-level fields so the admin form can
+   * prefill them on edit (the columns were dropped in the generalization). The
+   * `features` blob is left intact.
+   */
+  private unfoldCaps<T extends { features?: Prisma.JsonValue | null }>(plan: T) {
+    const features =
+      plan.features && typeof plan.features === 'object' && !Array.isArray(plan.features)
+        ? (plan.features as Record<string, any>)
+        : {};
+    return {
+      ...plan,
+      access_limit_per_period: features['access_limit_per_period'] ?? null,
+      class_limit_per_period: features['class_limit_per_period'] ?? null,
+    };
+  }
+
   // ------------------------------------------------------------------ CRUD
 
   async create(dto: CreateMembershipPlanDto) {
@@ -157,7 +175,7 @@ export class MembershipPlansService {
     ]);
 
     return {
-      data,
+      data: data.map((plan) => this.unfoldCaps(plan)),
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }
@@ -173,7 +191,7 @@ export class MembershipPlansService {
         'Plan de membresía no encontrado',
       );
     }
-    return plan;
+    return this.unfoldCaps(plan);
   }
 
   async update(id: number, dto: UpdateMembershipPlanDto) {

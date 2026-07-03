@@ -210,7 +210,7 @@ export class MembershipMemberProfilePageComponent implements OnInit {
   }
 
   planName(m: GymMembership): string {
-    return m.plan?.name ?? `Plan #${m.gym_plan_id}`;
+    return m.plan?.name ?? `Plan #${m.plan_id}`;
   }
 
   onHeaderAction(actionId: string): void {

@@ -55,8 +55,8 @@ export class MembershipsService {
     if (query.customer_id != null) {
       params = params.set('customer_id', String(query.customer_id));
     }
-    if (query.gym_plan_id != null) {
-      params = params.set('gym_plan_id', String(query.gym_plan_id));
+    if (query.plan_id != null) {
+      params = params.set('plan_id', String(query.plan_id));
     }
 
     return this.http
