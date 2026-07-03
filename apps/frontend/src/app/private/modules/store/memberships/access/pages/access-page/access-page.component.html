@@ -1,7 +1,7 @@
 <div class="w-full overflow-x-hidden">
   <app-sticky-header
     title="Control de Accesos"
-    subtitle="Bitácora de ingresos y credenciales de tus socios"
+    subtitle="Aforo en vivo, bitácora de ingresos y credenciales de tus miembros"
     icon="door-open"
     variant="glass"
     [tabs]="tabs"
@@ -11,34 +11,337 @@
     (actionClicked)="onHeaderAction($event)"
   />
 
-  <div
-    class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
-  >
-    <app-stats
-      title="Eventos de acceso"
-      [value]="logsTotal()"
-      smallText="Registros en la bitácora"
-      iconName="history"
-      iconBgColor="bg-blue-100"
-      iconColor="text-blue-600"
-    />
-    <app-stats
-      title="Concedidos hoy"
-      [value]="grantedToday()"
-      smallText="Ingresos permitidos hoy (página actual)"
-      iconName="check-circle"
-      iconBgColor="bg-green-100"
-      iconColor="text-green-600"
-    />
-    <app-stats
-      title="Credenciales"
-      [value]="credsTotal()"
-      smallText="Credenciales registradas"
-      iconName="key-round"
-      iconBgColor="bg-purple-100"
-      iconColor="text-purple-600"
-    />
-  </div>
+  @if (activeTab() !== 'aforo') {
+    <div
+      class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent"
+    >
+      <app-stats
+        title="Eventos de acceso"
+        [value]="logsTotal()"
+        smallText="Registros en la bitácora"
+        iconName="history"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      />
+      <app-stats
+        title="Concedidos hoy"
+        [value]="grantedToday()"
+        smallText="Ingresos permitidos hoy (página actual)"
+        iconName="check-circle"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      />
+      <app-stats
+        title="Credenciales"
+        [value]="credsTotal()"
+        smallText="Credenciales registradas"
+        iconName="key-round"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      />
+    </div>
+  }
+
+  <!-- ══════════════════ Aforo ══════════════════ -->
+  @if (activeTab() === 'aforo') {
+    <div class="aforo-wrap">
+      <!-- ─── Contador en vivo ─── -->
+      <section class="aforo-hero" [class.is-full]="isFull()">
+        <div
+          class="aforo-gauge"
+          [style.--ring]="occupancyColor()"
+          [style.--pct]="occupancyPct()"
+        >
+          <div class="aforo-gauge-inner">
+            <span class="aforo-count">{{ occupancy()?.current_count ?? 0 }}</span>
+            <span class="aforo-count-label">adentro ahora</span>
+            @if (
+              occupancy()?.capacity_control_enabled &&
+              (occupancy()?.max_capacity ?? 0) > 0
+            ) {
+              <span class="aforo-cap">Capacidad {{ occupancy()?.max_capacity }}</span>
+            }
+          </div>
+        </div>
+
+        <div class="aforo-meta">
+          <div class="aforo-meta-head">
+            <span
+              class="aforo-state-dot"
+              [style.background]="occupancyColor()"
+            ></span>
+            @if (occupancy()?.capacity_control_enabled) {
+              @if (isFull()) {
+                <span class="aforo-state-label full">Aforo lleno</span>
+              } @else {
+                <span class="aforo-state-label">
+                  {{ availableSpots() }} cupos disponibles
+                </span>
+              }
+            } @else {
+              <span class="aforo-state-label muted">Control de aforo desactivado</span>
+            }
+            @if (occupancyLoading()) {
+              <span class="aforo-syncing">actualizando…</span>
+            }
+          </div>
+
+          @if (
+            occupancy()?.capacity_control_enabled &&
+            (occupancy()?.max_capacity ?? 0) > 0
+          ) {
+            <div class="aforo-bar">
+              <div
+                class="aforo-bar-fill"
+                [style.width.%]="occupancyPct()"
+                [style.background]="occupancyColor()"
+              ></div>
+            </div>
+            <div class="aforo-bar-legend">
+              <span>{{ occupancyPct() }}% ocupado</span>
+              <span>Concedidos hoy: {{ grantedToday() }}</span>
+            </div>
+          } @else {
+            <p class="aforo-hint">
+              Activa el control de aforo en la configuración para fijar una
+              capacidad máxima y que el sistema cuente los ingresos.
+            </p>
+          }
+        </div>
+      </section>
+
+      <!-- ─── Acciones ─── -->
+      <app-card [responsive]="true">
+        <div class="aforo-actions">
+          <!-- Ingreso manual (valida credencial → +1) -->
+          <div class="aforo-block">
+            <div class="aforo-block-title">
+              <app-icon name="log-in" />
+              <span>Ingreso manual</span>
+            </div>
+            <p class="aforo-block-desc">
+              Valida una credencial (QR, PIN o huella) para registrar el ingreso.
+            </p>
+            <div class="aforo-checkin">
+              <select
+                class="aforo-select"
+                [ngModel]="checkinType()"
+                (ngModelChange)="checkinType.set($event)"
+                [disabled]="actionInFlight()"
+              >
+                @for (opt of credentialTypeOptions; track opt.value) {
+                  <option [value]="opt.value">{{ opt.label }}</option>
+                }
+              </select>
+              <input
+                class="aforo-input"
+                type="text"
+                placeholder="Valor de la credencial"
+                [ngModel]="checkinValue()"
+                (ngModelChange)="checkinValue.set($event)"
+                (keyup.enter)="checkIn()"
+                [disabled]="actionInFlight()"
+              />
+              <button
+                type="button"
+                class="aforo-btn primary"
+                [disabled]="actionInFlight() || !checkinValue().trim()"
+                (click)="checkIn()"
+              >
+                <app-icon name="user-check" />
+                <span>Registrar</span>
+              </button>
+            </div>
+
+            @if (lastCheckin(); as res) {
+              <div
+                class="aforo-checkin-result"
+                [style.border-color]="checkinColor(res.result)"
+              >
+                <span
+                  class="aforo-result-badge"
+                  [style.background]="checkinColor(res.result)"
+                >
+                  {{ checkinLabel(res.result) }}
+                </span>
+                <span class="aforo-result-reason">
+                  {{ res.reason ?? (res.granted ? 'Ingreso permitido' : '—') }}
+                </span>
+              </div>
+            }
+          </div>
+
+          <!-- Salida (−1) -->
+          <div class="aforo-block">
+            <div class="aforo-block-title">
+              <app-icon name="log-out" />
+              <span>Salida</span>
+              @if (occupancy()?.turnstile_mode) {
+                <span class="aforo-tag">Modo torniquete</span>
+              }
+            </div>
+            <p class="aforo-block-desc">
+              @if (occupancy()?.turnstile_mode) {
+                El torniquete controla entradas y salidas. Usa esto para registrar
+                una salida manual.
+              } @else {
+                Registra la salida de un miembro para descontar el aforo.
+              }
+            </p>
+            <button
+              type="button"
+              class="aforo-btn outline full-width"
+              [disabled]="actionInFlight() || (occupancy()?.current_count ?? 0) <= 0"
+              (click)="registerExit()"
+            >
+              <app-icon name="log-out" />
+              <span>Registrar salida (−1)</span>
+            </button>
+          </div>
+
+          <!-- Ajuste manual +/− -->
+          <div class="aforo-block">
+            <div class="aforo-block-title">
+              <app-icon name="arrow-up-down" />
+              <span>Ajuste manual</span>
+            </div>
+            <p class="aforo-block-desc">
+              Corrige el conteo sin validar credencial (nivelación manual).
+            </p>
+            <div class="aforo-adjust">
+              <button
+                type="button"
+                class="aforo-step"
+                [disabled]="actionInFlight() || (occupancy()?.current_count ?? 0) <= 0"
+                (click)="adjust(-1)"
+                aria-label="Restar uno"
+              >
+                <app-icon name="arrow-down" />
+              </button>
+              <span class="aforo-adjust-value">{{ occupancy()?.current_count ?? 0 }}</span>
+              <button
+                type="button"
+                class="aforo-step"
+                [disabled]="actionInFlight()"
+                (click)="adjust(1)"
+                aria-label="Sumar uno"
+              >
+                <app-icon name="arrow-up" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </app-card>
+
+      <!-- ─── Configuración de aforo (inline) ─── -->
+      @if (showConfig()) {
+        <app-card [responsive]="true">
+          <div class="aforo-config">
+            <header class="aforo-config-head">
+              <div class="aforo-block-title">
+                <app-icon name="gauge" />
+                <span>Configuración de aforo</span>
+              </div>
+              <p class="aforo-block-desc">
+                Define la capacidad, la nivelación automática y el modo torniquete.
+                El horario de atención se toma del horario del Punto de Venta.
+              </p>
+            </header>
+
+            <div class="aforo-config-grid">
+              <app-setting-toggle
+                label="Control de aforo"
+                description="Cuenta los ingresos y bloquea al alcanzar la capacidad."
+                [ngModel]="cfgCapacityControl()"
+                (changed)="onCapacityControlToggle($event)"
+              />
+
+              <div class="aforo-field" [class.dimmed]="!cfgCapacityControl()">
+                <label class="aforo-field-label">Capacidad máxima</label>
+                <app-quantity-control
+                  [value]="cfgMaxCapacity()"
+                  [min]="0"
+                  [max]="null"
+                  [step]="1"
+                  [disabled]="!cfgCapacityControl()"
+                  (valueChange)="onMaxCapacityChange($event)"
+                />
+                <span class="aforo-field-hint">0 = sin límite</span>
+              </div>
+
+              <app-setting-toggle
+                label="Modo torniquete"
+                description="El torniquete controla entradas y salidas. Desactiva la nivelación automática."
+                [ngModel]="cfgTurnstile()"
+                (changed)="onTurnstileToggle($event)"
+              />
+
+              <app-setting-toggle
+                label="Nivelación automática"
+                description="Descuenta 1 persona cada cierto tiempo para nivelar el aforo (solo sin torniquete)."
+                [ngModel]="cfgLevelingEnabled()"
+                (changed)="onLevelingToggle($event)"
+              />
+
+              <div
+                class="aforo-field"
+                [class.dimmed]="levelingDisabled() || !cfgLevelingEnabled()"
+              >
+                <label class="aforo-field-label">Intervalo de nivelación</label>
+                <div class="aforo-interval">
+                  <button
+                    type="button"
+                    class="aforo-chip"
+                    [class.active]="cfgLevelingInterval() === 1"
+                    [disabled]="levelingDisabled() || !cfgLevelingEnabled()"
+                    (click)="setLevelingInterval(1)"
+                  >
+                    Cada 1 hora
+                  </button>
+                  <button
+                    type="button"
+                    class="aforo-chip"
+                    [class.active]="cfgLevelingInterval() === 2"
+                    [disabled]="levelingDisabled() || !cfgLevelingEnabled()"
+                    (click)="setLevelingInterval(2)"
+                  >
+                    Cada 2 horas
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="aforo-schedule-note">
+              <app-icon name="alert-triangle" />
+              <span>
+                El aforo se reinicia a 0 al cerrar el horario de atención y cada
+                día. El horario se configura en el Punto de Venta (Ajustes → Horario).
+              </span>
+            </div>
+
+            <div class="aforo-config-footer">
+              <button
+                type="button"
+                class="aforo-btn ghost"
+                [disabled]="savingConfig()"
+                (click)="showConfig.set(false)"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                class="aforo-btn primary"
+                [disabled]="savingConfig()"
+                (click)="saveConfig()"
+              >
+                {{ savingConfig() ? 'Guardando…' : 'Guardar configuración' }}
+              </button>
+            </div>
+          </div>
+        </app-card>
+      }
+    </div>
+  }
 
   <!-- ══════════════════ Bitácora ══════════════════ -->
   @if (activeTab() === 'logs') {

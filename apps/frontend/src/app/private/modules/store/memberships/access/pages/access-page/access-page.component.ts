@@ -6,6 +6,7 @@ import {
   OnInit,
   signal,
 } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -15,10 +16,13 @@ import {
   EmptyStateComponent,
   FilterConfig,
   FilterValues,
+  IconComponent,
   ItemListCardConfig,
   OptionsDropdownComponent,
   PaginationComponent,
+  QuantityControlComponent,
   ResponsiveDataViewComponent,
+  SettingToggleComponent,
   StatsComponent,
   StickyHeaderActionButton,
   StickyHeaderComponent,
@@ -29,26 +33,39 @@ import {
 } from '../../../../../../../shared/components/index';
 
 import {
+  AccessValidationResult,
   GymAccessCredential,
   GymAccessLog,
   GymAccessResult,
   GymCredentialType,
+  Occupancy,
   GYM_ACCESS_RESULT_COLORS,
   GYM_ACCESS_RESULT_LABELS,
   GYM_CREDENTIAL_TYPE_LABELS,
 } from '../../interfaces';
 import { MembershipAccessService } from '../../services';
 import { MembershipCredentialFormModalComponent } from '../../components/credential-form-modal/credential-form-modal.component';
+import { MembershipAmbientAccessService } from '../../../../../../../core/services/membership-ambient-access.service';
+import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
+import { StoreSettingsService } from '../../../../settings/general/services/store-settings.service';
+import type {
+  MembershipSettings,
+  StoreSettings,
+} from '../../../../../../../core/models/store-settings.interface';
 
-type AccessTab = 'logs' | 'credentials';
+type AccessTab = 'aforo' | 'logs' | 'credentials';
 
 @Component({
   selector: 'app-membership-access-page',
   standalone: true,
   imports: [
+    FormsModule,
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
+    IconComponent,
+    QuantityControlComponent,
+    SettingToggleComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
@@ -56,15 +73,97 @@ type AccessTab = 'logs' | 'credentials';
     MembershipCredentialFormModalComponent,
   ],
   templateUrl: './access-page.component.html',
+  styleUrl: './access-page.component.css',
 })
 export class MembershipAccessPageComponent implements OnInit {
   private readonly accessService = inject(MembershipAccessService);
   private readonly toastService = inject(ToastService);
   private readonly dialogService = inject(DialogService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly ambient = inject(MembershipAmbientAccessService);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly storeSettingsService = inject(StoreSettingsService);
 
-  readonly activeTab = signal<AccessTab>('logs');
+  readonly activeTab = signal<AccessTab>('aforo');
   readonly isLoading = signal(false);
+
+  // ─── Aforo (occupancy) state ───────────────────────────────────────────────
+  /** Authoritative snapshot seeded via `getOccupancy()` (carries turnstile_mode + business_date). */
+  private readonly restOccupancy = signal<Occupancy | null>(null);
+  /**
+   * Effective occupancy: prefer the live SSE signal (C2) for the counters, but
+   * keep the authoritative `turnstile_mode` / `business_date` from the REST seed
+   * (the SSE tick does not carry those two fields).
+   */
+  readonly occupancy = computed<Occupancy | null>(() => {
+    const live = this.ambient.occupancy();
+    const seed = this.restOccupancy();
+    if (!live) return seed;
+    return {
+      ...live,
+      turnstile_mode: seed?.turnstile_mode ?? live.turnstile_mode,
+      business_date: seed?.business_date ?? live.business_date,
+    };
+  });
+
+  readonly occupancyPct = computed(() => {
+    const o = this.occupancy();
+    if (!o || !o.max_capacity) return 0;
+    return Math.min(100, Math.round((o.current_count / o.max_capacity) * 100));
+  });
+
+  readonly availableSpots = computed(() => {
+    const o = this.occupancy();
+    if (!o || !o.max_capacity) return null;
+    return Math.max(0, o.max_capacity - o.current_count);
+  });
+
+  /** True while the store-local aforo is at/over capacity (control on). */
+  readonly isFull = computed(() => {
+    const o = this.occupancy();
+    return (
+      !!o &&
+      o.capacity_control_enabled &&
+      o.max_capacity > 0 &&
+      o.current_count >= o.max_capacity
+    );
+  });
+
+  readonly occupancyLoading = signal(false);
+  readonly actionInFlight = signal(false);
+
+  /** Ring/badge color driven by how full the room is. */
+  readonly occupancyColor = computed(() => {
+    if (this.isFull()) return '#dc2626'; // red — full
+    const pct = this.occupancyPct();
+    if (pct >= 80) return '#d97706'; // amber — nearly full
+    return '#16a34a'; // green — comfortable
+  });
+
+  // ─── Manual check-in ────────────────────────────────────────────────────────
+  readonly checkinType = signal<GymCredentialType>('qr');
+  readonly checkinValue = signal('');
+  readonly lastCheckin = signal<AccessValidationResult | null>(null);
+  readonly credentialTypeOptions: { value: GymCredentialType; label: string }[] =
+    (Object.keys(GYM_CREDENTIAL_TYPE_LABELS) as GymCredentialType[]).map(
+      (value) => ({ value, label: GYM_CREDENTIAL_TYPE_LABELS[value] }),
+    );
+
+  // ─── Aforo config (persisted in store_settings.settings.membership) ─────────
+  readonly showConfig = signal(false);
+  readonly savingConfig = signal(false);
+  readonly cfgCapacityControl = signal(false);
+  readonly cfgMaxCapacity = signal(0);
+  readonly cfgTurnstile = signal(false);
+  readonly cfgLevelingEnabled = signal(false);
+  readonly cfgLevelingInterval = signal<1 | 2>(2);
+
+  /** Turnstile ⊕ auto-leveling: the turnstile controls entries/exits itself. */
+  readonly levelingDisabled = computed(() => this.cfgTurnstile());
+
+  private get membershipSettings(): MembershipSettings | undefined {
+    return (this.authFacade.storeSettings() as StoreSettings | null)?.membership;
+  }
 
   // ─── Logs state ──────────────────────────────────────────────────────────
   readonly logs = signal<GymAccessLog[]>([]);
@@ -83,6 +182,7 @@ export class MembershipAccessPageComponent implements OnInit {
   private credentialsLoaded = false;
 
   readonly tabs: StickyHeaderTab[] = [
+    { id: 'aforo', label: 'Aforo', icon: 'users' },
     { id: 'logs', label: 'Bitácora', icon: 'history' },
     { id: 'credentials', label: 'Credenciales', icon: 'key-round' },
   ];
@@ -95,6 +195,22 @@ export class MembershipAccessPageComponent implements OnInit {
           label: 'Nueva credencial',
           icon: 'plus',
           variant: 'primary',
+        },
+      ];
+    }
+    if (this.activeTab() === 'aforo') {
+      return [
+        {
+          id: 'config-aforo',
+          label: 'Configurar aforo',
+          icon: 'settings',
+          variant: 'outline',
+        },
+        {
+          id: 'refresh-aforo',
+          label: 'Refrescar',
+          icon: 'refresh-cw',
+          variant: 'ghost',
         },
       ];
     }
@@ -124,6 +240,8 @@ export class MembershipAccessPageComponent implements OnInit {
         { value: 'denied_suspended', label: 'Suspendida' },
         { value: 'denied_frozen', label: 'Congelada' },
         { value: 'denied_quota_exceeded', label: 'Límite alcanzado' },
+        { value: 'denied_outside_schedule', label: 'Fuera de horario' },
+        { value: 'denied_capacity_full', label: 'Aforo lleno' },
       ],
     },
   ];
@@ -277,6 +395,8 @@ export class MembershipAccessPageComponent implements OnInit {
   };
 
   ngOnInit(): void {
+    this.loadOccupancy();
+    this.hydrateConfigFromSettings();
     this.loadLogs();
   }
 
@@ -296,6 +416,10 @@ export class MembershipAccessPageComponent implements OnInit {
 
   onTabChanged(tabId: string): void {
     this.activeTab.set(tabId as AccessTab);
+    if (tabId === 'aforo') {
+      this.loadOccupancy();
+      this.hydrateConfigFromSettings();
+    }
     if (tabId === 'credentials' && !this.credentialsLoaded) {
       this.credentialsLoaded = true;
       this.loadCredentials();
@@ -305,6 +429,185 @@ export class MembershipAccessPageComponent implements OnInit {
   onHeaderAction(actionId: string): void {
     if (actionId === 'refresh') this.loadLogs();
     else if (actionId === 'new-credential') this.newCredential();
+    else if (actionId === 'refresh-aforo') this.loadOccupancy();
+    else if (actionId === 'config-aforo') this.toggleConfig();
+  }
+
+  // ─── Aforo: occupancy ───────────────────────────────────────────────────────
+  loadOccupancy(): void {
+    this.occupancyLoading.set(true);
+    this.accessService
+      .getOccupancy()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (occ) => {
+          this.restOccupancy.set(occ);
+          this.occupancyLoading.set(false);
+        },
+        error: (err: unknown) => {
+          // Non-fatal: the aforo panel still works via live SSE + actions.
+          this.occupancyLoading.set(false);
+          this.toastService.error(
+            typeof err === 'string' ? err : 'No se pudo leer el aforo',
+          );
+        },
+      });
+  }
+
+  checkIn(): void {
+    const value = this.checkinValue().trim();
+    if (!value) {
+      this.toastService.warning('Ingresa el valor de la credencial');
+      return;
+    }
+    this.actionInFlight.set(true);
+    this.accessService
+      .validate({ credential_type: this.checkinType(), credential_value: value })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.lastCheckin.set(res);
+          if (res.granted) {
+            this.toastService.success('Ingreso concedido');
+            this.checkinValue.set('');
+          } else {
+            this.toastService.warning(
+              GYM_ACCESS_RESULT_LABELS[res.result] ?? 'Acceso denegado',
+            );
+          }
+          // The grant already incremented the counter server-side; re-read to
+          // reflect it even when the ambient SSE stream is not connected.
+          this.loadOccupancy();
+          this.actionInFlight.set(false);
+        },
+        error: (err: unknown) => {
+          this.actionInFlight.set(false);
+          this.toastService.error(
+            typeof err === 'string' ? err : 'Error al validar el acceso',
+          );
+        },
+      });
+  }
+
+  registerExit(): void {
+    this.actionInFlight.set(true);
+    this.accessService
+      .registerExit()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (occ) => {
+          this.restOccupancy.set(occ);
+          this.toastService.success('Salida registrada');
+          this.actionInFlight.set(false);
+        },
+        error: (err: unknown) => {
+          this.actionInFlight.set(false);
+          this.toastService.error(
+            typeof err === 'string' ? err : 'Error al registrar la salida',
+          );
+        },
+      });
+  }
+
+  adjust(delta: number): void {
+    this.actionInFlight.set(true);
+    this.accessService
+      .adjustOccupancy(delta)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (occ) => {
+          this.restOccupancy.set(occ);
+          this.actionInFlight.set(false);
+        },
+        error: (err: unknown) => {
+          this.actionInFlight.set(false);
+          this.toastService.error(
+            typeof err === 'string' ? err : 'Error al ajustar el aforo',
+          );
+        },
+      });
+  }
+
+  checkinLabel(result: GymAccessResult): string {
+    return GYM_ACCESS_RESULT_LABELS[result] ?? result;
+  }
+
+  checkinColor(result: GymAccessResult): string {
+    return GYM_ACCESS_RESULT_COLORS[result] ?? '#6b7280';
+  }
+
+  // ─── Aforo: config ────────────────────────────────────────────────────────
+  toggleConfig(): void {
+    this.hydrateConfigFromSettings();
+    this.showConfig.update((v) => !v);
+  }
+
+  private hydrateConfigFromSettings(): void {
+    const m = this.membershipSettings;
+    this.cfgCapacityControl.set(m?.capacity_control_enabled ?? false);
+    this.cfgMaxCapacity.set(m?.max_capacity ?? 0);
+    this.cfgTurnstile.set(m?.turnstile_mode ?? false);
+    this.cfgLevelingEnabled.set(m?.auto_leveling_enabled ?? false);
+    this.cfgLevelingInterval.set(m?.auto_leveling_interval_hours === 1 ? 1 : 2);
+  }
+
+  onCapacityControlToggle(enabled: boolean): void {
+    this.cfgCapacityControl.set(enabled);
+  }
+
+  onTurnstileToggle(enabled: boolean): void {
+    this.cfgTurnstile.set(enabled);
+    // Turnstile controls entries/exits itself → auto-leveling makes no sense.
+    if (enabled) this.cfgLevelingEnabled.set(false);
+  }
+
+  onLevelingToggle(enabled: boolean): void {
+    if (this.levelingDisabled()) return;
+    this.cfgLevelingEnabled.set(enabled);
+  }
+
+  onMaxCapacityChange(value: number): void {
+    this.cfgMaxCapacity.set(Math.max(0, Math.round(value)));
+  }
+
+  setLevelingInterval(hours: 1 | 2): void {
+    if (this.levelingDisabled()) return;
+    this.cfgLevelingInterval.set(hours);
+  }
+
+  saveConfig(): void {
+    this.savingConfig.set(true);
+    const current = this.membershipSettings;
+    const membership: MembershipSettings = {
+      // preserve unrelated membership settings (ambient toggle, etc.)
+      ambient_access_enabled: current?.ambient_access_enabled ?? false,
+      ...current,
+      capacity_control_enabled: this.cfgCapacityControl(),
+      max_capacity: this.cfgMaxCapacity(),
+      turnstile_mode: this.cfgTurnstile(),
+      auto_leveling_enabled: this.cfgTurnstile()
+        ? false
+        : this.cfgLevelingEnabled(),
+      auto_leveling_interval_hours: this.cfgLevelingInterval(),
+    };
+
+    this.storeSettingsService
+      .saveSettingsNow({ membership })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.savingConfig.set(false);
+          this.showConfig.set(false);
+          this.toastService.success('Configuración de aforo guardada');
+          this.loadOccupancy();
+        },
+        error: (err: unknown) => {
+          this.savingConfig.set(false);
+          this.toastService.error(
+            err instanceof Error ? err.message : 'Error al guardar la configuración',
+          );
+        },
+      });
   }
 
   // ─── Logs ────────────────────────────────────────────────────────────────
