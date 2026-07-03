@@ -7,6 +7,8 @@ import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
 import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
 import { AccountingEntryFailureService } from './accounting-entry-failure.service';
+import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
+import { ErrorCodes } from '../../../../common/errors/error-codes';
 
 export interface AutoEntryEventData {
   source_type: string;
@@ -25,11 +27,38 @@ export interface AutoEntryEventData {
   user_id?: number;
 }
 
+/**
+ * Snapshot histórico del tercero (cliente/proveedor/empleado) ligado a una
+ * línea de asiento. Se persiste TAL CUAL en `accounting_entry_lines` — nunca
+ * se relee por FK en reportes, para no mutar la identidad fiscal exhibida en
+ * asientos ya posteados (exigencia exógena art. 631 ET: el NIT histórico no
+ * cambia aunque el tercero actualice sus datos después).
+ *
+ * `type` sigue la convención ya usada por la migración M2 de backfill
+ * (`20260702100002_backfill_third_party_accounting_entry_lines`): 'customer'
+ * | 'supplier' | 'employee'. Debe viajar en el payload del evento — está
+ * PROHIBIDO resolverlo con un lookup por línea (N+1).
+ */
+export interface AutoEntryThirdParty {
+  id: number;
+  type: 'customer' | 'supplier' | 'employee' | string;
+  name?: string;
+  tax_id?: string;
+}
+
 export interface AutoEntryLine {
   account_code: string;
   description?: string;
   debit_amount: number;
   credit_amount: number;
+  /**
+   * Tercero asociado a ESTA línea (no al asiento completo — un mismo asiento
+   * puede tener líneas con terceros distintos, p.ej. AR de cliente vs CxP de
+   * un proveedor en el mismo movimiento). Opcional: los handlers que no
+   * reciban el tercero en el payload del evento simplemente omiten el campo
+   * y la línea se postea igual que hoy (sin regresión).
+   */
+  third_party?: AutoEntryThirdParty;
 }
 
 /**
@@ -71,6 +100,7 @@ export class AutoEntryService {
     debit_amount: number,
     credit_amount: number,
     store_id?: number,
+    third_party?: AutoEntryThirdParty,
   ): Promise<AutoEntryLine | null> {
     const mapping = await this.account_mapping_service.getMapping(
       org_id,
@@ -83,6 +113,7 @@ export class AutoEntryService {
       description,
       debit_amount,
       credit_amount,
+      ...(third_party && { third_party }),
     };
   }
 
@@ -506,6 +537,41 @@ export class AutoEntryService {
       );
     }
 
+    // C2: Guard de período cerrado NO-reintenable.
+    // Si el `entry_date` cae dentro de un período CERRADO (ya liquidado por
+    // el contador), el asiento NO debe postearse ni encolarse para reintento:
+    // postear retroactivamente sobre un mes cerrado rompe el cierre contable
+    // (declaraciones, exógena, informes ya emitidos). Lanzamos
+    // `VendixHttpException` (no `BadRequestException`) con código
+    // `FISCAL_PERIOD_CLOSED` para que `AccountingEntryFailureService`
+    // detecte el código en el mensaje y omita el enqueue del reintento.
+    const closed_period = await this.prisma.fiscal_periods.findFirst({
+      where: {
+        organization_id,
+        OR: [
+          { accounting_entity_id: accounting_entity.id },
+          { accounting_entity_id: null },
+        ],
+        status: 'closed',
+        start_date: { lte: entry_date },
+        end_date: { gte: entry_date },
+      },
+      orderBy: { accounting_entity_id: 'desc' },
+      select: { id: true, name: true, start_date: true, end_date: true },
+    });
+    if (closed_period) {
+      this.logger.error(
+        `Cannot post auto-entry for ${source_type}#${source_id}: ` +
+          `fiscal period '${closed_period.name}' covering ${entry_date.toISOString()} is closed`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_PERIOD_CLOSED,
+        `Fiscal period '${closed_period.name}' (id ${closed_period.id}) covering ` +
+          `${entry_date.toISOString()} is closed; auto-entry ${source_type}#${source_id} rejected. ` +
+          `Open a corrective period or reverse the original business transaction.`,
+      );
+    }
+
     // Find the open fiscal period for the entry date
     let fiscal_period = await this.prisma.fiscal_periods.findFirst({
       where: {
@@ -680,6 +746,12 @@ export class AutoEntryService {
             description: line.description || null,
             debit_amount: new Prisma.Decimal(line.debit_amount),
             credit_amount: new Prisma.Decimal(line.credit_amount),
+            // Snapshot histórico del tercero — viaja en el payload del evento
+            // (nunca se resuelve por lookup aquí). Ver AutoEntryThirdParty.
+            third_party_id: line.third_party?.id ?? null,
+            third_party_type: line.third_party?.type ?? null,
+            third_party_name: line.third_party?.name ?? null,
+            third_party_tax_id: line.third_party?.tax_id ?? null,
           };
         }),
       });
@@ -761,7 +833,22 @@ export class AutoEntryService {
     total: number;
     user_id?: number;
     accounting_entity_id?: number;
+    /**
+     * Snapshot del cliente al momento de la venta. Debe venir ya resuelto por
+     * el emisor (p.ej. `updated.customer` en invoice-flow.service.ts, ya
+     * cargado vía INVOICE_INCLUDE) — PROHIBIDO resolverlo aquí por lookup.
+     */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     // Caso 2 (retenido): the customer withholds part of the payment. Recognize
     // the withholding as an asset (1355) at revenue recognition and reduce the
     // receivable by the same amount. Empty breakdown → identical to legacy.
@@ -778,6 +865,7 @@ export class AutoEntryService {
         accounts_receivable,
         0,
         data.store_id,
+        customer_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -1027,7 +1115,21 @@ export class AutoEntryService {
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
     user_id?: number;
+    /**
+     * Snapshot del cliente que paga. El emisor ya tiene `order.customer_id`
+     * en scope (ver payments.service.ts) — PROHIBIDO resolverlo aquí.
+     */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     // Check if this payment's order has an associated invoice
     let has_invoice = false;
     if (data.order_id) {
@@ -1067,6 +1169,7 @@ export class AutoEntryService {
           0,
           data.amount,
           data.store_id,
+          customer_third_party,
         ),
       ]);
     } else {
@@ -1171,7 +1274,18 @@ export class AutoEntryService {
     discount_amount?: number;
     total_amount: number;
     user_id?: number;
+    /** Snapshot del cliente de la venta a crédito. Ver onPaymentReceived. */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     const order_ref = data.order_number ? ` - Orden ${data.order_number}` : '';
     const discount = Number(data.discount_amount || 0);
 
@@ -1193,6 +1307,7 @@ export class AutoEntryService {
         accounts_receivable,
         0,
         data.store_id,
+        customer_third_party,
       ),
     ];
 
@@ -1264,7 +1379,25 @@ export class AutoEntryService {
     store_id?: number;
     amount: number;
     user_id?: number;
+    /**
+     * Snapshot del proveedor/acreedor del gasto. NOTA: el modelo `expenses`
+     * genérico no tiene `supplier_id` propio (confirmado — solo
+     * `vendor_support_documents`, un flujo DIAN aparte, liga a `suppliers`).
+     * Se deja el campo opcional listo para el día que expense-flow.service.ts
+     * lo resuelva desde `expense_categories`/vendor y lo agregue al payload;
+     * hoy siempre llega `undefined` y la línea se postea igual que antes.
+     */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -1281,6 +1414,7 @@ export class AutoEntryService {
         0,
         data.amount,
         data.store_id,
+        supplier_third_party,
       ),
     ]);
 
@@ -1303,7 +1437,18 @@ export class AutoEntryService {
     store_id?: number;
     amount: number;
     user_id?: number;
+    /** Snapshot del proveedor/acreedor. Ver onExpenseApproved. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -1312,6 +1457,7 @@ export class AutoEntryService {
         data.amount,
         0,
         data.store_id,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -1334,7 +1480,7 @@ export class AutoEntryService {
   }
 
   /**
-   * payroll.approved: Debit Payroll Expense + SS (split by cost center), Credit Salaries Payable + Health + Pension
+   * payroll.approved: Debit Payroll Expense + SS (split by cost center), Credit Salaries Payable + Health + Pension + Labor Withholding (236505) + Other Withholdings (2365)
    *
    * Cost center mapping:
    *   administrative → 5105 (Gastos de Personal - Admin)
@@ -1342,6 +1488,17 @@ export class AutoEntryService {
    *   sales          → 5205 (Gastos de Personal - Ventas)
    *
    * Liability accounts (credit side) are shared across all cost centers.
+   *
+   * B1 (segregación 236505): la retención en la fuente laboral (retefuente
+   * practicada al empleado sobre su salario, columna `deductions.retention` en
+   * `payroll_items`) se acredita en la sub-cuenta 236505 "Retención en la
+   * Fuente - Laboral" en lugar de la 2365 genérica. El resto de retenciones
+   * (si existieran) sigue acreditándose a 2365. Cuadre:
+   *   total_debits - (net_pay + health + pension) = total_retention (→ 236505) + otros (→ 2365)
+   * Si el cálculo de "otros" sale negativo (e.g. datos redondeados que no
+   * cuadran exactamente), NO fallamos el asiento — emitimos warning y
+   * ponemos 0 con nota en la descripción. La invariante de balance la
+   * garantiza la validación al final de `createAutoEntry`.
    */
   async onPayrollApproved(data: {
     payroll_run_id: number;
@@ -1353,6 +1510,12 @@ export class AutoEntryService {
     total_net_pay: number;
     health_deduction: number;
     pension_deduction: number;
+    /**
+     * B1: suma de `payroll_items.deductions.retention` (retefuente laboral).
+     * Si el caller no la propaga, se trata como 0 (compatibilidad con callers
+     * históricos que aún no la incluyen).
+     */
+    total_retention?: number;
     accounting_entity_id?: number;
     user_id?: number;
     cost_center_breakdown?: Record<
@@ -1361,6 +1524,12 @@ export class AutoEntryService {
     >;
   }) {
     const lines: (AutoEntryLine | null)[] = [];
+
+    // B1: retención laboral segregada a 236505.
+    const total_retention = Math.max(
+      0,
+      Number(data.total_retention ?? 0),
+    );
 
     // === DEBIT LINES ===
     if (
@@ -1460,21 +1629,49 @@ export class AutoEntryService {
       );
     }
 
-    // Withholdings = total debits - (net_pay + health + pension)
+    // B1: segregación de retenciones. Primero acreditamos la retención laboral
+    // (retefuente del empleado) en 236505; luego el resto de retenciones van a
+    // la cuenta 2365 genérica. Cuadre:
+    //   total_debits = net_pay + health + pension + labor_withholding (236505) + other_withholdings (2365)
+    //   other_withholdings = total_debits - (net_pay + health + pension + labor_withholding)
     const total_debits = data.total_earnings + data.total_employer_costs;
-    const remaining =
+    if (total_retention > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'payroll.approved.labor_withholding',
+          'Retención en la Fuente - Laboral',
+          0,
+          total_retention,
+          data.store_id,
+        ),
+      );
+    }
+    const other_withholdings =
       total_debits -
-      (data.total_net_pay + data.health_deduction + data.pension_deduction);
-    if (remaining > 0.001) {
+      (data.total_net_pay +
+        data.health_deduction +
+        data.pension_deduction +
+        total_retention);
+    if (other_withholdings > 0.001) {
       lines.push(
         await this.resolveAccountLine(
           data.organization_id,
           'payroll.approved.withholdings',
-          'Retenciones y deducciones',
+          'Otras retenciones y deducciones',
           0,
-          remaining,
+          other_withholdings,
           data.store_id,
         ),
+      );
+    } else if (other_withholdings < -0.001) {
+      // Diferencia por redondeo o datos ruidosos: NO fallar el asiento (la
+      // invariante de balance la garantiza `createAutoEntry`). Log warning
+      // y emitir la línea con valor 0 para mantener la trazabilidad.
+      this.logger.warn(
+        `payroll.approved #${data.payroll_run_id}: computed other_withholdings ` +
+          `=${other_withholdings.toFixed(2)} is negative after segregating labor ` +
+          `retention ${total_retention.toFixed(2)}; clamping to 0 and proceeding.`,
       );
     }
 
@@ -1502,6 +1699,15 @@ export class AutoEntryService {
       payroll_item_id: number;
       employee_id: number;
       cost_center: string;
+      /**
+       * Snapshot del empleado (forward-fill: solo asientos NUEVOS lo llevan;
+       * la nómina histórica ya posteada NO se reescribe). Opcional porque el
+       * emisor (payroll-flow.service.ts) hoy no lo incluye — `run.payroll_items`
+       * ya trae `employee.{id,document_type,document_number,first_name,last_name}`
+       * en memoria; falta solo que ese servicio lo agregue al payload.
+       */
+      employee_name?: string;
+      employee_document?: string;
       earnings: {
         base_salary: number;
         transport_subsidy: number;
@@ -1537,6 +1743,12 @@ export class AutoEntryService {
 
     for (const item of data.payroll_items) {
       try {
+        const employee_third_party: AutoEntryThirdParty = {
+          id: item.employee_id,
+          type: 'employee',
+          name: item.employee_name,
+          tax_id: item.employee_document,
+        };
         const e = item.earnings ?? {
           base_salary: 0,
           transport_subsidy: 0,
@@ -1729,11 +1941,13 @@ export class AutoEntryService {
         );
 
         if (d.retention > 0) {
+          // B1: la retención en la fuente del empleado se acredita en la
+          // sub-cuenta 236505 (laboral), NO en la 2365 genérica.
           lines.push(
             await this.resolveAccountLine(
               data.organization_id,
-              'payroll.approved.withholdings',
-              'Retención',
+              'payroll.approved.labor_withholding',
+              'Retención en la Fuente - Laboral',
               0,
               d.retention,
               data.store_id,
@@ -1763,6 +1977,7 @@ export class AutoEntryService {
             0,
             item.net_pay,
             data.store_id,
+            employee_third_party,
           ),
         );
 
@@ -2143,14 +2358,41 @@ export class AutoEntryService {
 
   /**
    * purchase_order.received: Debit Inventory, Credit Accounts Payable
+   *
+   * D2: fired on EVERY reception (partial or final) of a purchase order, not
+   * only when it becomes fully received. `data.total_amount` here is already
+   * the prorated amount for THIS specific reception batch (or the remainder
+   * on the final reception) — computed by the emitter in
+   * purchase-orders.service.ts, never recomputed here.
    */
   async onPurchaseOrderReceived(data: {
     purchase_order_id: number;
+    /**
+     * `purchase_order_receptions.id` — used as `source_id` instead of
+     * `purchase_order_id` so createAutoEntry's (source_type, source_id)
+     * duplicate guard treats each partial reception of the same order as a
+     * distinct event instead of skipping the 2nd/3rd reception as a dup.
+     */
+    reception_id: number;
     organization_id: number;
     store_id?: number;
     total_amount: number;
     user_id?: number;
+    /**
+     * Snapshot del proveedor. El emisor ya carga `result.updated_po.suppliers`
+     * completo (ver purchase-orders.service.ts) — PROHIBIDO resolverlo aquí.
+     */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -2167,14 +2409,16 @@ export class AutoEntryService {
         0,
         data.total_amount,
         data.store_id,
+        supplier_third_party,
       ),
     ]);
 
     return this.createAutoEntry({
       source_type: 'purchase_order.received',
-      source_id: data.purchase_order_id,
+      source_id: data.reception_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,      description: `Purchase order received #${data.purchase_order_id}`,
+      store_id: data.store_id,
+      description: `Purchase order received #${data.purchase_order_id} (reception #${data.reception_id})`,
       lines,
       user_id: data.user_id,
     });
@@ -2189,7 +2433,18 @@ export class AutoEntryService {
     amount: number;
     payment_method: string;
     user_id?: number;
+    /** Snapshot del proveedor. Ver onPurchaseOrderReceived. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     // Resolve cash/bank key based on payment method
     const method = (data.payment_method || '').toLowerCase();
     const is_cash = method.includes('cash') || method.includes('efectivo');
@@ -2204,6 +2459,8 @@ export class AutoEntryService {
         'Proveedores - Pago OC',
         data.amount,
         0,
+        undefined,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -3250,7 +3507,18 @@ export class AutoEntryService {
     amount: number;
     document_number?: string;
     user_id: number;
+    /** Snapshot del cliente cuya cartera se castiga. */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -3267,6 +3535,7 @@ export class AutoEntryService {
         0,
         data.amount,
         data.store_id,
+        customer_third_party,
       ),
     ]);
 
@@ -3294,7 +3563,18 @@ export class AutoEntryService {
     payment_method?: string;
     document_number?: string;
     user_id: number;
+    /** Snapshot del proveedor cuya cuenta por pagar se cancela. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -3303,6 +3583,7 @@ export class AutoEntryService {
         data.amount,
         0,
         data.store_id,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -3335,7 +3616,18 @@ export class AutoEntryService {
     amount: number;
     document_number?: string;
     user_id: number;
+    /** Snapshot del proveedor cuya cuenta por pagar se castiga. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -3344,6 +3636,7 @@ export class AutoEntryService {
         data.amount,
         0,
         data.store_id,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,

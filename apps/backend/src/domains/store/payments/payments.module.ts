@@ -50,11 +50,13 @@ import { PaymentLinksModule } from '../payment-links/payment-links.module';
 import { InvoiceDataRequestsModule } from '../invoicing/invoice-data-requests/invoice-data-requests.module';
 import { WithholdingTaxModule } from '../withholding-tax/withholding-tax.module';
 import { InventorySerialNumbersModule } from '../inventory/serial-numbers/inventory-serial-numbers.module';
+import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.module';
 
 @Module({
   imports: [
     ResponseModule,
     PrismaModule,
+    OrderStockCommitModule,
     CashPaymentModule,
     CashOnDeliveryPaymentModule,
     StripeModule,

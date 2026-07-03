@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Reporte QA · {{SPRINT_NAME}}</title>
+<!--
+  QA REPORT — plantilla self-contained (CSP-safe: sin CDN, sin webfonts, sin imágenes remotas).
+  CÓMO USAR:
+   1. Reemplazá el objeto REPORT (al final, en <script>) con los datos reales del sprint.
+   2. Reemplazá los {{PLACEHOLDERS}} del <header>.
+   3. Guardá como docs/qa-report-<sprint>.html y ábrelo con:  open docs/qa-report-<sprint>.html
+  Todo número debe trazar a un issue real (QUI-x). Desconocido => "sin dato", nunca inventar.
+-->
+<style>
+  /* ---------- Design tokens (tema claro por defecto) ---------- */
+  :root{
+    --bg:#F5F7FA; --surface:#FFFFFF; --surface-2:#EDF1F6; --ink:#131722; --muted:#5A6474;
+    --line:#E2E7EF; --accent:#17708C; --accent-2:#0E5568; --on-accent:#FFFFFF;
+    /* estado semántico — RESERVADO para severidad/veredicto, no es el acento */
+    --crit:#D1495B; --warn:#D98A1F; --good:#2F9E6B; --info:#3E7CB1; --neutral:#8A93A3;
+    --crit-bg:#FBEAEC; --warn-bg:#FAF0DE; --good-bg:#E5F4EC; --info-bg:#E7F0F8;
+    --shadow:0 1px 2px rgba(19,23,34,.06),0 8px 24px rgba(19,23,34,.06);
+    --radius:14px; --maxw:1080px;
+    --font-display:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    --font-body:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0C0F14; --surface:#141A22; --surface-2:#1B222C; --ink:#E7ECF3; --muted:#8B95A6;
+      --line:#26303C; --accent:#42A7C2; --accent-2:#6CC4DA; --on-accent:#07222A;
+      --crit:#E96E7E; --warn:#E3A94A; --good:#4FBD86; --info:#5C9BD4; --neutral:#8B95A6;
+      --crit-bg:#2A1519; --warn-bg:#271E10; --good-bg:#122419; --info-bg:#111E2B;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  /* toggle manual del visor (gana en ambas direcciones) */
+  :root[data-theme="light"]{
+    --bg:#F5F7FA; --surface:#FFFFFF; --surface-2:#EDF1F6; --ink:#131722; --muted:#5A6474;
+    --line:#E2E7EF; --accent:#17708C; --accent-2:#0E5568; --on-accent:#FFFFFF;
+    --crit:#D1495B; --warn:#D98A1F; --good:#2F9E6B; --info:#3E7CB1; --neutral:#8A93A3;
+    --crit-bg:#FBEAEC; --warn-bg:#FAF0DE; --good-bg:#E5F4EC; --info-bg:#E7F0F8;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0C0F14; --surface:#141A22; --surface-2:#1B222C; --ink:#E7ECF3; --muted:#8B95A6;
+    --line:#26303C; --accent:#42A7C2; --accent-2:#6CC4DA; --on-accent:#07222A;
+    --crit:#E96E7E; --warn:#E3A94A; --good:#4FBD86; --info:#5C9BD4; --neutral:#8B95A6;
+    --crit-bg:#2A1519; --warn-bg:#271E10; --good-bg:#122419; --info-bg:#111E2B;
+  }
+
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);font-family:var(--font-body);
+    line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;
+  }
+  .mono{font-family:var(--font-mono);font-size:.92em}
+  .tnum{font-variant-numeric:tabular-nums}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+
+  /* ---------- Top bar ---------- */
+  .topbar{
+    position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--surface) 88%,transparent);
+    backdrop-filter:saturate(1.2) blur(8px);border-bottom:1px solid var(--line);
+  }
+  .topbar-in{max-width:var(--maxw);margin:0 auto;display:flex;align-items:center;gap:14px;
+    padding:10px 20px}
+  .brand{font-family:var(--font-display);font-weight:700;letter-spacing:-.01em;font-size:15px}
+  .brand small{color:var(--muted);font-weight:500}
+  .nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+  .nav a{color:var(--muted);font-size:12.5px;padding:5px 9px;border-radius:8px}
+  .nav a:hover{background:var(--surface-2);text-decoration:none;color:var(--ink)}
+  .theme-btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);
+    border-radius:8px;padding:5px 9px;cursor:pointer;font-size:12.5px}
+  .progress{position:absolute;left:0;bottom:-1px;height:2px;background:var(--accent);width:0}
+
+  /* ---------- Layout ---------- */
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+  section.slide{padding:56px 0;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--font-mono);text-transform:uppercase;letter-spacing:.12em;
+    font-size:11px;color:var(--accent);font-weight:600}
+  h1{font-family:var(--font-display);font-weight:800;letter-spacing:-.02em;
+    font-size:clamp(30px,5vw,52px);line-height:1.05;margin:.3em 0;text-wrap:balance}
+  h2{font-family:var(--font-display);font-weight:700;letter-spacing:-.01em;
+    font-size:clamp(21px,3vw,30px);margin:.2em 0 .6em;text-wrap:balance}
+  h3{font-family:var(--font-display);font-weight:650;font-size:16px;margin:0 0 8px}
+  p.lead{color:var(--muted);font-size:17px;max-width:60ch}
+
+  /* ---------- Cover ---------- */
+  .cover{padding:72px 0 60px;position:relative;overflow:hidden}
+  .cover .meta{display:flex;flex-wrap:wrap;gap:10px 26px;margin-top:22px;color:var(--muted);
+    font-size:14px}
+  .cover .meta b{color:var(--ink);font-weight:600}
+  .cover-orb{position:absolute;right:-120px;top:-120px;width:360px;height:360px;border-radius:50%;
+    background:radial-gradient(circle at 30% 30%,var(--accent),transparent 62%);opacity:.14;
+    filter:blur(6px);pointer-events:none}
+
+  /* ---------- KPI tiles ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .kpi .n{font-family:var(--font-display);font-weight:800;font-size:38px;line-height:1;
+    letter-spacing:-.02em}
+  .kpi .l{color:var(--muted);font-size:12.5px;margin-top:6px;text-transform:uppercase;
+    letter-spacing:.05em}
+  .kpi .ctx{font-size:12px;color:var(--muted);margin-top:8px}
+  .kpi .stripe{position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--accent)}
+  .kpi.crit .stripe{background:var(--crit)} .kpi.crit .n{color:var(--crit)}
+  .kpi.good .stripe{background:var(--good)} .kpi.good .n{color:var(--good)}
+  .kpi.warn .stripe{background:var(--warn)} .kpi.warn .n{color:var(--warn)}
+
+  /* ---------- Critical section ---------- */
+  .crit-slide{background:linear-gradient(180deg,var(--crit-bg),transparent 40%)}
+  .crit-head{display:flex;align-items:center;gap:12px}
+  .crit-dot{width:11px;height:11px;border-radius:50%;background:var(--crit);
+    box-shadow:0 0 0 0 color-mix(in srgb,var(--crit) 70%,transparent)}
+  .crit-list{display:grid;gap:12px;margin-top:18px}
+  .crit-card{display:grid;grid-template-columns:5px 1fr auto;gap:0 16px;align-items:start;
+    background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;
+    box-shadow:var(--shadow)}
+  .crit-card .bar{background:var(--crit)}
+  .crit-card .body{padding:14px 4px 14px 0}
+  .crit-card .title{font-weight:650;font-size:15px}
+  .crit-card .impact{color:var(--muted);font-size:13.5px;margin-top:3px}
+  .crit-card .side{padding:14px 16px;text-align:right;white-space:nowrap}
+  .empty-note{background:var(--good-bg);border:1px solid var(--line);border-radius:12px;
+    padding:16px 18px;color:var(--good);font-weight:600}
+
+  /* ---------- Highlights (tickets destacados — de qué tratan) ---------- */
+  .hl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:14px;margin-top:18px}
+  .hl-card{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--accent);
+    border-radius:var(--radius);padding:18px;box-shadow:var(--shadow);display:flex;flex-direction:column}
+  .hl-card.k-crit{border-top-color:var(--crit)} .hl-card.k-warn{border-top-color:var(--warn)}
+  .hl-card.k-good{border-top-color:var(--good)} .hl-card.k-info{border-top-color:var(--info)}
+  .hl-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px}
+  .hl-card h3{margin:2px 0 7px;font-size:15.5px}
+  .hl-card .sum{color:var(--muted);font-size:13.5px;line-height:1.6}
+  .hl-card .area{margin-top:auto;padding-top:12px;font-size:12px;color:var(--muted)}
+
+  /* ---------- Pills ---------- */
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+    padding:3px 9px;border-radius:999px;border:1px solid transparent;line-height:1.4}
+  .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.85}
+  .s-crit{color:var(--crit);background:var(--crit-bg)}
+  .s-warn{color:var(--warn);background:var(--warn-bg)}
+  .s-good{color:var(--good);background:var(--good-bg)}
+  .s-info{color:var(--info);background:var(--info-bg)}
+  .s-neutral{color:var(--neutral);background:var(--surface-2)}
+
+  /* ---------- Panels / charts grid ---------- */
+  .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;box-shadow:var(--shadow)}
+  .panel .cap{color:var(--muted);font-size:12.5px;margin:-2px 0 12px}
+  .legend{display:flex;flex-wrap:wrap;gap:10px 16px;margin-top:12px;font-size:12.5px}
+  .legend .it{display:inline-flex;align-items:center;gap:7px;color:var(--muted)}
+  .legend .sw{width:11px;height:11px;border-radius:3px;flex:none}
+
+  /* svg bar chart */
+  .barrow{display:grid;grid-template-columns:130px 1fr 44px;align-items:center;gap:10px;
+    margin:9px 0;font-size:13px}
+  .barrow .bl{color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* display:block es OBLIGATORIO: son <span> y width/height NO aplican a inline */
+  .bartrack{display:block;height:14px;background:var(--surface-2);border-radius:7px;overflow:hidden}
+  /* width se fija inline (siempre visible); la animación es transform, no afecta layout */
+  .barfill{display:block;height:100%;border-radius:7px;transform-origin:left center}
+  @media (prefers-reduced-motion:no-preference){
+    .barfill{animation:grow .9s cubic-bezier(.2,.7,.2,1) both}
+    @keyframes grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+  }
+  .barrow .bv{text-align:right;color:var(--muted);font-weight:600}
+
+  /* ---------- Listings ---------- */
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:560px}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--surface-2);color:var(--muted);font-weight:600;font-size:12px;
+    text-transform:uppercase;letter-spacing:.04em;position:sticky;top:0}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:var(--surface-2)}
+
+  /* ---------- Reveal animation (gated) ---------- */
+  .reveal{opacity:1;transform:none}
+  @media (prefers-reduced-motion:no-preference){
+    .reveal{opacity:0;transform:translateY(14px);transition:opacity .6s ease,transform .6s ease}
+    .reveal.in{opacity:1;transform:none}
+    .crit-dot.pulse{animation:pulse 2.2s ease-out infinite}
+    @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--crit) 60%,transparent)}
+      70%{box-shadow:0 0 0 12px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  }
+  footer{padding:30px 0 60px;color:var(--muted);font-size:12.5px}
+  @media (max-width:560px){
+    .crit-card{grid-template-columns:5px 1fr}.crit-card .side{grid-column:2;text-align:left;padding-top:0}
+    .barrow{grid-template-columns:96px 1fr 40px}
+  }
+</style>
+</head>
+<body data-palette="#17708C,#3E7CB1,#2F9E6B,#D98A1F,#D1495B,#8A93A3">
+
+<div class="topbar">
+  <div class="topbar-in">
+    <div class="brand">Reporte QA <small>· Vendix</small></div>
+    <nav class="nav" aria-label="Secciones">
+      <a href="#resumen">Resumen</a>
+      <a href="#criticos">Críticos</a>
+      <a href="#destacados">Destacados</a>
+      <a href="#bugs">Bugs</a>
+      <a href="#validados">Validados</a>
+      <a href="#tendencia">Tendencia</a>
+      <a href="#cierre">Cierre</a>
+    </nav>
+    <button class="theme-btn" id="themeBtn" type="button" aria-label="Cambiar tema">◐ Tema</button>
+  </div>
+  <div class="progress" id="progress"></div>
+</div>
+
+<!-- ======================= PORTADA ======================= -->
+<section class="cover wrap" id="top">
+  <div class="cover-orb" aria-hidden="true"></div>
+  <div class="eyebrow reveal">Ciclo de QA · Reporte de sprint</div>
+  <h1 class="reveal" id="sprintTitle">Reporte QA</h1>
+  <p class="lead reveal">Bugs encontrados, tickets validados y estado crítico de la ventana del sprint. Cada dato traza a un issue real de Linear.</p>
+  <div class="meta reveal">
+    <span>Ventana: <b class="mono"><span id="winStart">—</span> → <span id="winEnd">—</span></b></span>
+    <span>Generado: <b class="mono" id="genAt">—</b></span>
+    <span>QA: <b id="qaAuthor">—</b></span>
+  </div>
+</section>
+
+<!-- ======================= RESUMEN / KPIs ======================= -->
+<section class="slide wrap" id="resumen">
+  <div class="eyebrow reveal">01 · Resumen ejecutivo</div>
+  <h2 class="reveal">Panorama del sprint</h2>
+  <div class="kpis reveal" id="kpis"><!-- render JS --></div>
+</section>
+
+<!-- ======================= CRÍTICOS (OBLIGATORIO) ======================= -->
+<section class="slide crit-slide wrap" id="criticos">
+  <div class="crit-head reveal">
+    <span class="crit-dot pulse" aria-hidden="true"></span>
+    <div>
+      <div class="eyebrow" style="color:var(--crit)">02 · Atención inmediata</div>
+      <h2 style="margin:.1em 0">Críticos / Urgentes</h2>
+    </div>
+  </div>
+  <p class="lead reveal">Bugs bloqueantes o de severidad alta abiertos que deben abordarse de inmediato.</p>
+  <div class="crit-list reveal" id="critList"><!-- render JS --></div>
+</section>
+
+<!-- ======================= TICKETS DESTACADOS ======================= -->
+<section class="slide wrap" id="destacados">
+  <div class="eyebrow reveal">02b · Detalle</div>
+  <h2 class="reveal">Tickets destacados — de qué tratan</h2>
+  <p class="lead reveal">Los tickets más relevantes del sprint, explicados en breve para que cualquiera entienda de qué se tratan y por qué importan.</p>
+  <div class="hl-grid reveal" id="highlights"><!-- render JS --></div>
+</section>
+
+<!-- ======================= BUGS ENCONTRADOS ======================= -->
+<section class="slide wrap" id="bugs">
+  <div class="eyebrow reveal">03 · Hallazgos</div>
+  <h2 class="reveal">Bugs encontrados</h2>
+  <div class="grid2 reveal">
+    <div class="panel">
+      <h3>Por severidad</h3>
+      <div class="cap">Distribución de bugs hallados en la ventana</div>
+      <div id="chartSeverity"></div>
+    </div>
+    <div class="panel">
+      <h3>Por módulo / app</h3>
+      <div class="cap">Dónde se concentran los hallazgos</div>
+      <div id="chartModule"></div>
+    </div>
+  </div>
+  <div class="panel reveal" style="margin-top:16px">
+    <h3>Listado de bugs</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>ID</th><th>Título</th><th>Módulo</th><th>Severidad</th><th>Estado</th></tr></thead>
+        <tbody id="bugRows"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= TICKETS VALIDADOS ======================= -->
+<section class="slide wrap" id="validados">
+  <div class="eyebrow reveal">04 · Verificación</div>
+  <h2 class="reveal">Tickets / flujos validados</h2>
+  <div class="grid2 reveal">
+    <div class="panel">
+      <h3>Veredictos</h3>
+      <div class="cap">Resultado de la verificación E2E (ver verify-ticket-prod)</div>
+      <div id="chartVerdict" style="display:flex;gap:18px;align-items:center;flex-wrap:wrap"></div>
+    </div>
+    <div class="panel">
+      <h3>Tasa de aprobación</h3>
+      <div class="cap">Validados OK sobre el total verificado</div>
+      <div id="chartApproval"></div>
+    </div>
+  </div>
+  <div class="panel reveal" style="margin-top:16px">
+    <h3>Listado de validaciones</h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>ID</th><th>Ticket / flujo</th><th>Tienda</th><th>Veredicto</th></tr></thead>
+        <tbody id="valRows"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= TENDENCIA ======================= -->
+<section class="slide wrap" id="tendencia">
+  <div class="eyebrow reveal">05 · Tendencia temporal</div>
+  <h2 class="reveal">Bugs a lo largo de la ventana</h2>
+  <div class="panel reveal">
+    <h3>Encontrados vs. resueltos</h3>
+    <div class="cap">Ritmo diario del ciclo de QA</div>
+    <div id="chartTrend"></div>
+    <div class="legend">
+      <span class="it"><span class="sw" style="background:var(--crit)"></span>Encontrados</span>
+      <span class="it"><span class="sw" style="background:var(--good)"></span>Resueltos</span>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= CIERRE ======================= -->
+<section class="slide wrap" id="cierre">
+  <div class="eyebrow reveal">06 · Cierre</div>
+  <h2 class="reveal">Conclusiones y próximos pasos</h2>
+  <div class="panel reveal">
+    <ul id="closing" style="margin:0;padding-left:20px;color:var(--ink)"></ul>
+  </div>
+</section>
+
+<footer class="wrap">
+  Reporte QA generado para Vendix · datos de Linear (proyecto Vendix / QUI). Documento autónomo, sin dependencias externas.
+</footer>
+
+<script>
+/* ================================================================
+   DATOS DEL REPORTE — reemplazar íntegro con los datos reales.
+   Regla: todo valor traza a un issue real. Desconocido => null/"sin dato".
+   ================================================================ */
+const REPORT = {
+  sprint: "Sprint 24 · Despachos & Seriales",
+  window: { start: "2026-06-16", end: "2026-06-30" },
+  generatedAt: "2026-07-03",
+  author: "QA · Rafael",
+  kpis: [
+    { key:"found",    n:23, label:"Bugs encontrados", ctx:"en la ventana", tone:"" },
+    { key:"resolved", n:17, label:"Bugs resueltos",   ctx:"74% del total", tone:"good" },
+    { key:"validated",n:12, label:"Tickets validados",ctx:"E2E en demo",   tone:"" },
+    { key:"critical", n:3,  label:"Críticos abiertos",ctx:"acción inmediata", tone:"crit" },
+    { key:"approval", n:83, label:"Tasa aprobación",  ctx:"validados OK", tone:"warn", suffix:"%" },
+  ],
+  // Bloqueantes/altos abiertos — sección obligatoria. [] => muestra "sin críticos".
+  criticals: [
+    { id:"QUI-501", url:"https://linear.app/quickss/issue/QUI-501", title:"FIX/ Doble descuento de stock al cerrar ruta [api]", impact:"Inventario fantasma en despachos DSD; afecta cuadre de recaudo.", severity:"Bloqueante", state:"In Progress" },
+    { id:"QUI-508", url:"https://linear.app/quickss/issue/QUI-508", title:"FIX/ Serial no se registra al confirmar remisión [admin]", impact:"Productos tecnológicos sin trazabilidad de serial.", severity:"Alta", state:"Todo" },
+    { id:"QUI-511", url:"https://linear.app/quickss/issue/QUI-511", title:"FIX/ 500 al despachar orden sin dirección [api]", impact:"Bloquea el flujo de despacho para órdenes COD.", severity:"Bloqueante", state:"In Review" },
+  ],
+  // Tickets más relevantes del sprint — con un resumen en lenguaje llano de QUÉ TRATAN.
+  // kind = etiqueta corta; tone = pill/estado (s-crit|s-warn|s-good|s-info).
+  highlights: [
+    { id:"QUI-501", url:"https://linear.app/quickss/issue/QUI-501", kind:"Bug bloqueante", tone:"s-crit", title:"Doble descuento de stock al cerrar ruta", area:"Despachos · api",
+      summary:"Al cerrar una ruta DSD el inventario se descontaba dos veces (una en la remisión y otra en el cierre), generando stock fantasma y descuadre del recaudo. Es la causa raíz de varias diferencias que reportaron los conductores al regresar." },
+    { id:"QUI-495", url:"https://linear.app/quickss/issue/QUI-495", kind:"Validado OK", tone:"s-good", title:"Registro de serial en POS diferido", area:"e-tech · seriales",
+      summary:"Se verificó E2E que vender productos serializados en POS ya no bloquea el cobro: el serial se difiere a la remisión y se registra al confirmar. La trazabilidad de equipos tecnológicos quedó correcta." },
+    { id:"QUI-499", url:"https://linear.app/quickss/issue/QUI-499", kind:"No cumple", tone:"s-crit", title:"Split de cuenta en mesa", area:"miramor · restaurante",
+      summary:"Al dividir la cuenta de una mesa entre comensales, los impuestos no se reparten bien y la suma de las partes no cuadra con el total. No cumple el requerimiento del ticket; requiere corrección antes de liberar." },
+    { id:"QUI-497", url:"https://linear.app/quickss/issue/QUI-497", kind:"Con defectos", tone:"s-warn", title:"Cierre de ruta y cuadre de recaudo", area:"tuerca-mia · despachos",
+      summary:"El cierre de ruta opera, pero el cuadre de recaudo muestra una diferencia intermitente cuando hay retenciones. Depende del fix de QUI-501; reprogramar una segunda verificación tras aplicarlo." },
+  ],
+  severity: [ // {label, value, color-var}
+    { label:"Bloqueante", value:4, color:"var(--crit)" },
+    { label:"Alta",       value:7, color:"var(--warn)" },
+    { label:"Media",      value:9, color:"var(--info)" },
+    { label:"Baja",       value:3, color:"var(--neutral)" },
+  ],
+  byModule: [
+    { label:"api",       value:9,  color:"var(--accent)" },
+    { label:"admin",     value:7,  color:"var(--accent)" },
+    { label:"ecommerce", value:4,  color:"var(--accent)" },
+    { label:"mobile",    value:2,  color:"var(--accent)" },
+    { label:"core",      value:1,  color:"var(--accent)" },
+  ],
+  bugs: [
+    { id:"QUI-501", title:"Doble descuento de stock al cerrar ruta", module:"api", severity:"Bloqueante", state:"In Progress" },
+    { id:"QUI-508", title:"Serial no se registra al confirmar remisión", module:"admin", severity:"Alta", state:"Todo" },
+    { id:"QUI-511", title:"500 al despachar orden sin dirección", module:"api", severity:"Bloqueante", state:"In Review" },
+    { id:"QUI-514", title:"Toast de éxito en pago fallido", module:"ecommerce", severity:"Media", state:"Done" },
+    { id:"QUI-519", title:"Fecha de remisión off-by-one", module:"admin", severity:"Media", state:"Done" },
+  ],
+  // Veredictos alineados con verify-ticket-prod: ok / defect / mismatch / blocked
+  verdicts: [
+    { label:"Cumple (OK)",       value:10, tone:"s-good",    color:"var(--good)" },
+    { label:"Con defectos",      value:1,  tone:"s-warn",    color:"var(--warn)" },
+    { label:"No cumple",         value:1,  tone:"s-crit",    color:"var(--crit)" },
+    { label:"Bloqueado",         value:0,  tone:"s-neutral", color:"var(--neutral)" },
+  ],
+  validations: [
+    { id:"QUI-490", title:"Despacho order-first con remisión", store:"tuerca-mia", verdict:"Cumple (OK)", tone:"s-good" },
+    { id:"QUI-495", title:"Registro de serial en POS diferido", store:"e-tech", verdict:"Cumple (OK)", tone:"s-good" },
+    { id:"QUI-497", title:"Cierre de ruta y cuadre de recaudo", store:"tuerca-mia", verdict:"Con defectos", tone:"s-warn" },
+    { id:"QUI-499", title:"Split de cuenta en mesa", store:"miramor", verdict:"No cumple", tone:"s-crit" },
+  ],
+  // Serie temporal diaria (fecha corta -> encontrados/resueltos)
+  trend: [
+    { d:"16", found:2, resolved:0 }, { d:"18", found:4, resolved:1 }, { d:"20", found:3, resolved:2 },
+    { d:"22", found:5, resolved:3 }, { d:"24", found:3, resolved:4 }, { d:"26", found:2, resolved:3 },
+    { d:"28", found:3, resolved:2 }, { d:"30", found:1, resolved:2 },
+  ],
+  closing: [
+    "3 bugs críticos abiertos (QUI-501, QUI-508, QUI-511) — priorizar antes del cierre del sprint.",
+    "El flujo de despachos concentra el 40% de los hallazgos; recomendar hardening de la primitiva de remisión.",
+    "Tasa de aprobación 83%: 1 flujo con defectos y 1 que no cumple requerimiento — reprogramar verificación.",
+  ],
+};
+
+/* ================================================================
+   Render (sin dependencias externas). Guarda de reduced-motion.
+   ================================================================ */
+(function(){
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const $ = id => document.getElementById(id);
+
+  // ---- Header (por id — sin reemplazo de innerHTML) ----
+  document.title = "Reporte QA · " + REPORT.sprint;
+  const setText = (id,val)=>{ const n=$(id); if(n) n.textContent=val; };
+  setText('sprintTitle', REPORT.sprint);
+  setText('winStart', REPORT.window.start);
+  setText('winEnd', REPORT.window.end);
+  setText('genAt', REPORT.generatedAt);
+  setText('qaAuthor', REPORT.author);
+
+  // ---- KPIs (número final inline; count-up sólo con movimiento permitido) ----
+  $('kpis').innerHTML = REPORT.kpis.map(k=>`
+    <div class="kpi ${k.tone||''}">
+      <span class="stripe"></span>
+      <div class="n tnum" data-count="${k.n}" data-suffix="${k.suffix||''}">${k.n}${k.suffix||''}</div>
+      <div class="l">${esc(k.label)}</div>
+      <div class="ctx">${esc(k.ctx||'')}</div>
+    </div>`).join('');
+
+  // ---- Críticos (obligatorio) ----
+  const cl = $('critList');
+  if(!REPORT.criticals || REPORT.criticals.length===0){
+    cl.innerHTML = `<div class="empty-note">✓ Sin críticos abiertos en la ventana.</div>`;
+  } else {
+    cl.innerHTML = REPORT.criticals.map(c=>`
+      <article class="crit-card">
+        <div class="bar"></div>
+        <div class="body">
+          <div class="title">${esc(c.title)}</div>
+          <div class="impact">${esc(c.impact)}</div>
+        </div>
+        <div class="side">
+          <span class="pill ${c.severity==='Bloqueante'?'s-crit':'s-warn'}">${esc(c.severity)}</span><br>
+          <a class="mono" href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.id)}</a>
+          <div class="mono" style="color:var(--muted);font-size:12px">${esc(c.state)}</div>
+        </div>
+      </article>`).join('');
+  }
+
+  // ---- Tickets destacados (de qué tratan) ----
+  const hl = $('highlights');
+  if(hl){
+    if(!REPORT.highlights || REPORT.highlights.length===0){
+      hl.innerHTML = `<div class="empty-note" style="background:var(--info-bg);color:var(--info)">Sin tickets destacados para esta ventana.</div>`;
+    } else {
+      hl.innerHTML = REPORT.highlights.map(h=>`
+        <article class="hl-card ${(h.tone||'s-info').replace('s-','k-')}">
+          <div class="hl-top">
+            <a class="mono" href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.id)}</a>
+            <span class="pill ${esc(h.tone||'s-info')}">${esc(h.kind||'')}</span>
+          </div>
+          <h3>${esc(h.title)}</h3>
+          <div class="sum">${esc(h.summary)}</div>
+          <div class="area mono">${esc(h.area||'')}</div>
+        </article>`).join('');
+    }
+  }
+
+  // ---- Bar chart helper ----
+  function bars(elId, data){
+    const max = Math.max(1, ...data.map(d=>d.value));
+    $(elId).innerHTML = data.map(d=>`
+      <div class="barrow">
+        <span class="bl" title="${esc(d.label)}">${esc(d.label)}</span>
+        <span class="bartrack"><span class="barfill" style="background:${d.color};width:${(d.value/max*100).toFixed(1)}%"></span></span>
+        <span class="bv tnum">${d.value}</span>
+      </div>`).join('');
+  }
+  bars('chartSeverity', REPORT.severity);
+  bars('chartModule', REPORT.byModule);
+
+  // ---- Bug listing ----
+  const sevPill = s => s==='Bloqueante'?'s-crit':s==='Alta'?'s-warn':s==='Media'?'s-info':'s-neutral';
+  $('bugRows').innerHTML = REPORT.bugs.map(b=>`
+    <tr>
+      <td><a class="mono" href="https://linear.app/quickss/issue/${esc(b.id)}" target="_blank" rel="noopener">${esc(b.id)}</a></td>
+      <td>${esc(b.title)}</td><td class="mono">${esc(b.module)}</td>
+      <td><span class="pill ${sevPill(b.severity)}">${esc(b.severity)}</span></td>
+      <td class="mono" style="color:var(--muted)">${esc(b.state)}</td>
+    </tr>`).join('');
+
+  // ---- Verdict donut (SVG) ----
+  function donut(elId, segs){
+    const total = segs.reduce((a,s)=>a+s.value,0)||1;
+    const R=54, C=2*Math.PI*R; let off=0;
+    const arcs = segs.map(s=>{
+      const len = s.value/total*C;
+      const el = `<circle r="${R}" cx="70" cy="70" fill="none" stroke="${s.color}" stroke-width="20"
+        stroke-dasharray="${len} ${C-len}" stroke-dashoffset="${-off}" transform="rotate(-90 70 70)"
+        style="transition:stroke-dasharray .9s ease"></circle>`;
+      off += len; return el;
+    }).join('');
+    const legend = segs.map(s=>`<span class="it"><span class="sw" style="background:${s.color}"></span>${esc(s.label)} · <b class="tnum" style="color:var(--ink)">${s.value}</b></span>`).join('');
+    $(elId).innerHTML = `
+      <svg width="140" height="140" viewBox="0 0 140 140" role="img" aria-label="Veredictos">
+        <circle r="54" cx="70" cy="70" fill="none" stroke="var(--surface-2)" stroke-width="20"></circle>
+        ${arcs}
+        <text x="70" y="66" text-anchor="middle" font-size="26" font-weight="800" fill="var(--ink)" class="tnum">${total}</text>
+        <text x="70" y="86" text-anchor="middle" font-size="11" fill="var(--muted)">validados</text>
+      </svg>
+      <div class="legend" style="flex-direction:column;gap:8px">${legend}</div>`;
+  }
+  donut('chartVerdict', REPORT.verdicts);
+
+  // ---- Approval gauge (single bar) ----
+  const ap = REPORT.kpis.find(k=>k.key==='approval');
+  $('chartApproval').innerHTML = `
+    <div style="font-family:var(--font-display);font-weight:800;font-size:44px;letter-spacing:-.02em">${ap?ap.n:'—'}%</div>
+    <div class="bartrack" style="height:16px;margin-top:8px"><span class="barfill" style="background:var(--good);width:${ap?ap.n:0}%"></span></div>
+    <div class="cap" style="margin-top:8px">${esc(ap?ap.ctx:'')}</div>`;
+
+  // ---- Validations listing ----
+  $('valRows').innerHTML = REPORT.validations.map(v=>`
+    <tr>
+      <td><a class="mono" href="https://linear.app/quickss/issue/${esc(v.id)}" target="_blank" rel="noopener">${esc(v.id)}</a></td>
+      <td>${esc(v.title)}</td><td class="mono">${esc(v.store)}</td>
+      <td><span class="pill ${esc(v.tone)}">${esc(v.verdict)}</span></td>
+    </tr>`).join('');
+
+  // ---- Trend line (SVG) ----
+  (function(){
+    const t=REPORT.trend, W=680,H=220,pad=28;
+    const maxY=Math.max(1,...t.map(p=>Math.max(p.found,p.resolved)));
+    const x=i=>pad+ i*(W-2*pad)/(t.length-1);
+    const y=v=>H-pad - v/maxY*(H-2*pad);
+    const path=(key)=>t.map((p,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(p[key]).toFixed(1)).join(' ');
+    const area=(key)=>`${path(key)} L ${x(t.length-1)} ${H-pad} L ${x(0)} ${H-pad} Z`;
+    const grid=[0,.25,.5,.75,1].map(f=>{const yy=(H-pad)-f*(H-2*pad);return `<line x1="${pad}" y1="${yy}" x2="${W-pad}" y2="${yy}" stroke="var(--line)"/>`}).join('');
+    const dots=key=>t.map((p,i)=>`<circle cx="${x(i)}" cy="${y(p[key])}" r="3.2" fill="${key==='found'?'var(--crit)':'var(--good)'}"/>`).join('');
+    const labels=t.map((p,i)=>`<text x="${x(i)}" y="${H-8}" text-anchor="middle" font-size="10" fill="var(--muted)">${esc(p.d)}</text>`).join('');
+    $('chartTrend').innerHTML = `
+      <div style="overflow-x:auto"><svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Tendencia de bugs">
+        ${grid}
+        <path d="${area('found')}" fill="var(--crit)" opacity=".08"/>
+        <path d="${area('resolved')}" fill="var(--good)" opacity=".08"/>
+        <path d="${path('found')}" fill="none" stroke="var(--crit)" stroke-width="2"/>
+        <path d="${path('resolved')}" fill="none" stroke="var(--good)" stroke-width="2"/>
+        ${dots('found')}${dots('resolved')}${labels}
+      </svg></div>`;
+  })();
+
+  // ---- Closing ----
+  $('closing').innerHTML = REPORT.closing.map(c=>`<li style="margin:6px 0">${esc(c)}</li>`).join('');
+
+  // ---- Animate: count-up + reveal + progress + theme ----
+  // Barras y números ya tienen su valor FINAL inline (robusto). Aquí sólo agregamos el
+  // efecto opcional cuando el usuario permite movimiento.
+  function countUp(){
+    document.querySelectorAll('[data-count]').forEach(el=>{
+      const target=+el.dataset.count, suffix=el.dataset.suffix||'';
+      let s=0, step=Math.max(1,Math.round(target/40));
+      el.textContent='0'+suffix;
+      const t=setInterval(()=>{ s+=step; if(s>=target){s=target;clearInterval(t);} el.textContent=s+suffix; },22);
+    });
+  }
+  if(!reduce){
+    const io=new IntersectionObserver((es)=>es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} }),{threshold:.15});
+    document.querySelectorAll('.reveal').forEach(n=>io.observe(n));
+    setTimeout(countUp, 200);
+  }
+  // progress bar
+  const prog=$('progress');
+  addEventListener('scroll',()=>{ const h=document.documentElement; const p=h.scrollTop/(h.scrollHeight-h.clientHeight)*100; if(prog)prog.style.width=p+'%'; },{passive:true});
+  // theme toggle (re-bind after innerHTML replace)
+  const tb=$('themeBtn');
+  if(tb) tb.addEventListener('click',()=>{
+    const cur=document.documentElement.getAttribute('data-theme');
+    const next = cur ? (cur==='dark'?'light':'dark') : (matchMedia('(prefers-color-scheme: dark)').matches?'light':'dark');
+    document.documentElement.setAttribute('data-theme',next);
+  });
+})();
+</script>
+</body>
+</html>

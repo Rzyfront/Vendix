@@ -272,7 +272,11 @@ export class CustomerModalComponent {
     effect(() => {
       const isOpen = this.isOpen();
       if (isOpen && !this.customer()) {
-        this.form.reset();
+        // `reset()` sin argumento pone TODOS los controles en `null`, ignorando
+        // el default `[false]` del FormBuilder. `is_withholding_agent` es un
+        // Boolean no-nullable en backend, así que un `null` emitido rompe el
+        // alta (500). Reseteamos preservando el booleano en `false`.
+        this.form.reset({ is_withholding_agent: false });
       }
     });
   }

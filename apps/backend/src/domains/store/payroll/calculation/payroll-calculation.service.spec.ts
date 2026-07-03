@@ -339,6 +339,9 @@ describe('PayrollCalculationService — payroll novelties integration', () => {
       },
       payroll_novelties: { findMany: jest.fn() },
       payroll_items: { findFirst: jest.fn() },
+      withoutScope: jest.fn().mockReturnValue({
+        employee_fiscal_profiles: { findMany: jest.fn().mockResolvedValue([]) },
+      }),
       $transaction: jest.fn().mockImplementation(async (cb: any) => cb(tx)),
     };
     const advances = {

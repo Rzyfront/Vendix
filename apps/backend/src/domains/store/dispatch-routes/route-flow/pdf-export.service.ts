@@ -5,6 +5,7 @@
 // `.default` / module-object fallback to cover both CJS and ESM-bridge
 // environments (ts-node-watch, swc, tsc, esbuild).
 import * as PDFKitNs from 'pdfkit';
+import type { ArticleExitSummary } from '../utils/route-stop-calc';
 const PDFDocument: typeof import('pdfkit') =
   ((PDFKitNs as unknown as { default?: typeof import('pdfkit') }).default ??
     PDFKitNs) as typeof import('pdfkit');
@@ -102,7 +103,10 @@ const PAGE_WIDTH = 612; // Letter
 const PAGE_HEIGHT = 792;
 
 export class PdfExportService {
-  async generate(route: RouteForPdf): Promise<Buffer> {
+  async generate(
+    route: RouteForPdf,
+    articles?: ArticleExitSummary,
+  ): Promise<Buffer> {
     return new Promise((resolve, reject) => {
       try {
         const doc = new PDFDocument({
@@ -122,6 +126,11 @@ export class PdfExportService {
         this.drawStopsTable(doc, route);
         this.drawTotals(doc, route);
         this.drawSignatures(doc);
+        // Last page: consolidated goods-out detail. Drawn BEFORE the footer so
+        // drawFooter's bufferedPageRange numbers this page too.
+        if (articles) {
+          this.drawArticleDetailPage(doc, route, articles);
+        }
         this.drawFooter(doc);
 
         doc.end();
@@ -129,6 +138,147 @@ export class PdfExportService {
         reject(err);
       }
     });
+  }
+
+  /**
+   * Renders the final "DETALLE DE SALIDA DE ARTÍCULOS" page: the consolidated
+   * list of every product that leaves the warehouse in the route (sum of
+   * `dispatched_quantity` per product across all non-released stops). Columns:
+   * Código · Descripción · Unidad · Total Und. NO packaging columns.
+   */
+  private drawArticleDetailPage(
+    doc: PDFKit.PDFDocument,
+    route: RouteForPdf,
+    articles: ArticleExitSummary,
+  ) {
+    doc.addPage();
+    const printable = PAGE_WIDTH - MARGIN * 2;
+
+    // Title (centered, bold).
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(16)
+      .text('DETALLE DE SALIDA DE ARTÍCULOS', MARGIN, MARGIN, {
+        align: 'center',
+        width: printable,
+      });
+    doc.moveDown(0.4);
+
+    // Origin-warehouse subheader (only when known).
+    if (route.origin_location) {
+      const codePart = route.origin_location.code
+        ? `${route.origin_location.code} - `
+        : '';
+      doc
+        .font('Helvetica')
+        .fontSize(10)
+        .text(`Bodega: ${codePart}${route.origin_location.name}`, MARGIN, doc.y, {
+          align: 'center',
+          width: printable,
+        });
+      doc.moveDown(0.3);
+    }
+    this.hr(doc);
+    doc.moveDown(0.3);
+
+    // Column layout (sums to the printable width = 564). Código is widened
+    // (SKUs like ROKU-GAMI-NINT-0024-V38 are long) so it stays on one line.
+    const col_widths = [140, 250, 64, 110];
+    const aligns: Array<'left' | 'right' | 'center'> = [
+      'left',
+      'left',
+      'center',
+      'right',
+    ];
+    const headers = ['Código', 'Descripción', 'Unidad', 'Total Und'];
+    const startX = MARGIN;
+
+    // Draw (and re-draw on page breaks) the column header; returns the y of the
+    // first data row.
+    const drawColHeader = (yTop: number): number => {
+      doc.font('Helvetica-Bold').fontSize(9);
+      let hx = startX;
+      headers.forEach((h, i) => {
+        doc.text(h, hx, yTop, { width: col_widths[i], align: aligns[i] });
+        hx += col_widths[i];
+      });
+      const yAfter = yTop + 16;
+      this.hr(doc, yAfter - 4, MARGIN, PAGE_WIDTH - MARGIN * 2);
+      return yAfter + 4;
+    };
+
+    let y = drawColHeader(doc.y);
+
+    if (articles.rows.length === 0) {
+      doc.font('Helvetica').fontSize(10).fillColor('#555');
+      doc.text('Sin artículos despachados en esta ruta.', MARGIN, y + 4, {
+        width: printable,
+        align: 'left',
+      });
+      doc.fillColor('black');
+      y += 24;
+    } else {
+      // Dynamic row height: measure the tallest cell so a long código or
+      // descripción makes the ROW grow instead of overlapping the next one.
+      // The código keeps its full text (never truncated) — legibility matters
+      // on a picking sheet — at a slightly smaller font so most fit one line.
+      const CELL_PAD_Y = 5;
+      const CODE_FONT = 8;
+      const BODY_FONT = 9;
+      for (const row of articles.rows) {
+        doc.font('Helvetica').fontSize(CODE_FONT);
+        const codeH = doc.heightOfString(row.code, { width: col_widths[0] - 4 });
+        doc.font('Helvetica').fontSize(BODY_FONT);
+        const nameH = doc.heightOfString(row.name, { width: col_widths[1] - 4 });
+        const rowH = Math.max(codeH, nameH, 11) + CELL_PAD_Y * 2;
+
+        // Page break accounts for the FULL measured row height.
+        if (y + rowH > PAGE_HEIGHT - 60) {
+          doc.addPage();
+          y = drawColHeader(MARGIN);
+        }
+
+        const cellY = y + CELL_PAD_Y;
+        let x = startX;
+        // Col 0: código (smaller font, wraps within the widened column).
+        doc.font('Helvetica').fontSize(CODE_FONT).fillColor('black');
+        doc.text(row.code, x, cellY, { width: col_widths[0] - 4, align: aligns[0] });
+        x += col_widths[0];
+        // Col 1: descripción (wraps within its column).
+        doc.font('Helvetica').fontSize(BODY_FONT);
+        doc.text(row.name, x, cellY, { width: col_widths[1] - 4, align: aligns[1] });
+        x += col_widths[1];
+        // Col 2: unidad
+        doc.text(row.unit, x, cellY, { width: col_widths[2], align: aligns[2] });
+        x += col_widths[2];
+        // Col 3: total und
+        doc.text(row.total_units.toLocaleString('es-CO'), x, cellY, {
+          width: col_widths[3],
+          align: aligns[3],
+        });
+
+        y += rowH;
+        this.hr(doc, y - 2, MARGIN, PAGE_WIDTH - MARGIN * 2);
+      }
+    }
+
+    // Sheet footer: totals in bold. Push to a new page if too close to the
+    // bottom margin band (writing there would auto-append a blank page).
+    if (y > PAGE_HEIGHT - 80) {
+      doc.addPage();
+      y = MARGIN;
+    }
+    const footerY = y + 8;
+    doc
+      .font('Helvetica-Bold')
+      .fontSize(10)
+      .text(
+        `TOTAL ARTÍCULOS: ${articles.article_count}    TOTAL UNIDADES: ${articles.total_units.toLocaleString('es-CO')}`,
+        MARGIN,
+        footerY,
+        { width: printable, align: 'right' },
+      );
+    doc.font('Helvetica');
   }
 
   private drawHeader(doc: PDFKit.PDFDocument, route: RouteForPdf) {

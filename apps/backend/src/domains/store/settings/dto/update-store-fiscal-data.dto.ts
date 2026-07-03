@@ -162,4 +162,26 @@ export class UpdateStoreFiscalDataDto {
   @IsOptional()
   @IsBoolean()
   is_self_withholder?: boolean;
+
+  @ApiPropertyOptional({
+    example: '11001',
+    maxLength: 10,
+    description:
+      'Código DANE (Divipola) del municipio donde la tienda ejerce la actividad. Persiste en la columna real `stores.municipality_code`, usada por el cálculo de ICA (tax-declaration-draft.service.ts).',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  municipality_code?: string;
+
+  @ApiPropertyOptional({
+    example: '4711',
+    maxLength: 10,
+    description:
+      'Código CIIU de la actividad económica de la tienda. Persiste en la columna real `stores.ciiu_code`; cascada store→organization en el cálculo de ICA.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(10)
+  ciiu_code?: string;
 }

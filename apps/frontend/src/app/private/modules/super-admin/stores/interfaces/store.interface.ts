@@ -14,7 +14,7 @@ export enum StoreState {
   ARCHIVED = 'archived',
 }
 
-export type StoreIndustry = 'retail' | 'restaurant' | 'manufacturing' | 'service';
+export type StoreIndustry = 'retail' | 'restaurant' | 'manufacturing' | 'service' | 'gym';
 
 export interface Store {
   id: number;

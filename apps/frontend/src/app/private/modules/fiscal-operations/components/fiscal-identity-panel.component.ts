@@ -16,6 +16,7 @@ import {
   ButtonComponent,
   CardComponent,
   IconComponent,
+  InputComponent,
   SelectorComponent,
   SelectorOption,
   ToggleComponent,
@@ -35,6 +36,7 @@ import {
 } from '../../../../shared/components/fiscal-activation-wizard/interfaces/rut-scan-result.interface';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { CountryService } from '../../../../services/country.service';
 import {
   ApiResponse,
   FiscalApiScope,
@@ -93,6 +95,7 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
     ButtonComponent,
     CardComponent,
     IconComponent,
+    InputComponent,
     SelectorComponent,
     ToggleComponent,
     TooltipComponent,
@@ -275,6 +278,122 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
           }
         </app-card>
 
+        <!-- Card 3: Ubicación ICA — municipio DANE + CIIU en cascada -->
+        <app-card>
+          <div class="border-b border-border pb-3 mb-4">
+            <h2 class="text-base font-semibold text-text-primary">
+              Ubicación ICA
+            </h2>
+            <p class="text-xs text-text-secondary mt-0.5">
+              El ICA se declara en el municipio donde ejerces la actividad.
+              Captura el código DANE del municipio (Divipola 5 dígitos) y el
+              código CIIU de tu actividad principal; la cascada store→org
+              resuelve la tarifa al generar la declaración.
+            </p>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <div>
+              <label
+                class="block text-xs font-medium text-text-primary mb-1"
+                for="ica-municipality-code"
+              >
+                Código DANE del municipio
+                <app-tooltip
+                  content="Código Divipola del municipio donde opera la tienda (5 dígitos). Se normaliza a los primeros 5 caracteres al matchear contra la tabla de tarifas."
+                  position="bottom"
+                  size="sm"
+                >
+                  <span
+                    class="inline-flex h-4 w-4 cursor-help items-center justify-center text-text-secondary hover:text-text-primary ml-1"
+                  >
+                    <app-icon name="help-circle" [size]="12"></app-icon>
+                  </span>
+                </app-tooltip>
+              </label>
+              <app-input
+                inputId="ica-municipality-code"
+                [formControl]="icaMunicipalityCodeControl"
+                [disabled]="saving()"
+                placeholder="Ej: 11001 (Bogotá)"
+                [maxlength]="10"
+              ></app-input>
+              <p class="text-[11px] text-text-secondary mt-1">
+                Se persiste en <code>store.municipality_code</code>. Si la
+                tienda tiene dirección primaria con código DANE, M4 lo copia
+                automáticamente.
+              </p>
+            </div>
+
+            <div>
+              <label
+                class="block text-xs font-medium text-text-primary mb-1"
+                for="ica-ciiu-code"
+              >
+                Código CIIU
+                <app-tooltip
+                  content="Código CIIU de la actividad económica (4 dígitos). Cascada store→org: si la tienda no tiene CIIU propio, se usa el de la organización."
+                  position="bottom"
+                  size="sm"
+                >
+                  <span
+                    class="inline-flex h-4 w-4 cursor-help items-center justify-center text-text-secondary hover:text-text-primary ml-1"
+                  >
+                    <app-icon name="help-circle" [size]="12"></app-icon>
+                  </span>
+                </app-tooltip>
+              </label>
+              <app-input
+                inputId="ica-ciiu-code"
+                [formControl]="icaCiiuCodeControl"
+                [disabled]="saving()"
+                placeholder="Ej: 4711 (Comercio al por menor)"
+                [maxlength]="10"
+              ></app-input>
+              <p class="text-[11px] text-text-secondary mt-1">
+                Cascada: <code>store.ciiu_code</code> →
+                <code>organization.ciiu_code</code> → null (warning).
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-4">
+            <div
+              class="flex items-center gap-1.5 text-sm font-medium text-text-primary mb-2"
+            >
+              <span>Referencia geográfica (catálogo api-colombia)</span>
+              <app-tooltip
+                content="Selector auxiliar para confirmar departamento/municipio antes de capturar el código DANE."
+                position="bottom"
+                size="sm"
+              >
+                <span
+                  class="inline-flex h-4 w-4 cursor-help items-center justify-center text-text-secondary hover:text-text-primary"
+                >
+                  <app-icon name="help-circle" [size]="12"></app-icon>
+                </span>
+              </app-tooltip>
+            </div>
+            <div class="grid gap-3 md:grid-cols-2">
+              <app-selector
+                [formControl]="icaDepartmentControl"
+                [options]="icaDepartmentOptions()"
+                placeholder="Departamento"
+                (searchChange)="onIcaDepartmentSearch($event)"
+              ></app-selector>
+              <app-selector
+                [formControl]="icaCityControl"
+                [options]="icaCityOptions()"
+                [placeholder]="icaCityPlaceholder()"
+              ></app-selector>
+            </div>
+            <p class="text-[11px] text-text-secondary mt-2">
+              La api-colombia devuelve IDs no-DANE; usa el departamento/ciudad
+              como referencia y captura el código DANE manualmente arriba.
+            </p>
+          </div>
+        </app-card>
+
         <!-- Acciones -->
         <div class="flex justify-end">
           <app-button
@@ -303,6 +422,7 @@ export class FiscalIdentityPanelComponent {
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly headerActions = inject(FiscalOperationsHeaderActionsService);
+  private readonly countryService = inject(CountryService);
 
   /** Scope del API resuelto desde la data de la ruta (igual que el resto del módulo). */
   private readonly apiScope: FiscalApiScope = this.resolveScope();
@@ -327,6 +447,50 @@ export class FiscalIdentityPanelComponent {
     'bimonthly',
     { nonNullable: true },
   );
+
+  // ── Captura ICA (municipio DANE + CIIU) ──────────────────
+  /**
+   * FormControls para la sección "Ubicación ICA". Persisten vía
+   * PATCH /store|organization/settings/fiscal-data usando los campos
+   * dedicados `municipality_code` y `ciiu_code` del DTO, que el backend
+   * escribe en las columnas reales `stores.municipality_code` /
+   * `stores.ciiu_code` (o `organizations.ciiu_code` cuando el scope es
+   * organización) — las mismas que lee `calculateIca` en
+   * tax-declaration-draft.service.ts.
+   */
+  readonly icaMunicipalityCodeControl = new FormControl<string>('', {
+    nonNullable: true,
+  });
+  readonly icaCiiuCodeControl = new FormControl<string>('', {
+    nonNullable: true,
+  });
+
+  /** Departamento/municipio de referencia vía api-colombia (read-only hint). */
+  readonly icaDepartments = signal<
+    Array<{ id: number; name: string }>
+  >([]);
+  readonly icaCities = signal<
+    Array<{ id: number; name: string; departmentId: number }>
+  >([]);
+  readonly icaDepartmentControl = new FormControl<string>('', {
+    nonNullable: true,
+  });
+  readonly icaCityControl = new FormControl<string>('', {
+    nonNullable: true,
+  });
+
+  readonly icaDepartmentOptions = computed<SelectorOption[]>(() =>
+    this.icaDepartments().map((d) => ({ value: String(d.id), label: d.name })),
+  );
+  readonly icaCityOptions = computed<SelectorOption[]>(() =>
+    this.icaCities().map((c) => ({ value: String(c.id), label: c.name })),
+  );
+  readonly icaCityPlaceholder = computed(() => {
+    if (!this.icaDepartmentControl.value) {
+      return 'Seleccione departamento primero';
+    }
+    return 'Seleccione municipio';
+  });
 
   readonly vatPeriodicityOptions: SelectorOption[] = [
     { value: 'monthly', label: 'Mensual' },
@@ -371,6 +535,10 @@ export class FiscalIdentityPanelComponent {
     return this.selectedResponsibilities().filter((code) => !known.has(code));
   });
 
+  /** Snapshot del CIIU/municipio persistidos para dirty tracking de la sección ICA. */
+  private readonly baselineIcaCiiu = signal<string>('');
+  private readonly baselineIcaMunicipality = signal<string>('');
+
   readonly dirty = computed(() => {
     if (this.legalJson() !== this.baselineLegalJson()) return true;
     if (
@@ -378,6 +546,12 @@ export class FiscalIdentityPanelComponent {
         this.selectedResponsibilities(),
         this.savedResponsibilities(),
       )
+    ) {
+      return true;
+    }
+    if (this.icaCiiuCodeControl.value !== this.baselineIcaCiiu()) return true;
+    if (
+      this.icaMunicipalityCodeControl.value !== this.baselineIcaMunicipality()
     ) {
       return true;
     }
@@ -399,7 +573,57 @@ export class FiscalIdentityPanelComponent {
     this.headerActions.register('refresh', () => this.load());
     this.destroyRef.onDestroy(() => this.headerActions.unregister('refresh'));
 
+    // Carga lazy del catálogo de departamentos para la sección ICA.
+    void this.loadIcaDepartments();
+    // Cuando el usuario selecciona un departamento, hidratar ciudades.
+    this.icaDepartmentControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        if (!value) {
+          this.icaCities.set([]);
+          this.icaCityControl.setValue('', { emitEvent: false });
+          return;
+        }
+        void this.loadIcaCities(Number(value));
+      });
+
     this.load();
+  }
+
+  private async loadIcaDepartments(): Promise<void> {
+    try {
+      const departments = await this.countryService.getDepartments();
+      this.icaDepartments.set(
+        departments.map((d) => ({ id: d.id, name: d.name })),
+      );
+    } catch {
+      this.icaDepartments.set([]);
+    }
+  }
+
+  private async loadIcaCities(departmentId: number): Promise<void> {
+    try {
+      const cities = await this.countryService.getCitiesByDepartment(
+        departmentId,
+      );
+      this.icaCities.set(
+        cities.map((c) => ({
+          id: c.id,
+          name: c.name,
+          departmentId: c.departmentId,
+        })),
+      );
+    } catch {
+      this.icaCities.set([]);
+    }
+  }
+
+  /** Hook del SelectorComponent para refresh manual al teclear búsqueda. */
+  onIcaDepartmentSearch(_event: unknown): void {
+    // No-op: la api-colombia devuelve el catálogo completo por departamento;
+    // un search local en cliente se puede agregar si la lista crece.
+    // El arg es `unknown` porque el contrato de SelectorComponent.searchChange
+    // emite el `Event` nativo; no usamos el query aquí.
   }
 
   // ── Carga ─────────────────────────────────────────────────
@@ -500,10 +724,27 @@ export class FiscalIdentityPanelComponent {
     }
 
     this.saving.set(true);
+    const icaCiiu = this.icaCiiuCodeControl.value?.trim() || undefined;
+    const icaMunicipality =
+      this.icaMunicipalityCodeControl.value?.trim() || undefined;
     const payload: Record<string, unknown> = {
       ...form.getValue(),
       tax_responsibilities: this.selectedResponsibilities(),
       vat_periodicity: this.vatPeriodicityControl.value,
+      // El DTO legado `ciiu` (legal-data-form) sigue viajando para no romper
+      // el resto del formulario legal; el CIIU "oficial" para la cascada de
+      // ICA es el campo dedicado `ciiu_code`, que el backend persiste en la
+      // columna real `stores.ciiu_code` / `organizations.ciiu_code`.
+      ciiu: icaCiiu || form.getValue().ciiu || undefined,
+      // `municipality_code` y `ciiu_code` son campos dedicados del DTO
+      // (update-store-fiscal-data.dto.ts / update-org-fiscal-data.dto.ts) que
+      // el service persiste directamente en `stores.municipality_code` /
+      // `stores.ciiu_code` (o `organizations.ciiu_code`) — las mismas
+      // columnas que lee `calculateIca` en tax-declaration-draft.service.ts.
+      ...(icaMunicipality !== undefined && {
+        municipality_code: icaMunicipality,
+      }),
+      ...(icaCiiu !== undefined && { ciiu_code: icaCiiu }),
     };
 
     this.service
@@ -518,6 +759,10 @@ export class FiscalIdentityPanelComponent {
             ...this.selectedResponsibilities(),
           ]);
           this.savedVatPeriodicity.set(this.vatPeriodicityControl.value);
+          this.baselineIcaCiiu.set(this.icaCiiuCodeControl.value ?? '');
+          this.baselineIcaMunicipality.set(
+            this.icaMunicipalityCodeControl.value ?? '',
+          );
           this.toast.success('Identidad fiscal actualizada');
         },
         error: (error) => {
@@ -563,6 +808,20 @@ export class FiscalIdentityPanelComponent {
       : 'bimonthly';
     this.vatPeriodicityControl.setValue(periodicity);
     this.savedVatPeriodicity.set(periodicity);
+
+    // Sección ICA: `ciiu_code`/`municipality_code` son los campos dedicados
+    // que el GET refleja directamente desde las columnas reales
+    // `stores.ciiu_code`/`stores.municipality_code` (o
+    // `organizations.ciiu_code`). Fallback a `ciiu` legado solo si el campo
+    // dedicado aún no tiene valor (tenant que no ha guardado desde este panel).
+    // El FormControl siempre se inicializa con string vacío por
+    // `{ nonNullable: true }`, así que un undefined nunca rompe.
+    const persistedCiiu = fiscal?.ciiu_code || fiscal?.ciiu || '';
+    const persistedMunicipality = fiscal?.municipality_code || '';
+    this.icaCiiuCodeControl.setValue(persistedCiiu);
+    this.baselineIcaCiiu.set(persistedCiiu);
+    this.icaMunicipalityCodeControl.setValue(persistedMunicipality);
+    this.baselineIcaMunicipality.set(persistedMunicipality);
 
     // El próximo valueChange del form (disparado por el seed) fija la línea base.
     this.awaitingBaseline = true;

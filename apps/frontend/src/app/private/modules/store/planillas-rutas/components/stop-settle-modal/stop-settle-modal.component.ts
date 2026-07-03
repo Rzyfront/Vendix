@@ -7,6 +7,7 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../shared/components/selector/selector.component';
+import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   DispatchRouteStop,
   DispatchRouteStopResult,
@@ -43,6 +44,7 @@ import {
     ModalComponent,
     InputComponent,
     SelectorComponent,
+    IconComponent,
   ],
   template: `
     <app-modal
@@ -51,12 +53,43 @@ import {
       size="md"
       (cancel)="close.emit()"
     >
-      <div class="space-y-3">
-        <div class="text-sm text-text-secondary">
-          Remisión: <strong>{{ stop().dispatch_note?.dispatch_number }}</strong
-          ><br />
-          Cliente: {{ stop().dispatch_note?.customer_name }}<br />
-          Total: <strong>{{ grandTotal() | currency }}</strong>
+      <div class="space-y-4">
+        <!-- Cliente + remisión -->
+        <div class="flex items-start gap-3">
+          <span
+            class="flex h-10 w-10 items-center justify-center rounded-[0.625rem] flex-shrink-0"
+            style="color: var(--color-primary); background: rgba(var(--color-primary-rgb, 126, 215, 165), 0.1); border: 1px solid rgba(var(--color-primary-rgb, 126, 215, 165), 0.18);"
+          >
+            <app-icon name="user" [size]="20"></app-icon>
+          </span>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm font-bold text-text-primary truncate">
+              {{ customerName() }}
+            </p>
+            <div class="mt-1 flex flex-wrap items-center gap-2">
+              <span
+                class="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-text-secondary"
+              >
+                <app-icon name="file-text" [size]="12"></app-icon>
+                {{ dispatchNumber() }}
+              </span>
+              <span class="text-[11px] text-text-secondary">
+                Parada #{{ stop().stop_sequence }}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Total a cobrar (prominente) -->
+        <div class="rounded-xl border border-border bg-surface p-3">
+          <span
+            class="mb-0.5 block text-[11px] font-bold uppercase tracking-wide text-text-secondary"
+          >
+            Total a cobrar
+          </span>
+          <span class="font-mono text-xl font-bold text-text-primary">
+            {{ grandTotal() | currency }}
+          </span>
         </div>
 
         @if (isPrepaid()) {
@@ -210,6 +243,16 @@ export class StopSettleModalComponent {
       note?.customer_is_withholding_agent ?? note?.customer?.is_withholding_agent
     );
   });
+
+  /** Customer name for the summary header (falls back to a placeholder). */
+  readonly customerName = computed<string>(
+    () => this.stop()?.dispatch_note?.customer_name || '(Cliente)',
+  );
+
+  /** Dispatch-note number shown as a chip in the summary header. */
+  readonly dispatchNumber = computed<string>(
+    () => this.stop()?.dispatch_note?.dispatch_number || '—',
+  );
 
   readonly close = output<void>();
   readonly submitted = output<SettleStopDto>();

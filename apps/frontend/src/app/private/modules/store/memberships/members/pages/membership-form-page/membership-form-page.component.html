@@ -1,0 +1,103 @@
+<app-sticky-header
+  title="Asignar membresía"
+  subtitle="Vincula un cliente existente a un plan de membresía."
+  icon="user-plus"
+  [showBackButton]="true"
+  backRoute="/admin/memberships/members"
+  [actions]="headerActions()"
+  (actionClicked)="onHeaderAction($event)"
+></app-sticky-header>
+
+<form
+  [formGroup]="form"
+  (ngSubmit)="submit()"
+  class="space-y-4 md:space-y-6 px-2 pb-4 md:px-0 md:pb-6"
+>
+  <app-card [responsive]="true" [padding]="true" [overflow]="'visible'">
+    <div class="space-y-4">
+      <div class="flex items-start gap-2">
+        <app-icon name="user-plus" size="18" class="text-primary-600 mt-0.5" />
+        <div>
+          <h2 class="text-base font-bold text-gray-900">Socio y plan</h2>
+          <p class="text-xs text-gray-500 mt-0.5">
+            La vigencia se calcula automáticamente según los días del plan.
+          </p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="flex flex-col gap-1.5">
+          <app-selector
+            formControlName="customer_id"
+            label="Cliente (socio)"
+            placeholder="Selecciona un cliente"
+            [options]="customerOptions()"
+            [searchable]="true"
+            [required]="true"
+            [disabled]="isLoadingOptions()"
+            tooltipText="Cliente existente al que se asigna la membresía."
+          />
+          <div class="flex justify-end">
+            <app-button
+              variant="ghost"
+              size="xsm"
+              (clicked)="openCustomerModal()"
+            >
+              <app-icon slot="icon" name="user-plus" size="14" />
+              Crear cliente
+            </app-button>
+          </div>
+        </div>
+        <app-selector
+          formControlName="plan_id"
+          label="Plan"
+          placeholder="Selecciona un plan"
+          [options]="planOptions()"
+          [searchable]="true"
+          [required]="true"
+          [disabled]="isLoadingOptions()"
+          tooltipText="Plan de membresía a asignar."
+        />
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <app-input
+          formControlName="period_start"
+          label="Inicio del período"
+          type="date"
+          tooltipText="Por defecto es hoy. Puedes ajustarla si el período empieza otro día."
+        />
+        <app-setting-toggle
+          formControlName="auto_renew"
+          label="Renovación automática"
+          description="Marca la membresía para renovarse al vencer."
+        />
+      </div>
+
+      <app-textarea
+        formControlName="notes"
+        label="Notas"
+        placeholder="Observaciones internas sobre la membresía."
+        [rows]="3"
+        [maxlength]="2000"
+      />
+    </div>
+  </app-card>
+</form>
+
+<!-- Inline customer creation -->
+<app-customer-modal
+  [isOpen]="isCustomerModalOpen()"
+  [loading]="isCreatingCustomer()"
+  (isOpenChange)="isCustomerModalOpen.set($event)"
+  (closed)="isCustomerModalOpen.set(false)"
+  (save)="onCustomerCreated($event)"
+></app-customer-modal>
+
+<!-- Optional post-alta charge (reuses the renew modal) -->
+<app-membership-renew-modal
+  [open]="showChargeModal()"
+  (openChange)="onChargeModalOpenChange($event)"
+  [membership]="createdMembership()"
+  (renewed)="onCharged($event)"
+></app-membership-renew-modal>

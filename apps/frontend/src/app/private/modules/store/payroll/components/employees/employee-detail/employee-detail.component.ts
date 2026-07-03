@@ -24,6 +24,7 @@ import {
   SelectorOption,
 } from '../../../../../../../shared/components/selector/selector.component';
 import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
+import { EmployeeFiscalProfileFormComponent } from '../employee-fiscal-profile/employee-fiscal-profile-form.component';
 
 @Component({
   selector: 'vendix-employee-detail',
@@ -35,6 +36,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
     ButtonComponent,
     InputComponent,
     SelectorComponent,
+    EmployeeFiscalProfileFormComponent,
   ],
   template: `
     <app-modal
@@ -265,6 +267,20 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
             </div>
           </div>
         </form>
+
+        <!-- Fiscal Profile (art. 387 ET) -->
+        @if (employee() && employee()!.status === 'active') {
+          <div class="mt-6 pt-4 border-t border-border">
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Perfil Fiscal (art. 387 ET)
+            </h3>
+            <vendix-employee-fiscal-profile-form
+              [employeeId]="employee()!.id"
+            ></vendix-employee-fiscal-profile-form>
+          </div>
+        }
 
         <!-- Terminate Action -->
         @if (employee() && employee()!.status === 'active') {

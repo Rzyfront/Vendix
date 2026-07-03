@@ -37,6 +37,7 @@ export enum StoreIndustry {
   RESTAURANT = 'restaurant',
   MANUFACTURING = 'manufacturing',
   SERVICE = 'service',
+  GYM = 'gym',
 }
 
 export class CreateStoreDto {

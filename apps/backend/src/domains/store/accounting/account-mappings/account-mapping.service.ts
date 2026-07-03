@@ -70,6 +70,33 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '5110',
     description: 'Seguridad Social',
   },
+  // Cost center: Administrative
+  'payroll.approved.payroll_expense.administrative': {
+    code: '5105',
+    description: 'Gastos de Personal (Administrativo)',
+  },
+  'payroll.approved.social_security.administrative': {
+    code: '5105',
+    description: 'Seguridad Social (Administrativo)',
+  },
+  // Cost center: Operational (Mano de Obra Directa - Costo)
+  'payroll.approved.payroll_expense.operational': {
+    code: '7205',
+    description: 'Mano de Obra Directa (Operacional)',
+  },
+  'payroll.approved.social_security.operational': {
+    code: '7205',
+    description: 'Seguridad Social M.O.D. (Operacional)',
+  },
+  // Cost center: Sales (Gastos de Personal - Ventas)
+  'payroll.approved.payroll_expense.sales': {
+    code: '5205',
+    description: 'Gastos de Personal (Ventas)',
+  },
+  'payroll.approved.social_security.sales': {
+    code: '5205',
+    description: 'Seguridad Social (Ventas)',
+  },
   'payroll.approved.salaries_payable': {
     code: '2505',
     description: 'Salarios por Pagar',
@@ -77,6 +104,13 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'payroll.approved.health_payable': { code: '2370', description: 'EPS' },
   'payroll.approved.pension_payable': { code: '2380', description: 'Pension' },
   'payroll.approved.withholdings': { code: '2365', description: 'Retenciones' },
+  // B1: segregación de retefuente laboral en 236505 (child of 2365).
+  // El resto de retenciones distintas a retención en la fuente laboral se
+  // sigue acreditando a la cuenta 2365 genérica vía `payroll.approved.withholdings`.
+  'payroll.approved.labor_withholding': {
+    code: '236505',
+    description: 'Retención en la Fuente - Laboral',
+  },
   'payroll.paid.salaries_payable': {
     code: '2505',
     description: 'Salarios por Pagar',
@@ -516,15 +550,6 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Cuentas por pagar a vinculados',
   },
   // Comisiones (Pasarelas de Pago)
-  'commission.calculated.commission_expense': {
-    code: '5295',
-    description: 'Gastos por Comisiones',
-  },
-  'commission.calculated.commission_payable': {
-    code: '2335',
-    description: 'Comisiones por Pagar',
-  },
-  // Commissions
   'commission.calculated.expense': {
     code: '5295',
     description: 'Gastos Diversos - Comisiones',

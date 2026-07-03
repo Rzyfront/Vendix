@@ -36,6 +36,12 @@ import {
   QueryNoveltyDto,
   NoveltyListResponse,
   PilaReport,
+  QueryPilaSubmissionsDto,
+  PilaSubmissionListResponse,
+  EmployeeFiscalProfile,
+  EmployeeFiscalProfileUpdateDto,
+  CalculateSemesterRateDto,
+  CalculateSemesterRateResult,
 } from '../interfaces/payroll.interface';
 import {
   BulkEmployeeAnalysisResult,
@@ -86,6 +92,41 @@ export class PayrollService {
 
   getAvailableUsers(): Observable<ApiResponse<AvailableUser[]>> {
     return this.http.get<ApiResponse<AvailableUser[]>>(this.getApiUrl('employees/available-users'));
+  }
+
+  // ─── Fiscal profile (art. 387 ET — deducciones retefuente laboral) ───
+
+  getEmployeeFiscalProfile(
+    id: number,
+  ): Observable<ApiResponse<EmployeeFiscalProfile>> {
+    return this.http.get<ApiResponse<EmployeeFiscalProfile>>(
+      this.getApiUrl(`employees/${id}/fiscal-profile`),
+    );
+  }
+
+  upsertEmployeeFiscalProfile(
+    id: number,
+    dto: EmployeeFiscalProfileUpdateDto,
+  ): Observable<ApiResponse<EmployeeFiscalProfile>> {
+    return this.http.put<ApiResponse<EmployeeFiscalProfile>>(
+      this.getApiUrl(`employees/${id}/fiscal-profile`),
+      dto,
+    );
+  }
+
+  /**
+   * B5 — Procedimiento 2 (art. 386 ET): calcula el porcentaje fijo del
+   * semestre indicado (o el vigente si se omite) a partir del histórico de
+   * 12 meses de nómina, y lo persiste en el perfil fiscal del empleado.
+   */
+  calculateSemesterRate(
+    id: number,
+    dto: CalculateSemesterRateDto = {},
+  ): Observable<ApiResponse<CalculateSemesterRateResult>> {
+    return this.http.post<ApiResponse<CalculateSemesterRateResult>>(
+      this.getApiUrl(`employees/${id}/fiscal-profile/calculate-semester-rate`),
+      dto,
+    );
   }
 
   // ─── Bulk Upload (Session-based) ──────────────────────
@@ -327,11 +368,27 @@ export class PayrollService {
     });
   }
 
+  generatePilaReport(year: number, month: number): Observable<ApiResponse<PilaReport>> {
+    return this.http.get<ApiResponse<PilaReport>>(this.getApiUrl('pila/generate'), {
+      params: { year, month },
+    });
+  }
+
   exportPilaCsv(year: number, month: number): Observable<Blob> {
     return this.http.get(this.getApiUrl('pila/export'), {
       params: { year, month },
       responseType: 'blob',
     });
+  }
+
+  getPilaSubmissions(
+    query: QueryPilaSubmissionsDto = {},
+  ): Observable<PilaSubmissionListResponse> {
+    const params = this.buildParams(query as Record<string, any>);
+    return this.http.get<PilaSubmissionListResponse>(
+      this.getApiUrl('pila/submissions'),
+      { params },
+    );
   }
 
   // ─── Paystubs & ACH ───────────────────────────────────

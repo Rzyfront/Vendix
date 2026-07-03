@@ -52,10 +52,11 @@ export class MenuAvailabilityCheckerService {
         hour12: false,
       }).formatToParts(now);
       const weekdayStr = parts.find((p) => p.type === 'weekday')?.value || '';
-      const hoursVal = parseInt(
-        parts.find((p) => p.type === 'hour')?.value || '0',
-        10,
-      );
+      // ICU portability: with hour12:false some runtimes use hourCycle 'h24'
+      // and render midnight as "24" (00:00-00:59 → hour "24"), while others use
+      // 'h23' ("00"). Normalize 24 → 0 so minute-of-day math stays in [0,1439].
+      const hoursVal =
+        parseInt(parts.find((p) => p.type === 'hour')?.value || '0', 10) % 24;
       const minutesVal = parseInt(
         parts.find((p) => p.type === 'minute')?.value || '0',
         10,

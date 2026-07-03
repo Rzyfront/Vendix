@@ -60,6 +60,9 @@ import { ProductionOrdersModule } from './production/production.module';
 import { KitchenFireModule } from './kitchen-fire/kitchen-fire.module';
 import { TablesModule } from './tables/tables.module';
 import { MenusModule } from './menus/menus.module';
+import { MembershipPlansModule } from './membership-plans/membership-plans.module';
+import { MembershipsModule } from './memberships/memberships.module';
+import { MembershipAccessModule } from './membership-access/membership-access.module';
 import { UomModule } from './uom/uom.module';
 import { WeeklyReportModule } from './weekly-report/weekly-report.module';
 
@@ -124,6 +127,9 @@ import { WeeklyReportModule } from './weekly-report/weekly-report.module';
     KitchenFireModule,
     TablesModule,
     MenusModule,
+    MembershipPlansModule,
+    MembershipsModule,
+    MembershipAccessModule,
     UomModule,
     WeeklyReportModule,
   ],

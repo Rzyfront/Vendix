@@ -87,6 +87,15 @@ export class StorePrismaService extends BasePrismaService {
     'menus',
     'menu_sections',
     'menu_availability_windows',
+    // ===== Membership core (generalized) =====
+    // Las 5 tablas de membresía llevan store_id directo → scoping directo por
+    // tienda. membership_access_logs también scopea por store_id (bitácora).
+    'membership_plans',
+    'memberships',
+    'membership_profiles',
+    'membership_access_credentials',
+    'membership_access_logs',
+    'membership_access_occupancy',
   ];
 
   private readonly fiscal_entity_scoped_models = [
@@ -1625,6 +1634,40 @@ export class StorePrismaService extends BasePrismaService {
 
   get menu_availability_windows() {
     return this.scoped_client.menu_availability_windows;
+  }
+
+  // ===== Membership core (generalized) — scoped getters =====
+  get membership_plans() {
+    return this.scoped_client.membership_plans;
+  }
+
+  get memberships() {
+    return this.scoped_client.memberships;
+  }
+
+  get membership_profiles() {
+    return this.scoped_client.membership_profiles;
+  }
+
+  get membership_access_credentials() {
+    return this.scoped_client.membership_access_credentials;
+  }
+
+  get membership_access_logs() {
+    return this.scoped_client.membership_access_logs;
+  }
+
+  get membership_access_occupancy() {
+    return this.scoped_client.membership_access_occupancy;
+  }
+
+  /**
+   * Escape hatch to the UNSCOPED base client. There is NO automatic tenant
+   * scoping here: every query MUST carry an explicit `store_id` predicate.
+   * Use only for cross-scope/global reads or models without a scoped getter.
+   */
+  withoutScope() {
+    return this.baseClient;
   }
 
   // Global tables (no store scoping)

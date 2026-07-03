@@ -7,9 +7,11 @@ import type {
   Brand,
   CreateProductDto,
   CreateProductVariantDto,
+  PricingType,
   Product,
   ProductCategory,
   ProductState,
+  ProductType,
   TaxCategory,
   UpdateProductDto,
 } from '@/features/store/types';

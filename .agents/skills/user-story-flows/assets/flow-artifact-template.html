@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  TEMPLATE — User Story Flows (Vendix)
+  ============================================================================
+  Skill: user-story-flows
+
+  HOW TO USE
+    1. Copy this file to  docs/<feature>-user-stories.html  at the repo root.
+    2. Replace every {{TOKEN}} and the EXAMPLE epic with your real content.
+    3. Derive each flow from the real code (endpoints, guards, status enums).
+    4. Ground the state-pill colors in the app's real status palette.
+
+  PUBLISHING AS A CLAUDE ARTIFACT
+    Remove the <!DOCTYPE>, <html>, <head>, <body> wrapper below — the Artifact
+    tool injects its own. Keep only the <style> block onward. Load the
+    `artifact-design` skill first. All CSS/JS is already inline and CSP-safe.
+
+  RULES (see SKILL.md)
+    - No external CDN / webfonts / remote images. Inline everything (data: URIs).
+    - Nodes map to REAL actions/endpoints/states. No decorative flows.
+    - All motion is gated behind prefers-reduced-motion.
+  ============================================================================
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{{FEATURE_TITLE}} — Historias de usuario y flujos</title>
+</head>
+<body>
+<style>
+  :root {
+    /* ---- Ground + ink: cool, chosen neutrals (not default grey) ---- */
+    --ground: #EEF1F6;
+    --surface: #FFFFFF;
+    --surface-2: #F7F9FC;
+    --ink: #161922;
+    --ink-2: #4C5361;
+    --line: #DCE2EC;
+
+    /* ---- Structural accent (flat, NOT a semantic color). Retune per feature. ---- */
+    --accent: #3A3A7A;
+    --accent-2: #ECECF7;
+    --accent-ink: #2A2A62;
+
+    /* ---- Semantic STATE colors — REPLACE with the app's real status palette ---- */
+    --active-t: #15803D; --active-b: #DCFCE7; --active-l: #86EFAC;  /* ok / vigente   */
+    --pend-t: #B45309;   --pend-b: #FEF3C7;   --pend-l: #FCD34D;    /* pendiente      */
+    --deny-t: #B91C1C;   --deny-b: #FEE2E2;   --deny-l: #FCA5A5;    /* error / denied */
+    --froz-t: #1D4ED8;   --froz-b: #DBEAFE;   --froz-l: #93C5FD;    /* info / frozen  */
+    --exp-t: #57534E;    --exp-b: #ECEBE9;    --exp-l: #D6D3D1;     /* neutral / fin  */
+
+    --mono: "SF Mono", ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --r: 6px;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font-family: var(--sans);
+         font-size: 16px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- header ---------- */
+  header.masthead { padding: 64px 0 40px; border-bottom: 1px solid var(--line); }
+  .eyebrow { font-family: var(--mono); font-size: .72rem; letter-spacing: .14em;
+             text-transform: uppercase; color: var(--accent); margin: 0 0 18px;
+             display: flex; align-items: center; gap: 10px; }
+  .eyebrow::before { content: ""; width: 26px; height: 2px; background: var(--accent); display: inline-block; }
+  h1 { font-size: clamp(2.1rem, 5.2vw, 3.3rem); line-height: 1.04; letter-spacing: -.02em;
+       margin: 0 0 18px; text-wrap: balance; font-weight: 700; }
+  h1 span { color: var(--accent); }
+  .lede { max-width: 60ch; color: var(--ink-2); font-size: 1.05rem; margin: 0 0 26px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 10px; }
+  .stat { display: flex; flex-direction: column; gap: 2px; padding: 10px 16px 11px;
+          background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); min-width: 96px; }
+  .stat b { font-size: 1.5rem; line-height: 1; letter-spacing: -.01em; font-variant-numeric: tabular-nums; }
+  .stat small { font-family: var(--mono); font-size: .62rem; letter-spacing: .08em;
+                text-transform: uppercase; color: var(--ink-2); }
+
+  /* ---------- sticky nav ---------- */
+  nav.toc { position: sticky; top: 0; z-index: 20;
+            background: color-mix(in srgb, var(--ground) 88%, transparent);
+            backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  nav.toc .wrap { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 12px; padding-bottom: 12px; }
+  nav.toc a { font-family: var(--mono); font-size: .72rem; text-decoration: none; color: var(--ink-2);
+              padding: 6px 11px; border: 1px solid var(--line); border-radius: 100px; background: var(--surface);
+              transition: color .15s, border-color .15s, background .15s; white-space: nowrap; }
+  nav.toc a:hover, nav.toc a:focus-visible, nav.toc a.active {
+              color: var(--accent-ink); border-color: var(--accent); background: var(--accent-2); }
+
+  /* ---------- legend ---------- */
+  .legend { margin: 40px 0 12px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 22px 34px; padding: 24px 26px; background: var(--surface); border: 1px solid var(--line);
+            border-radius: var(--r); }
+  .legend h3 { font-family: var(--mono); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+               color: var(--ink-2); margin: 0 0 14px; font-weight: 600; }
+  .legend .row { display: flex; align-items: center; gap: 10px; margin-bottom: 9px; font-size: .85rem; }
+  .swatch { width: 26px; height: 18px; border-radius: 4px; flex: 0 0 auto; border: 1px solid rgba(0,0,0,.08); }
+
+  /* ---------- epics ---------- */
+  section.epic { padding: 52px 0 8px; scroll-margin-top: 64px; }
+  .epic-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 6px; }
+  .epic-num { font-family: var(--mono); font-size: .95rem; font-weight: 600; color: var(--accent);
+              padding: 3px 9px; background: var(--accent-2); border-radius: 4px; letter-spacing: .04em; }
+  .epic-head h2 { font-size: 1.55rem; letter-spacing: -.015em; margin: 0; font-weight: 700; text-wrap: balance; }
+  .epic-purpose { color: var(--ink-2); margin: 0 0 26px; max-width: 68ch; font-size: .96rem; }
+
+  /* ---------- story card ---------- */
+  .story { background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+           padding: 22px 24px 26px; margin-bottom: 18px; }
+  .story-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 14px; margin-bottom: 4px; }
+  .hu-id { font-family: var(--mono); font-size: .74rem; font-weight: 600; color: var(--surface);
+           background: var(--accent); padding: 3px 8px; border-radius: 4px; letter-spacing: .02em; }
+  .story-top h4 { font-size: 1.06rem; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  .as-a { color: var(--ink-2); font-size: .9rem; margin: 8px 0 20px; max-width: 74ch; }
+  .as-a em { color: var(--accent-ink); font-style: normal; font-weight: 600; }
+
+  /* ---------- flow ---------- */
+  .track { overflow-x: auto; padding: 4px 2px 12px; margin: 0 -4px; }
+  .flow { display: flex; align-items: center; gap: 0; flex-wrap: nowrap; min-width: min-content; }
+  .node { flex: 0 0 auto; width: 168px; min-height: 62px; display: flex; flex-direction: column;
+          justify-content: center; gap: 4px; padding: 11px 13px; border-radius: var(--r);
+          font-size: .83rem; line-height: 1.35; background: var(--surface-2); border: 1px solid var(--line); }
+  .node .tag { font-family: var(--mono); font-size: .58rem; letter-spacing: .09em;
+               text-transform: uppercase; color: var(--ink-2); }
+  .node code, .pill code { font-family: var(--mono); font-size: .74rem; }
+  .node.action { border-color: var(--ink); border-width: 1.5px; background: var(--surface); }
+  .node.action .tag { color: var(--ink); }
+  .node.system { background: var(--accent-2); border-color: transparent; }
+  .node.system .tag { color: var(--accent); }
+  .node.system code { color: var(--accent-ink); }
+  .node.decision { border-style: dashed; border-color: var(--ink-2); background: var(--surface); }
+  .node.decision .tag { color: var(--ink-2); }
+  .node.decision .tag::before { content: "\25C7 "; } /* ◇ */
+
+  /* connector: faint base line (::before) + flowing comet (::after) + chevron glyph */
+  .connector { flex: 0 0 auto; width: 40px; align-self: center; position: relative;
+               display: flex; align-items: center; justify-content: center;
+               color: var(--accent); font-size: 1.15rem; }
+  .connector::before { content: ""; position: absolute; left: 2px; right: 2px; top: 50%;
+                       height: 2px; transform: translateY(-50%); background: var(--line); border-radius: 2px; }
+  .connector::after { content: ""; position: absolute; top: 50%; left: 0; width: 14px; height: 2px;
+                      transform: translateY(-50%); border-radius: 2px;
+                      background: linear-gradient(90deg, transparent, var(--accent)); opacity: 0; }
+  .connector .chev { position: relative; z-index: 1; }
+
+  /* branch group */
+  .branch { flex: 0 0 auto; display: flex; flex-direction: column; gap: 10px; }
+  .branch-item { display: flex; align-items: center; gap: 8px; }
+  .cond { font-family: var(--mono); font-size: .6rem; letter-spacing: .04em; color: var(--ink-2);
+          white-space: nowrap; align-self: center; }
+
+  /* state pills */
+  .pill { flex: 0 0 auto; width: 168px; min-height: 62px; display: flex; flex-direction: column;
+          justify-content: center; gap: 4px; padding: 11px 13px; border-radius: var(--r);
+          font-size: .83rem; line-height: 1.3; border: 1px solid; }
+  .pill .tag { font-family: var(--mono); font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; }
+  .s-active { color: var(--active-t); background: var(--active-b); border-color: var(--active-l); }
+  .s-pend   { color: var(--pend-t);   background: var(--pend-b);   border-color: var(--pend-l); }
+  .s-deny   { color: var(--deny-t);   background: var(--deny-b);   border-color: var(--deny-l); }
+  .s-froz   { color: var(--froz-t);   background: var(--froz-b);   border-color: var(--froz-l); }
+  .s-exp    { color: var(--exp-t);    background: var(--exp-b);    border-color: var(--exp-l); }
+
+  /* evidence chips */
+  .evidence { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 16px; }
+  .chip { font-family: var(--mono); font-size: .66rem; letter-spacing: .03em; padding: 4px 9px;
+          border-radius: 100px; background: var(--surface-2); border: 1px solid var(--line); color: var(--ink-2); }
+  .chip.ok  { color: var(--active-t); background: var(--active-b); border-color: var(--active-l); }
+  .chip.acc { color: var(--accent-ink); background: var(--accent-2); border-color: transparent; }
+
+  footer { margin-top: 56px; padding: 34px 0 72px; border-top: 1px solid var(--line);
+           color: var(--ink-2); font-size: .88rem; }
+  footer .status { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+
+  a:focus-visible, .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- responsive: flow collapses to vertical ---------- */
+  @media (max-width: 760px) {
+    .flow { flex-direction: column; align-items: stretch; }
+    .node, .pill { width: 100%; }
+    .connector { width: 100%; height: 28px; transform: rotate(90deg); }
+    .branch { width: 100%; }
+    .branch-item { flex-direction: column; align-items: stretch; }
+    .cond { align-self: flex-start; }
+  }
+
+  /* ============================ ANIMATIONS ============================ */
+  /* Default (no-JS / reduced-motion): everything visible & static.       */
+  @media (prefers-reduced-motion: no-preference) {
+    /* 1. Scroll-reveal: story starts hidden, .in reveals with a stagger */
+    .story { opacity: 0; transform: translateY(14px); transition: opacity .5s ease, transform .5s ease; }
+    .story.in { opacity: 1; transform: none; }
+    .story .flow > * { opacity: 0; transform: translateY(8px);
+                       transition: opacity .45s ease, transform .45s ease;
+                       transition-delay: calc(var(--i, 0) * 70ms); }
+    .story.in .flow > * { opacity: 1; transform: none; }
+
+    /* 2. Flowing connector: the comet slides along the base line, only while revealed */
+    .story.in .connector::after { animation: flow-comet 1.8s linear infinite; }
+    @keyframes flow-comet {
+      0%   { left: 0;    width: 8px;  opacity: 0; }
+      15%  { opacity: 1; }
+      85%  { opacity: 1; }
+      100% { left: 100%; width: 16px; opacity: 0; }
+    }
+
+    /* 3. Live-state pulse on active/pending pills */
+    .story.in .pill.s-active, .story.in .pill.s-pend { animation: pill-pulse 2.6s ease-in-out infinite; }
+    @keyframes pill-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(21,128,61,0); }
+      50%      { box-shadow: 0 0 0 4px rgba(21,128,61,.10); }
+    }
+  }
+</style>
+
+<!-- =================================================================== -->
+<!-- STICKY NAV — one anchor per epic. Keep ids in sync with sections.   -->
+<!-- =================================================================== -->
+<nav class="toc" aria-label="Índice de épicas">
+  <div class="wrap">
+    <a href="#ep1">01 · {{EPIC_1_SHORT}}</a>
+    <!-- <a href="#ep2">02 · {{EPIC_2_SHORT}}</a> ... repeat per epic -->
+  </div>
+</nav>
+
+<!-- =================================================================== -->
+<!-- HEADER                                                              -->
+<!-- =================================================================== -->
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">{{MODULE_OR_AREA}} · Historias de usuario</p>
+    <h1>Flujos de <span>{{FEATURE_TITLE}}</span></h1>
+    <p class="lede">{{ONE_PARAGRAPH_SUMMARY — qué cubre, para quién, y que los flujos mapean a lo implementado.}}</p>
+    <div class="meta">
+      <div class="stat"><b>{{N}}</b><small>Épicas</small></div>
+      <div class="stat"><b>{{N}}</b><small>Historias</small></div>
+      <div class="stat"><b>{{N}}</b><small>Pantallas</small></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- =============================================================== -->
+  <!-- LEGEND — node types + the REAL state palette                    -->
+  <!-- =============================================================== -->
+  <div class="legend" aria-label="Leyenda">
+    <div>
+      <h3>Tipos de nodo</h3>
+      <div class="row"><span class="node action" style="width:auto;min-height:0;padding:5px 9px"><span class="tag">Acción</span></span> El actor hace algo</div>
+      <div class="row"><span class="node system" style="width:auto;min-height:0;padding:5px 9px"><span class="tag">Sistema</span></span> Backend / endpoint / servicio</div>
+      <div class="row"><span class="node decision" style="width:auto;min-height:0;padding:5px 9px"><span class="tag">Decisión</span></span> Bifurcación / validación</div>
+    </div>
+    <div>
+      <h3>Estados (colores reales del código)</h3>
+      <div class="row"><span class="swatch" style="background:var(--active-b);border-color:var(--active-l)"></span> <code style="font-family:var(--mono);font-size:.78rem;color:var(--active-t)">{{estado_ok}}</code></div>
+      <div class="row"><span class="swatch" style="background:var(--pend-b);border-color:var(--pend-l)"></span> <code style="font-family:var(--mono);font-size:.78rem;color:var(--pend-t)">{{estado_pendiente}}</code></div>
+      <div class="row"><span class="swatch" style="background:var(--deny-b);border-color:var(--deny-l)"></span> <code style="font-family:var(--mono);font-size:.78rem;color:var(--deny-t)">{{error / denegado}}</code></div>
+      <div class="row"><span class="swatch" style="background:var(--exp-b);border-color:var(--exp-l)"></span> <code style="font-family:var(--mono);font-size:.78rem;color:var(--exp-t)">{{estado_final}}</code></div>
+    </div>
+  </div>
+
+  <!-- =============================================================== -->
+  <!-- EXAMPLE EPIC — delete once you have your own. Shows every node   -->
+  <!-- type, a decision branch, evidence chips, and the animations.    -->
+  <!-- =============================================================== -->
+  <section class="epic" id="ep1">
+    <div class="epic-head"><span class="epic-num">01</span><h2>{{EPIC_1_TITLE — ej. "Recurso X"}}</h2></div>
+    <p class="epic-purpose">{{Una línea: superficie/ruta y propósito del épico.}}</p>
+
+    <!-- story with a linear flow -->
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-1.1</span><h4>{{Título de la historia}}</h4></div>
+      <p class="as-a">Como <em>{{actor}}</em> quiero <em>{{capacidad}}</em> para {{beneficio}}.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>{{Abre / completa …}}</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/{{endpoint}}</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">Sistema</span>{{Proceso / regla}}</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="pill s-active"><span class="tag">Estado</span>{{estado_resultante}}</div>
+      </div></div>
+      <div class="evidence">
+        <span class="chip">{{regla / invariante}}</span>
+        <span class="chip ok">{{evidencia verificada}}</span>
+      </div>
+    </div>
+
+    <!-- story with a decision + branch (2+ outcomes) -->
+    <div class="story">
+      <div class="story-top"><span class="hu-id">HU-1.2</span><h4>{{Historia con bifurcación}}</h4></div>
+      <p class="as-a">Como <em>{{actor}}</em> quiero <em>{{capacidad}}</em> para {{beneficio}}.</p>
+      <div class="track"><div class="flow">
+        <div class="node action"><span class="tag">Acción</span>{{Acción inicial}}</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node system"><span class="tag">POST</span><code>/{{endpoint}}/validate</code></div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="node decision"><span class="tag">Decisión</span>¿{{condición}}?</div>
+        <span class="connector" aria-hidden="true"><span class="chev">&rarr;</span></span>
+        <div class="branch">
+          <div class="branch-item"><span class="cond">sí</span><div class="pill s-active" style="width:150px"><span class="tag">Resultado</span>{{granted + log}}</div></div>
+          <div class="branch-item"><span class="cond">no</span><div class="pill s-deny" style="width:150px"><span class="tag">Error</span><code>{{404 CODE}}</code></div></div>
+        </div>
+      </div></div>
+      <div class="evidence"><span class="chip acc">{{fix / guard}}</span></div>
+    </div>
+  </section>
+  <!-- =========================== /EXAMPLE ========================== -->
+
+  <!-- Add the rest of your epics here, same shape, ids ep2, ep3, …    -->
+
+  <footer>
+    <div class="wrap" style="padding:0;max-width:none">
+      {{Nota de estado / evidencia: cómo se verificaron los flujos (curl, E2E, review).}}
+      <div class="status">
+        <span class="chip ok">{{hito verificado}}</span>
+        <span class="chip acc">{{estado del código}}</span>
+      </div>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  /* Scroll-reveal — adds .in to each story as it enters the viewport, and
+     staggers the flow children via --i. Disabled under reduced-motion so the
+     content is simply visible. */
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var stories = document.querySelectorAll('.story');
+    if (reduce || !('IntersectionObserver' in window)) {
+      stories.forEach(function (s) { s.classList.add('in'); });
+    } else {
+      stories.forEach(function (s) {
+        var kids = s.querySelectorAll('.flow > *');
+        kids.forEach(function (k, i) { k.style.setProperty('--i', i); });
+      });
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+        });
+      }, { rootMargin: '0px 0px -12% 0px', threshold: 0.12 });
+      stories.forEach(function (s) { io.observe(s); });
+    }
+
+    /* Sticky-nav active highlight as sections scroll by. */
+    var links = {};
+    document.querySelectorAll('nav.toc a').forEach(function (a) {
+      links[a.getAttribute('href').slice(1)] = a;
+    });
+    if ('IntersectionObserver' in window) {
+      var navIo = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          var a = links[e.target.id];
+          if (a && e.isIntersecting) {
+            Object.keys(links).forEach(function (k) { links[k].classList.remove('active'); });
+            a.classList.add('active');
+          }
+        });
+      }, { rootMargin: '-40% 0px -55% 0px' });
+      document.querySelectorAll('section.epic').forEach(function (s) { navIo.observe(s); });
+    }
+  })();
+</script>
+</body>
+</html>

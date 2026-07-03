@@ -7,6 +7,7 @@ import {
   viewChild,
   TemplateRef,
 } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 
@@ -15,6 +16,7 @@ import {
   PilaReport,
   PilaEmployeeRow,
   PilaTotals,
+  PilaSubmission,
 } from '../interfaces/payroll.interface';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -23,6 +25,7 @@ import { StatsComponent } from '../../../../../shared/components/stats/stats.com
 import { CardComponent } from '../../../../../shared/components/card/card.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { BadgeComponent, BadgeVariant } from '../../../../../shared/components/badge/badge.component';
 import {
   SelectorComponent,
   SelectorOption,
@@ -32,6 +35,18 @@ import {
   TableColumn,
   ItemListCardConfig,
 } from '../../../../../shared/components/responsive-data-view/responsive-data-view.component';
+
+const SUBMISSION_STATUS_LABELS: Record<string, string> = {
+  generated: 'Generada',
+  exported: 'Exportada',
+  void: 'Anulada',
+};
+
+const SUBMISSION_STATUS_VARIANTS: Record<string, BadgeVariant> = {
+  generated: 'info',
+  exported: 'success',
+  void: 'neutral',
+};
 
 const MONTH_LABELS = [
   'Enero',
@@ -67,10 +82,12 @@ const FLAG_CLASSES: Record<string, string> = {
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    DatePipe,
     StatsComponent,
     CardComponent,
     ButtonComponent,
     IconComponent,
+    BadgeComponent,
     SelectorComponent,
     ResponsiveDataViewComponent,
   ],
@@ -146,6 +163,16 @@ const FLAG_CLASSES: Record<string, string> = {
               ></app-selector>
             </div>
             <app-button
+              variant="ghost"
+              size="sm"
+              (clicked)="onGenerate()"
+              [loading]="generating()"
+              [disabled]="loading() || tableData().length === 0"
+            >
+              <app-icon slot="icon" name="file-check" [size]="14" class="mr-1"></app-icon>
+              Generar
+            </app-button>
+            <app-button
               variant="outline"
               size="sm"
               (clicked)="onExportCsv()"
@@ -169,6 +196,65 @@ const FLAG_CLASSES: Record<string, string> = {
             emptyMessage="No hay datos PILA para el período seleccionado"
             emptyIcon="file-spreadsheet"
           ></app-responsive-data-view>
+        </div>
+      </app-card>
+
+      <!-- Historial de generaciones/exportaciones (pila_submissions) -->
+      <app-card
+        [responsive]="true"
+        [padding]="false"
+        overflow="visible"
+        customClasses="mt-4"
+      >
+        <div
+          class="px-2 py-2 md:px-6 md:py-4 md:border-b md:border-border flex items-center justify-between"
+        >
+          <h2 class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:text-text-primary">
+            Historial de Planillas
+          </h2>
+          @if (currentPeriodStatus(); as current) {
+            <app-badge [variant]="getStatusVariant(current.status)" size="sm">
+              {{ getStatusLabel(current.status) }}
+            </app-badge>
+          }
+        </div>
+
+        <div class="px-2 pb-3 pt-2 md:p-4">
+          @if (loadingSubmissions()) {
+            <p class="text-xs text-text-secondary px-2 py-3">Cargando historial…</p>
+          } @else if (submissions().length === 0) {
+            <p class="text-xs text-text-secondary px-2 py-3">
+              Aún no se ha generado ni exportado ninguna planilla PILA.
+            </p>
+          } @else {
+            <ul class="flex flex-col gap-1.5">
+              @for (submission of submissions(); track submission.id) {
+                <li
+                  class="flex flex-col gap-1 rounded-lg border border-border px-3 py-2 md:flex-row md:items-center md:justify-between"
+                >
+                  <div class="flex items-center gap-2">
+                    <app-badge [variant]="getStatusVariant(submission.status)" size="xs">
+                      {{ getStatusLabel(submission.status) }}
+                    </app-badge>
+                    <span class="text-xs font-medium text-text-primary">
+                      {{ getPeriodLabel(submission.period_year, submission.period_month) }}
+                    </span>
+                    <span class="text-xs text-text-secondary">
+                      {{ submission.employees_count }} empleados
+                    </span>
+                  </div>
+                  <div class="flex items-center gap-3 text-[11px] text-text-secondary">
+                    <span>
+                      {{ formatCurrency(asNumber(submission.total_contributions)) }}
+                    </span>
+                    <span>
+                      {{ (submission.exported_at || submission.created_at) | date:'dd/MM/yyyy HH:mm' }}
+                    </span>
+                  </div>
+                </li>
+              }
+            </ul>
+          }
         </div>
       </app-card>
     </div>
@@ -201,7 +287,25 @@ export class PayrollPilaPageComponent {
 
   readonly loading = signal(false);
   readonly exporting = signal(false);
+  readonly generating = signal(false);
   readonly report = signal<PilaReport | null>(null);
+
+  readonly loadingSubmissions = signal(false);
+  readonly submissions = signal<PilaSubmission[]>([]);
+
+  /** Estado más reciente (no-void) de la planilla del período seleccionado. */
+  readonly currentPeriodStatus = computed(() => {
+    const year = this.yearControl.value;
+    const month = this.monthControl.value;
+    return (
+      this.submissions().find(
+        (s) =>
+          s.period_year === year &&
+          s.period_month === month &&
+          s.status !== 'void',
+      ) || null
+    );
+  });
 
   readonly totals = computed<PilaTotals>(() => this.report()?.totals || {});
   readonly socialSecurityTotal = computed(() => {
@@ -303,13 +407,20 @@ export class PayrollPilaPageComponent {
   constructor() {
     this.currencyService.loadCurrency();
     this.loadReport();
+    this.loadSubmissions();
 
     this.yearControl.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.loadReport());
+      .subscribe(() => {
+        this.loadReport();
+        this.loadSubmissions();
+      });
     this.monthControl.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => this.loadReport());
+      .subscribe(() => {
+        this.loadReport();
+        this.loadSubmissions();
+      });
   }
 
   loadReport(): void {
@@ -349,6 +460,7 @@ export class PayrollPilaPageComponent {
           a.click();
           window.URL.revokeObjectURL(url);
           this.exporting.set(false);
+          this.loadSubmissions();
         },
         error: () => {
           this.exporting.set(false);
@@ -360,8 +472,67 @@ export class PayrollPilaPageComponent {
       });
   }
 
+  onGenerate(): void {
+    const year = this.yearControl.value;
+    const month = this.monthControl.value;
+    this.generating.set(true);
+    this.payrollService
+      .generatePilaReport(year, month)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.generating.set(false);
+          this.toastService.show({
+            variant: 'success',
+            description: 'Planilla PILA generada y registrada en el historial',
+          });
+          this.loadSubmissions();
+        },
+        error: () => {
+          this.generating.set(false);
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al generar la planilla PILA',
+          });
+        },
+      });
+  }
+
+  loadSubmissions(): void {
+    this.loadingSubmissions.set(true);
+    this.payrollService
+      .getPilaSubmissions({ limit: 10 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.submissions.set(res.data || []);
+          this.loadingSubmissions.set(false);
+        },
+        error: () => {
+          this.submissions.set([]);
+          this.loadingSubmissions.set(false);
+        },
+      });
+  }
+
   formatCurrency(value: number): string {
     return this.currencyService.format(Number(value) || 0);
+  }
+
+  asNumber(value: string | number | null | undefined): number {
+    return Number(value) || 0;
+  }
+
+  getStatusLabel(status: string): string {
+    return SUBMISSION_STATUS_LABELS[status] || status;
+  }
+
+  getStatusVariant(status: string): BadgeVariant {
+    return SUBMISSION_STATUS_VARIANTS[status] || 'neutral';
+  }
+
+  getPeriodLabel(year: number, month: number): string {
+    return `${MONTH_LABELS[month - 1] || month} ${year}`;
   }
 
   getFlagLabel(flag: string): string {

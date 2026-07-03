@@ -25,6 +25,10 @@ import { SubscriptionWebhookReconcilerJob } from './subscription-webhook-reconci
 import { SubscriptionWebhookReconcilerController } from './subscription-webhook-reconciler.controller';
 import { SubscriptionTrialNotifierJob } from './subscription-trial-notifier.job';
 import { PaymentMethodExpiryNotifierJob } from './payment-method-expiry-notifier.job';
+import { MembershipExpiryNotifierJob } from './membership-expiry-notifier.job';
+import { MembershipAforoJob } from './membership-aforo.job';
+import { MembershipAccessModule } from '../domains/store/membership-access/membership-access.module';
+import { SettingsModule } from '../domains/store/settings/settings.module';
 import { PromotionalActivationJob } from './promotional-activation.job';
 import { PartnerPayoutBatchJob } from './partner-payout-batch.job';
 import { CommissionAccrualJob } from './commission-accrual.job';
@@ -34,6 +38,7 @@ import { FiscalObligationDetectorJob } from './fiscal-obligation-detector.job';
 import { FiscalStatusListener } from './fiscal-status.listener';
 import { WeeklyReportGenerateJob } from './weekly-report-generate.job';
 import { WeeklyReportModule } from '../domains/store/weekly-report/weekly-report.module';
+import { NotificationsModule } from '../domains/store/notifications/notifications.module';
 import { FiscalStatusService } from '../common/services/fiscal-status.service';
 // PaymentConfirmedEmailJob is intentionally NOT imported here. Its handler
 // logic (job name `payment.confirmed.email`) was consolidated into
@@ -65,6 +70,9 @@ import { ResponseModule } from '../common/responses/response.module';
     PlatformGatewayModule,
     ResponseModule,
     WeeklyReportModule,
+    NotificationsModule,
+    MembershipAccessModule,
+    SettingsModule,
     BullModule.registerQueue(
       { name: 'ai-embedding' },
       { name: 'subscription-payment-retry' },
@@ -96,6 +104,8 @@ import { ResponseModule } from '../common/responses/response.module';
     SubscriptionWebhookReconcilerJob,
     SubscriptionTrialNotifierJob,
     PaymentMethodExpiryNotifierJob,
+    MembershipExpiryNotifierJob,
+    MembershipAforoJob,
     PromotionalActivationJob,
     PartnerPayoutBatchJob,
     CommissionAccrualJob,

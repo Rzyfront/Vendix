@@ -39,7 +39,13 @@ const INVOICE_INCLUDE = {
   invoice_taxes: true,
   resolution: true,
   customer: {
-    select: { id: true, first_name: true, last_name: true, email: true },
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+      email: true,
+      document_number: true,
+    },
   },
   supplier: {
     select: {
@@ -743,6 +749,13 @@ export class InvoiceFlowService {
         withholding_breakdown,
         total_amount: Number(updated.total_amount),
         supplier_id: updated.supplier_id,
+        customer: updated.customer
+          ? {
+              id: updated.customer.id,
+              name: `${updated.customer.first_name} ${updated.customer.last_name}`.trim(),
+              tax_id: updated.customer.document_number ?? undefined,
+            }
+          : undefined,
         user_id: this.getContext().user_id,
       },
     );
@@ -829,6 +842,13 @@ export class InvoiceFlowService {
         withholding_breakdown,
         total_amount: Number(updated.total_amount),
         supplier_id: updated.supplier_id,
+        customer: updated.customer
+          ? {
+              id: updated.customer.id,
+              name: `${updated.customer.first_name} ${updated.customer.last_name}`.trim(),
+              tax_id: updated.customer.document_number ?? undefined,
+            }
+          : undefined,
         user_id: this.getContext().user_id,
       },
     );

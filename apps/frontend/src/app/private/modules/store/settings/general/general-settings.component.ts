@@ -13,8 +13,9 @@ import { AppSettingsForm } from './components/app-settings-form/app-settings-for
 import { OperationsSettingsForm } from './components/operations-settings-form/operations-settings-form.component';
 import { DispatchSettingsForm } from './components/dispatch-settings-form/dispatch-settings-form.component';
 import { RestaurantSettingsForm } from './components/restaurant-settings-form/restaurant-settings-form.component';
+import { FormsModule } from '@angular/forms';
 import { LucideAngularModule } from "lucide-angular";
-import { IconComponent } from '../../../../../shared/components/index';
+import { IconComponent, SettingToggleComponent } from '../../../../../shared/components/index';
 import { ScrollableTabsComponent } from '../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { StickyHeaderComponent, StickyHeaderBadgeColor, StickyHeaderActionButton } from '../../../../../shared/components/sticky-header/sticky-header.component';
 import { ConfigFacade } from '../../../../../core/store/config';
@@ -37,6 +38,8 @@ import { firstValueFrom } from 'rxjs';
     OperationsSettingsForm,
     DispatchSettingsForm,
     RestaurantSettingsForm,
+    SettingToggleComponent,
+    FormsModule,
     ScrollableTabsComponent,
     StickyHeaderComponent
 ],
@@ -74,6 +77,13 @@ export class GeneralSettingsComponent implements OnInit {
    */
   readonly isRestaurant = this.authFacade.isRestaurant;
 
+  /**
+   * True when the active store is a gym. Gates the "Zona Fit" settings
+   * section (tab + toggle). Source of truth is the industries cascade resolved
+   * by `AuthFacade.isGym` (settings → login → []).
+   */
+  readonly isGym = this.authFacade.isGym;
+
   readonly sections = computed(() => {
     const base = [
       { id: 'identity', label: 'Identidad', icon: 'user' },
@@ -89,6 +99,11 @@ export class GeneralSettingsComponent implements OnInit {
       // Insert "Mesas" right after "Operaciones" for restaurants only.
       const dispatchIndex = base.findIndex((s) => s.id === 'dispatch');
       base.splice(dispatchIndex, 0, { id: 'restaurant', label: 'Mesas', icon: 'utensils' });
+    }
+    if (this.isGym()) {
+      // Insert "Zona Fit" right before "Despacho" for gyms only.
+      const dispatchIndex = base.findIndex((s) => s.id === 'dispatch');
+      base.splice(dispatchIndex, 0, { id: 'membership', label: 'Zona Fit', icon: 'dumbbell' });
     }
     return base;
   });
@@ -249,7 +264,7 @@ export class GeneralSettingsComponent implements OnInit {
       }
 
       const knownSections: (keyof StoreSettings)[] = [
-        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'restaurant', 'panel_ui',
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations', 'dispatch', 'restaurant', 'membership', 'panel_ui',
       ];
       const currentSettings = this.settings();
       const sanitizedSettings = knownSections.reduce((acc, key) => {

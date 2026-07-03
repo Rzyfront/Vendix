@@ -82,6 +82,8 @@ export const colorScales = {
     800: '#92400E',
     900: '#78350F',
   },
+  // Purple scale — parity con web (Tailwind purple-*).
+  // Usado por Tickets Promedio en analytics/sales (web usa bg-purple-100/text-purple-600).
   purple: {
     50: '#FAF5FF',
     100: '#F3E8FF',
@@ -93,6 +95,48 @@ export const colorScales = {
     700: '#7E22CE',
     800: '#6B21A8',
     900: '#581C87',
+  },
+  // Orange scale — parity con web (Tailwind orange-*).
+  // Usado por Unidades Vendidas en analytics/sales (web usa bg-orange-100/text-orange-600).
+  orange: {
+    50: '#FFF7ED',
+    100: '#FFEDD5',
+    200: '#FED7AA',
+    300: '#FDBA74',
+    400: '#FB923C',
+    500: '#F97316',
+    600: '#EA580C',
+    700: '#C2410C',
+    800: '#9A3412',
+    900: '#7C2D12',
+  },
+  // Emerald scale — parity con web (Tailwind emerald-*).
+  // Usado por Completadas en orders (web usa bg-emerald-100/text-emerald-500).
+  emerald: {
+    50: '#ECFDF5',
+    100: '#D1FAE5',
+    200: '#A7F3D0',
+    300: '#6EE7B7',
+    400: '#34D399',
+    500: '#10B981',
+    600: '#059669',
+    700: '#047857',
+    800: '#065F46',
+    900: '#064E3B',
+  },
+  // Cyan scale — parity con web (--color-accent: #06b6d4).
+  // Usado por "Ticket Prom." en dashboard store-admin (web usa text-accent).
+  cyan: {
+    50: '#ECFEFF',
+    100: '#CFFAFE',
+    200: '#A5F3FC',
+    300: '#67E8F9',
+    400: '#22D3EE',
+    500: '#06B6D4',
+    600: '#0891B2',
+    700: '#0E7490',
+    800: '#155E75',
+    900: '#164E63',
   },
 } as const;
 

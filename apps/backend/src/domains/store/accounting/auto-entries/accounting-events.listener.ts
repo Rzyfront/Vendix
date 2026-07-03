@@ -86,6 +86,8 @@ export class AccountingEventsListener {
     withholding_breakdown?: WithholdingLine[];
     total_amount: number;
     user_id?: number;
+    /** C4-followup: propagado desde invoice-flow.service.ts (updated.customer). */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
       if (!(await this.isFlowEnabled(event.store_id, 'invoicing'))) return;
@@ -122,6 +124,7 @@ export class AccountingEventsListener {
         withholding_breakdown: event.withholding_breakdown,
         total: event.total_amount,
         user_id: event.user_id,
+        customer: event.customer,
       });
       this.logger.log(
         `Auto-entry created for invoice.accepted #${event.invoice_id}`,
@@ -193,6 +196,8 @@ export class AccountingEventsListener {
     currency: string;
     payment_method: string;
     user_id?: number;
+    /** C4-followup: propagado desde payments.service.ts (order.customer_id). */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
       if (!(await this.isFlowEnabled(event.store_id, 'payments'))) return;
@@ -217,6 +222,7 @@ export class AccountingEventsListener {
             ? Number(event.discount_amount)
             : undefined,
         user_id: event.user_id,
+        customer: event.customer,
       });
       this.logger.log(
         `Auto-entry created for payment.received #${event.payment_id}`,
@@ -379,6 +385,8 @@ export class AccountingEventsListener {
     total_net_pay: number;
     health_deduction: number;
     pension_deduction: number;
+    /** B1: suma de retenciones laborales (retefuente del empleado). */
+    total_retention?: number;
     approved_by: number;
     cost_center_breakdown?: Record<
       string,
@@ -399,6 +407,8 @@ export class AccountingEventsListener {
     total_net_pay: number;
     health_deduction: number;
     pension_deduction: number;
+    /** B1: suma de retenciones laborales (retefuente del empleado). */
+    total_retention?: number;
     approved_by: number;
     cost_center_breakdown?: Record<
       string,
@@ -418,6 +428,10 @@ export class AccountingEventsListener {
         total_net_pay: Number(event.total_net_pay),
         health_deduction: Number(event.health_deduction),
         pension_deduction: Number(event.pension_deduction),
+        total_retention:
+          event.total_retention !== undefined
+            ? Number(event.total_retention)
+            : undefined,
         user_id: event.approved_by,
         cost_center_breakdown: event.cost_center_breakdown,
       });
@@ -442,6 +456,9 @@ export class AccountingEventsListener {
       payroll_item_id: number;
       employee_id: number;
       cost_center: string;
+      /** C4-followup: propagado desde payroll-flow.service.ts (item.employee). */
+      employee_name?: string;
+      employee_document?: string;
       earnings: any;
       deductions: any;
       employer_costs: any;
@@ -602,26 +619,37 @@ export class AccountingEventsListener {
   @OnEvent('purchase_order.received')
   async handlePurchaseOrderReceived(event: {
     purchase_order_id: number;
+    /**
+     * D2: id of the specific `purchase_order_receptions` row that triggered
+     * this event. Used as the auto-entry `source_id` (NOT purchase_order_id)
+     * so each partial reception of the same order gets its own idempotency
+     * key instead of being skipped as a duplicate of the first.
+     */
+    reception_id: number;
     organization_id: number;
     store_id?: number;
     total_amount: number;
     user_id?: number;
+    /** C4-followup: propagado desde purchase-orders.service.ts (updated_po.suppliers). */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
     try {
       if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
       await this.auto_entry_service.onPurchaseOrderReceived({
         purchase_order_id: event.purchase_order_id,
+        reception_id: event.reception_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
         total_amount: Number(event.total_amount),
         user_id: event.user_id,
+        supplier: event.supplier,
       });
       this.logger.log(
-        `Auto-entry created for purchase_order.received #${event.purchase_order_id}`,
+        `Auto-entry created for purchase_order.received #${event.purchase_order_id} (reception #${event.reception_id})`,
       );
     } catch (error) {
       this.logger.error(
-        `Failed to create auto-entry for purchase_order.received #${event.purchase_order_id}: ${error.message}`,
+        `Failed to create auto-entry for purchase_order.received #${event.purchase_order_id} (reception #${event.reception_id}): ${error.message}`,
         error.stack,
       );
     }
