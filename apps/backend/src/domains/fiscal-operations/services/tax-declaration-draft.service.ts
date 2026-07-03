@@ -833,24 +833,16 @@ export class TaxDeclarationDraftService {
       });
     }
 
-    // Agrupar facturas por tienda (best-effort: las facturas del período
-    // pueden venir de varias tiendas cuando fiscal_scope=ORGANIZATION y la
-    // entidad contable consolidada las abarca todas). Si no podemos atribuir
-    // cada factura a su tienda (no hay store_id en invoice), caemos a un
-    // pool global y aplicamos las tarifas a cada combinación store/municipio
-    // de la org según el base agrupado por municipio de la dirección del
-    // cliente; en STORE scope las facturas son de la propia tienda.
-    const invoiceStoreIds = new Set(
-      invoices
-        .map((invoice) => (invoice as any).store_id)
-        .filter((value): value is number => typeof value === 'number'),
-    );
-    const consolidatedInvoicePool =
-      context.fiscal_scope === 'ORGANIZATION' && invoiceStoreIds.size > 1;
-
+    // Agrupar facturas por tienda: `invoices.store_id` es NOT NULL (columna
+    // Int obligatoria en schema.prisma, siempre poblada por invoicing.service
+    // y credit-notes.service antes de escribir), así que cada factura se
+    // atribuye SIEMPRE a la tienda que la emitió — sin excepción, tanto en
+    // STORE scope (una sola tienda) como en ORGANIZATION scope multi-tienda
+    // consolidada. Esto evita contar la misma factura más de una vez cuando
+    // la org tiene facturas de 2+ tiendas/municipios.
+    //
     // Mapa de líneas por tienda para asignar correctamente en STORE scope y
-    // modo consolidado. Para STORE scope, asumimos todas las facturas de la
-    // tienda del contexto.
+    // en ORGANIZATION scope multi-tienda.
     type StoreBucket = {
       storeId: number | null;
       municipalityCode: string | null;
@@ -996,32 +988,20 @@ export class TaxDeclarationDraftService {
 
       const ratePerMil = Number(rate.rate_per_mil || 0);
 
-      // Filtrar facturas atribuibles a esta tienda (solo si la factura trae
-      // store_id; si no, en STORE scope incluimos todas; en ORG consolidado
-      // incluimos todas y dividimos prorrata por número de tiendas con tarifa).
-      const storeInvoices = consolidatedInvoicePool
-        ? invoices
-        : context.fiscal_scope === 'STORE' && context.store_id === store.id
-          ? invoices
-          : invoices.filter(
-              (invoice) => (invoice as any).store_id === store.id,
-            );
+      // Filtrar facturas atribuibles a esta tienda: `store_id` es NOT NULL en
+      // `invoices`, así que cada factura pertenece a exactamente una tienda.
+      // Nunca reasignar el pool completo aquí — eso duplicaría la base/tax
+      // por cada tienda del loop cuando la org tiene 2+ tiendas.
+      const storeInvoices = invoices.filter(
+        (invoice) => (invoice as any).store_id === store.id,
+      );
 
       const base = storeInvoices.reduce((sum, invoice) => {
         const sign = invoice.invoice_type === 'credit_note' ? -1 : 1;
         return sum + Number(invoice.subtotal_amount || 0) * sign;
       }, 0);
 
-      // En ORG consolidado sin atribución por tienda, dividir base entre
-      // tiendas con tarifa configurada para no duplicar el ICA.
-      const shareBase =
-        consolidatedInvoicePool &&
-        invoiceStoreIds.size === 0 &&
-        storesToIterate.filter((s) => s.municipality_code).length > 0
-          ? base / storesToIterate.filter((s) => s.municipality_code).length
-          : base;
-
-      const tax = (shareBase * ratePerMil) / 1000;
+      const tax = (base * ratePerMil) / 1000;
 
       const bucket: StoreBucket = {
         storeId: store.id,
@@ -1032,27 +1012,20 @@ export class TaxDeclarationDraftService {
         rateMunicipalityName: rate.municipality_name,
         rateCiiuDescription: rate.ciiu_description,
         rateMatchKind: matchKind,
-        base: shareBase,
+        base,
         tax,
         invoiceCount: storeInvoices.length,
         lines: storeInvoices.map((invoice) => {
           const sign = invoice.invoice_type === 'credit_note' ? -1 : 1;
           const invoiceBase = Number(invoice.subtotal_amount || 0) * sign;
-          const proRatedBase =
-            consolidatedInvoicePool &&
-            invoiceStoreIds.size === 0 &&
-            storesToIterate.filter((s) => s.municipality_code).length > 0
-              ? invoiceBase /
-                storesToIterate.filter((s) => s.municipality_code).length
-              : invoiceBase;
           return {
             declaration_id: 0,
             line_type: 'ica_base',
             source_type: 'invoice',
             source_id: invoice.id,
             description: `${invoice.invoice_type} ${invoice.invoice_number}`,
-            base_amount: proRatedBase,
-            tax_amount: (proRatedBase * ratePerMil) / 1000,
+            base_amount: invoiceBase,
+            tax_amount: (invoiceBase * ratePerMil) / 1000,
             metadata: {
               store_id: store.id,
               municipality_code: municipalityCode,

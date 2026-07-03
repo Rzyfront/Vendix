@@ -727,3 +727,250 @@ describe('TaxDeclarationDraftService income tax preclose estimation', () => {
     expect(draft.total_payable).toBe(0);
   });
 });
+
+describe('TaxDeclarationDraftService ICA calculation (multi-store, multi-municipality)', () => {
+  // Regression test for a critical bug: when an ORGANIZATION-scope org has
+  // invoices from 2+ stores, `storeInvoices` was reassigned to the FULL
+  // invoice pool on every loop iteration instead of being filtered per
+  // store, so the declared base/tax were multiplied by the number of
+  // stores. `invoices.store_id` is a NOT NULL Int column, so filtering by
+  // `store_id === store.id` must always be safe and must never duplicate a
+  // given invoice across stores.
+  const context: FiscalOperationsContext = {
+    organization_id: 1,
+    store_id: null,
+    fiscal_scope: 'ORGANIZATION',
+    operating_scope: 'ORGANIZATION',
+    accounting_entity_id: 99,
+    accounting_entity: { id: 99 },
+    can_read: true,
+    can_write: true,
+  } as any;
+
+  const requestContext = {
+    user_id: 9,
+    organization_id: 1,
+    store_id: undefined,
+    is_super_admin: false,
+    is_owner: true,
+  };
+
+  const createService = ({
+    stores,
+    invoices,
+    rates,
+  }: {
+    stores: Array<{
+      id: number;
+      municipality_code: string | null;
+      ciiu_code: string | null;
+    }>;
+    invoices: Array<{
+      id: number;
+      store_id: number;
+      invoice_type: string;
+      invoice_number: string;
+      subtotal_amount: number;
+      issue_date: Date;
+    }>;
+    rates: Record<
+      string,
+      { rate_per_mil: number; municipality_name: string }
+    >;
+  }) => {
+    let draftData: any;
+    let createdLines: any[] = [];
+    const tx = {
+      tax_declaration_drafts: {
+        create: jest.fn().mockImplementation(({ data }) => {
+          draftData = { id: 20, ...data };
+          return draftData;
+        }),
+        update: jest.fn(),
+        findUnique: jest.fn().mockImplementation(() => ({
+          ...draftData,
+          lines: createdLines,
+          obligation: null,
+          evidence: null,
+        })),
+      },
+      tax_declaration_lines: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn().mockImplementation(({ data }) => {
+          createdLines = data;
+          return { count: data.length };
+        }),
+      },
+    };
+    const prisma = {
+      invoices: {
+        findMany: jest.fn().mockResolvedValue(invoices),
+      },
+      organizations: {
+        findUnique: jest.fn().mockResolvedValue({ ciiu_code: null }),
+      },
+      stores: {
+        findMany: jest.fn().mockResolvedValue(stores),
+        findUnique: jest.fn(),
+      },
+      ica_municipal_rates: {
+        findFirst: jest.fn().mockImplementation(({ where }) => {
+          const key = `${where.municipality_code}:${where.ciiu_code ?? 'null'}`;
+          const rate = rates[key];
+          return rate
+            ? {
+                rate_per_mil: rate.rate_per_mil,
+                municipality_code: where.municipality_code,
+                municipality_name: rate.municipality_name,
+                ciiu_code: where.ciiu_code,
+                ciiu_description: null,
+              }
+            : null;
+        }),
+      },
+      fiscal_rule_sets: { findFirst: jest.fn().mockResolvedValue(null) },
+      tax_declaration_drafts: { findFirst: jest.fn().mockResolvedValue(null) },
+      $transaction: jest.fn((callback) => callback(tx)),
+    };
+    const audit = { logForResource: jest.fn() };
+    const fiscalRules = { resolveEffectiveRules: jest.fn() };
+    const exogenousGenerator = {
+      generateFormat1001: jest.fn().mockResolvedValue([]),
+      generateFormat1003: jest.fn().mockResolvedValue([]),
+      generateFormat1005: jest.fn().mockResolvedValue([]),
+      generateFormat1007: jest.fn().mockResolvedValue([]),
+    };
+
+    return {
+      service: new TaxDeclarationDraftService(
+        prisma as any,
+        audit as any,
+        exogenousGenerator as any,
+        fiscalRules as any,
+      ),
+      prisma,
+      getDraftData: () => draftData,
+      getCreatedLines: () => createdLines,
+    };
+  };
+
+  it('does not duplicate the declared ICA base across stores in different municipalities', async () => {
+    // Reproduces the reviewer's manual calculation: store A (municipality
+    // 11001, rate 5‰) bills 1,000,000; store B (municipality 76001, rate
+    // 7‰) bills 500,000. Real total base = 1,500,000. Real total tax =
+    // 1,000,000*5/1000 + 500,000*7/1000 = 5,000 + 3,500 = 8,500.
+    // The bug computed totalBase=3,000,000 and totalTax=18,000 (every
+    // invoice counted once per store in the loop).
+    const { service, getDraftData, getCreatedLines } = createService({
+      stores: [
+        { id: 10, municipality_code: '11001', ciiu_code: null },
+        { id: 20, municipality_code: '76001', ciiu_code: null },
+      ],
+      invoices: [
+        {
+          id: 1,
+          store_id: 10,
+          invoice_type: 'sales_invoice',
+          invoice_number: 'FV-A1',
+          subtotal_amount: 1_000_000,
+          issue_date: new Date('2026-05-05T10:00:00.000Z'),
+        },
+        {
+          id: 2,
+          store_id: 20,
+          invoice_type: 'sales_invoice',
+          invoice_number: 'FV-B1',
+          subtotal_amount: 500_000,
+          issue_date: new Date('2026-05-06T10:00:00.000Z'),
+        },
+      ],
+      rates: {
+        '11001:null': { rate_per_mil: 5, municipality_name: 'Bogotá' },
+        '76001:null': { rate_per_mil: 7, municipality_name: 'Cali' },
+      },
+    });
+
+    await RequestContextService.run(requestContext, () =>
+      service.createDraft(context, {
+        declaration_type: 'ica',
+        period_year: 2026,
+        period_month: 5,
+      }),
+    );
+
+    const draft = getDraftData();
+
+    // Real base: no multiplication by store count.
+    expect(draft.gross_base_amount).toBe(1_500_000);
+    expect(draft.taxable_base_amount).toBe(1_500_000);
+    expect(draft.generated_tax_amount).toBe(8_500);
+    expect(draft.balance_due).toBe(8_500);
+    expect(draft.total_payable).toBe(8_500);
+
+    // Each invoice appears exactly once, attributed to its own store — no
+    // duplicate detail lines with the full unprorated base.
+    const lines = getCreatedLines();
+    expect(lines).toHaveLength(2);
+    const lineA = lines.find((line: any) => line.source_id === 1);
+    const lineB = lines.find((line: any) => line.source_id === 2);
+    expect(lineA).toMatchObject({ base_amount: 1_000_000, tax_amount: 5_000 });
+    expect(lineB).toMatchObject({ base_amount: 500_000, tax_amount: 3_500 });
+
+    // Sum of per-municipality rows equals the real total base, not a multiple.
+    const sourceSnapshot = draft.source_snapshot as any;
+    const sumOfRows = sourceSnapshot.stores_with_rate.reduce(
+      (sum: number, row: any) => sum + row.base,
+      0,
+    );
+    expect(sumOfRows).toBe(1_500_000);
+  });
+
+  it('keeps single-store ICA calculation unchanged (no duplication possible)', async () => {
+    const singleStoreContext: FiscalOperationsContext = {
+      organization_id: 1,
+      store_id: 10,
+      fiscal_scope: 'STORE',
+      operating_scope: 'STORE',
+      accounting_entity_id: 55,
+      accounting_entity: { id: 55 },
+      can_read: true,
+      can_write: true,
+    } as any;
+
+    const { service, getDraftData } = createService({
+      stores: [{ id: 10, municipality_code: '11001', ciiu_code: null }],
+      invoices: [
+        {
+          id: 1,
+          store_id: 10,
+          invoice_type: 'sales_invoice',
+          invoice_number: 'FV-1',
+          subtotal_amount: 2_000_000,
+          issue_date: new Date('2026-05-05T10:00:00.000Z'),
+        },
+      ],
+      rates: {
+        '11001:null': { rate_per_mil: 5, municipality_name: 'Bogotá' },
+      },
+    });
+    // STORE scope resolves the store via `stores.findUnique`, not `findMany`.
+    (service as any).prisma.stores.findUnique = jest
+      .fn()
+      .mockResolvedValue({ id: 10, municipality_code: '11001', ciiu_code: null });
+
+    await RequestContextService.run(
+      { ...requestContext, store_id: 10 },
+      () =>
+        service.createDraft(singleStoreContext, {
+          declaration_type: 'ica',
+          period_year: 2026,
+          period_month: 5,
+        }),
+    );
+
+    const draft = getDraftData();
+    expect(draft.gross_base_amount).toBe(2_000_000);
+    expect(draft.generated_tax_amount).toBe(10_000);
+    expect(draft.total_payable).toBe(10_000);
+  });
+});
