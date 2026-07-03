@@ -528,7 +528,7 @@ export class OrderFlowService {
         }
       }
 
-      await this.prisma.payments.create({
+      const payment = await this.prisma.payments.create({
         data: {
           order_id: orderId,
           store_payment_method_id: dto.store_payment_method_id,
@@ -597,10 +597,36 @@ export class OrderFlowService {
       }
 
       this.validateTransition(order.state as OrderState, 'finished');
-      const updatedOrder = await this.updateOrderState(orderId, 'finished', {
-        paid_at: new Date(),
-        finished_at: new Date(),
-      });
+      // The succeeded payment was created above, BEFORE the finish. If the
+      // finish is blocked by insufficient stock (INV_STOCK_002) or missing
+      // serials (SERIAL_REQUIRED_001), the order stays 'created' and that
+      // payment would be orphaned. Business rule (confirmed): keep + compensate
+      // — cancel the payment (preserving the audit trail) and propagate the 409.
+      // NOTE: the pending-kitchen guard above intentionally leaves the payment
+      // (the operator finishes once the kitchen delivers), so only the finish
+      // throw compensates here.
+      let updatedOrder;
+      try {
+        updatedOrder = await this.updateOrderState(orderId, 'finished', {
+          paid_at: new Date(),
+          finished_at: new Date(),
+        });
+      } catch (e) {
+        if (e instanceof VendixHttpException) {
+          await this.prisma.payments.update({
+            where: { id: payment.id },
+            data: {
+              state: 'cancelled',
+              updated_at: new Date(),
+              gateway_response: {
+                ...((payment.gateway_response as object) ?? {}),
+                cancellation_reason: 'finish_blocked_insufficient_stock',
+              },
+            },
+          });
+        }
+        throw e;
+      }
 
       this.logger.log(`Order #${orderId} paid directly and finished`);
 
