@@ -688,6 +688,58 @@ export class MembershipSettingsDto {
   @IsOptional()
   @IsBoolean()
   ambient_access_enabled?: boolean;
+
+  @ApiProperty({
+    example: false,
+    required: false,
+    description: 'Enables capacity (aforo) control for the membership area.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  capacity_control_enabled?: boolean;
+
+  @ApiProperty({
+    example: 0,
+    required: false,
+    description: 'Maximum number of people allowed inside (aforo máximo).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  max_capacity?: number;
+
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'When true, a turnstile controls entries/exits and automatic leveling is disabled.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  turnstile_mode?: boolean;
+
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Enables automatic capacity leveling (time-based decrement of the occupancy count).',
+  })
+  @IsOptional()
+  @IsBoolean()
+  auto_leveling_enabled?: boolean;
+
+  @ApiProperty({
+    example: 2,
+    required: false,
+    description:
+      'Interval in hours after which automatic leveling decrements the occupancy count by 1 person.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @IsIn([1, 2])
+  auto_leveling_interval_hours?: number;
 }
 
 export class PanelUISettingsDto {

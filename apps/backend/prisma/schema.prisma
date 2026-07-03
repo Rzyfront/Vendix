@@ -3279,6 +3279,7 @@ enum membership_access_result_enum {
   denied_frozen
   denied_quota_exceeded
   denied_outside_schedule
+  denied_capacity_full
 }
 
 // Discriminador de industria/uso de la membresía. `generic` es el default reutilizable;
@@ -3381,6 +3382,21 @@ model membership_access_logs {
 
   @@index([store_id, access_at])
   @@index([store_id, customer_id])
+}
+
+// Contador de aforo (ocupación actual) por tienda. Fila singleton por store_id:
+// current_count = personas dentro; business_date = día de negocio al que pertenece
+// el conteo (permite reset en el rollover diario); last_leveled_at = último nivelado.
+// Como los demás modelos de membresía, usa store_id escalar (la FK vive en SQL;
+// Prisma ignora la FK escalar — ver migración membership_generalization §9).
+model membership_access_occupancy {
+  id             Int       @id @default(autoincrement())
+  store_id       Int       @unique
+  current_count  Int       @default(0)
+  business_date  DateTime? @db.Date
+  last_leveled_at DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
 }
 
 enum api_key_status_enum {

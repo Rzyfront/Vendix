@@ -363,8 +363,14 @@ export function getDefaultStoreSettings(): StoreSettings {
 
     // Membership - gym/membership suite behavior toggles. Ambient access
     // validation is opt-in (false by default) and only surfaced for `gym`.
+    // Capacity (aforo) control and its auto-leveling are also opt-in.
     membership: {
       ambient_access_enabled: false,
+      capacity_control_enabled: false,
+      max_capacity: 0,
+      turnstile_mode: false,
+      auto_leveling_enabled: false,
+      auto_leveling_interval_hours: 2,
     },
 
     // Legacy: Mantener por compatibilidad (redundante con branding)

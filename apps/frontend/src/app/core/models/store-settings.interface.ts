@@ -122,6 +122,30 @@ export interface MembershipSettings {
    * memberships. When `false` (default), ambient access validation is off.
    */
   ambient_access_enabled: boolean;
+  /**
+   * When `true`, enables capacity (aforo) control for the membership area.
+   * When `false` (default), capacity control is disabled.
+   */
+  capacity_control_enabled?: boolean;
+  /**
+   * Maximum number of people allowed inside (aforo máximo). Default `0`.
+   */
+  max_capacity?: number;
+  /**
+   * When `true`, a turnstile controls entries/exits and automatic leveling is
+   * disabled. Default `false`.
+   */
+  turnstile_mode?: boolean;
+  /**
+   * When `true`, enables automatic capacity leveling (time-based decrement of
+   * the occupancy count). Default `false`.
+   */
+  auto_leveling_enabled?: boolean;
+  /**
+   * Interval in hours after which automatic leveling decrements the occupancy
+   * count by 1 person. Allowed values: `1` or `2`. Default `2`.
+   */
+  auto_leveling_interval_hours?: number;
 }
 
 export interface CheckoutSettings {

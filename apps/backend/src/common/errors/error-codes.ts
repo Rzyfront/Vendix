@@ -736,6 +736,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Insufficient stock',
   },
+  INV_STOCK_002: {
+    code: 'INV_STOCK_002',
+    httpStatus: 409,
+    devMessage:
+      'Insufficient available stock to deliver order (no reservation and available stock is not enough)',
+  },
   POS_STOCK_INSUFFICIENT_001: {
     code: 'POS_STOCK_INSUFFICIENT_001',
     httpStatus: 409,

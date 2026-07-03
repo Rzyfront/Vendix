@@ -15,6 +15,7 @@ import { InventoryModule } from '../inventory/inventory.module';
 // (InventoryModule already re-exports this module; the explicit import documents
 // the dependency and is harmless.)
 import { InventorySerialNumbersModule } from '../inventory/serial-numbers/inventory-serial-numbers.module';
+import { OrderStockCommitModule } from '../inventory/shared/order-stock-commit.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { InventorySerialNumbersModule } from '../inventory/serial-numbers/invent
     S3Module,
     InventoryModule,
     InventorySerialNumbersModule,
+    OrderStockCommitModule,
   ],
   controllers: [DispatchNotesController],
   providers: [
