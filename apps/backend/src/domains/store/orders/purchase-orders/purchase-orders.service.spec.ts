@@ -285,4 +285,429 @@ describe('PurchaseOrdersService.receive()', () => {
       expect.anything(),
     );
   });
+
+  /**
+   * D2 — partial receptions must post proportional accounting entries with
+   * a distinct `reception_id` as `source_id` each time (see
+   * vendix-auto-entries skill: "Purchase order receptions are the special
+   * case"), and the FINAL reception must post the exact remainder
+   * (`total_amount - alreadyPosted`), not another independently-computed
+   * proportion, so the sum across all receptions matches `total_amount`
+   * with no drift.
+   */
+  describe('D2: proportional accounting entries for partial receptions', () => {
+    // Order: 10 units @ unit_cost=170 => order_subtotal = 1700.
+    // total_amount intentionally left equal to subtotal (no header-level
+    // discount/tax/shipping) so the proration math is easy to assert.
+    const PARTIAL_PO_ITEM = {
+      id: PO_ITEM_ID,
+      product_id: PRODUCT_ID,
+      product_variant_id: null,
+      unit_cost: 170,
+      quantity_ordered: 10,
+      quantity_received: 0,
+      batch_number: null,
+      manufacturing_date: null,
+      expiration_date: null,
+    };
+
+    const PARTIAL_PO_TOTAL = 1700;
+
+    /**
+     * Rebuilds the service with a tx mock whose `purchase_orders.findUnique`
+     * / `.update` reflect the order's cumulative `quantity_received` BEFORE
+     * and AFTER a given reception, and whose `purchase_order_receptions.create`
+     * returns a distinct id per call. `priorTotalDebit` simulates what
+     * accounting already posted for earlier receptions of this same order
+     * (read via `this.prisma.accounting_entries.findMany`, OUTSIDE the tx).
+     */
+    function buildServiceForReception(opts: {
+      receptionId: number;
+      quantityReceivedBefore: number;
+      quantityReceivedNow: number;
+      priorReceptionIds: number[];
+      priorTotalDebit: number;
+    }) {
+      const {
+        receptionId,
+        quantityReceivedBefore,
+        quantityReceivedNow,
+        priorReceptionIds,
+        priorTotalDebit,
+      } = opts;
+
+      const quantityReceivedAfter =
+        quantityReceivedBefore + quantityReceivedNow;
+      const allItemsReceived =
+        quantityReceivedAfter >= PARTIAL_PO_ITEM.quantity_ordered;
+
+      // NOTE: the real service reads `tx.purchase_orders.findUnique` AFTER
+      // `tx.purchase_order_items.update({ quantity_received: { increment } })`
+      // has already run (see receive() around line 1026-1042), so the
+      // `quantity_received` this mock returns must already reflect THIS
+      // reception's contribution (quantityReceivedAfter), not the
+      // pre-reception value — otherwise `all_items_received` and the
+      // received-batch-subtotal proration would be computed one reception
+      // behind.
+      const orderFetchedInsideTx = {
+        id: PO_ID,
+        organization_id: ORG_ID,
+        location_id: LOCATION_ID,
+        status: quantityReceivedBefore > 0 ? 'partial' : 'pending',
+        total_amount: PARTIAL_PO_TOTAL,
+        location: { id: LOCATION_ID, store_id: STORE_ID },
+        purchase_order_items: [
+          { ...PARTIAL_PO_ITEM, quantity_received: quantityReceivedAfter },
+        ],
+      };
+
+      const buildTxMock = () => ({
+        purchase_order_receptions: {
+          create: jest.fn().mockResolvedValue({ id: receptionId }),
+        },
+        purchase_order_reception_items: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+        purchase_order_items: { update: jest.fn().mockResolvedValue({}) },
+        products: {
+          findFirst: jest.fn().mockResolvedValue({
+            id: PRODUCT_ID,
+            is_ingredient: false,
+            purchase_to_stock_factor: null,
+            stock_uom_id: null,
+            purchase_uom_id: null,
+          }),
+          findUnique: jest.fn().mockResolvedValue({
+            base_price: 3000,
+            profit_margin: 20,
+          }),
+          update: jest.fn().mockResolvedValue({}),
+        },
+        purchase_orders: {
+          findUnique: jest.fn().mockResolvedValue(orderFetchedInsideTx),
+          update: jest.fn().mockResolvedValue({
+            id: PO_ID,
+            organization_id: ORG_ID,
+            total_amount: PARTIAL_PO_TOTAL,
+            status: allItemsReceived ? 'received' : 'partial',
+            suppliers: null,
+            location: orderFetchedInsideTx.location,
+            purchase_order_items: [
+              {
+                ...PARTIAL_PO_ITEM,
+                quantity_received: quantityReceivedAfter,
+                products: null,
+                product_variants: null,
+              },
+            ],
+          }),
+        },
+      });
+
+      const mockPrismaService = {
+        $transaction: jest.fn().mockImplementation(async (callback: any) => {
+          return callback(buildTxMock());
+        }),
+        purchase_order_receptions: {
+          findMany: jest.fn().mockResolvedValue(
+            priorReceptionIds.map((prId) => ({ id: prId })),
+          ),
+        },
+        accounting_entries: {
+          findMany: jest.fn().mockResolvedValue(
+            priorReceptionIds.length > 0
+              ? [{ total_debit: priorTotalDebit }]
+              : [],
+          ),
+        },
+      };
+
+      return mockPrismaService;
+    }
+
+    async function createServiceWithPrisma(mockPrismaService: any) {
+      const mockStockLevelManager = {
+        updateStock: jest.fn().mockResolvedValue({
+          stock_level: { id: 1 },
+          transaction: { id: 1 },
+          previous_quantity: 0,
+        }),
+      };
+      const mockCostingService = {
+        calculateCostOnReceipt: jest.fn().mockResolvedValue({
+          new_cost_per_unit: 170,
+          previous_cost_per_unit: 170,
+        }),
+      };
+      const mockCostingMethodResolver = {
+        resolveCostingMethod: jest.fn().mockResolvedValue('weighted_average'),
+      };
+      const mockAuditService = { logCustom: jest.fn().mockResolvedValue(undefined) };
+      const mockSerialNumbersService = {
+        populatePoolOnReceipt: jest.fn().mockResolvedValue(undefined),
+      };
+      const mockSerialEnforcement = {
+        isSerialized: jest.fn().mockResolvedValue(false),
+        assertParityForLocation: jest.fn().mockResolvedValue(undefined),
+      };
+      const mockEventEmitter = { emit: jest.fn() };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          PurchaseOrdersService,
+          { provide: StorePrismaService, useValue: mockPrismaService },
+          { provide: StockLevelManager, useValue: mockStockLevelManager },
+          { provide: CostingService, useValue: mockCostingService },
+          {
+            provide: CostingMethodResolverService,
+            useValue: mockCostingMethodResolver,
+          },
+          {
+            provide: InventorySerialNumbersService,
+            useValue: mockSerialNumbersService,
+          },
+          {
+            provide: SerialNumberEnforcementService,
+            useValue: mockSerialEnforcement,
+          },
+          { provide: AuditService, useValue: mockAuditService },
+          { provide: S3Service, useValue: {} as any },
+          { provide: SettingsService, useValue: {} as any },
+          { provide: EventEmitter2, useValue: mockEventEmitter },
+        ],
+      }).compile();
+
+      return {
+        service: module.get<PurchaseOrdersService>(PurchaseOrdersService),
+        eventEmitter: module.get(EventEmitter2) as jest.Mocked<EventEmitter2>,
+      };
+    }
+
+    it('posts a proportional entry for a partial reception, then the exact remainder on the final reception, with distinct reception ids and no drift', async () => {
+      // ---- Reception 1: partial, 4 of 10 units received ----
+      const prisma1 = buildServiceForReception({
+        receptionId: 101,
+        quantityReceivedBefore: 0,
+        quantityReceivedNow: 4,
+        priorReceptionIds: [],
+        priorTotalDebit: 0,
+      });
+      const { service: service1, eventEmitter: emitter1 } =
+        await createServiceWithPrisma(prisma1);
+
+      jest.spyOn(RequestContextService, 'getOrganizationId').mockReturnValue(ORG_ID);
+      jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+      jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(USER_ID);
+
+      await service1.receive(PO_ID, {
+        items: [{ id: PO_ITEM_ID, quantity_received: 4 }],
+        notes: 'Partial receipt 1/2',
+      } as any);
+
+      expect(emitter1.emit).toHaveBeenCalledTimes(1);
+      const [event1Name, event1Payload] = emitter1.emit.mock.calls[0];
+      expect(event1Name).toBe('purchase_order.received');
+      expect(event1Payload.reception_id).toBe(101);
+      // Proportional share: 4/10 of 1700 = 680.
+      expect(event1Payload.total_amount).toBeCloseTo(680, 2);
+
+      // ---- Reception 2: final, remaining 6 of 10 units ----
+      // Accounting already posted 680 for reception #101.
+      const prisma2 = buildServiceForReception({
+        receptionId: 102,
+        quantityReceivedBefore: 4,
+        quantityReceivedNow: 6,
+        priorReceptionIds: [101],
+        priorTotalDebit: event1Payload.total_amount,
+      });
+      const { service: service2, eventEmitter: emitter2 } =
+        await createServiceWithPrisma(prisma2);
+
+      await service2.receive(PO_ID, {
+        items: [{ id: PO_ITEM_ID, quantity_received: 6 }],
+        notes: 'Partial receipt 2/2 (final)',
+      } as any);
+
+      expect(emitter2.emit).toHaveBeenCalledTimes(1);
+      const [event2Name, event2Payload] = emitter2.emit.mock.calls[0];
+      expect(event2Name).toBe('purchase_order.received');
+      expect(event2Payload.reception_id).toBe(102);
+
+      // Distinct source_id (reception_id) between the two receptions — this
+      // is what keeps createAutoEntry's (source_type, source_id) duplicate
+      // guard from treating reception #2 as a repeat of reception #1.
+      expect(event2Payload.reception_id).not.toBe(event1Payload.reception_id);
+
+      // Final reception posts the exact remainder (total - alreadyPosted),
+      // NOT an independently-computed 6/10 proportion.
+      const expectedRemainder =
+        PARTIAL_PO_TOTAL - event1Payload.total_amount;
+      expect(event2Payload.total_amount).toBeCloseTo(expectedRemainder, 2);
+
+      // No drift: the sum of both emitted amounts equals total_amount
+      // exactly (to the cent).
+      const sum = event1Payload.total_amount + event2Payload.total_amount;
+      expect(sum).toBeCloseTo(PARTIAL_PO_TOTAL, 2);
+    });
+
+    it('does not lose cents across 3 uneven partial receptions (rounding drift)', async () => {
+      // Order total 1699.99 split across three receptions of 3/4/3 units
+      // (10 total) so 1699.99/10 does not divide evenly per-unit — forces
+      // rounding at each proration step.
+      const ROUNDING_PO_TOTAL = 1699.99;
+
+      function buildRoundingServiceForReception(opts: {
+        receptionId: number;
+        quantityReceivedBefore: number;
+        quantityReceivedNow: number;
+        priorReceptionIds: number[];
+        priorTotalDebit: number;
+      }) {
+        const {
+          receptionId,
+          quantityReceivedBefore,
+          quantityReceivedNow,
+          priorReceptionIds,
+          priorTotalDebit,
+        } = opts;
+        const quantityReceivedAfter =
+          quantityReceivedBefore + quantityReceivedNow;
+        const allItemsReceived = quantityReceivedAfter >= 10;
+
+        const roundingPoItem = {
+          id: PO_ITEM_ID,
+          product_id: PRODUCT_ID,
+          product_variant_id: null,
+          unit_cost: 169.999, // 10 units => subtotal 1699.99
+          quantity_ordered: 10,
+          quantity_received: 0,
+          batch_number: null,
+          manufacturing_date: null,
+          expiration_date: null,
+        };
+
+        // Same note as buildServiceForReception above: the real service reads
+        // this AFTER incrementing quantity_received for THIS reception, so
+        // it must already carry quantityReceivedAfter.
+        const orderFetchedInsideTx = {
+          id: PO_ID,
+          organization_id: ORG_ID,
+          location_id: LOCATION_ID,
+          status: quantityReceivedBefore > 0 ? 'partial' : 'pending',
+          total_amount: ROUNDING_PO_TOTAL,
+          location: { id: LOCATION_ID, store_id: STORE_ID },
+          purchase_order_items: [
+            { ...roundingPoItem, quantity_received: quantityReceivedAfter },
+          ],
+        };
+
+        const buildTxMock = () => ({
+          purchase_order_receptions: {
+            create: jest.fn().mockResolvedValue({ id: receptionId }),
+          },
+          purchase_order_reception_items: {
+            create: jest.fn().mockResolvedValue({}),
+          },
+          purchase_order_items: { update: jest.fn().mockResolvedValue({}) },
+          products: {
+            findFirst: jest.fn().mockResolvedValue({
+              id: PRODUCT_ID,
+              is_ingredient: false,
+              purchase_to_stock_factor: null,
+              stock_uom_id: null,
+              purchase_uom_id: null,
+            }),
+            findUnique: jest.fn().mockResolvedValue({
+              base_price: 3000,
+              profit_margin: 20,
+            }),
+            update: jest.fn().mockResolvedValue({}),
+          },
+          purchase_orders: {
+            findUnique: jest.fn().mockResolvedValue(orderFetchedInsideTx),
+            update: jest.fn().mockResolvedValue({
+              id: PO_ID,
+              organization_id: ORG_ID,
+              total_amount: ROUNDING_PO_TOTAL,
+              status: allItemsReceived ? 'received' : 'partial',
+              suppliers: null,
+              location: orderFetchedInsideTx.location,
+              purchase_order_items: [
+                {
+                  ...roundingPoItem,
+                  quantity_received: quantityReceivedAfter,
+                  products: null,
+                  product_variants: null,
+                },
+              ],
+            }),
+          },
+        });
+
+        return {
+          $transaction: jest.fn().mockImplementation(async (callback: any) => {
+            return callback(buildTxMock());
+          }),
+          purchase_order_receptions: {
+            findMany: jest.fn().mockResolvedValue(
+              priorReceptionIds.map((prId) => ({ id: prId })),
+            ),
+          },
+          accounting_entries: {
+            findMany: jest.fn().mockResolvedValue(
+              priorReceptionIds.length > 0
+                ? [{ total_debit: priorTotalDebit }]
+                : [],
+            ),
+          },
+        };
+      }
+
+      const emittedAmounts: number[] = [];
+      let alreadyPosted = 0;
+      const receptionIds: number[] = [];
+      const batches = [
+        { receptionId: 201, before: 0, now: 3 },
+        { receptionId: 202, before: 3, now: 4 },
+        { receptionId: 203, before: 7, now: 3 },
+      ];
+
+      for (const batch of batches) {
+        const mockPrismaService = buildRoundingServiceForReception({
+          receptionId: batch.receptionId,
+          quantityReceivedBefore: batch.before,
+          quantityReceivedNow: batch.now,
+          priorReceptionIds: [...receptionIds],
+          priorTotalDebit: alreadyPosted,
+        });
+        const { service, eventEmitter: emitter } =
+          await createServiceWithPrisma(mockPrismaService);
+
+        jest.spyOn(RequestContextService, 'getOrganizationId').mockReturnValue(ORG_ID);
+        jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+        jest.spyOn(RequestContextService, 'getUserId').mockReturnValue(USER_ID);
+
+        await service.receive(PO_ID, {
+          items: [{ id: PO_ITEM_ID, quantity_received: batch.now }],
+          notes: `Partial receipt (reception ${batch.receptionId})`,
+        } as any);
+
+        expect(emitter.emit).toHaveBeenCalledTimes(1);
+        const [, payload] = emitter.emit.mock.calls[0];
+        expect(payload.reception_id).toBe(batch.receptionId);
+
+        emittedAmounts.push(payload.total_amount);
+        alreadyPosted += payload.total_amount;
+        receptionIds.push(batch.receptionId);
+      }
+
+      // All three reception ids must be distinct source_ids.
+      expect(new Set(receptionIds).size).toBe(3);
+
+      // The sum of all emitted amounts must equal total_amount exactly —
+      // no cents lost or duplicated to rounding across partial receptions.
+      const total = emittedAmounts.reduce((a, b) => a + b, 0);
+      expect(total).toBeCloseTo(ROUNDING_PO_TOTAL, 2);
+    });
+  });
 });
