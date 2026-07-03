@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -44,7 +44,15 @@ import { ImageSourceModal, type UploadedImage } from '@/features/store/component
 import { ImageEditModal } from '@/features/store/components/image-edit-modal';
 import { Toggle } from '@/shared/components/toggle/toggle';
 import PopConfigModal from '@/features/pop/components/pop-config-modal';
-import StockAdjustmentLocationModal from '@/features/store/components/stock-adjustment-location-modal';
+import StockAdjustmentModal from '@/features/store/components/stock-adjustment-location-modal';
+import InventoryDetailModal from '@/features/store/components/inventory-detail-modal';
+import type { ConsolidatedStock } from '@/features/store/types';
+import {
+  cartesian,
+  getVariantKey,
+  parseVariantAttributes,
+} from '@/features/store/utils/variant-attributes';
+import { ChipInput } from '@/shared/components/chip-input/chip-input';
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { borderRadius, colorScales, colors, shadows, spacing, typography } from '@/shared/theme';
 import { formatCurrency } from '@/shared/utils/currency';
@@ -62,6 +70,22 @@ interface VariantForm {
   is_on_sale: boolean;
   sale_price: string;
   stock_quantity: string;
+  /**
+   * Atributos de la variante (ej. { Color: "Rojo", Talla: "S" }). Sólo se
+   * persiste si la variante fue auto-generada desde la matriz de
+   * atributos; las variantes legacy (sin matriz) lo dejan en undefined.
+   */
+  attributes?: Record<string, string>;
+}
+
+/**
+ * Atributo de variante — espejo del web `VariantAttribute`.
+ * Una variante se genera como producto cartesiano de los `values`
+ * de cada atributo.
+ */
+interface VariantAttribute {
+  name: string;
+  values: string[];
 }
 
 interface PriceTierOverrideForm {
@@ -114,6 +138,24 @@ interface ProductFormState {
   tax_category_ids: number[];
   has_variants: boolean;
   variants: VariantForm[];
+  /**
+   * Atributos que definen la matriz de variantes (Color, Talla, Material…).
+   * Las variantes se auto-generan como producto cartesiano de `attributes`.
+   */
+  attributes: VariantAttribute[];
+  /**
+   * Claves estable-serializadas (`getVariantKey`) de variantes que el
+   * usuario eliminó manualmente. La reconciliación las respeta — no se
+   * resurrectan al regenerar la matriz.
+   */
+  removedVariantKeys: string[];
+  /**
+   * Working list derivada de `attributes` con reconciliación no
+   * destructiva. Se mantiene sincronizada con `variants` para no romper
+   * el resto del form; el DTO enviado al backend se construye desde
+   * `variants` (= `generatedVariants` siempre).
+   */
+  generatedVariants: VariantForm[];
   stock_by_location: Record<string, string>;
   // Precios multi-tarifa
   has_multiple_price_tiers?: boolean;
@@ -218,6 +260,9 @@ const initialForm: ProductFormState = {
   tax_category_ids: [],
   has_variants: false,
   variants: [],
+  attributes: [],
+  removedVariantKeys: [],
+  generatedVariants: [],
   stock_by_location: {},
   has_multiple_price_tiers: false,
   enabled_price_tier_ids: [],
@@ -244,6 +289,68 @@ function toNumber(value: string | undefined): number | undefined {
 
 function money(value?: number | null): string {
   return value == null ? '' : String(Number(value));
+}
+
+/**
+ * Reconstruye la matriz de `attributes` recorriendo las variantes
+ * persistidas y agrupando `(attribute_name) → Set<attribute_value>`.
+ * Espejo del web `loadProduct` (apps/frontend/.../product-create-page.component.ts:1749).
+ *
+ * Si ninguna variante tiene attributes (legacy / productos sin matriz),
+ * devuelve `[]`.
+ */
+function rebuildAttributesFromVariants(
+  variants?: Array<{ attributes?: unknown }>,
+): VariantAttribute[] {
+  if (!variants || variants.length === 0) return [];
+  const map = new Map<string, Set<string>>();
+  for (const v of variants) {
+    const attrs = parseVariantAttributes(v.attributes);
+    for (const [k, val] of Object.entries(attrs)) {
+      const set = map.get(k) ?? new Set<string>();
+      set.add(val);
+      map.set(k, set);
+    }
+  }
+  return Array.from(map.entries()).map(([name, set]) => ({
+    name,
+    values: Array.from(set),
+  }));
+}
+
+/**
+ * Convierte las variantes persistidas al `VariantForm` con `attributes`
+ * parseado. Defiende contra el drift de tipos (backend envía objeto,
+ * type lo declara string).
+ */
+function hydrateVariantsFromProduct(
+  variants?: Array<{
+    id: number;
+    sku?: string | null;
+    name?: string | null;
+    attributes?: unknown;
+    price_override?: number | null;
+    cost_price?: number | null;
+    profit_margin?: number | null;
+    is_on_sale?: boolean | null;
+    sale_price?: number | null;
+    stock_quantity?: number | null;
+  }>,
+): VariantForm[] {
+  if (!variants || variants.length === 0) return [];
+  return variants.map((variant) => ({
+    localId: `variant-${variant.id}`,
+    id: variant.id,
+    sku: variant.sku || '',
+    name: variant.name || '',
+    price_override: money(variant.price_override),
+    cost_price: money(variant.cost_price),
+    profit_margin: money(variant.profit_margin),
+    is_on_sale: !!variant.is_on_sale,
+    sale_price: money(variant.sale_price),
+    stock_quantity: String(variant.stock_quantity ?? 0),
+    attributes: parseVariantAttributes(variant.attributes),
+  }));
 }
 
 function createVariant(baseSku = ''): VariantForm {
@@ -285,6 +392,9 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const [productImages, setProductImages] = useState<string[]>([]);
   const [showPopConfig, setShowPopConfig] = useState(false);
   const [showStockLocationModal, setShowStockLocationModal] = useState(false);
+  // Popup "Detalle de Inventario" — se abre al pulsar 'Ver detalle completo'.
+  // Lazy: la query de consolidated-stock sólo se activa cuando el modal está abierto.
+  const [showStockDetailModal, setShowStockDetailModal] = useState(false);
   // Flag para no sobrescribir `price_tier_overrides` cada vez que se
   // re-fetchea el producto. Sólo hidratamos desde el backend la primera
   // vez; las selecciones del usuario se preservan en re-fetches.
@@ -307,7 +417,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   });
 
   // Bodegas / ubicaciones de la tienda actual (para el modal de ajuste
-  // de stock y el selector de ubicación en StockAdjustmentLocationModal).
+  // de stock y el selector de ubicación en StockAdjustmentModal).
   // Se carga lazy cuando el modal se abre por primera vez.
   const locationsQuery = useQuery({
     queryKey: ['inventory-locations'],
@@ -357,6 +467,15 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   });
 
   const locations = locationsResponse?.data ?? [];
+
+  // Stock consolidado del producto — sólo se carga al abrir el popup
+  // 'Detalle de Inventario' (lazy) para no penalizar el render del form.
+  const consolidatedStockQuery = useQuery({
+    queryKey: ['consolidated-stock', productId],
+    queryFn: () => InventoryService.getConsolidatedStock(Number(productId)),
+    enabled: mode === 'edit' && !!productId && showStockDetailModal,
+    staleTime: 0,
+  });
 
   useEffect(() => {
     if (!product) return;
@@ -412,18 +531,15 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       tax_category_ids: product.product_tax_assignments?.map((assignment) => assignment.tax_category_id) ?? [],
       enabled_price_tier_ids: ext.enabled_price_tier_ids ?? [],
       has_variants: (product.product_variants?.length ?? 0) > 0,
-      variants: (product.product_variants || []).map((variant) => ({
-        localId: `variant-${variant.id}`,
-        id: variant.id,
-        sku: variant.sku || '',
-        name: variant.name || '',
-        price_override: money(variant.price_override),
-        cost_price: money(variant.cost_price),
-        profit_margin: money(variant.profit_margin),
-        is_on_sale: !!variant.is_on_sale,
-        sale_price: money(variant.sale_price),
-        stock_quantity: String(variant.stock_quantity ?? 0),
-      })),
+      // Reconstruir `attributes` desde las variantes existentes del producto.
+      // Recorremos cada variante, parseamos su JSON `attributes` y
+      // agrupamos por nombre → set único de valores. Esto reconstruye
+      // la matriz que el usuario configuró originalmente (espejo del
+      // web `loadProduct` líneas 1749–1761).
+      attributes: rebuildAttributesFromVariants(product.product_variants),
+      variants: hydrateVariantsFromProduct(product.product_variants),
+      generatedVariants: hydrateVariantsFromProduct(product.product_variants),
+      removedVariantKeys: [],
       stock_by_location: stockByLocation,
     });
 
@@ -525,6 +641,18 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     const sale = form.is_on_sale ? toNumber(form.sale_price) : undefined;
     return sale && sale > 0 ? sale : priceWithTax;
   }, [form.is_on_sale, form.sale_price, priceWithTax]);
+
+  /**
+   * Detecta SKUs duplicados entre las variantes — usado para mostrar
+   * el banner ámbar en la sección Variantes (mirror del web).
+   */
+  const hasDuplicateSkus = useMemo(() => {
+    if (!form.has_variants) return false;
+    const skus = form.variants
+      .map((v) => v.sku?.trim())
+      .filter((s): s is string => Boolean(s && s.length > 0));
+    return new Set(skus).size !== skus.length;
+  }, [form.has_variants, form.variants]);
 
   /**
    * Suma del stock físico y disponible para la sección "Inventario / Stock".
@@ -691,18 +819,234 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   };
 
   const updateVariant = (localId: string, patch: Partial<VariantForm>) => {
+    setForm((current) => {
+      const patchList = (vs: VariantForm[]) =>
+        vs.map((variant) => (variant.localId === localId ? { ...variant, ...patch } : variant));
+      return {
+        ...current,
+        variants: patchList(current.variants),
+        generatedVariants: patchList(current.generatedVariants),
+      };
+    });
+  };
+
+  /**
+   * Eliminada manualmente → marca en `removedVariantKeys` (clave estable
+   * basada en attributes) para que la reconciliación no la resurrect al
+   * regenerar la matriz cartesiana.
+   */
+  const removeVariant = (localId: string) => {
+    setForm((current) => {
+      const removed = current.generatedVariants.find((v) => v.localId === localId);
+      const nextRemovedKeys = removed?.attributes
+        ? [...current.removedVariantKeys, getVariantKey(removed.attributes)]
+        : current.removedVariantKeys;
+      const filterList = (vs: VariantForm[]) =>
+        vs.filter((variant) => variant.localId !== localId);
+      return {
+        ...current,
+        variants: filterList(current.variants),
+        generatedVariants: filterList(current.generatedVariants),
+        removedVariantKeys: nextRemovedKeys,
+      };
+    });
+  };
+
+  /**
+   * Reconciliación no destructiva — espejo del web `reconcileVariants`.
+   *
+   * - Filtra atributos con nombre vacío o sin valores.
+   * - Genera el producto cartesiano de los `values` válidos.
+   * - Para cada combinación, busca variante preexistente por `getVariantKey`
+   *   y la preserva con sus ediciones. Si no existe, crea una heredando
+   *   sku/precio/costo del producto base.
+   * - Honra `removedVariantKeys` (variantes eliminadas no se resurrectan).
+   * - Sincroniza `variants` ↔ `generatedVariants` para no romper el DTO
+   *   (que se construye desde `form.variants`).
+   */
+  const reconcileVariants = useCallback(() => {
+    setForm((current) => {
+      const validAttributes = current.attributes.filter(
+        (a) => a.name.trim() !== '' && a.values.length > 0,
+      );
+      if (validAttributes.length === 0) {
+        return {
+          ...current,
+          generatedVariants: [],
+          variants: [],
+        };
+      }
+
+      const valueLists = validAttributes.map((a) => a.values);
+      const combos = cartesian(valueLists);
+      const basePrice = toNumber(current.base_price) || 0;
+      const baseCost = toNumber(current.cost_price) || 0;
+      const baseMargin = toNumber(current.profit_margin) || 0;
+      const baseSku = current.sku.trim();
+      const baseName = current.name.trim() || 'Producto';
+
+      // Lookup de variantes existentes con attributes por clave estable
+      const existingMap = new Map<string, VariantForm>();
+      for (const v of current.generatedVariants) {
+        if (v.attributes) existingMap.set(getVariantKey(v.attributes), v);
+      }
+
+      // Variantes legacy (sin attributes) — preservarlas por localId para
+      // no perder ediciones durante la transición.
+      const legacyByLocalId = new Map<string, VariantForm>();
+      for (const v of current.generatedVariants) {
+        if (!v.attributes) legacyByLocalId.set(v.localId, v);
+      }
+
+      const removedSet = new Set(current.removedVariantKeys);
+      const next: VariantForm[] = [];
+
+      for (const combo of combos) {
+        const attrs: Record<string, string> = {};
+        let nameSuffix = '';
+        let skuSuffix = '';
+        validAttributes.forEach((a, i) => {
+          const v = combo[i];
+          attrs[a.name] = v;
+          nameSuffix += ` ${v}`;
+          // Sufijo SKU: 3 primeras letras del valor en mayúsculas (mirror web)
+          skuSuffix += `-${v.toUpperCase().slice(0, 3)}`;
+        });
+
+        const key = getVariantKey(attrs);
+        if (removedSet.has(key)) continue;
+
+        const existing = existingMap.get(key);
+        if (existing) {
+          next.push(existing);
+          continue;
+        }
+
+        const suffix = Math.random().toString(36).slice(2, 6).toUpperCase();
+        next.push({
+          localId: `variant-${Date.now()}-${suffix}`,
+          sku: baseSku ? `${baseSku}${skuSuffix}` : '',
+          name: `${baseName}${nameSuffix}`.trim(),
+          price_override: String(basePrice),
+          cost_price: String(baseCost),
+          profit_margin: String(baseMargin),
+          is_on_sale: false,
+          sale_price: '',
+          stock_quantity: '0',
+          attributes: attrs,
+        });
+      }
+
+      // Append legacy variants al final para no romper compat temporal.
+      for (const v of legacyByLocalId.values()) next.push(v);
+
+      return {
+        ...current,
+        generatedVariants: next,
+        variants: next,
+      };
+    });
+  }, []);
+
+  // ============ Mutators de atributos ============
+
+  const addQuickAttribute = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    let duplicate = false;
+    setForm((current) => {
+      if (
+        current.attributes.some(
+          (a) => a.name.toLowerCase() === trimmed.toLowerCase(),
+        )
+      ) {
+        duplicate = true;
+        return current;
+      }
+      return {
+        ...current,
+        attributes: [...current.attributes, { name: trimmed, values: [] }],
+      };
+    });
+    if (duplicate) toastError(`El atributo "${trimmed}" ya existe`);
+    // No reconcilia aún — sin values, no hay combinaciones que generar.
+  };
+
+  const addAttribute = () => {
     setForm((current) => ({
       ...current,
-      variants: current.variants.map((variant) => (variant.localId === localId ? { ...variant, ...patch } : variant)),
+      attributes: [...current.attributes, { name: '', values: [] }],
     }));
   };
 
-  const addVariant = () => {
-    setForm((current) => ({ ...current, has_variants: true, variants: [...current.variants, createVariant(current.sku)] }));
+  const removeAttribute = (index: number) => {
+    setForm((current) => ({
+      ...current,
+      attributes: current.attributes.filter((_, i) => i !== index),
+    }));
+    reconcileVariants();
   };
 
-  const removeVariant = (localId: string) => {
-    setForm((current) => ({ ...current, variants: current.variants.filter((variant) => variant.localId !== localId) }));
+  const updateAttributeName = (index: number, name: string) => {
+    setForm((current) => ({
+      ...current,
+      attributes: current.attributes.map((a, i) =>
+        i === index ? { ...a, name } : a,
+      ),
+    }));
+    if (name.trim()) reconcileVariants();
+  };
+
+  const addAttributeValue = (attrIndex: number, value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    let changed = false;
+    setForm((current) => {
+      const attrs = current.attributes.map((a, i) => {
+        if (i !== attrIndex) return a;
+        if (a.values.includes(trimmed)) return a;
+        changed = true;
+        return { ...a, values: [...a.values, trimmed] };
+      });
+      if (!changed) return current;
+      return { ...current, attributes: attrs };
+    });
+    if (changed) reconcileVariants();
+  };
+
+  const removeAttributeValue = (attrIndex: number, valueIndex: number) => {
+    setForm((current) => ({
+      ...current,
+      attributes: current.attributes.map((a, i) =>
+        i === attrIndex
+          ? { ...a, values: a.values.filter((_, j) => j !== valueIndex) }
+          : a,
+      ),
+    }));
+    reconcileVariants();
+  };
+
+  /**
+   * Bulk action — el botón "Aplicar precio/costo a todas" del web.
+   */
+  const applyBaseToAllVariants = (
+    field: 'price_override' | 'cost_price' | 'profit_margin',
+  ) => {
+    setForm((current) => {
+      const source =
+        field === 'price_override'
+          ? current.base_price
+          : field === 'cost_price'
+            ? current.cost_price
+            : current.profit_margin;
+      const patch = current.variants.map((v) => ({ ...v, [field]: source }));
+      return {
+        ...current,
+        variants: patch,
+        generatedVariants: patch,
+      };
+    });
+    toastSuccess('Aplicado a todas las variantes');
   };
 
   const toggleNumber = (key: 'category_ids' | 'tax_category_ids', id: number) => {
@@ -742,18 +1086,28 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       .filter((stock) => stock.quantity > 0);
 
     const variants: CreateProductVariantDto[] | undefined = form.has_variants
-      ? form.variants.map((variant) => ({
-          ...(variant.id ? { id: variant.id } : {}),
-          sku: variant.sku.trim(),
-          name: variant.name.trim() || undefined,
-          price_override: toNumber(variant.price_override),
-          cost_price: toNumber(variant.cost_price),
-          profit_margin: toNumber(variant.profit_margin),
-          is_on_sale: variant.is_on_sale,
-          sale_price: variant.is_on_sale ? toNumber(variant.sale_price) : undefined,
-          stock_quantity: toNumber(variant.stock_quantity) ?? 0,
-          track_inventory_override: null,
-        }))
+      ? form.variants.map((variant) => {
+          // `attributes` se persiste siempre que tenga al menos una entrada.
+          // El backend ya acepta `Record<string, any>` en el DTO
+          // (`CreateProductVariantDto.attributes`) y persiste el JSON tal cual.
+          const attrs =
+            variant.attributes && Object.keys(variant.attributes).length > 0
+              ? variant.attributes
+              : undefined;
+          return {
+            ...(variant.id ? { id: variant.id } : {}),
+            sku: variant.sku.trim(),
+            name: variant.name.trim() || undefined,
+            price_override: toNumber(variant.price_override),
+            cost_price: toNumber(variant.cost_price),
+            profit_margin: toNumber(variant.profit_margin),
+            is_on_sale: variant.is_on_sale,
+            sale_price: variant.is_on_sale ? toNumber(variant.sale_price) : undefined,
+            stock_quantity: toNumber(variant.stock_quantity) ?? 0,
+            attributes: attrs,
+            track_inventory_override: null,
+          };
+        })
       : undefined;
 
     // Base payload — fields safe in both create and update.
@@ -1679,28 +2033,71 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             onCancel={() => setShowPopConfig(false)}
           />
 
-          {/* Modal: Seleccionar Ubicación para ajuste de stock
+          {/* Modal: Confirmar Ajustes de Inventario (2 pasos)
               - Se abre desde el botón 'Ajustar' del modal Stock
-              - Stepper de 2 pasos: UBICACIÓN → CONFIRMAR
-              - Botón "Continuar" con icono arrow-right (full-width, primary)
-              - Paso 2 con confirmación de la selección
+              - Paso 1 UBICACIÓN: selector dropdown de bodegas
+              - Paso 2 CONFIRMAR: tarjeta del producto pre-seleccionado
+                con grid de tipos (Daño/Pérdida/Robo/Vencido/Conteo/Corrección),
+                input de nueva cantidad, nota opcional y checkbox.
+              - Botón "Crear y Aplicar" ejecuta `InventoryService.createAdjustment`
+                (endpoint batch-complete) y al éxito invalida las queries que
+                muestran el stock del producto (products, consolidated-stock,
+                inventory-stats, adjustments, pos-products).
+              - Espejo del `app-adjustment-create-modal` web en modo preseleccionado.
           */}
-          <StockAdjustmentLocationModal
+          <StockAdjustmentModal
             visible={showStockLocationModal}
             locations={inventoryLocations.map((l) => ({
               id: Number(l.id),
               name: l.name,
             }))}
+            preselectedProduct={
+              product
+                ? {
+                    id: Number(product.id),
+                    name: product.name,
+                    sku: product.sku ?? null,
+                    stock_quantity: product.stock_quantity ?? 0,
+                  }
+                : productId
+                  ? {
+                      id: Number(productId),
+                      name: form.name || 'Producto sin nombre',
+                      sku: form.sku || null,
+                      stock_quantity: Number(form.stock_quantity) || 0,
+                    }
+                  : undefined
+            }
             onClose={() => setShowStockLocationModal(false)}
-            onConfirm={(locationId) => {
-              setShowStockLocationModal(false);
-              // Navegar a la pantalla de creación de ajuste con la ubicación
-              // pre-seleccionada.
-              router.push({
-                pathname: '/(store-admin)/inventory/adjustments/create',
-                params: { locationId: String(locationId) },
-              });
+            onSubmitted={() => {
+              // Tras crear y aplicar el ajuste, refrescamos las queries que
+              // muestran el stock del producto para que se refleje el nuevo
+              // valor en este form, en la lista de productos, en el POS,
+              // en el dashboard de inventario y en la pantalla de detalle
+              // consolidado.
+              queryClient.invalidateQueries({ queryKey: ['products'] });
+              queryClient.invalidateQueries({ queryKey: ['pos-products'] });
+              queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
+              if (productId) {
+                queryClient.invalidateQueries({ queryKey: ['consolidated-stock', productId] });
+                queryClient.invalidateQueries({ queryKey: ['product', productId] });
+              }
+              queryClient.invalidateQueries({ queryKey: ['adjustments'] });
             }}
+          />
+
+          {/* Popup 'Detalle de Inventario' — abre al pulsar 'Ver detalle completo'.
+              Espejo del popup web móvil: stats apiladas + cards por bodega. */}
+          <InventoryDetailModal
+            visible={showStockDetailModal}
+            consolidated={
+              consolidatedStockQuery.data
+                ? (consolidatedStockQuery.data as ConsolidatedStock)
+                : null
+            }
+            isLoading={consolidatedStockQuery.isLoading}
+            onRefresh={consolidatedStockQuery.refetch}
+            onClose={() => setShowStockDetailModal(false)}
           />
 
           {/* Promociones & Operaciones (espejo exacto del web lg:hidden).
@@ -1816,12 +2213,11 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </View>
             <Pressable
               onPress={() => {
-                // Navega a la vista detallada de stock por bodega.
+                // Abre el popup 'Detalle de Inventario' sobre el form
+                // (sin navegar a otra pantalla). La query lazy de
+                // consolidated-stock se activa al abrir el modal.
                 if (productId) {
-                  router.push({
-                    pathname: '/(store-admin)/inventory/stock-detail',
-                    params: { productId: String(productId) },
-                  });
+                  setShowStockDetailModal(true);
                 } else {
                   toastSuccess('Guarda el producto para ver el detalle');
                 }
@@ -1836,61 +2232,80 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             </Pressable>
           </Section>
 
-          {/* Números de serie (espejo exacto del web lg:hidden)
+          {/* Números de serie (espejo exacto del web lg:hidden — QUI-431)
+              - Solo se muestra si el toggle 'requires_serial_numbers' está
+                activo (`@if (isSerialized)` en la versión web).
               - Header: flex-col gap-3 en mobile, sm:flex-row sm:items-start
-                sm:justify-between en md+. Icon hash (18, primary) + título
-                'Números de serie' + subtítulo.
+                sm:justify-between en md+. Icono hash (18, primary-600) +
+                título 'Números de serie' + subtítulo (cambia entre modo
+                edición y modo creación).
               - Botón 'Gestionar seriales' (variant primary, icon settings)
-                a la derecha.
-              - Grid 2 cols mobile / 4 cols sm+ con stats:
-                Total / En stock / Vendidos / Garantía por vencer. */}
-          <Section title="" icon="hash">
-            <View
-              style={[
-                styles.serialHeader,
-                isMdUp && styles.serialHeaderRow,
-              ]}
-            >
-              <View style={styles.serialHeaderLeft}>
-                <View style={styles.serialTitleRow}>
-                  <Text style={styles.serialTitle}>Números de serie</Text>
+                a la derecha. Deshabilitado en creación o sin productId
+                (`@if (isEditMode() && productId !== null)`).
+              - Grid 2 cols mobile / 4 cols md+ (`grid-cols-2 sm:grid-cols-4`)
+                con stats: Total / En stock / Vendidos / Garantía por
+                vencer. Solo se muestra en modo edición con producto
+                persistido. La celda 'Garantía' cambia a ámbar si >0.
+          */}
+          {form.requires_serial_numbers ? (
+            <Section title="" icon="hash">
+              <View
+                style={[
+                  styles.serialHeader,
+                  isMdUp && styles.serialHeaderRow,
+                ]}
+              >
+                <View style={styles.serialHeaderLeft}>
+                  <View style={styles.serialTitleRow}>
+                    <Icon
+                      name="hash"
+                      size={18}
+                      color={colorScales.green[600]}
+                      style={styles.serialTitleIcon}
+                    />
+                    <Text style={styles.serialTitle}>Números de serie</Text>
+                  </View>
+                  <Text style={styles.serialSubtitle}>
+                    {mode === 'edit' && productId
+                      ? "Resumen del pool de seriales. Usa “Gestionar seriales” para registrar, editar o cargar en lote."
+                      : 'Guarda el producto para gestionar sus números de serie.'}
+                  </Text>
                 </View>
-                <Text style={styles.serialSubtitle}>
-                  Resumen del pool de seriales. Usa 'Gestionar
-                  seriales' para registrar, editar o cargar en lote.
-                </Text>
+                <Button
+                  title="Gestionar seriales"
+                  variant="primary"
+                  leftIcon={
+                    <Icon name="settings" size={16} color={colors.background} />
+                  }
+                  disabled={!(mode === 'edit' && !!productId)}
+                  onPress={() =>
+                    toastSuccess('Gestionar seriales próximamente')
+                  }
+                />
               </View>
-              <Button
-                title="Gestionar seriales"
-                variant="primary"
-                leftIcon={
-                  <Icon name="settings" size={16} color={colors.background} />
-                }
-                onPress={() =>
-                  toastSuccess('Gestionar seriales próximamente')
-                }
-              />
-            </View>
 
-            <View style={styles.serialStatsGrid}>
-              <View style={styles.serialStatCell}>
-                <Text style={styles.serialStatLabel}>Total</Text>
-                <Text style={styles.serialStatValuePrimary}>0</Text>
-              </View>
-              <View style={styles.serialStatCell}>
-                <Text style={styles.serialStatLabel}>En stock</Text>
-                <Text style={styles.serialStatValuePrimary700}>0</Text>
-              </View>
-              <View style={styles.serialStatCell}>
-                <Text style={styles.serialStatLabel}>Vendidos</Text>
-                <Text style={styles.serialStatValuePrimary}>0</Text>
-              </View>
-              <View style={styles.serialStatCell}>
-                <Text style={styles.serialStatLabel}>Garantía por vencer</Text>
-                <Text style={styles.serialStatValueMuted}>0</Text>
-              </View>
-            </View>
-          </Section>
+              {mode === 'edit' && productId ? (
+                <View style={styles.serialStatsGrid}>
+                  <View style={[styles.serialStatCell, isMdUp && styles.serialStatCellMd]}>
+                    <Text style={styles.serialStatLabel}>Total</Text>
+                    <Text style={styles.serialStatValuePrimary}>0</Text>
+                  </View>
+                  <View style={[styles.serialStatCell, isMdUp && styles.serialStatCellMd]}>
+                    <Text style={styles.serialStatLabel}>En stock</Text>
+                    <Text style={styles.serialStatValuePrimary700}>0</Text>
+                  </View>
+                  <View style={[styles.serialStatCell, isMdUp && styles.serialStatCellMd]}>
+                    <Text style={styles.serialStatLabel}>Vendidos</Text>
+                    <Text style={styles.serialStatValuePrimary}>0</Text>
+                  </View>
+                  <View style={[styles.serialStatCell, isMdUp && styles.serialStatCellMd]}>
+                    <Text style={styles.serialStatLabel}>Garantía por vencer</Text>
+                    <Text style={styles.serialStatValueMuted}>0</Text>
+                  </View>
+                </View>
+              ) : null}
+            </Section>
+          ) : null}
 
           {/* Disponibilidad y Estado (espejo exacto del web)
               - Header: icon check-circle + h2 (sin subtitle)
@@ -2070,7 +2485,20 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             <View style={styles.settingToggleRow}>
               <Toggle
                 value={!!form.has_variants}
-                onChange={(v) => updateField('has_variants', v)}
+                onChange={(v) => {
+                  updateField('has_variants', v);
+                  if (!v) {
+                    // Al desactivar variantes: limpiar toda la matriz para
+                    // no dejar datos huérfanos que el backend rechazaría.
+                    setForm((current) => ({
+                      ...current,
+                      variants: [],
+                      generatedVariants: [],
+                      attributes: [],
+                      removedVariantKeys: [],
+                    }));
+                  }
+                }}
                 label="Este producto tiene variantes"
                 description="Agrega opciones como tamaño, color o material"
               />
@@ -2411,42 +2839,244 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             )}
           </Section>
 
-          <Section title="Variantes" subtitle="Opciones vendibles del producto" icon="list">
+          {/* Variantes — sección rediseñada para matchear el patrón web:
+              atributos (Color/Talla/Material) + generación cartesiana
+              + reconciliación no destructiva + lista de variantes editables.
+              Espejo del modal Variantes del product-create-page.component.html
+              (apps/frontend/src/.../product-create-page.component.html líneas 2560-2820). */}
+          <Section
+            title="Variantes"
+            subtitle="Los atributos (Color, Talla, Material...) generan combinaciones. Cada combinación es una variante con su propio SKU, precio y stock."
+            icon="layers"
+            iconColor={colors.primary}
+            right={
+              <Icon name="help-circle" size={16} color={colorScales.gray[400]} />
+            }
+          >
             <Toggle
               value={form.has_variants}
-              onChange={(v) => updateField('has_variants', v)}
+              onChange={(v) => {
+                updateField('has_variants', v);
+                if (!v) {
+                  setForm((current) => ({
+                    ...current,
+                    variants: [],
+                    generatedVariants: [],
+                    attributes: [],
+                    removedVariantKeys: [],
+                  }));
+                }
+              }}
               label="Producto con variantes"
               description="Activá si el producto tiene tallas, colores u otras opciones."
             />
-            {errors.variants && <Text style={styles.errorText}>{errors.variants}</Text>}
+
+            {errors.variants && (
+              <Text style={styles.errorText}>{errors.variants}</Text>
+            )}
+
+            {/* Banner de SKUs duplicados (ámbar) — espejo del web */}
+            {form.has_variants && hasDuplicateSkus && (
+              <View style={styles.duplicateSkuBanner}>
+                <Icon name="alert-triangle" size={16} color={colorScales.amber[600]} />
+                <Text style={styles.duplicateSkuText}>
+                  Hay SKUs duplicados en las variantes. Cada variante debe tener un SKU único.
+                </Text>
+              </View>
+            )}
+
             {form.has_variants && (
-              <View style={styles.variantList}>
-                {form.variants.map((variant, index) => (
-                  <View key={variant.localId} style={styles.variantCard}>
-                    <View style={styles.variantHeader}>
-                      <Text style={styles.variantTitle}>Variante {index + 1}</Text>
-                      <Pressable onPress={() => removeVariant(variant.localId)} hitSlop={8}>
-                        <Icon name="trash-2" size={16} color={colors.error} />
+              <>
+                {/* Fila de quick-add chips (Color / Talla / Material / Personalizado) */}
+                <View style={styles.quickAddRow}>
+                  <Text style={styles.quickAddLabel}>Añadir atributo:</Text>
+                  <Pressable onPress={() => addQuickAttribute('Color')} style={styles.quickAddChipPrimary}>
+                    <Icon name="plus" size={11} color={colors.primary} />
+                    <Text style={styles.quickAddChipPrimaryText}>Color</Text>
+                  </Pressable>
+                  <Pressable onPress={() => addQuickAttribute('Talla')} style={styles.quickAddChipPrimary}>
+                    <Icon name="plus" size={11} color={colors.primary} />
+                    <Text style={styles.quickAddChipPrimaryText}>Talla</Text>
+                  </Pressable>
+                  <Pressable onPress={() => addQuickAttribute('Material')} style={styles.quickAddChipPrimary}>
+                    <Icon name="plus" size={11} color={colors.primary} />
+                    <Text style={styles.quickAddChipPrimaryText}>Material</Text>
+                  </Pressable>
+                  <Pressable onPress={addAttribute} style={styles.quickAddChipGray}>
+                    <Icon name="plus" size={11} color={colorScales.gray[600]} />
+                    <Text style={styles.quickAddChipGrayText}>Personalizado</Text>
+                  </Pressable>
+                </View>
+
+                {/* Lista de attribute cards */}
+                {form.attributes.map((attr, index) => (
+                  <View
+                    key={`attr-${index}`}
+                    style={[styles.attrCard, isMdUp && styles.attrCardRow]}
+                  >
+                    <View
+                      style={[
+                        styles.attrCardRowLayout,
+                        isMdUp && styles.attrCardRowLayoutMd,
+                      ]}
+                    >
+                      {/* Input Nombre del Atributo — 1/3 en md+ */}
+                      <View style={[styles.attrNameWrap, isMdUp && styles.attrNameWrapMd]}>
+                        <Input
+                          label="Nombre del Atributo"
+                          value={attr.name}
+                          onChangeText={(v) => updateAttributeName(index, v)}
+                          placeholder="Ej. Talla, Color"
+                        />
+                      </View>
+                      {/* ChipInput Valores — flex en md+ */}
+                      <View style={styles.attrValuesWrap}>
+                        <ChipInput
+                          label="Valores"
+                          values={attr.values}
+                          onAdd={(v) => addAttributeValue(index, v)}
+                          onRemove={(j) => removeAttributeValue(index, j)}
+                          placeholder="Escribe un valor y presiona Enter (ej: Rojo, Azul)"
+                        />
+                      </View>
+                      {/* Trash button */}
+                      <Pressable
+                        onPress={() => removeAttribute(index)}
+                        hitSlop={8}
+                        style={[styles.attrDeleteBtn, isMdUp && styles.attrDeleteBtnMd]}
+                        accessibilityLabel={`Eliminar atributo ${attr.name || index + 1}`}
+                      >
+                        <Icon name="trash-2" size={18} color={colors.error} />
                       </Pressable>
                     </View>
-                    {errors[`variant-${index}`] && <Text style={styles.errorText}>{errors[`variant-${index}`]}</Text>}
-                    <Input label="Nombre" value={variant.name} onChangeText={(value) => updateVariant(variant.localId, { name: value })} />
-                    <Input label="SKU" value={variant.sku} onChangeText={(value) => updateVariant(variant.localId, { sku: value.toUpperCase() })} autoCapitalize="characters" />
-                    <Input label="Precio propio" value={variant.price_override} onChangeText={(value) => updateVariant(variant.localId, { price_override: value })} keyboardType="decimal-pad" />
-                    <Input label="Costo" value={variant.cost_price} onChangeText={(value) => updateVariant(variant.localId, { cost_price: value })} keyboardType="decimal-pad" />
-                    <Input label="Stock" value={variant.stock_quantity} onChangeText={(value) => updateVariant(variant.localId, { stock_quantity: value })} keyboardType="number-pad" />
-                    <Toggle
-                      value={variant.is_on_sale}
-                      onChange={(v) => updateVariant(variant.localId, { is_on_sale: v })}
-                      label="Variante en oferta"
-                    />
-                    {variant.is_on_sale && (
-                      <Input label="Precio oferta variante" value={variant.sale_price} onChangeText={(value) => updateVariant(variant.localId, { sale_price: value })} keyboardType="decimal-pad" />
-                    )}
                   </View>
                 ))}
-                <Button title="Agregar variante" variant="outline" onPress={addVariant} leftIcon={<Icon name="plus" size={16} color={colors.primary} />} fullWidth />
-              </View>
+
+                {/* Link "+ Agregar Atributo" */}
+                <Pressable
+                  onPress={addAttribute}
+                  style={styles.addAttrLink}
+                  accessibilityLabel="Agregar atributo personalizado"
+                >
+                  <Icon name="plus" size={16} color={colors.primary} />
+                  <Text style={styles.addAttrLinkText}>Agregar Atributo</Text>
+                </Pressable>
+
+                {/* Bulk actions — sólo si hay variantes generadas */}
+                {form.generatedVariants.length > 0 && (
+                  <View style={styles.bulkActionsRow}>
+                    <Button
+                      title="Aplicar precio base"
+                      variant="outline"
+                      onPress={() => applyBaseToAllVariants('price_override')}
+                      leftIcon={<Icon name="tag" size={14} color={colors.primary} />}
+                      style={styles.bulkActionBtn}
+                    />
+                    <Button
+                      title="Aplicar costo"
+                      variant="outline"
+                      onPress={() => applyBaseToAllVariants('cost_price')}
+                      leftIcon={<Icon name="tag" size={14} color={colors.primary} />}
+                      style={styles.bulkActionBtn}
+                    />
+                  </View>
+                )}
+
+                {/* Lista de variantes generadas (auto desde cartesiano) */}
+                {form.generatedVariants.length > 0 && (
+                  <View style={styles.variantList}>
+                    {form.generatedVariants.map((variant, index) => (
+                      <View key={variant.localId} style={styles.variantCard}>
+                        <View style={styles.variantHeader}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.variantTitle} numberOfLines={1}>
+                              {variant.attributes
+                                ? Object.entries(variant.attributes)
+                                    .map(([k, v]) => `${k}: ${v}`)
+                                    .join(' · ')
+                                : `Variante ${index + 1}`}
+                            </Text>
+                            <Text style={styles.variantSubtitle}>
+                              Variante {index + 1} de {form.generatedVariants.length}
+                            </Text>
+                          </View>
+                          <Pressable
+                            onPress={() => removeVariant(variant.localId)}
+                            hitSlop={8}
+                            accessibilityLabel={`Eliminar variante ${variant.name || index + 1}`}
+                          >
+                            <Icon name="trash-2" size={16} color={colors.error} />
+                          </Pressable>
+                        </View>
+                        {errors[`variant-${index}`] && (
+                          <Text style={styles.errorText}>
+                            {errors[`variant-${index}`]}
+                          </Text>
+                        )}
+                        <Input
+                          label="Nombre"
+                          value={variant.name}
+                          onChangeText={(value) =>
+                            updateVariant(variant.localId, { name: value })
+                          }
+                        />
+                        <Input
+                          label="SKU"
+                          value={variant.sku}
+                          onChangeText={(value) =>
+                            updateVariant(variant.localId, {
+                              sku: value.toUpperCase(),
+                            })
+                          }
+                          autoCapitalize="characters"
+                          placeholder="SKU único para esta variante"
+                        />
+                        <Input
+                          label="Precio propio"
+                          value={variant.price_override}
+                          onChangeText={(value) =>
+                            updateVariant(variant.localId, { price_override: value })
+                          }
+                          keyboardType="decimal-pad"
+                        />
+                        <Input
+                          label="Costo"
+                          value={variant.cost_price}
+                          onChangeText={(value) =>
+                            updateVariant(variant.localId, { cost_price: value })
+                          }
+                          keyboardType="decimal-pad"
+                        />
+                        <Input
+                          label="Stock"
+                          value={variant.stock_quantity}
+                          onChangeText={(value) =>
+                            updateVariant(variant.localId, { stock_quantity: value })
+                          }
+                          keyboardType="number-pad"
+                        />
+                        <Toggle
+                          value={variant.is_on_sale}
+                          onChange={(v) =>
+                            updateVariant(variant.localId, { is_on_sale: v })
+                          }
+                          label="Variante en oferta"
+                        />
+                        {variant.is_on_sale && (
+                          <Input
+                            label="Precio oferta variante"
+                            value={variant.sale_price}
+                            onChangeText={(value) =>
+                              updateVariant(variant.localId, { sale_price: value })
+                            }
+                            keyboardType="decimal-pad"
+                          />
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
             )}
           </Section>
         </ScrollView>
@@ -2566,8 +3196,120 @@ const styles = StyleSheet.create({
   locationInput: { width: 120 },
   variantList: { gap: spacing[4] },
   variantCard: { borderWidth: 1, borderColor: colorScales.gray[100], borderRadius: borderRadius.xl, padding: spacing[3], gap: spacing[3], backgroundColor: colorScales.gray[50] },
-  variantHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  variantTitle: { fontSize: typography.fontSize.base, fontWeight: '800' as any, color: colorScales.gray[900] },
+  variantHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing[2] },
+  variantTitle: { fontSize: typography.fontSize.base, fontWeight: '700' as any, color: colorScales.gray[900] },
+  variantSubtitle: { fontSize: 11, color: colorScales.gray[500], marginTop: 2 },
+
+  // ── Variantes — matriz de atributos (mirror web) ─────────────────────
+  duplicateSkuBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    padding: spacing[3],
+    backgroundColor: colorScales.amber[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.amber[200],
+  },
+  duplicateSkuText: {
+    flex: 1,
+    fontSize: 12,
+    color: colorScales.amber[800],
+  },
+  quickAddRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: spacing[1.5],
+  },
+  quickAddLabel: {
+    fontSize: 11,
+    color: colorScales.gray[500],
+    marginRight: spacing[1],
+  },
+  quickAddChipPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 4,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(46, 204, 113, 0.3)',
+  },
+  quickAddChipPrimaryText: {
+    fontSize: 11,
+    fontWeight: '600' as any,
+    color: colors.primary,
+  },
+  quickAddChipGray: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: spacing[2],
+    paddingVertical: 4,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colorScales.gray[300],
+  },
+  quickAddChipGrayText: {
+    fontSize: 11,
+    fontWeight: '600' as any,
+    color: colorScales.gray[600],
+  },
+  attrCard: {
+    padding: spacing[3],
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+  },
+  attrCardRow: {},
+  attrCardRowLayout: {
+    gap: spacing[3],
+  },
+  attrCardRowLayoutMd: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  attrNameWrap: {},
+  attrNameWrapMd: {
+    width: '33.333%' as unknown as number,
+    flexShrink: 0,
+  },
+  attrValuesWrap: {
+    flex: 1,
+  },
+  attrDeleteBtn: {
+    alignSelf: 'flex-end',
+    padding: spacing[2],
+  },
+  attrDeleteBtnMd: {
+    alignSelf: 'auto',
+    marginTop: spacing[6],
+  },
+  addAttrLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+    paddingVertical: spacing[2],
+  },
+  addAttrLinkText: {
+    fontSize: 13,
+    fontWeight: '600' as any,
+    color: colors.primary,
+  },
+  bulkActionsRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    flexWrap: 'wrap',
+  },
+  bulkActionBtn: {
+    flex: 1,
+    minWidth: 140,
+  },
   errorText: { color: colors.error, fontSize: typography.fontSize.xs, fontWeight: '600' as any },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, flexDirection: 'row', gap: spacing[3], padding: spacing[4], backgroundColor: colors.background, borderTopWidth: 1, borderTopColor: colorScales.gray[200], ...shadows.lg },
   footerButton: { flex: 1 },
@@ -3632,8 +4374,14 @@ const styles = StyleSheet.create({
   },
   serialTitleRow: {
     flexDirection: 'row' as const,
-    alignItems: 'center' as const,
+    // `flex items-start` web — el icono (18px) se alinea con el top del
+    // bloque título+subtítulo, igual que el original.
+    alignItems: 'flex-start' as const,
     gap: spacing[2],
+  },
+  // hash icon alignment (mirror de `mt-0.5` web)
+  serialTitleIcon: {
+    marginTop: 2,
   },
   serialTitle: {
     fontSize: typography.fontSize.base,
@@ -3647,19 +4395,26 @@ const styles = StyleSheet.create({
   },
   serialStatsGrid: {
     flexDirection: 'row' as const,
-    gap: spacing[3],
     flexWrap: 'wrap' as const,
+    rowGap: spacing[3],
+    columnGap: spacing[3],
   },
+  // 2 cols en mobile (`grid-cols-2`) — pasamos a flexBasis '23%' en md+
+  // para replicar `sm:grid-cols-4` cuando el viewport lo permita. El
+  // 23% (en lugar de 25%) reserva aprox. 36px para `columnGap` de 12×3.
   serialStatCell: {
     flexBasis: '48%' as const,
     flexGrow: 1,
+  },
+  serialStatCellMd: {
+    flexBasis: '23%' as const,
   },
   serialStatLabel: {
     fontSize: 10,
     fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[500],
     textTransform: 'uppercase' as const,
-    letterSpacing: 0.5,
+    letterSpacing: 0.7,
     marginBottom: 2,
   },
   serialStatValuePrimary: {
@@ -3667,14 +4422,24 @@ const styles = StyleSheet.create({
     fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[900],
   },
+  // `text-primary-700` web → green-700 sólido (no rgba alpha) para
+  // mantener contraste y consistencia con `--color-primary: #2ecc71`.
   serialStatValuePrimary700: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
-    color: 'rgba(46, 204, 113, 0.85)',
+    color: colors.primary,
   },
+  // Color base muted; se sobreescribe a ámbar en runtime cuando
+  // `warranty_expiring_soon > 0` para replicar
+  // `[class.text-amber-600]="… > 0"` del web.
   serialStatValueMuted: {
     fontSize: typography.fontSize.lg,
     fontWeight: typography.fontWeight.bold,
     color: colorScales.gray[500],
+  },
+  serialStatValueAmber: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.amber[600],
   },
 });
