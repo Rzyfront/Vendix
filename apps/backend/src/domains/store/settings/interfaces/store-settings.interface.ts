@@ -332,6 +332,9 @@ export interface StoreSettings {
   // Restaurant - restaurant suite behavior toggles
   restaurant?: RestaurantSettings;
 
+  // Membership - gym/membership suite behavior toggles
+  membership?: MembershipSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -519,6 +522,15 @@ export interface RestaurantSettings {
    * the normal POS payment flow.
    */
   enable_table_checkout: boolean;
+}
+
+export interface MembershipSettings {
+  /**
+   * Enables ambient (background) access validation for gym memberships.
+   * Only relevant when the store's `general.industries` includes `'gym'`.
+   * When false (default), ambient access validation is disabled.
+   */
+  ambient_access_enabled: boolean;
 }
 
 // ============================================================================

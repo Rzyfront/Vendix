@@ -18,6 +18,7 @@ export interface StoreSettings {
   operations?: OperationsSettings;
   dispatch?: DispatchSettings;
   restaurant?: RestaurantSettings;
+  membership?: MembershipSettings;
   fiscal_status?: FiscalStatusBlock;
   panel_ui?: PanelUISettings;
 }
@@ -108,6 +109,19 @@ export interface RestaurantSettings {
    * the payment status. Default `false`.
    */
   enable_table_checkout: boolean;
+}
+
+/**
+ * Membership/gym-specific store settings. Only relevant when the store's
+ * `general.industries` includes `'gym'`. Mirrors backend
+ * `store_settings.settings.membership`.
+ */
+export interface MembershipSettings {
+  /**
+   * When `true`, enables ambient (background) access validation for gym
+   * memberships. When `false` (default), ambient access validation is off.
+   */
+  ambient_access_enabled: boolean;
 }
 
 export interface CheckoutSettings {

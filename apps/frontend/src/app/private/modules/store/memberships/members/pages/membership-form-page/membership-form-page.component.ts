@@ -8,7 +8,8 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
-import { startWith } from 'rxjs/operators';
+import { of } from 'rxjs';
+import { catchError, startWith, switchMap } from 'rxjs/operators';
 import {
   FormBuilder,
   FormControl,
@@ -18,6 +19,7 @@ import {
 } from '@angular/forms';
 
 import {
+  ButtonComponent,
   CardComponent,
   IconComponent,
   InputComponent,
@@ -29,12 +31,19 @@ import {
   TextareaComponent,
   ToastService,
 } from '../../../../../../../shared/components/index';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 import { CustomersService } from '../../../../customers/services/customers.service';
-import { Customer } from '../../../../customers/models/customer.model';
+import {
+  Customer,
+  CreateCustomerRequest,
+} from '../../../../customers/models/customer.model';
+import { CustomerModalComponent } from '../../../../customers/components/customer-modal/customer-modal.component';
+import { translateCustomerError } from '../../../../customers/utils/customer-error.translator';
 import { MembershipPlansService } from '../../../plans/services';
-import { CreateGymMembershipDto } from '../../interfaces';
+import { CreateGymMembershipDto, GymMembership } from '../../interfaces';
 import { MembershipsService } from '../../services';
+import { RenewMembershipModalComponent } from '../../components/renew-membership-modal/renew-membership-modal.component';
 
 interface MembershipFormShape {
   customer_id: FormControl<number | null>;
@@ -56,6 +65,9 @@ interface MembershipFormShape {
     SettingToggleComponent,
     TextareaComponent,
     IconComponent,
+    ButtonComponent,
+    CustomerModalComponent,
+    RenewMembershipModalComponent,
   ],
   templateUrl: './membership-form-page.component.html',
 })
@@ -75,6 +87,16 @@ export class MembershipFormPageComponent implements OnInit {
   readonly customerOptions = signal<SelectorOption[]>([]);
   readonly planOptions = signal<SelectorOption[]>([]);
 
+  /** Inline "crear cliente" modal state. */
+  readonly isCustomerModalOpen = signal(false);
+  readonly isCreatingCustomer = signal(false);
+
+  /** Post-alta optional charge modal (reuses the renew modal). */
+  readonly showChargeModal = signal(false);
+  readonly createdMembership = signal<GymMembership | null>(null);
+  /** Guard: navigate to the detail exactly once when the charge flow ends. */
+  private finishing = false;
+
   readonly form: FormGroup<MembershipFormShape> =
     this.fb.nonNullable.group<MembershipFormShape>({
       customer_id: this.fb.nonNullable.control<number | null>(null, {
@@ -83,7 +105,7 @@ export class MembershipFormPageComponent implements OnInit {
       plan_id: this.fb.nonNullable.control<number | null>(null, {
         validators: [Validators.required],
       }),
-      period_start: this.fb.nonNullable.control(''),
+      period_start: this.fb.nonNullable.control(toLocalDateString()),
       auto_renew: this.fb.nonNullable.control(false),
       notes: this.fb.nonNullable.control(''),
     });
@@ -191,12 +213,26 @@ export class MembershipFormPageComponent implements OnInit {
     this.isSubmitting.set(true);
     this.membershipsService
       .create(dto)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        // `create` returns the bare membership (no plan/customer snapshot), so we
+        // enrich it via `getById` (which attaches the plan) to render the correct
+        // plan name/price in the charge modal. Fall back to the raw membership if
+        // the enrich call fails — the backend renew still charges the plan price.
+        switchMap((created) =>
+          this.membershipsService
+            .getById(created.id)
+            .pipe(catchError(() => of(created))),
+        ),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe({
         next: (membership) => {
           this.isSubmitting.set(false);
           this.toastService.success('Membresía asignada correctamente');
-          this.router.navigate(['/admin/memberships/members', membership.id]);
+          // Offer an OPTIONAL charge right away by reusing the renew modal.
+          this.finishing = false;
+          this.createdMembership.set(membership);
+          this.showChargeModal.set(true);
         },
         error: (err: unknown) => {
           this.isSubmitting.set(false);
@@ -205,5 +241,73 @@ export class MembershipFormPageComponent implements OnInit {
           );
         },
       });
+  }
+
+  // --- Inline customer creation ------------------------------------------
+
+  openCustomerModal(): void {
+    this.isCustomerModalOpen.set(true);
+  }
+
+  onCustomerCreated(data: CreateCustomerRequest): void {
+    this.isCreatingCustomer.set(true);
+    this.customersService
+      .createCustomer(data)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (customer: Customer) => {
+          this.isCreatingCustomer.set(false);
+          this.isCustomerModalOpen.set(false);
+          const option: SelectorOption = {
+            value: customer.id,
+            label:
+              `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() ||
+              customer.email,
+            description: customer.email ?? undefined,
+          };
+          // Prepend the new customer and select it in the form.
+          this.customerOptions.update((opts) => [
+            option,
+            ...opts.filter((o) => o.value !== customer.id),
+          ]);
+          this.form.controls.customer_id.setValue(customer.id);
+          this.toastService.success('Cliente creado y seleccionado');
+        },
+        error: (err: unknown) => {
+          this.isCreatingCustomer.set(false);
+          this.toastService.error(
+            translateCustomerError(err, 'No se pudo crear el cliente'),
+          );
+        },
+      });
+  }
+
+  // --- Optional post-alta charge (renew modal) ---------------------------
+
+  /**
+   * Fired when the charge modal open state changes. When it closes (via cancel,
+   * backdrop, or after a successful charge) we navigate to the membership detail.
+   * If closed without charging, the membership stays `pending_payment`.
+   */
+  onChargeModalOpenChange(open: boolean): void {
+    this.showChargeModal.set(open);
+    if (!open) this.finishToDetail();
+  }
+
+  /** Fired when the renew modal reports a successful charge. */
+  onCharged(updated: GymMembership): void {
+    this.createdMembership.set(updated);
+    this.finishToDetail();
+  }
+
+  private finishToDetail(): void {
+    if (this.finishing) return;
+    this.finishing = true;
+    const id = this.createdMembership()?.id;
+    this.router.navigate(
+      id != null
+        ? ['/admin/memberships/members', id]
+        : ['/admin/memberships/members'],
+    );
   }
 }

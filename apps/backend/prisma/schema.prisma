@@ -3270,6 +3270,7 @@ enum membership_access_result_enum {
   denied_suspended
   denied_frozen
   denied_quota_exceeded
+  denied_outside_schedule
 }
 
 // Discriminador de industria/uso de la membresía. `generic` es el default reutilizable;

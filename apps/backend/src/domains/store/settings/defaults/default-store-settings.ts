@@ -361,6 +361,12 @@ export function getDefaultStoreSettings(): StoreSettings {
       enable_table_checkout: false,
     },
 
+    // Membership - gym/membership suite behavior toggles. Ambient access
+    // validation is opt-in (false by default) and only surfaced for `gym`.
+    membership: {
+      ambient_access_enabled: false,
+    },
+
     // Legacy: Mantener por compatibilidad (redundante con branding)
     app: {
       name: 'Vendix',

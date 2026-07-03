@@ -678,6 +678,18 @@ export class RestaurantSettingsDto {
   enable_table_checkout?: boolean;
 }
 
+export class MembershipSettingsDto {
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'Enables ambient (background) access validation for gym memberships.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  ambient_access_enabled?: boolean;
+}
+
 export class PanelUISettingsDto {
   @IsOptional()
   STORE_ADMIN?: Record<string, boolean>;
