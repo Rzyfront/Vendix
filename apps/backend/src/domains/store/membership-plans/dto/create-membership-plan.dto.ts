@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsNumber,
@@ -8,8 +9,10 @@ import {
   Length,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { AccessScheduleWindowDto } from './access-schedule-window.dto';
 
 /**
  * DTO to create a store-scoped membership plan (membership tariff).
@@ -70,6 +73,18 @@ export class CreateMembershipPlanDto {
   @Type(() => Number)
   @Min(0)
   class_limit_per_period?: number;
+
+  /**
+   * Optional per-plan access schedule (opening hours). Folded into
+   * `features.access_schedule` by the service (no dedicated column). Empty or
+   * absent = no schedule restriction. Each window mirrors
+   * `menu_availability_windows`.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AccessScheduleWindowDto)
+  access_schedule?: AccessScheduleWindowDto[];
 
   /** Free-form feature flags / metadata (Json). */
   @IsOptional()

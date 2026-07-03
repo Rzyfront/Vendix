@@ -2,18 +2,26 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpException,
+  MessageEvent,
   Param,
   ParseIntPipe,
   Patch,
   Post,
   Query,
+  Req,
+  Sse,
   UseGuards,
 } from '@nestjs/common';
+import { Request } from 'express';
+import { Observable, filter, map } from 'rxjs';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { RequestContextService } from '@common/context/request-context.service';
 import { MembershipAccessService } from './membership-access.service';
+import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import {
   ValidateAccessDto,
   CreateCredentialDto,
@@ -41,6 +49,7 @@ export class MembershipAccessController {
   constructor(
     private readonly service: MembershipAccessService,
     private readonly responseService: ResponseService,
+    private readonly sseService: NotificationsSseService,
   ) {}
 
   /**
@@ -68,6 +77,35 @@ export class MembershipAccessController {
     } catch (error: any) {
       return this.fail(error, 'Error al validar el acceso');
     }
+  }
+
+  /**
+   * GET /store/memberships/access/stream — live SSE feed of access decisions
+   * (`membership-access` events) for the current store, for an ambient-access
+   * screen. Live-only: no historical snapshot, so we never re-establish the
+   * ALS request context after the handler returns.
+   *
+   * Auth: EventSource cannot set the Authorization header, so it authenticates
+   * via `?token=`; the JWT strategy already extracts it
+   * (`ExtractJwt.fromUrlQueryParameter('token')`). We take `@Req() req` and do
+   * NOT declare a `@Query()` DTO — the global ValidationPipe
+   * (`forbidNonWhitelisted: true`) would otherwise reject the raw `token` query
+   * param and tear the stream down (same rule as notifications/kitchen-fire).
+   * The `store_id` comes from the scoped request context, never the client.
+   */
+  @Sse('stream')
+  @Permissions('store:membership_access:read')
+  stream(@Req() req: Request): Observable<MessageEvent> {
+    const store_id = RequestContextService.getContext()?.store_id;
+    if (!store_id) throw new ForbiddenException('Store context required');
+
+    const subject = this.sseService.getOrCreate(store_id);
+    req.on('close', () => this.sseService.unsubscribe(store_id));
+
+    return subject.pipe(
+      filter((payload: any) => payload?.type === 'membership-access'),
+      map((payload) => ({ data: JSON.stringify(payload) }) as MessageEvent),
+    );
   }
 
   @Get('logs')

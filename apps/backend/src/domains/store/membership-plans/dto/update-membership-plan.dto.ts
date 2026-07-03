@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsNumber,
@@ -8,8 +9,10 @@ import {
   Length,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { AccessScheduleWindowDto } from './access-schedule-window.dto';
 
 /**
  * DTO to partially update a membership plan. All fields are optional.
@@ -64,6 +67,16 @@ export class UpdateMembershipPlanDto {
   @Type(() => Number)
   @Min(0)
   class_limit_per_period?: number;
+
+  /**
+   * Optional per-plan access schedule. Merged into `features.access_schedule`
+   * by the service. Pass an empty array to clear the restriction.
+   */
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AccessScheduleWindowDto)
+  access_schedule?: AccessScheduleWindowDto[];
 
   @IsOptional()
   @IsObject()

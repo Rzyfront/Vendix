@@ -58,7 +58,16 @@ export class MembershipPlansService {
    * nothing to persist. `base` seeds the merge (existing features on update).
    */
   private buildFeatures(
-    dto: { features?: Record<string, any>; access_limit_per_period?: number; class_limit_per_period?: number },
+    dto: {
+      features?: Record<string, any>;
+      access_limit_per_period?: number;
+      class_limit_per_period?: number;
+      access_schedule?: Array<{
+        day_of_week: number;
+        start_time: string;
+        end_time: string;
+      }>;
+    },
     base?: Prisma.JsonValue | null,
   ): Prisma.InputJsonValue | typeof Prisma.JsonNull {
     const seed =
@@ -72,6 +81,13 @@ export class MembershipPlansService {
     }
     if (dto.class_limit_per_period !== undefined) {
       seed['class_limit_per_period'] = dto.class_limit_per_period;
+    }
+    // Access schedule (opening hours) lives inside `features` as an array of
+    // windows. Folded here as a flat convenience field so the admin form can
+    // send it top-level, mirroring the per-period caps. When provided flat it
+    // wins over any `access_schedule` carried inside `dto.features`.
+    if (dto.access_schedule !== undefined) {
+      seed['access_schedule'] = dto.access_schedule as unknown as Prisma.InputJsonValue;
     }
     return Object.keys(seed).length > 0
       ? (seed as Prisma.InputJsonValue)
@@ -93,6 +109,9 @@ export class MembershipPlansService {
       ...plan,
       access_limit_per_period: features['access_limit_per_period'] ?? null,
       class_limit_per_period: features['class_limit_per_period'] ?? null,
+      access_schedule: Array.isArray(features['access_schedule'])
+        ? features['access_schedule']
+        : [],
     };
   }
 
@@ -222,7 +241,8 @@ export class MembershipPlansService {
     const featuresChanged =
       dto.features !== undefined ||
       dto.access_limit_per_period !== undefined ||
-      dto.class_limit_per_period !== undefined;
+      dto.class_limit_per_period !== undefined ||
+      dto.access_schedule !== undefined;
     const featuresUpdate = featuresChanged
       ? this.buildFeatures(dto, existing.features)
       : undefined;
