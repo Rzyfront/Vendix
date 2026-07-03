@@ -10,6 +10,7 @@ import {
   CredentialQuery,
   GymAccessCredential,
   GymAccessLog,
+  Occupancy,
   UpdateCredentialDto,
   ValidateAccessDto,
 } from '../interfaces';
@@ -135,6 +136,44 @@ export class MembershipAccessService {
       .post<ApiResponse<AccessValidationResult>>(
         `${this.apiUrl}${this.basePath}/validate`,
         dto,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  // ─── Occupancy (aforo) ─────────────────────────────────────────────────────
+  getOccupancy(): Observable<Occupancy> {
+    return this.http
+      .get<ApiResponse<Occupancy>>(
+        `${this.apiUrl}${this.basePath}/occupancy`,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  registerExit(
+    body: { credential_value?: string; device_id?: string } = {},
+  ): Observable<Occupancy> {
+    return this.http
+      .post<ApiResponse<Occupancy>>(
+        `${this.apiUrl}${this.basePath}/exit`,
+        body,
+      )
+      .pipe(
+        map((res) => res.data),
+        catchError(this.handleError),
+      );
+  }
+
+  adjustOccupancy(delta: number): Observable<Occupancy> {
+    return this.http
+      .patch<ApiResponse<Occupancy>>(
+        `${this.apiUrl}${this.basePath}/occupancy/adjust`,
+        { delta },
       )
       .pipe(
         map((res) => res.data),

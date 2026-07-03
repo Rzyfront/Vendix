@@ -18,7 +18,9 @@ export type GymAccessResult =
   | 'denied_expired'
   | 'denied_suspended'
   | 'denied_frozen'
-  | 'denied_quota_exceeded';
+  | 'denied_quota_exceeded'
+  | 'denied_outside_schedule'
+  | 'denied_capacity_full';
 
 export interface GymAccessCredential {
   id: number;
@@ -90,6 +92,32 @@ export interface AccessValidationResult {
   membership_id: number | null;
 }
 
+/**
+ * Current occupancy (aforo) snapshot for the store.
+ * Returned by the occupancy / exit / adjust endpoints.
+ */
+export interface Occupancy {
+  current_count: number;
+  max_capacity: number;
+  capacity_control_enabled: boolean;
+  turnstile_mode: boolean;
+  business_date: string | null;
+  updated_at: string;
+}
+
+/**
+ * SSE event payload broadcast when occupancy (aforo) changes.
+ * Discriminated by `type: 'occupancy'`.
+ */
+export interface MembershipOccupancyEvent {
+  type: 'occupancy';
+  store_id: number;
+  current_count: number;
+  max_capacity: number;
+  capacity_control_enabled: boolean;
+  updated_at: string;
+}
+
 export const GYM_CREDENTIAL_TYPE_LABELS: Record<GymCredentialType, string> = {
   qr: 'Código QR',
   pin: 'PIN',
@@ -105,6 +133,8 @@ export const GYM_ACCESS_RESULT_LABELS: Record<GymAccessResult, string> = {
   denied_suspended: 'Suspendida',
   denied_frozen: 'Congelada',
   denied_quota_exceeded: 'Límite alcanzado',
+  denied_outside_schedule: 'Fuera de horario',
+  denied_capacity_full: 'Aforo lleno',
 };
 
 /** Result → 7-char hex color (colorMap requires hex, not Tailwind classes). */
@@ -115,4 +145,6 @@ export const GYM_ACCESS_RESULT_COLORS: Record<GymAccessResult, string> = {
   denied_suspended: '#dc2626',
   denied_frozen: '#2563eb',
   denied_quota_exceeded: '#7c3aed',
+  denied_outside_schedule: '#0891b2',
+  denied_capacity_full: '#db2777',
 };
