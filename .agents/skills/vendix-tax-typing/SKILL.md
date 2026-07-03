@@ -46,9 +46,18 @@ mechanics of posting entries (`vendix-auto-entries`). This skill governs only th
   reteiva/reteica before withholding; ica/inc before iva; ELSE iva.
 - **A tax must be typed in ALL layers or none.** Half-typing is the bug. If the
   calculation emits `tax_type` but the journal line ignores it, INC posts to 2408.
-- **`support_document.accepted` is excluded by design.** Purchases post only
-  `vat_deductible` — INC is non-deductible, so the breakdown contract does not
-  apply to purchase documents. Do not "fix" this by adding a breakdown there.
+- **`support_document.accepted` DOES post a full accounting entry** — it is not
+  excluded from accounting, only from the *typed tax breakdown*. `AutoEntryService
+  .onSupportDocumentAccepted()` (`auto-entry.service.ts`) creates a balanced entry
+  with expense/purchase debit, accounts payable credit, a `vat_deductible` debit
+  line when `tax_amount > 0`, and withholding credit line(s) (typed
+  `withholding_breakdown` when present, else the legacy scalar
+  `withholding_payable`). What is genuinely excluded is the **multi-type tax
+  breakdown** (`tax_breakdown: TaxBreakdownItem[]`): purchases only ever post the
+  single scalar `vat_deductible` line — INC is non-deductible, so there is no
+  INC-vs-IVA split to make on the purchase side. Do not "fix" this by adding a
+  `tax_breakdown` there; withholding, which purchases DO need multi-type, already
+  has its own breakdown (`withholding_breakdown`) wired through this same handler.
 - Every accounting emit that carries tax MUST pass `tax_breakdown: TaxBreakdownItem[]`
   alongside the scalar `tax_amount`. The scalar is the legacy fallback; the
   breakdown is the typed truth.
