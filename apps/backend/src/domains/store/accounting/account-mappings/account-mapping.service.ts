@@ -151,6 +151,20 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '2205',
     description: 'Proveedor documento soporte',
   },
+  // F2 IVA lifecycle — VAT-only recognition of a POP purchase (O-48
+  // responsible). `purchase_order.received` already posts DR 1435(net)/CR
+  // 2205(net); this complement posts ONLY DR 240804 (IVA descontable) / CR
+  // 2205 (proveedores) for the deductible VAT, completing the payable to gross
+  // WITHOUT touching inventory or contabilizing expense (5195). Do NOT reuse
+  // support_document.accepted here — that handler also debits 5195 + full 2205.
+  'purchase.vat_recognized.iva_deductible': {
+    code: '240804',
+    description: 'IVA Descontable en Compras (reconocimiento POP)',
+  },
+  'purchase.vat_recognized.accounts_payable': {
+    code: '2205',
+    description: 'Proveedores (complemento IVA compra)',
+  },
   // Purchase order payments
   'purchase_order.payment.accounts_payable': {
     code: '2205',

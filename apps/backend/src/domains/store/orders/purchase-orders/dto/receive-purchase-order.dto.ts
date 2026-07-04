@@ -1,5 +1,6 @@
 import {
   IsArray,
+  IsDateString,
   IsInt,
   IsNumber,
   IsOptional,
@@ -65,4 +66,23 @@ export class ReceivePurchaseOrderDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  /**
+   * F2 IVA lifecycle — supplier's own invoice number for this purchase. When
+   * provided it becomes the `invoice_number` of the fiscal document that
+   * recognizes the deductible VAT (240804); otherwise the recognition falls
+   * back to the purchase order's `order_number`.
+   */
+  @IsOptional()
+  @IsString()
+  supplier_invoice_number?: string;
+
+  /**
+   * F2 IVA lifecycle — supplier invoice date (YYYY-MM-DD). Drives the fiscal
+   * document's `issue_date` so the deductible VAT lands in the correct
+   * declaration period. Defaults to the reception date when omitted.
+   */
+  @IsOptional()
+  @IsDateString()
+  supplier_invoice_date?: string;
 }

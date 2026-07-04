@@ -649,6 +649,7 @@ export class AutoEntryService {
       'refund.completed': 'auto_return',
       'purchase_order.received': 'auto_purchase',
       'purchase_order.payment': 'auto_purchase',
+      purchase_vat: 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
       installment_payment: 'auto_installment_payment',
@@ -2376,6 +2377,12 @@ export class AutoEntryService {
     reception_id: number;
     organization_id: number;
     store_id?: number;
+    /**
+     * F2: entidad fiscal resuelta por el emisor vía FiscalScopeService. Se
+     * propaga explícitamente (en vez de dejar que createAutoEntry caiga al
+     * fallback) para que la resolución sea determinista y trazable.
+     */
+    accounting_entity_id?: number;
     total_amount: number;
     user_id?: number;
     /**
@@ -2418,7 +2425,91 @@ export class AutoEntryService {
       source_id: data.reception_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
       description: `Purchase order received #${data.purchase_order_id} (reception #${data.reception_id})`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * F2 IVA lifecycle — recognize the DEDUCTIBLE VAT (IVA descontable) of a POP
+   * purchase from a VAT-responsible commerce (O-48), via a "VAT-only" journal
+   * entry:
+   *
+   *   DR 240804  IVA descontable en compras (iva)
+   *   CR 2205    Proveedores                (iva)
+   *
+   * This is the complement to `purchase_order.received` (which already posts
+   * DR 1435 net / CR 2205 net). Together the combined economic entry is:
+   *
+   *   DR 1435   Inventario        (neto)
+   *   DR 240804 IVA descontable   (iva)
+   *   CR 2205   Proveedores       (bruto = neto + iva)
+   *
+   * It deliberately does NOT reuse `onSupportDocumentAccepted` (which also
+   * debits 5195 expense + credits the FULL 2205), because that would duplicate
+   * the payable and contabilize expense over inventoried merchandise.
+   *
+   * Idempotent by (organization_id, source_type='purchase_vat',
+   * source_id=invoice_id, accounting_entity_id). O-49 (non-responsible) never
+   * reaches here — its VAT is already capitalized into inventory cost by F1.
+   */
+  async onPurchaseVatRecognized(data: {
+    invoice_id: number;
+    purchase_order_id: number;
+    reception_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    iva_amount: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+    user_id?: number;
+  }) {
+    const iva = Number(data.iva_amount || 0);
+    if (!(iva > 0)) {
+      this.logger.warn(
+        `Skipping purchase_vat recognition for invoice #${data.invoice_id}: non-positive IVA (${iva})`,
+      );
+      return null;
+    }
+
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.iva_deductible',
+        'IVA Descontable en Compras',
+        iva,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.accounts_payable',
+        'Proveedores (complemento IVA)',
+        0,
+        iva,
+        data.store_id,
+        supplier_third_party,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'purchase_vat',
+      source_id: data.invoice_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `IVA descontable compra — factura #${data.invoice_id} (PO #${data.purchase_order_id}, recepción #${data.reception_id})`,
       lines,
       user_id: data.user_id,
     });

@@ -11,8 +11,13 @@ import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
-import { purchase_order_status_enum, tax_type_enum } from '@prisma/client';
+import {
+  purchase_order_status_enum,
+  tax_type_enum,
+  invoice_type_enum,
+} from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { generateSlug } from '@common/utils/slug.util';
@@ -52,6 +57,7 @@ export class PurchaseOrdersService {
     private auditService: AuditService,
     private s3Service: S3Service,
     private settingsService: SettingsService,
+    private fiscalScopeService: FiscalScopeService,
     private eventEmitter: EventEmitter2,
   ) {}
 
@@ -1507,6 +1513,15 @@ export class PurchaseOrdersService {
         data: {
           status: newStatus,
           received_date: all_items_received ? new Date() : null,
+          // F2 IVA lifecycle: persist the supplier's own invoice reference when
+          // provided at receipt. Used as the fiscal document's invoice_number
+          // and issue_date for the deductible-VAT recognition (240804).
+          ...(dto.supplier_invoice_number != null && {
+            supplier_invoice_number: dto.supplier_invoice_number,
+          }),
+          ...(dto.supplier_invoice_date != null && {
+            supplier_invoice_date: new Date(dto.supplier_invoice_date),
+          }),
         },
         include: {
           suppliers: true,
@@ -1535,6 +1550,11 @@ export class PurchaseOrdersService {
         reception_id: reception.id,
         received_batch_subtotal: receivedBatchSubtotal,
         order_subtotal: orderSubtotal,
+        // F1/F2 IVA lifecycle: fiscal responsibility resolved once inside the
+        // tx (O-48 → net cost + deductible VAT; O-49 → capitalized in cost).
+        // Surfaced here so the post-tx block can decide whether to recognize
+        // the deductible VAT (only O-48).
+        vat_responsible: vatResponsible,
       };
     });
 
@@ -1557,13 +1577,45 @@ export class PurchaseOrdersService {
       );
     }
 
+    // ===== F2 IVA lifecycle: shared context for the accounting emits =====
+    const store_id = result.updated_po.location?.store_id ?? undefined;
+    const supplier = result.updated_po.suppliers
+      ? {
+          id: result.updated_po.suppliers.id,
+          name: result.updated_po.suppliers.name,
+          tax_id: result.updated_po.suppliers.tax_id ?? undefined,
+        }
+      : undefined;
+
+    // Step 10: resolve the fiscal accounting entity ONCE (via the canonical
+    // FiscalScopeService) and propagate it explicitly to every emitted
+    // accounting event. This makes the entity deterministic/traceable instead
+    // of relying on createAutoEntry's fallback resolution.
+    let accounting_entity_id: number | undefined;
+    try {
+      const entity =
+        await this.fiscalScopeService.resolveAccountingEntityForFiscal({
+          organization_id: result.updated_po.organization_id,
+          store_id,
+        });
+      accounting_entity_id = entity?.id;
+    } catch (error: any) {
+      this.logger.warn(
+        `F2: could not resolve fiscal accounting entity for PO #${id}: ${error?.message}`,
+      );
+    }
+
     // D2: emit purchase_order.received on EVERY reception (partial or final)
     // so inventory (DR 1435) recognized at receipt time is matched by
     // accounts payable (CR 2205) in the SAME event — no more waiting for the
-    // order to be fully received. The amount is prorated from this batch's
-    // share of the order subtotal against `total_amount` (which already
-    // folds in header-level discount/tax/shipping), following the same
-    // ratio pattern used in return-orders.service.ts for partial refunds.
+    // order to be fully received.
+    //
+    // F2: the amount is the NET share received (Σ quantity × unit_cost, with
+    // unit_cost = net per F1). We scale on the NET order subtotal, NOT on
+    // `purchase_orders.total_amount` — the latter is inconsistent (net in
+    // "exclude"/added-on-top mode, gross in "include" mode). Posting NET here
+    // is what lets the F2 VAT complement (DR 240804 / CR 2205 for the IVA)
+    // bring the payable to gross WITHOUT double-counting the tax.
     //
     // Idempotency: `source_id` is the reception id (`purchase_order_receptions.id`,
     // unique per reception, not per order), NOT the purchase_order_id. This
@@ -1572,26 +1624,39 @@ export class PurchaseOrdersService {
     // instead of being skipped as a duplicate of the first.
     //
     // The reception that completes the order (all_items_received) posts only
-    // the REMAINDER against total_amount — not its own prorated share — so
-    // rounding drift from prior partial receptions never leaves a gap or a
+    // the REMAINDER against the net order total — not its own prorated share —
+    // so rounding drift from prior partial receptions never leaves a gap or a
     // double-count. The remainder is computed against what accounting has
     // ACTUALLY posted so far (sum of total_debit for this order's previous
-    // reception ids), not against a business-side running total, so a prior
-    // reception whose emit failed (see catch below) is naturally recovered
-    // here instead of being silently lost.
+    // reception ids), so a prior reception whose emit failed is naturally
+    // recovered here instead of being silently lost.
     try {
-      const total_amount = Number(result.updated_po.total_amount || 0);
-      const supplier = result.updated_po.suppliers
-        ? {
-            id: result.updated_po.suppliers.id,
-            name: result.updated_po.suppliers.name,
-            tax_id: result.updated_po.suppliers.tax_id ?? undefined,
-          }
-        : undefined;
+      // NET order total (Σ quantity_ordered × unit_cost, unit_cost = net). The
+      // authoritative net value, independent of the inconsistent total_amount.
+      const net_total = Number(result.order_subtotal || 0);
+
+      // F2: régime-aware emit total. O-48 (responsible) posts NET here and lets
+      // the VAT complement (DR 240804 / CR 2205) bring the payable to gross.
+      // O-49 (non-responsible) has its IVA CAPITALIZED into inventory cost by F1
+      // (sealed in capitalized_tax_amount) and NEVER generates a VAT complement,
+      // so the reception itself must post GROSS (net + capitalized IVA) — else
+      // the GL 1435 understates inventory vs. the FIFO layer AND the CR 2205
+      // understates what is actually owed to the supplier. The all_items_received
+      // remainder branch trues the order-level total up to gross even across
+      // partial receptions.
+      const capitalized_iva = result.vat_responsible
+        ? 0
+        : Math.round(
+            result.updated_po.purchase_order_items.reduce(
+              (sum, i) => sum + Number(i.capitalized_tax_amount ?? 0),
+              0,
+            ) * 100,
+          ) / 100;
+      const emit_total = Math.round((net_total + capitalized_iva) * 100) / 100;
 
       let batch_amount: number;
       if (result.all_items_received) {
-        // Sum what accounting already posted for THIS order's earlier
+        // Sum what accounting already posted (NET) for THIS order's earlier
         // receptions (source_type is fixed; source_id ranges over this
         // order's other reception ids).
         const priorReceptionIds = (
@@ -1615,16 +1680,15 @@ export class PurchaseOrdersService {
             0,
           );
         }
-        batch_amount =
-          Math.round((total_amount - alreadyPosted) * 100) / 100;
+        batch_amount = Math.round((emit_total - alreadyPosted) * 100) / 100;
       } else if (result.order_subtotal > 0) {
-        // Proportional share of this batch vs. the order's full subtotal,
-        // scaled onto total_amount (same ratio pattern as
-        // return-orders.service.ts: amount / order_total * header_charge).
+        // Proportional share of this batch vs. the order's full NET subtotal
+        // scaled onto the emit total (gross for O-49). The final reception's
+        // remainder branch trues up any per-batch rounding drift.
         batch_amount =
           Math.round(
             (result.received_batch_subtotal / result.order_subtotal) *
-              total_amount *
+              emit_total *
               100,
           ) / 100;
       } else {
@@ -1636,7 +1700,8 @@ export class PurchaseOrdersService {
           purchase_order_id: result.updated_po.id,
           reception_id: result.reception_id,
           organization_id: result.updated_po.organization_id,
-          store_id: result.updated_po.location?.store_id,
+          store_id,
+          accounting_entity_id,
           total_amount: batch_amount,
           user_id: RequestContextService.getUserId(),
           // C4-followup: result.updated_po.suppliers ya viene completo del
@@ -1650,7 +1715,190 @@ export class PurchaseOrdersService {
       );
     }
 
+    // ===== F2 (Step 9): recognize the DEDUCTIBLE VAT (IVA descontable) =====
+    // Only for a VAT-responsible commerce (O-48), only once the order is fully
+    // received (Σ deductible_tax_amount is fully sealed by F1 across partial
+    // receptions), and only when there is IVA to recognize. O-49 never reaches
+    // here — its VAT is already capitalized into inventory cost by F1.
+    //
+    // We materialize a purchase fiscal document (`invoices` row) that feeds the
+    // VAT declaration (calculateVat), and emit `purchase.vat_recognized` so the
+    // ledger complement DR 240804 / CR 2205 (iva) is posted. The document is
+    // created WITHOUT going through invoice-flow send()/accept(), so it never
+    // fires `support_document.accepted` (which would post 5195 + full 2205).
+    try {
+      if (result.vat_responsible && result.all_items_received && store_id != null) {
+        const iva_amount =
+          Math.round(
+            result.updated_po.purchase_order_items.reduce(
+              (sum, i) => sum + Number(i.deductible_tax_amount ?? 0),
+              0,
+            ) * 100,
+          ) / 100;
+        const net_amount = Number(result.order_subtotal || 0);
+
+        if (iva_amount > 0 && accounting_entity_id != null) {
+          const invoice = await this.materializeVatDocument({
+            purchase_order_id: result.updated_po.id,
+            order_number: result.updated_po.order_number,
+            supplier_invoice_number:
+              result.updated_po.supplier_invoice_number ?? null,
+            supplier_invoice_date:
+              result.updated_po.supplier_invoice_date ?? null,
+            supplier,
+            organization_id: result.updated_po.organization_id,
+            store_id,
+            accounting_entity_id,
+            net_amount,
+            iva_amount,
+            user_id: RequestContextService.getUserId(),
+          });
+
+          if (invoice) {
+            this.eventEmitter.emit('purchase.vat_recognized', {
+              invoice_id: invoice.id,
+              purchase_order_id: result.updated_po.id,
+              reception_id: result.reception_id,
+              organization_id: result.updated_po.organization_id,
+              store_id,
+              accounting_entity_id,
+              iva_amount,
+              supplier,
+              user_id: RequestContextService.getUserId(),
+            });
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `F2: failed to recognize deductible VAT for PO #${id} (reception #${result.reception_id}): ${error?.message}`,
+      );
+    }
+
     return result.updated_po;
+  }
+
+  /**
+   * F2 IVA lifecycle — materialize (idempotently) the purchase fiscal document
+   * that carries the deductible VAT of a POP purchase into the VAT declaration.
+   *
+   * Design decisions (documented on purpose):
+   * - `invoice_type`: defaults to `support_document`. There is no supplier
+   *   "electronic-invoicer" flag in the schema; when one is added, switch to
+   *   `purchase_invoice` for e-invoicing suppliers. Both types are classified
+   *   as DEDUCTIBLE (not a sale) by `calculateVat`.
+   * - `dian_status = not_applicable`: this is an internally-generated purchase
+   *   support document, so `calculateVat.isAcceptedForTax` counts it without a
+   *   DIAN round-trip.
+   * - Created via a direct scoped Prisma insert (NOT `InvoicingService.create`)
+   *   to avoid consuming our own DIAN numbering resolution — the invoice_number
+   *   is the SUPPLIER's number (or the PO `order_number` as a traceable
+   *   fallback), never one of our sequence.
+   * - Traceability PO↔invoice (no FK column exists on `invoices`): the
+   *   `invoice_number` carries the supplier/PO reference and `supplier_id`
+   *   links the counterparty; `notes` records the PO id + order_number.
+   * - Idempotency: guarded by the `invoices` unique
+   *   (accounting_entity_id, invoice_type, invoice_number). A pre-check
+   *   `findFirst` reuses an existing row; a concurrent unique violation (P2002)
+   *   is caught and the winning row is returned — so there is never more than
+   *   one document per purchase.
+   */
+  private async materializeVatDocument(params: {
+    purchase_order_id: number;
+    order_number: string;
+    supplier_invoice_number: string | null;
+    supplier_invoice_date: Date | null;
+    supplier?: { id: number; name?: string; tax_id?: string };
+    organization_id: number;
+    store_id: number;
+    accounting_entity_id: number;
+    net_amount: number;
+    iva_amount: number;
+    user_id?: number;
+  }): Promise<{ id: number } | null> {
+    const invoice_type = invoice_type_enum.support_document;
+    const invoice_number =
+      params.supplier_invoice_number?.trim() || params.order_number;
+    const issue_date = params.supplier_invoice_date ?? new Date();
+
+    // Idempotency pre-check: reuse an existing document for this purchase.
+    const existing = await this.prisma.invoices.findFirst({
+      where: {
+        accounting_entity_id: params.accounting_entity_id,
+        invoice_type,
+        invoice_number,
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      this.logger.log(
+        `F2: reusing existing VAT document invoice #${existing.id} for PO #${params.purchase_order_id}`,
+      );
+      return existing;
+    }
+
+    const net = Math.round(params.net_amount * 100) / 100;
+    const iva = Math.round(params.iva_amount * 100) / 100;
+    const total = Math.round((net + iva) * 100) / 100;
+    const tax_rate = net > 0 ? Math.round((iva / net) * 10000) / 100 : 0;
+
+    try {
+      const invoice = await this.prisma.invoices.create({
+        data: {
+          organization_id: params.organization_id,
+          // store_id is injected by StorePrismaService from the request context.
+          accounting_entity_id: params.accounting_entity_id,
+          fiscal_document_type: 'support_document',
+          invoice_number,
+          invoice_type,
+          status: 'validated',
+          dian_status: 'not_applicable',
+          supplier_id: params.supplier?.id,
+          customer_name: params.supplier?.name,
+          customer_tax_id: params.supplier?.tax_id,
+          subtotal_amount: net,
+          discount_amount: 0,
+          tax_amount: iva,
+          withholding_amount: 0,
+          total_amount: total,
+          currency: 'COP',
+          issue_date,
+          created_by_user_id: params.user_id,
+          notes: `F2: reconocimiento IVA descontable — PO #${params.purchase_order_id} (${params.order_number})`,
+          invoice_taxes: {
+            create: [
+              {
+                tax_name: 'IVA',
+                tax_rate,
+                taxable_amount: net,
+                tax_amount: iva,
+                tax_type: tax_type_enum.iva,
+              },
+            ],
+          },
+        },
+        select: { id: true },
+      });
+      this.logger.log(
+        `F2: materialized VAT document invoice #${invoice.id} (${invoice_type} ${invoice_number}) for PO #${params.purchase_order_id}`,
+      );
+      return invoice;
+    } catch (error: any) {
+      // Concurrent creation lost the race on the unique constraint — reuse the
+      // winning row so recognition stays idempotent.
+      if (error?.code === 'P2002') {
+        const winner = await this.prisma.invoices.findFirst({
+          where: {
+            accounting_entity_id: params.accounting_entity_id,
+            invoice_type,
+            invoice_number,
+          },
+          select: { id: true },
+        });
+        if (winner) return winner;
+      }
+      throw error;
+    }
   }
 
   // ===== Receptions =====

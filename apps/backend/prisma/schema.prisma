@@ -2124,6 +2124,12 @@ model purchase_orders {
   /// tax is ADDED on top. Individual lines may override via
   /// `purchase_order_items.prices_include_tax` to support mixed invoices.
   prices_include_tax    Boolean                            @default(false)
+  /// F2 IVA lifecycle: supplier's own invoice reference for the purchase.
+  /// `supplier_invoice_number` becomes the `invoice_number` of the fiscal
+  /// document materialized to recognize the deductible VAT (240804). When the
+  /// supplier number is absent the recognition falls back to `order_number`.
+  supplier_invoice_number String?                          @db.VarChar(50)
+  supplier_invoice_date   DateTime?                        @db.Date
   purchase_order_items  purchase_order_items[]
   users                 users?                             @relation("purchase_orders_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users1                users?                             @relation("purchase_orders_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)

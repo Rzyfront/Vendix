@@ -57,6 +57,12 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'support_document.accepted.iva_deductible': '240804',
   'support_document.accepted.withholding_payable': '2365',
   'support_document.accepted.accounts_payable': '2205',
+  // F2 IVA lifecycle — VAT-only recognition of a POP purchase (dual-source
+  // with DEFAULT_ACCOUNT_MAPPINGS): DR 240804 (IVA descontable) / CR 2205
+  // (proveedores). Complements purchase_order.received (DR 1435 net / CR 2205
+  // net) so the payable reaches gross without contabilizing expense (5195).
+  'purchase.vat_recognized.iva_deductible': '240804',
+  'purchase.vat_recognized.accounts_payable': '2205',
   'purchase_order.payment.accounts_payable': '2205',
   'purchase_order.payment.cash_bank': '1110',
   'inventory.adjusted.inventory': '1435',
