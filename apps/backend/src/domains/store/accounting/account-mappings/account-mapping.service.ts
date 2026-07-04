@@ -136,8 +136,12 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Compra/Gasto soportado',
   },
   'support_document.accepted.vat_deductible': {
-    code: '2408',
-    description: 'IVA descontable',
+    code: '240804',
+    description: 'IVA Descontable en Compras',
+  },
+  'support_document.accepted.iva_deductible': {
+    code: '240804',
+    description: 'IVA Descontable en Compras (tipado)',
   },
   'support_document.accepted.withholding_payable': {
     code: '2365',
@@ -215,12 +219,12 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   },
   // ── Typed fiscal tax routing (per tax_type) ───────────────────────────
   // AutoEntryService.resolveTaxLines posts one line per fiscal type using
-  // `<event>.<tax_type>_payable`. IVA → 2408 (same as legacy vat_payable, no
-  // regression), INC → 2436 (Impuesto al Consumo), ICA → 2412. The legacy
-  // `vat_payable` keys above remain as fallback when no breakdown is present.
+  // `<event>.<tax_type>_payable`. IVA → 240802 (IVA Generado por Ventas, hoja
+  // del control 2408), INC → 2436 (Impuesto al Consumo), ICA → 2412. The legacy
+  // `vat_payable` keys above remain in 2408 as fallback when no breakdown is present.
   'invoice.validated.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (factura)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (factura)',
   },
   'invoice.validated.inc_payable': {
     code: '2436',
@@ -231,8 +235,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA por Pagar (factura)',
   },
   'payment.received.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (venta directa)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (venta directa)',
   },
   'payment.received.inc_payable': {
     code: '2436',
@@ -243,8 +247,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA por Pagar (venta directa)',
   },
   'credit_sale.created.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (venta a crédito)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (venta a crédito)',
   },
   'credit_sale.created.inc_payable': {
     code: '2436',
@@ -255,8 +259,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA por Pagar (venta a crédito)',
   },
   'refund.completed.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (reversa devolución)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (reversa devolución)',
   },
   'refund.completed.inc_payable': {
     code: '2436',
@@ -275,8 +279,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Devoluciones en Ventas (nota crédito)',
   },
   'credit_note.accepted.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (reversa nota crédito)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (reversa nota crédito)',
   },
   'credit_note.accepted.inc_payable': {
     code: '2436',
@@ -736,6 +740,26 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'saas_revenue.partner_payable': {
     code: '2335',
     description: 'CxP Comisión partner SaaS (plataforma Vendix)',
+  },
+  // VAT settlement (liquidación de IVA al aprobar la declaración) — netea el
+  // IVA generado contra el descontable y deja el neto a pagar o a favor:
+  //   DR 240802 (generado) / CR 240804 (descontable) + neto → CR 240810 (a
+  //   pagar) o DR 135520 (a favor). Ver AutoEntryService.onVatSettlement (F5).
+  'vat.declaration.settled.iva_generated': {
+    code: '240802',
+    description: 'IVA Generado por Ventas (liquidación)',
+  },
+  'vat.declaration.settled.iva_deductible': {
+    code: '240804',
+    description: 'IVA Descontable en Compras (liquidación)',
+  },
+  'vat.declaration.settled.vat_payable': {
+    code: '240810',
+    description: 'IVA por Pagar - Liquidación',
+  },
+  'vat.declaration.settled.vat_favor': {
+    code: '135520',
+    description: 'Saldo a Favor en IVA',
   },
 };
 
