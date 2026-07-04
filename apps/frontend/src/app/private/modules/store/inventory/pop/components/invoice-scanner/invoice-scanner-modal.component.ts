@@ -11,7 +11,6 @@ import { SpinnerComponent } from '../../../../../../../shared/components/spinner
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
 import { InputsearchComponent } from '../../../../../../../shared/components/inputsearch/inputsearch.component';
 import { StepsLineComponent } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
@@ -43,7 +42,6 @@ import {
     IconComponent,
     InputComponent,
     ToggleComponent,
-    SelectorComponent,
     InputsearchComponent,
     StepsLineComponent,
     CurrencyPipe,
@@ -256,14 +254,59 @@ import {
             }
 
             <div class="flex items-end gap-2">
-              <div class="flex-1 min-w-0">
-                <app-selector
-                  [searchable]="true"
-                  [options]="supplierOptions()"
-                  placeholder="Selecciona un proveedor"
-                  [ngModel]="selectedSupplierId()"
-                  (valueChange)="onSupplierSelected($event)"
-                ></app-selector>
+              <div class="flex-1 min-w-0 relative">
+                <button
+                  type="button"
+                  (click)="toggleSupplierDropdown()"
+                  class="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm border border-border rounded-lg bg-surface hover:border-primary text-left"
+                >
+                  <span
+                    class="truncate"
+                    [class.text-text-secondary]="!selectedSupplierId()"
+                  >
+                    {{ selectedSupplierLabel() }}
+                  </span>
+                  <app-icon
+                    [name]="supplierDropdownOpen() ? 'chevron-up' : 'chevron-down'"
+                    [size]="14"
+                  ></app-icon>
+                </button>
+
+                @if (supplierDropdownOpen()) {
+                  <div
+                    class="absolute z-[10000] mt-1 w-full bg-surface border border-border shadow-lg rounded-lg max-h-64 overflow-auto"
+                  >
+                    <div class="p-2 border-b border-border sticky top-0 bg-surface">
+                      <app-inputsearch
+                        size="sm"
+                        placeholder="Buscar proveedor..."
+                        [debounceTime]="300"
+                        (searchChange)="onSupplierSearch($event)"
+                      ></app-inputsearch>
+                    </div>
+                    <div class="py-1">
+                      @if (supplierSearchLoading()) {
+                        <p class="px-3 py-2 text-xs text-text-secondary">Buscando...</p>
+                      } @else if (supplierDisplayList().length > 0) {
+                        @for (s of supplierDisplayList(); track s.id) {
+                          <button
+                            type="button"
+                            (click)="chooseSupplier(s)"
+                            class="w-full px-3 py-2 text-left text-xs hover:bg-primary-50 flex items-center justify-between gap-2"
+                            [class.bg-primary-50]="selectedSupplierId() === s.id"
+                          >
+                            <span class="truncate">{{ s.name }}</span>
+                            @if (s.tax_id) {
+                              <span class="text-[10px] text-text-secondary shrink-0">NIT: {{ s.tax_id }}</span>
+                            }
+                          </button>
+                        }
+                      } @else {
+                        <p class="px-3 py-2 text-xs text-text-secondary">Sin resultados</p>
+                      }
+                    </div>
+                  </div>
+                }
               </div>
               <app-button
                 variant="outline"
@@ -642,24 +685,28 @@ export class InvoiceScannerModalComponent {
    *  apertura, sin pisar la elección manual del usuario en re-renders. */
   private modalInitialized = false;
 
-  // Punto 2: proveedor preseleccionado + editable.
+  // Punto 2: proveedor preseleccionado + editable con búsqueda server-side
+  // (paridad con el picker de productos: dropdown + app-inputsearch + switchMap).
   readonly selectedSupplierId = signal<number | null>(null);
+  readonly selectedSupplierName = signal<string | null>(null);
   readonly showSupplierCreate = signal(false);
+  readonly supplierDropdownOpen = signal(false);
   private readonly suppliers = signal<Supplier[]>([]);
-  readonly supplierOptions = computed<SelectorOption[]>(() => {
-    const opts: SelectorOption[] = this.suppliers().map((s) => ({
-      value: s.id,
-      label: s.name,
-      description: s.tax_id ? `NIT: ${s.tax_id}` : undefined,
-    }));
-    // El proveedor detectado/preseleccionado siempre debe aparecer como
-    // opción aunque no venga en la página cargada del pool.
-    const match = this.matchResult()?.supplier_match;
-    if (match?.matched_id && !opts.some((o) => o.value === match.matched_id)) {
-      opts.unshift({ value: match.matched_id, label: match.name });
-    }
-    return opts;
-  });
+  readonly supplierSearchResults = signal<Supplier[]>([]);
+  readonly supplierSearchLoading = signal(false);
+  private readonly supplierSearchTerm = signal('');
+  private readonly supplierSearch$ = new Subject<string>();
+  /** Lista mostrada en el dropdown: resultados de servidor cuando hay término
+   *  de búsqueda, si no el pool inicial de activos precargado al abrir. */
+  readonly supplierDisplayList = computed<Supplier[]>(() =>
+    this.supplierSearchTerm().trim()
+      ? this.supplierSearchResults()
+      : this.suppliers(),
+  );
+  /** Etiqueta del botón del selector de proveedor. */
+  readonly selectedSupplierLabel = computed<string>(
+    () => this.selectedSupplierName() ?? 'Selecciona un proveedor',
+  );
 
   // Punto 3+4: búsqueda de catálogo por línea (un dropdown abierto a la vez).
   readonly productSearchIndex = signal<number | null>(null);
@@ -744,6 +791,31 @@ export class InvoiceScannerModalComponent {
           })),
         );
         this.productSearchLoading.set(false);
+      });
+
+    // Punto 2: stream de búsqueda de proveedores (server-side, cancelable con
+    // switchMap). Da paridad con el picker de productos: alcanza cualquier
+    // proveedor por nombre/NIT sin importar cuántos haya (no cap de 50).
+    this.supplierSearch$
+      .pipe(
+        switchMap((term) => {
+          const q = (term ?? '').trim();
+          this.supplierSearchTerm.set(q);
+          if (!q) {
+            this.supplierSearchLoading.set(false);
+            this.supplierSearchResults.set([]);
+            return of<any>({ data: [] });
+          }
+          this.supplierSearchLoading.set(true);
+          return this.suppliersService
+            .getSuppliers({ is_active: true, limit: 20, search: q })
+            .pipe(catchError(() => of<any>({ data: [] })));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res: any) => {
+        this.supplierSearchResults.set(Array.isArray(res?.data) ? res.data : []);
+        this.supplierSearchLoading.set(false);
       });
   }
 
@@ -962,6 +1034,11 @@ export class InvoiceScannerModalComponent {
           this.selectedSupplierId.set(
             matchResponse.data.supplier_match.matched_id ?? null,
           );
+          this.selectedSupplierName.set(
+            matchResponse.data.supplier_match.matched_id
+              ? matchResponse.data.supplier_match.name
+              : null,
+          );
           // Create editable copy of items. Fase 4: en flujo ingredient,
           // resolvemos uom_hint → purchase/stock UoM como preselección.
           this.editableItems.set(
@@ -1018,8 +1095,9 @@ export class InvoiceScannerModalComponent {
   // Punto 2: proveedor
   // ============================================================
 
-  /** Precarga el pool de proveedores activos para el selector searchable.
-   *  El filtrado dentro del dropdown lo hace `app-selector` en cliente. */
+  /** Precarga el pool inicial de proveedores activos que se muestra en el
+   *  dropdown antes de teclear. La búsqueda por término va server-side vía
+   *  `supplierSearch$` (ver constructor), sin el cap de 50 del pool inicial. */
   private loadSuppliers(): void {
     this.suppliersService
       .getSuppliers({ is_active: true, limit: 50 })
@@ -1034,10 +1112,18 @@ export class InvoiceScannerModalComponent {
       });
   }
 
-  onSupplierSelected(value: string | number | null): void {
-    this.selectedSupplierId.set(
-      value == null || value === '' ? null : Number(value),
-    );
+  toggleSupplierDropdown(): void {
+    this.supplierDropdownOpen.update((v) => !v);
+  }
+
+  onSupplierSearch(term: string): void {
+    this.supplierSearch$.next(term ?? '');
+  }
+
+  chooseSupplier(supplier: Supplier): void {
+    this.selectedSupplierId.set(supplier.id);
+    this.selectedSupplierName.set(supplier.name);
+    this.supplierDropdownOpen.set(false);
   }
 
   openSupplierCreate(): void {
@@ -1051,6 +1137,8 @@ export class InvoiceScannerModalComponent {
       ...list.filter((s) => s.id !== supplier.id),
     ]);
     this.selectedSupplierId.set(supplier.id);
+    this.selectedSupplierName.set(supplier.name);
+    this.supplierDropdownOpen.set(false);
     this.showSupplierCreate.set(false);
   }
 
@@ -1167,7 +1255,12 @@ export class InvoiceScannerModalComponent {
     this.editInvoiceDate = '';
     // Punto 2 + 3/4: limpia estado de proveedor y del picker de productos.
     this.selectedSupplierId.set(null);
+    this.selectedSupplierName.set(null);
     this.showSupplierCreate.set(false);
+    this.supplierDropdownOpen.set(false);
+    this.supplierSearchResults.set([]);
+    this.supplierSearchLoading.set(false);
+    this.supplierSearchTerm.set('');
     this.productSearchIndex.set(null);
     this.productSearchResults.set([]);
     this.productSearchLoading.set(false);
