@@ -1196,7 +1196,14 @@ export class PurchaseOrdersService {
           // and matches what the modal displays in `resulting_margin`.
           if (item.new_base_price !== undefined || item.new_profit_margin !== undefined) {
             const dtoItem = item;
-            const costForPricing = costResult?.new_cost_per_unit ?? receiptUnitCost;
+            // QUI-425: recompute margin against the SCOPED cost (the value
+            // persisted to cost_price), not the receiving-location-only cost,
+            // so base_price = cost_price·(1+margin/100) stays consistent and
+            // matches the cost preview's resulting_margin.
+            const costForPricing =
+              costResult?.new_scoped_cost_per_unit ??
+              costResult?.new_cost_per_unit ??
+              receiptUnitCost;
 
             // Persist on the variant first (if present), then on the product
             // for variant-less items. Variants use price_override (NOT
@@ -1249,7 +1256,14 @@ export class PurchaseOrdersService {
             // margin tracks the new cost. Without this, the displayed
             // resulting_margin in the preview would diverge from the stored
             // margin on the product.
-            const costForPricing = costResult?.new_cost_per_unit ?? receiptUnitCost;
+            // QUI-425: recompute margin against the SCOPED cost (the value
+            // persisted to cost_price), not the receiving-location-only cost,
+            // so base_price = cost_price·(1+margin/100) stays consistent and
+            // matches the cost preview's resulting_margin.
+            const costForPricing =
+              costResult?.new_scoped_cost_per_unit ??
+              costResult?.new_cost_per_unit ??
+              receiptUnitCost;
             if (costForPricing > 0) {
               if (productVariantId) {
                 const existingVariant = await tx.product_variants.findUnique({
@@ -1829,11 +1843,9 @@ export class PurchaseOrdersService {
       storeId ?? undefined,
     );
 
-    // Scope cost aggregates to the operating scope (STORE vs ORGANIZATION).
-    const locationFilter = await this.costingService.buildScopedLocationFilter(
-      organizationId,
-      dto.location_id,
-    );
+    // Scoped cost aggregates (STORE vs ORGANIZATION) are computed per-item via
+    // CostingService.getScopedStockAggregate, which owns the operating-scope
+    // location filter and reads UNSCOPED to include org-level warehouses.
 
     const items: Array<{
       product_id: number;
@@ -1866,25 +1878,17 @@ export class PurchaseOrdersService {
       const currentStock = Number(stockLevel?.quantity_on_hand ?? 0);
       const currentCost = Number(stockLevel?.cost_per_unit ?? 0);
 
-      // Aggregate stock across the scoped location set (org or store).
-      const allStockLevels = await this.prisma.stock_levels.findMany({
-        where: {
+      // Aggregate stock across the scoped location set (org or store) via the
+      // shared helper, which reads UNSCOPED so org-level central warehouses
+      // (store_id = null) and sibling stores are counted for ORGANIZATION scope
+      // — the store-scoped client would drop them and report global_stock = 0,
+      // wrongly flagging a reactivation and ignoring the general inventory.
+      const { quantity: globalStock, cost_per_unit: globalCostPerUnit } =
+        await this.costingService.getScopedStockAggregate({
           product_id: item.product_id,
-          product_variant_id: item.product_variant_id || null,
-          quantity_on_hand: { gt: 0 },
-          inventory_locations: { is: locationFilter },
-        },
-      });
-      const globalStock = allStockLevels.reduce(
-        (sum, sl) => sum + (sl.quantity_on_hand ?? 0),
-        0,
-      );
-      const globalValue = allStockLevels.reduce(
-        (sum, sl) =>
-          sum + (sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0),
-        0,
-      );
-      const globalCostPerUnit = globalStock > 0 ? globalValue / globalStock : 0;
+          variant_id: item.product_variant_id || undefined,
+          location_id: dto.location_id,
+        });
 
       const newStock = globalStock + item.quantity;
       const isReactivation = globalStock <= 0;

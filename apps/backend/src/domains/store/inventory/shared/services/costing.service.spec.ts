@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Prisma } from '@prisma/client';
 import { CostingService } from './costing.service';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
+import { GlobalPrismaService } from '../../../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 
@@ -25,6 +26,7 @@ import { OperatingScopeService } from '@common/services/operating-scope.service'
 describe('CostingService', () => {
   let service: CostingService;
   let prismaService: jest.Mocked<StorePrismaService>;
+  let globalPrismaService: jest.Mocked<GlobalPrismaService>;
   let operatingScopeService: jest.Mocked<OperatingScopeService>;
 
   const mockContext = {
@@ -57,6 +59,15 @@ describe('CostingService', () => {
       },
     };
 
+    // QUI-425: the scoped cost aggregate is read through the UNSCOPED base
+    // client (GlobalPrismaService), so it must be mocked separately from the
+    // store-scoped client used for the single-location read and writes.
+    const mockGlobalPrismaService = {
+      stock_levels: {
+        findMany: jest.fn(),
+      },
+    };
+
     const mockOperatingScopeService = {
       getOperatingScope: jest.fn().mockResolvedValue('ORGANIZATION'),
     };
@@ -65,6 +76,7 @@ describe('CostingService', () => {
       providers: [
         CostingService,
         { provide: StorePrismaService, useValue: mockPrismaService },
+        { provide: GlobalPrismaService, useValue: mockGlobalPrismaService },
         {
           provide: OperatingScopeService,
           useValue: mockOperatingScopeService,
@@ -74,6 +86,7 @@ describe('CostingService', () => {
 
     service = module.get<CostingService>(CostingService);
     prismaService = module.get(StorePrismaService);
+    globalPrismaService = module.get(GlobalPrismaService);
     operatingScopeService = module.get(OperatingScopeService);
 
     jest
@@ -86,6 +99,8 @@ describe('CostingService', () => {
       store_id: 10,
     });
     (prismaService as any).stock_levels.findMany.mockResolvedValue([]);
+    // Scoped aggregate default: no in-scope stock anywhere.
+    (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
     (prismaService as any).inventory_cost_layers.create.mockResolvedValue({});
     (prismaService as any).products.update.mockResolvedValue({});
     (prismaService as any).product_variants.update.mockResolvedValue({});
@@ -100,8 +115,8 @@ describe('CostingService', () => {
     it('case 1: stock 0 + receipt 1@5682 → new_cost_per_unit = 5682 and products.cost_price = 5682', async () => {
       // No existing stock_level — first ever receipt.
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
-      // No locations with stock_on_hand > 0 anywhere yet.
-      (prismaService as any).stock_levels.findMany.mockResolvedValue([]);
+      // No locations with stock_on_hand > 0 anywhere yet (scoped aggregate).
+      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
 
       const result = await service.calculateCostOnReceipt({
         product_id: 1,
@@ -112,6 +127,8 @@ describe('CostingService', () => {
       });
 
       expect(result.new_cost_per_unit).toBe(5682);
+      // Scoped cost equals the receipt cost when there is no prior in-scope stock.
+      expect(result.new_scoped_cost_per_unit).toBe(5682);
       expect(result.previous_cost_per_unit).toBe(0);
 
       // products.cost_price written with the scoped weighted-average (here = receipt cost).
@@ -154,8 +171,8 @@ describe('CostingService', () => {
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(
         existingStockLevel,
       );
-      // Scoped aggregate finds the same single stock level.
-      (prismaService as any).stock_levels.findMany.mockResolvedValue([
+      // Scoped aggregate (UNSCOPED base client) finds the same single stock level.
+      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
         existingStockLevel,
       ]);
 
@@ -169,6 +186,8 @@ describe('CostingService', () => {
 
       // (10*1000 + 10*2000) / 20 = 1500
       expect(result.new_cost_per_unit).toBe(1500);
+      // Scoped cost equals the same blend here (single in-scope location).
+      expect(result.new_scoped_cost_per_unit).toBe(1500);
       expect(result.previous_cost_per_unit).toBe(1000);
 
       // stock_levels.cost_per_unit updated with 1500 (the new CPP).
@@ -213,7 +232,7 @@ describe('CostingService', () => {
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(
         existingStockLevel,
       );
-      (prismaService as any).stock_levels.findMany.mockResolvedValue([
+      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
         existingStockLevel,
       ]);
 
@@ -247,7 +266,7 @@ describe('CostingService', () => {
         store_id: 42,
       });
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
-      (prismaService as any).stock_levels.findMany.mockResolvedValue([]);
+      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
 
       await service.calculateCostOnReceipt({
         product_id: 1,
@@ -257,7 +276,9 @@ describe('CostingService', () => {
         costing_method: 'weighted_average',
       });
 
-      expect(prismaService.stock_levels.findMany).toHaveBeenCalledWith(
+      // Aggregate runs on the UNSCOPED client with the scope filter as the
+      // ONLY predicate (STORE → org + store).
+      expect(globalPrismaService.stock_levels.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             inventory_locations: {
@@ -275,7 +296,7 @@ describe('CostingService', () => {
         store_id: 42,
       });
       (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
-      (prismaService as any).stock_levels.findMany.mockResolvedValue([]);
+      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([]);
 
       await service.calculateCostOnReceipt({
         product_id: 1,
@@ -285,12 +306,58 @@ describe('CostingService', () => {
         costing_method: 'weighted_average',
       });
 
-      expect(prismaService.stock_levels.findMany).toHaveBeenCalledWith(
+      // ORGANIZATION scope → filter is { organization_id } only, so org-level
+      // central warehouses (store_id = null) and sibling stores are included.
+      expect(globalPrismaService.stock_levels.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             inventory_locations: {
               is: { organization_id: 1 },
             },
+          }),
+        }),
+      );
+    });
+
+    it('case 5b (QUI-425): ORGANIZATION scope blends the org-level central warehouse into cost_price/margin basis', async () => {
+      // Founder's reported scenario: 10 units already in the central warehouse
+      // (store_id = null) at 1.000.000, receiving 10 units into a store showroom
+      // at 200.000. The scoped cost MUST blend both → 600.000, NOT collapse to
+      // the incoming 200.000 (which spiked the margin).
+      operatingScopeService.getOperatingScope.mockResolvedValue('ORGANIZATION');
+      (prismaService as any).inventory_locations.findUnique.mockResolvedValue({
+        organization_id: 1,
+        store_id: 10, // receiving location = a store showroom
+      });
+      // Receiving location itself is empty pre-receipt.
+      (prismaService as any).stock_levels.findFirst.mockResolvedValue(null);
+      // Scoped aggregate (unscoped read) sees the org-level central warehouse.
+      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+        {
+          location_id: 49, // Bodega Central, store_id = null
+          quantity_on_hand: 10,
+          cost_per_unit: 1000000,
+        },
+      ]);
+
+      const result = await service.calculateCostOnReceipt({
+        product_id: 1,
+        location_id: 100,
+        quantity_received: 10,
+        unit_cost: 200000,
+        costing_method: 'weighted_average',
+      });
+
+      // Receiving location alone: empty + 10@200k → 200.000.
+      expect(result.new_cost_per_unit).toBe(200000);
+      // Scoped blend across the org: (10*1.000.000 + 10*200.000)/20 = 600.000.
+      expect(result.new_scoped_cost_per_unit).toBe(600000);
+      // products.cost_price persisted with the scoped blend (600.000), not 200.000.
+      expect(prismaService.products.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 1 },
+          data: expect.objectContaining({
+            cost_price: new Prisma.Decimal(600000),
           }),
         }),
       );
