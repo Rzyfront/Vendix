@@ -2119,6 +2119,11 @@ model purchase_orders {
   updated_at            DateTime?                          @default(now()) @db.Timestamp(6)
   payment_status        purchase_order_payment_status_enum @default(unpaid)
   payment_due_date      DateTime?                          @db.Timestamp(6)
+  /// F1 IVA lifecycle: dominant tax mode for the whole invoice. When true,
+  /// line `unit_price` is understood as tax-INCLUSIVE (gross); when false the
+  /// tax is ADDED on top. Individual lines may override via
+  /// `purchase_order_items.prices_include_tax` to support mixed invoices.
+  prices_include_tax    Boolean                            @default(false)
   purchase_order_items  purchase_order_items[]
   users                 users?                             @relation("purchase_orders_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users1                users?                             @relation("purchase_orders_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -2142,6 +2147,21 @@ model purchase_order_items {
   quantity_received  Int                              @default(0)
   unit_cost          Decimal?                         @db.Decimal(12, 4)
   total_cost         Decimal?                         @db.Decimal(12, 2)
+  /// F1 IVA lifecycle — VAT capture per line.
+  /// `tax_rate`        : percentage (e.g. 19 for 19%).
+  /// `tax_type`        : fiscal classification, defaults to iva.
+  /// `prices_include_tax`: per-line override of the header mode (mixed invoices).
+  /// `unit_price_net`  : the NET unit price (single source of truth for cost).
+  /// `tax_amount`      : total VAT captured for the line (per-unit tax × qty).
+  /// `deductible_tax_amount`  : VAT sealed as descontable (O-48 responsible).
+  /// `capitalized_tax_amount` : VAT sealed into inventory cost (O-49 non-responsible).
+  tax_rate               Decimal?      @db.Decimal(5, 2)
+  tax_type               tax_type_enum? @default(iva)
+  prices_include_tax     Boolean?
+  unit_price_net         Decimal?      @db.Decimal(12, 4)
+  tax_amount             Decimal?      @db.Decimal(12, 2)
+  deductible_tax_amount  Decimal?      @db.Decimal(12, 2)
+  capitalized_tax_amount Decimal?      @db.Decimal(12, 2)
   /// Fase 2: UoM FKs the receiving engine uses to derive the
   /// `purchase_to_stock_factor` for ingredient orders. Optional because
   /// retail orders keep factor=1 and do not need them. When

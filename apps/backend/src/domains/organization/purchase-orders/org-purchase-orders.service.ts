@@ -418,6 +418,10 @@ export class OrgPurchaseOrdersService {
       shipping_cost: dto.shipping_cost,
       tax_amount: dto.tax_amount,
       discount_amount: dto.discount_amount,
+      // F1 IVA lifecycle: dominant invoice tax mode must cross the mapping so
+      // org-created POs capture VAT via the store-native deriveLineTax exactly
+      // like store-native POs. Derivation/costeo is NOT reimplemented here.
+      prices_include_tax: dto.prices_include_tax,
       notes: dto.notes,
       internal_notes: dto.internal_notes,
       items: dto.items.map((item) => ({
@@ -429,6 +433,9 @@ export class OrgPurchaseOrdersService {
         unit_price: item.unit_price,
         discount_percentage: item.discount_percentage,
         tax_rate: item.tax_rate,
+        // F1: line-level VAT fields cross the mapping (type + per-line override).
+        tax_type: item.tax_type,
+        prices_include_tax: item.prices_include_tax,
         notes: item.notes,
         batch_number: item.batch_number,
         manufacturing_date: item.manufacturing_date,

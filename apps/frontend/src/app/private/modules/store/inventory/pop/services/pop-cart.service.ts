@@ -38,6 +38,13 @@ export interface PopCartItemLotInfo {
   expiration_date?: Date;
 }
 
+/**
+ * IVA cycle (F1): default tax rate (%) seeded on NEW cart lines. Standard
+ * Colombian IVA is 19%. Fully editable per line (0 for exempt). Named so the
+ * default is trivial to change / wire to a store setting later.
+ */
+const DEFAULT_PURCHASE_TAX_RATE = 19;
+
 const INITIAL_STATE: PopCartState = {
   items: [],
   summary: {
@@ -48,6 +55,10 @@ const INITIAL_STATE: PopCartState = {
     itemCount: 0,
     totalItems: 0,
   },
+  // IVA cycle (F1): default dominant mode. `false` = tax is ADDED on top of
+  // net prices (the common Colombian B2B purchase-invoice layout). The header
+  // toggle flips this to `true` for IVA-included prices.
+  prices_include_tax: false,
   supplierId: null,
   locationId: null,
   orderDate: new Date(),
@@ -447,7 +458,11 @@ export class PopCartService {
         quantity: request.quantity,
         unit_cost: request.unit_cost,
         discount: 0,
-        tax_rate: 0,
+        // IVA cycle (F1): seed the standard IVA rate + type. `prices_include_tax`
+        // stays undefined so the line inherits the header mode.
+        tax_rate: DEFAULT_PURCHASE_TAX_RATE,
+        tax_type: 'iva',
+        prices_include_tax: undefined,
         subtotal: 0,
         tax_amount: 0,
         total: 0,
@@ -460,7 +475,7 @@ export class PopCartService {
         stock_uom_id: request.stock_uom_id ?? null,
         addedAt: new Date(),
       };
-      this.recalculateItemTotals(newItem);
+      this.recalculateItemTotals(newItem, currentState.prices_include_tax);
       const updatedItems = [newItem, ...currentState.items];
       return {
         ...currentState,
@@ -492,7 +507,10 @@ export class PopCartService {
         lot_info: request.lot_info || existingItem.lot_info,
         notes: request.notes || existingItem.notes,
       };
-      this.recalculateItemTotals(updatedItems[existingItemIndex]);
+      this.recalculateItemTotals(
+        updatedItems[existingItemIndex],
+        currentState.prices_include_tax,
+      );
     } else {
       // Add new item
       const newItem: PopCartItem = {
@@ -502,7 +520,10 @@ export class PopCartService {
         quantity: request.quantity,
         unit_cost: request.unit_cost,
         discount: 0,
-        tax_rate: 0,
+        // IVA cycle (F1): seed the standard IVA rate + type; inherit header mode.
+        tax_rate: DEFAULT_PURCHASE_TAX_RATE,
+        tax_type: 'iva',
+        prices_include_tax: undefined,
         subtotal: 0,
         tax_amount: 0,
         total: 0,
@@ -514,7 +535,7 @@ export class PopCartService {
         stock_uom_id: request.stock_uom_id ?? null,
         addedAt: new Date(),
       };
-      this.recalculateItemTotals(newItem);
+      this.recalculateItemTotals(newItem, currentState.prices_include_tax);
       updatedItems = [newItem, ...currentState.items];
     }
 
@@ -565,7 +586,10 @@ export class PopCartService {
     }
 
     updatedItems[itemIndex] = updatedItem;
-    this.recalculateItemTotals(updatedItems[itemIndex]);
+    this.recalculateItemTotals(
+      updatedItems[itemIndex],
+      currentState.prices_include_tax,
+    );
 
     return {
       ...currentState,
@@ -593,17 +617,112 @@ export class PopCartService {
   }
 
   /**
-   * Recalculate item totals
+   * IVA cycle (F1): recalculate a line's NET subtotal / IVA / total using the
+   * pinned derivation formula. The backend remains the single source of truth
+   * for the persisted split; this is a client-side PREVIEW only.
+   *
+   * effective_include = item.prices_include_tax ?? header.prices_include_tax
+   * r = tax_rate / 100
+   *  - included:  unit_price_net = unit_price / (1 + r);
+   *               line_tax = (unit_price - unit_price_net) * quantity
+   *  - added:     unit_price_net = unit_price;
+   *               line_tax = unit_price * r * quantity
+   *
+   * A per-line discount (%) is applied to the gross unit price BEFORE the
+   * include/added branch, so a discounted line stays consistent (discount is
+   * 0 for the common path where no discount UI is exposed).
    */
-  private recalculateItemTotals(item: PopCartItem) {
-    const baseTotal = item.quantity * item.unit_cost;
-    const discountAmount = (baseTotal * item.discount) / 100;
-    const taxableAmount = baseTotal - discountAmount;
-    const taxAmount = (taxableAmount * item.tax_rate) / 100;
+  private recalculateItemTotals(
+    item: PopCartItem,
+    headerPricesIncludeTax: boolean,
+  ): void {
+    const quantity = Number(item.quantity) || 0;
+    const unitCost = Number(item.unit_cost) || 0;
+    const discountPct = Number(item.discount) || 0;
+    const taxRate = Number(item.tax_rate) || 0;
+    const r = taxRate / 100;
 
-    item.subtotal = baseTotal;
-    item.tax_amount = taxAmount;
-    item.total = taxableAmount + taxAmount;
+    // Discount applies to the gross unit price first.
+    const grossUnit = unitCost * (1 - discountPct / 100);
+
+    // Per-line override wins over the header mode (mixed invoices).
+    const effectiveInclude = item.prices_include_tax ?? headerPricesIncludeTax;
+
+    let unitNet: number;
+    let lineTax: number;
+    if (effectiveInclude) {
+      unitNet = r > 0 ? grossUnit / (1 + r) : grossUnit;
+      lineTax = (grossUnit - unitNet) * quantity;
+    } else {
+      unitNet = grossUnit;
+      lineTax = grossUnit * r * quantity;
+    }
+
+    item.subtotal = unitNet * quantity; // NET line subtotal
+    item.tax_amount = lineTax; // IVA for the line
+    item.total = item.subtotal + item.tax_amount;
+  }
+
+  /**
+   * IVA cycle (F1): set the header-level dominant mode (whether captured
+   * prices include tax). Recomputes every line that inherits the header
+   * (lines with an explicit per-line override keep their own mode).
+   */
+  setPricesIncludeTax(value: boolean): void {
+    const current = this.currentState;
+    const items = current.items.map((item) => {
+      const clone = { ...item };
+      this.recalculateItemTotals(clone, value);
+      return clone;
+    });
+    this.updateState({ prices_include_tax: value, items });
+  }
+
+  /**
+   * IVA cycle (F1): set a line's tax rate (%). Clamps to a non-negative
+   * finite number and recomputes the line against the current header mode.
+   */
+  setItemTaxRate(itemId: string, rate: number): void {
+    const safe = Number.isFinite(Number(rate)) && Number(rate) >= 0 ? Number(rate) : 0;
+    this.mutateItem(itemId, (item) => {
+      item.tax_rate = safe;
+    });
+  }
+
+  /** IVA cycle (F1): set a line's tax classification (defaults to 'iva'). */
+  setItemTaxType(itemId: string, taxType: string): void {
+    this.mutateItem(itemId, (item) => {
+      item.tax_type = taxType || 'iva';
+    });
+  }
+
+  /**
+   * IVA cycle (F1): set a line's per-line override of the header mode.
+   * Pass `undefined` to CLEAR the override (line follows the header again).
+   */
+  setItemPricesIncludeTax(itemId: string, value: boolean | undefined): void {
+    this.mutateItem(itemId, (item) => {
+      item.prices_include_tax = value;
+    });
+  }
+
+  /**
+   * IVA cycle (F1): immutably patch a single line, recompute its totals
+   * against the current header mode, and refresh the summary.
+   */
+  private mutateItem(
+    itemId: string,
+    mutator: (item: PopCartItem) => void,
+  ): void {
+    const current = this.currentState;
+    const index = current.items.findIndex((i) => i.id === itemId);
+    if (index === -1) return;
+    const items = [...current.items];
+    const updated = { ...items[index] };
+    mutator(updated);
+    this.recalculateItemTotals(updated, current.prices_include_tax);
+    items[index] = updated;
+    this.updateState({ items });
   }
 
   /**
@@ -656,6 +775,10 @@ export class PopCartService {
    * Load an existing purchase order into the cart
    */
   loadOrder(order: PurchaseOrder): void {
+    // IVA cycle (F1): restore the header dominant mode from the order (falls
+    // back to the safe default when the order predates the IVA cycle).
+    const headerInclude: boolean =
+      (order as any).prices_include_tax ?? INITIAL_STATE.prices_include_tax;
     const rawItems = order.purchase_order_items || order.items || [];
     const items: PopCartItem[] = rawItems.map(item => {
       const product = item.products || item.product;
@@ -701,6 +824,9 @@ export class PopCartService {
         unit_cost: item.unit_cost || item.unit_price,
         discount: item.discount_percentage || 0,
         tax_rate: item.tax_rate || 0,
+        // IVA cycle (F1): restore tax classification and per-line override.
+        tax_type: (item as any).tax_type ?? 'iva',
+        prices_include_tax: (item as any).prices_include_tax ?? undefined,
         subtotal: ((item.quantity_ordered || item.quantity) * (item.unit_cost || item.unit_price)),
         tax_amount: 0,
         total: 0,
@@ -710,13 +836,14 @@ export class PopCartService {
         addedAt: new Date()
       };
 
-      this.recalculateItemTotals(cartItem);
+      this.recalculateItemTotals(cartItem, headerInclude);
       return cartItem;
     });
 
     const newState: PopCartState = {
       ...INITIAL_STATE,
       orderId: order.id,
+      prices_include_tax: headerInclude,
       items: items,
       supplierId: order.supplier_id,
       locationId: order.location_id,

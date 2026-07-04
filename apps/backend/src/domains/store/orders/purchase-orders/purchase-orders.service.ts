@@ -11,7 +11,7 @@ import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
-import { purchase_order_status_enum } from '@prisma/client';
+import { purchase_order_status_enum, tax_type_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
 import { toTitleCase } from '@common/utils/format.util';
@@ -31,6 +31,13 @@ import { SettingsService } from '../../settings/settings.service';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 
+/**
+ * F1 IVA lifecycle — RUT casilla 53 code for "Responsable de IVA" (O-48).
+ * Mirrors FiscalObligationService.VAT_RESPONSIBLE_CODE so the cost treatment
+ * (exclude vs capitalize IVA) uses the same canonical fiscal source.
+ */
+const VAT_RESPONSIBLE_CODE = 'O-48';
+
 @Injectable()
 export class PurchaseOrdersService {
   private readonly logger = new Logger(PurchaseOrdersService.name);
@@ -47,6 +54,112 @@ export class PurchaseOrdersService {
     private settingsService: SettingsService,
     private eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * F1 IVA lifecycle — single source of truth for the net/gross split of a
+   * purchase line. The frontend mirrors this exact formula for its live
+   * preview, so it MUST stay byte-for-byte equivalent to the clavado contract:
+   *
+   *   effective_include = item.prices_include_tax ?? header.prices_include_tax
+   *   r = tax_rate / 100
+   *   include  → unit_price_net = gross / (1 + r); tax/u = gross - net
+   *   exclude  → unit_price_net = gross;           tax/u = gross * r
+   *
+   * `gross` is read from `unit_price` (create) or `unit_cost` (cost preview),
+   * whichever the caller provides. When there is no tax rate the line is
+   * tax-free: net = gross, tax = 0 (preserves legacy behaviour exactly).
+   *
+   * @returns unit_price_net (per unit, → persisted `unit_cost`),
+   *          tax_amount_per_unit (per unit),
+   *          tax_amount (line total = per-unit × quantity, → persisted),
+   *          effective_include (the resolved mode for the line).
+   */
+  private deriveLineTax(
+    item: {
+      unit_price?: number | null;
+      unit_cost?: number | null;
+      quantity?: number | null;
+      tax_rate?: number | null;
+      prices_include_tax?: boolean | null;
+    },
+    header: { prices_include_tax?: boolean | null },
+  ): {
+    unit_price_net: number;
+    tax_amount_per_unit: number;
+    tax_amount: number;
+    effective_include: boolean;
+  } {
+    const gross = Number(item.unit_price ?? item.unit_cost ?? 0);
+    const quantity = Number(item.quantity ?? 0);
+    const r = Number(item.tax_rate ?? 0) / 100;
+    const effective_include =
+      item.prices_include_tax ?? header.prices_include_tax ?? false;
+
+    let unit_price_net: number;
+    let tax_amount_per_unit: number;
+    if (!(r > 0)) {
+      // No (or invalid) tax rate → line is tax-free, cost stays as entered.
+      unit_price_net = gross;
+      tax_amount_per_unit = 0;
+    } else if (effective_include) {
+      // Price already includes IVA: strip it out to get the net cost.
+      unit_price_net = gross / (1 + r);
+      tax_amount_per_unit = gross - unit_price_net;
+    } else {
+      // IVA added on top: entered price is already net.
+      unit_price_net = gross;
+      tax_amount_per_unit = gross * r;
+    }
+
+    return {
+      unit_price_net,
+      tax_amount_per_unit,
+      tax_amount: tax_amount_per_unit * quantity,
+      effective_include,
+    };
+  }
+
+  /**
+   * F1 IVA lifecycle — read-only check of the commerce's VAT responsibility,
+   * driving the inventory cost treatment at receipt:
+   *   - O-48 (responsible)     → IVA is descontable, EXCLUDED from cost.
+   *   - O-49 (non-responsible) → IVA is CAPITALIZED into inventory cost.
+   *
+   * Canonical source: `SettingsService.getFiscalData().tax_responsibilities`
+   * (RUT casilla 53). Mirrors FiscalObligationService's O-48 evaluation.
+   *
+   * Anti-regression rule: NO declared responsibilities / indeterminate ⇒ treat
+   * as RESPONSIBLE (O-48). This preserves the pre-F1 behaviour where entered
+   * cost was net and IVA was never capitalized.
+   *
+   * `organizationId`/`storeId` are the resolved tenant identifiers (used for
+   * logging); the fiscal data itself is read from the request context inside
+   * `getFiscalData()`.
+   */
+  private async isVatResponsible(
+    organizationId?: number,
+    storeId?: number,
+  ): Promise<boolean> {
+    try {
+      const fiscalData = await this.settingsService.getFiscalData();
+      const responsibilities = Array.isArray(
+        (fiscalData as any)?.tax_responsibilities,
+      )
+        ? ((fiscalData as any).tax_responsibilities as unknown[]).filter(
+            (code): code is string => typeof code === 'string',
+          )
+        : [];
+
+      // No declared responsibilities / indeterminate ⇒ RESPONSIBLE (O-48).
+      if (responsibilities.length === 0) return true;
+      return responsibilities.includes(VAT_RESPONSIBLE_CODE);
+    } catch (error: any) {
+      this.logger.warn(
+        `isVatResponsible: could not resolve fiscal data for org ${organizationId} / store ${storeId} (${error?.message}); defaulting to VAT responsible (O-48).`,
+      );
+      return true;
+    }
+  }
 
   /**
    * Resolves the UoM conversion for a product at receipt time.
@@ -655,22 +768,37 @@ export class PurchaseOrdersService {
           total_amount: totalAmount,
           order_date: new Date(),
           purchase_order_items: {
-            create: processedItems.map((item) => ({
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id,
-              quantity_ordered: item.quantity,
-              unit_cost: item.unit_price,
-              notes: item.notes,
-              batch_number: item.batch_number,
-              manufacturing_date: toDate(item.manufacturing_date),
-              expiration_date: toDate(item.expiration_date),
-              // Fase 2: UoM FKs. Required when the parent is `ingredient`;
-              // we pass `null` otherwise to keep the column clean.
-              purchase_uom_id: isIngredient
-                ? (item.purchase_uom_id ?? null)
-                : null,
-              stock_uom_id: isIngredient ? (item.stock_uom_id ?? null) : null,
-            })),
+            create: processedItems.map((item) => {
+              // F1 IVA lifecycle: derive net/tax from the entered unit_price
+              // and the effective include-tax mode (line override ?? header).
+              // `unit_cost` persists the NET price (single source of truth for
+              // costing); the VAT treatment for inventory cost is decided later
+              // in receive() by fiscal responsibility.
+              const derived = this.deriveLineTax(item, createPurchaseOrderDto);
+              return {
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id,
+                quantity_ordered: item.quantity,
+                unit_cost: derived.unit_price_net,
+                unit_price_net: derived.unit_price_net,
+                tax_rate: item.tax_rate ?? null,
+                tax_type:
+                  (item.tax_type as tax_type_enum | undefined) ??
+                  tax_type_enum.iva,
+                prices_include_tax: item.prices_include_tax ?? null,
+                tax_amount: derived.tax_amount,
+                notes: item.notes,
+                batch_number: item.batch_number,
+                manufacturing_date: toDate(item.manufacturing_date),
+                expiration_date: toDate(item.expiration_date),
+                // Fase 2: UoM FKs. Required when the parent is `ingredient`;
+                // we pass `null` otherwise to keep the column clean.
+                purchase_uom_id: isIngredient
+                  ? (item.purchase_uom_id ?? null)
+                  : null,
+                stock_uom_id: isIngredient ? (item.stock_uom_id ?? null) : null,
+              };
+            }),
           },
         },
         include: {
@@ -1054,6 +1182,14 @@ export class PurchaseOrdersService {
         storeId ?? undefined,
       );
 
+      // F1 IVA lifecycle: resolve the commerce's VAT responsibility ONCE for
+      // this receipt. O-48 (responsible) excludes IVA from inventory cost;
+      // O-49 (non-responsible) capitalizes it. Indeterminate ⇒ responsible.
+      const vatResponsible = await this.isVatResponsible(
+        organizationId ?? undefined,
+        storeId ?? undefined,
+      );
+
       // D2: accumulate the purchase-unit subtotal received in THIS specific
       // reception batch (quantity_received_now × unit_cost, in purchase-order
       // currency, matching the same basis used for `subtotal` at PO creation
@@ -1072,8 +1208,47 @@ export class PurchaseOrdersService {
         const productVariantId = orderItem?.product_variant_id;
 
         if (productId) {
-          const purchaseUnitCost = Number(orderItem?.unit_cost || 0);
-          receivedBatchSubtotal += item.quantity_received * purchaseUnitCost;
+          // F1: `unit_cost` now persists the NET price (see create/deriveLineTax).
+          const netUnitCost = Number(orderItem?.unit_cost || 0);
+          // AP proration basis stays on the NET subtotal (matches orderSubtotal
+          // below, which reads unit_cost), so the accounting ratio is unchanged.
+          receivedBatchSubtotal += item.quantity_received * netUnitCost;
+
+          // ===== F1 IVA lifecycle: cost treatment by fiscal responsibility =====
+          // Per-unit IVA sealed on the line at create (tax_amount / qty_ordered),
+          // with a recompute fallback for legacy lines that predate F1.
+          const qtyOrdered = orderItem?.quantity_ordered ?? 0;
+          const lineTaxAmount =
+            orderItem?.tax_amount != null ? Number(orderItem.tax_amount) : null;
+          const ivaPerUnit =
+            lineTaxAmount != null && qtyOrdered > 0
+              ? lineTaxAmount / qtyOrdered
+              : netUnitCost * (Number(orderItem?.tax_rate ?? 0) / 100);
+
+          // O-48 responsible → cost EXCLUDES IVA (net). O-49 non-responsible →
+          // CAPITALIZE IVA into cost. Capitalization is on the PURCHASE unit,
+          // BEFORE resolveUoMConversion (so the per-stock-unit cost the FIFO
+          // engine sees already carries the capitalized IVA when applicable).
+          const costUnit = vatResponsible
+            ? netUnitCost
+            : netUnitCost + ivaPerUnit;
+
+          // Seal the VAT attributable to the units received in THIS batch,
+          // proportional to quantity_received (purchase units), accumulating
+          // across partial receptions. O-48 → deductible (descontable);
+          // O-49 → capitalized into inventory cost.
+          const sealedTaxNow = ivaPerUnit * item.quantity_received;
+          const prevSealed = vatResponsible
+            ? Number(orderItem?.deductible_tax_amount ?? 0)
+            : Number(orderItem?.capitalized_tax_amount ?? 0);
+          const newSealed =
+            Math.round((prevSealed + sealedTaxNow) * 100) / 100;
+          await tx.purchase_order_items.update({
+            where: { id: item.id },
+            data: vatResponsible
+              ? { deductible_tax_amount: newSealed }
+              : { capitalized_tax_amount: newSealed },
+          });
 
           // ===== UoM conversion (purchase unit → minimum stock unit) =====
           // The frontend sends `item.quantity_received` in the purchase unit
@@ -1090,7 +1265,7 @@ export class PurchaseOrdersService {
           } = await this.resolveUoMConversion(
             productId,
             item.quantity_received,
-            purchaseUnitCost,
+            costUnit,
             tx,
           );
 
@@ -1860,6 +2035,12 @@ export class PurchaseOrdersService {
       new_cost_per_unit: number;
       incoming_quantity: number;
       incoming_cost: number;
+      // F1 IVA lifecycle preview parity (frontend mirrors deriveLineTax):
+      incoming_gross_cost: number;
+      unit_price_net: number;
+      incoming_tax_per_unit: number;
+      incoming_tax_amount: number;
+      effective_include: boolean;
       is_reactivation: boolean;
       current_base_price: number;
       current_profit_margin: number;
@@ -1890,17 +2071,31 @@ export class PurchaseOrdersService {
           location_id: dto.location_id,
         });
 
+      // F1 IVA lifecycle: derive the NET cost from the entered (possibly
+      // gross) unit_cost + tax_rate + effective include-tax mode. The NET is
+      // the cost basis for CPP/FIFO — mirrors what create/receive persist.
+      const derivedTax = this.deriveLineTax(
+        {
+          unit_cost: item.unit_cost,
+          quantity: item.quantity,
+          tax_rate: item.tax_rate,
+          prices_include_tax: item.prices_include_tax,
+        },
+        dto,
+      );
+      const netUnitCost = derivedTax.unit_price_net;
+
       const newStock = globalStock + item.quantity;
       const isReactivation = globalStock <= 0;
 
       let newCostPerUnit: number;
       if (isReactivation || costingMethod === 'fifo') {
-        // Stock at zero: previous CPP is orphaned, new cost = purchase price directly
-        newCostPerUnit = item.unit_cost;
+        // Stock at zero: previous CPP is orphaned, new cost = NET purchase price
+        newCostPerUnit = netUnitCost;
       } else {
         // CPP (weighted average) using global stock across all locations
         newCostPerUnit =
-          (globalStock * globalCostPerUnit + item.quantity * item.unit_cost) /
+          (globalStock * globalCostPerUnit + item.quantity * netUnitCost) /
           newStock;
       }
 
@@ -1972,7 +2167,15 @@ export class PurchaseOrdersService {
         new_stock: newStock,
         new_cost_per_unit: newCostPerUnit,
         incoming_quantity: item.quantity,
-        incoming_cost: item.unit_cost,
+        // incoming_cost is the NET cost basis that actually enters inventory
+        // (equals the entered value when no tax applies — legacy-compatible).
+        incoming_cost: Math.round(netUnitCost * 100) / 100,
+        incoming_gross_cost: item.unit_cost,
+        unit_price_net: Math.round(netUnitCost * 100) / 100,
+        incoming_tax_per_unit:
+          Math.round(derivedTax.tax_amount_per_unit * 100) / 100,
+        incoming_tax_amount: Math.round(derivedTax.tax_amount * 100) / 100,
+        effective_include: derivedTax.effective_include,
         is_reactivation: isReactivation,
         current_base_price: currentBasePrice,
         current_profit_margin: currentProfitMargin,

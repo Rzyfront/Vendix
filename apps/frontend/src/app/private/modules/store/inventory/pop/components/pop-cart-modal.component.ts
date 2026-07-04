@@ -10,7 +10,8 @@ import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
 import { QuantityControlComponent } from '../../../../../../shared/components/quantity-control/quantity-control.component';
-import { PopCartState, PopCartItem } from '../services/pop-cart.service';
+import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
+import { PopCartService, PopCartState, PopCartItem } from '../services/pop-cart.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
@@ -20,7 +21,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
     FormsModule,
     IconComponent,
     TooltipComponent,
-    QuantityControlComponent
+    QuantityControlComponent,
+    ToggleComponent
 ],
   template: `
     <!-- Overlay -->
@@ -168,6 +170,28 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
                     ></app-quantity-control>
                     <span class="item-total">{{ formatCurrency(item.total) }}</span>
                   </div>
+                  <!-- IVA per-line: rate (%) + include/added override -->
+                  <div class="item-tax">
+                    <label class="tax-label">IVA</label>
+                    <div class="tax-rate-input">
+                      <input
+                        type="number"
+                        [value]="item.tax_rate"
+                        (change)="onTaxRateChange(item.id, $event)"
+                        min="0"
+                        step="1"
+                        />
+                      <span class="tax-pct">%</span>
+                    </div>
+                    <div class="tax-include">
+                      <span>{{ itemEffectiveInclude(item) ? 'Incluido' : 'Agregado' }}</span>
+                      <app-toggle
+                        [checked]="itemEffectiveInclude(item)"
+                        (changed)="onItemIncludeToggle(item, $event)"
+                        ariaLabel="Precio con IVA incluido para esta línea"
+                      ></app-toggle>
+                    </div>
+                  </div>
                   <!-- Lot Config Row (POP-specific) -->
                   @if (!item.lot_info) {
                     <div class="item-lot">
@@ -192,12 +216,21 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         <!-- Summary Section -->
         @if (cartState()?.items?.length) {
           <div class="summary-section">
+            <!-- IVA header mode toggle (dominant invoice mode) -->
+            <div class="summary-row tax-mode-row">
+              <span>Esta factura incluye IVA</span>
+              <app-toggle
+                [checked]="headerIncludeTax()"
+                (changed)="onHeaderIncludeToggle($event)"
+                ariaLabel="Esta factura incluye IVA"
+              ></app-toggle>
+            </div>
             <div class="summary-row">
-              <span>Subtotal</span>
+              <span>Subtotal (neto)</span>
               <span>{{ formatCurrency(cartState()?.summary?.subtotal || 0) }}</span>
             </div>
             <div class="summary-row">
-              <span>Impuestos</span>
+              <span>IVA</span>
               <span>{{ formatCurrency(cartState()?.summary?.tax_amount || 0) }}</span>
             </div>
             <div class="summary-row total">
@@ -623,6 +656,76 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         color: var(--color-primary);
       }
 
+      /* IVA per-line row (POP-specific) */
+      .item-tax {
+        grid-column: 1 / -1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding-top: 8px;
+        margin-top: 4px;
+        border-top: 1px solid var(--color-border);
+        flex-wrap: wrap;
+      }
+
+      .tax-label {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: var(--color-text-secondary);
+      }
+
+      .tax-rate-input {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        background: var(--color-background);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        padding: 3px 6px;
+      }
+
+      .tax-rate-input input {
+        width: 44px;
+        border: none;
+        background: transparent;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        outline: none;
+        text-align: right;
+        -moz-appearance: textfield;
+      }
+
+      .tax-rate-input input::-webkit-outer-spin-button,
+      .tax-rate-input input::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+      }
+
+      .tax-pct {
+        font-size: 11px;
+        color: var(--color-text-secondary);
+      }
+
+      .tax-include {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+
+      .summary-row.tax-mode-row {
+        padding-bottom: 8px;
+        margin-bottom: 4px;
+        border-bottom: 1px solid var(--color-border);
+        font-weight: 500;
+        color: var(--color-text-primary);
+      }
+
       /* Lot config row (POP-specific) */
       .item-lot {
         grid-row: 3;
@@ -775,6 +878,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 })
 export class PopCartModalComponent {
   private currencyService = inject(CurrencyFormatService);
+  private cartService = inject(PopCartService);
   readonly isOpen = input(false);
   readonly cartState = input<PopCartState | null>(null);
   readonly supplierName = input('');
@@ -823,6 +927,44 @@ export class PopCartModalComponent {
     const input = event.target as HTMLInputElement;
     const cost = Number(input.value) || 0;
     this.itemCostChanged.emit({ itemId, cost });
+  }
+
+  // ============================================================
+  // IVA cycle (F1): header mode + per-line tax capture (mobile)
+  // ============================================================
+
+  /** Header dominant mode: whether captured prices already include tax. */
+  headerIncludeTax(): boolean {
+    return this.cartState()?.prices_include_tax ?? false;
+  }
+
+  /** Effective include mode for a line: per-line override wins over header. */
+  itemEffectiveInclude(item: PopCartItem): boolean {
+    return item.prices_include_tax ?? this.headerIncludeTax();
+  }
+
+  /** Toggle the header dominant mode; recomputes lines that inherit it. */
+  onHeaderIncludeToggle(value: boolean): void {
+    this.cartService.setPricesIncludeTax(value);
+  }
+
+  /** Update a line's tax rate (%) from the native input. */
+  onTaxRateChange(itemId: string, event: Event): void {
+    const raw = Number((event.target as HTMLInputElement).value);
+    this.cartService.setItemTaxRate(itemId, Number.isFinite(raw) ? raw : 0);
+  }
+
+  /**
+   * Toggle a line's include/added mode. Clears the override when it matches
+   * the header (line follows the header again); otherwise sets an explicit
+   * per-line override (mixed invoices).
+   */
+  onItemIncludeToggle(item: PopCartItem, value: boolean): void {
+    const header = this.headerIncludeTax();
+    this.cartService.setItemPricesIncludeTax(
+      item.id,
+      value === header ? undefined : value,
+    );
   }
 
   onRemoveItem(itemId: string): void {

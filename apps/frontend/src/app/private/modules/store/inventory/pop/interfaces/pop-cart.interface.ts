@@ -164,7 +164,28 @@ export interface PopCartItem {
   quantity: number;
   unit_cost: number;
   discount: number;
+  /**
+   * IVA cycle (F1): tax rate captured MANUALLY for this line, as a
+   * percentage (e.g. 19 for standard Colombian IVA, 0 for exempt).
+   */
   tax_rate: number;
+  /**
+   * IVA cycle (F1): tax classification for this line. Defaults to 'iva'.
+   * Passed through to the backend as-is (backend is the source of truth).
+   */
+  tax_type?: string;
+  /**
+   * IVA cycle (F1): per-line override of the header `prices_include_tax`
+   * mode (mixed invoices). When set, it inverts/overrides the header mode
+   * for THIS line only: `effective_include = prices_include_tax ?? header`.
+   * `undefined` means the line inherits the header mode.
+   */
+  prices_include_tax?: boolean;
+  /**
+   * Net (pre-tax) line subtotal = `unit_price_net * quantity` derived from
+   * the effective include mode. IVA cycle (F1) redefines `subtotal` to be
+   * NET so the summary shows Subtotal(neto) / IVA / Total.
+   */
   subtotal: number;
   tax_amount: number;
   total: number;
@@ -189,9 +210,15 @@ export interface PopCartItem {
  * Financial summary for purchase order cart
  */
 export interface PopCartSummary {
+  /**
+   * IVA cycle (F1): NET (pre-tax) subtotal = Σ(unit_price_net * quantity).
+   * Derived from the effective include mode per line.
+   */
   subtotal: number;
+  /** IVA cycle (F1): total tax (IVA) = Σ line_tax. */
   tax_amount: number;
   shipping_cost: number;
+  /** Gross total = subtotal (net) + tax_amount (IVA) + shipping. */
   total: number;
   itemCount: number;
   totalItems: number;
@@ -213,6 +240,13 @@ export interface PopCartState {
   orderId?: number; // ID of the order being edited
   items: PopCartItem[];
   summary: PopCartSummary;
+  /**
+   * IVA cycle (F1): dominant invoice mode. `true` when the captured prices
+   * already INCLUDE tax (extract IVA out of the price); `false` when tax is
+   * ADDED on top of the net price. Per-line `prices_include_tax` overrides
+   * this for mixed invoices.
+   */
+  prices_include_tax: boolean;
   supplierId: number | null;
   locationId: number | null;
   orderDate: Date;

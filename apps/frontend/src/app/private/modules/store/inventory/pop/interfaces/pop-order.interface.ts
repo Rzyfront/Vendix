@@ -22,7 +22,16 @@ export interface PurchaseOrderItemRequest {
   quantity: number;
   unit_price: number;
   discount_percentage?: number;
+  /** IVA cycle (F1): tax rate (%) captured manually for this line. */
   tax_rate?: number;
+  /** IVA cycle (F1): tax classification for this line. Defaults to 'iva'. */
+  tax_type?: string;
+  /**
+   * IVA cycle (F1): per-line override of the header `prices_include_tax`
+   * mode (mixed invoices). When present it inverts/overrides the header for
+   * this line; when omitted the line inherits the header mode.
+   */
+  prices_include_tax?: boolean;
   notes?: string;
   // Batch/lot tracking fields
   batch_number?: string;
@@ -75,6 +84,12 @@ export interface CreatePurchaseOrderRequest {
   supplier_id: number;
   location_id: number;
   status?: PurchaseOrderStatus;
+  /**
+   * IVA cycle (F1): dominant invoice mode. `true` when captured prices
+   * already INCLUDE tax; `false` when tax is ADDED on top. Per-item
+   * `prices_include_tax` overrides this for mixed invoices.
+   */
+  prices_include_tax?: boolean;
   order_date?: string;
   expected_date?: string;
   payment_terms?: string;
@@ -114,6 +129,15 @@ export function cartToPurchaseOrderRequest(
         product_variant_id: item.variant?.id,
         quantity: item.quantity,
         unit_price: item.unit_cost,
+        // IVA cycle (F1): forward the manually-captured tax per line. The
+        // backend is the source of truth for the actual tax/cost split; we
+        // only pass the captured intent. `prices_include_tax` is included
+        // ONLY when the line overrides the header mode (mixed invoices).
+        tax_rate: item.tax_rate,
+        tax_type: item.tax_type ?? 'iva',
+        ...(item.prices_include_tax !== undefined
+          ? { prices_include_tax: item.prices_include_tax }
+          : {}),
         notes: item.notes,
         // Fase 3: UoM FKs. The cart stores the FKs chosen in the modal
         // (defaults to the product's persisted UoMs in ingredient mode).
@@ -196,6 +220,8 @@ export function cartToPurchaseOrderRequest(
     supplier_id: cartState.supplierId!,
     location_id: cartState.locationId!,
     status: cartState.status === 'draft' ? 'draft' : 'approved',
+    // IVA cycle (F1): dominant invoice mode captured in the POP header.
+    prices_include_tax: cartState.prices_include_tax,
     order_type: isIngredientOrder ? 'ingredient' : 'retail',
     order_date: cartState.orderDate.toISOString(),
     expected_date: cartState.expectedDate?.toISOString(),
