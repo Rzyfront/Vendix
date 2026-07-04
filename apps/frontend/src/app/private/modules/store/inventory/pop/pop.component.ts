@@ -240,7 +240,7 @@ export class PopComponent implements OnInit, OnDestroy {
    */
   readonly scannerOrderType = computed<'retail' | 'ingredient'>(() => {
     const state = this.popCartService.currentState;
-    const isIngredient = state.items.some((it: any) => {
+    const cartHasIngredient = state.items.some((it: any) => {
       const p: any = it.product;
       if (!p) return false;
       const sellable =
@@ -249,7 +249,14 @@ export class PopComponent implements OnInit, OnDestroy {
           : !!p.is_sellable;
       return !!p.is_ingredient && !sellable;
     });
-    return isIngredient ? 'ingredient' : 'retail';
+    // Punto 1 (a): el default sugerido combina el carrito con la capacidad de
+    // industria. Si la tienda soporta insumos (restaurante, etc.) el escaneo
+    // arranca en modo `ingredient` aunque el carrito esté vacío. Es solo la
+    // semilla: el usuario puede cambiar el perfil dentro del modal.
+    const industrySupportsIngredients = this.authFacade.storeSupportsIngredients();
+    return cartHasIngredient || industrySupportsIngredients
+      ? 'ingredient'
+      : 'retail';
   });
 
   supplierModalOpen = signal(false);
@@ -632,13 +639,24 @@ export class PopComponent implements OnInit, OnDestroy {
     editedItems: MatchedLineItem[];
     invoiceNumber?: string;
     invoiceDate?: string;
+    supplierId?: number | null;
   }): void {
     this.showInvoiceScanner.set(false);
 
-    if (data.matchResult.supplier_match.matched_id) {
-      this.popCartService.setSupplier(
-        data.matchResult.supplier_match.matched_id,
-      );
+    // Punto 2 (i): usa el proveedor ELEGIDO en el modal (preseleccionado desde
+    // el match pero editable). Si es null no tocamos el proveedor actual.
+    if (data.supplierId != null) {
+      this.popCartService.setSupplier(data.supplierId);
+    }
+
+    // Punto 2 (ii) — BUG: `invoiceDate` llegaba pero nunca se aplicaba. La
+    // cableamos a la fecha de la orden validando que parsee antes (evita
+    // Invalid Date con inputs vacíos o mal formados).
+    if (data.invoiceDate) {
+      const parsedDate = new Date(data.invoiceDate);
+      if (!Number.isNaN(parsedDate.getTime())) {
+        this.popCartService.setOrderDate(parsedDate);
+      }
     }
 
     let addedCount = 0;
