@@ -1872,4 +1872,109 @@ export class AccountingEventsListener {
       );
     }
   }
+
+  /**
+   * F5 (paso 17) — Liquidación de IVA al aprobar la declaración `vat`. El
+   * evento lo emite TaxDeclarationDraftService.approveDraft con el período AÚN
+   * abierto, así que el asiento (fechado en period_end) no choca con el guard
+   * FISCAL_PERIOD_CLOSED. Gated por el área `accounting` (resolveArea cae a
+   * 'accounting' para subflows desconocidos). Los fallos se loguean y NUNCA
+   * revierten la aprobación de la declaración.
+   */
+  @OnEvent('vat.declaration.approved')
+  async handleVatDeclarationApproved(event: {
+    declaration_id: number;
+    organization_id: number;
+    store_id?: number | null;
+    accounting_entity_id?: number;
+    generated_tax_amount: number;
+    deductible_tax_amount: number;
+    period_end: Date | string;
+    user_id?: number;
+  }) {
+    try {
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id ?? undefined,
+          'accounting',
+          event.organization_id,
+        ))
+      )
+        return;
+      await this.auto_entry_service.onVatSettlement({
+        declaration_id: event.declaration_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id ?? undefined,
+        accounting_entity_id: event.accounting_entity_id,
+        generated_tax_amount: Number(event.generated_tax_amount),
+        deductible_tax_amount: Number(event.deductible_tax_amount),
+        period_end:
+          event.period_end instanceof Date
+            ? event.period_end
+            : new Date(event.period_end),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for vat.declaration.approved #${event.declaration_id}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to create auto-entry for vat.declaration.approved #${event.declaration_id}: ${error?.message ?? error}`,
+        error?.stack,
+      );
+    }
+  }
+
+  /**
+   * F5 (paso 18) — Reversa de la liquidación de IVA al anular/rechazar una
+   * declaración `vat` ya liquidada. Postea el asiento espejo
+   * (source_type='vat_declaration_reversal'). Si la declaración nunca se
+   * liquidó, onVatSettlementReversed no hace nada. Si el período ya está
+   * cerrado, createAutoEntry rechaza el espejo (FISCAL_PERIOD_CLOSED) y se
+   * exige período correctivo. Los fallos se loguean y NUNCA revierten la
+   * anulación/rechazo de la declaración.
+   */
+  @OnEvent('vat.declaration.reversed')
+  async handleVatDeclarationReversed(event: {
+    declaration_id: number;
+    organization_id: number;
+    store_id?: number | null;
+    accounting_entity_id?: number;
+    generated_tax_amount: number;
+    deductible_tax_amount: number;
+    period_end: Date | string;
+    user_id?: number;
+  }) {
+    try {
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id ?? undefined,
+          'accounting',
+          event.organization_id,
+        ))
+      )
+        return;
+      await this.auto_entry_service.onVatSettlementReversed({
+        declaration_id: event.declaration_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id ?? undefined,
+        accounting_entity_id: event.accounting_entity_id,
+        generated_tax_amount: Number(event.generated_tax_amount),
+        deductible_tax_amount: Number(event.deductible_tax_amount),
+        period_end:
+          event.period_end instanceof Date
+            ? event.period_end
+            : new Date(event.period_end),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry (reversal) created for vat.declaration.reversed #${event.declaration_id}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to create auto-entry for vat.declaration.reversed #${event.declaration_id}: ${error?.message ?? error}`,
+        error?.stack,
+      );
+    }
+  }
 }

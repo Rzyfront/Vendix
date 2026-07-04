@@ -9,6 +9,7 @@ import {
   tax_declaration_type_enum,
   withholding_type_enum,
 } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { FiscalOperationsContext } from './fiscal-context-resolver.service';
@@ -70,7 +71,35 @@ export class TaxDeclarationDraftService {
     private readonly audit: FiscalAuditService,
     private readonly exogenousGenerator: ExogenousGeneratorService,
     private readonly fiscalRules: FiscalRulesService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * F5 — Payload compartido del ciclo de liquidación de IVA. Los montos van
+   * congelados (una declaración aprobada está LOCKED y no se puede recalcular,
+   * así que generado/descontable no cambian entre liquidar y reversar). El
+   * asiento se fecha en `period_end` tanto en la liquidación como en su espejo.
+   */
+  private buildVatSettlementEventPayload(draft: {
+    id: number;
+    organization_id: number;
+    store_id: number | null;
+    accounting_entity_id: number;
+    generated_tax_amount: Prisma.Decimal | number | null;
+    deductible_tax_amount: Prisma.Decimal | number | null;
+    period_end: Date;
+  }) {
+    return {
+      declaration_id: draft.id,
+      organization_id: draft.organization_id,
+      store_id: draft.store_id,
+      accounting_entity_id: draft.accounting_entity_id,
+      generated_tax_amount: Number(draft.generated_tax_amount || 0),
+      deductible_tax_amount: Number(draft.deductible_tax_amount || 0),
+      period_end: draft.period_end,
+      user_id: RequestContextService.getUserId(),
+    };
+  }
 
   async list(contexts: FiscalOperationsContext[], query: FiscalListQueryDto) {
     const page = query.page ?? 1;
@@ -262,6 +291,20 @@ export class TaxDeclarationDraftService {
       previous_status: draft.status,
       new_status: approved.status,
     });
+
+    // F5 (paso 17): al aprobar una declaración de IVA con el período AÚN
+    // abierto, disparamos la liquidación contable (netea generado vs
+    // descontable → neto a pagar/favor). El listener de contabilidad postea el
+    // asiento; los montos ya están congelados (aprobada = LOCKED, sin
+    // recálculo). El fallo contable NUNCA revierte la aprobación (el asiento es
+    // idempotente por source en createAutoEntry). El early-return de
+    // status==='approved' evita re-emitir en aprobaciones repetidas.
+    if (approved.declaration_type === 'vat') {
+      this.eventEmitter.emit(
+        'vat.declaration.approved',
+        this.buildVatSettlementEventPayload(approved),
+      );
+    }
     return approved;
   }
 
@@ -294,6 +337,18 @@ export class TaxDeclarationDraftService {
       new_status: voided.status,
       metadata: { reason },
     });
+
+    // F5 (paso 18): al anular una declaración de IVA que pudo haber sido
+    // liquidada (pasó por 'approved'), disparamos la reversa contable (asiento
+    // espejo). El listener SÓLO reversa si existe la liquidación original, así
+    // que anular una declaración nunca aprobada es inocuo. El fallo contable
+    // NUNCA revierte la anulación.
+    if (voided.declaration_type === 'vat') {
+      this.eventEmitter.emit(
+        'vat.declaration.reversed',
+        this.buildVatSettlementEventPayload(voided),
+      );
+    }
     return voided;
   }
 
@@ -352,6 +407,52 @@ export class TaxDeclarationDraftService {
       new_status: accepted.status,
     });
     return accepted;
+  }
+
+  /**
+   * Marca una declaración como RECHAZADA (p.ej. la DIAN rechazó la presentación
+   * ya realizada). Sólo aplica desde 'submitted' (ver
+   * DECLARATION_STATUS_TRANSITIONS). Una declaración que llega a 'rejected'
+   * necesariamente pasó por 'approved' → 'submitted', así que estuvo liquidada:
+   * F5 (paso 18) dispara la reversa contable del asiento de liquidación (el
+   * listener sólo reversa si la liquidación original existe). El fallo contable
+   * NUNCA revierte el rechazo.
+   */
+  async markRejected(
+    contexts: FiscalOperationsContext[],
+    id: number,
+    reason?: string,
+  ) {
+    const draft = await this.findOne(contexts, id);
+    if (draft.status === 'rejected') return draft;
+    this.assertStatusTransition(draft.status, 'rejected');
+
+    const rejected = await this.prisma.tax_declaration_drafts.update({
+      where: { id: draft.id },
+      data: {
+        status: 'rejected',
+        notes: reason ?? draft.notes,
+      },
+    });
+    await this.audit.logForResource(rejected, {
+      event_type: 'fiscal.declaration.rejected',
+      resource_type: 'tax_declaration_draft',
+      declaration_id: rejected.id,
+      obligation_id: rejected.obligation_id,
+      previous_status: draft.status,
+      new_status: rejected.status,
+      metadata: { reason },
+    });
+
+    // F5 (paso 18): la declaración rechazada estuvo liquidada → reversar el
+    // asiento de liquidación (espejo). Inocuo si nunca se llegó a liquidar.
+    if (rejected.declaration_type === 'vat') {
+      this.eventEmitter.emit(
+        'vat.declaration.reversed',
+        this.buildVatSettlementEventPayload(rejected),
+      );
+    }
+    return rejected;
   }
 
   private buildDraftData(
