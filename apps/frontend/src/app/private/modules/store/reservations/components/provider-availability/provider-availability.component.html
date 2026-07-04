@@ -1,134 +1,243 @@
 <div class="provider-availability">
-  <header class="pa-header">
-    <div class="pa-header__title">
-      <h1>Disponibilidad de Proveedores</h1>
-      <p>Capacidad y ocupación por proveedor en el rango seleccionado.</p>
-    </div>
-    <div class="pa-header__actions">
-      <a routerLink="/admin/reservations" class="pa-back-link">
-        <app-icon name="arrow-left" [size]="14"></app-icon>
-        Volver a Reservas
-      </a>
-    </div>
-  </header>
+  <!-- Page header (Vendix sticky-header pattern) -->
+  <app-sticky-header
+    title="Disponibilidad de Proveedores"
+    subtitle="Capacidad y ocupación por proveedor en el rango seleccionado."
+    iconName="calendar-clock"
+    [actions]="headerActions"
+    (actionClicked)="onHeaderAction($event)"
+  />
 
-  <!-- Filters -->
-  <div class="pa-filters">
-    <div class="pa-filters__group">
-      <label class="pa-filters__label">Desde</label>
-      <input type="date" class="pa-filters__input" [ngModel]="dateFrom()" (ngModelChange)="dateFrom.set($event)" />
-    </div>
-    <div class="pa-filters__group">
-      <label class="pa-filters__label">Hasta</label>
-      <input type="date" class="pa-filters__input" [ngModel]="dateTo()" (ngModelChange)="dateTo.set($event)" />
-    </div>
-    <div class="pa-filters__group">
-      <label class="pa-filters__label">Slot (min)</label>
-      <select class="pa-filters__input" [ngModel]="slotMinutes()" (ngModelChange)="slotMinutes.set(+$event)">
-        <option [ngValue]="30">30 min</option>
-        <option [ngValue]="60">60 min</option>
-      </select>
-    </div>
-    <div class="pa-filters__presets">
-      <button type="button" class="pa-preset" (click)="setDateRange(1)">Hoy</button>
-      <button type="button" class="pa-preset" (click)="setDateRange(7)">7 días</button>
-      <button type="button" class="pa-preset" (click)="setDateRange(14)">14 días</button>
-    </div>
-  </div>
-
-  <!-- Stats cards -->
+  <!-- Stats cards (design system: stats-container + app-stats) -->
   @if (totals(); as t) {
-    <div class="pa-stats">
-      <div class="pa-stat">
-        <div class="pa-stat__label">Ocupación promedio</div>
-        <div class="pa-stat__value" [class]="occupancyClass(t.average_occupancy_pct)">
-          {{ t.average_occupancy_pct }}%
-        </div>
-      </div>
-      <div class="pa-stat">
-        <div class="pa-stat__label">Ocupación global</div>
-        <div class="pa-stat__value" [class]="occupancyClass(t.occupancy_pct)">
-          {{ t.occupancy_pct }}%
-        </div>
-        <div class="pa-stat__sub">{{ t.booked_slots }} / {{ t.total_slots }} slots</div>
-      </div>
-      <div class="pa-stat">
-        <div class="pa-stat__label">Huecos libres hoy</div>
-        <div class="pa-stat__value occ-low">{{ freeSlotsToday() }}</div>
-      </div>
-      <div class="pa-stat">
-        <div class="pa-stat__label">Reservas próximas</div>
-        <div class="pa-stat__value">{{ upcomingBookings() }}</div>
-      </div>
-      @if (t.most_loaded_provider_name; as ml) {
-        <div class="pa-stat pa-stat--wide">
-          <div class="pa-stat__label">Proveedor más cargado</div>
-          <div class="pa-stat__value-sm">{{ ml }}</div>
-        </div>
-      }
+    <div class="stats-container pa-stats">
+      <app-stats
+        title="Ocupación promedio"
+        [value]="t.average_occupancy_pct + '%'"
+        iconName="trending-up"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+        smallText="Promedio del rango"
+      />
+
+      <app-stats
+        title="Ocupación global"
+        [value]="t.occupancy_pct + '%'"
+        [smallText]="t.booked_slots + ' / ' + t.total_slots + ' slots'"
+        iconName="activity"
+        iconBgColor="bg-indigo-100"
+        iconColor="text-indigo-600"
+      />
+
+      <app-stats
+        title="Huecos libres hoy"
+        [value]="freeSlotsToday()"
+        iconName="calendar-check"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+        smallText="Disponibles ahora"
+      />
+
+      <app-stats
+        title="Reservas próximas"
+        [value]="upcomingBookings()"
+        iconName="clock"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+        smallText="Desde hoy en adelante"
+      />
     </div>
   }
 
-  <!-- Grid -->
-  <div class="pa-grid-wrapper">
-    @if (loading() && !overview()) {
-      <div class="pa-loading">Cargando disponibilidad…</div>
-    } @else if (providers().length === 0) {
-      <div class="pa-empty">
-        <app-icon name="calendar-off" [size]="32"></app-icon>
-        <p>No hay proveedores activos con horarios configurados en este rango.</p>
-        <a routerLink="/admin/reservations/schedules" class="pa-empty__cta">
-          Configurar horarios
-        </a>
-      </div>
-    } @else {
-      <div class="pa-grid" [style.grid-template-columns]="'200px repeat(' + dates().length + ', minmax(80px, 1fr))'">
-        <!-- Header row -->
-        <div class="pa-grid__corner">Proveedor</div>
-        @for (date of dates(); track date) {
-          <div class="pa-grid__day-header">
-            <div class="pa-grid__day-dow">{{ date | date:'EEE':'':'es' }}</div>
-            <div class="pa-grid__day-num">{{ date | date:'d MMM':'':'es' }}</div>
-          </div>
-        }
+  <!-- Main card with header (title + search + acciones + filtros) + grid -->
+  <app-card [responsive]="true" [padding]="false" overflow="visible">
+    <!-- Header inline: title left, search + dropdowns right -->
+    <div class="pa-toolbar">
+      <h2 class="pa-toolbar__title">
+        Proveedores
+        <span class="pa-toolbar__count">({{ providers().length }})</span>
+      </h2>
 
-        <!-- Provider rows -->
-        @for (p of providers(); track p.provider_id) {
-          <div class="pa-grid__provider">
-            @if (p.avatar_url) {
-              <img [src]="p.avatar_url" alt="" class="pa-grid__avatar" />
-            } @else {
-              <div class="pa-grid__avatar-placeholder">
-                {{ (p.display_name || '?').charAt(0).toUpperCase() }}
-              </div>
-            }
-            <div class="pa-grid__provider-info">
-              <div class="pa-grid__provider-name">{{ p.display_name || 'Sin nombre' }}</div>
-              <div class="pa-grid__provider-meta">
-                <span [class]="occupancyClass(p.occupancy_pct)">{{ p.occupancy_pct }}%</span>
-                · {{ p.free_slots }} libres
-              </div>
+      <div class="pa-toolbar__controls">
+        <app-inputsearch
+          class="pa-toolbar__search"
+          size="sm"
+          placeholder="Buscar proveedor..."
+          [debounceTime]="300"
+          [ngModel]="providerSearch()"
+          (ngModelChange)="providerSearch.set($event)"
+        />
+        <app-options-dropdown
+          class="pa-toolbar__action"
+          [filters]="dropdownFilters"
+          [filterValues]="filterValues()"
+          [showActions]="false"
+          triggerLabel="Filtros"
+          triggerIcon="filter"
+          (filterChange)="onFilterChange($event)"
+        />
+      </div>
+    </div>
+
+    <!-- Loading state -->
+    @if (loading() && !overview()) {
+      <div class="pa-loading" role="status" aria-live="polite">
+        <span class="pa-spinner" aria-hidden="true"></span>
+        <span>Cargando disponibilidad…</span>
+      </div>
+    }
+
+    <!-- Empty state -->
+    @else if (providers().length === 0) {
+      <div class="pa-empty">
+        <div class="pa-empty__icon">
+          <app-icon name="calendar-off" [size]="40"></app-icon>
+        </div>
+        <div class="pa-empty__title">Sin datos en este rango</div>
+        <p class="pa-empty__desc">
+          No hay proveedores activos con horarios configurados entre
+          <strong>{{ dateFrom() }}</strong> y <strong>{{ dateTo() }}</strong>.
+        </p>
+        <app-button
+          variant="primary"
+          size="md"
+          iconName="settings"
+          label="Configurar horarios"
+          (onClick)="goToSchedules()"
+        />
+      </div>
+    }
+
+    <!-- Standard Vendix data table (one row per provider) -->
+    @else {
+      <div class="pa-table-wrapper">
+        <app-responsive-data-view
+          [data]="enrichedProviders()"
+          [columns]="tableColumns"
+          [actions]="tableActions"
+          [cardConfig]="cardConfig"
+          [loading]="loading()"
+        />
+      </div>
+    }
+  </app-card>
+
+  <!-- Day detail modal: always rendered, toggled via [isOpen]. Keeping it
+     in the DOM (instead of @if) prevents the ModalComponent's internal
+     state from being destroyed on close, so the second click reliably
+     re-opens it. -->
+  <app-modal
+    [isOpen]="!!selectedDetail()"
+    [title]="selectedDetail() ? selectedDetail()!.provider.display_name + ' — ' + formatDate(selectedDetail()!.date) : ''"
+    size="md"
+    (closed)="closeDetail()"
+  >
+    @if (selectedDetail(); as detail) {
+      @let day = getDayFor(detail.provider, detail.date);
+      <div class="pa-detail">
+        @if (day && day.total_slots > 0) {
+          <div class="pa-detail__summary">
+            <div class="pa-detail__stat">
+              <span class="pa-detail__stat-label">Reservados</span>
+              <span class="pa-detail__stat-value pa-detail__stat-value--busy">
+                {{ day.booked_slots }}
+              </span>
+            </div>
+            <div class="pa-detail__stat">
+              <span class="pa-detail__stat-label">Libres</span>
+              <span class="pa-detail__stat-value pa-detail__stat-value--free">
+                {{ day.free_slots }}
+              </span>
+            </div>
+            <div class="pa-detail__stat">
+              <span class="pa-detail__stat-label">Ocupación</span>
+              <span class="pa-detail__stat-value" [class]="occupancyClass(day.occupancy_pct)">
+                {{ day.occupancy_pct }}%
+              </span>
             </div>
           </div>
-          @for (day of p.days; track day.date) {
-            <div class="pa-grid__cell" [class]="occupancyClass(day.occupancy_pct)" [title]="
-              day.date +
-              ' — ' + day.booked_slots + ' reservados, ' + day.free_slots + ' libres (' + day.occupancy_pct + '%)'
-            ">
-              @if (day.total_slots === 0) {
-                <span class="pa-cell__dash">—</span>
-              } @else {
-                <div class="pa-cell__occ" [style.height.%]="day.occupancy_pct"></div>
-                <div class="pa-cell__nums">
-                  <span class="pa-cell__free">{{ day.free_slots }}</span>
-                  <span class="pa-cell__sep">/</span>
-                  <span class="pa-cell__total">{{ day.total_slots }}</span>
-                </div>
-              }
+
+          <div class="pa-detail__workwindow">
+            <app-icon name="clock" [size]="14"></app-icon>
+            <span>Horario de trabajo: <strong>7:00 AM – 10:00 PM</strong> ({{ slotMinutes() }} min por slot)</span>
+          </div>
+
+          <div class="pa-detail__legend">
+            <span class="pa-detail__legend-item">
+              <span class="pa-detail__legend-swatch pa-detail__legend-swatch--busy"></span>
+              <app-icon name="lock" [size]="12"></app-icon>
+              Ocupado
+            </span>
+            <span class="pa-detail__legend-item">
+              <span class="pa-detail__legend-swatch pa-detail__legend-swatch--free"></span>
+              <app-icon name="check" [size]="12"></app-icon>
+              Libre
+            </span>
+          </div>
+
+          @let grouped = getGroupedSlots();
+
+          @if (grouped.morning.length > 0) {
+            <div class="pa-detail__section">
+              <div class="pa-detail__section-title">
+                <app-icon name="sun" [size]="14"></app-icon>
+                <span>Mañana</span>
+                <span class="pa-detail__section-count">({{ grouped.morning.length }})</span>
+              </div>
+              <div class="pa-detail__slots">
+                @for (slot of grouped.morning; track slot.time) {
+                  <div
+                    class="pa-detail__slot"
+                    [class.pa-detail__slot--busy]="slot.status === 'busy'"
+                    [class.pa-detail__slot--free]="slot.status === 'free'"
+                  >
+                    <app-icon
+                      [name]="slot.status === 'busy' ? 'lock' : 'check'"
+                      [size]="13"
+                    />
+                    <span>{{ slot.time }}</span>
+                  </div>
+                }
+              </div>
             </div>
           }
+
+          @if (grouped.afternoon.length > 0) {
+            <div class="pa-detail__section">
+              <div class="pa-detail__section-title">
+                <app-icon name="moon" [size]="14"></app-icon>
+                <span>Tarde</span>
+                <span class="pa-detail__section-count">({{ grouped.afternoon.length }})</span>
+              </div>
+              <div class="pa-detail__slots">
+                @for (slot of grouped.afternoon; track slot.time) {
+                  <div
+                    class="pa-detail__slot"
+                    [class.pa-detail__slot--busy]="slot.status === 'busy'"
+                    [class.pa-detail__slot--free]="slot.status === 'free'"
+                  >
+                    <app-icon
+                      [name]="slot.status === 'busy' ? 'lock' : 'check'"
+                      [size]="13"
+                    />
+                    <span>{{ slot.time }}</span>
+                  </div>
+                }
+              </div>
+            </div>
+          }
+
+          <p class="pa-detail__note">
+            <app-icon name="info" [size]="14"></app-icon>
+            Vista aproximada basada en conteos. Para ver reservas exactas con cliente y servicio, abrí el detalle en el módulo de Reservas.
+          </p>
+        } @else {
+          <div class="pa-detail__empty">
+            <app-icon name="calendar-off" [size]="32"></app-icon>
+            <p>El proveedor no tiene horarios configurados para este día.</p>
+          </div>
         }
       </div>
     }
-  </div>
+  </app-modal>
 </div>

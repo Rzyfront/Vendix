@@ -368,7 +368,7 @@
           type="time"
           label="Hora inicio"
           [ngModel]="startTime()"
-          (ngModelChange)="startTime.set($event)"
+          (ngModelChange)="onStartTimeChange($event)"
           placeholder="HH:mm"
           [required]="true"
         ></app-input>
