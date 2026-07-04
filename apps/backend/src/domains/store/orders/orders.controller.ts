@@ -29,6 +29,7 @@ import { Public } from '../../auth/decorators/public.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException } from '@common/errors';
 import { OrderEtaService } from './services/order-eta.service';
 import { SettingsService } from '../settings/settings.service';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
@@ -78,6 +79,10 @@ export class OrdersController {
       const result = await this.ordersService.create(createOrderDto, req.user);
       return this.responseService.created(result, 'Orden creada exitosamente');
     } catch (error) {
+      // IVA cycle (F4): deja propagar las excepciones tipadas Vendix (p.ej.
+      // FISCAL_VAT_NOT_RESPONSIBLE_001, context 'sale') al AllExceptionsFilter
+      // para conservar 412 + error_code + details; el resto usa el legacy.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al crear la orden',
         error.response?.message || error.message,
@@ -281,6 +286,8 @@ export class OrdersController {
         'Items de la orden actualizados exitosamente',
       );
     } catch (error) {
+      // IVA cycle (F4): propaga la excepción tipada del gate al filtro.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar los items de la orden',
         error.response?.message || error.message,
