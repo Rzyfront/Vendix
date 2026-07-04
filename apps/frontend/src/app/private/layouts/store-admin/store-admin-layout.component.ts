@@ -30,6 +30,7 @@ import { MenuFilterService } from '../../../core/services/menu-filter.service';
 import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { WeeklyReportBannerComponent } from '../../modules/store/weekly-report/components/weekly-report-banner/weekly-report-banner.component';
 import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/components/weekly-report-stories/weekly-report-stories.component';
 import { WeeklyReportSnapshot } from '../../modules/store/weekly-report/interfaces/weekly-report.interface';
@@ -52,6 +53,7 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     SubscriptionBannerComponent,
     FiscalObligationBannerComponent,
     PaywallOutletComponent,
+    FiscalGateOutletComponent,
     WeeklyReportBannerComponent,
     WeeklyReportStoriesComponent,
   ],
@@ -198,6 +200,9 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
 
     <!-- Subscription paywall (driven by interceptor + access service) -->
     <app-paywall-outlet />
+
+    <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
+    <app-fiscal-gate-outlet />
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })

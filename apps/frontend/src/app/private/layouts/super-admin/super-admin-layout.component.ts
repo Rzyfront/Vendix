@@ -15,6 +15,7 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 // S1.2 — SubscriptionBannerComponent removed from SUPER_ADMIN. The banner is
 // store-scoped only and never makes sense in the platform-level layout.
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { SupportService } from '../../modules/super-admin/support/services/support.service';
 import { timer } from 'rxjs';
@@ -29,6 +30,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
     SidebarComponent,
     HeaderComponent,
     PaywallOutletComponent,
+    FiscalGateOutletComponent,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -78,6 +80,9 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
     <!-- Subscription paywall (driven by interceptor + access service) -->
     <app-paywall-outlet />
+
+    <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
+    <app-fiscal-gate-outlet />
   `,
   styleUrls: ['./super-admin-layout.component.scss'],
 })

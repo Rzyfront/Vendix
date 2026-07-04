@@ -110,6 +110,14 @@ export class AuthFacade {
   readonly pendingFiscalObligations$ = this.store.select(
     AuthSelectors.selectPendingObligations,
   );
+  // F4 — Responsabilidad de IVA (gate "no responsable de IVA").
+  readonly fiscalData$ = this.store.select(AuthSelectors.selectFiscalData);
+  readonly isVatResponsible$ = this.store.select(
+    AuthSelectors.selectIsVatResponsible,
+  );
+  readonly isVatBlocked$ = this.store.select(
+    AuthSelectors.selectIsExplicitlyNotVatResponsible,
+  );
 
   // Panel UI observables
   readonly panelUiConfig$ = this.store.select(
@@ -263,6 +271,11 @@ export class AuthFacade {
   readonly fiscalStatus = toSignal(this.fiscalStatus$, { initialValue: null as any });
   readonly activeFiscalAreas = toSignal(this.activeFiscalAreas$, { initialValue: [] as FiscalArea[] });
   readonly pendingFiscalObligations = toSignal(this.pendingFiscalObligations$, { initialValue: [] as FiscalArea[] });
+  // F4 — Responsabilidad de IVA. `isVatBlocked` = comercio explícitamente NO
+  // responsable; indeterminado ⇒ initialValue `false` (no bloquea).
+  readonly fiscalData = toSignal(this.fiscalData$, { initialValue: null as any });
+  readonly isVatResponsible = toSignal(this.isVatResponsible$, { initialValue: true });
+  readonly isVatBlocked = toSignal(this.isVatBlocked$, { initialValue: false });
   readonly panelUiConfig = toSignal(this.panelUiConfig$, { initialValue: null as any });
   readonly selectedAppType = toSignal(this.selectedAppType$, { initialValue: null as any });
   readonly currentAppPanelUi = toSignal(this.currentAppPanelUi$, { initialValue: null as any });

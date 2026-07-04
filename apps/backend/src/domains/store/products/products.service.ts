@@ -50,6 +50,8 @@ import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-sto
 import type { StoreSettings } from '../settings/interfaces/store-settings.interface';
 import { PromotionEngineService } from '../promotions/promotion-engine/promotion-engine.service';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
+import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
+import { SettingsService } from '../settings/settings.service';
 import type {
   ActiveProductPromotion,
   ActivePromotionProductInput,
@@ -90,7 +92,40 @@ export class ProductsService {
     private readonly s3PathHelper: S3PathHelper,
     private readonly ai_engine: AIEngineService,
     private readonly promotionEngine: PromotionEngineService,
+    private readonly settingsService: SettingsService,
   ) {}
+
+  /**
+   * F4 — Gate "no responsable de IVA" (escritura de producto).
+   *
+   * Un comercio que NO es responsable de IVA ante la DIAN no puede asignar
+   * una categoría de impuesto tipo `iva` a un producto. INC/ICA/retenciones
+   * siguen permitidos; las lecturas nunca se bloquean.
+   *
+   * Solo dispara el rechazo cuando el payload realmente incluye IVA: si no
+   * hay categorías IVA en la selección, no consulta fiscal_data (barato en el
+   * camino feliz). Indeterminado ⇒ responsable (no bloquea).
+   *
+   * @param taxCategories categorías ya validadas (existencia/scope) que se van
+   *        a asignar, con su `tax_type`.
+   */
+  private async assertProductVatAssignmentAllowed(
+    taxCategories: Array<{ tax_type: string | null }>,
+  ): Promise<void> {
+    const hasIva = taxCategories.some(
+      (tc) => (tc.tax_type ?? '').toLowerCase() === 'iva',
+    );
+    if (!hasIva) return;
+
+    let fiscalData: any = null;
+    try {
+      fiscalData = await this.settingsService.getFiscalData();
+    } catch {
+      // Contexto/fiscal_data no resoluble ⇒ indeterminado ⇒ responsable.
+      return;
+    }
+    assertCanChargeVat(fiscalData, 'product');
+  }
 
   /**
    * Deriva products.purchase_to_stock_factor a partir del catálogo global
@@ -694,6 +729,9 @@ export class ProductsService {
               );
               throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_001);
             }
+
+            // F4 — comercio no responsable de IVA no puede asignar IVA.
+            await this.assertProductVatAssignmentAllowed(tax_categories);
 
             await prisma.product_tax_assignments.createMany({
               data: tax_categories.map((tax_category) => ({
@@ -2035,6 +2073,14 @@ export class ProductsService {
             });
 
             if (tax_category_ids.length > 0) {
+              // F4 — resolver tax_type de las categorías para bloquear IVA en
+              // comercios no responsables antes de escribir las asignaciones.
+              const tax_categories = await prisma.tax_categories.findMany({
+                where: { id: { in: tax_category_ids } },
+                select: { id: true, tax_type: true },
+              });
+              await this.assertProductVatAssignmentAllowed(tax_categories);
+
               await prisma.product_tax_assignments.createMany({
                 data: tax_category_ids.map((tax_category_id) => ({
                   product_id: id,
