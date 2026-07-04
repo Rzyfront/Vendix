@@ -35,6 +35,7 @@ import {
   MarkFiscalSubmittedDto,
   OverrideFiscalCloseCheckDto,
   ReopenFiscalCloseDto,
+  VoidTaxDeclarationDto,
 } from './dto/fiscal-operations.dto';
 import {
   FISCAL_RESPONSIBILITIES_CATALOG,
@@ -208,6 +209,30 @@ export class StoreFiscalController {
     const context = await this.contextResolver.resolveForStore();
     return this.response.updated(
       await this.declarations.markSubmitted([context], id, dto),
+    );
+  }
+
+  @Patch('declarations/:id/void')
+  @Permissions('store:fiscal:declarations:write')
+  async voidDeclaration(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: VoidTaxDeclarationDto,
+  ) {
+    const context = await this.contextResolver.resolveForStore();
+    return this.response.updated(
+      await this.declarations.voidDraft([context], id, dto.reason),
+    );
+  }
+
+  @Patch('declarations/:id/reject')
+  @Permissions('store:fiscal:declarations:write')
+  async rejectDeclaration(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: VoidTaxDeclarationDto,
+  ) {
+    const context = await this.contextResolver.resolveForStore();
+    return this.response.updated(
+      await this.declarations.markRejected([context], id, dto.reason),
     );
   }
 

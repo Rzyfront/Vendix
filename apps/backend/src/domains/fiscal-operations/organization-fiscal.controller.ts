@@ -43,6 +43,7 @@ import {
   MarkFiscalSubmittedDto,
   OverrideFiscalCloseCheckDto,
   ReopenFiscalCloseDto,
+  VoidTaxDeclarationDto,
 } from './dto/fiscal-operations.dto';
 import {
   FISCAL_RESPONSIBILITIES_CATALOG,
@@ -238,6 +239,30 @@ export class OrganizationFiscalController {
     const contexts = await this.readContexts();
     return this.response.updated(
       await this.declarations.markSubmitted(contexts, id, dto),
+    );
+  }
+
+  @Patch('declarations/:id/void')
+  @Permissions('organization:fiscal:declarations:write')
+  async voidDeclaration(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: VoidTaxDeclarationDto,
+  ) {
+    const contexts = await this.readContexts();
+    return this.response.updated(
+      await this.declarations.voidDraft(contexts, id, dto.reason),
+    );
+  }
+
+  @Patch('declarations/:id/reject')
+  @Permissions('organization:fiscal:declarations:write')
+  async rejectDeclaration(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: VoidTaxDeclarationDto,
+  ) {
+    const contexts = await this.readContexts();
+    return this.response.updated(
+      await this.declarations.markRejected(contexts, id, dto.reason),
     );
   }
 
