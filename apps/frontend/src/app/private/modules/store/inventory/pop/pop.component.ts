@@ -652,6 +652,16 @@ export class PopComponent implements OnInit, OnDestroy {
       const purchaseUomId = item.purchase_uom_id ?? null;
       const stockUomId = item.stock_uom_id ?? null;
 
+      // IVA cycle (F3 wiring): el escáner emite `tax_rate` como FRACCIÓN (0.19)
+      // y ya aplastó `unit_price` a neto (`normalizeOcrResponse`). Convertimos a
+      // PORCENTAJE (×100) para el carrito y forzamos modo adicional
+      // (`prices_include_tax=false`) para que el IVA se sume sobre el neto y el
+      // costeo lo trate según el estado fiscal. Sin tasa detectada ⇒ undefined
+      // (el carrito hereda header + default). Tasa 0 (exento) se respeta.
+      const scannedRate =
+        item.tax_rate != null ? Number(item.tax_rate) * 100 : undefined;
+      const scannedIncludeMode = scannedRate != null ? false : undefined;
+
       if (candidate) {
         this.popCartService
           .addToCart({
@@ -668,6 +678,9 @@ export class PopComponent implements OnInit, OnDestroy {
             unit_cost: item.unit_price,
             purchase_uom_id: purchaseUomId,
             stock_uom_id: stockUomId,
+            tax_rate: scannedRate,
+            tax_type: 'iva',
+            prices_include_tax: scannedIncludeMode,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       } else {
@@ -687,12 +700,20 @@ export class PopComponent implements OnInit, OnDestroy {
             is_prebulk: true,
             purchase_uom_id: purchaseUomId,
             stock_uom_id: stockUomId,
+            tax_rate: scannedRate,
+            tax_type: 'iva',
+            prices_include_tax: scannedIncludeMode,
             prebulk_data: {
               name: item.description,
               code: item.sku_if_visible || '',
               description: item.description,
               purchase_uom_id: purchaseUomId,
               stock_uom_id: stockUomId,
+              // IVA cycle (F3): categoría de impuesto sugerida por el escáner
+              // (null si el comercio no es responsable de IVA — gate en origen).
+              tax_category_ids: item.suggested_tax_category_id
+                ? [item.suggested_tax_category_id]
+                : undefined,
             },
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();

@@ -3,6 +3,8 @@ import { AIEngineService } from '../../../../ai-engine/ai-engine.service';
 import { AIMessage } from '../../../../ai-engine/interfaces/ai-provider.interface';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { PurchaseOrdersService } from './purchase-orders.service';
+import { SettingsService } from '../../settings/settings.service';
+import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import {
@@ -24,10 +26,18 @@ import sharp = require('sharp');
 export class InvoiceScannerService {
   private readonly logger = new Logger(InvoiceScannerService.name);
 
+  /**
+   * F3 IVA lifecycle — RUT casilla 53 code for "Responsable de IVA" (O-48).
+   * Mirrors PurchaseOrdersService.VAT_RESPONSIBLE_CODE so the tax-category
+   * suggestion uses the same canonical fiscal source.
+   */
+  private static readonly VAT_RESPONSIBLE_CODE = 'O-48';
+
   constructor(
     private readonly aiEngine: AIEngineService,
     private readonly prisma: StorePrismaService,
     private readonly purchaseOrdersService: PurchaseOrdersService,
+    private readonly settingsService: SettingsService,
     private readonly responseService: ResponseService,
   ) {}
 
@@ -109,6 +119,15 @@ export class InvoiceScannerService {
     const warnings: string[] = [];
     let supplierMatch: SupplierMatch;
 
+    // F3 IVA lifecycle: resolve the commerce's VAT responsibility ONCE. A
+    // non-responsible tenant (O-49) capitalizes IVA into cost and must not be
+    // handed a deductible tax_category, so we skip loading rates entirely and
+    // every `suggested_tax_category_id` stays null.
+    const vatResponsible = await this.isVatResponsible();
+    const taxCategoryRates = vatResponsible
+      ? await this.loadTaxCategoryRates()
+      : [];
+
     // Supplier match — never throw
     try {
       supplierMatch = await this.matchSupplier(scanResult);
@@ -166,6 +185,12 @@ export class InvoiceScannerService {
           match_status: matchStatus,
           selected_product_id: selectedProductId,
           candidates: candidates.slice(0, 5),
+          // F3: sugerencia de impuesto por tasa + neto ya aplanado.
+          suggested_tax_category_id: this.suggestTaxCategoryId(
+            item.tax_rate,
+            taxCategoryRates,
+          ),
+          unit_cost_net: Number(item.unit_price) || 0,
         });
       } catch (err) {
         this.logger.warn(
@@ -177,6 +202,12 @@ export class InvoiceScannerService {
           match_status: 'new',
           selected_product_id: undefined,
           candidates: [],
+          // F3: mantiene el contrato aun cuando el match de producto falla.
+          suggested_tax_category_id: this.suggestTaxCategoryId(
+            item.tax_rate,
+            taxCategoryRates,
+          ),
+          unit_cost_net: Number(item.unit_price) || 0,
         });
       }
     }
@@ -540,6 +571,11 @@ export class InvoiceScannerService {
       );
     }
 
+    // F3 IVA lifecycle: invoice-global include flag. Canonical default is
+    // `false` (tax added on top) when the scanner does not emit it, mirroring
+    // `effective_include = ... ?? false` in deriveLineTax / recalculateItemTotals.
+    const pricesIncludeTax = parsed.prices_include_tax === true;
+
     return {
       supplier: {
         name: parsed.supplier?.name || 'Desconocido',
@@ -550,17 +586,152 @@ export class InvoiceScannerService {
       invoice_number: String(parsed.invoice_number || ''),
       invoice_date: String(parsed.invoice_date || ''),
       payment_terms: parsed.payment_terms || undefined,
-      line_items: (parsed.line_items || []).map((item: any) => ({
-        description: String(item.description || ''),
-        quantity: Number(item.quantity) || 0,
-        unit_price: Number(item.unit_price) || 0,
-        total: Number(item.total) || 0,
-        sku_if_visible: item.sku_if_visible || undefined,
-      })),
+      prices_include_tax: pricesIncludeTax,
+      line_items: (parsed.line_items || []).map((item: any) =>
+        this.normalizeLineItem(item, pricesIncludeTax),
+      ),
       subtotal: Number(parsed.subtotal) || 0,
       tax_amount: Number(parsed.tax_amount) || 0,
       total: Number(parsed.total) || 0,
       confidence: Number(parsed.confidence) || 0,
     };
+  }
+
+  /**
+   * F3 IVA lifecycle: normalize a single extracted line, flattening its
+   * printed unit price to NET when the invoice is IVA-inclusive.
+   *
+   * Canonical formula (byte-for-byte mirror of PurchaseOrdersService.
+   * deriveLineTax): the scanner emits `tax_rate` as a FRACTION (0, 0.05,
+   * 0.19) — NOT a percentage — so `r = tax_rate` directly (no /100 here).
+   *   include + r>0 → unit_price_net = gross / (1 + r)
+   *   otherwise     → unit_price_net = gross (net === printed)
+   *
+   * `unit_price` is set to the NET; the original printed value is preserved
+   * in `unit_price_gross` (equal to net in the exclusive case). This lets
+   * `unit_cost` persist net downstream and the UI show "bruto → neto".
+   */
+  private normalizeLineItem(
+    item: any,
+    pricesIncludeTax: boolean,
+  ): InvoiceScanResult['line_items'][number] {
+    const grossUnit = Number(item.unit_price) || 0;
+    // El scanner emite tax_rate como fracción (0.19), no como porcentaje.
+    const rawRate = Number(item.tax_rate);
+    const taxRate =
+      Number.isFinite(rawRate) && rawRate >= 0 ? rawRate : null;
+    const r = taxRate ?? 0;
+    const unitNet =
+      pricesIncludeTax && r > 0 ? grossUnit / (1 + r) : grossUnit;
+
+    const rawPackSize = Number(item.pack_size);
+
+    return {
+      description: String(item.description || ''),
+      quantity: Number(item.quantity) || 0,
+      // unit_price SIEMPRE queda en neto (aplastado si la factura era inclusiva).
+      unit_price: unitNet,
+      unit_price_gross: grossUnit,
+      tax_rate: taxRate,
+      total: Number(item.total) || 0,
+      sku_if_visible: item.sku_if_visible || undefined,
+      // Fase 4: preserva las pistas de UoM emitidas por el perfil ingredient
+      // (antes se descartaban en el map original).
+      presentation: item.presentation ?? undefined,
+      pack_size:
+        Number.isFinite(rawPackSize) && rawPackSize > 0
+          ? rawPackSize
+          : undefined,
+      uom_hint: item.uom_hint ?? undefined,
+    };
+  }
+
+  /**
+   * F3 IVA lifecycle — read-only check of the commerce's VAT responsibility.
+   * Replicated (not shared) from PurchaseOrdersService.isVatResponsible to
+   * avoid modifying that service: same canonical source
+   * (SettingsService.getFiscalData().tax_responsibilities, RUT casilla 53),
+   * same anti-regression default (no declared responsibilities /
+   * indeterminate ⇒ RESPONSIBLE O-48). Never throws.
+   */
+  private async isVatResponsible(): Promise<boolean> {
+    try {
+      const fiscalData = await this.settingsService.getFiscalData();
+      const responsibilities = Array.isArray(
+        (fiscalData as any)?.tax_responsibilities,
+      )
+        ? ((fiscalData as any).tax_responsibilities as unknown[]).filter(
+            (code): code is string => typeof code === 'string',
+          )
+        : [];
+      if (responsibilities.length === 0) return true;
+      return responsibilities.includes(
+        InvoiceScannerService.VAT_RESPONSIBLE_CODE,
+      );
+    } catch (error: any) {
+      this.logger.warn(
+        `isVatResponsible: could not resolve fiscal data (${error?.message}); defaulting to VAT responsible (O-48).`,
+      );
+      return true;
+    }
+  }
+
+  /**
+   * F3 IVA lifecycle: load the commerce's tax categories with their rates so
+   * `matchProducts` can suggest one by rate. tax_categories is store-scoped,
+   * but ORGANIZATION-level categories live with store_id = NULL; we mirror the
+   * PurchaseOrdersService.create pattern (withoutScope + OR store/null) so the
+   * suggestion sees both. Rates are read as fractions (Decimal(6,5)) to match
+   * the scanner's fractional tax_rate. Never throws (returns [] on failure).
+   */
+  private async loadTaxCategoryRates(): Promise<
+    Array<{ id: number; rates: number[] }>
+  > {
+    try {
+      const storeId = RequestContextService.getStoreId();
+      if (!storeId) return [];
+      const categories = await this.prisma
+        .withoutScope()
+        .tax_categories.findMany({
+          where: { OR: [{ store_id: storeId }, { store_id: null }] },
+          select: { id: true, tax_rates: { select: { rate: true } } },
+        });
+      return categories.map((c) => ({
+        id: c.id,
+        rates: c.tax_rates.map((rate) => Number(rate.rate)),
+      }));
+    } catch (err: any) {
+      this.logger.warn(
+        `Could not load tax categories for suggestion: ${err?.message}`,
+      );
+      return [];
+    }
+  }
+
+  /**
+   * F3 IVA lifecycle: resolve the closest tax_category whose rate matches the
+   * line's fractional `tax_rate`. Returns null when there is no rate (exempt /
+   * 0 / missing) or no catalog match. Tolerance covers Decimal(6,5) noise
+   * (0.19 vs 0.19000). Caller already suppressed the catalog for O-49 tenants.
+   */
+  private suggestTaxCategoryId(
+    taxRate: number | null | undefined,
+    taxCategoryRates: Array<{ id: number; rates: number[] }>,
+  ): number | null {
+    const r = Number(taxRate);
+    if (!Number.isFinite(r) || r <= 0 || taxCategoryRates.length === 0) {
+      return null;
+    }
+    const TOLERANCE = 0.005; // fracción
+    let best: { id: number; delta: number } | null = null;
+    for (const cat of taxCategoryRates) {
+      for (const rate of cat.rates) {
+        const delta = Math.abs(rate - r);
+        if (delta <= TOLERANCE && (best === null || delta < best.delta)) {
+          best = { id: cat.id, delta };
+        }
+      }
+    }
+    return best?.id ?? null;
   }
 }

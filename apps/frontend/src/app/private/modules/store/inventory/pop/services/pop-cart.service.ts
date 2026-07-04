@@ -458,11 +458,11 @@ export class PopCartService {
         quantity: request.quantity,
         unit_cost: request.unit_cost,
         discount: 0,
-        // IVA cycle (F1): seed the standard IVA rate + type. `prices_include_tax`
-        // stays undefined so the line inherits the header mode.
-        tax_rate: DEFAULT_PURCHASE_TAX_RATE,
-        tax_type: 'iva',
-        prices_include_tax: undefined,
+        // IVA cycle (F1/F3): defaults sembrados salvo override del request
+        // (escáner de facturas). `prices_include_tax` undefined ⇒ hereda header.
+        tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
+        tax_type: request.tax_type ?? 'iva',
+        prices_include_tax: request.prices_include_tax,
         subtotal: 0,
         tax_amount: 0,
         total: 0,
@@ -520,10 +520,10 @@ export class PopCartService {
         quantity: request.quantity,
         unit_cost: request.unit_cost,
         discount: 0,
-        // IVA cycle (F1): seed the standard IVA rate + type; inherit header mode.
-        tax_rate: DEFAULT_PURCHASE_TAX_RATE,
-        tax_type: 'iva',
-        prices_include_tax: undefined,
+        // IVA cycle (F1/F3): defaults salvo override del request (escáner).
+        tax_rate: request.tax_rate ?? DEFAULT_PURCHASE_TAX_RATE,
+        tax_type: request.tax_type ?? 'iva',
+        prices_include_tax: request.prices_include_tax,
         subtotal: 0,
         tax_amount: 0,
         total: 0,

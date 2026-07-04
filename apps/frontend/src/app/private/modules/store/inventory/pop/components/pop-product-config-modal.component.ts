@@ -672,6 +672,21 @@ export class PopProductConfigModalComponent {
    */
   readonly mode = input<'create' | 'configure'>('configure');
 
+  /**
+   * F3 IVA lifecycle (factura escaneada): costo unitario NETO sugerido para
+   * pre-llenar el campo de costo en create mode. El scanner ya aplastó el
+   * bruto a neto (`MatchedLineItem.unit_cost_net`); aquí solo se muestra.
+   * `null` (default) => se usa el flujo normal (form / product cost).
+   */
+  readonly suggestedUnitCostNet = input<number | null>(null);
+  /**
+   * F3 IVA lifecycle (factura escaneada): tax_category sugerida por match de
+   * tasa (`MatchedLineItem.suggested_tax_category_id`). Cuando está presente
+   * se propaga a `prebulkData.tax_category_ids` en create mode para que el
+   * producto/orden quede con el impuesto correcto. `null` => sin sugerencia.
+   */
+  readonly suggestedTaxCategoryId = input<number | null>(null);
+
   readonly confirmed = output<PopProductModalResult>();
   readonly closed = output<void>();
 
@@ -702,8 +717,16 @@ export class PopProductConfigModalComponent {
   readonly isSellable = signal(true);
   /** Live create quantity (read from the form, kept in sync). */
   readonly createQuantity = signal<number>(1);
-  /** Initial unit cost shown in `pop-uom-capture` (configure mode). */
+  /**
+   * Initial unit cost shown in `pop-uom-capture` (configure mode).
+   * F3 IVA lifecycle: cuando viene de factura escaneada prefiere el NETO
+   * sugerido (`suggestedUnitCostNet`) sobre el costo del producto.
+   */
   readonly initialUnitCost = computed(() => {
+    const suggestedNet = this.suggestedUnitCostNet();
+    if (suggestedNet != null && Number.isFinite(suggestedNet) && suggestedNet > 0) {
+      return suggestedNet;
+    }
     const p: any = this.product();
     return Number(p?.cost || p?.cost_price || 0);
   });
@@ -1118,6 +1141,15 @@ export class PopProductConfigModalComponent {
       const v = this.identityForm.value;
       const ingredient = this.isIngredient();
 
+      // F3 IVA lifecycle: propaga el impuesto sugerido por el scanner (por
+      // match de tasa) al producto nuevo. Solo cuando hay sugerencia (>0);
+      // en el flujo manual queda undefined y el backend no asigna impuestos.
+      const suggestedTaxId = this.suggestedTaxCategoryId();
+      const taxCategoryIds =
+        suggestedTaxId != null && suggestedTaxId > 0
+          ? [suggestedTaxId]
+          : undefined;
+
       const prebulkData: PreBulkData = {
         name: v.name,
         code: v.code,
@@ -1128,6 +1160,8 @@ export class PopProductConfigModalComponent {
         // UoM FKs only travel for ingredients; retail stays null.
         purchase_uom_id: ingredient ? this.purchaseUomId() : null,
         stock_uom_id: ingredient ? this.stockUomId() : null,
+        // F3: impuesto sugerido (neto ya aplastado en unitCost del form).
+        tax_category_ids: taxCategoryIds,
       };
 
       this.confirmed.emit({
@@ -1409,12 +1443,19 @@ export class PopProductConfigModalComponent {
     this.activeTab.set('general');
 
     // Reset create-mode state on every open so each create starts clean.
+    // F3 IVA lifecycle: cuando viene de una factura escaneada, pre-llena el
+    // costo con el NETO sugerido (ya aplastado por el scanner). Fuera de ese
+    // flujo `suggestedUnitCostNet()` es null y el costo arranca en 0.
+    const suggestedNet = this.suggestedUnitCostNet();
     this.identityForm.reset({
       name: '',
       code: '',
       description: '',
       quantity: 1,
-      unitCost: 0,
+      unitCost:
+        suggestedNet != null && Number.isFinite(suggestedNet) && suggestedNet > 0
+          ? suggestedNet
+          : 0,
       basePrice: 0,
       notes: '',
     });

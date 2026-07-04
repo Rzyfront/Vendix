@@ -280,6 +280,17 @@ export interface AddToPopCartRequest {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * IVA cycle (F3 wiring): override de IVA por línea proveniente del escáner
+   * de facturas. `tax_rate` es PORCENTAJE (19), no fracción — el escáner emite
+   * fracción y `pop.component.ts` la convierte ×100 antes de llegar aquí.
+   * Cuando el escáner detectó tasa, la línea entra en modo adicional
+   * (`prices_include_tax=false`) porque `normalizeOcrResponse` ya aplastó el
+   * `unit_cost` a neto. Ausentes ⇒ el carrito usa sus defaults (hereda header).
+   */
+  tax_rate?: number;
+  tax_type?: string;
+  prices_include_tax?: boolean;
 }
 
 /**
