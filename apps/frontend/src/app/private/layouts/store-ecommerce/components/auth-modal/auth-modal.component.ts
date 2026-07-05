@@ -408,6 +408,9 @@ export class AuthModalComponent {
 
         if (open) {
           this.errorMessage.set(null);
+          // Clear stale error$ state from a previous login/register attempt
+          // so the modal doesn't re-fire the previous toast on open.
+          this.authFacade.setAuthError(null);
           if (!isLoginMode) {
             this.loadPendingDocuments();
           }
