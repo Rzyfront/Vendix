@@ -98,13 +98,6 @@
           No hay proveedores activos con horarios configurados entre
           <strong>{{ dateFrom() }}</strong> y <strong>{{ dateTo() }}</strong>.
         </p>
-        <app-button
-          variant="primary"
-          size="md"
-          iconName="settings"
-          label="Configurar horarios"
-          (onClick)="goToSchedules()"
-        />
       </div>
     }
 
@@ -135,108 +128,101 @@
     @if (selectedDetail(); as detail) {
       @let day = getDayFor(detail.provider, detail.date);
       <div class="pa-detail">
-        @if (day && day.total_slots > 0) {
-          <div class="pa-detail__summary">
-            <div class="pa-detail__stat">
-              <span class="pa-detail__stat-label">Reservados</span>
-              <span class="pa-detail__stat-value pa-detail__stat-value--busy">
-                {{ day.booked_slots }}
-              </span>
-            </div>
-            <div class="pa-detail__stat">
-              <span class="pa-detail__stat-label">Libres</span>
-              <span class="pa-detail__stat-value pa-detail__stat-value--free">
-                {{ day.free_slots }}
-              </span>
-            </div>
-            <div class="pa-detail__stat">
-              <span class="pa-detail__stat-label">Ocupación</span>
-              <span class="pa-detail__stat-value" [class]="occupancyClass(day.occupancy_pct)">
-                {{ day.occupancy_pct }}%
-              </span>
-            </div>
-          </div>
-
-          <div class="pa-detail__workwindow">
-            <app-icon name="clock" [size]="14"></app-icon>
-            <span>Horario de trabajo: <strong>7:00 AM – 10:00 PM</strong> ({{ slotMinutes() }} min por slot)</span>
-          </div>
-
-          <div class="pa-detail__legend">
-            <span class="pa-detail__legend-item">
-              <span class="pa-detail__legend-swatch pa-detail__legend-swatch--busy"></span>
-              <app-icon name="lock" [size]="12"></app-icon>
-              Ocupado
-            </span>
-            <span class="pa-detail__legend-item">
-              <span class="pa-detail__legend-swatch pa-detail__legend-swatch--free"></span>
-              <app-icon name="check" [size]="12"></app-icon>
-              Libre
+        <div class="pa-detail__summary">
+          <div class="pa-detail__stat">
+            <span class="pa-detail__stat-label">Reservados</span>
+            <span class="pa-detail__stat-value pa-detail__stat-value--busy">
+              {{ day?.booked_slots ?? 0 }}
             </span>
           </div>
+          <div class="pa-detail__stat">
+            <span class="pa-detail__stat-label">Libres</span>
+            <span class="pa-detail__stat-value pa-detail__stat-value--free">
+              {{ day?.free_slots ?? slotMinutes() > 0 ? 20 : 0 }}
+            </span>
+          </div>
+          <div class="pa-detail__stat">
+            <span class="pa-detail__stat-label">Ocupación</span>
+            <span class="pa-detail__stat-value" [class]="occupancyClass(day?.occupancy_pct ?? 0)">
+              {{ day?.occupancy_pct ?? 0 }}%
+            </span>
+          </div>
+        </div>
 
-          @let grouped = getGroupedSlots();
+        <div class="pa-detail__workwindow">
+          <app-icon name="clock" [size]="14"></app-icon>
+          <span>Horario de trabajo: <strong>7:00 AM – 10:00 PM</strong> ({{ slotMinutes() }} min por slot)</span>
+        </div>
 
-          @if (grouped.morning.length > 0) {
-            <div class="pa-detail__section">
-              <div class="pa-detail__section-title">
-                <app-icon name="sun" [size]="14"></app-icon>
-                <span>Mañana</span>
-                <span class="pa-detail__section-count">({{ grouped.morning.length }})</span>
-              </div>
-              <div class="pa-detail__slots">
-                @for (slot of grouped.morning; track slot.time) {
-                  <div
-                    class="pa-detail__slot"
-                    [class.pa-detail__slot--busy]="slot.status === 'busy'"
-                    [class.pa-detail__slot--free]="slot.status === 'free'"
-                  >
-                    <app-icon
-                      [name]="slot.status === 'busy' ? 'lock' : 'check'"
-                      [size]="13"
-                    />
-                    <span>{{ slot.time }}</span>
-                  </div>
-                }
-              </div>
+        <div class="pa-detail__legend">
+          <span class="pa-detail__legend-item">
+            <span class="pa-detail__legend-swatch pa-detail__legend-swatch--busy"></span>
+            <app-icon name="lock" [size]="12"></app-icon>
+            Ocupado
+          </span>
+          <span class="pa-detail__legend-item">
+            <span class="pa-detail__legend-swatch pa-detail__legend-swatch--free"></span>
+            <app-icon name="check" [size]="12"></app-icon>
+            Libre
+          </span>
+        </div>
+
+        @let grouped = getGroupedSlots();
+
+        @if (grouped.morning.length > 0) {
+          <div class="pa-detail__section">
+            <div class="pa-detail__section-title">
+              <app-icon name="sun" [size]="14"></app-icon>
+              <span>Mañana</span>
+              <span class="pa-detail__section-count">({{ grouped.morning.length }})</span>
             </div>
-          }
-
-          @if (grouped.afternoon.length > 0) {
-            <div class="pa-detail__section">
-              <div class="pa-detail__section-title">
-                <app-icon name="moon" [size]="14"></app-icon>
-                <span>Tarde</span>
-                <span class="pa-detail__section-count">({{ grouped.afternoon.length }})</span>
-              </div>
-              <div class="pa-detail__slots">
-                @for (slot of grouped.afternoon; track slot.time) {
-                  <div
-                    class="pa-detail__slot"
-                    [class.pa-detail__slot--busy]="slot.status === 'busy'"
-                    [class.pa-detail__slot--free]="slot.status === 'free'"
-                  >
-                    <app-icon
-                      [name]="slot.status === 'busy' ? 'lock' : 'check'"
-                      [size]="13"
-                    />
-                    <span>{{ slot.time }}</span>
-                  </div>
-                }
-              </div>
+            <div class="pa-detail__slots">
+              @for (slot of grouped.morning; track slot.time) {
+                <div
+                  class="pa-detail__slot"
+                  [class.pa-detail__slot--busy]="slot.status === 'busy'"
+                  [class.pa-detail__slot--free]="slot.status === 'free'"
+                >
+                  <app-icon
+                    [name]="slot.status === 'busy' ? 'lock' : 'check'"
+                    [size]="13"
+                  />
+                  <span>{{ slot.time }}</span>
+                </div>
+              }
             </div>
-          }
-
-          <p class="pa-detail__note">
-            <app-icon name="info" [size]="14"></app-icon>
-            Vista aproximada basada en conteos. Para ver reservas exactas con cliente y servicio, abrí el detalle en el módulo de Reservas.
-          </p>
-        } @else {
-          <div class="pa-detail__empty">
-            <app-icon name="calendar-off" [size]="32"></app-icon>
-            <p>El proveedor no tiene horarios configurados para este día.</p>
           </div>
         }
+
+        @if (grouped.afternoon.length > 0) {
+          <div class="pa-detail__section">
+            <div class="pa-detail__section-title">
+              <app-icon name="moon" [size]="14"></app-icon>
+              <span>Tarde</span>
+              <span class="pa-detail__section-count">({{ grouped.afternoon.length }})</span>
+            </div>
+            <div class="pa-detail__slots">
+              @for (slot of grouped.afternoon; track slot.time) {
+                <div
+                  class="pa-detail__slot"
+                  [class.pa-detail__slot--busy]="slot.status === 'busy'"
+                  [class.pa-detail__slot--free]="slot.status === 'free'"
+                >
+                  <app-icon
+                    [name]="slot.status === 'busy' ? 'lock' : 'check'"
+                    [size]="13"
+                  />
+                  <span>{{ slot.time }}</span>
+                </div>
+              }
+            </div>
+          </div>
+        }
+
+        <p class="pa-detail__note">
+          <app-icon name="info" [size]="14"></app-icon>
+          Vista aproximada basada en conteos. Para ver reservas exactas con cliente y servicio, abrí el detalle en el módulo de Reservas.
+        </p>
       </div>
     }
   </app-modal>
