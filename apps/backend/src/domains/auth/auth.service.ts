@@ -1027,9 +1027,13 @@ export class AuthService {
     });
     if (existingUser) {
       // Distinguish "account exists and can be claimed via password reset"
-      // (customer pre-created in POS / backoffice, pending_verification)
-      // from a generic 409. The frontend uses the code to offer the
-      // "¿ya tienes cuenta? Recupera tu contraseña" flow.
+      // from a generic 409. Per the issue ("conciliar la cuenta mediante
+      // una recuperación de contraseña"), the CTA should fire whenever a
+      // pre-existing customer tries to register on the ecommerce — even
+      // if they're already linked to the store but haven't activated
+      // their account (state=pending_verification). The frontend uses
+      // the AUTH_CUSTOMER_CLAIMABLE_001 code to offer the recovery
+      // CTA instead of dead-ending the flow.
       const isCustomer = await this.prismaService.user_roles.findFirst({
         where: {
           user_id: existingUser.id,
@@ -1040,7 +1044,12 @@ export class AuthService {
         const alreadyLinked = await this.prismaService.store_users.findFirst({
           where: { user_id: existingUser.id, store_id: store.id },
         });
-        if (!alreadyLinked) {
+        const isActive = existingUser.state === 'active';
+        // Fire the recovery CTA when:
+        //   - the customer is not yet linked to this ecommerce store, OR
+        //   - the customer is linked but still pending_verification (the
+        //     POS-created account they can't log in to).
+        if (!alreadyLinked || !isActive) {
           throw new VendixHttpException(
             ErrorCodes.AUTH_CUSTOMER_CLAIMABLE_001,
           );
