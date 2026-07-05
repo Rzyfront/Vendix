@@ -195,7 +195,7 @@ export class CustomersService {
         username,
         email_verified: false,
         state: 'pending_verification' as const,
-        organization_id: store.organization_id,
+        organizations: { connect: { id: store.organization_id } },
         user_roles: {
           create: {
             role_id: customerRole.id,
@@ -403,7 +403,7 @@ export class CustomersService {
           : {}),
         username: username,
         email_verified: false,
-        organization_id: store.organization_id,
+        organizations: { connect: { id: store.organization_id } },
         user_roles: {
           create: {
             role_id: customerRole.id,
