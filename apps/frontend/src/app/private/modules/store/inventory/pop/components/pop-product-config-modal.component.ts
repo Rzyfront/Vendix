@@ -132,7 +132,7 @@ export type { PopProductConfigResult };
             @if (createMode()) {
               <form
                 [formGroup]="identityForm"
-                class="rounded-xl border border-border/50 bg-muted/20 p-3 space-y-3"
+                class="rounded-xl border border-border/50 bg-surface p-3 space-y-3"
                 data-testid="pop-create-identity"
               >
                 <p
@@ -170,6 +170,7 @@ export type { PopProductConfigResult };
                       label="Es un insumo"
                       description="Marca este producto como insumo para recetas. Dejará de venderse directamente y se medirá por unidades de compra y stock."
                       [ngModel]="isIngredient()"
+                      [ngModelOptions]="{ standalone: true }"
                       (changed)="onIngredientToggle($event)"
                     ></app-setting-toggle>
                   </div>

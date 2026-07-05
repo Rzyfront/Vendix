@@ -185,6 +185,12 @@ export interface PopUomCaptureResult {
                 <app-icon name="info" [size]="12"></app-icon>
                 1 {{ pkg.purchaseUnit }} = {{ pkg.content }} {{ pkg.stockUnit }}.
               </span>
+              @if (pkg.totalStock > 0) {
+                <span class="font-semibold">
+                  Stock total del lote: {{ pkg.totalStockLabel }}
+                  {{ pkg.stockUnit }}
+                </span>
+              }
               <span class="text-muted">
                 Costo por {{ pkg.stockUnit }}: {{ pkg.costPerStockLabel }}
               </span>
@@ -386,6 +392,8 @@ export class PopUomCaptureComponent {
     purchaseUnit: string;
     stockUnit: string;
     costPerStockLabel: string;
+    totalStock: number;
+    totalStockLabel: string;
   } | null>(() => {
     if (!this.needsManualContent()) return null;
     const content = this.contentPerPackage();
@@ -395,11 +403,18 @@ export class PopUomCaptureComponent {
     if (!purchase || !stock) return null;
     const unit = this.unitCost();
     const costPerStock = content > 0 ? unit / content : 0;
+    // F1: stock total del lote = envases (cantidad de compra) × contenido por
+    // envase. Es entero (unidad mínima de stock). 0 si aún no hay cantidad.
+    const qty = this.quantity();
+    const totalStock =
+      Number.isFinite(qty) && qty > 0 ? Math.round(qty * content) : 0;
     return {
       content,
       purchaseUnit: purchase.code,
       stockUnit: stock.code,
       costPerStockLabel: this.currencyService.format(costPerStock || 0),
+      totalStock,
+      totalStockLabel: totalStock.toLocaleString('es-CO'),
     };
   });
 
