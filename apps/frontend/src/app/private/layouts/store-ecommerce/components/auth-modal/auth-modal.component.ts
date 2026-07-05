@@ -426,6 +426,15 @@ export class AuthModalComponent {
 
         if (open) {
           this.errorMessage.set(null);
+          // Hydrate the dedupe tracker so the first effect tick that
+          // observes the current (about-to-be-cleared) authError treats
+          // it as already-shown. Without this, the effect below can fire
+          // the toast on the same tick before this clear propagates.
+          this.lastShownError.set(
+            typeof this.authFacade.authError() === 'string'
+              ? (this.authFacade.authError() as string)
+              : null,
+          );
           // Clear stale error$ state from a previous login/register attempt
           // so the modal doesn't re-fire the previous toast on open.
           this.authFacade.setAuthError(null);
