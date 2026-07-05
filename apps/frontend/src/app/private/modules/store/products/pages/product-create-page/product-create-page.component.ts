@@ -513,6 +513,13 @@ export class ProductCreatePageComponent {
     this.storeIndustries().includes('restaurant'),
   );
   /**
+   * `true` solo si la tienda tiene la industria `service`. Gatea el tipo
+   * "Servicio" en el selector, igual que `isRestaurant` gatea "Plato preparado".
+   */
+  readonly isServiceIndustry = computed(() =>
+    this.storeIndustries().includes('service'),
+  );
+  /**
    * Fase 0: capability resolver reused from the auth facade. Identical
    * semantics to `isRestaurant` for now, but expressed through the single
    * `industriesSupportIngredients` helper so the gating can be extended
@@ -827,11 +834,14 @@ export class ProductCreatePageComponent {
   readonly productTypeOptions = computed<{ value: string; label: string }[]>(
     () => {
       this.formUpdateTrigger(); // reactividad ante cambios del formulario
-      const base = [
-        { value: 'physical', label: 'Producto Físico' },
-        { value: 'service', label: 'Servicio' },
-      ];
       const current = this.productForm?.get('product_type')?.value;
+      const base = [{ value: 'physical', label: 'Producto Físico' }];
+      // "Servicio" solo con la industria `service` activa (o al editar un
+      // servicio ya creado en una tienda mal configurada, para no perder el
+      // valor). Mismo patrón que "Plato preparado" con la industria restaurant.
+      if (this.isServiceIndustry() || current === 'service') {
+        base.push({ value: 'service', label: 'Servicio' });
+      }
       if (this.isRestaurant() || current === 'prepared') {
         base.push({ value: 'prepared', label: 'Plato preparado' });
       }
