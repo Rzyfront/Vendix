@@ -1,4 +1,4 @@
-import {Component, signal, effect, inject, input, output, untracked, DestroyRef} from '@angular/core';
+import {Component, signal, computed, effect, inject, input, output, untracked, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReservationsService } from '../../../services/reservations.service';
@@ -46,6 +46,25 @@ export class CalendarContainerComponent {
   loading = signal(false);
   selectedServiceId = signal<number | null>(null);
 
+  /**
+   * Bookable services catalog, loaded once. Used to derive the active
+   * service's duration so the week-view can snap clicks to the right
+   * granularity. Mirrors the pattern used by `reservation-form-modal`.
+   */
+  services = signal<Array<{ id: number; name: string; service_duration_minutes?: number }>>([]);
+
+  /**
+   * Duration in minutes of the currently-selected service. Defaults to 30
+   * (the legacy hardcoded value) when no service is selected, when its
+   * duration isn't configured, or while the catalog is still loading —
+   * so the calendar keeps behaving correctly during the initial render.
+   */
+  readonly selectedServiceDuration = computed(() => {
+    const id = this.selectedServiceId();
+    if (id == null) return 30;
+    return this.services().find((s) => s.id === id)?.service_duration_minutes ?? 30;
+  });
+
   // Outputs for parent to handle modals
   readonly slotClicked = output<{ date: string; time: string }>();
   readonly bookingClicked = output<Booking>();
@@ -61,6 +80,19 @@ export class CalendarContainerComponent {
       const _refresh = this.refreshTrigger();
       untracked(() => this.loadCalendarData());
     });
+
+    // Load the services catalog once so the calendar can snap clicks to
+    // the active service's duration. Fire-and-forget; if it fails we keep
+    // the 30-min default behavior.
+    this.reservationsService
+      .getBookableServices()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (services) => this.services.set(services ?? []),
+        error: () => {
+          // Silent: calendar defaults to 30-min snap. Other features work.
+        },
+      });
   }
 
   loadCalendarData(): void {

@@ -316,6 +316,7 @@
                 [bookingsByDate]="bookingsByDate()"
                 [freeSlotsByDate]="freeSlotsByDate()"
                 [currentDate]="selectedDate() ? parseAsDate(selectedDate()) : today"
+                [slotMinutes]="selectedService()?.service_duration_minutes || 30"
                 (slotClicked)="onCalendarSlotPicked($event)"
               />
             </div>

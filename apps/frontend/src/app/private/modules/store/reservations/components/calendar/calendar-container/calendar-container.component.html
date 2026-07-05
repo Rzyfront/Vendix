@@ -28,6 +28,7 @@
           [bookingsByDate]="bookingsByDate()"
           [freeSlotsByDate]="freeSlotsByDate()"
           [currentDate]="currentDate()"
+          [slotMinutes]="selectedServiceDuration()"
           (slotClicked)="onSlotClicked($event)"
           (bookingClicked)="onBookingClicked($event)"
           (bookingDropped)="onBookingDropped($event)"
