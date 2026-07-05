@@ -129,13 +129,17 @@ export function cartToPurchaseOrderRequest(
         product_variant_id: item.variant?.id,
         quantity: item.quantity,
         unit_price: item.unit_cost,
-        // IVA cycle (F1): forward the manually-captured tax per line. The
-        // backend is the source of truth for the actual tax/cost split; we
-        // only pass the captured intent. `prices_include_tax` is included
-        // ONLY when the line overrides the header mode (mixed invoices).
-        tax_rate: item.tax_rate,
+        // IVA cycle (F1): forward the manually-captured tax per line, GATED by
+        // the POP header master switch `cartState.has_vat`. When the buyer
+        // marks the purchase as WITHOUT VAT, we must persist tax_rate = 0 so
+        // the persisted order matches the $0 IVA preview (pop-cart.service
+        // computes taxRate = hasVat ? item.tax_rate : 0). Without this gate the
+        // seeded default rate (19) would leak to the backend and contaminate
+        // cost/deductible-IVA. `prices_include_tax` per-line override is only
+        // meaningful when VAT is on (mixed invoices).
+        tax_rate: cartState.has_vat ? item.tax_rate : 0,
         tax_type: item.tax_type ?? 'iva',
-        ...(item.prices_include_tax !== undefined
+        ...(cartState.has_vat && item.prices_include_tax !== undefined
           ? { prices_include_tax: item.prices_include_tax }
           : {}),
         notes: item.notes,
@@ -220,8 +224,11 @@ export function cartToPurchaseOrderRequest(
     supplier_id: cartState.supplierId!,
     location_id: cartState.locationId!,
     status: cartState.status === 'draft' ? 'draft' : 'approved',
-    // IVA cycle (F1): dominant invoice mode captured in the POP header.
-    prices_include_tax: cartState.prices_include_tax,
+    // IVA cycle (F1): dominant invoice mode captured in the POP header, GATED
+    // by the master switch `cartState.has_vat`. When the purchase has no VAT,
+    // force `false` so the header cannot reintroduce tax-inclusive semantics
+    // that the $0 IVA preview never showed.
+    prices_include_tax: cartState.has_vat ? cartState.prices_include_tax : false,
     order_type: isIngredientOrder ? 'ingredient' : 'retail',
     order_date: cartState.orderDate.toISOString(),
     expected_date: cartState.expectedDate?.toISOString(),
