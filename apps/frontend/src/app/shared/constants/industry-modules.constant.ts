@@ -31,13 +31,21 @@ export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
  * `restaurant_ops`, so a `['gym','restaurant']` store sees BOTH suites. Note
  * `gym` and `service` still hide `restaurant_ops` on their own, so a pure gym
  * or pure service store never sees the restaurant suite.
+ *
+ * Service Suite: the `orders_reservations` module (booking calendar, providers,
+ * schedules) is visible ⟺ the store's industry includes `service`. Every other
+ * industry (retail / restaurant / manufacturing / gym) lists it as hidden, so
+ * the OR-semantics intersection keeps it visible only when `service` is one of
+ * the store's industries (a `['service','retail']` store still sees it because
+ * the `service` half of the intersection does not hide it). This mirrors the
+ * inverse gating of `restaurant_ops` for the restaurant suite.
  */
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
-  retail: ['restaurant_ops', 'memberships'],
-  restaurant: ['memberships'],
-  manufacturing: ['restaurant_ops', 'memberships'],
+  retail: ['restaurant_ops', 'memberships', 'orders_reservations'],
+  restaurant: ['memberships', 'orders_reservations'],
+  manufacturing: ['restaurant_ops', 'memberships', 'orders_reservations'],
   service: ['restaurant_ops'],
-  gym: ['restaurant_ops'],
+  gym: ['restaurant_ops', 'orders_reservations'],
 };
 
 /**
