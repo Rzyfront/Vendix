@@ -568,9 +568,18 @@ export class ProviderAvailabilityComponent {
     // automatically unsubscribes from the previous inner observable.
     const params = computed(() => {
       const prov = this.providerFilter();
+      // Clamp date_to >= date_from. If the user types a `dateFrom` that is
+      // after `dateTo` (e.g. they updated dateFrom but forgot to refresh
+      // dateTo, or selected a range in the wrong order), the backend
+      // returns an empty result and the dashboard looks "broken".
+      // Auto-clamping respects the apparent intent ("filter from this
+      // date on") and prevents the empty-result footgun.
+      const from = this.dateFrom();
+      const rawTo = this.dateTo();
+      const to = rawTo && from && rawTo < from ? from : rawTo;
       return {
-        date_from: this.dateFrom(),
-        date_to: this.dateTo(),
+        date_from: from,
+        date_to: to,
         slot_minutes: this.slotMinutes(),
         provider_id: prov ?? undefined,
       };
