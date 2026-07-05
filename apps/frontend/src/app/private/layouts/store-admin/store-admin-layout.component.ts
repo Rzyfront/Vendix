@@ -710,6 +710,12 @@ export class StoreAdminLayoutComponent {
           route: '/admin/reports/accounting',
           alwaysVisible: true,
         },
+        {
+          label: 'Nómina',
+          icon: 'circle',
+          route: '/admin/reports/payroll',
+          alwaysVisible: true,
+        },
       ],
     },
     {
