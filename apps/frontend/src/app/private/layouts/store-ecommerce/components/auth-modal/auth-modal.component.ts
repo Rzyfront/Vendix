@@ -390,23 +390,14 @@ export class AuthModalComponent {
       if (error && open) {
         const rawMessage =
           typeof error === 'string' ? error : extractApiErrorMessage(error);
-        console.log('[auth-modal effect] rawMessage =', rawMessage);
         if (this.lastShownError() === rawMessage) return;
         this.lastShownError.set(rawMessage);
         untracked(() => {
           const { title, message, useRecoveryToast } =
             this.mapErrorToUserFriendly(rawMessage);
-          console.log(
-            '[auth-modal effect] mapped =',
-            title,
-            message,
-            'useRecoveryToast =',
-            useRecoveryToast,
-          );
           this.errorTitle.set(title);
           this.errorMessage.set(message);
           if (useRecoveryToast) {
-            console.log('[auth-modal effect] firing toast.withAction');
             this.toast.withAction({
               title,
               description: message,
