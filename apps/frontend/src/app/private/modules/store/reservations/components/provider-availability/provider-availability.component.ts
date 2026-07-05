@@ -48,7 +48,7 @@ import {
  * Provider availability dashboard.
  *
  * Renders a 7-day (default) overview of capacity and occupancy per provider
- * with stats cards on top. Built signals-first / zoneless — no markForCheck,
+ * with stats cards on top. Built signals-first / zoneless — no manual change detection,
  * no subscribe without takeUntilDestroyed.
  */
 @Component({

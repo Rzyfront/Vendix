@@ -28,7 +28,7 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
  * The SSE-sound effect (`NotificationsEffects.playSound$`) plays the
  * configured notification sound automatically — no extra wiring needed.
  *
- * Zoneless / signals-only — no `markForCheck`, no `subscribe` without
+ * Zoneless / signals-only — no manual change detection, no `subscribe` without
  * `takeUntilDestroyed`.
  */
 @Component({
