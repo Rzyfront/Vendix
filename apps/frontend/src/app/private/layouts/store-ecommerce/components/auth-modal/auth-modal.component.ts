@@ -316,24 +316,6 @@ export class AuthModalComponent {
   readonly claimableEmail = signal<string | null>(null);
   readonly recoveryPending = signal(false);
 
-  /**
-   * Tracks the last raw error string surfaced as a toast/errorMessage, so we
-   * don't re-fire the same error toast on every effect re-run (the effect
-   * re-evaluates whenever `isOpen` flips). Cleared back to null when the
-   * facade clears the error so the next fresh error still surfaces.
-   */
-  /**
-   * Tracks the last raw error string surfaced as a toast/errorMessage so we
-   * don't re-fire the same error toast on every effect re-run (isOpen flips
-   * re-run it). Seeded with the current facade error so the FIRST render of
-   * the modal doesn't re-surface a stale error from a previous login/
-   * register attempt. Cleared back to null when the facade clears the error
-   * so the next fresh error still surfaces.
-   */
-  private readonly lastShownError = signal<string | null>(
-    this.authFacade.authError(),
-  );
-
   // Legal Documents state
   readonly pendingDocuments = signal<PendingDocument[]>([]);
   readonly acceptedDocuments = signal<Record<number, boolean>>({});
@@ -347,6 +329,17 @@ export class AuthModalComponent {
   private legalService = inject(LegalService);
   private destroyRef = inject(DestroyRef);
   private toast = inject(ToastService);
+
+  /**
+   * Tracks the last raw error string surfaced as a toast/errorMessage, so we
+   * don't re-fire the same error toast on every effect re-run (the effect
+   * re-evaluates whenever `isOpen` flips). Seeded with the current facade
+   * error AFTER the constructor initializers run (via the constructor
+   * itself) so the FIRST render doesn't re-surface a stale error from a
+   * previous login/register attempt. Cleared back to null when the facade
+   * clears the error so the next fresh error still surfaces.
+   */
+  private readonly lastShownError = signal<string | null>(null);
 
   loading = this.authFacade.authLoading;
   authForm: FormGroup;
