@@ -393,20 +393,13 @@ export class AuthModalComponent {
         if (this.lastShownError() === rawMessage) return;
         this.lastShownError.set(rawMessage);
         untracked(() => {
-          const { title, message, useRecoveryToast } =
-            this.mapErrorToUserFriendly(rawMessage);
+          const { title, message } = this.mapErrorToUserFriendly(rawMessage);
           this.errorTitle.set(title);
           this.errorMessage.set(message);
-          if (useRecoveryToast) {
-            this.toast.withAction({
-              title,
-              description: message,
-              action: {
-                label: 'Recuperar contraseña',
-                callback: () => this.onStartRecovery(),
-              },
-            });
-          }
+          // Recovery CTA is rendered inline in the modal's amber banner
+          // (see template @if (claimableEmail())). The previous toast.withAction
+          // here was redundant once the inline banner was visible — keeping
+          // it produced two parallel surfaces for the same action. Removed.
         });
       } else if (!error) {
         this.lastShownError.set(null);
