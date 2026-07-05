@@ -1,8 +1,10 @@
 import {
   Component,
+  computed,
   inject,
   input,
   output,
+  signal,
 } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
@@ -11,6 +13,12 @@ import {
   PayrollSettlement,
 } from '../../../interfaces/payroll.interface';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import {
+  SETTLEMENT_STATUS_COLOR_MAP,
+  getSettlementReasonLabel,
+  getSettlementStatusLabel,
+} from '../settlement-labels';
 import {
   InputsearchComponent,
   OptionsDropdownComponent,
@@ -54,9 +62,18 @@ export class SettlementListComponent {
   pay = output<PayrollSettlement>();
   cancel = output<PayrollSettlement>();
 
-  // ── Local state ───────────────────────────────────────
-  searchTerm = '';
-  filterValues: FilterValues = {};
+  // ── Local state (signals: zoneless-safe) ──────────────
+  readonly searchTerm = signal('');
+  readonly filterValues = signal<FilterValues>({});
+
+  /** Hay busqueda o filtros activos → el vacío ofrece "limpiar filtros". */
+  readonly hasFilters = computed(() => {
+    if (this.searchTerm().trim().length > 0) return true;
+    return Object.values(this.filterValues()).some(
+      (v) => v !== null && v !== undefined && v !== '',
+    );
+  });
+
   dropdownActions: DropdownAction[] = [
     {
       label: 'Nueva Liquidación',
@@ -95,19 +112,12 @@ export class SettlementListComponent {
     {
       key: 'termination_date',
       label: 'Fecha Terminacion',
-      transform: (val: string) =>
-        val
-          ? new Date(val).toLocaleDateString('es-CO', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-            })
-          : '-',
+      transform: (val: string) => (val ? formatDateOnlyUTC(val) : '-'),
     },
     {
       key: 'termination_reason',
       label: 'Motivo',
-      transform: (val: string) => this.getReasonLabel(val),
+      transform: (val: string) => getSettlementReasonLabel(val),
     },
     {
       key: 'gross_settlement',
@@ -126,15 +136,9 @@ export class SettlementListComponent {
       badgeConfig: {
         type: 'custom',
         size: 'sm',
-        colorMap: {
-          draft: '#9ca3af',
-          calculated: '#3b82f6',
-          approved: '#eab308',
-          paid: '#22c55e',
-          cancelled: '#9ca3af',
-        },
+        colorMap: SETTLEMENT_STATUS_COLOR_MAP,
       },
-      transform: (val: string) => this.getStatusLabel(val),
+      transform: (val: string) => getSettlementStatusLabel(val),
     },
   ];
 
@@ -148,20 +152,14 @@ export class SettlementListComponent {
     badgeConfig: {
       type: 'custom',
       size: 'sm',
-      colorMap: {
-        draft: '#9ca3af',
-        calculated: '#3b82f6',
-        approved: '#eab308',
-        paid: '#22c55e',
-        cancelled: '#9ca3af',
-      },
+      colorMap: SETTLEMENT_STATUS_COLOR_MAP,
     },
-    badgeTransform: (val: string) => this.getStatusLabel(val),
+    badgeTransform: (val: string) => getSettlementStatusLabel(val),
     detailKeys: [
       {
         key: 'termination_reason',
         label: 'Motivo',
-        transform: (v: any) => this.getReasonLabel(v),
+        transform: (v: any) => getSettlementReasonLabel(v),
       },
     ],
     footerKey: 'net_settlement',
@@ -204,12 +202,12 @@ export class SettlementListComponent {
 
   // ── Event handlers ────────────────────────────────────
   onSearchChange(term: string): void {
-    this.searchTerm = term;
+    this.searchTerm.set(term);
     this.search.emit(term);
   }
 
   onFilterChange(values: FilterValues): void {
-    this.filterValues = values;
+    this.filterValues.set(values);
     this.filter.emit(values);
   }
 
@@ -221,28 +219,10 @@ export class SettlementListComponent {
     }
   }
 
-  // ── Helpers ───────────────────────────────────────────
-  getStatusLabel(status: string): string {
-    const labels: Record<string, string> = {
-      draft: 'Borrador',
-      calculated: 'Calculada',
-      approved: 'Aprobada',
-      paid: 'Pagada',
-      cancelled: 'Cancelada',
-    };
-    return labels[status] || status;
-  }
-
-  getReasonLabel(reason: string): string {
-    const labels: Record<string, string> = {
-      voluntary_resignation: 'Renuncia Voluntaria',
-      just_cause: 'Despido con Justa Causa',
-      without_just_cause: 'Despido sin Justa Causa',
-      mutual_agreement: 'Mutuo Acuerdo',
-      contract_expiry: 'Vencimiento Contrato',
-      retirement: 'Jubilacion',
-      death: 'Muerte del Trabajador',
-    };
-    return labels[reason] || reason || '-';
+  onClearFilters(): void {
+    this.searchTerm.set('');
+    this.filterValues.set({});
+    this.search.emit('');
+    this.filter.emit({});
   }
 }

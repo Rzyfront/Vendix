@@ -22,14 +22,14 @@
             class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             placeholder="Buscar liquidacion..."
             [debounceTime]="300"
-            [ngModel]="searchTerm"
+            [ngModel]="searchTerm()"
             (ngModelChange)="onSearchChange($event)">
           </app-inputsearch>
 
           <app-options-dropdown
             class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             [filters]="filterConfigs"
-            [filterValues]="filterValues"
+            [filterValues]="filterValues()"
             [actions]="dropdownActions"
             [isLoading]="isLoading()"
             (filterChange)="onFilterChange($event)"
@@ -51,13 +51,18 @@
     @if (!isLoading() && settlements().length === 0) {
       <app-empty-state
         icon="file-minus"
-        title="No hay liquidaciones registradas"
-        description="Comience creando su primera liquidacion."
+        [title]="hasFilters() ? 'Sin resultados' : 'No hay liquidaciones registradas'"
+        [description]="hasFilters()
+          ? 'Ninguna liquidacion coincide con tu busqueda o filtros.'
+          : 'Comience creando su primera liquidacion.'"
         actionButtonText="Crear Liquidacion"
-        [showActionButton]="true"
+        actionButtonIcon="plus"
+        [showActionButton]="!hasFilters()"
         [showRefreshButton]="true"
+        [showClearFilters]="hasFilters()"
         (actionClick)="create.emit()"
-        (refreshClick)="search.emit(searchTerm)">
+        (refreshClick)="search.emit(searchTerm())"
+        (clearFiltersClick)="onClearFilters()">
       </app-empty-state>
     }
 
