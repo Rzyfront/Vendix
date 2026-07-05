@@ -398,7 +398,7 @@ export class CustomersService {
         document_number: normalizedDoc.number,
         tax_regime: this.normalizeOptionalString(dto.tax_regime),
         person_type: this.normalizeOptionalString(dto.person_type),
-        ...(dto.is_withholding_agent !== undefined
+        ...(dto.is_withholding_agent != null
           ? { is_withholding_agent: dto.is_withholding_agent }
           : {}),
         username: username,

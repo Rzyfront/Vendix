@@ -136,6 +136,7 @@ import { PreBulkData } from '../interfaces/pop-cart.interface';
                 label="Es un insumo"
                 description="Marca este producto como insumo para recetas. Dejará de venderse directamente y se medirá por unidades de compra y stock."
                 [ngModel]="isIngredient()"
+                [ngModelOptions]="{ standalone: true }"
                 (changed)="onIngredientToggle($event)"
               ></app-setting-toggle>
 

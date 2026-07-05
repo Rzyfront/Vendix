@@ -7,7 +7,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { RouterModule } from '@angular/router';
+import { Router, RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -17,7 +17,11 @@ import {
   MenuSection,
   PublicMenu,
 } from '../../services/catalog.service';
+import { CartService } from '../../services/cart.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
+import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { IconComponent } from '../../../../../shared/components/icon/icon.component';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
 
 type AvailabilityDisplay = 'hide' | 'badge';
@@ -40,19 +44,28 @@ interface RenderMenu extends PublicMenu {
 @Component({
   selector: 'app-menus-page',
   standalone: true,
-  imports: [RouterModule, CurrencyPipe],
+  imports: [RouterModule, CurrencyPipe, ButtonComponent, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './menus-page.component.html',
   styleUrls: ['./menus-page.component.scss'],
 })
 export class MenusPageComponent implements OnInit {
   private readonly catalogService = inject(CatalogService);
+  private readonly cartService = inject(CartService);
+  private readonly toastService = inject(ToastService);
+  private readonly router = inject(Router);
   private readonly tenantFacade = inject(TenantFacade);
   private readonly destroyRef = inject(DestroyRef);
 
   readonly isLoading = signal(true);
   readonly availabilityDisplay = signal<AvailabilityDisplay>('hide');
   private readonly menus = signal<PublicMenu[]>([]);
+
+  /**
+   * Per-item quantity for the inline stepper, keyed by `MenuItem.id`.
+   * Signal-based so the template re-renders under zoneless change detection.
+   */
+  private readonly quantities = signal<Record<number, number>>({});
 
   private static readonly DAY_LABELS = [
     'Domingo',
@@ -123,5 +136,51 @@ export class MenusPageComponent implements OnInit {
     if (!na) return 'pronto';
     const day = MenusPageComponent.DAY_LABELS[na.day_of_week] ?? '';
     return `${day} a las ${na.start_time}`.trim();
+  }
+
+  /** Current stepper quantity for an item (defaults to 1). */
+  qtyOf(itemId: number): number {
+    return this.quantities()[itemId] ?? 1;
+  }
+
+  incQty(event: Event, itemId: number): void {
+    this.stopCardNav(event);
+    const next = this.qtyOf(itemId) + 1;
+    this.quantities.update((q) => ({ ...q, [itemId]: next }));
+  }
+
+  decQty(event: Event, itemId: number): void {
+    this.stopCardNav(event);
+    const next = Math.max(1, this.qtyOf(itemId) - 1);
+    this.quantities.update((q) => ({ ...q, [itemId]: next }));
+  }
+
+  /** Stops the wrapping card `<a>` from navigating when interacting with buy controls. */
+  stopCardNav(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  /** Routes a variant dish to its detail page so the customer can pick an option. */
+  onViewOptions(event: Event, item: MenuItem): void {
+    this.stopCardNav(event);
+    const slug = item.product?.slug;
+    if (slug) this.router.navigate(['/products', slug]);
+  }
+
+  /** Adds a non-variant dish to the cart. Backend rejects off-schedule dishes
+   * (422 MENU_ITEM_NOT_AVAILABLE_NOW), so the button is already gated by
+   * `is_available_now`; this is a defensive guard. */
+  onAdd(event: Event, item: MenuItem): void {
+    this.stopCardNav(event);
+    const product = item.product;
+    if (!product || !item.is_available_now) return;
+    const result = this.cartService.addToCart(product.id, this.qtyOf(item.id));
+    const done = () => this.toastService.success('Plato agregado al carrito');
+    if (result) {
+      result.subscribe({ next: done });
+    } else {
+      done();
+    }
   }
 }

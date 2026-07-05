@@ -378,7 +378,7 @@ export class SuperadminPqrsComponent {
     ) {
       return;
     }
-    this.quickFilter.set(raw);
+this.quickFilter.set(raw);
     this.page.set(1);
     this.fetch();
   }

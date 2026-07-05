@@ -95,12 +95,7 @@ export const REQUIRED_STEPS_BY_AREA: Record<FiscalArea, FiscalWizardStepId[]> =
       'initial_inventory',
       'validation',
     ],
-    payroll: [
-      'legal_data',
-      'payroll_config',
-      'accounting_mappings',
-      'validation',
-    ],
+    payroll: ['legal_data', 'payroll_config', 'validation'],
   };
 
 export const FISCAL_STEP_ORDER: FiscalWizardStepId[] = [

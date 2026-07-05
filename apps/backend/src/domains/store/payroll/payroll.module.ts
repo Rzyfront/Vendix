@@ -5,6 +5,7 @@ import { S3Module } from '../../../common/services/s3.module';
 import { PayrollProviderModule } from './providers/payroll-provider.module';
 import { EmployeesController } from './employees/employees.controller';
 import { EmployeesService } from './employees/employees.service';
+import { EmployeeFiscalProfileService } from './employees/employee-fiscal-profile.service';
 import { EmployeesBulkController } from './employees/employees-bulk.controller';
 import { EmployeesBulkService } from './employees/employees-bulk.service';
 import { PayrollRunsController } from './payroll-runs/payroll-runs.controller';
@@ -51,6 +52,7 @@ import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.
   ],
   providers: [
     EmployeesService,
+    EmployeeFiscalProfileService,
     EmployeesBulkService,
     PayrollRunsService,
     PayrollFlowService,

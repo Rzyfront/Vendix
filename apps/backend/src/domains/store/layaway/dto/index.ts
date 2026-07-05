@@ -219,4 +219,22 @@ export class CancelLayawayDto {
   @IsString()
   @IsNotEmpty()
   cancellation_reason: string;
+
+  /**
+   * Monto a devolver al cliente del anticipo pagado. Si se omite, se asume la
+   * devolución total de lo pagado (refund = total_paid, sin penalización).
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  refund_amount?: number;
+
+  /**
+   * Penalización retenida por la cancelación (se reconoce como otro ingreso).
+   * Si se omite, es 0. Debe cumplir: refund_amount + cancellation_fee == total_paid.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  cancellation_fee?: number;
 }

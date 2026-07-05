@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { S3Module } from '../../../common/services/s3.module';
@@ -21,6 +22,7 @@ import { FiscalPeriodsService } from './fiscal-periods/fiscal-periods.service';
 // Reports
 import { AccountingReportsController } from './reports/accounting-reports.controller';
 import { AccountingReportsService } from './reports/accounting-reports.service';
+import { InventoryReconciliationService } from './reports/inventory-reconciliation.service';
 
 // Account Mappings
 import { AccountMappingController } from './account-mappings/account-mapping.controller';
@@ -29,6 +31,12 @@ import { AccountMappingService } from './account-mappings/account-mapping.servic
 // Auto Entries
 import { AutoEntryService } from './auto-entries/auto-entry.service';
 import { AccountingEventsListener } from './auto-entries/accounting-events.listener';
+import {
+  AccountingEntryFailureService,
+  ACCOUNTING_ENTRY_RETRY_QUEUE,
+} from './auto-entries/accounting-entry-failure.service';
+import { AccountingEntryRetryProcessor } from './auto-entries/processors/accounting-entry-retry.processor';
+import { EntryFailuresController } from './auto-entries/entry-failures.controller';
 import { PlatformOrgService } from '../../../common/services/platform-org.service';
 
 // Bank Reconciliation
@@ -66,9 +74,15 @@ import { FixedAssetCategoriesService } from './fixed-assets/fixed-asset-categori
 import { DepreciationCalculatorService } from './fixed-assets/depreciation-calculator.service';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, S3Module],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    S3Module,
+    BullModule.registerQueue({ name: ACCOUNTING_ENTRY_RETRY_QUEUE }),
+  ],
   controllers: [
     ChartOfAccountsController,
+    EntryFailuresController,
     JournalEntriesController,
     FiscalPeriodsController,
     AccountingReportsController,
@@ -89,9 +103,12 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     JournalEntryFlowService,
     FiscalPeriodsService,
     AccountingReportsService,
+    InventoryReconciliationService,
     AccountMappingService,
     AutoEntryService,
     AccountingEventsListener,
+    AccountingEntryFailureService,
+    AccountingEntryRetryProcessor,
     PlatformOrgService,
     BankAccountsService,
     BankTransactionsService,

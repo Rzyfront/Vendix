@@ -42,6 +42,7 @@ import {
   PopProductConfigModalComponent,
 } from './components/pop-product-config-modal.component';
 import { PopOrderConfirmationModalComponent } from './components/pop-order-confirmation-modal.component';
+import { PricingOverridesMap } from './components/pop-order-confirmation-modal.component';
 import { InvoiceScannerModalComponent } from './components/invoice-scanner/invoice-scanner-modal.component';
 import {
   InvoiceScanResult,
@@ -197,6 +198,7 @@ import { POP_USE_UNIFIED_MODAL } from './pop.config';
       (confirmed)="onOrderConfirmed()"
       (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
+      (pricingOverridesChange)="onPricingOverridesChange($event)"
     ></app-pop-order-confirmation-modal>
 
     <app-pop-product-config-modal
@@ -238,7 +240,7 @@ export class PopComponent implements OnInit, OnDestroy {
    */
   readonly scannerOrderType = computed<'retail' | 'ingredient'>(() => {
     const state = this.popCartService.currentState;
-    const isIngredient = state.items.some((it: any) => {
+    const cartHasIngredient = state.items.some((it: any) => {
       const p: any = it.product;
       if (!p) return false;
       const sellable =
@@ -247,7 +249,14 @@ export class PopComponent implements OnInit, OnDestroy {
           : !!p.is_sellable;
       return !!p.is_ingredient && !sellable;
     });
-    return isIngredient ? 'ingredient' : 'retail';
+    // Punto 1 (a): el default sugerido combina el carrito con la capacidad de
+    // industria. Si la tienda soporta insumos (restaurante, etc.) el escaneo
+    // arranca en modo `ingredient` aunque el carrito esté vacío. Es solo la
+    // semilla: el usuario puede cambiar el perfil dentro del modal.
+    const industrySupportsIngredients = this.authFacade.storeSupportsIngredients();
+    return cartHasIngredient || industrySupportsIngredients
+      ? 'ingredient'
+      : 'retail';
   });
 
   supplierModalOpen = signal(false);
@@ -322,6 +331,13 @@ export class PopComponent implements OnInit, OnDestroy {
 
   costPreview = signal<CostPreviewResponse | null>(null);
   loadingCostPreview = signal(false);
+  /**
+   * QUI-425 (D4) — Latest pricing overrides captured by the confirmation
+   * modal. Mirrored here so `_executeCreateAndReceive` can thread them into
+   * `receivePurchaseOrder()` without round-tripping through the modal's
+   * internal signal. Default to an empty Map so `?.get()` is always safe.
+   */
+  pricingOverrides = signal<PricingOverridesMap>(new Map());
 
   cartState = signal<PopCartState | null>(null);
   cartSummary = signal<PopCartSummary | null>(null);
@@ -445,6 +461,10 @@ export class PopComponent implements OnInit, OnDestroy {
                     ? Number(variant.cost_price)
                     : result.unit_cost,
                   lot_info: result.lot_info,
+                  purchase_uom_id: result.purchase_uom_id,
+                  stock_uom_id: result.stock_uom_id,
+                  // F1: contenido por envase (factor manual envase→stock).
+                  contentPerPackage: result.contentPerPackage,
                 })
                 .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
             });
@@ -503,6 +523,10 @@ export class PopComponent implements OnInit, OnDestroy {
               ? Number(variant.cost_price)
               : result.unit_cost,
             lot_info: result.lot_info,
+            purchase_uom_id: result.purchase_uom_id,
+            stock_uom_id: result.stock_uom_id,
+            // F1: contenido por envase (factor manual envase→stock).
+            contentPerPackage: result.contentPerPackage,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       });
@@ -532,6 +556,13 @@ export class PopComponent implements OnInit, OnDestroy {
           quantity: result.quantity,
           unit_cost: result.unit_cost,
           lot_info: result.lot_info,
+          // Propagar las FKs de UoM del insumo (antes se descartaban → la
+          // línea quedaba sin unidad de compra/stock y el backend no derivaba
+          // el factor al recibir).
+          purchase_uom_id: result.purchase_uom_id,
+          stock_uom_id: result.stock_uom_id,
+          // F1: contenido por envase (factor manual envase→stock).
+          contentPerPackage: result.contentPerPackage,
         })
         .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
@@ -623,13 +654,36 @@ export class PopComponent implements OnInit, OnDestroy {
     editedItems: MatchedLineItem[];
     invoiceNumber?: string;
     invoiceDate?: string;
+    supplierId?: number | null;
   }): void {
     this.showInvoiceScanner.set(false);
 
-    if (data.matchResult.supplier_match.matched_id) {
-      this.popCartService.setSupplier(
-        data.matchResult.supplier_match.matched_id,
-      );
+    // Punto 2 (i): usa el proveedor ELEGIDO en el modal (preseleccionado desde
+    // el match pero editable). Si es null no tocamos el proveedor actual.
+    if (data.supplierId != null) {
+      this.popCartService.setSupplier(data.supplierId);
+    }
+
+    // Punto 2 (ii) — BUG: `invoiceDate` llegaba pero nunca se aplicaba. La
+    // cableamos a la fecha de la orden validando que parsee antes (evita
+    // Invalid Date con inputs vacíos o mal formados).
+    if (data.invoiceDate) {
+      const parsedDate = new Date(data.invoiceDate);
+      if (!Number.isNaN(parsedDate.getTime())) {
+        this.popCartService.setOrderDate(parsedDate);
+      }
+    }
+
+    // IVA cycle (maestro): si el escáner detectó IVA en alguna línea, enciende
+    // "¿Esta compra tiene IVA?" ANTES del loop para que las líneas nuevas se
+    // agreguen con el maestro ya activo. El neto ya viene aplastado y el modo es
+    // adicional (prices_include_tax=false) ⇒ no hay doble resta. No se apaga si
+    // el usuario ya lo tenía encendido.
+    const scanHasVat = data.editedItems.some(
+      (it) => it.tax_rate != null && Number(it.tax_rate) > 0,
+    );
+    if (scanHasVat) {
+      this.popCartService.setHasVat(true);
     }
 
     let addedCount = 0;
@@ -642,6 +696,16 @@ export class PopComponent implements OnInit, OnDestroy {
       // flujo ingredient). Sugerencia editable; null en retail / sin match.
       const purchaseUomId = item.purchase_uom_id ?? null;
       const stockUomId = item.stock_uom_id ?? null;
+
+      // IVA cycle (F3 wiring): el escáner emite `tax_rate` como FRACCIÓN (0.19)
+      // y ya aplastó `unit_price` a neto (`normalizeOcrResponse`). Convertimos a
+      // PORCENTAJE (×100) para el carrito y forzamos modo adicional
+      // (`prices_include_tax=false`) para que el IVA se sume sobre el neto y el
+      // costeo lo trate según el estado fiscal. Sin tasa detectada ⇒ undefined
+      // (el carrito hereda header + default). Tasa 0 (exento) se respeta.
+      const scannedRate =
+        item.tax_rate != null ? Number(item.tax_rate) * 100 : undefined;
+      const scannedIncludeMode = scannedRate != null ? false : undefined;
 
       if (candidate) {
         this.popCartService
@@ -659,6 +723,9 @@ export class PopComponent implements OnInit, OnDestroy {
             unit_cost: item.unit_price,
             purchase_uom_id: purchaseUomId,
             stock_uom_id: stockUomId,
+            tax_rate: scannedRate,
+            tax_type: 'iva',
+            prices_include_tax: scannedIncludeMode,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       } else {
@@ -678,12 +745,20 @@ export class PopComponent implements OnInit, OnDestroy {
             is_prebulk: true,
             purchase_uom_id: purchaseUomId,
             stock_uom_id: stockUomId,
+            tax_rate: scannedRate,
+            tax_type: 'iva',
+            prices_include_tax: scannedIncludeMode,
             prebulk_data: {
               name: item.description,
               code: item.sku_if_visible || '',
               description: item.description,
               purchase_uom_id: purchaseUomId,
               stock_uom_id: stockUomId,
+              // IVA cycle (F3): categoría de impuesto sugerida por el escáner
+              // (null si el comercio no es responsable de IVA — gate en origen).
+              tax_category_ids: item.suggested_tax_category_id
+                ? [item.suggested_tax_category_id]
+                : undefined,
             },
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
@@ -1101,8 +1176,7 @@ export class PopComponent implements OnInit, OnDestroy {
   onConfigureFromModal(): void {
     this.showCartModal.set(false);
     if (this.header) {
-      this.header.showMobileSettings.set(true);
-      setTimeout(() => this.header.flashConfigWarning(), 50);
+      this.header.openConfigModal();
     }
   }
 
@@ -1169,7 +1243,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     if (!state.supplierId || !state.locationId || state.items.length === 0) {
       if ((!state.supplierId || !state.locationId) && this.header) {
-        this.header.flashConfigWarning();
+        this.header.openConfigModal();
       }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
@@ -1197,7 +1271,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     if (!state.supplierId || !state.locationId) {
       if (this.header) {
-        this.header.flashConfigWarning();
+        this.header.openConfigModal();
       }
       this.toastService.warning(
         'Por favor selecciona proveedor y bodega antes de guardar.',
@@ -1208,6 +1282,8 @@ export class PopComponent implements OnInit, OnDestroy {
     const userId = this.authFacade.getUserId() || 0;
 
     const request = cartToPurchaseOrderRequest(draftState, userId, undefined);
+    // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
+    this.attachPurchaseToStockFactor(request, draftState);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1234,7 +1310,7 @@ export class PopComponent implements OnInit, OnDestroy {
         this.showCartModal.set(true);
       }
       if ((!state.supplierId || !state.locationId) && this.header) {
-        this.header.flashConfigWarning();
+        this.header.openConfigModal();
       }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
@@ -1254,7 +1330,7 @@ export class PopComponent implements OnInit, OnDestroy {
         this.showCartModal.set(true);
       }
       if ((!state.supplierId || !state.locationId) && this.header) {
-        this.header.flashConfigWarning();
+        this.header.openConfigModal();
       }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
@@ -1263,6 +1339,9 @@ export class PopComponent implements OnInit, OnDestroy {
     }
 
     this.confirmOrderAction = 'create-receive';
+    // Reset overrides from any previous reception — each confirmation gets a
+    // clean slate anchored to the freshly-loaded cost preview.
+    this.pricingOverrides.set(new Map());
     this.loadCostPreview();
     this.showOrderConfirmModal.set(true);
   }
@@ -1283,6 +1362,16 @@ export class PopComponent implements OnInit, OnDestroy {
   onNavigateToSettings(): void {
     this.showOrderConfirmModal.set(false);
     this.router.navigate(['/store/settings/general']);
+  }
+
+  /**
+   * QUI-425 (D4) — keep the latest override Map in sync with the modal so
+   * `_executeCreateAndReceive` can grab it synchronously when the operator
+   * confirms. We accept a Map directly (no copy) because the modal emits
+   * the same Map it stores; downstream consumers must treat it as read-only.
+   */
+  onPricingOverridesChange(overrides: PricingOverridesMap): void {
+    this.pricingOverrides.set(overrides);
   }
 
   private loadCostPreview(): void {
@@ -1326,6 +1415,8 @@ export class PopComponent implements OnInit, OnDestroy {
     const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
+    // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
+    this.attachPurchaseToStockFactor(request, state);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1349,6 +1440,8 @@ export class PopComponent implements OnInit, OnDestroy {
     const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
+    // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
+    this.attachPurchaseToStockFactor(request, state);
 
     this.toastService.info('Creando orden e ingresando inventario...');
 
@@ -1358,16 +1451,39 @@ export class PopComponent implements OnInit, OnDestroy {
           const orderId = response.data.id;
           const orderItems = response.data.purchase_order_items || [];
 
-          const receiveItems = orderItems.map((item: any) => ({
-            id: item.id,
-            quantity_received: item.quantity_ordered,
-          }));
+          // Capture the latest overrides synchronously — the modal emits
+          // them right before `confirmed`, but we also accept a stale or
+          // missing Map (e.g. confirm from keyboard) by falling back to
+          // an empty Map. QUI-425 (D4).
+          const overrides = this.pricingOverrides();
+
+          const receiveItems = orderItems.map((item: any) => {
+            // Same key shape as the modal: `${product_id}-${variant_id || 0}`.
+            // purchase_order_items carry product_id + product_variant_id
+            // directly so we don't need to walk any joins.
+            const key = `${item.product_id}-${item.product_variant_id || 0}`;
+            const lineOverride = overrides?.get(key);
+            return {
+              id: item.id,
+              quantity_received: item.quantity_ordered,
+              // Only attach the override when defined — `receive` skips
+              // the pricing path entirely when BOTH fields are absent,
+              // applying the cost-anchor default at the backend instead.
+              ...(lineOverride?.new_base_price !== undefined && {
+                new_base_price: lineOverride.new_base_price,
+              }),
+              ...(lineOverride?.new_profit_margin !== undefined && {
+                new_profit_margin: lineOverride.new_profit_margin,
+              }),
+            };
+          });
 
           this.purchaseOrdersService
             .receivePurchaseOrder(orderId, receiveItems)
             .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: () => {
                 this.toastService.success('Stock ingresado correctamente');
+                this.pricingOverrides.set(new Map());
                 this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
                 this.router.navigate(['/admin/products']);
               },
@@ -1376,6 +1492,7 @@ export class PopComponent implements OnInit, OnDestroy {
                 this.toastService.error(
                   'Orden creada pero hubo error al recibir stock',
                 );
+                this.pricingOverrides.set(new Map());
                 this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
                 this.router.navigate(['/admin/products']);
               },
@@ -1388,6 +1505,32 @@ export class PopComponent implements OnInit, OnDestroy {
           error.error?.message || error.message || 'Error al crear la orden';
         this.toastService.error(errorMsg);
       },
+    });
+  }
+
+  /**
+   * F1 (contenido por envase): adjunta `purchase_to_stock_factor` a cada línea
+   * del request de orden. El `pop-cart.service` arma el `PopCartItem` con
+   * campos explícitos (no propaga columnas nuevas top-level), así que el factor
+   * viaja dentro de `prebulk_data.contentPerPackage` (productos nuevos = flujo
+   * principal de alta de insumo). Aquí lo leemos por índice (mapeo 1:1 con
+   * `cartToPurchaseOrderRequest`) y lo escribimos con el nombre EXACTO que
+   * espera el backend. Solo se adjunta con un contenido válido (>=1); en el
+   * resto el backend deriva el factor por UoM (misma dimensión).
+   */
+  private attachPurchaseToStockFactor(
+    request: CreatePurchaseOrderRequest,
+    state: PopCartState,
+  ): void {
+    request.items.forEach((reqItem, i) => {
+      const cartItem: any = state.items[i];
+      if (!cartItem) return;
+      const raw =
+        cartItem.prebulk_data?.contentPerPackage ?? cartItem.contentPerPackage;
+      const content = Number(raw);
+      if (Number.isFinite(content) && content >= 1) {
+        (reqItem as any).purchase_to_stock_factor = Math.round(content);
+      }
     });
   }
 

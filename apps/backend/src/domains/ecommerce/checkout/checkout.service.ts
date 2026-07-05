@@ -35,10 +35,46 @@ import { CouponsService } from '../../store/coupons/coupons.service';
 import { CouponAppliesTo } from '../../store/coupons/dto';
 import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote.interface';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
+import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
+import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 
 @Injectable()
 export class CheckoutService {
   private readonly logger = new Logger(CheckoutService.name);
+
+  /**
+   * F4 — Gate "no responsable de IVA" (checkout ecommerce).
+   *
+   * Un comercio no responsable de IVA no puede COBRAR IVA en la venta. Aquí
+   * las líneas ya traen `item_taxes` calculados por `TaxesService`, así que el
+   * IVA se detecta directamente por `tax_type === 'iva'` con monto > 0.
+   *
+   * Solo consulta `fiscal_data` cuando efectivamente se está cargando IVA
+   * (camino feliz sin costo extra). Indeterminado ⇒ responsable (no bloquea).
+   */
+  private async assertCheckoutVatAllowed(
+    itemsWithTaxes: Array<{
+      item_taxes?: Array<{ tax_type?: string | null; amount?: number | null }>;
+    }>,
+  ): Promise<void> {
+    const chargesVat = itemsWithTaxes.some((it) =>
+      (it.item_taxes ?? []).some(
+        (t) =>
+          (t.tax_type ?? '').toLowerCase() === 'iva' &&
+          Number(t.amount ?? 0) > 0,
+      ),
+    );
+    if (!chargesVat) return;
+
+    let fiscalData: any = null;
+    try {
+      fiscalData = await this.settingsService.getFiscalData();
+    } catch {
+      // fiscal_data no resoluble ⇒ indeterminado ⇒ responsable.
+      return;
+    }
+    assertCanChargeVat(fiscalData, 'sale');
+  }
 
   constructor(
     private readonly prisma: EcommercePrismaService,
@@ -64,6 +100,7 @@ export class CheckoutService {
     private readonly customersService: CustomersService,
     private readonly promotionEngine: PromotionEngineService,
     private readonly couponsService: CouponsService,
+    private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
   ) {}
 
   /**
@@ -557,6 +594,30 @@ export class CheckoutService {
     }
   }
 
+  /**
+   * Strict menu schedule enforcement at order creation. If ANY cart item's
+   * product belongs to an active carta with availability windows and none is
+   * open right now, reject the whole checkout with MENU_ITEM_NOT_AVAILABLE_NOW.
+   * Same algorithm/timezone math as the public carta endpoint (shared service).
+   * Products not in any menu, or in menus without windows, are unaffected — so
+   * a retail-only checkout is never blocked.
+   */
+  private async assertCartItemsWithinMenuWindows(
+    cart_items: Array<{ product_id: number }>,
+  ): Promise<void> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id || cart_items.length === 0) return;
+
+    const productIds = cart_items.map((item) => item.product_id);
+    const blocked = await this.menuAvailabilityChecker.getBlockedProductIds(
+      store_id,
+      productIds,
+    );
+    if (blocked.size > 0) {
+      throw new VendixHttpException(ErrorCodes.MENU_ITEM_NOT_AVAILABLE_NOW);
+    }
+  }
+
   async checkout(dto: CheckoutDto, file?: Express.Multer.File) {
     await this.assertGuestCheckoutAllowed();
 
@@ -657,6 +718,9 @@ export class CheckoutService {
     if (!payment_method) {
       throw new VendixHttpException(ErrorCodes.ECOM_CHECKOUT_002);
     }
+
+    // Strict carta schedule gate (same OR window semantics as the public menu).
+    await this.assertCartItemsWithinMenuWindows(cart_items);
 
     for (const item of cart_items) {
       const productVariantCount = await this.prisma.product_variants.count({
@@ -900,6 +964,9 @@ export class CheckoutService {
     const total_tax = this.roundMoney(
       itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
+
+    // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
+    await this.assertCheckoutVatAllowed(itemsWithTaxes);
 
     // Recompute promotional + coupon discounts on the backend. Frontend
     // only sends the coupon code (if any); totals here are authoritative.
@@ -1285,6 +1352,9 @@ export class CheckoutService {
       }
     }
 
+    // Strict carta schedule gate (same OR window semantics as the public menu).
+    await this.assertCartItemsWithinMenuWindows(cart_items);
+
     for (const item of cart_items) {
       const productVariantCount = await this.prisma.product_variants.count({
         where: { product_id: item.product_id },
@@ -1399,6 +1469,9 @@ export class CheckoutService {
     const total_tax = this.roundMoney(
       itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
+
+    // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
+    await this.assertCheckoutVatAllowed(itemsWithTaxes);
 
     // Resolve promotional + coupon discounts on the backend (same source of
     // truth used by the normal checkout). Frontend never sends totals.

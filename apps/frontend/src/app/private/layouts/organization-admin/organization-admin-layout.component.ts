@@ -4,7 +4,6 @@ import {
   inject,
   signal,
   computed,
-  DestroyRef,
 } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import {
@@ -13,17 +12,16 @@ import {
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
-import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
-import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
 // S1.2 — SubscriptionBannerComponent removed from ORG_ADMIN. The banner is
 // store-scoped only; org-level renders would either flash stale data or show
 // the wrong tienda's status.
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 
 import { map } from 'rxjs/operators';
-import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { ConfigFacade } from '../../../core/store/config';
 
@@ -44,8 +42,8 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     RouterModule,
     SidebarComponent,
     HeaderComponent,
-    OnboardingModalComponent,
     PaywallOutletComponent,
+    FiscalGateOutletComponent,
     FiscalObligationBannerComponent,
   ],
   template: `
@@ -97,26 +95,18 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
       </div>
     </div>
 
-    <!-- Onboarding Modal - Only render if onboarding is needed -->
-    @if (needsOnboarding()) {
-      <app-onboarding-modal
-        [isOpen]="showOnboardingModal()"
-        (isOpenChange)="showOnboardingModal.set($event)"
-        (completed)="onOnboardingCompleted($event)"
-      ></app-onboarding-modal>
-    }
-
     <!-- Subscription paywall (driven by interceptor + access service) -->
     <app-paywall-outlet />
+
+    <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
+    <app-fiscal-gate-outlet />
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
 })
 export class OrganizationAdminLayoutComponent {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
-  private readonly destroyRef = inject(DestroyRef);
   private readonly authFacade = inject(AuthFacade);
-  private readonly onboardingWizardService = inject(OnboardingWizardService);
   private readonly storesService = inject(OrganizationStoresService);
   private readonly environmentSwitchService = inject(EnvironmentSwitchService);
   private readonly dialogService = inject(DialogService);
@@ -145,15 +135,9 @@ export class OrganizationAdminLayoutComponent {
     ),
     { initialValue: null as string | null },
   );
-  readonly needsOrganizationOnboarding = toSignal(
-    this.authFacade.needsOrganizationOnboarding$,
-    { initialValue: false },
-  );
 
   // --- Local state signals ---
   readonly sidebarCollapsed = signal(false);
-  readonly showOnboardingModal = signal(false);
-  readonly needsOnboarding = signal(false);
   readonly stores = signal<StoreListItem[]>([]);
   readonly isLoadingStores = signal(false);
 
@@ -436,50 +420,8 @@ export class OrganizationAdminLayoutComponent {
   );
 
   constructor() {
-    // Check onboarding status considering both organization state and user role
-    this.checkOnboardingWithRoleValidation();
-
-    // Subscribe to organization onboarding status from user data
-    this.authFacade.needsOrganizationOnboarding$
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((needsOnboarding: boolean) => {
-        this.needsOnboarding.set(needsOnboarding);
-        this.updateOnboardingModal();
-      });
-
     // Load stores for sidebar
     this.loadStores();
-  }
-
-  private checkOnboardingWithRoleValidation(): void {
-    const isOwner = this.authFacade.isOwner();
-    if (!isOwner) {
-      this.needsOnboarding.set(false);
-      this.showOnboardingModal.set(false);
-      return;
-    }
-
-    const currentUser = this.authFacade.getCurrentUser();
-    const organizationOnboarding = currentUser?.organizations?.onboarding;
-
-    this.needsOnboarding.set(!organizationOnboarding);
-    this.updateOnboardingModal();
-  }
-
-  private updateOnboardingModal(): void {
-    const isOwner = this.authFacade.isOwner();
-    if (!isOwner) {
-      this.showOnboardingModal.set(false);
-      return;
-    }
-
-    const currentUser = this.authFacade.getCurrentUser();
-    const organizationOnboarding = currentUser?.organizations?.onboarding;
-    const actuallyNeedsOnboarding = !organizationOnboarding;
-
-    this.showOnboardingModal.set(
-      actuallyNeedsOnboarding && this.needsOnboarding(),
-    );
   }
 
   loadStores(): void {
@@ -607,10 +549,5 @@ export class OrganizationAdminLayoutComponent {
     } else {
       this.sidebarCollapsed.update((v) => !v);
     }
-  }
-
-  onOnboardingCompleted(event: any): void {
-    this.authFacade.setOnboardingCompleted(true);
-    this.authFacade.loadUser();
   }
 }

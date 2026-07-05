@@ -24,11 +24,9 @@ import { SettingsService } from '../../settings/settings.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../cash-registers/movements/movements.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
-import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/serial-number-enforcement.service';
-import { InventorySerialNumbersService } from '../../inventory/serial-numbers/inventory-serial-numbers.service';
+import { OrderStockCommitService } from '../../inventory/shared/services/order-stock-commit.service';
 import { OrderEtaService } from '../services/order-eta.service';
 import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
-import { storeIsRestaurant } from '../../../../common/helpers/industry-capabilities.helper';
 
 type OrderState = order_state_enum;
 
@@ -65,9 +63,8 @@ export class OrderFlowService {
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
     private readonly stockLevelManager: StockLevelManager,
-    private readonly serialEnforcement: SerialNumberEnforcementService,
-    private readonly serialNumbers: InventorySerialNumbersService,
     private readonly orderEtaService: OrderEtaService,
+    private readonly orderStockCommit: OrderStockCommitService,
   ) {}
 
   private async getOrder(orderId: number) {
@@ -192,6 +189,96 @@ export class OrderFlowService {
       select: { state: true, store_id: true, order_number: true },
     });
 
+    // `finished` is the only state that mutates inventory. Route the stock
+    // deduction through the canonical OrderStockCommitService and make the
+    // commit + state write ATOMIC: the deduction runs FIRST inside the same
+    // $transaction, so if it throws (INV_STOCK_002 / SERIAL_REQUIRED_001) the
+    // state write is rolled back and the order stays in its previous state.
+    // All the skip rules (service / !track_inventory / consumed-at-fire /
+    // already-committed / restaurant-prepared-pending-fire) live inside the
+    // canonical service — they are NOT replicated here. Side-effect events are
+    // emitted only AFTER the transaction commits (never on rollback).
+    if (newState === 'finished') {
+      try {
+        const { updated_order, commit } = await this.prisma.$transaction(
+          async (tx) => {
+            const commit = await this.orderStockCommit.commitOrderDelivery(
+              orderId,
+              {
+                movementType: 'sale',
+                blockOnInsufficient: true,
+                consumeSerials: true,
+                reason: 'Order completed',
+                userId: RequestContextService.getUserId(),
+              },
+              tx,
+            );
+
+            const updated_order = await tx.orders.update({
+              where: { id: orderId },
+              data: schemaFields,
+              include: {
+                stores: {
+                  select: {
+                    id: true,
+                    name: true,
+                    store_code: true,
+                    organization_id: true,
+                  },
+                },
+                order_items: {
+                  include: { products: true, product_variants: true },
+                },
+                payments: true,
+              },
+            });
+
+            return { updated_order, commit };
+          },
+          // Multi-line + serial commits do more work per line than a plain
+          // state write; widen the interactive-transaction budget.
+          { timeout: 20000 },
+        );
+
+        // Emitted only after a successful commit → never fires on rollback.
+        this.eventEmitter.emit('order.status_changed', {
+          store_id: updated_order.store_id,
+          order_id: orderId,
+          order_number: previous_order?.order_number || '',
+          old_state: previous_order?.state || '',
+          new_state: newState,
+        });
+
+        if (commit.totalCost > 0) {
+          this.eventEmitter.emit('order.completed', {
+            order_id: orderId,
+            order_number: previous_order?.order_number || '',
+            organization_id: updated_order.stores?.organization_id,
+            store_id: updated_order.store_id,
+            total_cost: commit.totalCost,
+            user_id: RequestContextService.getUserId(),
+          });
+        }
+
+        return updated_order;
+      } catch (error) {
+        // The commit failed → the state write was rolled back with it, so the
+        // order is still in its previous state. Business rules
+        // (INV_STOCK_002 / SERIAL_REQUIRED_001) MUST propagate so the finish
+        // fails loudly instead of silently completing without deducting
+        // stock/serials. Genuine infra errors also propagate (the order was
+        // NOT finished, so reporting success would be a lie).
+        if (error instanceof VendixHttpException) {
+          throw error;
+        }
+        this.logger.error(
+          `Failed to finish order #${orderId}: ${error.message}`,
+        );
+        throw error;
+      }
+    }
+
+    // All other states: single non-transactional write (no inventory mutation).
     const updated_order = await this.prisma.orders.update({
       where: { id: orderId },
       data: schemaFields,
@@ -210,250 +297,7 @@ export class OrderFlowService {
       new_state: newState,
     });
 
-    if (newState === 'finished') {
-      // Consume reserved stock: decrement quantity_on_hand + release reservation
-      // Note: POS direct delivery handles its own inventory via PaymentsService.updateInventoryFromOrder()
-      // and sets state to 'finished' directly (bypasses updateOrderState), so this block only runs
-      // for non-POS flows (e-commerce, admin, delivery confirmation, auto-finish).
-      //
-      // P3.4: ORG-scope ecommerce orders are decremented earlier when the
-      // order moves to `'shipped'` (auto-fulfillment listener moves stock
-      // from central to fulfilling store and consumes the original
-      // reservation). Detect that path by checking whether the order still
-      // has any active reservation rows — if not, skip the legacy decrement
-      // to avoid double-counting.
-      try {
-        const orderWithItems = await this.prisma.orders.findUnique({
-          where: { id: orderId },
-          include: {
-            stores: { select: { organization_id: true, industries: true } },
-            order_items: {
-              include: {
-                products: {
-                  select: {
-                    id: true,
-                    track_inventory: true,
-                    product_type: true,
-                  },
-                },
-                product_variants: { select: { id: true } },
-              },
-            },
-          },
-        });
-
-        const activeReservations = await this.prisma
-          .withoutScope()
-          .stock_reservations.count({
-            where: {
-              reserved_for_type: 'order',
-              reserved_for_id: orderId,
-              status: 'active',
-            },
-          });
-
-        let totalCost = 0;
-
-        if (activeReservations > 0) {
-          // Legacy path: reservations still active means inventory has not
-          // been moved yet. Decrement here as before.
-          for (const item of orderWithItems?.order_items || []) {
-            if (
-              !item.products?.track_inventory ||
-              item.products?.product_type === 'service'
-            )
-              continue;
-
-            // Plan KDS fire-flows (B4a): for restaurant stores, items
-            // flagged `prepared` with skip_kds=false are NOT decremented
-            // here — their COGS + stock consumption will happen in
-            // fire-to-kitchen (the operator / auto-fire / manual-fire
-            // path). Items with skip_kds=true still flow through here
-            // (they were never candidates for the kitchen).
-            // For non-restaurant stores the behavior is unchanged: the
-            // legacy path decrements everything as it always did.
-            if (
-              storeIsRestaurant(
-                (orderWithItems as any)?.stores?.industries,
-              ) &&
-              item.products?.product_type === 'prepared' &&
-              !item.skip_kds
-            ) {
-              continue;
-            }
-
-            const location_id =
-              await this.stockLevelManager.getDefaultLocationForProduct(
-                item.product_id,
-                item.product_variant_id || undefined,
-              );
-
-            // QUI-431 — auto-consume serial numbers (FIFO) for serialized
-            // products at the SAME location the stock is deducted from.
-            // Ecommerce fulfillment has no manual serial picker, so we always
-            // auto-select FIFO. Runs BEFORE the stock deduction so an
-            // insufficient-serials condition throws SERIAL_REQUIRED_001 before
-            // any stock is moved (never discount a serialized product without
-            // consuming its serials). No-op for non-serialized products.
-            await this.consumeSerialsForOrderItem(item, location_id);
-
-            const stockUpdate = await this.stockLevelManager.updateStock({
-              product_id: item.product_id,
-              variant_id: item.product_variant_id || undefined,
-              location_id,
-              quantity_change: -item.quantity,
-              movement_type: 'sale',
-              reason: `Order ${previous_order?.order_number || orderId} completed`,
-              user_id: RequestContextService.getUserId(),
-              order_item_id: item.id,
-              create_movement: true,
-            });
-            totalCost += Number(stockUpdate.cost_snapshot?.total_cost || 0);
-          }
-
-          // Release all reservations by reference (fixes mismatched location bug)
-          await this.stockLevelManager.releaseReservationsByReference(
-            'order',
-            orderId,
-            'consumed',
-            undefined,
-            { decrementOnHand: false },
-          );
-        } else {
-          // P3.4: ORG-scope auto-fulfillment already moved stock and marked
-          // reservations as 'consumed' during 'shipped'. No-op here so we
-          // do not double-decrement. We still need an accounting cost for
-          // the `order.completed` event — derive it from order item cost.
-          for (const item of orderWithItems?.order_items || []) {
-            if (
-              !item.products?.track_inventory ||
-              item.products?.product_type === 'service'
-            )
-              continue;
-            // Plan KDS fire-flows (B4a): for restaurant stores, items
-            // flagged `prepared` with skip_kds=false have their COGS
-            // already recognized in fire-to-kitchen (accounting entry
-            // 6135/1435 emitted by the kitchen.fired listener); the
-            // `order.completed` event must not double-count them by
-            // re-summing cost_price here.
-            if (
-              storeIsRestaurant(
-                (orderWithItems as any)?.stores?.industries,
-              ) &&
-              item.products?.product_type === 'prepared' &&
-              !item.skip_kds
-            ) {
-              continue;
-            }
-            totalCost += Number(item.cost_price || 0) * item.quantity;
-          }
-        }
-
-        if (totalCost > 0) {
-          this.eventEmitter.emit('order.completed', {
-            order_id: orderId,
-            order_number: previous_order?.order_number || '',
-            organization_id: orderWithItems?.stores?.organization_id,
-            store_id: updated_order.store_id,
-            total_cost: totalCost,
-            user_id: RequestContextService.getUserId(),
-          });
-        }
-      } catch (error) {
-        // QUI-431 — serial-number business rules (e.g. SERIAL_REQUIRED_001 when
-        // a serialized product has no serials available) MUST propagate so the
-        // completion fails loudly instead of silently fulfilling without
-        // consuming serials. Only genuine stock/infra errors are logged and
-        // swallowed (legacy behavior).
-        if (error instanceof VendixHttpException) {
-          throw error;
-        }
-        this.logger.error(
-          `Failed to update stock for finished order #${orderId}: ${error.message}`,
-        );
-      }
-    }
-
     return updated_order;
-  }
-
-  /**
-   * QUI-431 — Consume the serial numbers for ONE order_item of a serialized
-   * product during ecommerce/admin order completion (the `finished` stock
-   * decrement path that does NOT go through
-   * `PaymentsService.updateInventoryFromOrder`).
-   *
-   * No-op for non-serialized products (the enforcement service short-circuits),
-   * so it can be called unconditionally for every fulfilled line.
-   *
-   * Ecommerce has no manual serial picker, so selection is always automatic:
-   * FIFO from `listAvailable` (in_stock, oldest first) at the sale location
-   * until `quantity` is covered. If fewer are available → SERIAL_REQUIRED_001
-   * (never discount stock silently for a serialized product). This runs BEFORE
-   * the stock deduction so the throw happens before any stock moves.
-   *
-   * For each resolved serial: transition → `sold` and link to the `order_item`
-   * via `sales_document_serials` (the @@unique guard throws SERIAL_DUP_001 on a
-   * concurrent double-sale). Finally persists the CSV of serial_number strings
-   * into `order_items.serial_numbers_snapshot` (immutable legal snapshot).
-   */
-  private async consumeSerialsForOrderItem(
-    orderItem: {
-      id: number;
-      product_id: number;
-      product_variant_id?: number | null;
-      quantity: number;
-    },
-    location_id: number,
-  ): Promise<void> {
-    const product_id = orderItem.product_id;
-    const variant_id = orderItem.product_variant_id ?? undefined;
-    const quantity = orderItem.quantity;
-
-    if (!(await this.serialEnforcement.isSerialized(product_id))) {
-      return;
-    }
-
-    // Auto-select FIFO from the sellable pool at the fulfillment location.
-    const available = await this.serialNumbers.listAvailable(
-      product_id,
-      location_id,
-      variant_id,
-    );
-    if (available.length < quantity) {
-      throw new VendixHttpException(
-        ErrorCodes.SERIAL_REQUIRED_001,
-        `No hay suficientes seriales disponibles (${available.length}/${quantity}) para el producto serializado`,
-        {
-          product_id,
-          product_variant_id: variant_id ?? null,
-          location_id,
-          requested_qty: quantity,
-          available_serials: available.length,
-        },
-      );
-    }
-    const serialIds: number[] = available
-      .slice(0, quantity)
-      .map((s: any) => s.id);
-
-    // Transition + link each serial.
-    const soldSerialNumbers: string[] = [];
-    for (const serial_id of serialIds) {
-      const sold = await this.serialNumbers.transition(serial_id, 'sold');
-      await this.serialNumbers.linkToDocument(
-        serial_id,
-        'order_item',
-        orderItem.id,
-      );
-      if (sold?.serial_number) soldSerialNumbers.push(sold.serial_number);
-    }
-
-    // Immutable snapshot (CSV of serial_number strings, NOT ids) on the line.
-    await this.prisma.order_items.updateMany({
-      where: { id: orderItem.id },
-      data: { serial_numbers_snapshot: soldSerialNumbers.join(', ') },
-    });
   }
 
   /**
@@ -684,7 +528,7 @@ export class OrderFlowService {
         }
       }
 
-      await this.prisma.payments.create({
+      const payment = await this.prisma.payments.create({
         data: {
           order_id: orderId,
           store_payment_method_id: dto.store_payment_method_id,
@@ -753,10 +597,36 @@ export class OrderFlowService {
       }
 
       this.validateTransition(order.state as OrderState, 'finished');
-      const updatedOrder = await this.updateOrderState(orderId, 'finished', {
-        paid_at: new Date(),
-        finished_at: new Date(),
-      });
+      // The succeeded payment was created above, BEFORE the finish. If the
+      // finish is blocked by insufficient stock (INV_STOCK_002) or missing
+      // serials (SERIAL_REQUIRED_001), the order stays 'created' and that
+      // payment would be orphaned. Business rule (confirmed): keep + compensate
+      // — cancel the payment (preserving the audit trail) and propagate the 409.
+      // NOTE: the pending-kitchen guard above intentionally leaves the payment
+      // (the operator finishes once the kitchen delivers), so only the finish
+      // throw compensates here.
+      let updatedOrder;
+      try {
+        updatedOrder = await this.updateOrderState(orderId, 'finished', {
+          paid_at: new Date(),
+          finished_at: new Date(),
+        });
+      } catch (e) {
+        if (e instanceof VendixHttpException) {
+          await this.prisma.payments.update({
+            where: { id: payment.id },
+            data: {
+              state: 'cancelled',
+              updated_at: new Date(),
+              gateway_response: {
+                ...((payment.gateway_response as object) ?? {}),
+                cancellation_reason: 'finish_blocked_insufficient_stock',
+              },
+            },
+          });
+        }
+        throw e;
+      }
 
       this.logger.log(`Order #${orderId} paid directly and finished`);
 
@@ -1309,6 +1179,27 @@ export class OrderFlowService {
   }
 
   /**
+   * Public finish entrypoint for callers that own their own lifecycle (e.g.
+   * memberships — Caller D). Validates the transition to `finished`
+   * (created / processing / delivered → finished are all valid) and delegates
+   * to updateOrderState, which now deducts stock through the canonical
+   * OrderStockCommitService and blocks on INV_STOCK_002 / SERIAL_REQUIRED_001.
+   * For service products (memberships) the canonical service skips the
+   * deduction automatically, so the order simply finishes. `meta` is merged
+   * into the state-change metadata (persisted in internal_notes._flow_metadata).
+   */
+  async finishOrder(orderId: number, meta?: Record<string, any>) {
+    const order = await this.getOrder(orderId);
+    this.validateTransition(order.state as OrderState, 'finished');
+    const updatedOrder = await this.updateOrderState(orderId, 'finished', {
+      finished_at: new Date(),
+      ...(meta ?? {}),
+    });
+    this.logger.log(`Order #${orderId} finished via finishOrder()`);
+    return updatedOrder;
+  }
+
+  /**
    * Cancel an order (from created, pending_payment, or processing)
    */
   async cancelOrder(orderId: number, dto: CancelOrderDto) {
@@ -1682,16 +1573,26 @@ export class OrderFlowService {
       },
     });
 
-    // Update order balances
+    // Update order balances — persisted ALWAYS. The payment is registered even
+    // if the finish is later blocked by insufficient stock, so this balance
+    // write is separate from and precedes the finish transition below.
     const newTotalPaid = Number(order.total_paid) + paymentAmount;
     const newRemainingBalance = Math.max(remainingBalance - paymentAmount, 0);
 
-    const orderUpdateData: any = {
-      total_paid: Math.round(newTotalPaid * 100) / 100,
-      remaining_balance: Math.round(newRemainingBalance * 100) / 100,
-    };
+    await this.prisma.orders.update({
+      where: { id: orderId },
+      data: {
+        total_paid: Math.round(newTotalPaid * 100) / 100,
+        remaining_balance: Math.round(newRemainingBalance * 100) / 100,
+      },
+    });
 
-    // If fully paid, transition to finished
+    // If fully paid, finish through updateOrderState — which now deducts stock
+    // via the canonical OrderStockCommitService and blocks on INV_STOCK_002 /
+    // SERIAL_REQUIRED_001. The balance write above already committed, so a
+    // blocked finish NEVER loses the payment.
+    let finished = false;
+    let finishBlockedReason: string | undefined;
     if (newRemainingBalance <= 0.01) {
       // F2-guard (AUTOMATIC path): do NOT finish a fully-paid order while the
       // kitchen still has undelivered items. We must NOT throw here — the
@@ -1705,15 +1606,27 @@ export class OrderFlowService {
         );
       } else {
         this.validateTransition(order.state as OrderState, 'finished');
-        orderUpdateData.state = 'finished';
-        orderUpdateData.completed_at = new Date();
+        try {
+          await this.updateOrderState(orderId, 'finished', {
+            paid_at: new Date(),
+            finished_at: new Date(),
+          });
+          finished = true;
+        } catch (error) {
+          // A stock/serial business rule blocked the finish. The payment is
+          // already recorded above, so leave the order UNFINISHED and surface
+          // the reason WITHOUT failing the whole call (never lose the payment).
+          if (error instanceof VendixHttpException) {
+            finishBlockedReason = error.message;
+            this.logger.warn(
+              `Order #${orderId} fully paid but NOT finished (stock/serial rule): ${error.message}`,
+            );
+          } else {
+            throw error;
+          }
+        }
       }
     }
-
-    await this.prisma.orders.update({
-      where: { id: orderId },
-      data: orderUpdateData,
-    });
 
     // Update installment if specified (for installment-based credit)
     if (order.credit_type === 'installments') {
@@ -1837,6 +1750,14 @@ export class OrderFlowService {
     return {
       order: updatedOrder,
       payment: { transaction_id: transactionId, change, amount: paymentAmount },
+      // The payment is always recorded. `finished` reflects whether the order
+      // could also be closed; when a stock/serial rule blocked the finish,
+      // `finish_blocked_reason` explains why (the order stays open).
+      payment_recorded: true,
+      finished,
+      ...(finishBlockedReason
+        ? { finish_blocked_reason: finishBlockedReason }
+        : {}),
     };
   }
 

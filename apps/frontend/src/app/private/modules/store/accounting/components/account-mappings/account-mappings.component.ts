@@ -52,22 +52,36 @@ const MAPPING_LABELS: Record<string, string> = {
   'invoice.validated.accounts_receivable': 'Cuentas por Cobrar',
   'invoice.validated.revenue': 'Ingresos por Ventas',
   'invoice.validated.vat_payable': 'IVA por Pagar',
+  'invoice.validated.iva_payable': 'IVA por Pagar (Tipado)',
+  'invoice.validated.inc_payable': 'INC por Pagar',
+  'invoice.validated.ica_payable': 'ICA por Pagar',
   'payment.received.cash': 'Caja (Efectivo)',
   'payment.received.bank': 'Banco (Transferencia / Tarjeta)',
   'payment.received.accounts_receivable':
     'Cuentas por Cobrar (recaudo factura)',
   'payment.received.revenue': 'Ingresos por Ventas (venta directa)',
   'payment.received.vat_payable': 'IVA por Pagar (venta directa)',
+  'payment.received.iva_payable': 'IVA por Pagar (Tipado, venta directa)',
+  'payment.received.inc_payable': 'INC por Pagar (venta directa)',
+  'payment.received.ica_payable': 'ICA por Pagar (venta directa)',
   'expense.approved.expense': 'Gastos Diversos',
   'expense.approved.accounts_payable': 'Cuentas por Pagar',
   'expense.paid.accounts_payable': 'Cuentas por Pagar',
   'expense.paid.cash': 'Caja / Banco',
+  'expense.cancelled.expense': 'Gastos Diversos (Reversa Cancelacion)',
+  'expense.cancelled.accounts_payable':
+    'Cuentas por Pagar (Reversa Cancelacion)',
+  'expense.refunded.expense': 'Gastos Diversos (Reversa Reembolso)',
+  'expense.refunded.accounts_payable':
+    'Cuentas por Pagar (Reversa Reembolso)',
+  'expense.refunded.cash': 'Caja / Banco (Reembolso de Gasto)',
   'payroll.approved.payroll_expense': 'Gastos de Personal',
   'payroll.approved.social_security': 'Seguridad Social Empleador',
   'payroll.approved.salaries_payable': 'Salarios por Pagar',
   'payroll.approved.health_payable': 'Aportes EPS',
   'payroll.approved.pension_payable': 'Aportes Pension',
   'payroll.approved.withholdings': 'Retenciones',
+  'payroll.approved.labor_withholding': 'Retencion en la Fuente Laboral',
   'payroll.paid.salaries_payable': 'Salarios por Pagar',
   'payroll.paid.bank': 'Banco',
   'order.completed.cogs': 'Costo de Ventas',
@@ -75,20 +89,35 @@ const MAPPING_LABELS: Record<string, string> = {
   'refund.completed.revenue': 'Ingresos (Reversa)',
   'refund.completed.cash': 'Caja / Banco (Reembolso)',
   'refund.completed.vat_payable': 'IVA por Pagar (Reversa Devolucion)',
+  'refund.completed.iva_payable': 'IVA por Pagar (Tipado, Reversa Devolucion)',
+  'refund.completed.inc_payable': 'INC por Pagar (Reversa Devolucion)',
+  'refund.completed.ica_payable': 'ICA por Pagar (Reversa Devolucion)',
   'purchase_order.received.inventory': 'Inventario (Entrada)',
   'purchase_order.received.accounts_payable': 'Proveedores',
   'support_document.accepted.expense': 'Compra/Gasto Soportado',
   'support_document.accepted.vat_deductible': 'IVA Descontable',
   'support_document.accepted.withholding_payable': 'Retenciones por Pagar',
   'support_document.accepted.accounts_payable': 'Proveedor Documento Soporte',
+  'purchase.vat_recognized.iva_deductible': 'IVA Descontable de Compra (POP)',
+  'purchase.vat_recognized.accounts_payable': 'Proveedores (Complemento IVA Compra)',
   'inventory.adjusted.inventory': 'Inventario (Ajuste)',
   'inventory.adjusted.shrinkage': 'Faltantes de Inventario',
   'credit_sale.created.accounts_receivable':
     'Cuentas por Cobrar (Venta a Credito)',
   'credit_sale.created.revenue': 'Ingresos (Venta a Credito)',
   'credit_sale.created.vat_payable': 'IVA por Pagar (Venta a Credito)',
+  'credit_sale.created.iva_payable': 'IVA por Pagar (Tipado, Venta a Credito)',
+  'credit_sale.created.inc_payable': 'INC por Pagar (Venta a Credito)',
+  'credit_sale.created.ica_payable': 'ICA por Pagar (Venta a Credito)',
   'payment.received.sales_discount': 'Descuentos en Ventas (POS)',
   'credit_sale.created.sales_discount': 'Descuentos en Ventas (Credito)',
+  // Notas Credito (Devoluciones sobre Factura)
+  'credit_note.accepted.accounts_receivable':
+    'Cuentas por Cobrar (Reversa Nota Credito)',
+  'credit_note.accepted.sales_returns': 'Devoluciones en Ventas',
+  'credit_note.accepted.iva_payable': 'IVA por Pagar (Reversa Nota Credito)',
+  'credit_note.accepted.inc_payable': 'INC por Pagar (Reversa Nota Credito)',
+  'credit_note.accepted.ica_payable': 'ICA por Pagar (Reversa Nota Credito)',
   // Purchase Order Payments
   'purchase_order.payment.accounts_payable': 'Proveedores (Pago OC)',
   'purchase_order.payment.cash_bank': 'Banco (Pago OC)',
@@ -99,6 +128,10 @@ const MAPPING_LABELS: Record<string, string> = {
   'layaway.completed.customer_advance':
     'Anticipos de Clientes (Separe Completado)',
   'layaway.completed.revenue': 'Ingresos por Ventas (Separe Completado)',
+  'layaway.cancelled.advance': 'Anticipos de Clientes (Reversa Separe Cancelado)',
+  'layaway.cancelled.refund': 'Caja/Banco (Devolucion Separe Cancelado)',
+  'layaway.cancelled.forfeit_income':
+    'Otros Ingresos (Penalizacion Separe Cancelado)',
   // Fixed Assets - Depreciation
   'depreciation.monthly.depreciation_expense': 'Gasto por Depreciacion',
   'depreciation.monthly.accumulated_depreciation': 'Depreciacion Acumulada',
@@ -113,7 +146,35 @@ const MAPPING_LABELS: Record<string, string> = {
   'withholding.applied.expense': 'Gasto / Compra (Base Retencion)',
   'withholding.applied.withholding_payable': 'Retencion en la Fuente por Pagar',
   'withholding.applied.accounts_payable': 'Proveedores (Neto tras Retencion)',
+  // Retenciones Practicadas (Vendix retiene a terceros)
+  'withholding.practiced.retefuente_payable':
+    'Retefuente Practicada por Pagar',
+  'withholding.practiced.reteiva_payable': 'Reteiva Practicada por Pagar',
+  'withholding.practiced.reteica_payable': 'Reteica Practicada por Pagar',
+  // Retenciones Sufridas (terceros retienen a Vendix)
+  'withholding.suffered.retefuente_receivable':
+    'Retefuente Sufrida por Cobrar',
+  'withholding.suffered.reteiva_receivable': 'Reteiva Sufrida por Cobrar',
+  'withholding.suffered.reteica_receivable': 'Reteica Sufrida por Cobrar',
+  // Cocina / Produccion (Restaurante)
+  'kitchen.fired.cogs': 'Costo de Ventas (Fired a Cocina)',
+  'kitchen.fired.inventory': 'Inventario (Fired a Cocina)',
+  'production.completed.finished_goods':
+    'Inventario Producto Terminado (Produccion)',
+  'production.completed.ingredient_consumed':
+    'Inventario Insumos Consumidos (Produccion)',
   // Settlement (Liquidacion por Terminacion)
+  'settlement.approved.severance': 'Cesantias (Causacion Liquidacion)',
+  'settlement.approved.severance_interest':
+    'Intereses Cesantias (Causacion Liquidacion)',
+  'settlement.approved.bonus': 'Prima de Servicios (Causacion Liquidacion)',
+  'settlement.approved.vacation': 'Vacaciones (Causacion Liquidacion)',
+  'settlement.approved.pending_salary':
+    'Gastos de Personal - Salario Pendiente (Causacion)',
+  'settlement.approved.indemnification':
+    'Gastos de Personal - Indemnizacion (Causacion)',
+  'settlement.approved.salaries_payable':
+    'Salarios por Pagar (Causacion Liquidacion)',
   'settlement.paid.severance': 'Cesantias Consolidadas',
   'settlement.paid.severance_interest': 'Intereses sobre Cesantias',
   'settlement.paid.bonus': 'Prima de Servicios por Pagar',
@@ -122,6 +183,8 @@ const MAPPING_LABELS: Record<string, string> = {
   'settlement.paid.indemnification': 'Gastos de Personal (Indemnizacion)',
   'settlement.paid.social_deductions': 'Retenciones y Aportes de Nomina',
   'settlement.paid.bank': 'Bancos (Pago Liquidacion)',
+  'settlement.paid.salaries_payable':
+    'Salarios por Pagar (Drenaje Pago Liquidacion)',
   // Wallet / Monedero
   'wallet.topup.customer_advance': 'Anticipos de Clientes (Recarga Wallet)',
   'wallet.topup.cash_bank': 'Caja/Banco (Recarga Wallet)',
@@ -172,12 +235,22 @@ const MAPPING_LABELS: Record<string, string> = {
   'payroll.approved.advance_deduction': 'Descuento Anticipos',
   // Wompi
   'payment.received.wompi': 'Pasarela Wompi',
-  // Cuotas de Credito
-  'installment_payment.received.accounts_receivable': 'CxC (Cuota Recibida)',
-  'installment_payment.received.cash_bank': 'Caja/Banco (Cuota Recibida)',
   // Comisiones
   'commission.calculated.expense': 'Gasto por Comisiones',
   'commission.calculated.payable': 'Comisiones por Pagar',
+  // SaaS Vendix — lado Plataforma (ingreso + comision partner)
+  'saas_revenue.cash_bank': 'Banco (Cobro Suscripcion SaaS)',
+  'saas_revenue.revenue': 'Ingresos por Suscripcion SaaS',
+  'saas_revenue.partner_payable': 'Comision Partner SaaS por Pagar',
+  'saas_refund.cash_bank': 'Banco (Reembolso Suscripcion SaaS)',
+  'saas_refund.revenue': 'Ingresos por Suscripcion SaaS (Reversa)',
+  'saas_bad_debt.receivable': 'Cartera Suscripcion SaaS (Castigo)',
+  'saas_bad_debt.expense': 'Gasto por Cartera Incobrable SaaS',
+  'saas_partner_payout.commissions_payable': 'Comisiones Partners por Pagar',
+  'saas_partner_payout.cash_bank': 'Banco (Pago Comisiones Partner)',
+  // SaaS Vendix — lado Store-Cliente (gasto por la suscripcion)
+  'saas_subscription_expense.expense': 'Gasto Suscripcion SaaS Vendix',
+  'saas_subscription_expense.cash_bank': 'Banco (Pago Suscripcion SaaS)',
   // Caja Registradora
   'cash_register.opened.cash': 'Caja (Apertura)',
   'cash_register.opened.cash_base': 'Fondo Base (Apertura)',
@@ -187,6 +260,10 @@ const MAPPING_LABELS: Record<string, string> = {
   'cash_register.closed.shortage': 'Faltante de Caja',
   'cash_register.movement.cash': 'Caja (Movimiento Manual)',
   'cash_register.movement.other': 'Contrapartida (Movimiento Manual)',
+  'dispatch_route.closed.cash': 'Caja (Cuadre Planilla de Ruta)',
+  'dispatch_route.closed.surplus': 'Otros Ingresos (Sobrante de Ruta)',
+  'dispatch_route.closed.shortage_receivable':
+    'CxC al Conductor (Faltante de Ruta)',
   // Transferencias de Stock
   'stock_transfer.completed.inventory_origin': 'Inventario (Tienda Origen)',
   'stock_transfer.completed.inventory_destination':
@@ -220,7 +297,12 @@ const GROUP_DEFINITIONS: Array<{
     key: 'expenses',
     label: 'Gastos',
     icon: 'trending-down',
-    prefixes: ['expense.approved.', 'expense.paid.'],
+    prefixes: [
+      'expense.approved.',
+      'expense.paid.',
+      'expense.cancelled.',
+      'expense.refunded.',
+    ],
   },
   {
     key: 'payroll',
@@ -232,7 +314,7 @@ const GROUP_DEFINITIONS: Array<{
     key: 'credit_sales',
     label: 'Ventas a Credito',
     icon: 'file-plus',
-    prefixes: ['credit_sale.created.'],
+    prefixes: ['credit_sale.created.', 'credit_note.accepted.'],
   },
   {
     key: 'inventory',
@@ -243,6 +325,7 @@ const GROUP_DEFINITIONS: Array<{
       'refund.completed.',
       'purchase_order.received.',
       'support_document.accepted.',
+      'purchase.vat_recognized.',
       'purchase_order.payment.',
       'inventory.adjusted.',
     ],
@@ -251,7 +334,7 @@ const GROUP_DEFINITIONS: Array<{
     key: 'layaway',
     label: 'Plan Separe',
     icon: 'clock',
-    prefixes: ['layaway.payment.', 'layaway.completed.'],
+    prefixes: ['layaway.payment.', 'layaway.completed.', 'layaway.cancelled.'],
   },
   {
     key: 'fixed_assets',
@@ -263,13 +346,23 @@ const GROUP_DEFINITIONS: Array<{
     key: 'withholding',
     label: 'Retencion en la Fuente',
     icon: 'percent',
-    prefixes: ['withholding.applied.'],
+    prefixes: [
+      'withholding.applied.',
+      'withholding.practiced.',
+      'withholding.suffered.',
+    ],
+  },
+  {
+    key: 'restaurant_ops',
+    label: 'Cocina y Produccion',
+    icon: 'chef-hat',
+    prefixes: ['kitchen.fired.', 'production.completed.'],
   },
   {
     key: 'settlements',
     label: 'Liquidaciones',
     icon: 'user-minus',
-    prefixes: ['settlement.paid.'],
+    prefixes: ['settlement.approved.', 'settlement.paid.'],
   },
   {
     key: 'wallet',
@@ -290,10 +383,16 @@ const GROUP_DEFINITIONS: Array<{
     prefixes: ['ar.write_off.'],
   },
   {
-    key: 'installments',
-    label: 'Cuotas de Credito',
-    icon: 'calendar-check',
-    prefixes: ['installment_payment.received.'],
+    key: 'saas',
+    label: 'Suscripcion SaaS Vendix',
+    icon: 'server',
+    prefixes: [
+      'saas_revenue.',
+      'saas_refund.',
+      'saas_bad_debt.',
+      'saas_partner_payout.',
+      'saas_subscription_expense.',
+    ],
   },
   {
     key: 'stock_transfers',
@@ -316,6 +415,12 @@ const GROUP_DEFINITIONS: Array<{
       'cash_register.closed.',
       'cash_register.movement.',
     ],
+  },
+  {
+    key: 'dispatch_routes',
+    label: 'Planillas de Ruta (DSD)',
+    icon: 'truck',
+    prefixes: ['dispatch_route.closed.'],
   },
 ];
 

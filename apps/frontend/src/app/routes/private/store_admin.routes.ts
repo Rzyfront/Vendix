@@ -3,6 +3,7 @@ import { provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { AuthGuard } from '../../core/guards/auth.guard';
 import { fiscalManagementGuard } from '../../core/guards/fiscal-management.guard';
+import { onboardingGuard } from '../../core/guards/onboarding.guard';
 import { subscriptionManagementGuard } from '../../core/guards/subscription-management.guard';
 import { manageUsersGuard } from '../../core/guards/manage-users.guard';
 import { invoicingReducer } from '../../private/modules/store/invoicing/state/reducers/invoicing.reducer';
@@ -21,12 +22,27 @@ export const storeAdminRoutes: Routes = [
       import('../../private/layouts/store-admin/store-admin-layout.component').then(
         (c) => c.StoreAdminLayoutComponent,
       ),
-    canActivate: [AuthGuard],
+    canActivate: [AuthGuard, onboardingGuard],
+    // canActivateChild re-runs onboardingGuard on EVERY child navigation
+    // (including sibling→sibling SPA nav where the parent `admin` stays
+    // mounted and its canActivate would NOT re-fire). This is what makes the
+    // owner onboarding truly unavoidable, not just on hard reload.
+    canActivateChild: [onboardingGuard],
     children: [
       {
         path: '',
         pathMatch: 'full',
         redirectTo: 'dashboard',
+      },
+      // Owner onboarding host — gated by `onboardingGuard` on the `admin`
+      // root. Only an OWNER with `organizations.onboarding !== true` ever
+      // resolves here; everyone else is bounced to the dashboard.
+      {
+        path: 'onboarding',
+        loadComponent: () =>
+          import('../../private/pages/onboarding/onboarding-page.component').then(
+            (m) => m.OnboardingPageComponent,
+          ),
       },
       {
         path: 'dashboard',
@@ -704,6 +720,43 @@ export const storeAdminRoutes: Routes = [
               import(
                 '../../private/modules/store/restaurant-ops/menus/routes/menus.routes'
               ).then((m) => m.menusRoutes),
+          },
+        ],
+      },
+      // Memberships (Membership Suite: Planes, Socios/Membresías, Accesos). The
+      // whole group is hidden by INDUSTRY_HIDDEN_MODULES for every industry
+      // except `gym` and `service`; visible only when the store's industry
+      // includes `gym` or `service`. Panel_ui keys: memberships (parent) ·
+      // memberships_plans · memberships_members · memberships_access. The root
+      // /admin/memberships defaults to Planes.
+      {
+        path: 'memberships',
+        children: [
+          {
+            path: '',
+            pathMatch: 'full',
+            redirectTo: 'plans',
+          },
+          {
+            path: 'plans',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/memberships/plans/routes/membership-plans.routes'
+              ).then((m) => m.membershipPlansRoutes),
+          },
+          {
+            path: 'members',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/memberships/members/routes/membership-members.routes'
+              ).then((m) => m.membershipMembersRoutes),
+          },
+          {
+            path: 'access',
+            loadChildren: () =>
+              import(
+                '../../private/modules/store/memberships/access/routes/membership-access.routes'
+              ).then((m) => m.membershipAccessRoutes),
           },
         ],
       },

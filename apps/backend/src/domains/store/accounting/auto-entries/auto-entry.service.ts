@@ -6,6 +6,9 @@ import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { TaxBreakdownItem } from '@common/interfaces/tax-breakdown.interface';
 import { WithholdingLine } from '@common/interfaces/withholding-breakdown.interface';
+import { AccountingEntryFailureService } from './accounting-entry-failure.service';
+import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
+import { ErrorCodes } from '../../../../common/errors/error-codes';
 
 export interface AutoEntryEventData {
   source_type: string;
@@ -13,10 +16,34 @@ export interface AutoEntryEventData {
   organization_id: number;
   store_id?: number;
   accounting_entity_id?: number;
-  entry_date: Date;
+  /**
+   * Fecha del asiento. Si se omite, `createAutoEntry` la deriva de la zona
+   * horaria de la tienda (`resolveEntryDate`) para que un asiento generado
+   * de noche (COT = UTC-5) no caiga al día/mes siguiente en UTC crudo.
+   */
+  entry_date?: Date;
   description: string;
   lines: (AutoEntryLine | null)[];
   user_id?: number;
+}
+
+/**
+ * Snapshot histórico del tercero (cliente/proveedor/empleado) ligado a una
+ * línea de asiento. Se persiste TAL CUAL en `accounting_entry_lines` — nunca
+ * se relee por FK en reportes, para no mutar la identidad fiscal exhibida en
+ * asientos ya posteados (exigencia exógena art. 631 ET: el NIT histórico no
+ * cambia aunque el tercero actualice sus datos después).
+ *
+ * `type` sigue la convención ya usada por la migración M2 de backfill
+ * (`20260702100002_backfill_third_party_accounting_entry_lines`): 'customer'
+ * | 'supplier' | 'employee'. Debe viajar en el payload del evento — está
+ * PROHIBIDO resolverlo con un lookup por línea (N+1).
+ */
+export interface AutoEntryThirdParty {
+  id: number;
+  type: 'customer' | 'supplier' | 'employee' | string;
+  name?: string;
+  tax_id?: string;
 }
 
 export interface AutoEntryLine {
@@ -24,6 +51,14 @@ export interface AutoEntryLine {
   description?: string;
   debit_amount: number;
   credit_amount: number;
+  /**
+   * Tercero asociado a ESTA línea (no al asiento completo — un mismo asiento
+   * puede tener líneas con terceros distintos, p.ej. AR de cliente vs CxP de
+   * un proveedor en el mismo movimiento). Opcional: los handlers que no
+   * reciban el tercero en el payload del evento simplemente omiten el campo
+   * y la línea se postea igual que hoy (sin regresión).
+   */
+  third_party?: AutoEntryThirdParty;
 }
 
 /**
@@ -40,11 +75,19 @@ export interface AutoEntryLine {
 export class AutoEntryService {
   private readonly logger = new Logger(AutoEntryService.name);
 
+  /**
+   * Cache en memoria de la zona horaria por `store_id`. La timezone de una
+   * tienda no cambia en runtime, así que evitamos consultar `stores` en cada
+   * asiento. `null` = tienda sin timezone configurada (usa el fallback).
+   */
+  private readonly store_tz_cache = new Map<number, string | null>();
+
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly account_mapping_service: AccountMappingService,
     private readonly fiscal_scope_service: FiscalScopeService,
     private readonly fiscal_gate: FiscalGateService,
+    private readonly entry_failure_service: AccountingEntryFailureService,
   ) {}
 
   /**
@@ -57,6 +100,7 @@ export class AutoEntryService {
     debit_amount: number,
     credit_amount: number,
     store_id?: number,
+    third_party?: AutoEntryThirdParty,
   ): Promise<AutoEntryLine | null> {
     const mapping = await this.account_mapping_service.getMapping(
       org_id,
@@ -69,6 +113,7 @@ export class AutoEntryService {
       description,
       debit_amount,
       credit_amount,
+      ...(third_party && { third_party }),
     };
   }
 
@@ -242,18 +287,180 @@ export class AutoEntryService {
    * Validates accounts exist, finds the appropriate fiscal period,
    * creates a balanced entry and auto-posts it.
    */
+  /**
+   * Deriva la fecha del asiento como la MEDIANOCHE del día calendario vigente
+   * en la zona horaria de la tienda, expresada como instante UTC.
+   *
+   * Motivo: los handlers generaban `entry_date` con `new Date()` (instante UTC
+   * del momento de proceso). En Colombia (UTC-5) un asiento creado entre las
+   * 19:00–23:59 locales caía al DÍA siguiente en UTC — y en el borde de fin de
+   * mes, al MES/período siguiente. Al anclar en la medianoche local convertida
+   * a UTC, `ensureMonthlyFiscalPeriod` (que lee `getUTC*`) resuelve el mes
+   * calendario correcto para la tienda.
+   *
+   * Fallback `America/Bogota` cuando no hay `store_id` (asiento a nivel de
+   * organización) o la tienda no tiene `timezone` configurada. Ante una zona
+   * inválida, `Intl` lanza y caemos a UTC — nunca dejamos de fechar el asiento.
+   */
+  private static readonly DEFAULT_TIMEZONE = 'America/Bogota';
+
+  private async resolveStoreTimezone(store_id?: number): Promise<string> {
+    if (!store_id) return AutoEntryService.DEFAULT_TIMEZONE;
+    if (this.store_tz_cache.has(store_id)) {
+      return (
+        this.store_tz_cache.get(store_id) ?? AutoEntryService.DEFAULT_TIMEZONE
+      );
+    }
+    const store = await this.prisma.withoutScope().stores.findUnique({
+      where: { id: store_id },
+      select: { timezone: true },
+    });
+    const tz = store?.timezone ?? null;
+    this.store_tz_cache.set(store_id, tz);
+    return tz ?? AutoEntryService.DEFAULT_TIMEZONE;
+  }
+
+  private async resolveEntryDate(store_id?: number): Promise<Date> {
+    const timezone = await this.resolveStoreTimezone(store_id);
+    const now = new Date();
+    try {
+      const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      }).formatToParts(now);
+      const get = (type: string) =>
+        Number(parts.find((p) => p.type === type)?.value);
+      const year = get('year');
+      const month = get('month'); // 1-based
+      const day = get('day');
+      if (!year || !month || !day) return now;
+      return new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+    } catch {
+      // Zona horaria inválida: no dejamos el asiento sin fecha.
+      return now;
+    }
+  }
+
+  /**
+   * Garantiza (crea si falta) el período fiscal MENSUAL abierto que contiene
+   * `date`, para la organización/entidad contable dada. Idempotente y
+   * tolerante a carreras: si otro asiento concurrente ya lo creó, re-busca y
+   * reutiliza el existente en vez de duplicar.
+   *
+   * Los bordes se calculan en UTC para coincidir con la convención de
+   * almacenamiento de `fiscal_periods` (Timestamp sin zona) usada por el
+   * resto del módulo. El nombre sigue el formato `YYYY-MM`.
+   */
+  private async ensureMonthlyFiscalPeriod(
+    organization_id: number,
+    accounting_entity_id: number,
+    date: Date,
+  ) {
+    const year = date.getUTCFullYear();
+    const monthIndex = date.getUTCMonth(); // 0-based
+    const start_date = new Date(Date.UTC(year, monthIndex, 1, 0, 0, 0, 0));
+    const end_date = new Date(
+      Date.UTC(year, monthIndex + 1, 0, 23, 59, 59, 999),
+    );
+    const name = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+
+    // `fiscal_periods` no tiene `store_id`: se escribe sin scope de tienda
+    // (org/entidad van explícitos), igual que la resolución de accounting_entities.
+    const db = this.prisma.withoutScope();
+    try {
+      const created = await db.fiscal_periods.create({
+        data: {
+          organization_id,
+          accounting_entity_id,
+          name,
+          start_date,
+          end_date,
+          status: 'open',
+        },
+      });
+      this.logger.log(
+        `Auto-created open fiscal period '${name}' (id ${created.id}) for ` +
+          `organization #${organization_id} entity #${accounting_entity_id}`,
+      );
+      return created;
+    } catch (error) {
+      // Carrera / solapamiento: otro flujo concurrente ya abrió el período.
+      // Re-buscar cualquier período abierto que cubra la fecha y reutilizarlo.
+      const existing = await db.fiscal_periods.findFirst({
+        where: {
+          organization_id,
+          OR: [{ accounting_entity_id }, { accounting_entity_id: null }],
+          status: 'open',
+          start_date: { lte: date },
+          end_date: { gte: date },
+        },
+        orderBy: { accounting_entity_id: 'desc' },
+      });
+      if (existing) return existing;
+
+      // No hay período abierto que cubra la fecha, pero el create falló. Caso
+      // típico: ya existe un período '${name}' para la entidad en estado
+      // CERRADO (unique parcial entity+name). Postear en un período cerrado es
+      // incorrecto, así que fallamos con un mensaje explícito en vez del error
+      // opaco de constraint — el asiento NO debe perderse en silencio.
+      const sameName = await db.fiscal_periods.findFirst({
+        where: { accounting_entity_id, name },
+        select: { id: true, status: true },
+      });
+      const detail = sameName
+        ? `already exists (id ${sameName.id}, status ${sameName.status}) but does not cover the entry date`
+        : (error as Error).message;
+      this.logger.error(
+        `Failed to auto-create fiscal period '${name}' for organization ` +
+          `#${organization_id}: ${detail}`,
+      );
+      throw new Error(
+        `Cannot post auto-entry: fiscal period '${name}' ${detail}`,
+      );
+    }
+  }
+
+  /**
+   * Punto de entrada de todos los handlers `on*()`. Envuelve `postAutoEntry`
+   * para NO perder el asiento en silencio: si el posteo lanza (mapping/cuenta
+   * faltante, período cerrado, error de BD), se persiste el fallo + se encola
+   * un reintento automático, y luego se re-lanza el error original para
+   * preservar el logging del AccountingEventsListener. El reintento reejecuta
+   * `postAutoEntry` directamente (ver AccountingEntryRetryProcessor) para no
+   * volver a registrar el mismo fallo.
+   */
   async createAutoEntry(event_data: AutoEntryEventData) {
+    try {
+      return await this.postAutoEntry(event_data);
+    } catch (error) {
+      await this.entry_failure_service.recordFailure(
+        event_data,
+        error as Error,
+      );
+      throw error;
+    }
+  }
+
+  async postAutoEntry(event_data: AutoEntryEventData) {
     const {
       source_type,
       source_id,
       organization_id,
       store_id,
       accounting_entity_id,
-      entry_date,
       description,
       lines,
       user_id,
     } = event_data;
+
+    // Fecha del asiento: la del evento si viene explícita (p.ej. depreciación
+    // con `period_date`, o flujos SaaS), o la medianoche del día vigente en la
+    // zona horaria de la tienda. Nunca `new Date()` UTC crudo (ver
+    // resolveEntryDate) para no descuadrar día/mes en husos negativos.
+    const entry_date =
+      event_data.entry_date ?? (await this.resolveEntryDate(store_id));
 
     // Default ESTRICTO: no materializar entidades/asientos contables si el área
     // `accounting` no está activa para la organización. Red de seguridad para
@@ -330,8 +537,43 @@ export class AutoEntryService {
       );
     }
 
+    // C2: Guard de período cerrado NO-reintenable.
+    // Si el `entry_date` cae dentro de un período CERRADO (ya liquidado por
+    // el contador), el asiento NO debe postearse ni encolarse para reintento:
+    // postear retroactivamente sobre un mes cerrado rompe el cierre contable
+    // (declaraciones, exógena, informes ya emitidos). Lanzamos
+    // `VendixHttpException` (no `BadRequestException`) con código
+    // `FISCAL_PERIOD_CLOSED` para que `AccountingEntryFailureService`
+    // detecte el código en el mensaje y omita el enqueue del reintento.
+    const closed_period = await this.prisma.fiscal_periods.findFirst({
+      where: {
+        organization_id,
+        OR: [
+          { accounting_entity_id: accounting_entity.id },
+          { accounting_entity_id: null },
+        ],
+        status: 'closed',
+        start_date: { lte: entry_date },
+        end_date: { gte: entry_date },
+      },
+      orderBy: { accounting_entity_id: 'desc' },
+      select: { id: true, name: true, start_date: true, end_date: true },
+    });
+    if (closed_period) {
+      this.logger.error(
+        `Cannot post auto-entry for ${source_type}#${source_id}: ` +
+          `fiscal period '${closed_period.name}' covering ${entry_date.toISOString()} is closed`,
+      );
+      throw new VendixHttpException(
+        ErrorCodes.FISCAL_PERIOD_CLOSED,
+        `Fiscal period '${closed_period.name}' (id ${closed_period.id}) covering ` +
+          `${entry_date.toISOString()} is closed; auto-entry ${source_type}#${source_id} rejected. ` +
+          `Open a corrective period or reverse the original business transaction.`,
+      );
+    }
+
     // Find the open fiscal period for the entry date
-    const fiscal_period = await this.prisma.fiscal_periods.findFirst({
+    let fiscal_period = await this.prisma.fiscal_periods.findFirst({
       where: {
         organization_id,
         OR: [
@@ -345,13 +587,16 @@ export class AutoEntryService {
       orderBy: { accounting_entity_id: 'desc' },
     });
 
+    // Auto-apertura del período mensual que contiene `entry_date` cuando no
+    // existe uno abierto. Cierra el gap de INTEGRIDAD por el que, al rotar el
+    // mes sin período creado, `createAutoEntry` lanzaba y el try/catch del
+    // AccountingEventsListener tragaba el fallo → el asiento se perdía en
+    // silencio (venta/cierre/nómina exitosos pero SIN contabilizar).
     if (!fiscal_period) {
-      this.logger.error(
-        `No open fiscal period found for date ${entry_date.toISOString()} ` +
-          `in organization #${organization_id}`,
-      );
-      throw new Error(
-        `No open fiscal period found for date ${entry_date.toISOString()}`,
+      fiscal_period = await this.ensureMonthlyFiscalPeriod(
+        organization_id,
+        accounting_entity.id,
+        entry_date,
       );
     }
 
@@ -404,6 +649,7 @@ export class AutoEntryService {
       'refund.completed': 'auto_return',
       'purchase_order.received': 'auto_purchase',
       'purchase_order.payment': 'auto_purchase',
+      purchase_vat: 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
       installment_payment: 'auto_installment_payment',
@@ -413,7 +659,10 @@ export class AutoEntryService {
       'disposal.fixed_asset': 'auto_depreciation',
       'withholding.applied': 'auto_expense',
       payroll_item: 'auto_payroll',
+      'settlement.approved': 'auto_payroll',
       'settlement.paid': 'auto_payroll',
+      'layaway.cancelled': 'auto_payment',
+      'dispatch_route.closed': 'adjustment',
       ar_write_off: 'adjustment',
       ap_payment: 'auto_purchase',
       ap_write_off: 'adjustment',
@@ -426,6 +675,11 @@ export class AutoEntryService {
       cash_register_movement: 'adjustment',
       'expense.refunded': 'auto_expense',
       'expense.cancelled': 'auto_expense',
+      // F5 — Liquidación de IVA y su reversa. Reutilizan el tipo 'adjustment'
+      // del enum accounting_entry_type_enum (no es venta/compra/pago, es un
+      // ajuste de cierre de las cuentas de IVA generado/descontable).
+      vat_declaration: 'adjustment',
+      vat_declaration_reversal: 'adjustment',
     };
     const entry_type = entry_type_map[source_type] || 'manual';
 
@@ -498,6 +752,12 @@ export class AutoEntryService {
             description: line.description || null,
             debit_amount: new Prisma.Decimal(line.debit_amount),
             credit_amount: new Prisma.Decimal(line.credit_amount),
+            // Snapshot histórico del tercero — viaja en el payload del evento
+            // (nunca se resuelve por lookup aquí). Ver AutoEntryThirdParty.
+            third_party_id: line.third_party?.id ?? null,
+            third_party_type: line.third_party?.type ?? null,
+            third_party_name: line.third_party?.name ?? null,
+            third_party_tax_id: line.third_party?.tax_id ?? null,
           };
         }),
       });
@@ -579,7 +839,22 @@ export class AutoEntryService {
     total: number;
     user_id?: number;
     accounting_entity_id?: number;
+    /**
+     * Snapshot del cliente al momento de la venta. Debe venir ya resuelto por
+     * el emisor (p.ej. `updated.customer` en invoice-flow.service.ts, ya
+     * cargado vía INVOICE_INCLUDE) — PROHIBIDO resolverlo aquí por lookup.
+     */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     // Caso 2 (retenido): the customer withholds part of the payment. Recognize
     // the withholding as an asset (1355) at revenue recognition and reduce the
     // receivable by the same amount. Empty breakdown → identical to legacy.
@@ -596,6 +871,7 @@ export class AutoEntryService {
         accounts_receivable,
         0,
         data.store_id,
+        customer_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -636,9 +912,7 @@ export class AutoEntryService {
       source_id: data.invoice_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,
-      entry_date: new Date(),
-      description: `Invoice validated #${data.invoice_id}`,
+      accounting_entity_id: data.accounting_entity_id,      description: `Invoice validated #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -706,9 +980,7 @@ export class AutoEntryService {
       source_id: data.invoice_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,
-      entry_date: new Date(),
-      description: `Credit note accepted #${data.invoice_id}`,
+      accounting_entity_id: data.accounting_entity_id,      description: `Credit note accepted #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -812,9 +1084,7 @@ export class AutoEntryService {
       source_id: data.invoice_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,
-      entry_date: new Date(),
-      description: `Support document accepted #${data.invoice_id}`,
+      accounting_entity_id: data.accounting_entity_id,      description: `Support document accepted #${data.invoice_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -851,7 +1121,21 @@ export class AutoEntryService {
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
     user_id?: number;
+    /**
+     * Snapshot del cliente que paga. El emisor ya tiene `order.customer_id`
+     * en scope (ver payments.service.ts) — PROHIBIDO resolverlo aquí.
+     */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     // Check if this payment's order has an associated invoice
     let has_invoice = false;
     if (data.order_id) {
@@ -891,6 +1175,7 @@ export class AutoEntryService {
           0,
           data.amount,
           data.store_id,
+          customer_third_party,
         ),
       ]);
     } else {
@@ -973,9 +1258,7 @@ export class AutoEntryService {
       source_type: 'payment.received',
       source_id: data.payment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description,
+      store_id: data.store_id,      description,
       lines,
       user_id: data.user_id,
     });
@@ -997,7 +1280,18 @@ export class AutoEntryService {
     discount_amount?: number;
     total_amount: number;
     user_id?: number;
+    /** Snapshot del cliente de la venta a crédito. Ver onPaymentReceived. */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     const order_ref = data.order_number ? ` - Orden ${data.order_number}` : '';
     const discount = Number(data.discount_amount || 0);
 
@@ -1019,6 +1313,7 @@ export class AutoEntryService {
         accounts_receivable,
         0,
         data.store_id,
+        customer_third_party,
       ),
     ];
 
@@ -1075,9 +1370,7 @@ export class AutoEntryService {
       source_type: 'credit_sale.created',
       source_id: data.order_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Venta a crédito #${data.order_id}${order_ref}`,
+      store_id: data.store_id,      description: `Venta a crédito #${data.order_id}${order_ref}`,
       lines,
       user_id: data.user_id,
     });
@@ -1092,7 +1385,25 @@ export class AutoEntryService {
     store_id?: number;
     amount: number;
     user_id?: number;
+    /**
+     * Snapshot del proveedor/acreedor del gasto. NOTA: el modelo `expenses`
+     * genérico no tiene `supplier_id` propio (confirmado — solo
+     * `vendor_support_documents`, un flujo DIAN aparte, liga a `suppliers`).
+     * Se deja el campo opcional listo para el día que expense-flow.service.ts
+     * lo resuelva desde `expense_categories`/vendor y lo agregue al payload;
+     * hoy siempre llega `undefined` y la línea se postea igual que antes.
+     */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -1109,6 +1420,7 @@ export class AutoEntryService {
         0,
         data.amount,
         data.store_id,
+        supplier_third_party,
       ),
     ]);
 
@@ -1116,9 +1428,7 @@ export class AutoEntryService {
       source_type: 'expense.approved',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Expense approved #${data.expense_id}`,
+      store_id: data.store_id,      description: `Expense approved #${data.expense_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -1133,7 +1443,18 @@ export class AutoEntryService {
     store_id?: number;
     amount: number;
     user_id?: number;
+    /** Snapshot del proveedor/acreedor. Ver onExpenseApproved. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -1142,6 +1463,7 @@ export class AutoEntryService {
         data.amount,
         0,
         data.store_id,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -1157,16 +1479,14 @@ export class AutoEntryService {
       source_type: 'expense.paid',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Expense paid #${data.expense_id}`,
+      store_id: data.store_id,      description: `Expense paid #${data.expense_id}`,
       lines,
       user_id: data.user_id,
     });
   }
 
   /**
-   * payroll.approved: Debit Payroll Expense + SS (split by cost center), Credit Salaries Payable + Health + Pension
+   * payroll.approved: Debit Payroll Expense + SS (split by cost center), Credit Salaries Payable + Health + Pension + Labor Withholding (236505) + Other Withholdings (2365)
    *
    * Cost center mapping:
    *   administrative → 5105 (Gastos de Personal - Admin)
@@ -1174,6 +1494,17 @@ export class AutoEntryService {
    *   sales          → 5205 (Gastos de Personal - Ventas)
    *
    * Liability accounts (credit side) are shared across all cost centers.
+   *
+   * B1 (segregación 236505): la retención en la fuente laboral (retefuente
+   * practicada al empleado sobre su salario, columna `deductions.retention` en
+   * `payroll_items`) se acredita en la sub-cuenta 236505 "Retención en la
+   * Fuente - Laboral" en lugar de la 2365 genérica. El resto de retenciones
+   * (si existieran) sigue acreditándose a 2365. Cuadre:
+   *   total_debits - (net_pay + health + pension) = total_retention (→ 236505) + otros (→ 2365)
+   * Si el cálculo de "otros" sale negativo (e.g. datos redondeados que no
+   * cuadran exactamente), NO fallamos el asiento — emitimos warning y
+   * ponemos 0 con nota en la descripción. La invariante de balance la
+   * garantiza la validación al final de `createAutoEntry`.
    */
   async onPayrollApproved(data: {
     payroll_run_id: number;
@@ -1185,6 +1516,12 @@ export class AutoEntryService {
     total_net_pay: number;
     health_deduction: number;
     pension_deduction: number;
+    /**
+     * B1: suma de `payroll_items.deductions.retention` (retefuente laboral).
+     * Si el caller no la propaga, se trata como 0 (compatibilidad con callers
+     * históricos que aún no la incluyen).
+     */
+    total_retention?: number;
     accounting_entity_id?: number;
     user_id?: number;
     cost_center_breakdown?: Record<
@@ -1193,6 +1530,12 @@ export class AutoEntryService {
     >;
   }) {
     const lines: (AutoEntryLine | null)[] = [];
+
+    // B1: retención laboral segregada a 236505.
+    const total_retention = Math.max(
+      0,
+      Number(data.total_retention ?? 0),
+    );
 
     // === DEBIT LINES ===
     if (
@@ -1292,21 +1635,49 @@ export class AutoEntryService {
       );
     }
 
-    // Withholdings = total debits - (net_pay + health + pension)
+    // B1: segregación de retenciones. Primero acreditamos la retención laboral
+    // (retefuente del empleado) en 236505; luego el resto de retenciones van a
+    // la cuenta 2365 genérica. Cuadre:
+    //   total_debits = net_pay + health + pension + labor_withholding (236505) + other_withholdings (2365)
+    //   other_withholdings = total_debits - (net_pay + health + pension + labor_withholding)
     const total_debits = data.total_earnings + data.total_employer_costs;
-    const remaining =
+    if (total_retention > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'payroll.approved.labor_withholding',
+          'Retención en la Fuente - Laboral',
+          0,
+          total_retention,
+          data.store_id,
+        ),
+      );
+    }
+    const other_withholdings =
       total_debits -
-      (data.total_net_pay + data.health_deduction + data.pension_deduction);
-    if (remaining > 0.001) {
+      (data.total_net_pay +
+        data.health_deduction +
+        data.pension_deduction +
+        total_retention);
+    if (other_withholdings > 0.001) {
       lines.push(
         await this.resolveAccountLine(
           data.organization_id,
           'payroll.approved.withholdings',
-          'Retenciones y deducciones',
+          'Otras retenciones y deducciones',
           0,
-          remaining,
+          other_withholdings,
           data.store_id,
         ),
+      );
+    } else if (other_withholdings < -0.001) {
+      // Diferencia por redondeo o datos ruidosos: NO fallar el asiento (la
+      // invariante de balance la garantiza `createAutoEntry`). Log warning
+      // y emitir la línea con valor 0 para mantener la trazabilidad.
+      this.logger.warn(
+        `payroll.approved #${data.payroll_run_id}: computed other_withholdings ` +
+          `=${other_withholdings.toFixed(2)} is negative after segregating labor ` +
+          `retention ${total_retention.toFixed(2)}; clamping to 0 and proceeding.`,
       );
     }
 
@@ -1315,9 +1686,7 @@ export class AutoEntryService {
       source_id: data.payroll_run_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,
-      entry_date: new Date(),
-      description: `Nómina Aprobada - Run #${data.payroll_run_id}`,
+      accounting_entity_id: data.accounting_entity_id,      description: `Nómina Aprobada - Run #${data.payroll_run_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -1336,6 +1705,15 @@ export class AutoEntryService {
       payroll_item_id: number;
       employee_id: number;
       cost_center: string;
+      /**
+       * Snapshot del empleado (forward-fill: solo asientos NUEVOS lo llevan;
+       * la nómina histórica ya posteada NO se reescribe). Opcional porque el
+       * emisor (payroll-flow.service.ts) hoy no lo incluye — `run.payroll_items`
+       * ya trae `employee.{id,document_type,document_number,first_name,last_name}`
+       * en memoria; falta solo que ese servicio lo agregue al payload.
+       */
+      employee_name?: string;
+      employee_document?: string;
       earnings: {
         base_salary: number;
         transport_subsidy: number;
@@ -1371,6 +1749,12 @@ export class AutoEntryService {
 
     for (const item of data.payroll_items) {
       try {
+        const employee_third_party: AutoEntryThirdParty = {
+          id: item.employee_id,
+          type: 'employee',
+          name: item.employee_name,
+          tax_id: item.employee_document,
+        };
         const e = item.earnings ?? {
           base_salary: 0,
           transport_subsidy: 0,
@@ -1563,11 +1947,13 @@ export class AutoEntryService {
         );
 
         if (d.retention > 0) {
+          // B1: la retención en la fuente del empleado se acredita en la
+          // sub-cuenta 236505 (laboral), NO en la 2365 genérica.
           lines.push(
             await this.resolveAccountLine(
               data.organization_id,
-              'payroll.approved.withholdings',
-              'Retención',
+              'payroll.approved.labor_withholding',
+              'Retención en la Fuente - Laboral',
               0,
               d.retention,
               data.store_id,
@@ -1597,6 +1983,7 @@ export class AutoEntryService {
             0,
             item.net_pay,
             data.store_id,
+            employee_third_party,
           ),
         );
 
@@ -1716,9 +2103,7 @@ export class AutoEntryService {
           source_type: 'payroll_item',
           source_id: item.payroll_item_id,
           organization_id: data.organization_id,
-          store_id: data.store_id,
-          entry_date: new Date(),
-          description: `Nómina Pago Empleado #${item.employee_id} - Run #${data.payroll_run_id}`,
+          store_id: data.store_id,          description: `Nómina Pago Empleado #${item.employee_id} - Run #${data.payroll_run_id}`,
           lines,
           user_id: data.user_id,
         });
@@ -1769,9 +2154,7 @@ export class AutoEntryService {
       source_type: 'order.completed',
       source_id: data.order_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Order completed #${data.order_id} - COGS`,
+      store_id: data.store_id,      description: `Order completed #${data.order_id} - COGS`,
       lines,
       user_id: data.user_id,
     });
@@ -1831,9 +2214,7 @@ export class AutoEntryService {
       source_type: 'production.completed',
       source_id: data.production_order_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Producción completada #${data.production_order_id} – ${data.product_name}`,
+      store_id: data.store_id,      description: `Producción completada #${data.production_order_id} – ${data.product_name}`,
       lines,
       user_id: data.user_id,
     });
@@ -1900,9 +2281,7 @@ export class AutoEntryService {
       source_type: 'kitchen.fired',
       source_id: data.kitchen_ticket_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Fire-to-kitchen ticket #${data.kitchen_ticket_id} – orden #${data.order_id} (${data.consumed_line_count} líneas)`,
+      store_id: data.store_id,      description: `Fire-to-kitchen ticket #${data.kitchen_ticket_id} – orden #${data.order_id} (${data.consumed_line_count} líneas)`,
       lines,
       user_id: data.user_id,
     });
@@ -1977,9 +2356,7 @@ export class AutoEntryService {
       source_type: 'refund.completed',
       source_id: data.refund_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Devolución #${data.refund_id}`,
+      store_id: data.store_id,      description: `Devolución #${data.refund_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -1987,14 +2364,47 @@ export class AutoEntryService {
 
   /**
    * purchase_order.received: Debit Inventory, Credit Accounts Payable
+   *
+   * D2: fired on EVERY reception (partial or final) of a purchase order, not
+   * only when it becomes fully received. `data.total_amount` here is already
+   * the prorated amount for THIS specific reception batch (or the remainder
+   * on the final reception) — computed by the emitter in
+   * purchase-orders.service.ts, never recomputed here.
    */
   async onPurchaseOrderReceived(data: {
     purchase_order_id: number;
+    /**
+     * `purchase_order_receptions.id` — used as `source_id` instead of
+     * `purchase_order_id` so createAutoEntry's (source_type, source_id)
+     * duplicate guard treats each partial reception of the same order as a
+     * distinct event instead of skipping the 2nd/3rd reception as a dup.
+     */
+    reception_id: number;
     organization_id: number;
     store_id?: number;
+    /**
+     * F2: entidad fiscal resuelta por el emisor vía FiscalScopeService. Se
+     * propaga explícitamente (en vez de dejar que createAutoEntry caiga al
+     * fallback) para que la resolución sea determinista y trazable.
+     */
+    accounting_entity_id?: number;
     total_amount: number;
     user_id?: number;
+    /**
+     * Snapshot del proveedor. El emisor ya carga `result.updated_po.suppliers`
+     * completo (ver purchase-orders.service.ts) — PROHIBIDO resolverlo aquí.
+     */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -2011,16 +2421,100 @@ export class AutoEntryService {
         0,
         data.total_amount,
         data.store_id,
+        supplier_third_party,
       ),
     ]);
 
     return this.createAutoEntry({
       source_type: 'purchase_order.received',
-      source_id: data.purchase_order_id,
+      source_id: data.reception_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Purchase order received #${data.purchase_order_id}`,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `Purchase order received #${data.purchase_order_id} (reception #${data.reception_id})`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * F2 IVA lifecycle — recognize the DEDUCTIBLE VAT (IVA descontable) of a POP
+   * purchase from a VAT-responsible commerce (O-48), via a "VAT-only" journal
+   * entry:
+   *
+   *   DR 240804  IVA descontable en compras (iva)
+   *   CR 2205    Proveedores                (iva)
+   *
+   * This is the complement to `purchase_order.received` (which already posts
+   * DR 1435 net / CR 2205 net). Together the combined economic entry is:
+   *
+   *   DR 1435   Inventario        (neto)
+   *   DR 240804 IVA descontable   (iva)
+   *   CR 2205   Proveedores       (bruto = neto + iva)
+   *
+   * It deliberately does NOT reuse `onSupportDocumentAccepted` (which also
+   * debits 5195 expense + credits the FULL 2205), because that would duplicate
+   * the payable and contabilize expense over inventoried merchandise.
+   *
+   * Idempotent by (organization_id, source_type='purchase_vat',
+   * source_id=invoice_id, accounting_entity_id). O-49 (non-responsible) never
+   * reaches here — its VAT is already capitalized into inventory cost by F1.
+   */
+  async onPurchaseVatRecognized(data: {
+    invoice_id: number;
+    purchase_order_id: number;
+    reception_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    iva_amount: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+    user_id?: number;
+  }) {
+    const iva = Number(data.iva_amount || 0);
+    if (!(iva > 0)) {
+      this.logger.warn(
+        `Skipping purchase_vat recognition for invoice #${data.invoice_id}: non-positive IVA (${iva})`,
+      );
+      return null;
+    }
+
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.iva_deductible',
+        'IVA Descontable en Compras',
+        iva,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.accounts_payable',
+        'Proveedores (complemento IVA)',
+        0,
+        iva,
+        data.store_id,
+        supplier_third_party,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'purchase_vat',
+      source_id: data.invoice_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `IVA descontable compra — factura #${data.invoice_id} (PO #${data.purchase_order_id}, recepción #${data.reception_id})`,
       lines,
       user_id: data.user_id,
     });
@@ -2035,7 +2529,18 @@ export class AutoEntryService {
     amount: number;
     payment_method: string;
     user_id?: number;
+    /** Snapshot del proveedor. Ver onPurchaseOrderReceived. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     // Resolve cash/bank key based on payment method
     const method = (data.payment_method || '').toLowerCase();
     const is_cash = method.includes('cash') || method.includes('efectivo');
@@ -2050,6 +2555,8 @@ export class AutoEntryService {
         'Proveedores - Pago OC',
         data.amount,
         0,
+        undefined,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -2063,9 +2570,7 @@ export class AutoEntryService {
     return this.createAutoEntry({
       source_type: 'purchase_order.payment',
       source_id: data.purchase_order_id,
-      organization_id: data.organization_id,
-      entry_date: new Date(),
-      description: `Pago orden de compra #${data.purchase_order_id}`,
+      organization_id: data.organization_id,      description: `Pago orden de compra #${data.purchase_order_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2130,9 +2635,7 @@ export class AutoEntryService {
       source_type: 'inventory.adjusted',
       source_id: data.adjustment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Inventory adjustment #${data.adjustment_id}`,
+      store_id: data.store_id,      description: `Inventory adjustment #${data.adjustment_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2194,9 +2697,7 @@ export class AutoEntryService {
       source_type: 'installment_payment',
       source_id: data.payment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Abono cuota #${data.installment_number} - Crédito ${data.credit_number}`,
+      store_id: data.store_id,      description: `Abono cuota #${data.installment_number} - Crédito ${data.credit_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2248,9 +2749,7 @@ export class AutoEntryService {
       source_type: 'layaway.payment',
       source_id: data.payment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Pago de plan separé ${data.plan_number}`,
+      store_id: data.store_id,      description: `Pago de plan separé ${data.plan_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2291,9 +2790,174 @@ export class AutoEntryService {
       source_type: 'layaway.completed',
       source_id: data.plan_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Plan separé completado ${data.plan_number}`,
+      store_id: data.store_id,      description: `Plan separé completado ${data.plan_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * layaway.cancelled: reversa del anticipo recibido.
+   *   DR 2805 Anticipos recibidos      (total_paid)
+   *   CR 1105/1110 Caja/Banco          (refund_amount, dinero devuelto)
+   *   CR 4295 Otros ingresos           (cancellation_fee, penalización retenida)
+   * Invariante: refund_amount + cancellation_fee == total_paid (la entrada
+   * balancea por construcción: DR total_paid == CR (refund + fee)).
+   */
+  async onLayawayCancelled(data: {
+    plan_id: number;
+    plan_number: string;
+    organization_id: number;
+    store_id?: number;
+    total_paid: number;
+    refund_amount: number;
+    cancellation_fee: number;
+    refund_method?: string;
+    user_id?: number;
+  }) {
+    const lines: (AutoEntryLine | null)[] = [];
+
+    // DR: reversa del anticipo (todo lo pagado sale del pasivo 2805)
+    if (data.total_paid > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'layaway.cancelled.advance',
+          `Reversa anticipo separé ${data.plan_number}`,
+          data.total_paid,
+          0,
+          data.store_id,
+        ),
+      );
+    }
+
+    // CR: devolución de efectivo/banco al cliente
+    if (data.refund_amount > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'layaway.cancelled.refund',
+          `Devolución separé ${data.plan_number}`,
+          0,
+          data.refund_amount,
+          data.store_id,
+        ),
+      );
+    }
+
+    // CR: penalización retenida reconocida como otros ingresos
+    if (data.cancellation_fee > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'layaway.cancelled.forfeit_income',
+          `Penalización separé ${data.plan_number}`,
+          0,
+          data.cancellation_fee,
+          data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'layaway.cancelled',
+      source_id: data.plan_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,      description: `Plan separé cancelado ${data.plan_number}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * dispatch_route.closed: contabiliza SOLO el cuadre de efectivo del conductor
+   * (cash_variance). El recaudo y las retenciones por parada ya se contabilizan
+   * vía payment.received / withholding al liquidar cada parada — aquí NO se
+   * vuelve a contabilizar (anti doble-conteo).
+   *
+   *   Sobrante (cash_variance > 0): DR 1105 Caja / CR 4295 Otros ingresos.
+   *   Faltante (cash_variance < 0): DR 1365 CxC a trabajadores (conductor) / CR 1105 Caja.
+   *   cash_variance == 0: no se genera asiento.
+   */
+  async onDispatchRouteClosed(data: {
+    route_id: number;
+    route_number: string;
+    organization_id: number;
+    store_id?: number;
+    cash_variance: number;
+    driver_user_id?: number;
+    driver_label?: string;
+    user_id?: number;
+  }) {
+    const variance = Number(data.cash_variance || 0);
+    // GUARD anti doble-conteo: sin descuadre no hay asiento (el recaudo y las
+    // retenciones ya fueron contabilizados por parada).
+    if (Math.abs(variance) <= 0.01) {
+      this.logger.log(
+        `Skipping dispatch_route.closed auto-entry for route ${data.route_number}: cash_variance is zero`,
+      );
+      return null;
+    }
+
+    const driver = data.driver_label
+      ? ` - ${data.driver_label}`
+      : data.driver_user_id
+        ? ` - conductor #${data.driver_user_id}`
+        : '';
+    const lines: (AutoEntryLine | null)[] = [];
+
+    if (variance > 0) {
+      // Sobrante: entra efectivo, se reconoce como otro ingreso.
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_route.closed.cash',
+          `Sobrante de ruta ${data.route_number}`,
+          variance,
+          0,
+          data.store_id,
+        ),
+      );
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_route.closed.surplus',
+          `Sobrante de ruta ${data.route_number}`,
+          0,
+          variance,
+          data.store_id,
+        ),
+      );
+    } else {
+      // Faltante: el efectivo no entregado queda como CxC al conductor.
+      const shortage = Math.abs(variance);
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_route.closed.shortage_receivable',
+          `Faltante de ruta ${data.route_number}${driver}`,
+          shortage,
+          0,
+          data.store_id,
+        ),
+      );
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'dispatch_route.closed.cash',
+          `Faltante de ruta ${data.route_number}`,
+          0,
+          shortage,
+          data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'dispatch_route.closed',
+      source_id: data.route_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,      description: `Cuadre planilla de ruta ${data.route_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2439,9 +3103,7 @@ export class AutoEntryService {
       source_type: 'disposal.fixed_asset',
       source_id: data.asset_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Baja de activo fijo ${data.asset_number}`,
+      store_id: data.store_id,      description: `Baja de activo fijo ${data.asset_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -2533,9 +3195,7 @@ export class AutoEntryService {
       source_type: 'withholding.applied',
       source_id: data.invoice_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Retención ${data.concept_name} - ${data.supplier_name}`,
+      store_id: data.store_id,      description: `Retención ${data.concept_name} - ${data.supplier_name}`,
       lines,
       user_id: data.user_id,
     });
@@ -2553,6 +3213,135 @@ export class AutoEntryService {
    * DB 5105 Gastos de Personal (salario pendiente + indemnización)
    * CR 2370 Retenciones y Aportes de Nómina (salud + pensión)
    * CR 1110 Bancos (neto)
+   */
+  /**
+   * settlement.approved (DEVENGO/causación): reconoce el COSTO laboral de la
+   * liquidación como gasto/provisión contra el pasivo laboral 2505.
+   *
+   *   DR 2610 Cesantías
+   *   DR 2615 Intereses sobre Cesantías
+   *   DR 2620 Prima Proporcional
+   *   DR 2625 Vacaciones Proporcionales
+   *   DR 5105 Gastos de Personal (salario pendiente + indemnización)
+   *   CR 2505 Salarios por Pagar (total devengado = suma de los débitos)
+   *
+   * El pago (`onSettlementPaid`) SOLO drena 2505; el gasto NO se vuelve a
+   * reconocer. Idempotencia: `createAutoEntry` deduplica por
+   * (org, source_type='settlement.approved', source_id, accounting_entity);
+   * un re-emit de settlement.approved no causa un segundo asiento.
+   */
+  async onSettlementApproved(data: {
+    settlement_id: number;
+    settlement_number: string;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    employee_name: string;
+    severance: number;
+    severance_interest: number;
+    bonus: number;
+    vacation: number;
+    pending_salary: number;
+    indemnification: number;
+    user_id?: number;
+  }) {
+    const lines: (AutoEntryLine | null)[] = [];
+    const desc = (concept: string) =>
+      `${concept} - ${data.employee_name} (${data.settlement_number})`;
+
+    // DEBIT lines (provisiones + gasto): cada concepto causa su costo.
+    const debit_specs: Array<{ key: string; label: string; amount: number }> = [
+      {
+        key: 'settlement.approved.severance',
+        label: 'Cesantías',
+        amount: data.severance,
+      },
+      {
+        key: 'settlement.approved.severance_interest',
+        label: 'Intereses Cesantías',
+        amount: data.severance_interest,
+      },
+      {
+        key: 'settlement.approved.bonus',
+        label: 'Prima Proporcional',
+        amount: data.bonus,
+      },
+      {
+        key: 'settlement.approved.vacation',
+        label: 'Vacaciones Proporcionales',
+        amount: data.vacation,
+      },
+      {
+        key: 'settlement.approved.pending_salary',
+        label: 'Salario Pendiente',
+        amount: data.pending_salary,
+      },
+      {
+        key: 'settlement.approved.indemnification',
+        label: 'Indemnización',
+        amount: data.indemnification,
+      },
+    ];
+
+    let total_accrued = 0;
+    for (const spec of debit_specs) {
+      if (spec.amount > 0) {
+        total_accrued += spec.amount;
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id,
+            spec.key,
+            desc(spec.label),
+            spec.amount,
+            0,
+            data.store_id,
+          ),
+        );
+      }
+    }
+
+    // CR 2505 Salarios por Pagar — el total devengado pasa a pasivo laboral.
+    if (total_accrued > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          data.organization_id,
+          'settlement.approved.salaries_payable',
+          desc('Salarios por Pagar (causación)'),
+          0,
+          total_accrued,
+          data.store_id,
+        ),
+      );
+    }
+
+    return this.createAutoEntry({
+      source_type: 'settlement.approved',
+      source_id: data.settlement_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,      description: `Liquidación causada ${data.settlement_number} - ${data.employee_name}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * settlement.paid (DEVENGO): SOLO drena el pasivo laboral 2505 causado en
+   * `settlement.approved`. NO reconoce gasto (ya se reconoció en la causación)
+   * → no hay doble gasto cuando approved + paid ocurren ambos.
+   *
+   *   DR 2505 Salarios por Pagar (total devengado = gross)
+   *   CR 2370 Retenciones de Nómina (salud + pensión)
+   *   CR 1110 Bancos (neto)
+   *
+   * Donde gross == social_deductions + net_settlement, por lo que la entrada
+   * balancea.
+   *
+   * Salvaguarda de orden de estados: la máquina exige calculated→approved→paid
+   * (ver settlement-flow.service.ts VALID_TRANSITIONS), así que `paid` SIEMPRE
+   * llega después de `approved` y el pasivo 2505 ya existe. Si por una ruta
+   * futura el accrual no existiese, este asiento dejaría 2505 en negativo; el
+   * accrual es la única fuente que lo abona.
    */
   async onSettlementPaid(data: {
     settlement_id: number;
@@ -2575,74 +3364,24 @@ export class AutoEntryService {
     const desc = (concept: string) =>
       `${concept} - ${data.employee_name} (${data.settlement_number})`;
 
-    // DEBIT lines (provisions and expenses)
-    if (data.severance > 0) {
+    // Total devengado (gross) = suma de conceptos causados en approved. Es lo
+    // que drenamos del pasivo 2505.
+    const gross =
+      data.severance +
+      data.severance_interest +
+      data.bonus +
+      data.vacation +
+      data.pending_salary +
+      data.indemnification;
+
+    // DR 2505 — drena el pasivo laboral causado en approved.
+    if (gross > 0) {
       lines.push(
         await this.resolveAccountLine(
           data.organization_id,
-          'settlement.paid.severance',
-          desc('Cesantías'),
-          data.severance,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.severance_interest > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.severance_interest',
-          desc('Intereses Cesantías'),
-          data.severance_interest,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.bonus > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.bonus',
-          desc('Prima Proporcional'),
-          data.bonus,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.vacation > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.vacation',
-          desc('Vacaciones Proporcionales'),
-          data.vacation,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.pending_salary > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.pending_salary',
-          desc('Salario Pendiente'),
-          data.pending_salary,
-          0,
-          data.store_id,
-        ),
-      );
-    }
-    if (data.indemnification > 0) {
-      lines.push(
-        await this.resolveAccountLine(
-          data.organization_id,
-          'settlement.paid.indemnification',
-          desc('Indemnización'),
-          data.indemnification,
+          'settlement.paid.salaries_payable',
+          desc('Drenaje Salarios por Pagar'),
+          gross,
           0,
           data.store_id,
         ),
@@ -2681,9 +3420,7 @@ export class AutoEntryService {
       source_type: 'settlement.paid',
       source_id: data.settlement_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Liquidación pagada ${data.settlement_number} - ${data.employee_name}`,
+      store_id: data.store_id,      description: `Liquidación pagada ${data.settlement_number} - ${data.employee_name}`,
       lines,
       user_id: data.user_id,
     });
@@ -2725,9 +3462,7 @@ export class AutoEntryService {
       source_type: 'cash_register_opened',
       source_id: data.session_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Apertura caja registradora - Sesión #${data.session_id}`,
+      store_id: data.store_id,      description: `Apertura caja registradora - Sesión #${data.session_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2803,9 +3538,7 @@ export class AutoEntryService {
       source_type: 'cash_register_closed',
       source_id: data.session_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Cierre caja registradora - Sesión #${data.session_id}`,
+      store_id: data.store_id,      description: `Cierre caja registradora - Sesión #${data.session_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2851,9 +3584,7 @@ export class AutoEntryService {
       source_type: 'cash_register_movement',
       source_id: data.movement_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `${desc} #${data.movement_id}${data.reference ? ` - ${data.reference}` : ''}`,
+      store_id: data.store_id,      description: `${desc} #${data.movement_id}${data.reference ? ` - ${data.reference}` : ''}`,
       lines,
       user_id: data.user_id,
     });
@@ -2872,7 +3603,18 @@ export class AutoEntryService {
     amount: number;
     document_number?: string;
     user_id: number;
+    /** Snapshot del cliente cuya cartera se castiga. */
+    customer?: { id: number; name?: string; tax_id?: string };
   }) {
+    const customer_third_party: AutoEntryThirdParty | undefined = data.customer
+      ? {
+          id: data.customer.id,
+          type: 'customer',
+          name: data.customer.name,
+          tax_id: data.customer.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -2889,6 +3631,7 @@ export class AutoEntryService {
         0,
         data.amount,
         data.store_id,
+        customer_third_party,
       ),
     ]);
 
@@ -2896,9 +3639,7 @@ export class AutoEntryService {
       source_type: 'ar_write_off',
       source_id: data.ar_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Castigo CxC${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ar_id}`,
+      store_id: data.store_id,      description: `Castigo CxC${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ar_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2918,7 +3659,18 @@ export class AutoEntryService {
     payment_method?: string;
     document_number?: string;
     user_id: number;
+    /** Snapshot del proveedor cuya cuenta por pagar se cancela. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -2927,6 +3679,7 @@ export class AutoEntryService {
         data.amount,
         0,
         data.store_id,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -2942,9 +3695,7 @@ export class AutoEntryService {
       source_type: 'ap_payment',
       source_id: data.ap_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Pago CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
+      store_id: data.store_id,      description: `Pago CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -2961,7 +3712,18 @@ export class AutoEntryService {
     amount: number;
     document_number?: string;
     user_id: number;
+    /** Snapshot del proveedor cuya cuenta por pagar se castiga. */
+    supplier?: { id: number; name?: string; tax_id?: string };
   }) {
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
     const lines = await Promise.all([
       this.resolveAccountLine(
         data.organization_id,
@@ -2970,6 +3732,7 @@ export class AutoEntryService {
         data.amount,
         0,
         data.store_id,
+        supplier_third_party,
       ),
       this.resolveAccountLine(
         data.organization_id,
@@ -2985,9 +3748,7 @@ export class AutoEntryService {
       source_type: 'ap_write_off',
       source_id: data.ap_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Castigo CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
+      store_id: data.store_id,      description: `Castigo CxP${data.document_number ? ` - Doc ${data.document_number}` : ''} #${data.ap_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -3030,9 +3791,7 @@ export class AutoEntryService {
       source_type: 'commission',
       source_id: data.payment_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Comisión calculada - Pago #${data.payment_id} (Regla #${data.rule_id})`,
+      store_id: data.store_id,      description: `Comisión calculada - Pago #${data.payment_id} (Regla #${data.rule_id})`,
       lines,
       user_id: data.user_id,
     });
@@ -3071,9 +3830,7 @@ export class AutoEntryService {
       source_type: 'wallet.credited',
       source_id: data.wallet_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Recarga wallet #${data.wallet_id} - ${data.reference_type}`,
+      store_id: data.store_id,      description: `Recarga wallet #${data.wallet_id} - ${data.reference_type}`,
       lines,
       user_id: data.user_id,
     });
@@ -3111,9 +3868,7 @@ export class AutoEntryService {
       source_type: 'wallet.debited',
       source_id: data.wallet_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Pago con wallet #${data.wallet_id}${data.order_id ? ` - Orden #${data.order_id}` : ''}`,
+      store_id: data.store_id,      description: `Pago con wallet #${data.wallet_id}${data.order_id ? ` - Orden #${data.order_id}` : ''}`,
       lines,
       user_id: data.user_id,
     });
@@ -3179,9 +3934,7 @@ export class AutoEntryService {
       source_type: 'stock_transfer',
       source_id: data.transfer_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Transferencia de inventario ${data.transfer_number}`,
+      store_id: data.store_id,      description: `Transferencia de inventario ${data.transfer_number}`,
       lines,
       user_id: data.user_id,
     });
@@ -3244,9 +3997,7 @@ export class AutoEntryService {
       source_type: 'intercompany_transfer.shipped',
       source_id: data.transfer_id,
       organization_id: data.organization_id,
-      store_id: data.from_store_id,
-      entry_date: new Date(),
-      description: `Transferencia intercompany enviada ${data.transfer_number}`,
+      store_id: data.from_store_id,      description: `Transferencia intercompany enviada ${data.transfer_number}`,
       lines: shipped_lines,
       user_id: data.user_id,
     });
@@ -3255,9 +4006,7 @@ export class AutoEntryService {
       source_type: 'intercompany_transfer.received',
       source_id: data.transfer_id,
       organization_id: data.organization_id,
-      store_id: data.to_store_id,
-      entry_date: new Date(),
-      description: `Transferencia intercompany recibida ${data.transfer_number}`,
+      store_id: data.to_store_id,      description: `Transferencia intercompany recibida ${data.transfer_number}`,
       lines: received_lines,
       user_id: data.user_id,
     });
@@ -3347,9 +4096,7 @@ export class AutoEntryService {
       source_type: 'expense.refunded',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Reversión pago gasto #${data.expense_id}`,
+      store_id: data.store_id,      description: `Reversión pago gasto #${data.expense_id}`,
       lines: reversalPaymentLines,
       user_id: data.user_id,
     });
@@ -3377,9 +4124,7 @@ export class AutoEntryService {
       source_type: 'expense.refunded',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Reversión aprobación gasto #${data.expense_id}`,
+      store_id: data.store_id,      description: `Reversión aprobación gasto #${data.expense_id}`,
       lines: reversalApprovalLines,
       user_id: data.user_id,
     });
@@ -3415,9 +4160,7 @@ export class AutoEntryService {
       source_type: 'expense.cancelled',
       source_id: data.expense_id,
       organization_id: data.organization_id,
-      store_id: data.store_id,
-      entry_date: new Date(),
-      description: `Cancelación gasto #${data.expense_id}`,
+      store_id: data.store_id,      description: `Cancelación gasto #${data.expense_id}`,
       lines,
       user_id: data.user_id,
     });
@@ -3549,5 +4292,263 @@ export class AutoEntryService {
       lines,
       user_id: data.user_id,
     });
+  }
+
+  /**
+   * F5 (paso 17) — Liquidación de IVA al APROBAR la declaración `vat`. Netea el
+   * IVA generado del período contra el IVA descontable y traslada el NETO a la
+   * cuenta de liquidación correspondiente:
+   *
+   *   DR 240802  IVA Generado por Ventas       (por el generado del período)
+   *   CR 240804  IVA Descontable en Compras    (por el descontable del período)
+   *   ── neto ──
+   *   CR 240810  IVA por Pagar - Liquidación   (si generado > descontable)
+   *   DR 135520  Saldo a Favor en IVA          (si descontable > generado)
+   *
+   * Ejemplo (generado=1900, descontable=1140): DR 240802 1900 / CR 240804 1140
+   * / CR 240810 760 → SUM(debit)=1900 = SUM(credit)=1140+760.
+   *
+   * Se dispara con el período AÚN abierto (evento vat.declaration.approved), no
+   * al cerrar: así el asiento fechado en `period_end` cae dentro del período
+   * abierto y NO lo rechaza el guard FISCAL_PERIOD_CLOSED de createAutoEntry.
+   *
+   * Idempotente por (organization_id, source_type='vat_declaration',
+   * source_id=declaration_id, accounting_entity_id): aprobar dos veces devuelve
+   * el mismo entry (la guarda vive en createAutoEntry).
+   */
+  async onVatSettlement(data: {
+    declaration_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    generated_tax_amount: number;
+    deductible_tax_amount: number;
+    period_end: Date;
+    user_id?: number;
+  }) {
+    const generated = Math.max(0, Number(data.generated_tax_amount || 0));
+    const deductible = Math.max(0, Number(data.deductible_tax_amount || 0));
+
+    // Sin IVA que liquidar (período sin ventas ni compras gravadas): nada que
+    // contabilizar. createAutoEntry igual descartaría (<2 líneas), pero salimos
+    // temprano para no emitir un warning ruidoso.
+    if (generated <= 0 && deductible <= 0) {
+      this.logger.warn(
+        `Skipping VAT settlement for declaration #${data.declaration_id}: generado=0 y descontable=0`,
+      );
+      return null;
+    }
+
+    const balance = generated - deductible; // >0 a pagar, <0 a favor
+    const lines = await this.buildVatSettlementLines({
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      generated,
+      deductible,
+      balance,
+      reversed: false,
+    });
+
+    return this.createAutoEntry({
+      source_type: 'vat_declaration',
+      source_id: data.declaration_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      entry_date: data.period_end,
+      description: `Liquidación de IVA — declaración #${data.declaration_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * F5 (paso 18) — Reversa de la liquidación de IVA al ANULAR/RECHAZAR una
+   * declaración `vat` ya liquidada. Postea el asiento ESPEJO exacto de
+   * onVatSettlement (intercambia DR↔CR):
+   *
+   *   CR 240802  IVA Generado por Ventas       (por el generado)
+   *   DR 240804  IVA Descontable en Compras    (por el descontable)
+   *   ── neto ──
+   *   DR 240810  IVA por Pagar - Liquidación   (si generado > descontable)
+   *   CR 135520  Saldo a Favor en IVA          (si descontable > generado)
+   *
+   * Sólo reversa si existe la liquidación original (source_type='vat_declaration',
+   * mismo source_id/entidad): si la declaración nunca se aprobó (nunca se
+   * liquidó), no hay nada que reversar y se omite en silencio (log warn).
+   *
+   * Si el período de la liquidación YA está cerrado, createAutoEntry rechaza el
+   * espejo con FISCAL_PERIOD_CLOSED (el espejo se fecha en `period_end`); en ese
+   * caso se exige un período correctivo — la reversa NO se fuerza sobre un mes
+   * cerrado.
+   *
+   * Idempotente por (organization_id, source_type='vat_declaration_reversal',
+   * source_id=declaration_id, accounting_entity_id).
+   */
+  async onVatSettlementReversed(data: {
+    declaration_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    generated_tax_amount: number;
+    deductible_tax_amount: number;
+    period_end: Date;
+    user_id?: number;
+  }) {
+    // Resolver la entidad contable de la liquidación original (misma resolución
+    // que createAutoEntry usa como clave de idempotencia) para localizarla.
+    const accounting_entity = data.accounting_entity_id
+      ? await this.prisma.withoutScope().accounting_entities.findFirst({
+          where: {
+            id: data.accounting_entity_id,
+            organization_id: data.organization_id,
+            is_active: true,
+          },
+          select: { id: true },
+        })
+      : await this.fiscal_scope_service.resolveAccountingEntityForFiscal({
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+        });
+
+    if (!accounting_entity) {
+      this.logger.warn(
+        `Skipping VAT settlement reversal for declaration #${data.declaration_id}: no se pudo resolver la entidad contable`,
+      );
+      return null;
+    }
+
+    // Sólo reversar si la liquidación original fue posteada. Si la declaración
+    // nunca se aprobó (no hay asiento vat_declaration), no hay nada que reversar.
+    const original = await this.prisma.accounting_entries.findFirst({
+      where: {
+        organization_id: data.organization_id,
+        source_type: 'vat_declaration',
+        source_id: data.declaration_id,
+        accounting_entity_id: accounting_entity.id,
+      },
+      select: { id: true },
+    });
+    if (!original) {
+      this.logger.warn(
+        `Skipping VAT settlement reversal for declaration #${data.declaration_id}: no existe liquidación original que reversar`,
+      );
+      return null;
+    }
+
+    const generated = Math.max(0, Number(data.generated_tax_amount || 0));
+    const deductible = Math.max(0, Number(data.deductible_tax_amount || 0));
+    const balance = generated - deductible;
+
+    const lines = await this.buildVatSettlementLines({
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      generated,
+      deductible,
+      balance,
+      reversed: true,
+    });
+
+    return this.createAutoEntry({
+      source_type: 'vat_declaration_reversal',
+      source_id: data.declaration_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: accounting_entity.id,
+      entry_date: data.period_end,
+      description: `Reversa liquidación de IVA — declaración #${data.declaration_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * Construye las 2-3 líneas de la liquidación de IVA (o su espejo). En modo
+   * normal: DR 240802 (generado) / CR 240804 (descontable) + neto → CR 240810
+   * (a pagar) o DR 135520 (a favor). En modo `reversed` intercambia TODOS los
+   * lados (DR↔CR) para producir el asiento espejo exacto. El asiento SIEMPRE
+   * cuadra: SUM(debit) === SUM(credit) (invariante también validada por
+   * createAutoEntry con tolerancia 0.001).
+   */
+  private async buildVatSettlementLines(params: {
+    organization_id: number;
+    store_id?: number;
+    generated: number;
+    deductible: number;
+    balance: number; // generated - deductible
+    reversed: boolean;
+  }): Promise<(AutoEntryLine | null)[]> {
+    const {
+      organization_id,
+      store_id,
+      generated,
+      deductible,
+      balance,
+      reversed,
+    } = params;
+    const lines: (AutoEntryLine | null)[] = [];
+
+    // IVA generado: normal DR 240802; reversed CR 240802.
+    if (generated > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          organization_id,
+          'vat.declaration.settled.iva_generated',
+          reversed
+            ? 'Reversa IVA Generado por Ventas (liquidación)'
+            : 'IVA Generado por Ventas (liquidación)',
+          reversed ? 0 : generated,
+          reversed ? generated : 0,
+          store_id,
+        ),
+      );
+    }
+
+    // IVA descontable: normal CR 240804; reversed DR 240804.
+    if (deductible > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          organization_id,
+          'vat.declaration.settled.iva_deductible',
+          reversed
+            ? 'Reversa IVA Descontable en Compras (liquidación)'
+            : 'IVA Descontable en Compras (liquidación)',
+          reversed ? deductible : 0,
+          reversed ? 0 : deductible,
+          store_id,
+        ),
+      );
+    }
+
+    // Neto a pagar (balance>0): normal CR 240810; reversed DR 240810.
+    // Neto a favor (balance<0): normal DR 135520; reversed CR 135520.
+    if (balance > 0.001) {
+      lines.push(
+        await this.resolveAccountLine(
+          organization_id,
+          'vat.declaration.settled.vat_payable',
+          reversed
+            ? 'Reversa IVA por Pagar - Liquidación'
+            : 'IVA por Pagar - Liquidación',
+          reversed ? balance : 0,
+          reversed ? 0 : balance,
+          store_id,
+        ),
+      );
+    } else if (balance < -0.001) {
+      const favor = -balance;
+      lines.push(
+        await this.resolveAccountLine(
+          organization_id,
+          'vat.declaration.settled.vat_favor',
+          reversed ? 'Reversa Saldo a Favor en IVA' : 'Saldo a Favor en IVA',
+          reversed ? 0 : favor,
+          reversed ? favor : 0,
+          store_id,
+        ),
+      );
+    }
+
+    return lines;
   }
 }

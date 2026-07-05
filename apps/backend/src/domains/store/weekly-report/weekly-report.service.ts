@@ -24,6 +24,16 @@ const COMPLETED_ORDER_STATES = ['delivered', 'finished'];
 const RECEIVED_PO_STATUS = 'received';
 const COLOMBIA_OFFSET_MIN = -5 * 60;
 
+// Un comercio recién creado NO debe recibir "Tu Semana en Vendix" hasta
+// superar el periodo de prueba (15 días) + su primera semana completa de
+// operación. Antes de eso el reporte sólo tendría ceros y confunde a un
+// negocio que apenas arranca. Primer reporte posible: a los 22 días de creado.
+const TRIAL_PERIOD_DAYS = 15;
+const FIRST_REPORT_GRACE_DAYS = 7;
+const MIN_STORE_AGE_DAYS_FOR_WEEKLY_REPORT =
+  TRIAL_PERIOD_DAYS + FIRST_REPORT_GRACE_DAYS; // 22
+const MS_PER_DAY = 1000 * 60 * 60 * 24;
+
 @Injectable()
 export class WeeklyReportService {
   private readonly logger = new Logger(WeeklyReportService.name);
@@ -46,11 +56,28 @@ export class WeeklyReportService {
 
     const store = await this.prisma.stores.findFirst({
       where: { id: store_id, is_active: true },
-      select: { id: true, name: true },
+      select: { id: true, name: true, created_at: true },
     });
     if (!store) {
       this.logger.warn(
         `Store ${store_id} is not active or not found, skipping weekly report`,
+      );
+      return null;
+    }
+
+    // Gate de antigüedad: un comercio debe superar el trial (15d) + su primera
+    // semana (7d) antes de recibir su primer reporte semanal. Este es el único
+    // punto de creación de snapshots, así que cubre tanto el cron como la
+    // regeneración on-demand desde el dashboard (getLatestForCurrentStore).
+    // Si no hay created_at (dato anómalo), se omite por seguridad ("jamás
+    // antes de tiempo").
+    const ageDays = store.created_at
+      ? (now.getTime() - store.created_at.getTime()) / MS_PER_DAY
+      : -1;
+    if (ageDays < MIN_STORE_AGE_DAYS_FOR_WEEKLY_REPORT) {
+      this.logger.log(
+        `Store ${store_id} is ${ageDays < 0 ? 'unknown' : ageDays.toFixed(1)}d old ` +
+          `(< ${MIN_STORE_AGE_DAYS_FOR_WEEKLY_REPORT}d), skipping weekly report`,
       );
       return null;
     }
@@ -162,6 +189,21 @@ export class WeeklyReportService {
     const store_id = context?.store_id;
     if (!store_id) {
       throw new NotFoundException('Store context required');
+    }
+
+    // Gate de antigüedad también al SERVIR: aunque `generateForStore` ya impide
+    // crear snapshots para comercios jóvenes, un snapshot heredado (creado antes
+    // de este gate) no debe mostrarse. Un comercio con menos de 22 días (trial
+    // 15d + primera semana 7d) nunca ve el reporte, aunque exista el registro.
+    const store = await this.prisma.stores.findFirst({
+      where: { id: store_id },
+      select: { created_at: true },
+    });
+    const ageDays = store?.created_at
+      ? (Date.now() - store.created_at.getTime()) / MS_PER_DAY
+      : -1;
+    if (ageDays < MIN_STORE_AGE_DAYS_FOR_WEEKLY_REPORT) {
+      return null;
     }
 
     const window = getClosedWeekWindow();

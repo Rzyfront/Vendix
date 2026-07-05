@@ -9,6 +9,7 @@ import { MenuAvailabilityController } from './menu-availability.controller';
 import { MenuAvailabilityService } from './menu-availability.service';
 import { MenuEngineeringController } from './menu-engineering.controller';
 import { MenuEngineeringService } from './menu-engineering.service';
+import { MenuAvailabilityCheckerService } from './menu-availability-checker.service';
 
 /**
  * MenusModule — Restaurant Suite Fase G.
@@ -35,12 +36,14 @@ import { MenuEngineeringService } from './menu-engineering.service';
     MenuSectionsService,
     MenuAvailabilityService,
     MenuEngineeringService,
+    MenuAvailabilityCheckerService,
   ],
   exports: [
     MenusService,
     MenuSectionsService,
     MenuAvailabilityService,
     MenuEngineeringService,
+    MenuAvailabilityCheckerService,
   ],
 })
 export class MenusModule {}

@@ -585,3 +585,100 @@ export interface PilaReport {
   employees: PilaEmployeeRow[];
   totals: PilaTotals;
 }
+
+// ── PILA Submissions (tracking de generación/exportación) ──────────────
+
+export type PilaSubmissionStatus = 'generated' | 'exported' | 'void';
+
+export interface PilaSubmission {
+  id: number;
+  organization_id: number;
+  accounting_entity_id: number;
+  period_year: number;
+  period_month: number;
+  status: PilaSubmissionStatus;
+  employees_count: number;
+  total_earnings: string;
+  total_contributions: string;
+  metadata: Record<string, unknown> | null;
+  exported_at: string | null;
+  exported_by_user_id: number | null;
+  voided_at: string | null;
+  voided_by_user_id: number | null;
+  void_reason: string | null;
+  created_by_user_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface QueryPilaSubmissionsDto {
+  year?: number;
+  month?: number;
+  status?: PilaSubmissionStatus;
+  page?: number;
+  limit?: number;
+}
+
+export interface PilaSubmissionListResponse {
+  data: PilaSubmission[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage?: boolean;
+    hasPreviousPage?: boolean;
+  };
+}
+
+// ── Perfil fiscal (art. 387 ET) ────────────────────────────────────────
+
+export type RetentionProcedure = 'proc1' | 'proc2';
+
+export interface EmployeeFiscalProfile {
+  id?: number;
+  employee_id?: number;
+  certificate_year?: number;
+  dependents_count: number;
+  housing_interest_monthly: number;
+  prepaid_medicine_monthly: number;
+  voluntary_pension_monthly: number;
+  afc_monthly: number;
+  retention_procedure: RetentionProcedure;
+  fixed_retention_rate: number | null;
+  rate_semester: string | null;
+  last_calculated_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EmployeeFiscalProfileUpdateDto {
+  dependents_count?: number;
+  housing_interest_monthly?: number;
+  prepaid_medicine_monthly?: number;
+  voluntary_pension_monthly?: number;
+  afc_monthly?: number;
+  retention_procedure?: RetentionProcedure;
+  fixed_retention_rate?: number;
+  rate_semester?: string;
+}
+
+/**
+ * B5 — Procedimiento 2 (art. 386 ET): body/response de la acción de
+ * cálculo automático del porcentaje fijo semestral.
+ */
+export interface CalculateSemesterRateDto {
+  /** YYYY-1|YYYY-2. Si se omite, el backend resuelve el semestre vigente. */
+  semester?: string;
+}
+
+export interface CalculateSemesterRateResult extends EmployeeFiscalProfile {
+  calculation_detail: {
+    months_used: number;
+    average_taxable_earnings: number;
+    average_base_depurada: number;
+    average_retention_proc1: number;
+    marginal_rate: number;
+  };
+}
+

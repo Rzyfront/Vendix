@@ -318,12 +318,19 @@ import {
   Navigation,
   // Serial-numbers module icon
   Fingerprint,
+  Dumbbell,
+  DoorOpen,
+  KeyRound,
 } from 'lucide-angular';
 
 /**
  * Registry mapping current icon names to Lucide icons
  */
 export const ICON_REGISTRY: Record<string, LucideIconData> = {
+  // Gym Suite (Ola 1) icons
+  dumbbell: Dumbbell,
+  'door-open': DoorOpen,
+  'key-round': KeyRound,
   // Basic UI icons
   'external-link': ExternalLink,
   menu: Menu,

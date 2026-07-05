@@ -3,6 +3,11 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
+  ResponsiveDataViewComponent,
+  TableColumn,
+  ItemListCardConfig,
+} from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
+import {
   DispatchDeliveryAddress,
   DispatchRouteStop,
 } from '../../interfaces/planilla.interface';
@@ -26,7 +31,7 @@ type AddressLike = DispatchDeliveryAddress | string;
 @Component({
   selector: 'app-stop-detail-modal',
   standalone: true,
-  imports: [CurrencyPipe, ModalComponent, IconComponent],
+  imports: [CurrencyPipe, ModalComponent, IconComponent, ResponsiveDataViewComponent],
   template: `
     <app-modal
       [isOpen]="true"
@@ -102,16 +107,34 @@ type AddressLike = DispatchDeliveryAddress | string;
           </div>
         </div>
 
-        <!-- Items + orden vinculada -->
-        <div class="flex items-center justify-between text-sm">
-          <span class="flex items-center gap-1.5 text-text-secondary">
-            <app-icon name="package" [size]="14"></app-icon>
-            {{ itemCount() }} {{ itemCount() === 1 ? 'ítem' : 'ítems' }}
-          </span>
-          @if (orderNumber()) {
-            <span class="text-text-secondary">
-              Orden <strong class="text-text-primary">{{ orderNumber() }}</strong>
+        <!-- Ítems de la remisión -->
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span
+              class="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-text-secondary"
+            >
+              <app-icon name="package" [size]="14"></app-icon>
+              Ítems ({{ itemCount() }})
             </span>
+            @if (orderNumber()) {
+              <span class="text-xs text-text-secondary">
+                Orden <strong class="text-text-primary">{{ orderNumber() }}</strong>
+              </span>
+            }
+          </div>
+          @if (loading() && !note()) {
+            <p class="text-xs text-text-secondary italic">Cargando ítems…</p>
+          } @else {
+            <app-responsive-data-view
+              [data]="items()"
+              [columns]="columns"
+              [cardConfig]="cardConfig"
+              tableSize="sm"
+              itemListSize="sm"
+              [compact]="true"
+              emptyIcon="package"
+              emptyMessage="Sin ítems en la remisión."
+            ></app-responsive-data-view>
           }
         </div>
       </div>
@@ -173,6 +196,43 @@ export class StopDetailModalComponent {
     const so = this.note()?.sales_order as { order_number?: string } | undefined;
     return so?.order_number || '';
   });
+
+  // ── Ítems de la remisión para ResponsiveDataView ──────
+  /** Dispatch-note lines with a 1-based `_index` for the "#" column. */
+  readonly items = computed(() =>
+    (this.note()?.dispatch_note_items ?? []).map((item, i) => ({ ...item, _index: i + 1 })),
+  );
+
+  readonly columns: TableColumn[] = [
+    { key: '_index', label: '#', width: '44px', align: 'center' },
+    {
+      key: 'product.name',
+      label: 'Producto',
+      transform: (_v: any, item: any) =>
+        item?.product?.name || item?.product?.product_name || `Producto #${item?.product_id}`,
+    },
+    { key: 'ordered_quantity', label: 'Pedida', align: 'center', width: '80px' },
+    { key: 'dispatched_quantity', label: 'Despachada', align: 'center', width: '95px' },
+  ];
+
+  readonly cardConfig: ItemListCardConfig = {
+    titleKey: 'product.name',
+    titleTransform: (item: any) =>
+      item?.product?.name || item?.product?.product_name || `Producto #${item?.product_id}`,
+    subtitleKey: 'product_variant.sku',
+    subtitleTransform: (item: any) => {
+      const parts: string[] = [];
+      if (item?.product_variant?.sku) parts.push(`SKU: ${item.product_variant.sku}`);
+      if (item?.lot_serial) parts.push(`Lote: ${item.lot_serial}`);
+      return parts.join(' · ');
+    },
+    avatarFallbackIcon: 'package',
+    avatarShape: 'square',
+    detailKeys: [
+      { key: 'ordered_quantity', label: 'Pedida' },
+      { key: 'dispatched_quantity', label: 'Despachada' },
+    ],
+  };
 
   /**
    * Formats the delivery address whether it is a string or object. Prefers the

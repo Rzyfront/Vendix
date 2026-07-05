@@ -267,8 +267,8 @@ export interface PosOrderCreateResult {
           [loading]="submitting()"
           loadingText="Creando…"
         >
-          <app-icon name="check" [size]="16"></app-icon>
-          <span>Crear orden</span>
+          <app-icon slot="icon" name="check" [size]="16"></app-icon>
+          Crear orden
         </app-button>
       </div>
     </app-modal>

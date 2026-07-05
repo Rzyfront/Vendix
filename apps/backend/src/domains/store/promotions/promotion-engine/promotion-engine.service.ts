@@ -13,6 +13,20 @@ import {
   PromotionQuoteType,
 } from '../dto/promotion-quote.interface';
 
+/** Promotions resolve rule types from the Prisma enum. */
+type PromotionRuleType = 'flat' | 'quantity_tiered';
+
+/** Tier row resolved from DB; `type` and `value` mirror a flattened promotion. */
+interface PromotionQuantityTierRecord {
+  id: number;
+  promotion_id: number;
+  min_quantity: number;
+  max_quantity: number | null;
+  type: PromotionQuoteType;
+  value: unknown;
+  sort_order: number;
+}
+
 /** Internal helper: represents a promotion row resolved from DB with relations. */
 interface PromotionRecord {
   id: number;
@@ -20,6 +34,7 @@ interface PromotionRecord {
   code: string | null;
   type: PromotionQuoteType;
   value: unknown;
+  rule_type: PromotionRuleType;
   scope: PromotionQuoteScope;
   min_purchase_amount: unknown;
   max_discount_amount: unknown;
@@ -33,6 +48,7 @@ interface PromotionRecord {
   state: string;
   promotion_products?: Array<{ product_id: number }>;
   promotion_categories?: Array<{ category_id: number }>;
+  promotion_quantity_tiers?: PromotionQuantityTierRecord[];
 }
 
 @Injectable()
@@ -55,6 +71,7 @@ export class PromotionEngineService {
       include: {
         promotion_products: true,
         promotion_categories: true,
+        promotion_quantity_tiers: true,
       },
       orderBy: { priority: 'desc' },
     });
@@ -212,6 +229,7 @@ export class PromotionEngineService {
       include: {
         promotion_products: true,
         promotion_categories: true,
+        promotion_quantity_tiers: true,
       },
     });
 
@@ -336,6 +354,7 @@ export class PromotionEngineService {
       include: {
         promotion_products: true,
         promotion_categories: true,
+        promotion_quantity_tiers: true,
       },
       orderBy: { priority: 'desc' },
     })) as unknown as PromotionRecord[];
@@ -380,6 +399,102 @@ export class PromotionEngineService {
         subtotal < Number(promo.min_purchase_amount)
       )
         continue;
+
+      // ---------------------------------------------------------------
+      // quantity_tiered branch: per-line tier lookup, sum, then global cap.
+      // ---------------------------------------------------------------
+      if (promo.rule_type === 'quantity_tiered') {
+        const tiers = (promo.promotion_quantity_tiers ?? [])
+          .slice()
+          .sort((a, b) => {
+            if (a.min_quantity !== b.min_quantity)
+              return a.min_quantity - b.min_quantity;
+            if (a.sort_order !== b.sort_order)
+              return a.sort_order - b.sort_order;
+            return a.id - b.id;
+          });
+
+        if (tiers.length === 0) continue;
+
+        // Per-line discount computed independently from each line's quantity.
+        const perLineDiscount = new Map<number, number>();
+        let rawTotal = 0;
+        for (const idx of applicableIndexes) {
+          const item = items[idx];
+          const lineDiscount = this.computeQuantityTierDiscountForLine(
+            promo,
+            item,
+            tiers,
+          );
+          perLineDiscount.set(idx, lineDiscount);
+          rawTotal = this.roundMoney(rawTotal + lineDiscount);
+        }
+
+        if (rawTotal <= 0) continue;
+
+        // Apply the existing global max_discount_amount cap on top of the
+        // summed line discounts; never exceed applicable scoped total either.
+        let discountAmount = rawTotal;
+        const maxDiscount = Number(promo.max_discount_amount);
+        if (Number.isFinite(maxDiscount) && maxDiscount > 0) {
+          discountAmount = Math.min(discountAmount, maxDiscount);
+        }
+        discountAmount = Math.min(discountAmount, applicableTotal);
+        discountAmount = this.roundMoney(discountAmount);
+        if (discountAmount <= 0) continue;
+
+        // Proportionally scale per-line discounts to match the capped total
+        // so the persisted snapshot matches the per-item breakdown exactly.
+        const scale = rawTotal > 0 ? discountAmount / rawTotal : 0;
+        let assigned = 0;
+        applicableIndexes.forEach((idx, i) => {
+          const item = items[idx];
+          const lineTotal = Number(item.unit_price) * Number(item.quantity);
+          const isLast = i === applicableIndexes.length - 1;
+          const rawShare = perLineDiscount.get(idx) ?? 0;
+          const proportionalShare = this.roundMoney(rawShare * scale);
+          const share = isLast
+            ? this.roundMoney(discountAmount - assigned)
+            : proportionalShare;
+          assigned = this.roundMoney(assigned + share);
+
+          const current = itemBreakdownMap.get(idx);
+          if (!current) return;
+          const nextDiscount = this.roundMoney(current.promotion_discount + share);
+          // Cap discount per line at the line total so final_unit_price >= 0.
+          const cappedDiscount = Math.min(nextDiscount, lineTotal);
+          const remainingLineTotal = this.roundMoney(lineTotal - cappedDiscount);
+          const nextUnitPrice =
+            item.quantity > 0
+              ? this.roundMoney(remainingLineTotal / Number(item.quantity))
+              : current.original_unit_price;
+
+          itemBreakdownMap.set(idx, {
+            ...current,
+            promotion_discount: cappedDiscount,
+            final_unit_price: Math.max(0, nextUnitPrice),
+            final_line_total: Math.max(0, remainingLineTotal),
+            promotion_ids: current.promotion_ids.includes(promo.id)
+              ? current.promotion_ids
+              : [...current.promotion_ids, promo.id],
+          });
+        });
+
+        appliedPromotions.push({
+          promotion_id: promo.id,
+          name: promo.name,
+          code: promo.code ?? null,
+          type: promo.type,
+          scope: promo.scope,
+          value: Number(promo.value),
+          is_auto_apply: promo.is_auto_apply,
+          discount_amount: this.roundMoney(discountAmount),
+          applicable_item_ids: applicableIndexes
+            .map((idx) => itemBreakdownMap.get(idx)?.line_id)
+            .filter((lineId): lineId is string | number => lineId !== undefined),
+        });
+        continue;
+      }
 
       const discountAmount = this.computeDiscountAmount(promo, applicableTotal);
       if (discountAmount <= 0) continue;
@@ -496,6 +611,7 @@ export class PromotionEngineService {
       include: {
         promotion_products: { select: { product_id: true } },
         promotion_categories: { select: { category_id: true } },
+        promotion_quantity_tiers: true,
       },
       orderBy: { priority: 'desc' },
     })) as unknown as PromotionRecord[];
@@ -542,13 +658,68 @@ export class PromotionEngineService {
 
       if (!chosen) continue;
       const promo = chosen.promo;
+      const promoType = promo.type as PromotionQuoteType;
+      const value = Number(promo.value);
+
+      // quantity_tiered promotions don't have a fixed single-unit discount; we
+      // surface the lowest tier (by min_quantity) as a preview signal so
+      // downstream UIs can show "Descuentos por cantidad" + minimum tier
+      // value without forcing the UI to query tiers directly. The
+      // `promotional_price` for such promos stays at the unit price (no
+      // instant discount applies on a single-unit view).
+      if (promo.rule_type === 'quantity_tiered') {
+        const tiers = (promo.promotion_quantity_tiers ?? [])
+          .slice()
+          .sort((a, b) => {
+            if (a.min_quantity !== b.min_quantity)
+              return a.min_quantity - b.min_quantity;
+            if (a.sort_order !== b.sort_order)
+              return a.sort_order - b.sort_order;
+            return a.id - b.id;
+          });
+        const firstTier = tiers[0];
+        if (!firstTier) continue;
+        const tierValue = Number(firstTier.value);
+        if (!Number.isFinite(tierValue) || tierValue <= 0) continue;
+
+        const previewMinDiscount =
+          firstTier.type === 'percentage'
+            ? this.roundMoney((unitPrice * tierValue) / 100)
+            : this.roundMoney(tierValue);
+
+        const baseEntry: ActiveProductPromotion = {
+          id: promo.id,
+          name: promo.name,
+          type: promoType,
+          scope: promo.scope === 'product' ? 'product' : 'category',
+          discount_percentage:
+            firstTier.type === 'percentage' ? tierValue : undefined,
+          discount_amount:
+            firstTier.type === 'fixed_amount' ? tierValue : undefined,
+          promotional_price: this.roundMoney(unitPrice),
+          badge_label: this.buildQuantityTieredBadgeLabel(firstTier.min_quantity),
+          priority: promo.priority ?? 0,
+        };
+
+        // Forward extra signals for downstream consumers (Agent C may extend
+        // the interface contract). The shared `ActiveProductPromotion`
+        // interface does not declare these today, so we cast to keep the
+        // engine's typed contract intact while still surfacing them at
+        // runtime.
+        const extendedEntry = {
+          ...baseEntry,
+          is_quantity_tiered: true,
+          preview_min_discount: previewMinDiscount,
+        };
+        result.set(productId, extendedEntry as unknown as ActiveProductPromotion);
+        continue;
+      }
+
       const discount = this.computeDiscountAmount(promo, unitPrice);
       if (discount <= 0) continue;
 
       const promotionalPrice = this.roundMoney(Math.max(0, unitPrice - discount));
-      const promoType = promo.type as PromotionQuoteType;
       const isPercentage = promoType === 'percentage';
-      const value = Number(promo.value);
 
       result.set(productId, {
         id: promo.id,
@@ -590,6 +761,18 @@ export class PromotionEngineService {
     }
 
     return 'OFERTA';
+  }
+
+  /**
+   * Compact badge label for quantity_tiered promotions on product cards.
+   * Distinct from `buildBadgeLabel` because there is no instant single-unit
+   * discount — the badge advertises the minimum quantity needed.
+   */
+  private buildQuantityTieredBadgeLabel(minQuantity: number): string {
+    if (!Number.isFinite(minQuantity) || minQuantity <= 1) {
+      return 'Descuentos por cantidad';
+    }
+    return `Desde ${minQuantity} und: descuento`;
   }
 
   /** Resolve which item indexes a promotion applies to based on its scope. */
@@ -649,6 +832,53 @@ export class PromotionEngineService {
 
     // Never discount more than the applicable scoped total.
     discount = Math.min(discount, applicableTotal);
+    return this.roundMoney(discount);
+  }
+
+  /**
+   * Compute the per-line discount for a `quantity_tiered` promotion. The
+   * matching tier is the one where `min_quantity <= line.quantity` and
+   * (`max_quantity` is null OR `>= line.quantity`). Tier math:
+   *  - percentage: `lineTotal × tier.value / 100`
+   *  - fixed_amount: `tier.value × line.quantity` (per-unit value × qty)
+   * The returned discount is capped at the line total (never negative line)
+   * and rounded to 2 decimals.
+   *
+   * Tiers MUST be pre-sorted by `min_quantity` ascending before calling; this
+   * helper picks the first tier that matches the line quantity.
+   */
+  private computeQuantityTierDiscountForLine(
+    promotion: PromotionRecord,
+    line: PromotionQuoteItemInput,
+    tiers: PromotionQuantityTierRecord[],
+  ): number {
+    const quantity = Number(line.quantity);
+    const unitPrice = Number(line.unit_price);
+    if (!Number.isFinite(quantity) || quantity <= 0) return 0;
+    if (!Number.isFinite(unitPrice) || unitPrice <= 0) return 0;
+    if (!Array.isArray(tiers) || tiers.length === 0) return 0;
+
+    const matchedTier = tiers.find(
+      (t) =>
+        t.min_quantity <= quantity &&
+        (t.max_quantity === null || t.max_quantity >= quantity),
+    );
+    if (!matchedTier) return 0;
+
+    const tierValue = Number(matchedTier.value);
+    if (!Number.isFinite(tierValue) || tierValue <= 0) return 0;
+
+    const lineTotal = unitPrice * quantity;
+    let discount = 0;
+    if (matchedTier.type === 'percentage') {
+      discount = (lineTotal * tierValue) / 100;
+    } else {
+      // fixed_amount: tier.value applies per unit bought
+      discount = tierValue * quantity;
+    }
+
+    // Never discount more than the line total (final line total >= 0).
+    discount = Math.max(0, Math.min(discount, lineTotal));
     return this.roundMoney(discount);
   }
 

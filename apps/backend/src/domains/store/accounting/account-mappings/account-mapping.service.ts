@@ -70,6 +70,33 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '5110',
     description: 'Seguridad Social',
   },
+  // Cost center: Administrative
+  'payroll.approved.payroll_expense.administrative': {
+    code: '5105',
+    description: 'Gastos de Personal (Administrativo)',
+  },
+  'payroll.approved.social_security.administrative': {
+    code: '5105',
+    description: 'Seguridad Social (Administrativo)',
+  },
+  // Cost center: Operational (Mano de Obra Directa - Costo)
+  'payroll.approved.payroll_expense.operational': {
+    code: '7205',
+    description: 'Mano de Obra Directa (Operacional)',
+  },
+  'payroll.approved.social_security.operational': {
+    code: '7205',
+    description: 'Seguridad Social M.O.D. (Operacional)',
+  },
+  // Cost center: Sales (Gastos de Personal - Ventas)
+  'payroll.approved.payroll_expense.sales': {
+    code: '5205',
+    description: 'Gastos de Personal (Ventas)',
+  },
+  'payroll.approved.social_security.sales': {
+    code: '5205',
+    description: 'Seguridad Social (Ventas)',
+  },
   'payroll.approved.salaries_payable': {
     code: '2505',
     description: 'Salarios por Pagar',
@@ -77,6 +104,13 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'payroll.approved.health_payable': { code: '2370', description: 'EPS' },
   'payroll.approved.pension_payable': { code: '2380', description: 'Pension' },
   'payroll.approved.withholdings': { code: '2365', description: 'Retenciones' },
+  // B1: segregación de retefuente laboral en 236505 (child of 2365).
+  // El resto de retenciones distintas a retención en la fuente laboral se
+  // sigue acreditando a la cuenta 2365 genérica vía `payroll.approved.withholdings`.
+  'payroll.approved.labor_withholding': {
+    code: '236505',
+    description: 'Retención en la Fuente - Laboral',
+  },
   'payroll.paid.salaries_payable': {
     code: '2505',
     description: 'Salarios por Pagar',
@@ -102,8 +136,12 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Compra/Gasto soportado',
   },
   'support_document.accepted.vat_deductible': {
-    code: '2408',
-    description: 'IVA descontable',
+    code: '240804',
+    description: 'IVA Descontable en Compras',
+  },
+  'support_document.accepted.iva_deductible': {
+    code: '240804',
+    description: 'IVA Descontable en Compras (tipado)',
   },
   'support_document.accepted.withholding_payable': {
     code: '2365',
@@ -112,6 +150,20 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'support_document.accepted.accounts_payable': {
     code: '2205',
     description: 'Proveedor documento soporte',
+  },
+  // F2 IVA lifecycle — VAT-only recognition of a POP purchase (O-48
+  // responsible). `purchase_order.received` already posts DR 1435(net)/CR
+  // 2205(net); this complement posts ONLY DR 240804 (IVA descontable) / CR
+  // 2205 (proveedores) for the deductible VAT, completing the payable to gross
+  // WITHOUT touching inventory or contabilizing expense (5195). Do NOT reuse
+  // support_document.accepted here — that handler also debits 5195 + full 2205.
+  'purchase.vat_recognized.iva_deductible': {
+    code: '240804',
+    description: 'IVA Descontable en Compras (reconocimiento POP)',
+  },
+  'purchase.vat_recognized.accounts_payable': {
+    code: '2205',
+    description: 'Proveedores (complemento IVA compra)',
   },
   // Purchase order payments
   'purchase_order.payment.accounts_payable': {
@@ -181,12 +233,12 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   },
   // ── Typed fiscal tax routing (per tax_type) ───────────────────────────
   // AutoEntryService.resolveTaxLines posts one line per fiscal type using
-  // `<event>.<tax_type>_payable`. IVA → 2408 (same as legacy vat_payable, no
-  // regression), INC → 2436 (Impuesto al Consumo), ICA → 2412. The legacy
-  // `vat_payable` keys above remain as fallback when no breakdown is present.
+  // `<event>.<tax_type>_payable`. IVA → 240802 (IVA Generado por Ventas, hoja
+  // del control 2408), INC → 2436 (Impuesto al Consumo), ICA → 2412. The legacy
+  // `vat_payable` keys above remain in 2408 as fallback when no breakdown is present.
   'invoice.validated.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (factura)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (factura)',
   },
   'invoice.validated.inc_payable': {
     code: '2436',
@@ -197,8 +249,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA por Pagar (factura)',
   },
   'payment.received.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (venta directa)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (venta directa)',
   },
   'payment.received.inc_payable': {
     code: '2436',
@@ -209,8 +261,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA por Pagar (venta directa)',
   },
   'credit_sale.created.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (venta a crédito)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (venta a crédito)',
   },
   'credit_sale.created.inc_payable': {
     code: '2436',
@@ -221,8 +273,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA por Pagar (venta a crédito)',
   },
   'refund.completed.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (reversa devolución)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (reversa devolución)',
   },
   'refund.completed.inc_payable': {
     code: '2436',
@@ -241,8 +293,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Devoluciones en Ventas (nota crédito)',
   },
   'credit_note.accepted.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (reversa nota crédito)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (reversa nota crédito)',
   },
   'credit_note.accepted.inc_payable': {
     code: '2436',
@@ -285,6 +337,20 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'layaway.completed.revenue': {
     code: '4135',
     description: 'Ingresos por Ventas (separé completado)',
+  },
+  // Layaway cancellation — reverse the customer advance (2805): refund the
+  // returned cash/bank and recognize any retained cancellation fee as income.
+  'layaway.cancelled.advance': {
+    code: '2805',
+    description: 'Anticipos de Clientes (reversa separé cancelado)',
+  },
+  'layaway.cancelled.refund': {
+    code: '1105',
+    description: 'Caja/Banco (devolución separé cancelado)',
+  },
+  'layaway.cancelled.forfeit_income': {
+    code: '4295',
+    description: 'Otros Ingresos (penalización separé cancelado)',
   },
   // Fixed Assets - Depreciation
   'depreciation.monthly.depreciation_expense': {
@@ -360,6 +426,37 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA Retenido a Favor (ReteICA sufrida)',
   },
   // Settlement (Liquidación por Terminación)
+  // Settlement ACCRUAL (devengo) — at approval the labor cost is recognized as
+  // expense/provision (DR) against the labor payable 2505 (CR). The payment
+  // event then only drains 2505 (no expense reconocido at payment).
+  'settlement.approved.severance': {
+    code: '2610',
+    description: 'Cesantías Consolidadas (causación liquidación)',
+  },
+  'settlement.approved.severance_interest': {
+    code: '2615',
+    description: 'Intereses sobre Cesantías (causación liquidación)',
+  },
+  'settlement.approved.bonus': {
+    code: '2620',
+    description: 'Prima de Servicios (causación liquidación)',
+  },
+  'settlement.approved.vacation': {
+    code: '2625',
+    description: 'Vacaciones (causación liquidación)',
+  },
+  'settlement.approved.pending_salary': {
+    code: '5105',
+    description: 'Gastos de Personal - Salario Pendiente (causación)',
+  },
+  'settlement.approved.indemnification': {
+    code: '5105',
+    description: 'Gastos de Personal - Indemnización (causación)',
+  },
+  'settlement.approved.salaries_payable': {
+    code: '2505',
+    description: 'Salarios por Pagar (causación liquidación)',
+  },
   'settlement.paid.severance': {
     code: '2610',
     description: 'Cesantías Consolidadas',
@@ -391,6 +488,11 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'settlement.paid.bank': {
     code: '1110',
     description: 'Bancos (Pago Liquidación)',
+  },
+  // Devengo: el pago SOLO drena el pasivo laboral 2505 causado en approved.
+  'settlement.paid.salaries_payable': {
+    code: '2505',
+    description: 'Salarios por Pagar (drenaje pago liquidación)',
   },
   // Wompi Gateway (Nequi, PSE, Tarjetas locales, Bancolombia)
   'payment.received.wompi': {
@@ -466,15 +568,6 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Cuentas por pagar a vinculados',
   },
   // Comisiones (Pasarelas de Pago)
-  'commission.calculated.commission_expense': {
-    code: '5295',
-    description: 'Gastos por Comisiones',
-  },
-  'commission.calculated.commission_payable': {
-    code: '2335',
-    description: 'Comisiones por Pagar',
-  },
-  // Commissions
   'commission.calculated.expense': {
     code: '5295',
     description: 'Gastos Diversos - Comisiones',
@@ -590,6 +683,21 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '5295',
     description: 'Faltante de caja',
   },
+  // Dispatch routes (planillas DSD) — cash variance reconciliation at close.
+  // Recaudo y retenciones por parada ya se contabilizan vía payment.received;
+  // aquí SOLO se reconoce el sobrante/faltante de efectivo del conductor.
+  'dispatch_route.closed.cash': {
+    code: '1105',
+    description: 'Caja (cuadre planilla de ruta)',
+  },
+  'dispatch_route.closed.surplus': {
+    code: '4295',
+    description: 'Otros Ingresos (sobrante de ruta)',
+  },
+  'dispatch_route.closed.shortage_receivable': {
+    code: '1365',
+    description: 'Cuentas por Cobrar a Trabajadores (faltante de ruta, conductor)',
+  },
   'cash_register.movement.cash': {
     code: '1105',
     description: 'Caja (movimiento manual)',
@@ -646,6 +754,26 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'saas_revenue.partner_payable': {
     code: '2335',
     description: 'CxP Comisión partner SaaS (plataforma Vendix)',
+  },
+  // VAT settlement (liquidación de IVA al aprobar la declaración) — netea el
+  // IVA generado contra el descontable y deja el neto a pagar o a favor:
+  //   DR 240802 (generado) / CR 240804 (descontable) + neto → CR 240810 (a
+  //   pagar) o DR 135520 (a favor). Ver AutoEntryService.onVatSettlement (F5).
+  'vat.declaration.settled.iva_generated': {
+    code: '240802',
+    description: 'IVA Generado por Ventas (liquidación)',
+  },
+  'vat.declaration.settled.iva_deductible': {
+    code: '240804',
+    description: 'IVA Descontable en Compras (liquidación)',
+  },
+  'vat.declaration.settled.vat_payable': {
+    code: '240810',
+    description: 'IVA por Pagar - Liquidación',
+  },
+  'vat.declaration.settled.vat_favor': {
+    code: '135520',
+    description: 'Saldo a Favor en IVA',
   },
 };
 

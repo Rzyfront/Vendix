@@ -42,6 +42,14 @@
         <div class="flex items-center justify-center py-12">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
         </div>
+      } @else if (error(); as err) {
+        <div class="py-6 flex flex-col items-center gap-3">
+          <app-alert-banner variant="danger" icon="alert-triangle">{{ err }}</app-alert-banner>
+          <app-button variant="outline" size="sm" (clicked)="loadData()">
+            <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
+            Reintentar
+          </app-button>
+        </div>
       } @else if (!current_report()) {
         <p class="text-sm text-gray-400 text-center py-12">No hay datos de aging disponibles</p>
       } @else if (current_report(); as current_report) {

@@ -59,9 +59,11 @@ export class OrganizationPrismaService extends BasePrismaService {
     'fiscal_rule_sets',
     'fiscal_operation_events',
     'employees',
+    'employee_fiscal_profiles',
     'payroll_runs',
     'payroll_items',
     'payroll_novelties',
+    'pila_submissions',
     'partner_plan_overrides',
     'partner_commissions',
     'partner_payout_batches',
@@ -461,6 +463,14 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   get payroll_novelties() {
     return this.scoped_client.payroll_novelties;
+  }
+
+  get employee_fiscal_profiles() {
+    return this.scoped_client.employee_fiscal_profiles;
+  }
+
+  get pila_submissions() {
+    return this.scoped_client.pila_submissions;
   }
 
   get partner_plan_overrides() {

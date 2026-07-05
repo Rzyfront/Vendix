@@ -418,6 +418,33 @@ export const APP_MODULES: {
       ],
     },
 
+    // Memberships (Membership Suite). Parent module hidden by
+    // `INDUSTRY_HIDDEN_MODULES` for retail/restaurant/manufacturing;
+    // visible only when the store's industry includes `gym` or `service`.
+    {
+      key: 'memberships',
+      label: 'Zona Fit',
+      description: 'Planes, socios y control de accesos de membres\u00edas',
+      isParent: true,
+      children: [
+        {
+          key: 'memberships_plans',
+          label: 'Planes',
+          description: 'Planes y tarifas de membres\u00eda',
+        },
+        {
+          key: 'memberships_members',
+          label: 'Miembros',
+          description: 'Directorio y estado de miembros',
+        },
+        {
+          key: 'memberships_access',
+          label: 'Accesos',
+          description: 'Control de accesos y check-in de socios',
+        },
+      ],
+    },
+
     // Facturaci\u00f3n (padre con hijos)
     {
       key: 'invoicing',

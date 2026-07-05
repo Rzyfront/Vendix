@@ -3,6 +3,7 @@ export const STORE_INDUSTRIES = [
   'restaurant',
   'manufacturing',
   'service',
+  'gym',
 ] as const;
 
 export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
@@ -19,12 +20,24 @@ export type StoreIndustry = (typeof STORE_INDUSTRIES)[number];
  * never see it; the OR-semantics in `getModulesHiddenByIndustries` keeps a
  * multi-industry store (e.g. hotel = `service` + `restaurant`) visible because
  * the module is NOT hidden in the `restaurant` half of the intersection.
+ *
+ * Membership Suite: the generalized `memberships` module (plans, members,
+ * access) is visible ⟺ the store's industry ∈ {gym, service}. It is hidden for
+ * retail / restaurant / manufacturing. Both `gym` and `service` omit
+ * `memberships` from their hidden lists so the OR-semantics intersection keeps
+ * the suite visible for either industry (and for a store that has both). A gym
+ * that also sells shakes adds `restaurant` to its industries to unlock the
+ * restaurant suite too — the intersection empties for both `memberships` and
+ * `restaurant_ops`, so a `['gym','restaurant']` store sees BOTH suites. Note
+ * `gym` and `service` still hide `restaurant_ops` on their own, so a pure gym
+ * or pure service store never sees the restaurant suite.
  */
 export const INDUSTRY_HIDDEN_MODULES: Record<StoreIndustry, string[]> = {
-  retail: ['restaurant_ops'],
-  restaurant: [],
-  manufacturing: ['restaurant_ops'],
+  retail: ['restaurant_ops', 'memberships'],
+  restaurant: ['memberships'],
+  manufacturing: ['restaurant_ops', 'memberships'],
   service: ['restaurant_ops'],
+  gym: ['restaurant_ops'],
 };
 
 /**

@@ -179,6 +179,9 @@ model users {
   vendor_support_documents_created vendor_support_documents[]  @relation("vendor_doc_created_by")
   tax_declarations_approved        tax_declaration_drafts[]    @relation("tax_declarations_approved_by")
   tax_declarations_created         tax_declaration_drafts[]    @relation("tax_declarations_created_by")
+  pila_submissions_exported        pila_submissions[]          @relation("pila_submissions_exported_by")
+  pila_submissions_voided          pila_submissions[]          @relation("pila_submissions_voided_by")
+  pila_submissions_created         pila_submissions[]          @relation("pila_submissions_created_by")
   fiscal_close_sessions_started    fiscal_close_sessions[]     @relation("fiscal_close_sessions_started_by")
   fiscal_close_sessions_approved   fiscal_close_sessions[]     @relation("fiscal_close_sessions_approved_by")
   fiscal_close_sessions_closed     fiscal_close_sessions[]     @relation("fiscal_close_sessions_closed_by")
@@ -382,6 +385,7 @@ model organizations {
   created_at                    DateTime?                         @default(now()) @db.Timestamp(6)
   updated_at                    DateTime?                         @default(now()) @db.Timestamp(6)
   onboarding                    Boolean                           @default(false)
+  ciiu_code                     String?                           @db.VarChar(10)
   mode                          organization_mode_enum            @default(production)
   is_partner                    Boolean                           @default(false)
   partner_settings              Json?
@@ -424,6 +428,8 @@ model organizations {
   accounting_entries            accounting_entries[]
   accounting_entities           accounting_entities[]
   employees                     employees[]
+  employee_fiscal_profiles      employee_fiscal_profiles[]
+  pila_submissions              pila_submissions[]
   payroll_runs                  payroll_runs[]
   payroll_novelties             payroll_novelties[]
   dian_configurations           dian_configurations[]
@@ -642,6 +648,9 @@ model stores {
   timezone                    String?                       @db.VarChar(50)
   operating_hours             Json?
   onboarding                  Boolean                       @default(false)
+  municipality_code           String?                       @db.VarChar(10)
+  department_code             String?                       @db.VarChar(10)
+  ciiu_code                   String?                       @db.VarChar(10)
   default_location_id         Int?                          @unique
   default_location            inventory_locations?          @relation("StoreDefaultLocation", fields: [default_location_id], references: [id])
   addresses                   addresses[]
@@ -1094,6 +1103,14 @@ model order_items {
   // el descuento NO se vuelva a aplicar al pagar. Default false → no afecta
   // el flujo retail existente.
   inventory_consumed_at_fire       Boolean                  @default(false)
+  // Refactor inventario (Ola 0) — commit unico de stock, anti-doble-descuento.
+  // inventory_committed marca que el stock de este item YA fue descontado. El
+  // servicio unificado de commit salta el item si esta en true, garantizando que
+  // el descuento nunca se aplique dos veces. inventory_committed_at registra el
+  // instante del commit (null en historicos backfilleados). Default false preserva
+  // el flujo existente (retail, ecommerce, POS).
+  inventory_committed              Boolean                  @default(false)
+  inventory_committed_at           DateTime?                @db.Timestamp(6)
   // Restaurant Suite Fase K / Plan KDS fire-flows: marca persistida de la intencion
   // del cajero al aniadir el item al carrito ("usar stock" en pos-prepared-choice-modal).
   // - skip_kds=true: el item NO se enviara a cocina; su stock se descuenta en el
@@ -2102,6 +2119,17 @@ model purchase_orders {
   updated_at            DateTime?                          @default(now()) @db.Timestamp(6)
   payment_status        purchase_order_payment_status_enum @default(unpaid)
   payment_due_date      DateTime?                          @db.Timestamp(6)
+  /// F1 IVA lifecycle: dominant tax mode for the whole invoice. When true,
+  /// line `unit_price` is understood as tax-INCLUSIVE (gross); when false the
+  /// tax is ADDED on top. Individual lines may override via
+  /// `purchase_order_items.prices_include_tax` to support mixed invoices.
+  prices_include_tax    Boolean                            @default(false)
+  /// F2 IVA lifecycle: supplier's own invoice reference for the purchase.
+  /// `supplier_invoice_number` becomes the `invoice_number` of the fiscal
+  /// document materialized to recognize the deductible VAT (240804). When the
+  /// supplier number is absent the recognition falls back to `order_number`.
+  supplier_invoice_number String?                          @db.VarChar(50)
+  supplier_invoice_date   DateTime?                        @db.Date
   purchase_order_items  purchase_order_items[]
   users                 users?                             @relation("purchase_orders_approved_by", fields: [approved_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   users1                users?                             @relation("purchase_orders_created_by", fields: [created_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -2125,6 +2153,21 @@ model purchase_order_items {
   quantity_received  Int                              @default(0)
   unit_cost          Decimal?                         @db.Decimal(12, 4)
   total_cost         Decimal?                         @db.Decimal(12, 2)
+  /// F1 IVA lifecycle — VAT capture per line.
+  /// `tax_rate`        : percentage (e.g. 19 for 19%).
+  /// `tax_type`        : fiscal classification, defaults to iva.
+  /// `prices_include_tax`: per-line override of the header mode (mixed invoices).
+  /// `unit_price_net`  : the NET unit price (single source of truth for cost).
+  /// `tax_amount`      : total VAT captured for the line (per-unit tax × qty).
+  /// `deductible_tax_amount`  : VAT sealed as descontable (O-48 responsible).
+  /// `capitalized_tax_amount` : VAT sealed into inventory cost (O-49 non-responsible).
+  tax_rate               Decimal?      @db.Decimal(5, 2)
+  tax_type               tax_type_enum? @default(iva)
+  prices_include_tax     Boolean?
+  unit_price_net         Decimal?      @db.Decimal(12, 4)
+  tax_amount             Decimal?      @db.Decimal(12, 2)
+  deductible_tax_amount  Decimal?      @db.Decimal(12, 2)
+  capitalized_tax_amount Decimal?      @db.Decimal(12, 2)
   /// Fase 2: UoM FKs the receiving engine uses to derive the
   /// `purchase_to_stock_factor` for ingredient orders. Optional because
   /// retail orders keep factor=1 and do not need them. When
@@ -2547,35 +2590,51 @@ model default_templates {
 // ===== PROMOTIONS =====
 
 model promotions {
-  id                  Int                  @id @default(autoincrement())
+  id                  Int                       @id @default(autoincrement())
   store_id            Int
-  name                String               @db.VarChar(255)
+  name                String                    @db.VarChar(255)
   description         String?
-  code                String?              @db.VarChar(50)
+  code                String?                   @db.VarChar(50)
   type                promotion_type_enum
-  value               Decimal              @db.Decimal(12, 2)
-  scope               promotion_scope_enum @default(order)
-  min_purchase_amount Decimal?             @db.Decimal(12, 2)
-  max_discount_amount Decimal?             @db.Decimal(12, 2)
+  value               Decimal                   @db.Decimal(12, 2)
+  rule_type           promotion_rule_type_enum  @default(flat)
+  scope               promotion_scope_enum      @default(order)
+  min_purchase_amount Decimal?                  @db.Decimal(12, 2)
+  max_discount_amount Decimal?                  @db.Decimal(12, 2)
   usage_limit         Int?
-  usage_count         Int                  @default(0)
+  usage_count         Int                       @default(0)
   per_customer_limit  Int?
-  start_date          DateTime             @db.Timestamp(6)
-  end_date            DateTime?            @db.Timestamp(6)
-  state               promotion_state_enum @default(draft)
-  is_auto_apply       Boolean              @default(false)
-  priority            Int                  @default(0)
-  created_at          DateTime?            @default(now()) @db.Timestamp(6)
-  updated_at          DateTime?            @default(now()) @db.Timestamp(6)
+  start_date          DateTime                  @db.Timestamp(6)
+  end_date            DateTime?                 @db.Timestamp(6)
+  state               promotion_state_enum      @default(draft)
+  is_auto_apply       Boolean                   @default(false)
+  priority            Int                       @default(0)
+  created_at          DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at          DateTime?                 @default(now()) @db.Timestamp(6)
 
-  stores               stores                 @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  promotion_products   promotion_products[]
-  promotion_categories promotion_categories[]
-  order_promotions     order_promotions[]
+  stores                  stores                      @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  promotion_products      promotion_products[]
+  promotion_categories    promotion_categories[]
+  promotion_quantity_tiers promotion_quantity_tiers[]
+  order_promotions        order_promotions[]
 
   @@unique([store_id, code])
   @@index([store_id, state])
   @@index([store_id, start_date, end_date])
+}
+
+model promotion_quantity_tiers {
+  id           Int                @id @default(autoincrement())
+  promotion_id Int
+  min_quantity Int
+  max_quantity Int?
+  type         promotion_type_enum
+  value        Decimal            @db.Decimal(12, 2)
+  sort_order   Int                @default(0)
+  promotions   promotions         @relation(fields: [promotion_id], references: [id], onDelete: Cascade)
+
+  @@unique([promotion_id, min_quantity])
+  @@index([promotion_id])
 }
 
 model promotion_products {
@@ -2627,6 +2686,11 @@ enum promotion_state_enum {
 enum promotion_type_enum {
   percentage
   fixed_amount
+}
+
+enum promotion_rule_type_enum {
+  flat
+  quantity_tiered
 }
 
 enum promotion_scope_enum {
@@ -2751,6 +2815,8 @@ enum notification_type_enum {
   weekly_report
   pqr_new
   pqr_update
+  membership_expiring
+  membership_expired
 }
 
 model notifications {
@@ -3199,6 +3265,164 @@ enum industry_enum {
   restaurant
   manufacturing
   service
+  gym
+}
+
+// ===================== MEMBERSHIPS (industria-genérico, Ola 1) =====================
+// Núcleo de membresías REUTILIZABLE por cualquier industria (gym, service, generic…).
+// Nace de la suite `gym` y se generaliza (rename total, Opción A): las tablas y enums
+// dejan el prefijo gym_ y ganan un discriminador `kind` (membership_kind_enum) para que
+// un gimnasio, un club de servicios o cualquier comercio vendan membresías con el mismo
+// modelo, sin crear tablas por industria.
+// El socio es un `users` rol customer (+ store_users); las tablas cuelgan de customer_id
+// (scalar FK, constraints reales en la migración — sin relación Prisma hacia
+// users/stores/orders/products para no tocar esos modelos compartidos).
+// Límites específicos de industria (accesos/clases por periodo) viven en `features` Json,
+// no en columnas dedicadas, para no re-migrar por cada industria.
+// Nunca se almacenan plantillas biométricas: membership_access_credentials guarda solo
+// QR/PIN/external_ref (dato de referencia), la huella vive en el dispositivo.
+
+enum membership_status_enum {
+  active
+  expired
+  suspended
+  frozen
+  pending_payment
+  cancelled
+}
+
+enum membership_credential_type_enum {
+  qr
+  pin
+  external_ref
+}
+
+enum membership_access_result_enum {
+  granted
+  denied_no_membership
+  denied_expired
+  denied_suspended
+  denied_frozen
+  denied_quota_exceeded
+  denied_outside_schedule
+  denied_capacity_full
+}
+
+// Discriminador de industria/uso de la membresía. `generic` es el default reutilizable;
+// `gym`/`service` etiquetan el origen para gating y reportes sin ramificar el modelo.
+enum membership_kind_enum {
+  generic
+  gym
+  service
+}
+
+model membership_plans {
+  id            Int                  @id @default(autoincrement())
+  store_id      Int
+  kind          membership_kind_enum @default(generic)
+  code          String               @db.VarChar(60)
+  name          String               @db.VarChar(160)
+  description   String?
+  price         Decimal              @default(0) @db.Decimal(12, 2)
+  currency      String               @default("COP") @db.VarChar(3)
+  duration_days Int                  @default(30)
+  // Límites por periodo (accesos, clases, etc.) y cualquier atributo específico de la
+  // industria viven aquí: { access_limit_per_period, class_limit_per_period, ... }.
+  features      Json?
+  product_id    Int?
+  is_active     Boolean              @default(true)
+  sort_order    Int                  @default(0)
+  created_at    DateTime             @default(now())
+  updated_at    DateTime             @updatedAt
+
+  @@unique([store_id, code])
+  @@index([store_id])
+  @@index([store_id, is_active])
+  @@index([store_id, kind])
+}
+
+model memberships {
+  id              Int                    @id @default(autoincrement())
+  store_id        Int
+  customer_id     Int
+  plan_id         Int
+  kind            membership_kind_enum   @default(generic)
+  status          membership_status_enum @default(pending_payment)
+  period_start    DateTime?
+  period_end      DateTime?
+  auto_renew      Boolean                @default(false)
+  source_order_id Int?
+  notes           String?
+  created_at      DateTime               @default(now())
+  updated_at      DateTime               @updatedAt
+
+  @@index([store_id, customer_id])
+  @@index([store_id, status])
+  @@index([store_id, period_end])
+  @@index([plan_id])
+}
+
+model membership_profiles {
+  id                      Int       @id @default(autoincrement())
+  store_id                Int
+  customer_id             Int
+  date_of_birth           DateTime? @db.Date
+  gender                  String?   @db.VarChar(20)
+  emergency_contact_name  String?   @db.VarChar(160)
+  emergency_contact_phone String?   @db.VarChar(40)
+  medical_notes           String?
+  goals                   String?
+  height_cm               Int?
+  weight_kg               Decimal?  @db.Decimal(5, 2)
+  created_at              DateTime  @default(now())
+  updated_at              DateTime  @updatedAt
+
+  @@unique([store_id, customer_id])
+  @@index([store_id])
+}
+
+model membership_access_credentials {
+  id               Int                              @id @default(autoincrement())
+  store_id         Int
+  customer_id      Int
+  credential_type  membership_credential_type_enum
+  credential_value String                           @db.VarChar(255)
+  is_active        Boolean                          @default(true)
+  created_at       DateTime                         @default(now())
+  updated_at       DateTime                         @updatedAt
+
+  @@unique([store_id, credential_type, credential_value], map: "membership_access_cred_uq")
+  @@index([store_id, customer_id])
+}
+
+model membership_access_logs {
+  id            Int                            @id @default(autoincrement())
+  store_id      Int
+  customer_id   Int?
+  membership_id Int?
+  credential_id Int?
+  result        membership_access_result_enum
+  reason        String?                        @db.VarChar(120)
+  device_id     String?                        @db.VarChar(120)
+  access_at     DateTime                       @default(now())
+
+  @@index([store_id, access_at])
+  @@index([store_id, customer_id])
+}
+
+// Contador de aforo (ocupación actual) por tienda. Fila singleton por store_id:
+// current_count = personas dentro; business_date = día de negocio al que pertenece
+// el conteo (permite reset en el rollover diario); last_leveled_at = último nivelado.
+// Como los demás modelos de membresía, usa store_id escalar (la FK vive en SQL;
+// Prisma ignora la FK escalar — ver migración membership_generalization §9).
+model membership_access_occupancy {
+  id             Int       @id @default(autoincrement())
+  store_id       Int       @unique
+  current_count  Int       @default(0)
+  business_date  DateTime? @db.Date
+  last_leveled_at DateTime?
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
 }
 
 enum api_key_status_enum {
@@ -3624,6 +3848,17 @@ enum payroll_frequency_enum {
   monthly
   biweekly
   weekly
+}
+
+enum retention_procedure_enum {
+  proc1
+  proc2
+}
+
+enum pila_submission_status_enum {
+  generated
+  exported
+  void
 }
 
 enum employee_status_enum {
@@ -4428,6 +4663,7 @@ model accounting_entities {
   inventory_valuation_snapshots inventory_valuation_snapshots[]
   fiscal_obligations            fiscal_obligations[]
   tax_declaration_drafts        tax_declaration_drafts[]
+  pila_submissions              pila_submissions[]
   fiscal_close_sessions         fiscal_close_sessions[]
   fiscal_rule_sets              fiscal_rule_sets[]
   fiscal_operation_events       fiscal_operation_events[]
@@ -4567,20 +4803,50 @@ model accounting_entries {
   @@index([organization_id, is_historical_consolidated])
 }
 
+/// Cola de observabilidad de asientos automáticos fallidos. Cuando
+/// `AutoEntryService.createAutoEntry` lanza (mapping/cuenta faltante, período
+/// cerrado, error de BD), en vez de tragarse el error se persiste aquí el
+/// evento crudo + el error y se encola un reintento (cola BullMQ
+/// `accounting-entry-retry`). Sin relaciones a `organizations`/`stores` a
+/// propósito: es una bitácora operativa, no un modelo de negocio.
+model accounting_entry_failures {
+  id              Int       @id @default(autoincrement())
+  organization_id Int
+  store_id        Int?
+  handler_key     String    @db.VarChar(80)
+  source_type     String?   @db.VarChar(50)
+  source_id       Int?
+  event_payload   Json
+  error_message   String    @db.Text
+  attempt_count   Int       @default(1)
+  resolved_at     DateTime? @db.Timestamp(6)
+  created_at      DateTime  @default(now()) @db.Timestamp(6)
+  updated_at      DateTime  @updatedAt @db.Timestamp(6)
+
+  @@index([organization_id, resolved_at])
+  @@index([source_type, source_id])
+}
+
 model accounting_entry_lines {
-  id            Int       @id @default(autoincrement())
-  entry_id      Int
-  account_id    Int
-  description   String?   @db.VarChar(500)
-  debit_amount  Decimal   @default(0) @db.Decimal(12, 2)
-  credit_amount Decimal   @default(0) @db.Decimal(12, 2)
-  created_at    DateTime? @default(now()) @db.Timestamp(6)
+  id                 Int       @id @default(autoincrement())
+  entry_id           Int
+  account_id         Int
+  description        String?   @db.VarChar(500)
+  debit_amount       Decimal   @default(0) @db.Decimal(12, 2)
+  credit_amount      Decimal   @default(0) @db.Decimal(12, 2)
+  third_party_id     Int?
+  third_party_type   String?   @db.VarChar(40)
+  third_party_name   String?   @db.VarChar(255)
+  third_party_tax_id String?   @db.VarChar(50)
+  created_at         DateTime? @default(now()) @db.Timestamp(6)
 
   entry   accounting_entries @relation(fields: [entry_id], references: [id], onDelete: Cascade)
   account chart_of_accounts  @relation(fields: [account_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
 
   @@index([entry_id])
   @@index([account_id])
+  @@index([third_party_tax_id], map: "accounting_entry_lines_third_party_tax_id_idx")
+  @@index([third_party_type, third_party_id], map: "accounting_entry_lines_third_party_lookup_idx")
 }
 
 // ===== PAYROLL DOMAIN =====
@@ -4627,6 +4893,7 @@ model employees {
   employee_advances   employee_advances[]
   payroll_novelties   payroll_novelties[]
   service_providers   service_providers[]
+  employee_fiscal_profile employee_fiscal_profiles?
 
   @@unique([organization_id, employee_code])
   @@unique([organization_id, document_type, document_number])
@@ -4733,6 +5000,60 @@ model payroll_items {
   @@index([employee_id])
   @@index([accounting_entity_id])
   @@index([accounting_entity_id, dian_status])
+}
+
+model employee_fiscal_profiles {
+  id                        Int                          @id @default(autoincrement())
+  employee_id               Int                          @unique
+  organization_id           Int
+  certificate_year          Int
+  dependents_count          Int                          @default(0)
+  housing_interest_monthly  Decimal                      @default(0) @db.Decimal(12, 2)
+  prepaid_medicine_monthly  Decimal                      @default(0) @db.Decimal(12, 2)
+  voluntary_pension_monthly Decimal                      @default(0) @db.Decimal(12, 2)
+  afc_monthly               Decimal                      @default(0) @db.Decimal(12, 2)
+  retention_procedure       retention_procedure_enum     @default(proc1)
+  fixed_retention_rate      Decimal?                     @db.Decimal(5, 2)
+  rate_semester             String?                      @db.VarChar(7)
+  last_calculated_at        DateTime?                    @db.Timestamp(6)
+  created_at                DateTime?                    @default(now()) @db.Timestamp(6)
+  updated_at                DateTime?                    @default(now()) @db.Timestamp(6)
+
+  organization organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  employee     employees     @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+
+  @@index([organization_id])
+  @@index([certificate_year])
+}
+
+model pila_submissions {
+  id                   Int                            @id @default(autoincrement())
+  organization_id      Int
+  accounting_entity_id Int
+  period_year          Int
+  period_month         Int
+  status               pila_submission_status_enum    @default(generated)
+  employees_count      Int                            @default(0)
+  total_earnings       Decimal                        @default(0) @db.Decimal(14, 2)
+  total_contributions  Decimal                        @default(0) @db.Decimal(14, 2)
+  metadata             Json?
+  exported_at          DateTime?                      @db.Timestamp(6)
+  exported_by_user_id  Int?
+  voided_at            DateTime?                      @db.Timestamp(6)
+  voided_by_user_id    Int?
+  void_reason          String?
+  created_by_user_id   Int?
+  created_at           DateTime?                      @default(now()) @db.Timestamp(6)
+  updated_at           DateTime?                      @default(now()) @db.Timestamp(6)
+
+  organization      organizations      @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  accounting_entity accounting_entities @relation(fields: [accounting_entity_id], references: [id], onDelete: Restrict)
+  exported_by_user  users?             @relation("pila_submissions_exported_by", fields: [exported_by_user_id], references: [id], onDelete: SetNull)
+  voided_by_user    users?             @relation("pila_submissions_voided_by", fields: [voided_by_user_id], references: [id], onDelete: SetNull)
+  created_by_user   users?             @relation("pila_submissions_created_by", fields: [created_by_user_id], references: [id], onDelete: SetNull)
+
+  @@index([accounting_entity_id, period_year, period_month])
+  @@index([status, period_year, period_month])
 }
 
 model payroll_novelties {

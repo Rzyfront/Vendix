@@ -7,15 +7,18 @@ import {
   CardComponent,
   IconComponent,
   ButtonComponent,
+  AlertBannerComponent,
 } from '../../../../../../shared/components/index';
 import { AgingReport } from '../../interfaces/cartera.interface';
+import { parseApiError } from '../../../../../../core/utils/parse-api-error';
+import { forkJoin } from 'rxjs';
 
 type AgingTab = 'ar' | 'ap';
 
 @Component({
   selector: 'vendix-aging-report',
   standalone: true,
-  imports: [CardComponent, IconComponent, ButtonComponent,
+  imports: [CardComponent, IconComponent, ButtonComponent, AlertBannerComponent,
     NgClass,
   ],
   templateUrl: './aging-report.component.html',
@@ -27,6 +30,7 @@ export class AgingReportComponent {
 
   readonly active_tab = signal<AgingTab>('ar');
   readonly loading = signal(true);
+  readonly error = signal<string | null>(null);
   readonly ar_aging = signal<AgingReport | null>(null);
   readonly ap_aging = signal<AgingReport | null>(null);
 
@@ -44,15 +48,24 @@ export class AgingReportComponent {
 
   loadData(): void {
     this.loading.set(true);
+    this.error.set(null);
 
-    this.cartera.getArAging().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (res) => { this.ar_aging.set(res.data); },
-    });
-
-    this.cartera.getApAging().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (res) => { this.ap_aging.set(res.data); this.loading.set(false); },
-      error: () => { this.loading.set(false); },
-    });
+    forkJoin({
+      ar: this.cartera.getArAging(),
+      ap: this.cartera.getApAging(),
+    })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: ({ ar, ap }) => {
+          this.ar_aging.set(ar.data);
+          this.ap_aging.set(ap.data);
+          this.loading.set(false);
+        },
+        error: (err) => {
+          this.error.set(parseApiError(err).userMessage);
+          this.loading.set(false);
+        },
+      });
   }
 
   switchTab(tab: AgingTab): void {

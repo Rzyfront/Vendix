@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import { RequestContextService } from '../../../../common/context/request-context.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import {
   PilaCsvExport,
   PilaEmployeeContribution,
   PilaNoveltyFlags,
   PilaPeriodReport,
   PilaPeriodTotals,
+  PilaSubmissionRecord,
 } from './interfaces/pila-report.interface';
+import { QueryPilaSubmissionsDto } from './dto/query-pila-submissions.dto';
 
 /** Tipos de novedad que se reflejan como flags PILA. */
 const PILA_NOVELTY_TYPES = [
@@ -41,7 +45,18 @@ const CSV_SEPARATOR = ';';
 export class PilaReportService {
   private readonly logger = new Logger(PilaReportService.name);
 
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly fiscalScope: FiscalScopeService,
+  ) {}
+
+  private getContext() {
+    const context = RequestContextService.getContext();
+    if (!context) {
+      throw new Error('No request context found');
+    }
+    return context;
+  }
 
   async getContributionsForPeriod(
     year: number,
@@ -199,6 +214,29 @@ export class PilaReportService {
   }
 
   /**
+   * Genera el reporte del período y registra el tracking en
+   * `pila_submissions` con status `generated`. Punto de entrada del
+   * endpoint GET /pila/report (vista en pantalla, no descarga de archivo).
+   */
+  async generateAndTrack(
+    year: number,
+    month: number,
+    store_id: number | null = null,
+  ): Promise<PilaPeriodReport> {
+    const report = await this.getContributionsForPeriod(year, month, store_id);
+
+    await this.recordSubmission({
+      year,
+      month,
+      store_id,
+      status: 'generated',
+      report,
+    });
+
+    return report;
+  }
+
+  /**
    * Exporta el reporte del período como CSV (separador ';'), una fila por
    * empleado más una fila final de totales. Pensado para diligenciar la
    * planilla manualmente en el operador PILA.
@@ -283,7 +321,175 @@ export class PilaReportService {
     );
 
     const filename = `pila_${year}_${String(month).padStart(2, '0')}.csv`;
+
+    await this.recordSubmission({
+      year,
+      month,
+      store_id,
+      status: 'exported',
+      report,
+    });
+
     return { filename, content };
+  }
+
+  /**
+   * Historial de generaciones/exportaciones de planilla PILA para el
+   * aportante (accounting_entity) resuelto por el contexto actual.
+   */
+  async getSubmissionHistory(query: QueryPilaSubmissionsDto): Promise<{
+    data: PilaSubmissionRecord[];
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const context = this.getContext();
+    const accounting_entity_id =
+      await this.fiscalScope.findFiscalAccountingEntityId({
+        organization_id: context.organization_id!,
+        store_id: context.store_id,
+      });
+
+    const page = query.page || 1;
+    const limit = query.limit || 10;
+
+    if (!accounting_entity_id) {
+      return { data: [], total: 0, page, limit };
+    }
+
+    const where = {
+      organization_id: context.organization_id!,
+      accounting_entity_id,
+      ...(query.year ? { period_year: query.year } : {}),
+      ...(query.month ? { period_month: query.month } : {}),
+      ...(query.status ? { status: query.status } : {}),
+    };
+
+    const client = this.prisma.withoutScope();
+    const [rows, total] = await Promise.all([
+      client.pila_submissions.findMany({
+        where,
+        orderBy: [{ period_year: 'desc' }, { period_month: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      client.pila_submissions.count({ where }),
+    ]);
+
+    return {
+      data: rows.map((row: any) => this.toSubmissionRecord(row)),
+      total,
+      page,
+      limit,
+    };
+  }
+
+  /**
+   * Registra una generación/exportación de planilla PILA en
+   * `pila_submissions`, marcando `void` cualquier fila ACTIVA previa del
+   * mismo aportante+período (control de duplicados a nivel de servicio,
+   * la tabla no tiene unique constraint). El CSV NO se persiste — es
+   * regenerable determinísticamente desde payroll_items/novelties.
+   */
+  private async recordSubmission(params: {
+    year: number;
+    month: number;
+    store_id: number | null;
+    status: 'generated' | 'exported';
+    report: PilaPeriodReport;
+  }): Promise<void> {
+    const context = this.getContext();
+    if (!context.organization_id) {
+      this.logger.warn(
+        'Skipping pila_submissions tracking - no organization_id in context',
+      );
+      return;
+    }
+
+    const accounting_entity = await this.fiscalScope.resolveAccountingEntityForFiscal(
+      {
+        organization_id: context.organization_id,
+        store_id: params.store_id ?? context.store_id,
+      },
+    );
+
+    const client = this.prisma.withoutScope();
+    const now = new Date();
+
+    await client.$transaction(async (tx: any) => {
+      // Marcar void cualquier fila ACTIVA previa del mismo aportante+período.
+      await tx.pila_submissions.updateMany({
+        where: {
+          organization_id: context.organization_id,
+          accounting_entity_id: accounting_entity.id,
+          period_year: params.year,
+          period_month: params.month,
+          status: { not: 'void' },
+        },
+        data: {
+          status: 'void',
+          voided_at: now,
+          voided_by_user_id: context.user_id ?? null,
+          void_reason: 'Regenerada: nueva generación/exportación del período',
+          updated_at: now,
+        },
+      });
+
+      await tx.pila_submissions.create({
+        data: {
+          organization_id: context.organization_id,
+          accounting_entity_id: accounting_entity.id,
+          period_year: params.year,
+          period_month: params.month,
+          status: params.status,
+          employees_count: params.report.employees.length,
+          total_earnings: params.report.totals.ibc,
+          total_contributions: params.report.totals.total,
+          metadata: {
+            social_security: {
+              health_employee: params.report.totals.health_employee,
+              health_employer: params.report.totals.health_employer,
+              pension_employee: params.report.totals.pension_employee,
+              pension_employer: params.report.totals.pension_employer,
+              arl: params.report.totals.arl,
+              sena: params.report.totals.sena,
+              icbf: params.report.totals.icbf,
+              compensation_fund: params.report.totals.compensation_fund,
+            },
+          },
+          exported_at: params.status === 'exported' ? now : null,
+          exported_by_user_id:
+            params.status === 'exported' ? context.user_id ?? null : null,
+          created_by_user_id: context.user_id ?? null,
+          created_at: now,
+          updated_at: now,
+        },
+      });
+    });
+  }
+
+  private toSubmissionRecord(row: any): PilaSubmissionRecord {
+    return {
+      id: row.id,
+      organization_id: row.organization_id,
+      accounting_entity_id: row.accounting_entity_id,
+      period_year: row.period_year,
+      period_month: row.period_month,
+      status: row.status,
+      employees_count: row.employees_count,
+      total_earnings: row.total_earnings?.toString?.() ?? String(row.total_earnings),
+      total_contributions:
+        row.total_contributions?.toString?.() ?? String(row.total_contributions),
+      metadata: row.metadata ?? null,
+      exported_at: row.exported_at ? row.exported_at.toISOString() : null,
+      exported_by_user_id: row.exported_by_user_id ?? null,
+      voided_at: row.voided_at ? row.voided_at.toISOString() : null,
+      voided_by_user_id: row.voided_by_user_id ?? null,
+      void_reason: row.void_reason ?? null,
+      created_by_user_id: row.created_by_user_id ?? null,
+      created_at: row.created_at ? row.created_at.toISOString() : null,
+      updated_at: row.updated_at ? row.updated_at.toISOString() : null,
+    };
   }
 
   // ═══ Private helpers ═══

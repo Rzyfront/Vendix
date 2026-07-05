@@ -35,6 +35,7 @@ import { QuantityControlComponent } from '../../../../../shared/components/quant
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
 import { PriceResolverService } from '../../../../../shared/services/pricing';
+import { EmptyStateComponent } from '../../../../../shared/components/empty-state/empty-state.component';
 
 @Component({
   selector: 'app-product-detail',
@@ -51,6 +52,7 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
     QuantityControlComponent,
     ButtonComponent,
     ShareModalComponent,
+    EmptyStateComponent,
   ],
   template: `
     <div class="product-detail-page">
@@ -186,6 +188,9 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
                     style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;"
                     >{{ selectedPriceResolution()?.compareAtPrice | currency }}</span
                   >
+                }
+                @if (isQuantityTiered() && promotionBadgeLabel()) {
+                  <span class="discount-badge">{{ promotionBadgeLabel() }}</span>
                 }
               </div>
 
@@ -629,6 +634,33 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
           </div>
           }
         </div>
+      } @else if (notFound()) {
+        <app-empty-state
+          icon="search-x"
+          iconColor="warning"
+          title="Producto no disponible"
+          description="No encontramos este producto o ya no está disponible en la tienda. Es posible que haya sido retirado o que el enlace sea incorrecto."
+          actionButtonText="Volver al catálogo"
+          actionButtonIcon="arrow-left"
+          [showActionButton]="true"
+          (actionClick)="goToCatalog()"
+        ></app-empty-state>
+      } @else if (hasError()) {
+        <app-empty-state
+          icon="alert-triangle"
+          iconColor="error"
+          title="No pudimos cargar el producto"
+          description="Ocurrió un problema al cargar este producto. Inténtalo de nuevo o vuelve al catálogo."
+          actionButtonText="Reintentar"
+          actionButtonIcon="refresh-cw"
+          [showActionButton]="true"
+          (actionClick)="retryLoad()"
+        ></app-empty-state>
+        <div class="empty-state-fallback-link">
+          <app-button variant="ghost" size="sm" (clicked)="goToCatalog()">
+            Volver al catálogo
+          </app-button>
+        </div>
       }
     </div>
 
@@ -653,6 +685,13 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
         margin: 0 auto;
         padding: 1.5rem;
         font-family: inherit;
+      }
+
+      .empty-state-fallback-link {
+        display: flex;
+        justify-content: center;
+        margin-top: -1rem;
+        padding-bottom: 2rem;
       }
 
       .breadcrumbs {
@@ -770,6 +809,20 @@ import { PriceResolverService } from '../../../../../shared/services/pricing';
           font-size: 1.25rem;
           color: var(--color-text-muted);
           text-decoration: line-through;
+        }
+        .discount-badge {
+          display: inline-flex;
+          align-items: center;
+          min-height: 20px;
+          padding: 0.2rem 0.5rem;
+          border-radius: 999px;
+          background: var(--color-success-light);
+          color: var(--color-success);
+          font-size: var(--fs-xs);
+          font-weight: var(--fw-bold);
+          line-height: 1;
+          white-space: nowrap;
+          align-self: center;
         }
       }
 
@@ -1368,6 +1421,10 @@ export class ProductDetailComponent implements OnInit {
   product = signal<ProductDetail | null>(null);
   isLoading = signal(true);
   hasError = signal(false);
+  /** True when the product was not found / not available for ecommerce (HTTP 404). */
+  notFound = signal(false);
+  /** Last slug requested, used to retry after a generic load error. */
+  private currentSlug: string | null = null;
   activeImageUrl = signal<string | null>(null);
   selectedVariantId = signal<number | null>(null);
   isDescriptionExpanded = signal(false);
@@ -1516,6 +1573,21 @@ export class ProductDetailComponent implements OnInit {
     return 'Desde';
   });
 
+  /**
+   * True when the active promotion is quantity-tiered. These promotions have
+   * no single-unit discount (`promotional_price === unit price`), so the price
+   * stays normal, but we still surface the informative badge (e.g. "Desde 3
+   * und: descuento"). Mirrors ProductCardComponent.isQuantityTiered().
+   */
+  isQuantityTiered = computed((): boolean => {
+    return this.product()?.active_promotion?.is_quantity_tiered === true;
+  });
+
+  /** Informative label for the active promotion badge. */
+  promotionBadgeLabel = computed((): string => {
+    return this.product()?.active_promotion?.badge_label ?? '';
+  });
+
   displayStock = computed((): number => {
     const variant = this.selectedVariant();
     const p = this.product();
@@ -1648,12 +1720,14 @@ export class ProductDetailComponent implements OnInit {
   }
 
   loadProduct(slug: string): void {
+    this.currentSlug = slug;
     this.isLoading.set(true);
     this.hasError.set(false);
+    this.notFound.set(false);
     this.resetReviewsState();
     this.catalogService.getProductBySlug(slug).subscribe({
       next: (response) => {
-        if (response.success) {
+        if (response.success && response.data) {
           const product = response.data;
           this.product.set(product);
           this.activeImageUrl.set(product.image_url);
@@ -1679,15 +1753,40 @@ export class ProductDetailComponent implements OnInit {
           this.loadReviews(product.id);
           this.checkCanReview(product.id);
         } else {
+          // success:false or empty payload → treat as not available.
+          this.notFound.set(true);
+        }
+        this.isLoading.set(false);
+      },
+      error: (error) => {
+        // A 404 means the product does not exist or is not available for
+        // ecommerce → render a graceful "not available" empty state instead
+        // of an empty <main>. parseApiError surfaces the backend error_code
+        // for distinguishing not-found codes from other failures.
+        const parsed = parseApiError(error);
+        const status = error?.status;
+        const isNotFound =
+          status === 404 ||
+          parsed.errorCode === 'PROD_NOT_FOUND_001' ||
+          parsed.errorCode === 'PRODUCT_NOT_FOUND';
+        if (isNotFound) {
+          this.notFound.set(true);
+        } else {
           this.hasError.set(true);
         }
         this.isLoading.set(false);
       },
-      error: () => {
-        this.hasError.set(true);
-        this.isLoading.set(false);
-      },
     });
+  }
+
+  /** Retry loading the current product after a generic load error. */
+  retryLoad(): void {
+    if (this.currentSlug) this.loadProduct(this.currentSlug);
+  }
+
+  /** Navigate back to the storefront catalog. */
+  goToCatalog(): void {
+    this.router.navigate(['/catalog']);
   }
 
   loadRecommendations(product: ProductDetail): void {

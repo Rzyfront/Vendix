@@ -22,6 +22,7 @@ import {
   VoidDispatchRouteDto,
 } from '../dto';
 import {
+  aggregateArticleExits,
   aggregateRouteTotals,
   deriveStopIsPrepaid,
 } from '../utils/route-stop-calc';
@@ -83,6 +84,81 @@ const ROUTE_INCLUDE = {
   },
 };
 
+/**
+ * PDF-only include: a clone of {@link ROUTE_INCLUDE} that additionally pulls the
+ * dispatch_note LINES (`dispatch_note_items`) so the PDF can build the
+ * consolidated "DETALLE DE SALIDA DE ARTÍCULOS" page (sum of
+ * `dispatched_quantity` per product across the route).
+ *
+ * Kept separate from `ROUTE_INCLUDE` on purpose so the plain
+ * `GET /store/dispatch-routes/:id` response is NOT inflated with line items.
+ * The lines are nested under the already-scoped `dispatch_routes` query, so no
+ * extra model registration in `StorePrismaService` is required.
+ */
+const ROUTE_PDF_INCLUDE = {
+  vehicle: true,
+  driver_user: {
+    select: { id: true, first_name: true, last_name: true, document_number: true },
+  },
+  origin_location: { select: { id: true, name: true, code: true } },
+  stops: {
+    orderBy: { stop_sequence: 'asc' as const },
+    include: {
+      dispatch_note: {
+        select: {
+          id: true,
+          dispatch_number: true,
+          customer_id: true,
+          customer_name: true,
+          grand_total: true,
+          status: true,
+          sales_order_id: true,
+          order_id: true,
+          needs_collection: true,
+          customer_address: true,
+          sales_order: { select: { id: true, order_number: true, status: true } },
+          invoice: { select: { payment_date: true } },
+          order: {
+            select: {
+              id: true,
+              remaining_balance: true,
+              shipping_address_snapshot: true,
+              addresses_orders_shipping_address_idToaddresses: {
+                select: {
+                  address_line1: true,
+                  address_line2: true,
+                  city: true,
+                  state_province: true,
+                  country_code: true,
+                  postal_code: true,
+                },
+              },
+            },
+          },
+          // PDF-only: lines feed the consolidated article-exit detail page.
+          dispatch_note_items: {
+            select: {
+              product_id: true,
+              product_variant_id: true,
+              ordered_quantity: true,
+              dispatched_quantity: true,
+              product: {
+                select: {
+                  name: true,
+                  sku: true,
+                  barcode: true,
+                  stock_unit: true,
+                },
+              },
+              product_variant: { select: { sku: true, name: true } },
+            },
+          },
+        },
+      },
+    },
+  },
+};
+
 @Injectable()
 export class RouteFlowService {
   private readonly logger = new Logger(RouteFlowService.name);
@@ -129,6 +205,21 @@ export class RouteFlowService {
     const route = await this.prisma.dispatch_routes.findFirst({
       where: { id, store_id },
       include: ROUTE_INCLUDE,
+    });
+    if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
+    return this.withDerivedStopPrepaid(route);
+  }
+
+  /**
+   * Same tenant-scoped read as {@link getRoute} but with {@link
+   * ROUTE_PDF_INCLUDE} so the returned stops carry their dispatch_note LINES.
+   * Used exclusively by {@link generatePdf} to build the consolidated
+   * article-exit page without inflating the regular route response.
+   */
+  private async getRouteForPdf(id: number, store_id: number) {
+    const route = await this.prisma.dispatch_routes.findFirst({
+      where: { id, store_id },
+      include: ROUTE_PDF_INCLUDE,
     });
     if (!route) throw new NotFoundException(`Planilla #${id} no encontrada`);
     return this.withDerivedStopPrepaid(route);
@@ -1052,12 +1143,20 @@ export class RouteFlowService {
       return updated_route;
     });
 
+    // Conductor/responsable del faltante: interno (driver_user_id) o externo.
+    // El asiento de faltante (CxC 1365) usa este id/etiqueta como tercero.
+    const driver_label = updated.is_primary_driver_external
+      ? updated.external_driver_name || undefined
+      : undefined;
+
     // Emit route.closed event
     this.eventEmitter.emit('dispatch_route.closed', {
       route_id: id,
       route_number: updated.route_number,
       store_id,
       user_id,
+      driver_user_id: updated.driver_user_id ?? undefined,
+      driver_label,
       total_collected,
       total_changes,
       total_withholdings,
@@ -1151,7 +1250,10 @@ export class RouteFlowService {
 
   async generatePdf(id: number): Promise<Buffer> {
     const store_id = this.getStoreId();
-    const route = await this.getRoute(id, store_id);
-    return this.pdfExport.generate(route);
+    const route = await this.getRouteForPdf(id, store_id);
+    // Consolidated goods-out summary (sum of dispatched_quantity per product
+    // across all non-released stops) rendered as the last PDF page.
+    const articles = aggregateArticleExits(route.stops);
+    return this.pdfExport.generate(route, articles);
   }
 }

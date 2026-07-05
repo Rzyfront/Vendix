@@ -1,7 +1,9 @@
 import {
   IsArray,
+  IsBoolean,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsNotEmpty,
   IsNumber,
@@ -12,7 +14,10 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-import { purchase_order_status_enum } from '@prisma/client';
+import { purchase_order_status_enum, tax_type_enum } from '@prisma/client';
+
+/** Allowed fiscal tax classifications for a purchase line (F1 IVA lifecycle). */
+const TAX_TYPE_VALUES = Object.values(tax_type_enum) as string[];
 
 /**
  * Item DTO for org-native purchase order creation.
@@ -86,6 +91,26 @@ export class CreateOrgPurchaseOrderItemDto {
   @IsOptional()
   tax_rate?: number;
 
+  /** F1 IVA lifecycle — line tax type (iva | inc | ...). Defaults to iva. */
+  @ApiProperty({
+    description: 'F1: line tax type (iva | inc | ica | ...). Defaults to iva.',
+    enum: tax_type_enum,
+    required: false,
+  })
+  @IsIn(TAX_TYPE_VALUES)
+  @IsOptional()
+  tax_type?: string;
+
+  /** F1 IVA lifecycle — per-line override of header prices_include_tax. */
+  @ApiProperty({
+    description:
+      'F1: per-line override of header prices_include_tax (mixed invoices).',
+    required: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  prices_include_tax?: boolean;
+
   @ApiProperty({ description: 'Notes for this item (optional)' })
   @IsString()
   @IsOptional()
@@ -142,6 +167,19 @@ export class CreateOrgPurchaseOrderDto {
   @IsEnum(purchase_order_status_enum)
   @IsOptional()
   status?: purchase_order_status_enum;
+
+  /**
+   * F1 IVA lifecycle — dominant invoice tax mode. Crosses the mapping into
+   * the store-native DTO so org-created POs capture VAT identically.
+   */
+  @ApiProperty({
+    description:
+      'F1: dominant invoice tax mode. true = line prices already include tax.',
+    required: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  prices_include_tax?: boolean;
 
   @ApiProperty({ description: 'Order date' })
   @IsDateString()

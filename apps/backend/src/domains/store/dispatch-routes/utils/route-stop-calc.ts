@@ -426,3 +426,113 @@ export function aggregateRouteTotals<
     total_to_collect,
   };
 }
+
+/**
+ * One consolidated article-exit row for the route PDF "DETALLE DE SALIDA DE
+ * ARTÍCULOS" page: the total units of a product/variant that physically left
+ * the warehouse across every (non-released) stop in the route.
+ */
+export interface ArticleExitRow {
+  /** Variant SKU → product SKU → product barcode → '—'. */
+  code: string;
+  /** Variant name → product name → 'Producto #{id}'. */
+  name: string;
+  /** Product stock unit (e.g. 'UND', 'KG') → 'UND' when absent. */
+  unit: string;
+  /** Sum of `dispatched_quantity` for this group across the route. */
+  total_units: number;
+}
+
+/** Structured consolidated article-exit summary for a dispatch route. */
+export interface ArticleExitSummary {
+  rows: ArticleExitRow[];
+  /** Number of distinct product/variant rows (`rows.length`). */
+  article_count: number;
+  /** Sum of `total_units` across every row. */
+  total_units: number;
+}
+
+/**
+ * Minimal stop shape consumed by {@link aggregateArticleExits}. Each stop's
+ * linked dispatch_note must be loaded with its `dispatch_note_items` (each
+ * carrying `product` and optional `product_variant`). Typed loosely/structural
+ * so callers can pass the Prisma route payload directly without coupling this
+ * pure module to the Prisma client types. `dispatched_quantity` is an Int
+ * column but is coerced via `Number()` defensively.
+ */
+export interface ArticleExitStopInput {
+  status?: string | null;
+  result?: string | null;
+  dispatch_note?: {
+    dispatch_note_items?: Array<{
+      product_id: number;
+      product_variant_id?: number | null;
+      dispatched_quantity?: number | string | null;
+      product?: {
+        name?: string | null;
+        sku?: string | null;
+        barcode?: string | null;
+        stock_unit?: string | null;
+      } | null;
+      product_variant?: {
+        sku?: string | null;
+        name?: string | null;
+      } | null;
+    }> | null;
+  } | null;
+}
+
+/**
+ * Consolidate the goods that leave the warehouse in a route: sum
+ * `dispatched_quantity` per product (+ variant) across ALL stops, EXCLUDING
+ * `released` stops (that merchandise never left in this route).
+ *
+ * Grouping key is `product_id` + `product_variant_id`. Per group it derives a
+ * display `code`/`name`/`unit` and returns rows sorted by `name`
+ * (`localeCompare` es-CO), plus the distinct-row count and grand total of
+ * units. Pure function: stops in, summary out. No Prisma.
+ */
+export function aggregateArticleExits(
+  stops: ReadonlyArray<ArticleExitStopInput>,
+): ArticleExitSummary {
+  const groups = new Map<string, ArticleExitRow>();
+
+  for (const stop of stops) {
+    // Released stops did NOT leave the warehouse in this route — skip them.
+    if (stop.status === 'released' || stop.result === 'released') continue;
+    const items = stop.dispatch_note?.dispatch_note_items;
+    if (!items || items.length === 0) continue;
+
+    for (const item of items) {
+      const key = `${item.product_id}::${item.product_variant_id ?? ''}`;
+      const qty = Number(item.dispatched_quantity || 0);
+      const existing = groups.get(key);
+      if (existing) {
+        existing.total_units += qty;
+        continue;
+      }
+      const code =
+        item.product_variant?.sku ??
+        item.product?.sku ??
+        item.product?.barcode ??
+        '—';
+      const name =
+        item.product_variant?.name ??
+        item.product?.name ??
+        `Producto #${item.product_id}`;
+      const unit = item.product?.stock_unit ?? 'UND';
+      groups.set(key, { code, name, unit, total_units: qty });
+    }
+  }
+
+  const rows = Array.from(groups.values()).sort((a, b) =>
+    a.name.localeCompare(b.name, 'es-CO'),
+  );
+  const total_units = rows.reduce((sum, r) => sum + r.total_units, 0);
+
+  return {
+    rows,
+    article_count: rows.length,
+    total_units,
+  };
+}

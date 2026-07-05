@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
+import { GlobalPrismaService } from '../../../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 
@@ -23,7 +24,18 @@ export interface CalculateCostParams {
 }
 
 export interface CostCalculationResult {
+  /**
+   * Weighted-average cost of the RECEIVING location alone (used to update
+   * that location's `stock_levels.cost_per_unit`).
+   */
   new_cost_per_unit: number;
+  /**
+   * QUI-425 — scoped weighted-average cost across ALL in-scope locations
+   * (the value persisted to `products/variants.cost_price`). Pricing/margin
+   * recomputation MUST use this so `base_price = cost_price·(1+margin/100)`
+   * stays consistent and matches the cost preview.
+   */
+  new_scoped_cost_per_unit: number;
   previous_cost_per_unit: number;
 }
 
@@ -41,8 +53,53 @@ export class CostingService {
 
   constructor(
     private prisma: StorePrismaService,
+    private readonly globalPrisma: GlobalPrismaService,
     private readonly operatingScopeService: OperatingScopeService,
   ) {}
+
+  /**
+   * QUI-425 — Weighted-average cost aggregate across the in-scope location set.
+   *
+   * Reads via the UNSCOPED base client (`GlobalPrismaService`) on purpose:
+   * `buildScopedLocationFilter` already encodes the EXACT operating-scope
+   * predicate (STORE → same store, ORGANIZATION → whole org). Going through
+   * the store-scoped client would AND an extra
+   * `inventory_locations.store_id = <ctx store>` clause that silently DROPS
+   * org-level central warehouses (`store_id = null`) and sibling stores from
+   * the aggregate — which corrupted `cost_price`/`profit_margin` on receipt
+   * for ORGANIZATION-scope orgs (the general-inventory cost was ignored).
+   *
+   * Returns the scoped on-hand quantity and its weighted-average unit cost.
+   */
+  async getScopedStockAggregate(
+    params: { product_id: number; variant_id?: number; location_id: number },
+    tx?: any,
+  ): Promise<{ quantity: number; cost_per_unit: number }> {
+    const organizationId = this.getOrganizationId();
+    const locationFilter = await this.buildScopedLocationFilter(
+      organizationId,
+      params.location_id,
+      tx,
+    );
+    const rows = await this.globalPrisma.stock_levels.findMany({
+      where: {
+        product_id: params.product_id,
+        product_variant_id: params.variant_id || null,
+        quantity_on_hand: { gt: 0 },
+        inventory_locations: { is: locationFilter },
+      },
+    });
+    const quantity = rows.reduce(
+      (sum, sl) => sum + (sl.quantity_on_hand ?? 0),
+      0,
+    );
+    const value = rows.reduce(
+      (sum, sl) =>
+        sum + (sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0),
+      0,
+    );
+    return { quantity, cost_per_unit: quantity > 0 ? value / quantity : 0 };
+  }
 
   /**
    * Build a scoped `inventory_locations` filter for cost aggregates based on
@@ -123,30 +180,18 @@ export class CostingService {
 
     // Scoped stock aggregate (multi-tenant safe): aggregate across the same
     // store (STORE scope) or organization (ORGANIZATION scope) — never cross
-    // organizations or, in STORE scope, sibling stores.
-    const locationFilter = await this.buildScopedLocationFilter(
-      organizationId,
-      params.location_id,
-      tx,
-    );
-    const scopedStockLevels = await prisma.stock_levels.findMany({
-      where: {
-        product_id: params.product_id,
-        product_variant_id: params.variant_id || null,
-        quantity_on_hand: { gt: 0 },
-        inventory_locations: { is: locationFilter },
-      },
-    });
-    const scopedQty = scopedStockLevels.reduce(
-      (sum, sl) => sum + (sl.quantity_on_hand ?? 0),
-      0,
-    );
-    const scopedValue = scopedStockLevels.reduce(
-      (sum, sl) =>
-        sum + (sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0),
-      0,
-    );
-    const scopedCost = scopedQty > 0 ? scopedValue / scopedQty : 0;
+    // organizations or, in STORE scope, sibling stores. Reads via the UNSCOPED
+    // base client so org-level central warehouses (store_id = null) and sibling
+    // stores are included for ORGANIZATION scope — see getScopedStockAggregate.
+    const { quantity: scopedQty, cost_per_unit: scopedCost } =
+      await this.getScopedStockAggregate(
+        {
+          product_id: params.product_id,
+          variant_id: params.variant_id,
+          location_id: params.location_id,
+        },
+        tx,
+      );
 
     let newCostPerUnit: number;
 
@@ -229,6 +274,7 @@ export class CostingService {
 
     return {
       new_cost_per_unit: newCostPerUnit,
+      new_scoped_cost_per_unit: scopedCostPerUnit,
       previous_cost_per_unit: existingCost,
     };
   }
@@ -244,7 +290,12 @@ export class CostingService {
     const prisma = tx || this.prisma;
 
     if (params.costing_method === 'weighted_average') {
-      // For weighted average, COGS is simply quantity * current cost_per_unit
+      // For weighted average, COGS is quantity * current cost_per_unit (the
+      // average). We ALSO decrement cost layers (received_at ASC) so that the
+      // layers stay in sync with stock_levels; otherwise the layers would sum
+      // to more than the real stock and break a future FIFO switch or the
+      // historical valuation. The COGS amount is unaffected by which layers we
+      // touch: we always cost consumed units at the average cost_per_unit.
       const stockLevel = await prisma.stock_levels.findFirst({
         where: {
           product_id: params.product_id,
@@ -253,7 +304,53 @@ export class CostingService {
         },
       });
       const costPerUnit = Number(stockLevel?.cost_per_unit ?? 0);
-      return params.quantity * costPerUnit;
+
+      const cppLayers = await prisma.inventory_cost_layers.findMany({
+        where: {
+          product_id: params.product_id,
+          product_variant_id: params.variant_id || null,
+          location_id: params.location_id,
+          quantity_remaining: { gt: 0 },
+        },
+        orderBy: { received_at: 'asc' },
+      });
+
+      let remainingToConsume = params.quantity;
+      let totalCogs = 0;
+
+      for (const layer of cppLayers) {
+        if (remainingToConsume <= 0) break;
+
+        const consumeFromLayer = Math.min(
+          remainingToConsume,
+          layer.quantity_remaining,
+        );
+
+        // Average costing: cost consumed units at the average cost_per_unit,
+        // NOT at the individual layer.unit_cost.
+        totalCogs += consumeFromLayer * costPerUnit;
+        remainingToConsume -= consumeFromLayer;
+
+        await prisma.inventory_cost_layers.update({
+          where: { id: layer.id },
+          data: {
+            quantity_remaining: layer.quantity_remaining - consumeFromLayer,
+          },
+        });
+      }
+
+      if (remainingToConsume > 0) {
+        this.logger.warn(
+          `Insufficient cost layers for product ${params.product_id}. ` +
+            `${remainingToConsume} units consumed without layer data.`,
+        );
+        // Preserve legacy CPP behavior: COGS must remain exactly
+        // quantity * cost_per_unit even when layers are insufficient, so we
+        // still charge the missing units at the average cost.
+        totalCogs += remainingToConsume * costPerUnit;
+      }
+
+      return totalCogs;
     }
 
     // FIFO or LIFO: consume layers in order

@@ -97,6 +97,23 @@ export const orgAccountingRoutes: Routes = [
             (c) => c.OrgFiscalPeriodsComponent,
           ),
       },
+      // Consolidación — sesiones multi-tienda: listado + detalle (intercompañía
+      // + reportes consolidados). El backend vive en
+      // store/accounting/consolidation y resuelve la organización del contexto.
+      {
+        path: 'consolidation',
+        loadComponent: () =>
+          import(
+            './pages/consolidation/consolidation-list.component'
+          ).then((c) => c.OrgConsolidationListComponent),
+      },
+      {
+        path: 'consolidation/:id',
+        loadComponent: () =>
+          import(
+            './pages/consolidation/consolidation-detail.component'
+          ).then((c) => c.OrgConsolidationDetailComponent),
+      },
       // Configuración — super-tab; org scope only implements account mappings.
       {
         path: 'configuration',

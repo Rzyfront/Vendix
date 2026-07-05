@@ -348,6 +348,72 @@ export const selectFiscalStatus = createSelector(
   },
 );
 
+// ────────────────────────────────────────────────────────────────────────
+// F4 — Responsabilidad de IVA (gate "no responsable de IVA").
+//
+// Espejo EXACTO del helper backend `@common/helpers/vat-responsibility.helper`.
+// Fuente: `fiscal_data` (scope-aware igual que `selectFiscalStatus`).
+//   - tax_responsibilities incluye 'O-48'          ⇒ responsable (true)
+//   - incluye 'O-49' SIN 'O-48'                     ⇒ NO responsable (false)
+//   - fallback tax_regime COMUN/GRAN_CONTRIBUYENTE  ⇒ true; SIMPLIFICADO ⇒ false
+//   - indeterminado                                 ⇒ true (anti-regresión)
+// ────────────────────────────────────────────────────────────────────────
+const VAT_RESPONSIBLE_CODE = 'O-48';
+const VAT_NOT_RESPONSIBLE_CODE = 'O-49';
+
+function resolveIsVatResponsible(fiscalData: any): boolean {
+  const responsibilities: string[] = Array.isArray(
+    fiscalData?.tax_responsibilities,
+  )
+    ? (fiscalData.tax_responsibilities as unknown[]).filter(
+        (c): c is string => typeof c === 'string',
+      )
+    : [];
+
+  if (responsibilities.includes(VAT_RESPONSIBLE_CODE)) return true; // O-48
+  if (responsibilities.includes(VAT_NOT_RESPONSIBLE_CODE)) return false; // O-49 sin O-48
+
+  const regime =
+    typeof fiscalData?.tax_regime === 'string' ? fiscalData.tax_regime : undefined;
+  if (regime === 'COMUN' || regime === 'GRAN_CONTRIBUYENTE') return true;
+  if (regime === 'SIMPLIFICADO') return false;
+
+  return true; // indeterminado ⇒ responsable
+}
+
+/**
+ * `fiscal_data` del comercio, resuelto por fiscal_scope (mismo criterio que
+ * `selectFiscalStatus`): ORGANIZATION lee org settings, si no, store settings.
+ */
+export const selectFiscalData = createSelector(
+  selectStoreSettings,
+  selectOrganizationSettings,
+  selectUserOrganization,
+  (storeSettings: any, organizationSettings: any, organization: any) => {
+    const fiscalScope =
+      organization?.fiscal_scope || organization?.operating_scope;
+    if (fiscalScope === 'ORGANIZATION') {
+      return organizationSettings?.fiscal_data || null;
+    }
+    return storeSettings?.fiscal_data || null;
+  },
+);
+
+/** `true` cuando el comercio es responsable de IVA (o indeterminado). */
+export const selectIsVatResponsible = createSelector(
+  selectFiscalData,
+  (fiscalData: any) => resolveIsVatResponsible(fiscalData),
+);
+
+/**
+ * Predicado de bloqueo POSITIVO: `true` SOLO cuando el comercio es
+ * explícitamente NO responsable de IVA. Indeterminado ⇒ `false` (no bloquea).
+ */
+export const selectIsExplicitlyNotVatResponsible = createSelector(
+  selectFiscalData,
+  (fiscalData: any) => !resolveIsVatResponsible(fiscalData),
+);
+
 export const selectFiscalArea = (area: FiscalArea) =>
   createSelector(selectFiscalStatus, (status) => status?.[area] || null);
 

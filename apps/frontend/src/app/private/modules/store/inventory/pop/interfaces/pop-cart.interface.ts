@@ -152,6 +152,16 @@ export interface PreBulkData {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * F1 (contenido por envase): cuántas unidades de STOCK trae cada unidad de
+   * COMPRA cuando la compra es un envase (dimensión `count`) y el stock es
+   * masa/volumen — el catálogo NO puede derivar el factor porque las
+   * dimensiones difieren, así que el usuario lo teclea (entero ≥1). Viaja
+   * dentro de `prebulk_data` (sobrevive la copia del carrito) y `pop.component`
+   * lo mapea al item de la orden como `purchase_to_stock_factor`. Undefined en
+   * retail o cuando ambas unidades comparten dimensión (el backend deriva).
+   */
+  contentPerPackage?: number;
 }
 
 /**
@@ -164,7 +174,28 @@ export interface PopCartItem {
   quantity: number;
   unit_cost: number;
   discount: number;
+  /**
+   * IVA cycle (F1): tax rate captured MANUALLY for this line, as a
+   * percentage (e.g. 19 for standard Colombian IVA, 0 for exempt).
+   */
   tax_rate: number;
+  /**
+   * IVA cycle (F1): tax classification for this line. Defaults to 'iva'.
+   * Passed through to the backend as-is (backend is the source of truth).
+   */
+  tax_type?: string;
+  /**
+   * IVA cycle (F1): per-line override of the header `prices_include_tax`
+   * mode (mixed invoices). When set, it inverts/overrides the header mode
+   * for THIS line only: `effective_include = prices_include_tax ?? header`.
+   * `undefined` means the line inherits the header mode.
+   */
+  prices_include_tax?: boolean;
+  /**
+   * Net (pre-tax) line subtotal = `unit_price_net * quantity` derived from
+   * the effective include mode. IVA cycle (F1) redefines `subtotal` to be
+   * NET so the summary shows Subtotal(neto) / IVA / Total.
+   */
   subtotal: number;
   tax_amount: number;
   total: number;
@@ -182,6 +213,13 @@ export interface PopCartItem {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * F1 (contenido por envase): factor manual envase→stock (entero ≥1) para el
+   * caso count→masa/volumen. Espejo del campo homónimo en `prebulk_data`; se
+   * mapea al `purchase_to_stock_factor` del item de la orden. Undefined cuando
+   * el backend puede derivar el factor por UoM (misma dimensión) o en retail.
+   */
+  contentPerPackage?: number;
   addedAt: Date;
 }
 
@@ -189,9 +227,15 @@ export interface PopCartItem {
  * Financial summary for purchase order cart
  */
 export interface PopCartSummary {
+  /**
+   * IVA cycle (F1): NET (pre-tax) subtotal = Σ(unit_price_net * quantity).
+   * Derived from the effective include mode per line.
+   */
   subtotal: number;
+  /** IVA cycle (F1): total tax (IVA) = Σ line_tax. */
   tax_amount: number;
   shipping_cost: number;
+  /** Gross total = subtotal (net) + tax_amount (IVA) + shipping. */
   total: number;
   itemCount: number;
   totalItems: number;
@@ -213,6 +257,21 @@ export interface PopCartState {
   orderId?: number; // ID of the order being edited
   items: PopCartItem[];
   summary: PopCartSummary;
+  /**
+   * IVA cycle (F1): dominant invoice mode. `true` when the captured prices
+   * already INCLUDE tax (extract IVA out of the price); `false` when tax is
+   * ADDED on top of the net price. Per-line `prices_include_tax` overrides
+   * this for mixed invoices.
+   */
+  prices_include_tax: boolean;
+  /**
+   * IVA cycle — maestro "¿Esta compra tiene IVA?". `false` (default) ⇒ cero
+   * IVA en toda la orden: cada línea ignora su `tax_rate`, el neto = precio y
+   * el resumen no muestra IVA. `true` ⇒ se aplica el IVA por línea (tasa 19%
+   * por defecto) con su modo efectivo (`prices_include_tax` por línea ??
+   * header). El escáner de facturas lo enciende al detectar IVA.
+   */
+  has_vat: boolean;
   supplierId: number | null;
   locationId: number | null;
   orderDate: Date;
@@ -246,6 +305,23 @@ export interface AddToPopCartRequest {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * F1 (contenido por envase): factor manual envase→stock (entero ≥1) para el
+   * caso count→masa/volumen. El carrito lo transporta preferentemente dentro
+   * de `prebulk_data`; este campo top-level queda listo para propagación futura.
+   */
+  contentPerPackage?: number;
+  /**
+   * IVA cycle (F3 wiring): override de IVA por línea proveniente del escáner
+   * de facturas. `tax_rate` es PORCENTAJE (19), no fracción — el escáner emite
+   * fracción y `pop.component.ts` la convierte ×100 antes de llegar aquí.
+   * Cuando el escáner detectó tasa, la línea entra en modo adicional
+   * (`prices_include_tax=false`) porque `normalizeOcrResponse` ya aplastó el
+   * `unit_cost` a neto. Ausentes ⇒ el carrito usa sus defaults (hereda header).
+   */
+  tax_rate?: number;
+  tax_type?: string;
+  prices_include_tax?: boolean;
 }
 
 /**
@@ -294,6 +370,13 @@ export interface PopProductConfigResult {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * F1 (contenido por envase): factor manual envase→stock (entero ≥1) capturado
+   * por `pop-uom-capture` en el caso count→masa/volumen. `pop.component` lo
+   * propaga al carrito y lo mapea al `purchase_to_stock_factor` del item de la
+   * orden. Undefined cuando el backend deriva el factor por UoM o en retail.
+   */
+  contentPerPackage?: number;
 }
 
 /**
