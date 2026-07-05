@@ -91,18 +91,9 @@ export class AdvanceListComponent {
     {
       key: 'status',
       label: 'Estado',
+      align: 'center',
       badge: true,
-      badgeConfig: {
-        type: 'custom',
-        colorMap: {
-          pending: '#eab308',
-          approved: '#3b82f6',
-          repaying: '#a855f7',
-          paid: '#22c55e',
-          rejected: '#ef4444',
-          cancelled: '#9ca3af',
-        },
-      },
+      badgeConfig: { type: 'status', size: 'sm' },
       transform: (val: string) => this.getStatusLabel(val),
     },
   ];
@@ -114,18 +105,7 @@ export class AdvanceListComponent {
     subtitleTransform: (val: any) =>
       val ? `${val.first_name} ${val.last_name}` : '-',
     badgeKey: 'status',
-    badgeConfig: {
-      type: 'custom',
-      size: 'sm',
-      colorMap: {
-        pending: '#eab308',
-        approved: '#3b82f6',
-        repaying: '#a855f7',
-        paid: '#22c55e',
-        rejected: '#ef4444',
-        cancelled: '#9ca3af',
-      },
-    },
+    badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (val: string) => this.getStatusLabel(val),
     detailKeys: [
       {

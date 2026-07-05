@@ -50,9 +50,15 @@
       [cardConfig]="cardConfig"
       [actions]="actions"
       [loading]="loading()"
-      emptyMessage="No hay adelantos registrados"
       emptyIcon="hand-coins"
+      emptyMessage="No hay adelantos registrados"
+      emptyTitle="Sin adelantos"
+      emptyDescription="Aún no has registrado adelantos para tus empleados. Crea el primero para llevar el control de sus cuotas y deducciones."
+      emptyActionText="Nuevo Adelanto"
+      emptyActionIcon="plus"
+      [showEmptyAction]="true"
       (rowClick)="viewDetail.emit($event)"
+      (emptyActionClick)="create.emit()"
     ></app-responsive-data-view>
   </div>
 </app-card>
