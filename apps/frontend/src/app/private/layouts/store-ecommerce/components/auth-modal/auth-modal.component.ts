@@ -393,9 +393,22 @@ export class AuthModalComponent {
         if (this.lastShownError() === rawMessage) return;
         this.lastShownError.set(rawMessage);
         untracked(() => {
-          const { title, message } = this.mapErrorToUserFriendly(rawMessage);
+          const { title, message, useRecoveryToast } =
+            this.mapErrorToUserFriendly(rawMessage);
           this.errorTitle.set(title);
           this.errorMessage.set(message);
+          if (useRecoveryToast) {
+            // Show the recovery CTA as a persistent toast with inline
+            // action button — much more visible than the inline banner.
+            this.toast.withAction({
+              title,
+              description: message,
+              action: {
+                label: 'Recuperar contraseña',
+                callback: () => this.onStartRecovery(),
+              },
+            });
+          }
         });
       } else if (!error) {
         this.lastShownError.set(null);
@@ -466,6 +479,7 @@ export class AuthModalComponent {
   private mapErrorToUserFriendly(error: string): {
     title: string;
     message: string;
+    useRecoveryToast?: boolean;
   } {
     const errorLower = error.toLowerCase();
 
@@ -505,7 +519,8 @@ export class AuthModalComponent {
       return {
         title: 'Ya tienes cuenta con este correo',
         message:
-          'Detectamos que este correo ya está registrado como cliente. Te enviamos un link para que actives tu contraseña y vincules tu cuenta con esta tienda.',
+          'Detectamos que este correo ya está registrado como cliente. Te enviaremos un link para que actives tu contraseña.',
+        useRecoveryToast: true,
       };
     }
 
