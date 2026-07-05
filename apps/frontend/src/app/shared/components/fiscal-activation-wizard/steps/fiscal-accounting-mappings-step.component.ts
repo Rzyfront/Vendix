@@ -65,6 +65,8 @@ const DEFAULT_MAPPING_KEYS: MappingKeyDef[] = [
   { key: 'support_document.accepted.vat_deductible', label: 'Documento soporte aceptado · IVA descontable' },
   { key: 'support_document.accepted.withholding_payable', label: 'Documento soporte aceptado · Retenciones por pagar' },
   { key: 'support_document.accepted.accounts_payable', label: 'Documento soporte aceptado · Proveedor documento soporte' },
+  { key: 'purchase.vat_recognized.iva_deductible', label: 'IVA descontable de compra (POP) · IVA descontable' },
+  { key: 'purchase.vat_recognized.accounts_payable', label: 'IVA descontable de compra (POP) · Proveedores (complemento IVA)' },
   { key: 'purchase_order.payment.accounts_payable', label: 'Pago orden de compra · Proveedores (pago OC)' },
   { key: 'purchase_order.payment.cash_bank', label: 'Pago orden de compra · Banco (pago OC)' },
   { key: 'inventory.adjusted.inventory', label: 'Ajuste de inventario · Inventario' },

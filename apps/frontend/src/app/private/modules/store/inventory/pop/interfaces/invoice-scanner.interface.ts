@@ -17,9 +17,29 @@ export interface ExtractedSupplier {
 export interface ExtractedLineItem {
   description: string;
   quantity: number;
+  /**
+   * F3 IVA lifecycle: tras la normalización del backend, `unit_price` SIEMPRE
+   * es el precio unitario NETO (pre-IVA). Si la factura era IVA-incluido
+   * (`prices_include_tax === true`) el bruto emitido por el scanner se aplastó
+   * a neto con la fórmula canónica (neto = bruto / (1 + tax_rate)); el bruto
+   * original queda en `unit_price_gross`. En facturas con IVA por fuera,
+   * neto === bruto.
+   */
   unit_price: number;
   total: number;
   sku_if_visible?: string;
+  /**
+   * F3 IVA lifecycle: tasa de IVA/consumo por línea emitida por el scanner
+   * como FRACCIÓN decimal (0, 0.05, 0.19), NO porcentaje. Opcional porque los
+   * escaneos legacy / prompts pre-F3 no la emiten.
+   */
+  tax_rate?: number | null;
+  /**
+   * F3 IVA lifecycle: precio unitario ORIGINAL impreso en la factura (bruto si
+   * era inclusiva, neto si era exclusiva). `unit_price` queda normalizado a
+   * neto; este campo conserva el valor crudo para mostrar "bruto → neto".
+   */
+  unit_price_gross?: number | null;
   /**
    * Fase 4: pistas de unidad de medida emitidas por el perfil
    * `invoice_ocr_ingredient`. El perfil retail (`invoice_ocr`) no las
@@ -37,6 +57,12 @@ export interface InvoiceScanResult {
   invoice_number: string;
   invoice_date: string;
   payment_terms?: string;
+  /**
+   * F3 IVA lifecycle: flag GLOBAL de la factura — ¿los precios impresos ya
+   * INCLUYEN IVA? Dirige el aplastado a neto en el backend. Opcional / por
+   * defecto `false` (IVA por fuera) en escaneos pre-F3.
+   */
+  prices_include_tax?: boolean;
   line_items: ExtractedLineItem[];
   subtotal: number;
   tax_amount: number;
@@ -68,6 +94,17 @@ export interface MatchedLineItem extends ExtractedLineItem {
   match_status: 'matched' | 'partial' | 'new';
   selected_product_id?: number;
   candidates: ProductCandidate[];
+  /**
+   * F3 IVA lifecycle: tax_category sugerida por match de tasa. `null` cuando
+   * no hay coincidencia de tasa O cuando el comercio NO es responsable de IVA
+   * (O-49). El usuario puede asignarla manualmente en el modal POP.
+   */
+  suggested_tax_category_id?: number | null;
+  /**
+   * F3 IVA lifecycle: costo unitario NETO (pre-IVA) de la línea = `unit_price`
+   * ya normalizado. El modal POP lo usa para pre-llenar el costo con el neto.
+   */
+  unit_cost_net?: number | null;
   /**
    * Fase 4: UoM FKs resueltas por el scanner a partir de `uom_hint`
    * (solo en flujo `ingredient`). `purchase_uom_id` se resuelve por

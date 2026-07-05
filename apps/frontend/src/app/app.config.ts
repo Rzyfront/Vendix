@@ -17,6 +17,7 @@ import { provideStoreDevtools } from '@ngrx/store-devtools';
 import { firstValueFrom, timeout, catchError, of, filter } from 'rxjs';
 import { authInterceptorFn } from './core/interceptors/auth.interceptor';
 import { subscriptionPaywallInterceptor } from './core/interceptors/subscription-paywall.interceptor';
+import { fiscalGateInterceptor } from './core/interceptors/fiscal-gate.interceptor';
 import { cacheBustingInterceptor } from './core/interceptors/cache-busting.interceptor';
 import { RouteManagerService } from './core/services/route-manager.service';
 import { tenantReducer, TenantEffects } from './core/store/tenant';
@@ -88,6 +89,8 @@ export const appConfig: ApplicationConfig = {
         authInterceptorFn,
         cacheBustingInterceptor,
         subscriptionPaywallInterceptor,
+        // F4 — abre el gate "no responsable de IVA" ante FISCAL_VAT_NOT_RESPONSIBLE_001.
+        fiscalGateInterceptor,
       ]),
     ),
 

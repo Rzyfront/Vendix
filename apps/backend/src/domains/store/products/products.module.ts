@@ -14,6 +14,7 @@ import { S3Module } from '@common/services/s3.module';
 import { AccessValidationService } from '@common/services/access-validation.service';
 import { QrService } from '@common/services/qr.service';
 import { PromotionsModule } from '../promotions/promotions.module';
+import { SettingsModule } from '../settings/settings.module';
 
 @Module({
   imports: [
@@ -22,6 +23,8 @@ import { PromotionsModule } from '../promotions/promotions.module';
     PrismaModule,
     S3Module,
     PromotionsModule,
+    // F4 — SettingsService.getFiscalData() para el gate "no responsable de IVA".
+    SettingsModule,
   ],
   controllers: [
     ProductsController,

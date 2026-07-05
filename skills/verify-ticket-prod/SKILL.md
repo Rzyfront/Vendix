@@ -59,7 +59,7 @@ carefully to *identify* weaknesses and *reports* them.
    | --- | --- |
    | `organization_slug` | `vendix` (display name **"Vendix Electronics"**) |
    | `email` | `vendix.demo@gmail.com` |
-   | `password` | `vendixDEMO@#$1` |
+   | `password` | `vendixDEMO#$%1` |
 
    The demo account is a **multi-store owner** ("Dueño") — one org, several stores, each a test bench
    for a different industry. See **Demo Account — multi-store test bench** below for the store roster

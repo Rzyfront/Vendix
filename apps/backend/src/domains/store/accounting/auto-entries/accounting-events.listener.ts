@@ -628,6 +628,8 @@ export class AccountingEventsListener {
     reception_id: number;
     organization_id: number;
     store_id?: number;
+    /** F2: entidad fiscal resuelta por el emisor (propagación explícita). */
+    accounting_entity_id?: number;
     total_amount: number;
     user_id?: number;
     /** C4-followup: propagado desde purchase-orders.service.ts (updated_po.suppliers). */
@@ -640,6 +642,7 @@ export class AccountingEventsListener {
         reception_id: event.reception_id,
         organization_id: event.organization_id,
         store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
         total_amount: Number(event.total_amount),
         user_id: event.user_id,
         supplier: event.supplier,
@@ -650,6 +653,51 @@ export class AccountingEventsListener {
     } catch (error) {
       this.logger.error(
         `Failed to create auto-entry for purchase_order.received #${event.purchase_order_id} (reception #${event.reception_id}): ${error.message}`,
+        error.stack,
+      );
+    }
+  }
+
+  /**
+   * F2 IVA lifecycle — VAT-only recognition of a POP purchase's deductible VAT.
+   * The purchase-orders service already materialized the fiscal document
+   * (`invoices` row that feeds calculateVat) and emitted this event carrying
+   * its `invoice_id`. Here we only post the ledger complement DR 240804 / CR
+   * 2205 (see AutoEntryService.onPurchaseVatRecognized). Gated by the same
+   * `purchases` subflow as purchase_order.received. Accounting failures are
+   * logged and never roll back the already-completed reception.
+   */
+  @OnEvent('purchase.vat_recognized')
+  async handlePurchaseVatRecognized(event: {
+    invoice_id: number;
+    purchase_order_id: number;
+    reception_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    iva_amount: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+    user_id?: number;
+  }) {
+    try {
+      if (!(await this.isFlowEnabled(event.store_id, 'purchases'))) return;
+      await this.auto_entry_service.onPurchaseVatRecognized({
+        invoice_id: event.invoice_id,
+        purchase_order_id: event.purchase_order_id,
+        reception_id: event.reception_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id,
+        accounting_entity_id: event.accounting_entity_id,
+        iva_amount: Number(event.iva_amount),
+        supplier: event.supplier,
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for purchase.vat_recognized invoice #${event.invoice_id} (PO #${event.purchase_order_id})`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to create auto-entry for purchase.vat_recognized invoice #${event.invoice_id} (PO #${event.purchase_order_id}): ${error.message}`,
         error.stack,
       );
     }
@@ -1820,6 +1868,111 @@ export class AccountingEventsListener {
     } catch (error: any) {
       this.logger.error(
         `Failed to create auto-entry for partner_payout_batch.paid #${event.batchId}: ${error?.message ?? error}`,
+        error?.stack,
+      );
+    }
+  }
+
+  /**
+   * F5 (paso 17) — Liquidación de IVA al aprobar la declaración `vat`. El
+   * evento lo emite TaxDeclarationDraftService.approveDraft con el período AÚN
+   * abierto, así que el asiento (fechado en period_end) no choca con el guard
+   * FISCAL_PERIOD_CLOSED. Gated por el área `accounting` (resolveArea cae a
+   * 'accounting' para subflows desconocidos). Los fallos se loguean y NUNCA
+   * revierten la aprobación de la declaración.
+   */
+  @OnEvent('vat.declaration.approved')
+  async handleVatDeclarationApproved(event: {
+    declaration_id: number;
+    organization_id: number;
+    store_id?: number | null;
+    accounting_entity_id?: number;
+    generated_tax_amount: number;
+    deductible_tax_amount: number;
+    period_end: Date | string;
+    user_id?: number;
+  }) {
+    try {
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id ?? undefined,
+          'accounting',
+          event.organization_id,
+        ))
+      )
+        return;
+      await this.auto_entry_service.onVatSettlement({
+        declaration_id: event.declaration_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id ?? undefined,
+        accounting_entity_id: event.accounting_entity_id,
+        generated_tax_amount: Number(event.generated_tax_amount),
+        deductible_tax_amount: Number(event.deductible_tax_amount),
+        period_end:
+          event.period_end instanceof Date
+            ? event.period_end
+            : new Date(event.period_end),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry created for vat.declaration.approved #${event.declaration_id}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to create auto-entry for vat.declaration.approved #${event.declaration_id}: ${error?.message ?? error}`,
+        error?.stack,
+      );
+    }
+  }
+
+  /**
+   * F5 (paso 18) — Reversa de la liquidación de IVA al anular/rechazar una
+   * declaración `vat` ya liquidada. Postea el asiento espejo
+   * (source_type='vat_declaration_reversal'). Si la declaración nunca se
+   * liquidó, onVatSettlementReversed no hace nada. Si el período ya está
+   * cerrado, createAutoEntry rechaza el espejo (FISCAL_PERIOD_CLOSED) y se
+   * exige período correctivo. Los fallos se loguean y NUNCA revierten la
+   * anulación/rechazo de la declaración.
+   */
+  @OnEvent('vat.declaration.reversed')
+  async handleVatDeclarationReversed(event: {
+    declaration_id: number;
+    organization_id: number;
+    store_id?: number | null;
+    accounting_entity_id?: number;
+    generated_tax_amount: number;
+    deductible_tax_amount: number;
+    period_end: Date | string;
+    user_id?: number;
+  }) {
+    try {
+      if (
+        !(await this.isFlowEnabled(
+          event.store_id ?? undefined,
+          'accounting',
+          event.organization_id,
+        ))
+      )
+        return;
+      await this.auto_entry_service.onVatSettlementReversed({
+        declaration_id: event.declaration_id,
+        organization_id: event.organization_id,
+        store_id: event.store_id ?? undefined,
+        accounting_entity_id: event.accounting_entity_id,
+        generated_tax_amount: Number(event.generated_tax_amount),
+        deductible_tax_amount: Number(event.deductible_tax_amount),
+        period_end:
+          event.period_end instanceof Date
+            ? event.period_end
+            : new Date(event.period_end),
+        user_id: event.user_id,
+      });
+      this.logger.log(
+        `Auto-entry (reversal) created for vat.declaration.reversed #${event.declaration_id}`,
+      );
+    } catch (error: any) {
+      this.logger.error(
+        `Failed to create auto-entry for vat.declaration.reversed #${event.declaration_id}: ${error?.message ?? error}`,
         error?.stack,
       );
     }

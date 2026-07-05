@@ -260,10 +260,25 @@ export type PricingOverridesMap = Map<string, PricingOverride>;
 
         <!-- Totales -->
         <section class="rounded-lg overflow-hidden border border-[var(--color-primary)] bg-[var(--color-primary-light)]">
+          <!-- IVA mode legend (informative only — never a security gate).
+               Solo cuando la orden marca IVA (maestro). -->
+          @if (hasVat()) {
+            <div class="px-3 py-1.5 flex items-center gap-1.5 text-[11px] text-[var(--color-text-secondary)] border-b border-[var(--color-border)]">
+              <app-icon name="receipt" [size]="12" color="var(--color-primary)"></app-icon>
+              <span class="font-medium text-[var(--color-text-primary)]">
+                {{ pricesIncludeTax() ? 'Precios con IVA incluido' : 'IVA agregado' }}
+              </span>
+              @if (hasMixedTax()) {
+                <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                  Factura mixta
+                </span>
+              }
+            </div>
+          }
           <div class="px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-[var(--color-text-secondary)] border-b border-[var(--color-border)]">
-            <span>Subtotal: <span class="font-medium text-[var(--color-text-primary)]">{{ cartState()?.summary?.subtotal | currency }}</span></span>
+            <span>{{ hasVat() ? 'Subtotal (neto)' : 'Subtotal' }}: <span class="font-medium text-[var(--color-text-primary)]">{{ cartState()?.summary?.subtotal | currency }}</span></span>
             @if ((cartState()?.summary?.tax_amount || 0) > 0) {
-              <span>Impuestos: <span class="font-medium text-[var(--color-text-primary)]">{{ cartState()!.summary.tax_amount | currency }}</span></span>
+              <span>IVA: <span class="font-medium text-[var(--color-text-primary)]">{{ cartState()!.summary.tax_amount | currency }}</span></span>
             }
             @if ((cartState()?.shippingCost || 0) > 0) {
               <span>Envío: <span class="font-medium text-[var(--color-text-primary)]">{{ cartState()!.shippingCost | currency }}</span></span>
@@ -315,6 +330,26 @@ export class PopOrderConfirmationModalComponent {
    * every mutation to trigger downstream `computed()` re-evaluation.
    */
   readonly pricingOverrides = signal<PricingOverridesMap>(new Map());
+
+  /**
+   * IVA cycle (F1): informative-only signal for the applied dominant mode.
+   * Drives the "Precios con IVA incluido" / "IVA agregado" legend. NEVER a
+   * security gate — the backend is the source of truth for the tax split.
+   */
+  readonly pricesIncludeTax = computed(
+    () => this.cartState()?.prices_include_tax ?? false,
+  );
+
+  /** Maestro "¿Esta compra tiene IVA?": oculta la leyenda/desglose sin IVA. */
+  readonly hasVat = computed(() => this.cartState()?.has_vat ?? false);
+
+  /** True when at least one line overrides the header mode (mixed invoice). */
+  readonly hasMixedTax = computed(() => {
+    const header = this.cartState()?.prices_include_tax ?? false;
+    return (this.cartState()?.items ?? []).some(
+      (it) => it.prices_include_tax !== undefined && it.prices_include_tax !== header,
+    );
+  });
 
   get modalTitle(): string {
     return this.actionType() === 'create-receive'

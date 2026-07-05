@@ -11,8 +11,13 @@ import { PurchaseOrderQueryDto } from './dto/purchase-order-query.dto';
 import { ReceivePurchaseOrderDto } from './dto/receive-purchase-order.dto';
 import { RegisterPaymentDto } from './dto/register-payment.dto';
 import { AddAttachmentDto } from './dto/add-attachment.dto';
-import { purchase_order_status_enum } from '@prisma/client';
+import {
+  purchase_order_status_enum,
+  tax_type_enum,
+  invoice_type_enum,
+} from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { generateSlug } from '@common/utils/slug.util';
@@ -31,6 +36,13 @@ import { SettingsService } from '../../settings/settings.service';
 import { CostPreviewDto } from './dto/cost-preview.dto';
 import { storeIndustriesSupportIngredients } from '@common/helpers/industry-capabilities.helper';
 
+/**
+ * F1 IVA lifecycle — RUT casilla 53 code for "Responsable de IVA" (O-48).
+ * Mirrors FiscalObligationService.VAT_RESPONSIBLE_CODE so the cost treatment
+ * (exclude vs capitalize IVA) uses the same canonical fiscal source.
+ */
+const VAT_RESPONSIBLE_CODE = 'O-48';
+
 @Injectable()
 export class PurchaseOrdersService {
   private readonly logger = new Logger(PurchaseOrdersService.name);
@@ -45,8 +57,115 @@ export class PurchaseOrdersService {
     private auditService: AuditService,
     private s3Service: S3Service,
     private settingsService: SettingsService,
+    private fiscalScopeService: FiscalScopeService,
     private eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * F1 IVA lifecycle — single source of truth for the net/gross split of a
+   * purchase line. The frontend mirrors this exact formula for its live
+   * preview, so it MUST stay byte-for-byte equivalent to the clavado contract:
+   *
+   *   effective_include = item.prices_include_tax ?? header.prices_include_tax
+   *   r = tax_rate / 100
+   *   include  → unit_price_net = gross / (1 + r); tax/u = gross - net
+   *   exclude  → unit_price_net = gross;           tax/u = gross * r
+   *
+   * `gross` is read from `unit_price` (create) or `unit_cost` (cost preview),
+   * whichever the caller provides. When there is no tax rate the line is
+   * tax-free: net = gross, tax = 0 (preserves legacy behaviour exactly).
+   *
+   * @returns unit_price_net (per unit, → persisted `unit_cost`),
+   *          tax_amount_per_unit (per unit),
+   *          tax_amount (line total = per-unit × quantity, → persisted),
+   *          effective_include (the resolved mode for the line).
+   */
+  private deriveLineTax(
+    item: {
+      unit_price?: number | null;
+      unit_cost?: number | null;
+      quantity?: number | null;
+      tax_rate?: number | null;
+      prices_include_tax?: boolean | null;
+    },
+    header: { prices_include_tax?: boolean | null },
+  ): {
+    unit_price_net: number;
+    tax_amount_per_unit: number;
+    tax_amount: number;
+    effective_include: boolean;
+  } {
+    const gross = Number(item.unit_price ?? item.unit_cost ?? 0);
+    const quantity = Number(item.quantity ?? 0);
+    const r = Number(item.tax_rate ?? 0) / 100;
+    const effective_include =
+      item.prices_include_tax ?? header.prices_include_tax ?? false;
+
+    let unit_price_net: number;
+    let tax_amount_per_unit: number;
+    if (!(r > 0)) {
+      // No (or invalid) tax rate → line is tax-free, cost stays as entered.
+      unit_price_net = gross;
+      tax_amount_per_unit = 0;
+    } else if (effective_include) {
+      // Price already includes IVA: strip it out to get the net cost.
+      unit_price_net = gross / (1 + r);
+      tax_amount_per_unit = gross - unit_price_net;
+    } else {
+      // IVA added on top: entered price is already net.
+      unit_price_net = gross;
+      tax_amount_per_unit = gross * r;
+    }
+
+    return {
+      unit_price_net,
+      tax_amount_per_unit,
+      tax_amount: tax_amount_per_unit * quantity,
+      effective_include,
+    };
+  }
+
+  /**
+   * F1 IVA lifecycle — read-only check of the commerce's VAT responsibility,
+   * driving the inventory cost treatment at receipt:
+   *   - O-48 (responsible)     → IVA is descontable, EXCLUDED from cost.
+   *   - O-49 (non-responsible) → IVA is CAPITALIZED into inventory cost.
+   *
+   * Canonical source: `SettingsService.getFiscalData().tax_responsibilities`
+   * (RUT casilla 53). Mirrors FiscalObligationService's O-48 evaluation.
+   *
+   * Anti-regression rule: NO declared responsibilities / indeterminate ⇒ treat
+   * as RESPONSIBLE (O-48). This preserves the pre-F1 behaviour where entered
+   * cost was net and IVA was never capitalized.
+   *
+   * `organizationId`/`storeId` are the resolved tenant identifiers (used for
+   * logging); the fiscal data itself is read from the request context inside
+   * `getFiscalData()`.
+   */
+  private async isVatResponsible(
+    organizationId?: number,
+    storeId?: number,
+  ): Promise<boolean> {
+    try {
+      const fiscalData = await this.settingsService.getFiscalData();
+      const responsibilities = Array.isArray(
+        (fiscalData as any)?.tax_responsibilities,
+      )
+        ? ((fiscalData as any).tax_responsibilities as unknown[]).filter(
+            (code): code is string => typeof code === 'string',
+          )
+        : [];
+
+      // No declared responsibilities / indeterminate ⇒ RESPONSIBLE (O-48).
+      if (responsibilities.length === 0) return true;
+      return responsibilities.includes(VAT_RESPONSIBLE_CODE);
+    } catch (error: any) {
+      this.logger.warn(
+        `isVatResponsible: could not resolve fiscal data for org ${organizationId} / store ${storeId} (${error?.message}); defaulting to VAT responsible (O-48).`,
+      );
+      return true;
+    }
+  }
 
   /**
    * Resolves the UoM conversion for a product at receipt time.
@@ -259,21 +378,47 @@ export class PurchaseOrdersService {
                 'Unidad de medida no encontrada en el catálogo para el insumo.',
               );
             }
-            if (stockUom.dimension !== purchaseUom.dimension) {
-              throw new BadRequestException(
-                `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse.`,
+
+            // "Contenido por envase" (cross-dimension): when the purchase unit
+            // is a discrete package (`count`, e.g. una bolsita) and the stock
+            // unit is a continuous magnitude (`mass`/`volume`, e.g. g/ml), the
+            // factor CANNOT be derived from factor_to_base. The operator sends
+            // it manually as `purchase_to_stock_factor` (= cuánto contenido
+            // trae cada envase, p.ej. 250 g). We trust that value and SKIP the
+            // same-dimension validation. The DTO guarantees Int >= 1.
+            const manualFactor = item.purchase_to_stock_factor;
+            const isCrossDimensionPackaging =
+              purchaseUom.dimension === 'count' &&
+              (stockUom.dimension === 'mass' ||
+                stockUom.dimension === 'volume');
+
+            if (
+              manualFactor != null &&
+              Number.isInteger(manualFactor) &&
+              manualFactor >= 1 &&
+              isCrossDimensionPackaging
+            ) {
+              purchaseToStockFactor = manualFactor;
+            } else {
+              // Same-dimension (or no manual factor): derive from the catalog
+              // and enforce shared dimension so factor_to_base is meaningful.
+              // (Validación defensiva intacta para todo caso no cross-dimension.)
+              if (stockUom.dimension !== purchaseUom.dimension) {
+                throw new BadRequestException(
+                  `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse.`,
+                );
+              }
+              const derived = Math.round(
+                Number(purchaseUom.factor_to_base) /
+                  Number(stockUom.factor_to_base),
               );
+              if (!Number.isFinite(derived) || derived < 1) {
+                throw new BadRequestException(
+                  `Factor de conversión inválido entre ${purchaseUom.code} y ${stockUom.code}: debe ser >= 1.`,
+                );
+              }
+              purchaseToStockFactor = derived;
             }
-            const derived = Math.round(
-              Number(purchaseUom.factor_to_base) /
-                Number(stockUom.factor_to_base),
-            );
-            if (!Number.isFinite(derived) || derived < 1) {
-              throw new BadRequestException(
-                `Factor de conversión inválido entre ${purchaseUom.code} y ${stockUom.code}: debe ser >= 1.`,
-              );
-            }
-            purchaseToStockFactor = derived;
           }
 
           // Check if product with SKU exists to avoid duplicates
@@ -491,6 +636,30 @@ export class PurchaseOrdersService {
               };
             }
 
+            // Insumo (configure de producto existente): persistir la config UoM
+            // + factor en el producto YA en el create. `purchase_order_items` no
+            // almacena `purchase_to_stock_factor`, y el caso cross-dimension
+            // (count→mass/volume) NO es re-derivable del catálogo en receive, por
+            // lo que el producto es el único portador del factor hasta la
+            // recepción. resolveUoMConversion exige `is_ingredient=true` + factor
+            // para multiplicar, así que ambos deben quedar en el producto aquí.
+            // (syncIngredientConfigOnReceipt sigue como backfill de labels /
+            // same-dimension al recibir.) No se neutraliza pricing/ecommerce del
+            // producto existente para no clobberear su config de venta.
+            if (effectiveIsIngredient) {
+              productUpdateData.is_ingredient = true;
+              if (item.purchase_uom_id != null) {
+                productUpdateData.purchase_uom_id = item.purchase_uom_id;
+              }
+              if (item.stock_uom_id != null) {
+                productUpdateData.stock_uom_id = item.stock_uom_id;
+              }
+              if (purchaseToStockFactor != null) {
+                productUpdateData.purchase_to_stock_factor =
+                  purchaseToStockFactor;
+              }
+            }
+
             await tx.products.update({
               where: { id: existingProduct.id },
               data: productUpdateData,
@@ -561,6 +730,17 @@ export class PurchaseOrdersService {
             });
             finalProductId = newProduct.id;
           }
+        }
+
+        // Insumo por product_id (flujo POP: configure de producto EXISTENTE). El
+        // bloque de creación anterior solo corre para líneas SIN product_id; el
+        // POP siempre envía product_id, por lo que la config UoM + factor de un
+        // insumo existente se persiste aquí. purchase_order_items NO almacena el
+        // factor y el caso cross-dimension (count→mass/volume) no es re-derivable
+        // en receive, así que el producto es el único portador del factor hasta
+        // la recepción (resolveUoMConversion exige is_ingredient=true + factor).
+        if (orderType === 'ingredient' && item.product_id && finalProductId) {
+          await this.persistIngredientConfigToProduct(finalProductId, item, tx);
         }
 
         processedItems.push({
@@ -655,22 +835,37 @@ export class PurchaseOrdersService {
           total_amount: totalAmount,
           order_date: new Date(),
           purchase_order_items: {
-            create: processedItems.map((item) => ({
-              product_id: item.product_id,
-              product_variant_id: item.product_variant_id,
-              quantity_ordered: item.quantity,
-              unit_cost: item.unit_price,
-              notes: item.notes,
-              batch_number: item.batch_number,
-              manufacturing_date: toDate(item.manufacturing_date),
-              expiration_date: toDate(item.expiration_date),
-              // Fase 2: UoM FKs. Required when the parent is `ingredient`;
-              // we pass `null` otherwise to keep the column clean.
-              purchase_uom_id: isIngredient
-                ? (item.purchase_uom_id ?? null)
-                : null,
-              stock_uom_id: isIngredient ? (item.stock_uom_id ?? null) : null,
-            })),
+            create: processedItems.map((item) => {
+              // F1 IVA lifecycle: derive net/tax from the entered unit_price
+              // and the effective include-tax mode (line override ?? header).
+              // `unit_cost` persists the NET price (single source of truth for
+              // costing); the VAT treatment for inventory cost is decided later
+              // in receive() by fiscal responsibility.
+              const derived = this.deriveLineTax(item, createPurchaseOrderDto);
+              return {
+                product_id: item.product_id,
+                product_variant_id: item.product_variant_id,
+                quantity_ordered: item.quantity,
+                unit_cost: derived.unit_price_net,
+                unit_price_net: derived.unit_price_net,
+                tax_rate: item.tax_rate ?? null,
+                tax_type:
+                  (item.tax_type as tax_type_enum | undefined) ??
+                  tax_type_enum.iva,
+                prices_include_tax: item.prices_include_tax ?? null,
+                tax_amount: derived.tax_amount,
+                notes: item.notes,
+                batch_number: item.batch_number,
+                manufacturing_date: toDate(item.manufacturing_date),
+                expiration_date: toDate(item.expiration_date),
+                // Fase 2: UoM FKs. Required when the parent is `ingredient`;
+                // we pass `null` otherwise to keep the column clean.
+                purchase_uom_id: isIngredient
+                  ? (item.purchase_uom_id ?? null)
+                  : null,
+                stock_uom_id: isIngredient ? (item.stock_uom_id ?? null) : null,
+              };
+            }),
           },
         },
         include: {
@@ -998,6 +1193,215 @@ export class PurchaseOrdersService {
     return { basePrice: existingBasePrice, profitMargin: margin };
   }
 
+  /**
+   * F2 — Persist the ingredient UoM config captured on the PO line onto the
+   * product at receipt time, WITHOUT ever clobbering existing values with
+   * null/empty. Idempotent: re-receiving the same line resolves to the same
+   * values and produces a no-op update.
+   *
+   * Sources of the "config capturada":
+   *   - purchase_uom_id / stock_uom_id: captured on the PO item at create
+   *     (only ingredient orders carry them; retail lines have them null).
+   *   - purchase_to_stock_factor: derived from the catalog when both UoMs share
+   *     a dimension. For the cross-dimension "contenido por envase" case
+   *     (count → mass/volume) the factor is NOT derivable and must already live
+   *     on the product (inherited at create, F1) — it is left intact here.
+   *   - stock_unit / purchase_unit labels: sourced from the UoM `code`.
+   *
+   * Only fields that are (a) resolvable AND (b) empty on the product OR differ
+   * are written; a field is never overwritten with null/empty. New products
+   * already inherit the full config at create (F1), so this is a no-op for them.
+   */
+  /**
+   * Persiste la config de insumo (is_ingredient + UoM FKs + `purchase_to_stock_factor`)
+   * al producto EXISTENTE referenciado por una línea de orden tipo `ingredient`
+   * (flujo POP configure). purchase_order_items NO tiene columna de factor y el
+   * caso cross-dimension (count→mass/volume) no es re-derivable del catálogo en
+   * receive, por lo que el producto es el único portador del factor hasta la
+   * recepción; resolveUoMConversion exige is_ingredient=true + factor para
+   * multiplicar stock = qty × factor. Rellena cuando está vacío o difiere; nunca
+   * sobreescribe con vacío. Gatea por industria (solo restaurant soporta insumos).
+   */
+  private async persistIngredientConfigToProduct(
+    productId: number,
+    item: {
+      purchase_uom_id?: number | null;
+      stock_uom_id?: number | null;
+      purchase_to_stock_factor?: number | null;
+    },
+    tx: any,
+  ): Promise<void> {
+    if (item.purchase_uom_id == null && item.stock_uom_id == null) return;
+
+    const product = await tx.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        store_id: true,
+        is_ingredient: true,
+        purchase_uom_id: true,
+        stock_uom_id: true,
+        purchase_to_stock_factor: true,
+      },
+    });
+    if (!product) return;
+
+    const store = await tx.stores.findUnique({
+      where: { id: product.store_id },
+      select: { industries: true },
+    });
+    if (!storeIndustriesSupportIngredients(store?.industries)) return;
+
+    // Deriva el factor: manual cross-dimension (count→mass/volume) o catálogo
+    // same-dimension. Cross-dimension NO es derivable del factor_to_base.
+    let factor: number | undefined;
+    if (item.purchase_uom_id != null && item.stock_uom_id != null) {
+      const uoms = await tx.units_of_measure.findMany({
+        where: { id: { in: [item.stock_uom_id, item.purchase_uom_id] } },
+      });
+      const stockUom = uoms.find((u) => u.id === item.stock_uom_id);
+      const purchaseUom = uoms.find((u) => u.id === item.purchase_uom_id);
+      if (stockUom && purchaseUom) {
+        const manual = item.purchase_to_stock_factor;
+        const isCrossDimensionPackaging =
+          purchaseUom.dimension === 'count' &&
+          (stockUom.dimension === 'mass' || stockUom.dimension === 'volume');
+        if (
+          manual != null &&
+          Number.isInteger(manual) &&
+          manual >= 1 &&
+          isCrossDimensionPackaging
+        ) {
+          factor = manual;
+        } else if (stockUom.dimension === purchaseUom.dimension) {
+          const derived = Math.round(
+            Number(purchaseUom.factor_to_base) /
+              Number(stockUom.factor_to_base),
+          );
+          if (Number.isFinite(derived) && derived >= 1) factor = derived;
+        }
+      }
+    }
+
+    const data: Record<string, any> = {};
+    if (!product.is_ingredient) data.is_ingredient = true;
+    if (
+      item.purchase_uom_id != null &&
+      product.purchase_uom_id !== item.purchase_uom_id
+    ) {
+      data.purchase_uom_id = item.purchase_uom_id;
+    }
+    if (
+      item.stock_uom_id != null &&
+      product.stock_uom_id !== item.stock_uom_id
+    ) {
+      data.stock_uom_id = item.stock_uom_id;
+    }
+    if (factor != null && product.purchase_to_stock_factor !== factor) {
+      data.purchase_to_stock_factor = factor;
+    }
+    if (Object.keys(data).length > 0) {
+      await tx.products.update({ where: { id: productId }, data });
+    }
+  }
+
+  private async syncIngredientConfigOnReceipt(
+    productId: number,
+    orderItem:
+      | { purchase_uom_id?: number | null; stock_uom_id?: number | null }
+      | undefined
+      | null,
+    tx: any,
+  ): Promise<void> {
+    const capturedPurchaseUomId = orderItem?.purchase_uom_id ?? null;
+    const capturedStockUomId = orderItem?.stock_uom_id ?? null;
+
+    // Nothing captured on the line → not an ingredient line, no-op.
+    if (capturedPurchaseUomId == null && capturedStockUomId == null) {
+      return;
+    }
+
+    const product = await tx.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        purchase_uom_id: true,
+        stock_uom_id: true,
+        purchase_to_stock_factor: true,
+        stock_unit: true,
+        purchase_unit: true,
+      },
+    });
+    if (!product) return;
+
+    // When both FKs are present, resolve the catalog rows to derive the factor
+    // (same-dimension only) and the human-readable unit labels.
+    let derivedFactor: number | undefined;
+    let stockUnitLabel: string | undefined;
+    let purchaseUnitLabel: string | undefined;
+    if (capturedPurchaseUomId != null && capturedStockUomId != null) {
+      const uoms = await tx.units_of_measure.findMany({
+        where: { id: { in: [capturedStockUomId, capturedPurchaseUomId] } },
+      });
+      const stockUom = uoms.find((u) => u.id === capturedStockUomId);
+      const purchaseUom = uoms.find((u) => u.id === capturedPurchaseUomId);
+      if (stockUom && purchaseUom) {
+        stockUnitLabel = stockUom.code;
+        purchaseUnitLabel = purchaseUom.code;
+        // Same-dimension → derivable from factor_to_base. Cross-dimension
+        // (count → mass/volume) → NOT derivable; keep the product's existing
+        // manual factor (F1) untouched.
+        if (stockUom.dimension === purchaseUom.dimension) {
+          const factor = Math.round(
+            Number(purchaseUom.factor_to_base) /
+              Number(stockUom.factor_to_base),
+          );
+          if (Number.isFinite(factor) && factor >= 1) {
+            derivedFactor = factor;
+          }
+        }
+      }
+    }
+
+    // Fill/patch only when the captured value is present AND the product is
+    // empty or differs. Never write null/empty.
+    const data: Record<string, any> = {};
+    if (
+      capturedPurchaseUomId != null &&
+      product.purchase_uom_id !== capturedPurchaseUomId
+    ) {
+      data.purchase_uom_id = capturedPurchaseUomId;
+    }
+    if (
+      capturedStockUomId != null &&
+      product.stock_uom_id !== capturedStockUomId
+    ) {
+      data.stock_uom_id = capturedStockUomId;
+    }
+    if (
+      derivedFactor != null &&
+      product.purchase_to_stock_factor !== derivedFactor
+    ) {
+      data.purchase_to_stock_factor = derivedFactor;
+    }
+    if (stockUnitLabel && (product.stock_unit ?? '') !== stockUnitLabel) {
+      data.stock_unit = stockUnitLabel;
+    }
+    if (
+      purchaseUnitLabel &&
+      (product.purchase_unit ?? '') !== purchaseUnitLabel
+    ) {
+      data.purchase_unit = purchaseUnitLabel;
+    }
+
+    if (Object.keys(data).length > 0) {
+      await tx.products.update({
+        where: { id: productId },
+        data,
+      });
+    }
+  }
+
   async receive(id: number, dto: ReceivePurchaseOrderDto) {
     const result = await this.prisma.$transaction(async (tx) => {
       // Create reception record
@@ -1054,6 +1458,14 @@ export class PurchaseOrdersService {
         storeId ?? undefined,
       );
 
+      // F1 IVA lifecycle: resolve the commerce's VAT responsibility ONCE for
+      // this receipt. O-48 (responsible) excludes IVA from inventory cost;
+      // O-49 (non-responsible) capitalizes it. Indeterminate ⇒ responsible.
+      const vatResponsible = await this.isVatResponsible(
+        organizationId ?? undefined,
+        storeId ?? undefined,
+      );
+
       // D2: accumulate the purchase-unit subtotal received in THIS specific
       // reception batch (quantity_received_now × unit_cost, in purchase-order
       // currency, matching the same basis used for `subtotal` at PO creation
@@ -1072,8 +1484,47 @@ export class PurchaseOrdersService {
         const productVariantId = orderItem?.product_variant_id;
 
         if (productId) {
-          const purchaseUnitCost = Number(orderItem?.unit_cost || 0);
-          receivedBatchSubtotal += item.quantity_received * purchaseUnitCost;
+          // F1: `unit_cost` now persists the NET price (see create/deriveLineTax).
+          const netUnitCost = Number(orderItem?.unit_cost || 0);
+          // AP proration basis stays on the NET subtotal (matches orderSubtotal
+          // below, which reads unit_cost), so the accounting ratio is unchanged.
+          receivedBatchSubtotal += item.quantity_received * netUnitCost;
+
+          // ===== F1 IVA lifecycle: cost treatment by fiscal responsibility =====
+          // Per-unit IVA sealed on the line at create (tax_amount / qty_ordered),
+          // with a recompute fallback for legacy lines that predate F1.
+          const qtyOrdered = orderItem?.quantity_ordered ?? 0;
+          const lineTaxAmount =
+            orderItem?.tax_amount != null ? Number(orderItem.tax_amount) : null;
+          const ivaPerUnit =
+            lineTaxAmount != null && qtyOrdered > 0
+              ? lineTaxAmount / qtyOrdered
+              : netUnitCost * (Number(orderItem?.tax_rate ?? 0) / 100);
+
+          // O-48 responsible → cost EXCLUDES IVA (net). O-49 non-responsible →
+          // CAPITALIZE IVA into cost. Capitalization is on the PURCHASE unit,
+          // BEFORE resolveUoMConversion (so the per-stock-unit cost the FIFO
+          // engine sees already carries the capitalized IVA when applicable).
+          const costUnit = vatResponsible
+            ? netUnitCost
+            : netUnitCost + ivaPerUnit;
+
+          // Seal the VAT attributable to the units received in THIS batch,
+          // proportional to quantity_received (purchase units), accumulating
+          // across partial receptions. O-48 → deductible (descontable);
+          // O-49 → capitalized into inventory cost.
+          const sealedTaxNow = ivaPerUnit * item.quantity_received;
+          const prevSealed = vatResponsible
+            ? Number(orderItem?.deductible_tax_amount ?? 0)
+            : Number(orderItem?.capitalized_tax_amount ?? 0);
+          const newSealed =
+            Math.round((prevSealed + sealedTaxNow) * 100) / 100;
+          await tx.purchase_order_items.update({
+            where: { id: item.id },
+            data: vatResponsible
+              ? { deductible_tax_amount: newSealed }
+              : { capitalized_tax_amount: newSealed },
+          });
 
           // ===== UoM conversion (purchase unit → minimum stock unit) =====
           // The frontend sends `item.quantity_received` in the purchase unit
@@ -1090,7 +1541,7 @@ export class PurchaseOrdersService {
           } = await this.resolveUoMConversion(
             productId,
             item.quantity_received,
-            purchaseUnitCost,
+            costUnit,
             tx,
           );
 
@@ -1196,7 +1647,14 @@ export class PurchaseOrdersService {
           // and matches what the modal displays in `resulting_margin`.
           if (item.new_base_price !== undefined || item.new_profit_margin !== undefined) {
             const dtoItem = item;
-            const costForPricing = costResult?.new_cost_per_unit ?? receiptUnitCost;
+            // QUI-425: recompute margin against the SCOPED cost (the value
+            // persisted to cost_price), not the receiving-location-only cost,
+            // so base_price = cost_price·(1+margin/100) stays consistent and
+            // matches the cost preview's resulting_margin.
+            const costForPricing =
+              costResult?.new_scoped_cost_per_unit ??
+              costResult?.new_cost_per_unit ??
+              receiptUnitCost;
 
             // Persist on the variant first (if present), then on the product
             // for variant-less items. Variants use price_override (NOT
@@ -1249,7 +1707,14 @@ export class PurchaseOrdersService {
             // margin tracks the new cost. Without this, the displayed
             // resulting_margin in the preview would diverge from the stored
             // margin on the product.
-            const costForPricing = costResult?.new_cost_per_unit ?? receiptUnitCost;
+            // QUI-425: recompute margin against the SCOPED cost (the value
+            // persisted to cost_price), not the receiving-location-only cost,
+            // so base_price = cost_price·(1+margin/100) stays consistent and
+            // matches the cost preview's resulting_margin.
+            const costForPricing =
+              costResult?.new_scoped_cost_per_unit ??
+              costResult?.new_cost_per_unit ??
+              receiptUnitCost;
             if (costForPricing > 0) {
               if (productVariantId) {
                 const existingVariant = await tx.product_variants.findUnique({
@@ -1290,6 +1755,11 @@ export class PurchaseOrdersService {
               }
             }
           }
+
+          // F2 — persist the ingredient UoM config captured on the PO line
+          // onto the product at receipt time (idempotent; never clobbers with
+          // null/empty). New products already inherit the config at create (F1).
+          await this.syncIngredientConfigOnReceipt(productId, orderItem, tx);
         }
       }
 
@@ -1318,6 +1788,15 @@ export class PurchaseOrdersService {
         data: {
           status: newStatus,
           received_date: all_items_received ? new Date() : null,
+          // F2 IVA lifecycle: persist the supplier's own invoice reference when
+          // provided at receipt. Used as the fiscal document's invoice_number
+          // and issue_date for the deductible-VAT recognition (240804).
+          ...(dto.supplier_invoice_number != null && {
+            supplier_invoice_number: dto.supplier_invoice_number,
+          }),
+          ...(dto.supplier_invoice_date != null && {
+            supplier_invoice_date: new Date(dto.supplier_invoice_date),
+          }),
         },
         include: {
           suppliers: true,
@@ -1346,6 +1825,11 @@ export class PurchaseOrdersService {
         reception_id: reception.id,
         received_batch_subtotal: receivedBatchSubtotal,
         order_subtotal: orderSubtotal,
+        // F1/F2 IVA lifecycle: fiscal responsibility resolved once inside the
+        // tx (O-48 → net cost + deductible VAT; O-49 → capitalized in cost).
+        // Surfaced here so the post-tx block can decide whether to recognize
+        // the deductible VAT (only O-48).
+        vat_responsible: vatResponsible,
       };
     });
 
@@ -1368,13 +1852,45 @@ export class PurchaseOrdersService {
       );
     }
 
+    // ===== F2 IVA lifecycle: shared context for the accounting emits =====
+    const store_id = result.updated_po.location?.store_id ?? undefined;
+    const supplier = result.updated_po.suppliers
+      ? {
+          id: result.updated_po.suppliers.id,
+          name: result.updated_po.suppliers.name,
+          tax_id: result.updated_po.suppliers.tax_id ?? undefined,
+        }
+      : undefined;
+
+    // Step 10: resolve the fiscal accounting entity ONCE (via the canonical
+    // FiscalScopeService) and propagate it explicitly to every emitted
+    // accounting event. This makes the entity deterministic/traceable instead
+    // of relying on createAutoEntry's fallback resolution.
+    let accounting_entity_id: number | undefined;
+    try {
+      const entity =
+        await this.fiscalScopeService.resolveAccountingEntityForFiscal({
+          organization_id: result.updated_po.organization_id,
+          store_id,
+        });
+      accounting_entity_id = entity?.id;
+    } catch (error: any) {
+      this.logger.warn(
+        `F2: could not resolve fiscal accounting entity for PO #${id}: ${error?.message}`,
+      );
+    }
+
     // D2: emit purchase_order.received on EVERY reception (partial or final)
     // so inventory (DR 1435) recognized at receipt time is matched by
     // accounts payable (CR 2205) in the SAME event — no more waiting for the
-    // order to be fully received. The amount is prorated from this batch's
-    // share of the order subtotal against `total_amount` (which already
-    // folds in header-level discount/tax/shipping), following the same
-    // ratio pattern used in return-orders.service.ts for partial refunds.
+    // order to be fully received.
+    //
+    // F2: the amount is the NET share received (Σ quantity × unit_cost, with
+    // unit_cost = net per F1). We scale on the NET order subtotal, NOT on
+    // `purchase_orders.total_amount` — the latter is inconsistent (net in
+    // "exclude"/added-on-top mode, gross in "include" mode). Posting NET here
+    // is what lets the F2 VAT complement (DR 240804 / CR 2205 for the IVA)
+    // bring the payable to gross WITHOUT double-counting the tax.
     //
     // Idempotency: `source_id` is the reception id (`purchase_order_receptions.id`,
     // unique per reception, not per order), NOT the purchase_order_id. This
@@ -1383,26 +1899,39 @@ export class PurchaseOrdersService {
     // instead of being skipped as a duplicate of the first.
     //
     // The reception that completes the order (all_items_received) posts only
-    // the REMAINDER against total_amount — not its own prorated share — so
-    // rounding drift from prior partial receptions never leaves a gap or a
+    // the REMAINDER against the net order total — not its own prorated share —
+    // so rounding drift from prior partial receptions never leaves a gap or a
     // double-count. The remainder is computed against what accounting has
     // ACTUALLY posted so far (sum of total_debit for this order's previous
-    // reception ids), not against a business-side running total, so a prior
-    // reception whose emit failed (see catch below) is naturally recovered
-    // here instead of being silently lost.
+    // reception ids), so a prior reception whose emit failed is naturally
+    // recovered here instead of being silently lost.
     try {
-      const total_amount = Number(result.updated_po.total_amount || 0);
-      const supplier = result.updated_po.suppliers
-        ? {
-            id: result.updated_po.suppliers.id,
-            name: result.updated_po.suppliers.name,
-            tax_id: result.updated_po.suppliers.tax_id ?? undefined,
-          }
-        : undefined;
+      // NET order total (Σ quantity_ordered × unit_cost, unit_cost = net). The
+      // authoritative net value, independent of the inconsistent total_amount.
+      const net_total = Number(result.order_subtotal || 0);
+
+      // F2: régime-aware emit total. O-48 (responsible) posts NET here and lets
+      // the VAT complement (DR 240804 / CR 2205) bring the payable to gross.
+      // O-49 (non-responsible) has its IVA CAPITALIZED into inventory cost by F1
+      // (sealed in capitalized_tax_amount) and NEVER generates a VAT complement,
+      // so the reception itself must post GROSS (net + capitalized IVA) — else
+      // the GL 1435 understates inventory vs. the FIFO layer AND the CR 2205
+      // understates what is actually owed to the supplier. The all_items_received
+      // remainder branch trues the order-level total up to gross even across
+      // partial receptions.
+      const capitalized_iva = result.vat_responsible
+        ? 0
+        : Math.round(
+            result.updated_po.purchase_order_items.reduce(
+              (sum, i) => sum + Number(i.capitalized_tax_amount ?? 0),
+              0,
+            ) * 100,
+          ) / 100;
+      const emit_total = Math.round((net_total + capitalized_iva) * 100) / 100;
 
       let batch_amount: number;
       if (result.all_items_received) {
-        // Sum what accounting already posted for THIS order's earlier
+        // Sum what accounting already posted (NET) for THIS order's earlier
         // receptions (source_type is fixed; source_id ranges over this
         // order's other reception ids).
         const priorReceptionIds = (
@@ -1426,16 +1955,15 @@ export class PurchaseOrdersService {
             0,
           );
         }
-        batch_amount =
-          Math.round((total_amount - alreadyPosted) * 100) / 100;
+        batch_amount = Math.round((emit_total - alreadyPosted) * 100) / 100;
       } else if (result.order_subtotal > 0) {
-        // Proportional share of this batch vs. the order's full subtotal,
-        // scaled onto total_amount (same ratio pattern as
-        // return-orders.service.ts: amount / order_total * header_charge).
+        // Proportional share of this batch vs. the order's full NET subtotal
+        // scaled onto the emit total (gross for O-49). The final reception's
+        // remainder branch trues up any per-batch rounding drift.
         batch_amount =
           Math.round(
             (result.received_batch_subtotal / result.order_subtotal) *
-              total_amount *
+              emit_total *
               100,
           ) / 100;
       } else {
@@ -1447,7 +1975,8 @@ export class PurchaseOrdersService {
           purchase_order_id: result.updated_po.id,
           reception_id: result.reception_id,
           organization_id: result.updated_po.organization_id,
-          store_id: result.updated_po.location?.store_id,
+          store_id,
+          accounting_entity_id,
           total_amount: batch_amount,
           user_id: RequestContextService.getUserId(),
           // C4-followup: result.updated_po.suppliers ya viene completo del
@@ -1461,7 +1990,190 @@ export class PurchaseOrdersService {
       );
     }
 
+    // ===== F2 (Step 9): recognize the DEDUCTIBLE VAT (IVA descontable) =====
+    // Only for a VAT-responsible commerce (O-48), only once the order is fully
+    // received (Σ deductible_tax_amount is fully sealed by F1 across partial
+    // receptions), and only when there is IVA to recognize. O-49 never reaches
+    // here — its VAT is already capitalized into inventory cost by F1.
+    //
+    // We materialize a purchase fiscal document (`invoices` row) that feeds the
+    // VAT declaration (calculateVat), and emit `purchase.vat_recognized` so the
+    // ledger complement DR 240804 / CR 2205 (iva) is posted. The document is
+    // created WITHOUT going through invoice-flow send()/accept(), so it never
+    // fires `support_document.accepted` (which would post 5195 + full 2205).
+    try {
+      if (result.vat_responsible && result.all_items_received && store_id != null) {
+        const iva_amount =
+          Math.round(
+            result.updated_po.purchase_order_items.reduce(
+              (sum, i) => sum + Number(i.deductible_tax_amount ?? 0),
+              0,
+            ) * 100,
+          ) / 100;
+        const net_amount = Number(result.order_subtotal || 0);
+
+        if (iva_amount > 0 && accounting_entity_id != null) {
+          const invoice = await this.materializeVatDocument({
+            purchase_order_id: result.updated_po.id,
+            order_number: result.updated_po.order_number,
+            supplier_invoice_number:
+              result.updated_po.supplier_invoice_number ?? null,
+            supplier_invoice_date:
+              result.updated_po.supplier_invoice_date ?? null,
+            supplier,
+            organization_id: result.updated_po.organization_id,
+            store_id,
+            accounting_entity_id,
+            net_amount,
+            iva_amount,
+            user_id: RequestContextService.getUserId(),
+          });
+
+          if (invoice) {
+            this.eventEmitter.emit('purchase.vat_recognized', {
+              invoice_id: invoice.id,
+              purchase_order_id: result.updated_po.id,
+              reception_id: result.reception_id,
+              organization_id: result.updated_po.organization_id,
+              store_id,
+              accounting_entity_id,
+              iva_amount,
+              supplier,
+              user_id: RequestContextService.getUserId(),
+            });
+          }
+        }
+      }
+    } catch (error: any) {
+      this.logger.error(
+        `F2: failed to recognize deductible VAT for PO #${id} (reception #${result.reception_id}): ${error?.message}`,
+      );
+    }
+
     return result.updated_po;
+  }
+
+  /**
+   * F2 IVA lifecycle — materialize (idempotently) the purchase fiscal document
+   * that carries the deductible VAT of a POP purchase into the VAT declaration.
+   *
+   * Design decisions (documented on purpose):
+   * - `invoice_type`: defaults to `support_document`. There is no supplier
+   *   "electronic-invoicer" flag in the schema; when one is added, switch to
+   *   `purchase_invoice` for e-invoicing suppliers. Both types are classified
+   *   as DEDUCTIBLE (not a sale) by `calculateVat`.
+   * - `dian_status = not_applicable`: this is an internally-generated purchase
+   *   support document, so `calculateVat.isAcceptedForTax` counts it without a
+   *   DIAN round-trip.
+   * - Created via a direct scoped Prisma insert (NOT `InvoicingService.create`)
+   *   to avoid consuming our own DIAN numbering resolution — the invoice_number
+   *   is the SUPPLIER's number (or the PO `order_number` as a traceable
+   *   fallback), never one of our sequence.
+   * - Traceability PO↔invoice (no FK column exists on `invoices`): the
+   *   `invoice_number` carries the supplier/PO reference and `supplier_id`
+   *   links the counterparty; `notes` records the PO id + order_number.
+   * - Idempotency: guarded by the `invoices` unique
+   *   (accounting_entity_id, invoice_type, invoice_number). A pre-check
+   *   `findFirst` reuses an existing row; a concurrent unique violation (P2002)
+   *   is caught and the winning row is returned — so there is never more than
+   *   one document per purchase.
+   */
+  private async materializeVatDocument(params: {
+    purchase_order_id: number;
+    order_number: string;
+    supplier_invoice_number: string | null;
+    supplier_invoice_date: Date | null;
+    supplier?: { id: number; name?: string; tax_id?: string };
+    organization_id: number;
+    store_id: number;
+    accounting_entity_id: number;
+    net_amount: number;
+    iva_amount: number;
+    user_id?: number;
+  }): Promise<{ id: number } | null> {
+    const invoice_type = invoice_type_enum.support_document;
+    const invoice_number =
+      params.supplier_invoice_number?.trim() || params.order_number;
+    const issue_date = params.supplier_invoice_date ?? new Date();
+
+    // Idempotency pre-check: reuse an existing document for this purchase.
+    const existing = await this.prisma.invoices.findFirst({
+      where: {
+        accounting_entity_id: params.accounting_entity_id,
+        invoice_type,
+        invoice_number,
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      this.logger.log(
+        `F2: reusing existing VAT document invoice #${existing.id} for PO #${params.purchase_order_id}`,
+      );
+      return existing;
+    }
+
+    const net = Math.round(params.net_amount * 100) / 100;
+    const iva = Math.round(params.iva_amount * 100) / 100;
+    const total = Math.round((net + iva) * 100) / 100;
+    const tax_rate = net > 0 ? Math.round((iva / net) * 10000) / 100 : 0;
+
+    try {
+      const invoice = await this.prisma.invoices.create({
+        data: {
+          organization_id: params.organization_id,
+          // store_id is injected by StorePrismaService from the request context.
+          accounting_entity_id: params.accounting_entity_id,
+          fiscal_document_type: 'support_document',
+          invoice_number,
+          invoice_type,
+          status: 'validated',
+          dian_status: 'not_applicable',
+          supplier_id: params.supplier?.id,
+          customer_name: params.supplier?.name,
+          customer_tax_id: params.supplier?.tax_id,
+          subtotal_amount: net,
+          discount_amount: 0,
+          tax_amount: iva,
+          withholding_amount: 0,
+          total_amount: total,
+          currency: 'COP',
+          issue_date,
+          created_by_user_id: params.user_id,
+          notes: `F2: reconocimiento IVA descontable — PO #${params.purchase_order_id} (${params.order_number})`,
+          invoice_taxes: {
+            create: [
+              {
+                tax_name: 'IVA',
+                tax_rate,
+                taxable_amount: net,
+                tax_amount: iva,
+                tax_type: tax_type_enum.iva,
+              },
+            ],
+          },
+        },
+        select: { id: true },
+      });
+      this.logger.log(
+        `F2: materialized VAT document invoice #${invoice.id} (${invoice_type} ${invoice_number}) for PO #${params.purchase_order_id}`,
+      );
+      return invoice;
+    } catch (error: any) {
+      // Concurrent creation lost the race on the unique constraint — reuse the
+      // winning row so recognition stays idempotent.
+      if (error?.code === 'P2002') {
+        const winner = await this.prisma.invoices.findFirst({
+          where: {
+            accounting_entity_id: params.accounting_entity_id,
+            invoice_type,
+            invoice_number,
+          },
+          select: { id: true },
+        });
+        if (winner) return winner;
+      }
+      throw error;
+    }
   }
 
   // ===== Receptions =====
@@ -1829,11 +2541,9 @@ export class PurchaseOrdersService {
       storeId ?? undefined,
     );
 
-    // Scope cost aggregates to the operating scope (STORE vs ORGANIZATION).
-    const locationFilter = await this.costingService.buildScopedLocationFilter(
-      organizationId,
-      dto.location_id,
-    );
+    // Scoped cost aggregates (STORE vs ORGANIZATION) are computed per-item via
+    // CostingService.getScopedStockAggregate, which owns the operating-scope
+    // location filter and reads UNSCOPED to include org-level warehouses.
 
     const items: Array<{
       product_id: number;
@@ -1848,6 +2558,12 @@ export class PurchaseOrdersService {
       new_cost_per_unit: number;
       incoming_quantity: number;
       incoming_cost: number;
+      // F1 IVA lifecycle preview parity (frontend mirrors deriveLineTax):
+      incoming_gross_cost: number;
+      unit_price_net: number;
+      incoming_tax_per_unit: number;
+      incoming_tax_amount: number;
+      effective_include: boolean;
       is_reactivation: boolean;
       current_base_price: number;
       current_profit_margin: number;
@@ -1866,37 +2582,43 @@ export class PurchaseOrdersService {
       const currentStock = Number(stockLevel?.quantity_on_hand ?? 0);
       const currentCost = Number(stockLevel?.cost_per_unit ?? 0);
 
-      // Aggregate stock across the scoped location set (org or store).
-      const allStockLevels = await this.prisma.stock_levels.findMany({
-        where: {
+      // Aggregate stock across the scoped location set (org or store) via the
+      // shared helper, which reads UNSCOPED so org-level central warehouses
+      // (store_id = null) and sibling stores are counted for ORGANIZATION scope
+      // — the store-scoped client would drop them and report global_stock = 0,
+      // wrongly flagging a reactivation and ignoring the general inventory.
+      const { quantity: globalStock, cost_per_unit: globalCostPerUnit } =
+        await this.costingService.getScopedStockAggregate({
           product_id: item.product_id,
-          product_variant_id: item.product_variant_id || null,
-          quantity_on_hand: { gt: 0 },
-          inventory_locations: { is: locationFilter },
+          variant_id: item.product_variant_id || undefined,
+          location_id: dto.location_id,
+        });
+
+      // F1 IVA lifecycle: derive the NET cost from the entered (possibly
+      // gross) unit_cost + tax_rate + effective include-tax mode. The NET is
+      // the cost basis for CPP/FIFO — mirrors what create/receive persist.
+      const derivedTax = this.deriveLineTax(
+        {
+          unit_cost: item.unit_cost,
+          quantity: item.quantity,
+          tax_rate: item.tax_rate,
+          prices_include_tax: item.prices_include_tax,
         },
-      });
-      const globalStock = allStockLevels.reduce(
-        (sum, sl) => sum + (sl.quantity_on_hand ?? 0),
-        0,
+        dto,
       );
-      const globalValue = allStockLevels.reduce(
-        (sum, sl) =>
-          sum + (sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0),
-        0,
-      );
-      const globalCostPerUnit = globalStock > 0 ? globalValue / globalStock : 0;
+      const netUnitCost = derivedTax.unit_price_net;
 
       const newStock = globalStock + item.quantity;
       const isReactivation = globalStock <= 0;
 
       let newCostPerUnit: number;
       if (isReactivation || costingMethod === 'fifo') {
-        // Stock at zero: previous CPP is orphaned, new cost = purchase price directly
-        newCostPerUnit = item.unit_cost;
+        // Stock at zero: previous CPP is orphaned, new cost = NET purchase price
+        newCostPerUnit = netUnitCost;
       } else {
         // CPP (weighted average) using global stock across all locations
         newCostPerUnit =
-          (globalStock * globalCostPerUnit + item.quantity * item.unit_cost) /
+          (globalStock * globalCostPerUnit + item.quantity * netUnitCost) /
           newStock;
       }
 
@@ -1968,7 +2690,15 @@ export class PurchaseOrdersService {
         new_stock: newStock,
         new_cost_per_unit: newCostPerUnit,
         incoming_quantity: item.quantity,
-        incoming_cost: item.unit_cost,
+        // incoming_cost is the NET cost basis that actually enters inventory
+        // (equals the entered value when no tax applies — legacy-compatible).
+        incoming_cost: Math.round(netUnitCost * 100) / 100,
+        incoming_gross_cost: item.unit_cost,
+        unit_price_net: Math.round(netUnitCost * 100) / 100,
+        incoming_tax_per_unit:
+          Math.round(derivedTax.tax_amount_per_unit * 100) / 100,
+        incoming_tax_amount: Math.round(derivedTax.tax_amount * 100) / 100,
+        effective_include: derivedTax.effective_include,
         is_reactivation: isReactivation,
         current_base_price: currentBasePrice,
         current_profit_margin: currentProfitMargin,

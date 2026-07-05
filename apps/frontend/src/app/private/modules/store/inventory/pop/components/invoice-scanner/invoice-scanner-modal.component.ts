@@ -1,8 +1,8 @@
-import {Component, input, output, signal, computed, DestroyRef, inject} from '@angular/core';
+import {Component, input, output, signal, computed, effect, DestroyRef, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { switchMap, catchError } from 'rxjs';
-import { of } from 'rxjs';
+import { switchMap, catchError, of, Subject } from 'rxjs';
 
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
@@ -10,16 +10,23 @@ import { BadgeComponent } from '../../../../../../../shared/components/badge/bad
 import { SpinnerComponent } from '../../../../../../../shared/components/spinner/spinner.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
+import { InputsearchComponent } from '../../../../../../../shared/components/inputsearch/inputsearch.component';
 import { StepsLineComponent } from '../../../../../../../shared/components/steps-line/steps-line.component';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 import { InvoiceScannerService } from '../../services/invoice-scanner.service';
 import { UomService, UnitOfMeasure } from '../../../services/uom.service';
+import { SuppliersService } from '../../../services/suppliers.service';
+import { ProductsService } from '../../../../products/services/products.service';
+import { Supplier } from '../../../interfaces';
+import { PopSupplierQuickCreateComponent } from '../pop-supplier-quick-create.component';
 import {
   InvoiceScanResult,
   InvoiceMatchResult,
   MatchedLineItem,
+  ProductCandidate,
 } from '../../interfaces/invoice-scanner.interface';
 
 @Component({
@@ -27,14 +34,18 @@ import {
   standalone: true,
   imports: [
     FormsModule,
+    NgTemplateOutlet,
     ModalComponent,
     ButtonComponent,
     BadgeComponent,
     SpinnerComponent,
     IconComponent,
     InputComponent,
+    ToggleComponent,
+    InputsearchComponent,
     StepsLineComponent,
     CurrencyPipe,
+    PopSupplierQuickCreateComponent,
   ],
   template: `
     <app-modal
@@ -157,6 +168,29 @@ import {
           @if (fileError()) {
             <p class="text-sm text-red-600">{{ fileError() }}</p>
           }
+
+          <!-- Punto 1: selector de perfil de escaneo (retail vs insumos).
+               Define el prompt OCR del backend (invoice_ocr vs
+               invoice_ocr_ingredient). Se prellena con la sugerencia del
+               orquestador (carrito + industria) pero el usuario manda. -->
+          <div
+            class="flex items-start justify-between gap-3 p-3 rounded-lg border border-border bg-muted/20"
+          >
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-text-primary">
+                Factura de insumos / ingredientes
+              </p>
+              <p class="text-xs text-text-secondary mt-0.5">
+                Actívalo para materias primas o insumos: la IA extraerá también
+                unidades de medida (L, kg, ml, unidad...).
+              </p>
+            </div>
+            <app-toggle
+              [checked]="scanProfile() === 'ingredient'"
+              (changed)="onScanProfileToggle($event)"
+              ariaLabel="Factura de insumos o ingredientes"
+            ></app-toggle>
+          </div>
         </div>
       }
 
@@ -196,7 +230,7 @@ import {
       <!-- Step 3: Review & Confirm -->
       @if (currentStep() === 3 && matchResult()) {
         <div class="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
-          <!-- Supplier section -->
+          <!-- Punto 2: proveedor con paridad (preseleccionado + editable). -->
           <div class="bg-muted/30 rounded-lg p-4 border border-border">
             <div class="flex items-center justify-between mb-2">
               <h4 class="text-sm font-semibold text-text-primary">Proveedor</h4>
@@ -207,14 +241,82 @@ import {
                 {{ matchResult()!.supplier_match.is_new ? 'Nuevo' : (matchResult()!.supplier_match.confidence >= 80 ? 'Encontrado' : 'Parcial') }}
               </app-badge>
             </div>
-            <p class="text-base font-medium text-text-primary">
-              {{ matchResult()!.supplier_match.name }}
-            </p>
-            @if (matchResult()!.supplier_match.tax_id) {
-              <p class="text-xs text-text-secondary mt-0.5">
-                NIT: {{ matchResult()!.supplier_match.tax_id }}
+
+            <!-- Nombre/NIT detectado por el OCR como ayuda -->
+            @if (matchResult()!.supplier_match.name) {
+              <p class="text-xs text-text-secondary mb-2">
+                Detectado:
+                <span class="font-medium text-text-primary">{{ matchResult()!.supplier_match.name }}</span>
+                @if (matchResult()!.supplier_match.tax_id) {
+                  <span> · NIT: {{ matchResult()!.supplier_match.tax_id }}</span>
+                }
               </p>
             }
+
+            <div class="flex items-end gap-2">
+              <div class="flex-1 min-w-0 relative">
+                <button
+                  type="button"
+                  (click)="toggleSupplierDropdown()"
+                  class="w-full flex items-center justify-between gap-2 px-3 py-2 text-sm border border-border rounded-lg bg-surface hover:border-primary text-left"
+                >
+                  <span
+                    class="truncate"
+                    [class.text-text-secondary]="!selectedSupplierId()"
+                  >
+                    {{ selectedSupplierLabel() }}
+                  </span>
+                  <app-icon
+                    [name]="supplierDropdownOpen() ? 'chevron-up' : 'chevron-down'"
+                    [size]="14"
+                  ></app-icon>
+                </button>
+
+                @if (supplierDropdownOpen()) {
+                  <div
+                    class="absolute z-[10000] mt-1 w-full bg-surface border border-border shadow-lg rounded-lg max-h-64 overflow-auto"
+                  >
+                    <div class="p-2 border-b border-border sticky top-0 bg-surface">
+                      <app-inputsearch
+                        size="sm"
+                        placeholder="Buscar proveedor..."
+                        [debounceTime]="300"
+                        (searchChange)="onSupplierSearch($event)"
+                      ></app-inputsearch>
+                    </div>
+                    <div class="py-1">
+                      @if (supplierSearchLoading()) {
+                        <p class="px-3 py-2 text-xs text-text-secondary">Buscando...</p>
+                      } @else if (supplierDisplayList().length > 0) {
+                        @for (s of supplierDisplayList(); track s.id) {
+                          <button
+                            type="button"
+                            (click)="chooseSupplier(s)"
+                            class="w-full px-3 py-2 text-left text-xs hover:bg-primary-50 flex items-center justify-between gap-2"
+                            [class.bg-primary-50]="selectedSupplierId() === s.id"
+                          >
+                            <span class="truncate">{{ s.name }}</span>
+                            @if (s.tax_id) {
+                              <span class="text-[10px] text-text-secondary shrink-0">NIT: {{ s.tax_id }}</span>
+                            }
+                          </button>
+                        }
+                      } @else {
+                        <p class="px-3 py-2 text-xs text-text-secondary">Sin resultados</p>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="openSupplierCreate()"
+              >
+                <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+                Crear
+              </app-button>
+            </div>
           </div>
 
           <!-- Invoice header fields -->
@@ -302,26 +404,10 @@ import {
                         </app-badge>
                       </td>
                       <td class="py-2 pl-3">
-                        @if (item.match_status === 'matched' && item.candidates.length > 0) {
-                          <span class="text-text-primary text-xs">
-                            {{ item.candidates[0].name }}
-                          </span>
-                        } @else if (item.candidates.length > 0) {
-                          <select
-                            class="w-full px-2 py-1 text-xs border border-border rounded-md bg-surface text-text-primary focus:ring-1 focus:ring-primary"
-                            [value]="item.selected_product_id || ''"
-                            (change)="selectProduct(i, $event)"
-                          >
-                            <option value="">Producto nuevo</option>
-                            @for (candidate of item.candidates; track candidate.id) {
-                              <option [value]="candidate.id">
-                                {{ candidate.name }} ({{ candidate.sku }})
-                              </option>
-                            }
-                          </select>
-                        } @else {
-                          <span class="text-xs text-text-secondary italic">Producto nuevo</span>
-                        }
+                        <ng-container
+                          [ngTemplateOutlet]="productPicker"
+                          [ngTemplateOutletContext]="{ item: item, i: i }"
+                        ></ng-container>
                       </td>
                     </tr>
                   }
@@ -373,20 +459,13 @@ import {
                       </p>
                     </div>
                   </div>
-                  @if (item.candidates.length > 0 && item.match_status !== 'matched') {
-                    <select
-                      class="w-full px-2 py-1 text-xs border border-border rounded-md bg-surface text-text-primary"
-                      [value]="item.selected_product_id || ''"
-                      (change)="selectProduct(i, $event)"
-                    >
-                      <option value="">Producto nuevo</option>
-                      @for (candidate of item.candidates; track candidate.id) {
-                        <option [value]="candidate.id">
-                          {{ candidate.name }} ({{ candidate.sku }})
-                        </option>
-                      }
-                    </select>
-                  }
+                  <div>
+                    <label class="text-[10px] text-text-secondary">Producto</label>
+                    <ng-container
+                      [ngTemplateOutlet]="productPicker"
+                      [ngTemplateOutletContext]="{ item: item, i: i }"
+                    ></ng-container>
+                  </div>
                 </div>
               }
             </div>
@@ -411,6 +490,92 @@ import {
               </div>
             </div>
           </div>
+
+          <!-- Punto 3+4: picker de producto por línea, SIEMPRE editable.
+               Une candidatos sugeridos + búsqueda de catálogo server-side +
+               "Producto nuevo". Reutilizado en desktop y mobile. -->
+          <ng-template #productPicker let-item="item" let-i="i">
+            <div class="relative">
+              <button
+                type="button"
+                (click)="toggleProductSearch(i)"
+                class="w-full flex items-center justify-between gap-2 px-2 py-1 text-xs border border-border rounded-md bg-surface text-left hover:border-primary"
+              >
+                <span
+                  class="truncate"
+                  [class.text-text-secondary]="!item.selected_product_id"
+                >
+                  {{ selectedProductLabel(item) }}
+                </span>
+                <app-icon
+                  [name]="productSearchIndex() === i ? 'chevron-up' : 'chevron-down'"
+                  [size]="14"
+                ></app-icon>
+              </button>
+
+              @if (productSearchIndex() === i) {
+                <div
+                  class="absolute z-[10000] mt-1 w-full min-w-[220px] right-0 bg-surface border border-border shadow-lg rounded-lg max-h-64 overflow-auto"
+                >
+                  <div class="p-2 border-b border-border sticky top-0 bg-surface">
+                    <app-inputsearch
+                      size="sm"
+                      placeholder="Buscar en el catálogo..."
+                      [debounceTime]="300"
+                      (searchChange)="onProductSearch($event)"
+                    ></app-inputsearch>
+                  </div>
+                  <div class="py-1">
+                    <button
+                      type="button"
+                      (click)="chooseNewProduct(i)"
+                      class="w-full px-3 py-2 text-left text-xs hover:bg-primary-50 flex items-center gap-2"
+                      [class.font-semibold]="!item.selected_product_id"
+                    >
+                      <app-icon name="plus" [size]="14"></app-icon>
+                      Producto nuevo
+                    </button>
+
+                    @if (item.candidates.length > 0) {
+                      <p class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-text-secondary">
+                        Sugeridos
+                      </p>
+                      @for (c of item.candidates; track c.id) {
+                        <button
+                          type="button"
+                          (click)="chooseProduct(i, c)"
+                          class="w-full px-3 py-2 text-left text-xs hover:bg-primary-50 flex items-center justify-between gap-2"
+                          [class.bg-primary-50]="item.selected_product_id === c.id"
+                        >
+                          <span class="truncate">{{ c.name }}</span>
+                          <span class="text-[10px] text-text-secondary shrink-0">{{ c.sku }}</span>
+                        </button>
+                      }
+                    }
+
+                    @if (productSearchLoading()) {
+                      <p class="px-3 py-2 text-xs text-text-secondary">Buscando...</p>
+                    } @else if (productSearchResults().length > 0) {
+                      <p class="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-text-secondary">
+                        Catálogo
+                      </p>
+                      @for (r of productSearchResults(); track r.id) {
+                        <button
+                          type="button"
+                          (click)="chooseProduct(i, r)"
+                          class="w-full px-3 py-2 text-left text-xs hover:bg-primary-50 flex items-center justify-between gap-2"
+                          [class.bg-primary-50]="item.selected_product_id === r.id"
+                        >
+                          <span class="truncate">{{ r.name }}</span>
+                          <span class="text-[10px] text-text-secondary shrink-0">{{ r.sku }}</span>
+                        </button>
+                      }
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          </ng-template>
         </div>
       }
 
@@ -448,6 +613,13 @@ import {
         </div>
       </div>
     </app-modal>
+
+    <!-- Punto 2: quick-create de proveedor, montado como hermano del modal
+         para evitar anidar app-modal dentro de app-modal. -->
+    <app-pop-supplier-quick-create
+      [(isOpen)]="showSupplierCreate"
+      (supplierCreated)="onSupplierCreated($event)"
+    ></app-pop-supplier-quick-create>
   `,
   styles: [
     `
@@ -482,6 +654,7 @@ export class InvoiceScannerModalComponent {
     editedItems: MatchedLineItem[];
     invoiceNumber?: string;
     invoiceDate?: string;
+    supplierId?: number | null;
   }>();
 
   // Wizard state
@@ -505,6 +678,41 @@ export class InvoiceScannerModalComponent {
   // Editable invoice header
   editInvoiceNumber = '';
   editInvoiceDate = '';
+
+  // Punto 1: perfil de escaneo elegido en el modal (semilla = input orderType).
+  readonly scanProfile = signal<'retail' | 'ingredient'>('retail');
+  /** Guard para inicializar el modal (perfil + proveedores) UNA vez por
+   *  apertura, sin pisar la elección manual del usuario en re-renders. */
+  private modalInitialized = false;
+
+  // Punto 2: proveedor preseleccionado + editable con búsqueda server-side
+  // (paridad con el picker de productos: dropdown + app-inputsearch + switchMap).
+  readonly selectedSupplierId = signal<number | null>(null);
+  readonly selectedSupplierName = signal<string | null>(null);
+  readonly showSupplierCreate = signal(false);
+  readonly supplierDropdownOpen = signal(false);
+  private readonly suppliers = signal<Supplier[]>([]);
+  readonly supplierSearchResults = signal<Supplier[]>([]);
+  readonly supplierSearchLoading = signal(false);
+  private readonly supplierSearchTerm = signal('');
+  private readonly supplierSearch$ = new Subject<string>();
+  /** Lista mostrada en el dropdown: resultados de servidor cuando hay término
+   *  de búsqueda, si no el pool inicial de activos precargado al abrir. */
+  readonly supplierDisplayList = computed<Supplier[]>(() =>
+    this.supplierSearchTerm().trim()
+      ? this.supplierSearchResults()
+      : this.suppliers(),
+  );
+  /** Etiqueta del botón del selector de proveedor. */
+  readonly selectedSupplierLabel = computed<string>(
+    () => this.selectedSupplierName() ?? 'Selecciona un proveedor',
+  );
+
+  // Punto 3+4: búsqueda de catálogo por línea (un dropdown abierto a la vez).
+  readonly productSearchIndex = signal<number | null>(null);
+  readonly productSearchResults = signal<ProductCandidate[]>([]);
+  readonly productSearchLoading = signal(false);
+  private readonly productSearch$ = new Subject<string>();
 
   // Steps config
   wizardSteps = [
@@ -536,7 +744,80 @@ export class InvoiceScannerModalComponent {
     private invoiceScannerService: InvoiceScannerService,
     private uomService: UomService,
     private toastService: ToastService,
-  ) {}
+    private suppliersService: SuppliersService,
+    private productsService: ProductsService,
+  ) {
+    // Punto 1 + 2: al abrir el modal, sembrar el perfil sugerido y precargar
+    // el pool de proveedores. El guard evita re-sembrar en cada render, así
+    // se respeta la elección manual del usuario mientras el modal siga abierto.
+    effect(() => {
+      const open = this.isOpen();
+      if (open && !this.modalInitialized) {
+        this.modalInitialized = true;
+        this.scanProfile.set(this.orderType());
+        this.loadSuppliers();
+      } else if (!open) {
+        this.modalInitialized = false;
+      }
+    });
+
+    // Punto 3+4: stream de búsqueda de catálogo (cancelable con switchMap).
+    // El debounce lo aplica app-inputsearch; aquí solo cancelamos in-flight.
+    this.productSearch$
+      .pipe(
+        switchMap((term) => {
+          const q = (term ?? '').trim();
+          if (!q) {
+            this.productSearchLoading.set(false);
+            this.productSearchResults.set([]);
+            return of<any>({ data: [] });
+          }
+          this.productSearchLoading.set(true);
+          return this.productsService
+            .getProducts({ page: 1, limit: 10, state: 'active', search: q } as any)
+            .pipe(catchError(() => of<any>({ data: [] })));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res: any) => {
+        const list = Array.isArray(res?.data) ? res.data : [];
+        this.productSearchResults.set(
+          list.map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            sku: p.sku ?? p.code ?? '',
+            cost_price: p.cost_price != null ? Number(p.cost_price) : undefined,
+            confidence: 0,
+          })),
+        );
+        this.productSearchLoading.set(false);
+      });
+
+    // Punto 2: stream de búsqueda de proveedores (server-side, cancelable con
+    // switchMap). Da paridad con el picker de productos: alcanza cualquier
+    // proveedor por nombre/NIT sin importar cuántos haya (no cap de 50).
+    this.supplierSearch$
+      .pipe(
+        switchMap((term) => {
+          const q = (term ?? '').trim();
+          this.supplierSearchTerm.set(q);
+          if (!q) {
+            this.supplierSearchLoading.set(false);
+            this.supplierSearchResults.set([]);
+            return of<any>({ data: [] });
+          }
+          this.supplierSearchLoading.set(true);
+          return this.suppliersService
+            .getSuppliers({ is_active: true, limit: 20, search: q })
+            .pipe(catchError(() => of<any>({ data: [] })));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res: any) => {
+        this.supplierSearchResults.set(Array.isArray(res?.data) ? res.data : []);
+        this.supplierSearchLoading.set(false);
+      });
+  }
 
   // ============================================================
   // Fase 4: UoM hint resolution (ingredient flow only)
@@ -548,7 +829,7 @@ export class InvoiceScannerModalComponent {
    * al backend. Errores son no-fatales: el scanner sigue sin preselección.
    */
   private loadUomCatalog(): void {
-    if (this.orderType() !== 'ingredient') return;
+    if (this.scanProfile() !== 'ingredient') return;
     this.uomService
       .getCatalog()
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -579,7 +860,7 @@ export class InvoiceScannerModalComponent {
     stock_uom_id: number | null;
   } {
     const empty = { purchase_uom_id: null, stock_uom_id: null };
-    if (this.orderType() !== 'ingredient') return empty;
+    if (this.scanProfile() !== 'ingredient') return empty;
     const normalized = (hint ?? '').trim().toLowerCase();
     if (!normalized) return empty;
 
@@ -723,7 +1004,7 @@ export class InvoiceScannerModalComponent {
     this.loadUomCatalog();
 
     this.invoiceScannerService
-      .scanInvoice(file, this.orderType())
+      .scanInvoice(file, this.scanProfile())
       .pipe(
         switchMap((scanResponse) => {
           if (!scanResponse.success || !scanResponse.data) {
@@ -749,6 +1030,15 @@ export class InvoiceScannerModalComponent {
 
         if (matchResponse.success && matchResponse.data) {
           this.matchResult.set(matchResponse.data);
+          // Punto 2: preselecciona el proveedor emparejado (editable luego).
+          this.selectedSupplierId.set(
+            matchResponse.data.supplier_match.matched_id ?? null,
+          );
+          this.selectedSupplierName.set(
+            matchResponse.data.supplier_match.matched_id
+              ? matchResponse.data.supplier_match.name
+              : null,
+          );
           // Create editable copy of items. Fase 4: en flujo ingredient,
           // resolvemos uom_hint → purchase/stock UoM como preselección.
           this.editableItems.set(
@@ -793,16 +1083,125 @@ export class InvoiceScannerModalComponent {
     this.editableItems.set(items);
   }
 
-  selectProduct(index: number, event: Event): void {
-    const value = (event.target as HTMLSelectElement).value;
+  // ============================================================
+  // Punto 1: perfil de escaneo
+  // ============================================================
+
+  onScanProfileToggle(isIngredient: boolean): void {
+    this.scanProfile.set(isIngredient ? 'ingredient' : 'retail');
+  }
+
+  // ============================================================
+  // Punto 2: proveedor
+  // ============================================================
+
+  /** Precarga el pool inicial de proveedores activos que se muestra en el
+   *  dropdown antes de teclear. La búsqueda por término va server-side vía
+   *  `supplierSearch$` (ver constructor), sin el cap de 50 del pool inicial. */
+  private loadSuppliers(): void {
+    this.suppliersService
+      .getSuppliers({ is_active: true, limit: 50 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          this.suppliers.set(Array.isArray(res?.data) ? res.data : []);
+        },
+        error: () => {
+          this.suppliers.set([]);
+        },
+      });
+  }
+
+  toggleSupplierDropdown(): void {
+    this.supplierDropdownOpen.update((v) => !v);
+  }
+
+  onSupplierSearch(term: string): void {
+    this.supplierSearch$.next(term ?? '');
+  }
+
+  chooseSupplier(supplier: Supplier): void {
+    this.selectedSupplierId.set(supplier.id);
+    this.selectedSupplierName.set(supplier.name);
+    this.supplierDropdownOpen.set(false);
+  }
+
+  openSupplierCreate(): void {
+    this.showSupplierCreate.set(true);
+  }
+
+  onSupplierCreated(supplier: Supplier): void {
+    // Añade el proveedor recién creado al pool y lo selecciona.
+    this.suppliers.update((list) => [
+      supplier,
+      ...list.filter((s) => s.id !== supplier.id),
+    ]);
+    this.selectedSupplierId.set(supplier.id);
+    this.selectedSupplierName.set(supplier.name);
+    this.supplierDropdownOpen.set(false);
+    this.showSupplierCreate.set(false);
+  }
+
+  // ============================================================
+  // Punto 3+4: selector de producto por línea (siempre editable)
+  // ============================================================
+
+  /** Etiqueta mostrada en el botón del picker según la selección actual. */
+  selectedProductLabel(item: MatchedLineItem): string {
+    if (!item.selected_product_id) return 'Producto nuevo';
+    const found = [...item.candidates, ...this.productSearchResults()].find(
+      (c) => c.id === item.selected_product_id,
+    );
+    return found
+      ? `${found.name}${found.sku ? ` (${found.sku})` : ''}`
+      : 'Producto seleccionado';
+  }
+
+  toggleProductSearch(index: number): void {
+    if (this.productSearchIndex() === index) {
+      this.productSearchIndex.set(null);
+      return;
+    }
+    this.productSearchIndex.set(index);
+    this.productSearchResults.set([]);
+    this.productSearchLoading.set(false);
+  }
+
+  onProductSearch(term: string): void {
+    this.productSearch$.next(term);
+  }
+
+  /**
+   * Elige un producto (candidato sugerido o resultado de catálogo) para la
+   * línea. Lo añade a `candidates` para que persista visible aunque venga de
+   * la búsqueda, y fija `selected_product_id` + `match_status='matched'`.
+   */
+  chooseProduct(index: number, candidate: ProductCandidate): void {
     const items = [...this.editableItems()];
-    const productId = value ? Number(value) : undefined;
+    const current = items[index];
+    const candidates = current.candidates.some((c) => c.id === candidate.id)
+      ? current.candidates
+      : [candidate, ...current.candidates];
     items[index] = {
-      ...items[index],
-      selected_product_id: productId,
-      match_status: productId ? 'matched' : 'new',
+      ...current,
+      candidates,
+      selected_product_id: candidate.id,
+      match_status: 'matched',
     };
     this.editableItems.set(items);
+    this.productSearchIndex.set(null);
+  }
+
+  /** Vuelve a "Producto nuevo" (limpia la selección → prebulk en el carrito). */
+  chooseNewProduct(index: number): void {
+    const items = [...this.editableItems()];
+    items[index] = {
+      ...items[index],
+      selected_product_id: undefined,
+      match_status: 'new',
+    };
+    this.editableItems.set(items);
+    this.productSearchIndex.set(null);
   }
 
   // ============================================================
@@ -820,6 +1219,8 @@ export class InvoiceScannerModalComponent {
       editedItems: this.editableItems(),
       invoiceNumber: this.editInvoiceNumber || undefined,
       invoiceDate: this.editInvoiceDate || undefined,
+      // Punto 2: proveedor elegido por el usuario (null = no cambiar).
+      supplierId: this.selectedSupplierId(),
     });
 
     this.closeAndReset();
@@ -852,6 +1253,17 @@ export class InvoiceScannerModalComponent {
     this.editableItems.set([]);
     this.editInvoiceNumber = '';
     this.editInvoiceDate = '';
+    // Punto 2 + 3/4: limpia estado de proveedor y del picker de productos.
+    this.selectedSupplierId.set(null);
+    this.selectedSupplierName.set(null);
+    this.showSupplierCreate.set(false);
+    this.supplierDropdownOpen.set(false);
+    this.supplierSearchResults.set([]);
+    this.supplierSearchLoading.set(false);
+    this.supplierSearchTerm.set('');
+    this.productSearchIndex.set(null);
+    this.productSearchResults.set([]);
+    this.productSearchLoading.set(false);
   }
 
   private closeAndReset(): void {

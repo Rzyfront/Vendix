@@ -36,10 +36,45 @@ import { CouponAppliesTo } from '../../store/coupons/dto';
 import { PromotionQuoteResult } from '../../store/promotions/dto/promotion-quote.interface';
 import { storeIsRestaurant } from '@common/helpers/industry-capabilities.helper';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
+import { assertCanChargeVat } from '@common/helpers/vat-responsibility.helper';
 
 @Injectable()
 export class CheckoutService {
   private readonly logger = new Logger(CheckoutService.name);
+
+  /**
+   * F4 — Gate "no responsable de IVA" (checkout ecommerce).
+   *
+   * Un comercio no responsable de IVA no puede COBRAR IVA en la venta. Aquí
+   * las líneas ya traen `item_taxes` calculados por `TaxesService`, así que el
+   * IVA se detecta directamente por `tax_type === 'iva'` con monto > 0.
+   *
+   * Solo consulta `fiscal_data` cuando efectivamente se está cargando IVA
+   * (camino feliz sin costo extra). Indeterminado ⇒ responsable (no bloquea).
+   */
+  private async assertCheckoutVatAllowed(
+    itemsWithTaxes: Array<{
+      item_taxes?: Array<{ tax_type?: string | null; amount?: number | null }>;
+    }>,
+  ): Promise<void> {
+    const chargesVat = itemsWithTaxes.some((it) =>
+      (it.item_taxes ?? []).some(
+        (t) =>
+          (t.tax_type ?? '').toLowerCase() === 'iva' &&
+          Number(t.amount ?? 0) > 0,
+      ),
+    );
+    if (!chargesVat) return;
+
+    let fiscalData: any = null;
+    try {
+      fiscalData = await this.settingsService.getFiscalData();
+    } catch {
+      // fiscal_data no resoluble ⇒ indeterminado ⇒ responsable.
+      return;
+    }
+    assertCanChargeVat(fiscalData, 'sale');
+  }
 
   constructor(
     private readonly prisma: EcommercePrismaService,
@@ -930,6 +965,9 @@ export class CheckoutService {
       itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
 
+    // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
+    await this.assertCheckoutVatAllowed(itemsWithTaxes);
+
     // Recompute promotional + coupon discounts on the backend. Frontend
     // only sends the coupon code (if any); totals here are authoritative.
     const discountResult = await this.resolveCheckoutDiscounts({
@@ -1431,6 +1469,9 @@ export class CheckoutService {
     const total_tax = this.roundMoney(
       itemsWithTaxes.reduce((sum, item) => sum + item.total_tax, 0),
     );
+
+    // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
+    await this.assertCheckoutVatAllowed(itemsWithTaxes);
 
     // Resolve promotional + coupon discounts on the backend (same source of
     // truth used by the normal checkout). Frontend never sends totals.

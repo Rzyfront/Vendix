@@ -649,6 +649,7 @@ export class AutoEntryService {
       'refund.completed': 'auto_return',
       'purchase_order.received': 'auto_purchase',
       'purchase_order.payment': 'auto_purchase',
+      purchase_vat: 'auto_purchase',
       'inventory.adjusted': 'auto_inventory',
       'credit_sale.created': 'auto_invoice', // Uses auto_invoice type (revenue recognition without payment)
       installment_payment: 'auto_installment_payment',
@@ -674,6 +675,11 @@ export class AutoEntryService {
       cash_register_movement: 'adjustment',
       'expense.refunded': 'auto_expense',
       'expense.cancelled': 'auto_expense',
+      // F5 — Liquidación de IVA y su reversa. Reutilizan el tipo 'adjustment'
+      // del enum accounting_entry_type_enum (no es venta/compra/pago, es un
+      // ajuste de cierre de las cuentas de IVA generado/descontable).
+      vat_declaration: 'adjustment',
+      vat_declaration_reversal: 'adjustment',
     };
     const entry_type = entry_type_map[source_type] || 'manual';
 
@@ -2376,6 +2382,12 @@ export class AutoEntryService {
     reception_id: number;
     organization_id: number;
     store_id?: number;
+    /**
+     * F2: entidad fiscal resuelta por el emisor vía FiscalScopeService. Se
+     * propaga explícitamente (en vez de dejar que createAutoEntry caiga al
+     * fallback) para que la resolución sea determinista y trazable.
+     */
+    accounting_entity_id?: number;
     total_amount: number;
     user_id?: number;
     /**
@@ -2418,7 +2430,91 @@ export class AutoEntryService {
       source_id: data.reception_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
       description: `Purchase order received #${data.purchase_order_id} (reception #${data.reception_id})`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * F2 IVA lifecycle — recognize the DEDUCTIBLE VAT (IVA descontable) of a POP
+   * purchase from a VAT-responsible commerce (O-48), via a "VAT-only" journal
+   * entry:
+   *
+   *   DR 240804  IVA descontable en compras (iva)
+   *   CR 2205    Proveedores                (iva)
+   *
+   * This is the complement to `purchase_order.received` (which already posts
+   * DR 1435 net / CR 2205 net). Together the combined economic entry is:
+   *
+   *   DR 1435   Inventario        (neto)
+   *   DR 240804 IVA descontable   (iva)
+   *   CR 2205   Proveedores       (bruto = neto + iva)
+   *
+   * It deliberately does NOT reuse `onSupportDocumentAccepted` (which also
+   * debits 5195 expense + credits the FULL 2205), because that would duplicate
+   * the payable and contabilize expense over inventoried merchandise.
+   *
+   * Idempotent by (organization_id, source_type='purchase_vat',
+   * source_id=invoice_id, accounting_entity_id). O-49 (non-responsible) never
+   * reaches here — its VAT is already capitalized into inventory cost by F1.
+   */
+  async onPurchaseVatRecognized(data: {
+    invoice_id: number;
+    purchase_order_id: number;
+    reception_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    iva_amount: number;
+    supplier?: { id: number; name?: string; tax_id?: string };
+    user_id?: number;
+  }) {
+    const iva = Number(data.iva_amount || 0);
+    if (!(iva > 0)) {
+      this.logger.warn(
+        `Skipping purchase_vat recognition for invoice #${data.invoice_id}: non-positive IVA (${iva})`,
+      );
+      return null;
+    }
+
+    const supplier_third_party: AutoEntryThirdParty | undefined = data.supplier
+      ? {
+          id: data.supplier.id,
+          type: 'supplier',
+          name: data.supplier.name,
+          tax_id: data.supplier.tax_id,
+        }
+      : undefined;
+
+    const lines = await Promise.all([
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.iva_deductible',
+        'IVA Descontable en Compras',
+        iva,
+        0,
+        data.store_id,
+      ),
+      this.resolveAccountLine(
+        data.organization_id,
+        'purchase.vat_recognized.accounts_payable',
+        'Proveedores (complemento IVA)',
+        0,
+        iva,
+        data.store_id,
+        supplier_third_party,
+      ),
+    ]);
+
+    return this.createAutoEntry({
+      source_type: 'purchase_vat',
+      source_id: data.invoice_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `IVA descontable compra — factura #${data.invoice_id} (PO #${data.purchase_order_id}, recepción #${data.reception_id})`,
       lines,
       user_id: data.user_id,
     });
@@ -4196,5 +4292,263 @@ export class AutoEntryService {
       lines,
       user_id: data.user_id,
     });
+  }
+
+  /**
+   * F5 (paso 17) — Liquidación de IVA al APROBAR la declaración `vat`. Netea el
+   * IVA generado del período contra el IVA descontable y traslada el NETO a la
+   * cuenta de liquidación correspondiente:
+   *
+   *   DR 240802  IVA Generado por Ventas       (por el generado del período)
+   *   CR 240804  IVA Descontable en Compras    (por el descontable del período)
+   *   ── neto ──
+   *   CR 240810  IVA por Pagar - Liquidación   (si generado > descontable)
+   *   DR 135520  Saldo a Favor en IVA          (si descontable > generado)
+   *
+   * Ejemplo (generado=1900, descontable=1140): DR 240802 1900 / CR 240804 1140
+   * / CR 240810 760 → SUM(debit)=1900 = SUM(credit)=1140+760.
+   *
+   * Se dispara con el período AÚN abierto (evento vat.declaration.approved), no
+   * al cerrar: así el asiento fechado en `period_end` cae dentro del período
+   * abierto y NO lo rechaza el guard FISCAL_PERIOD_CLOSED de createAutoEntry.
+   *
+   * Idempotente por (organization_id, source_type='vat_declaration',
+   * source_id=declaration_id, accounting_entity_id): aprobar dos veces devuelve
+   * el mismo entry (la guarda vive en createAutoEntry).
+   */
+  async onVatSettlement(data: {
+    declaration_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    generated_tax_amount: number;
+    deductible_tax_amount: number;
+    period_end: Date;
+    user_id?: number;
+  }) {
+    const generated = Math.max(0, Number(data.generated_tax_amount || 0));
+    const deductible = Math.max(0, Number(data.deductible_tax_amount || 0));
+
+    // Sin IVA que liquidar (período sin ventas ni compras gravadas): nada que
+    // contabilizar. createAutoEntry igual descartaría (<2 líneas), pero salimos
+    // temprano para no emitir un warning ruidoso.
+    if (generated <= 0 && deductible <= 0) {
+      this.logger.warn(
+        `Skipping VAT settlement for declaration #${data.declaration_id}: generado=0 y descontable=0`,
+      );
+      return null;
+    }
+
+    const balance = generated - deductible; // >0 a pagar, <0 a favor
+    const lines = await this.buildVatSettlementLines({
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      generated,
+      deductible,
+      balance,
+      reversed: false,
+    });
+
+    return this.createAutoEntry({
+      source_type: 'vat_declaration',
+      source_id: data.declaration_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: data.accounting_entity_id,
+      entry_date: data.period_end,
+      description: `Liquidación de IVA — declaración #${data.declaration_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * F5 (paso 18) — Reversa de la liquidación de IVA al ANULAR/RECHAZAR una
+   * declaración `vat` ya liquidada. Postea el asiento ESPEJO exacto de
+   * onVatSettlement (intercambia DR↔CR):
+   *
+   *   CR 240802  IVA Generado por Ventas       (por el generado)
+   *   DR 240804  IVA Descontable en Compras    (por el descontable)
+   *   ── neto ──
+   *   DR 240810  IVA por Pagar - Liquidación   (si generado > descontable)
+   *   CR 135520  Saldo a Favor en IVA          (si descontable > generado)
+   *
+   * Sólo reversa si existe la liquidación original (source_type='vat_declaration',
+   * mismo source_id/entidad): si la declaración nunca se aprobó (nunca se
+   * liquidó), no hay nada que reversar y se omite en silencio (log warn).
+   *
+   * Si el período de la liquidación YA está cerrado, createAutoEntry rechaza el
+   * espejo con FISCAL_PERIOD_CLOSED (el espejo se fecha en `period_end`); en ese
+   * caso se exige un período correctivo — la reversa NO se fuerza sobre un mes
+   * cerrado.
+   *
+   * Idempotente por (organization_id, source_type='vat_declaration_reversal',
+   * source_id=declaration_id, accounting_entity_id).
+   */
+  async onVatSettlementReversed(data: {
+    declaration_id: number;
+    organization_id: number;
+    store_id?: number;
+    accounting_entity_id?: number;
+    generated_tax_amount: number;
+    deductible_tax_amount: number;
+    period_end: Date;
+    user_id?: number;
+  }) {
+    // Resolver la entidad contable de la liquidación original (misma resolución
+    // que createAutoEntry usa como clave de idempotencia) para localizarla.
+    const accounting_entity = data.accounting_entity_id
+      ? await this.prisma.withoutScope().accounting_entities.findFirst({
+          where: {
+            id: data.accounting_entity_id,
+            organization_id: data.organization_id,
+            is_active: true,
+          },
+          select: { id: true },
+        })
+      : await this.fiscal_scope_service.resolveAccountingEntityForFiscal({
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+        });
+
+    if (!accounting_entity) {
+      this.logger.warn(
+        `Skipping VAT settlement reversal for declaration #${data.declaration_id}: no se pudo resolver la entidad contable`,
+      );
+      return null;
+    }
+
+    // Sólo reversar si la liquidación original fue posteada. Si la declaración
+    // nunca se aprobó (no hay asiento vat_declaration), no hay nada que reversar.
+    const original = await this.prisma.accounting_entries.findFirst({
+      where: {
+        organization_id: data.organization_id,
+        source_type: 'vat_declaration',
+        source_id: data.declaration_id,
+        accounting_entity_id: accounting_entity.id,
+      },
+      select: { id: true },
+    });
+    if (!original) {
+      this.logger.warn(
+        `Skipping VAT settlement reversal for declaration #${data.declaration_id}: no existe liquidación original que reversar`,
+      );
+      return null;
+    }
+
+    const generated = Math.max(0, Number(data.generated_tax_amount || 0));
+    const deductible = Math.max(0, Number(data.deductible_tax_amount || 0));
+    const balance = generated - deductible;
+
+    const lines = await this.buildVatSettlementLines({
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      generated,
+      deductible,
+      balance,
+      reversed: true,
+    });
+
+    return this.createAutoEntry({
+      source_type: 'vat_declaration_reversal',
+      source_id: data.declaration_id,
+      organization_id: data.organization_id,
+      store_id: data.store_id,
+      accounting_entity_id: accounting_entity.id,
+      entry_date: data.period_end,
+      description: `Reversa liquidación de IVA — declaración #${data.declaration_id}`,
+      lines,
+      user_id: data.user_id,
+    });
+  }
+
+  /**
+   * Construye las 2-3 líneas de la liquidación de IVA (o su espejo). En modo
+   * normal: DR 240802 (generado) / CR 240804 (descontable) + neto → CR 240810
+   * (a pagar) o DR 135520 (a favor). En modo `reversed` intercambia TODOS los
+   * lados (DR↔CR) para producir el asiento espejo exacto. El asiento SIEMPRE
+   * cuadra: SUM(debit) === SUM(credit) (invariante también validada por
+   * createAutoEntry con tolerancia 0.001).
+   */
+  private async buildVatSettlementLines(params: {
+    organization_id: number;
+    store_id?: number;
+    generated: number;
+    deductible: number;
+    balance: number; // generated - deductible
+    reversed: boolean;
+  }): Promise<(AutoEntryLine | null)[]> {
+    const {
+      organization_id,
+      store_id,
+      generated,
+      deductible,
+      balance,
+      reversed,
+    } = params;
+    const lines: (AutoEntryLine | null)[] = [];
+
+    // IVA generado: normal DR 240802; reversed CR 240802.
+    if (generated > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          organization_id,
+          'vat.declaration.settled.iva_generated',
+          reversed
+            ? 'Reversa IVA Generado por Ventas (liquidación)'
+            : 'IVA Generado por Ventas (liquidación)',
+          reversed ? 0 : generated,
+          reversed ? generated : 0,
+          store_id,
+        ),
+      );
+    }
+
+    // IVA descontable: normal CR 240804; reversed DR 240804.
+    if (deductible > 0) {
+      lines.push(
+        await this.resolveAccountLine(
+          organization_id,
+          'vat.declaration.settled.iva_deductible',
+          reversed
+            ? 'Reversa IVA Descontable en Compras (liquidación)'
+            : 'IVA Descontable en Compras (liquidación)',
+          reversed ? deductible : 0,
+          reversed ? 0 : deductible,
+          store_id,
+        ),
+      );
+    }
+
+    // Neto a pagar (balance>0): normal CR 240810; reversed DR 240810.
+    // Neto a favor (balance<0): normal DR 135520; reversed CR 135520.
+    if (balance > 0.001) {
+      lines.push(
+        await this.resolveAccountLine(
+          organization_id,
+          'vat.declaration.settled.vat_payable',
+          reversed
+            ? 'Reversa IVA por Pagar - Liquidación'
+            : 'IVA por Pagar - Liquidación',
+          reversed ? balance : 0,
+          reversed ? 0 : balance,
+          store_id,
+        ),
+      );
+    } else if (balance < -0.001) {
+      const favor = -balance;
+      lines.push(
+        await this.resolveAccountLine(
+          organization_id,
+          'vat.declaration.settled.vat_favor',
+          reversed ? 'Reversa Saldo a Favor en IVA' : 'Saldo a Favor en IVA',
+          reversed ? 0 : favor,
+          reversed ? favor : 0,
+          store_id,
+        ),
+      );
+    }
+
+    return lines;
   }
 }

@@ -1264,6 +1264,16 @@ export const ErrorCodes = {
     devMessage:
       'This fiscal document type is not implemented for DIAN own software',
   },
+  // F4 — Gate "no responsable de IVA". El comercio NO es responsable de IVA
+  // ante la DIAN (fiscal_data: O-49 sin O-48, o régimen SIMPLIFICADO): no
+  // puede asignar IVA a un producto ni cobrarlo en una venta. `details`
+  // incluye `context: 'product' | 'sale'` y `cta: '/admin/fiscal/wizard'`.
+  FISCAL_VAT_NOT_RESPONSIBLE_001: {
+    code: 'FISCAL_VAT_NOT_RESPONSIBLE_001',
+    httpStatus: 412,
+    devMessage:
+      'Commerce is not VAT responsible (DIAN): cannot assign or charge IVA',
+  },
 
   // Payroll
   PAYROLL_FIND_001: {

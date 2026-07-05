@@ -98,6 +98,8 @@ const MAPPING_LABELS: Record<string, string> = {
   'support_document.accepted.vat_deductible': 'IVA Descontable',
   'support_document.accepted.withholding_payable': 'Retenciones por Pagar',
   'support_document.accepted.accounts_payable': 'Proveedor Documento Soporte',
+  'purchase.vat_recognized.iva_deductible': 'IVA Descontable de Compra (POP)',
+  'purchase.vat_recognized.accounts_payable': 'Proveedores (Complemento IVA Compra)',
   'inventory.adjusted.inventory': 'Inventario (Ajuste)',
   'inventory.adjusted.shrinkage': 'Faltantes de Inventario',
   'credit_sale.created.accounts_receivable':
@@ -323,6 +325,7 @@ const GROUP_DEFINITIONS: Array<{
       'refund.completed.',
       'purchase_order.received.',
       'support_document.accepted.',
+      'purchase.vat_recognized.',
       'purchase_order.payment.',
       'inventory.adjusted.',
     ],
