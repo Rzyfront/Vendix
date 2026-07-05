@@ -732,6 +732,17 @@ export class PurchaseOrdersService {
           }
         }
 
+        // Insumo por product_id (flujo POP: configure de producto EXISTENTE). El
+        // bloque de creación anterior solo corre para líneas SIN product_id; el
+        // POP siempre envía product_id, por lo que la config UoM + factor de un
+        // insumo existente se persiste aquí. purchase_order_items NO almacena el
+        // factor y el caso cross-dimension (count→mass/volume) no es re-derivable
+        // en receive, así que el producto es el único portador del factor hasta
+        // la recepción (resolveUoMConversion exige is_ingredient=true + factor).
+        if (orderType === 'ingredient' && item.product_id && finalProductId) {
+          await this.persistIngredientConfigToProduct(finalProductId, item, tx);
+        }
+
         processedItems.push({
           ...item,
           product_id: finalProductId,
@@ -1201,6 +1212,99 @@ export class PurchaseOrdersService {
    * are written; a field is never overwritten with null/empty. New products
    * already inherit the full config at create (F1), so this is a no-op for them.
    */
+  /**
+   * Persiste la config de insumo (is_ingredient + UoM FKs + `purchase_to_stock_factor`)
+   * al producto EXISTENTE referenciado por una línea de orden tipo `ingredient`
+   * (flujo POP configure). purchase_order_items NO tiene columna de factor y el
+   * caso cross-dimension (count→mass/volume) no es re-derivable del catálogo en
+   * receive, por lo que el producto es el único portador del factor hasta la
+   * recepción; resolveUoMConversion exige is_ingredient=true + factor para
+   * multiplicar stock = qty × factor. Rellena cuando está vacío o difiere; nunca
+   * sobreescribe con vacío. Gatea por industria (solo restaurant soporta insumos).
+   */
+  private async persistIngredientConfigToProduct(
+    productId: number,
+    item: {
+      purchase_uom_id?: number | null;
+      stock_uom_id?: number | null;
+      purchase_to_stock_factor?: number | null;
+    },
+    tx: any,
+  ): Promise<void> {
+    if (item.purchase_uom_id == null && item.stock_uom_id == null) return;
+
+    const product = await tx.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        store_id: true,
+        is_ingredient: true,
+        purchase_uom_id: true,
+        stock_uom_id: true,
+        purchase_to_stock_factor: true,
+      },
+    });
+    if (!product) return;
+
+    const store = await tx.stores.findUnique({
+      where: { id: product.store_id },
+      select: { industries: true },
+    });
+    if (!storeIndustriesSupportIngredients(store?.industries)) return;
+
+    // Deriva el factor: manual cross-dimension (count→mass/volume) o catálogo
+    // same-dimension. Cross-dimension NO es derivable del factor_to_base.
+    let factor: number | undefined;
+    if (item.purchase_uom_id != null && item.stock_uom_id != null) {
+      const uoms = await tx.units_of_measure.findMany({
+        where: { id: { in: [item.stock_uom_id, item.purchase_uom_id] } },
+      });
+      const stockUom = uoms.find((u) => u.id === item.stock_uom_id);
+      const purchaseUom = uoms.find((u) => u.id === item.purchase_uom_id);
+      if (stockUom && purchaseUom) {
+        const manual = item.purchase_to_stock_factor;
+        const isCrossDimensionPackaging =
+          purchaseUom.dimension === 'count' &&
+          (stockUom.dimension === 'mass' || stockUom.dimension === 'volume');
+        if (
+          manual != null &&
+          Number.isInteger(manual) &&
+          manual >= 1 &&
+          isCrossDimensionPackaging
+        ) {
+          factor = manual;
+        } else if (stockUom.dimension === purchaseUom.dimension) {
+          const derived = Math.round(
+            Number(purchaseUom.factor_to_base) /
+              Number(stockUom.factor_to_base),
+          );
+          if (Number.isFinite(derived) && derived >= 1) factor = derived;
+        }
+      }
+    }
+
+    const data: Record<string, any> = {};
+    if (!product.is_ingredient) data.is_ingredient = true;
+    if (
+      item.purchase_uom_id != null &&
+      product.purchase_uom_id !== item.purchase_uom_id
+    ) {
+      data.purchase_uom_id = item.purchase_uom_id;
+    }
+    if (
+      item.stock_uom_id != null &&
+      product.stock_uom_id !== item.stock_uom_id
+    ) {
+      data.stock_uom_id = item.stock_uom_id;
+    }
+    if (factor != null && product.purchase_to_stock_factor !== factor) {
+      data.purchase_to_stock_factor = factor;
+    }
+    if (Object.keys(data).length > 0) {
+      await tx.products.update({ where: { id: productId }, data });
+    }
+  }
+
   private async syncIngredientConfigOnReceipt(
     productId: number,
     orderItem:
