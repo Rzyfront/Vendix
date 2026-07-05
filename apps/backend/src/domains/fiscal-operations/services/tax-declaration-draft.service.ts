@@ -412,11 +412,20 @@ export class TaxDeclarationDraftService {
   /**
    * Marca una declaración como RECHAZADA (p.ej. la DIAN rechazó la presentación
    * ya realizada). Sólo aplica desde 'submitted' (ver
-   * DECLARATION_STATUS_TRANSITIONS). Una declaración que llega a 'rejected'
-   * necesariamente pasó por 'approved' → 'submitted', así que estuvo liquidada:
-   * F5 (paso 18) dispara la reversa contable del asiento de liquidación (el
-   * listener sólo reversa si la liquidación original existe). El fallo contable
-   * NUNCA revierte el rechazo.
+   * DECLARATION_STATUS_TRANSITIONS).
+   *
+   * El rechazo es TRANSITORIO, no terminal: un rechazo de la DIAN NO extingue la
+   * obligación de IVA del período — la declaración se corrige y se re-presenta
+   * (`rejected → ready/submitted → approved` es un ciclo alcanzable). Por eso el
+   * rechazo YA NO reversa el asiento de liquidación de IVA. Reversar aquí y luego
+   * re-aprobar dejaba la liquidación en neto 0 (la reversa `R` cancelaba la
+   * liquidación original `L`) subvalorando el IVA por pagar en el mayor
+   * (240802/240804/240810), porque `onVatSettlement` deduplica por
+   * `declaration_id` y NO re-postea al re-aprobar viniendo de `ready`. SÓLO el
+   * `void` (estado TERMINAL 'voided', sin ruta de regreso a 'approved') reversa
+   * la liquidación — ver `voidDraft`.
+   *
+   * El fallo de auditoría NUNCA revierte el rechazo.
    */
   async markRejected(
     contexts: FiscalOperationsContext[],
@@ -444,14 +453,8 @@ export class TaxDeclarationDraftService {
       metadata: { reason },
     });
 
-    // F5 (paso 18): la declaración rechazada estuvo liquidada → reversar el
-    // asiento de liquidación (espejo). Inocuo si nunca se llegó a liquidar.
-    if (rejected.declaration_type === 'vat') {
-      this.eventEmitter.emit(
-        'vat.declaration.reversed',
-        this.buildVatSettlementEventPayload(rejected),
-      );
-    }
+    // El rechazo es transitorio (se corrige y re-presenta): NO reversa la
+    // liquidación de IVA. Sólo el `void` terminal la reversa (ver voidDraft).
     return rejected;
   }
 

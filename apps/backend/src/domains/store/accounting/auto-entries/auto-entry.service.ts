@@ -675,11 +675,14 @@ export class AutoEntryService {
       cash_register_movement: 'adjustment',
       'expense.refunded': 'auto_expense',
       'expense.cancelled': 'auto_expense',
-      // F5 — Liquidación de IVA y su reversa. Reutilizan el tipo 'adjustment'
-      // del enum accounting_entry_type_enum (no es venta/compra/pago, es un
-      // ajuste de cierre de las cuentas de IVA generado/descontable).
+      // F5 — Liquidación de IVA, su reversa y su corrección. Reutilizan el tipo
+      // 'adjustment' del enum accounting_entry_type_enum (no es venta/compra/pago,
+      // es un ajuste de cierre de las cuentas de IVA generado/descontable). La
+      // corrección (2b) reconcilia una re-aprobación tras recálculo posteando el
+      // neto reversa-viejo + aplica-nuevo como asiento append-only aparte.
       vat_declaration: 'adjustment',
       vat_declaration_reversal: 'adjustment',
+      vat_declaration_correction: 'adjustment',
     };
     const entry_type = entry_type_map[source_type] || 'manual';
 
@@ -4315,6 +4318,26 @@ export class AutoEntryService {
    * Idempotente por (organization_id, source_type='vat_declaration',
    * source_id=declaration_id, accounting_entity_id): aprobar dos veces devuelve
    * el mismo entry (la guarda vive en createAutoEntry).
+   *
+   * RECONCILIACIÓN POR RE-APROBACIÓN (2b): si una declaración rechazada se
+   * RECALCULA con montos nuevos (`recalculateDraft` → `ready`) y luego se
+   * re-aprueba, la deduplicación por `declaration_id` conservaría el asiento con
+   * los montos VIEJOS. Para evitar el desfase, al re-aprobar reconstruimos el
+   * generado/descontable VIEJOS leyendo las líneas del asiento original
+   * (determinista: DR 240802 = generado, CR 240804 = descontable) y, si difieren
+   * de los actuales, posteamos un asiento de CORRECCIÓN append-only
+   * (source_type='vat_declaration_correction') cuyo neto = reversa-viejo +
+   * aplica-nuevo. No mutamos el asiento original (los asientos son inmutables);
+   * el ledger converge al monto nuevo vía original + corrección.
+   *
+   * LÍMITE MULTI-CICLO (documentado): la corrección es idempotente por
+   * (org, 'vat_declaration_correction', declaration_id, entidad) → una sola por
+   * declaración. Un SEGUNDO recálculo (rechazar-recalcular-re-aprobar otra vez
+   * con un tercer monto) deduplicaría la corrección y NO volvería a ajustar. Un
+   * motor de deltas versionado por ciclo queda fuera de alcance (ver Knowledge
+   * Gaps del plan). El caso de un ciclo — el frecuente en la práctica — sí
+   * reconcilia. Al no reversar en el rechazo (transitorio), el neto nunca cae a
+   * 0: queda en `L` (original) o `L'` (original + corrección de un ciclo).
    */
   async onVatSettlement(data: {
     declaration_id: number;
@@ -4340,6 +4363,117 @@ export class AutoEntryService {
     }
 
     const balance = generated - deductible; // >0 a pagar, <0 a favor
+
+    // 2b — Reconciliación por re-aprobación tras recálculo. Resolvemos la
+    // entidad contable (misma clave de idempotencia que usa createAutoEntry) y
+    // buscamos una liquidación previa de ESTA declaración. Si existe y sus
+    // montos difieren de los actuales, la declaración se recalculó entre el
+    // rechazo y la re-aprobación → posteamos una corrección append-only en vez
+    // de dejar el ledger con los montos viejos.
+    const accounting_entity = data.accounting_entity_id
+      ? await this.prisma.withoutScope().accounting_entities.findFirst({
+          where: {
+            id: data.accounting_entity_id,
+            organization_id: data.organization_id,
+            is_active: true,
+          },
+          select: { id: true },
+        })
+      : await this.fiscal_scope_service.resolveAccountingEntityForFiscal({
+          organization_id: data.organization_id,
+          store_id: data.store_id,
+        });
+
+    if (accounting_entity) {
+      const previous = await this.prisma.accounting_entries.findFirst({
+        where: {
+          organization_id: data.organization_id,
+          source_type: 'vat_declaration',
+          source_id: data.declaration_id,
+          accounting_entity_id: accounting_entity.id,
+        },
+        select: {
+          id: true,
+          accounting_entry_lines: {
+            select: {
+              debit_amount: true,
+              credit_amount: true,
+              account: { select: { code: true } },
+            },
+          },
+        },
+      });
+
+      if (previous) {
+        // Reconstruir los montos VIEJOS desde las líneas del asiento original.
+        // La liquidación normal postea DR 240802 (generado) y CR 240804
+        // (descontable); resolvemos ambos códigos vía la mapping-key y sumamos
+        // el lado correspondiente de las líneas que caen en esas cuentas.
+        const gen_mapping = await this.account_mapping_service.getMapping(
+          data.organization_id,
+          'vat.declaration.settled.iva_generated',
+          data.store_id,
+        );
+        const ded_mapping = await this.account_mapping_service.getMapping(
+          data.organization_id,
+          'vat.declaration.settled.iva_deductible',
+          data.store_id,
+        );
+        const gen_code = gen_mapping?.account_code;
+        const ded_code = ded_mapping?.account_code;
+
+        const old_generated = previous.accounting_entry_lines
+          .filter((l) => gen_code && l.account?.code === gen_code)
+          .reduce((sum, l) => sum + Number(l.debit_amount), 0);
+        const old_deductible = previous.accounting_entry_lines
+          .filter((l) => ded_code && l.account?.code === ded_code)
+          .reduce((sum, l) => sum + Number(l.credit_amount), 0);
+
+        const changed =
+          Math.abs(old_generated - generated) > 0.001 ||
+          Math.abs(old_deductible - deductible) > 0.001;
+
+        if (changed) {
+          // Corrección append-only: neto = (-viejo) + (nuevo). Cada mitad cuadra
+          // por separado (invariante de buildVatSettlementLines), así que su
+          // concatenación cuadra y createAutoEntry la acepta.
+          const reverse_old = await this.buildVatSettlementLines({
+            organization_id: data.organization_id,
+            store_id: data.store_id,
+            generated: old_generated,
+            deductible: old_deductible,
+            balance: old_generated - old_deductible,
+            reversed: true,
+          });
+          const apply_new = await this.buildVatSettlementLines({
+            organization_id: data.organization_id,
+            store_id: data.store_id,
+            generated,
+            deductible,
+            balance,
+            reversed: false,
+          });
+
+          return this.createAutoEntry({
+            source_type: 'vat_declaration_correction',
+            source_id: data.declaration_id,
+            organization_id: data.organization_id,
+            store_id: data.store_id,
+            accounting_entity_id: accounting_entity.id,
+            entry_date: data.period_end,
+            description: `Corrección liquidación de IVA — declaración #${data.declaration_id}`,
+            lines: [...reverse_old, ...apply_new],
+            user_id: data.user_id,
+          });
+        }
+        // Montos iguales (re-aprobación sin recálculo): caemos al camino normal,
+        // que deduplica por 'vat_declaration' y devuelve el asiento existente
+        // completo — preservando el contrato de retorno previo a 2b.
+      }
+    }
+
+    // Primera liquidación (o re-aprobación con montos idénticos): postear la
+    // liquidación normal. createAutoEntry deduplica si ya existe.
     const lines = await this.buildVatSettlementLines({
       organization_id: data.organization_id,
       store_id: data.store_id,
