@@ -1026,6 +1026,26 @@ export class AuthService {
       },
     });
     if (existingUser) {
+      // Distinguish "account exists and can be claimed via password reset"
+      // (customer pre-created in POS / backoffice, pending_verification)
+      // from a generic 409. The frontend uses the code to offer the
+      // "¿ya tienes cuenta? Recupera tu contraseña" flow.
+      const isCustomer = await this.prismaService.user_roles.findFirst({
+        where: {
+          user_id: existingUser.id,
+          roles: { name: 'customer' },
+        },
+      });
+      if (isCustomer) {
+        const alreadyLinked = await this.prismaService.store_users.findFirst({
+          where: { user_id: existingUser.id, store_id: store.id },
+        });
+        if (!alreadyLinked) {
+          throw new VendixHttpException(
+            ErrorCodes.AUTH_CUSTOMER_CLAIMABLE_001,
+          );
+        }
+      }
       throw new ConflictException(
         'El usuario con este email ya existe en esta organización/tienda',
       );
@@ -2709,6 +2729,196 @@ export class AuthService {
     );
 
     return { message: 'Contraseña restablecida exitosamente' };
+  }
+
+  /**
+   * Forgot-password flow for ecommerce customers.
+   *
+   * Differs from `forgotPassword` in two key ways:
+   *   1. No `organization_slug` required — the ecommerce customer doesn't
+   *      know that internal identifier. The store is resolved from the
+   *      JWT context / tenant header that the public ecommerce request carries.
+   *   2. Restricts to customer-role users only — owners/staff must keep
+   *      using the staff flow.
+   *
+   * Returns the same generic message whether or not the email exists, to
+   * avoid email enumeration.
+   */
+  async forgotCustomerPassword(
+    email: string,
+    store_id: number,
+  ): Promise<{ message: string }> {
+    const generic = {
+      message:
+        'Si el email está registrado como cliente, recibirás instrucciones para restablecer tu contraseña',
+    };
+
+    if (!email || !store_id) return generic;
+
+    const store = await this.prismaService.stores.findUnique({
+      where: { id: store_id },
+      select: { organization_id: true },
+    });
+    if (!store) return generic;
+
+    const user = await this.prismaService.users.findFirst({
+      where: {
+        email,
+        organization_id: store.organization_id,
+      },
+    });
+    if (!user) return generic;
+
+    // Only customer-role users can recover via this flow.
+    const isCustomer = await this.prismaService.user_roles.findFirst({
+      where: {
+        user_id: user.id,
+        roles: { name: 'customer' },
+      },
+    });
+    if (!isCustomer) return generic;
+
+    // Invalidate previous tokens.
+    await this.prismaService.password_reset_tokens.updateMany({
+      where: { user_id: user.id },
+      data: { used: true },
+    });
+
+    const token = this.generateRandomToken();
+    const expiresAt = new Date();
+    expiresAt.setHours(expiresAt.getHours() + 1);
+
+    await this.prismaService.password_reset_tokens.create({
+      data: {
+        user_id: user.id,
+        token,
+        expires_at: expiresAt,
+      },
+    });
+
+    if (user.email) {
+      await this.emailService.sendPasswordResetEmail(
+        user.email,
+        token,
+        user.first_name,
+      );
+    }
+
+    await this.auditService.logAuth(
+      user.id,
+      AuditAction.PASSWORD_RESET,
+      {
+        method: 'forgot_customer_password_request',
+        success: true,
+        email_sent: true,
+      },
+    );
+
+    return generic;
+  }
+
+  /**
+   * Reset-password flow for ecommerce customers.
+   *
+   * Differs from `resetPassword` in that it also activates the account
+   * when the user was left in `pending_verification` (the typical state
+   * for customers created in the POS / backoffice with a temp password).
+   * This is what closes the customer-consolidation loop: the customer
+   * claims their account by proving control of the email + setting a
+   * real password, and from then on they can log in to ecommerce.
+   */
+  async resetCustomerPassword(
+    token: string,
+    newPassword: string,
+  ): Promise<{ message: string; activated: boolean }> {
+    const resetToken =
+      await this.prismaService.password_reset_tokens.findUnique({
+        where: { token },
+        include: { users: true },
+      });
+
+    if (!resetToken || resetToken.used || new Date() > resetToken.expires_at) {
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
+    }
+
+    if (!resetToken.users) {
+      throw new VendixHttpException(ErrorCodes.AUTH_FIND_001);
+    }
+
+    // Confirm this token was issued via the customer flow — defensive
+    // guard so an owner-token can't be reused through this entrypoint.
+    const isCustomer = await this.prismaService.user_roles.findFirst({
+      where: {
+        user_id: resetToken.user_id,
+        roles: { name: 'customer' },
+      },
+    });
+    if (!isCustomer) {
+      throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
+    }
+
+    if (!this.validatePasswordStrength(newPassword)) {
+      throw new BadRequestException(
+        'La contraseña debe tener al menos 8 caracteres, incluyendo mayúsculas, minúsculas y números',
+      );
+    }
+
+    const isSamePassword = await bcrypt.compare(
+      newPassword,
+      resetToken.users.password,
+    );
+    if (isSamePassword) {
+      throw new BadRequestException(
+        'La nueva contraseña no puede ser igual a la contraseña actual',
+      );
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+    // Activate the account if it was left in pending_verification. The
+    // email is considered verified because the customer proved control
+    // by receiving the reset token in their inbox.
+    const wasPending = resetToken.users.state !== 'active';
+    const wasUnverified = !resetToken.users.email_verified;
+
+    await this.prismaService.$transaction([
+      this.prismaService.password_reset_tokens.update({
+        where: { id: resetToken.id },
+        data: { used: true },
+      }),
+      this.prismaService.users.update({
+        where: { id: resetToken.user_id },
+        data: {
+          password: hashedPassword,
+          failed_login_attempts: 0,
+          locked_until: null,
+          ...(wasPending || wasUnverified
+            ? { state: 'active', email_verified: true }
+            : {}),
+        },
+      }),
+      this.prismaService.refresh_tokens.deleteMany({
+        where: { user_id: resetToken.user_id },
+      }),
+    ]);
+
+    await this.auditService.logAuth(
+      resetToken.user_id,
+      AuditAction.PASSWORD_RESET,
+      {
+        method: 'customer_password_reset_token',
+        success: true,
+        account_activated: wasPending || wasUnverified,
+      },
+    );
+
+    return {
+      message:
+        wasPending || wasUnverified
+          ? 'Cuenta activada y contraseña restablecida exitosamente'
+          : 'Contraseña restablecida exitosamente',
+      activated: wasPending || wasUnverified,
+    };
   }
 
   async changePassword(

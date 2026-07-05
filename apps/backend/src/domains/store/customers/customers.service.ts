@@ -694,6 +694,46 @@ export class CustomersService {
     }
   }
 
+  /**
+   * Claim a pre-existing customer account for a store.
+   *
+   * Used when a customer was created in the POS / backoffice ("customers"
+   * module) — state stays at pending_verification with a temp password
+   * they don't know — and later tries to sign up on the ecommerce.
+   * Instead of returning a generic 409, the register endpoint detects the
+   * existing user, returns CUSTOMER_ALREADY_EXISTS_CLAIMABLE, and the
+   * password-reset flow calls this method to:
+   *   1. Link the user to the new store (linkCustomerToStore, idempotent)
+   *   2. Activate the user (state active + email_verified true)
+   *
+   * Safe to call repeatedly — both sub-operations are idempotent.
+   */
+  async claimCustomerAccount(
+    userId: number,
+    storeId: number,
+  ): Promise<{ activated: boolean }> {
+    await this.linkCustomerToStore(userId, storeId);
+
+    const user = await this.prisma.users.findUnique({
+      where: { id: userId },
+      select: { state: true, email_verified: true },
+    });
+
+    let activated = false;
+    if (user && (user.state !== 'active' || !user.email_verified)) {
+      await this.prisma.users.update({
+        where: { id: userId },
+        data: {
+          state: 'active',
+          email_verified: true,
+        },
+      });
+      activated = true;
+    }
+
+    return { activated };
+  }
+
   async getStats(storeId: number) {
     try {
       // Get current month start date
