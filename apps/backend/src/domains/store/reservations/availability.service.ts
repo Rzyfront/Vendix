@@ -581,7 +581,7 @@ export class AvailabilityService {
       const dateStr = this.formatDate(currentDate);
       const dayOfWeek = currentDate.getUTCDay();
 
-      if (dayOfWeek === 0) continue;
+      if (dayOfWeek === 0 || dayOfWeek === 6) continue;
 
       const timeSlots = this.generateTimeSlots(
         '08:00',
