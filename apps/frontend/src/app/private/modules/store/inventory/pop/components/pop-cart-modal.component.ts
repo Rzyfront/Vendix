@@ -170,28 +170,31 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
                     ></app-quantity-control>
                     <span class="item-total">{{ formatCurrency(item.total) }}</span>
                   </div>
-                  <!-- IVA per-line: rate (%) + include/added override -->
-                  <div class="item-tax">
-                    <label class="tax-label">IVA</label>
-                    <div class="tax-rate-input">
-                      <input
-                        type="number"
-                        [value]="item.tax_rate"
-                        (change)="onTaxRateChange(item.id, $event)"
-                        min="0"
-                        step="1"
-                        />
-                      <span class="tax-pct">%</span>
+                  <!-- IVA per-line: rate (%) + include/added override.
+                       Solo visible cuando la orden marca IVA (maestro). -->
+                  @if (hasVat()) {
+                    <div class="item-tax">
+                      <label class="tax-label">IVA</label>
+                      <div class="tax-rate-input">
+                        <input
+                          type="number"
+                          [value]="item.tax_rate"
+                          (change)="onTaxRateChange(item.id, $event)"
+                          min="0"
+                          step="1"
+                          />
+                        <span class="tax-pct">%</span>
+                      </div>
+                      <div class="tax-include">
+                        <span>{{ itemEffectiveInclude(item) ? 'Incluido' : 'Agregado' }}</span>
+                        <app-toggle
+                          [checked]="itemEffectiveInclude(item)"
+                          (changed)="onItemIncludeToggle(item, $event)"
+                          ariaLabel="Precio con IVA incluido para esta línea"
+                        ></app-toggle>
+                      </div>
                     </div>
-                    <div class="tax-include">
-                      <span>{{ itemEffectiveInclude(item) ? 'Incluido' : 'Agregado' }}</span>
-                      <app-toggle
-                        [checked]="itemEffectiveInclude(item)"
-                        (changed)="onItemIncludeToggle(item, $event)"
-                        ariaLabel="Precio con IVA incluido para esta línea"
-                      ></app-toggle>
-                    </div>
-                  </div>
+                  }
                   <!-- Lot Config Row (POP-specific) -->
                   @if (!item.lot_info) {
                     <div class="item-lot">
@@ -216,23 +219,25 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         <!-- Summary Section -->
         @if (cartState()?.items?.length) {
           <div class="summary-section">
-            <!-- IVA header mode toggle (dominant invoice mode) -->
+            <!-- IVA master toggle — "¿Esta compra tiene IVA?" -->
             <div class="summary-row tax-mode-row">
-              <span>Esta factura incluye IVA</span>
+              <span>¿Esta compra tiene IVA?</span>
               <app-toggle
-                [checked]="headerIncludeTax()"
-                (changed)="onHeaderIncludeToggle($event)"
-                ariaLabel="Esta factura incluye IVA"
+                [checked]="hasVat()"
+                (changed)="onHasVatToggle($event)"
+                ariaLabel="¿Esta compra tiene IVA?"
               ></app-toggle>
             </div>
             <div class="summary-row">
-              <span>Subtotal (neto)</span>
+              <span>{{ hasVat() ? 'Subtotal (neto)' : 'Subtotal' }}</span>
               <span>{{ formatCurrency(cartState()?.summary?.subtotal || 0) }}</span>
             </div>
-            <div class="summary-row">
-              <span>IVA</span>
-              <span>{{ formatCurrency(cartState()?.summary?.tax_amount || 0) }}</span>
-            </div>
+            @if (hasVat()) {
+              <div class="summary-row">
+                <span>IVA</span>
+                <span>{{ formatCurrency(cartState()?.summary?.tax_amount || 0) }}</span>
+              </div>
+            }
             <div class="summary-row total">
               <span>Total Estimado</span>
               <span class="total-amount">{{
@@ -932,6 +937,16 @@ export class PopCartModalComponent {
   // ============================================================
   // IVA cycle (F1): header mode + per-line tax capture (mobile)
   // ============================================================
+
+  /** Maestro "¿Esta compra tiene IVA?": gobierna la visibilidad y el cálculo. */
+  hasVat(): boolean {
+    return this.cartState()?.has_vat ?? false;
+  }
+
+  /** Encender/apagar el IVA de toda la orden (recomputa todas las líneas). */
+  onHasVatToggle(value: boolean): void {
+    this.cartService.setHasVat(value);
+  }
 
   /** Header dominant mode: whether captured prices already include tax. */
   headerIncludeTax(): boolean {

@@ -68,20 +68,20 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           </div>
         </div>
 
-        <!-- IVA header mode toggle (dominant invoice mode) -->
+        <!-- IVA master toggle — "¿Esta compra tiene IVA?" -->
         <div
           class="px-5 py-2.5 bg-primary/5 border-b border-border/50 flex items-center justify-between gap-3"
         >
           <div class="flex items-center gap-2 min-w-0">
             <app-icon name="receipt" [size]="14" class="text-primary"></app-icon>
             <span class="text-xs font-medium text-text-primary truncate">
-              Esta factura incluye IVA
+              ¿Esta compra tiene IVA?
             </span>
           </div>
           <app-toggle
-            [checked]="headerIncludeTax()"
-            (changed)="onHeaderIncludeToggle($event)"
-            ariaLabel="Esta factura incluye IVA"
+            [checked]="hasVat()"
+            (changed)="onHasVatToggle($event)"
+            ariaLabel="¿Esta compra tiene IVA?"
           ></app-toggle>
         </div>
 
@@ -89,17 +89,19 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         <div class="px-5 py-4 bg-muted/20">
           <div class="space-y-1.5 mb-4">
             <div class="flex justify-between text-xs text-text-secondary">
-              <span>Subtotal (neto)</span>
+              <span>{{ hasVat() ? 'Subtotal (neto)' : 'Subtotal' }}</span>
               <span class="font-medium">{{
                 formatCurrency(summary()?.subtotal || 0)
               }}</span>
             </div>
-            <div class="flex justify-between text-xs text-text-secondary">
-              <span>IVA</span>
-              <span class="font-medium">{{
-                formatCurrency(summary()?.tax_amount || 0)
-              }}</span>
-            </div>
+            @if (hasVat()) {
+              <div class="flex justify-between text-xs text-text-secondary">
+                <span>IVA</span>
+                <span class="font-medium">{{
+                  formatCurrency(summary()?.tax_amount || 0)
+                }}</span>
+              </div>
+            }
             <div
               class="pt-2 border-t border-border/50 flex justify-between items-center"
             >
@@ -380,47 +382,50 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                     ></app-quantity-control>
                   }
                 </div>
-                <!-- IVA per-line: rate (%) + type + include/added override -->
-                <div
-                  class="flex flex-wrap items-center gap-2 pt-2 border-t border-border/50 text-[10px]"
-                >
-                  <span
-                    class="uppercase tracking-wider font-bold text-text-secondary/60"
+                <!-- IVA per-line: rate (%) + type + include/added override.
+                     Solo visible cuando la orden marca IVA (maestro). -->
+                @if (hasVat()) {
+                  <div
+                    class="flex flex-wrap items-center gap-2 pt-2 border-t border-border/50 text-[10px]"
                   >
-                    IVA
-                  </span>
-                  <div class="flex items-center gap-1">
-                    <app-input
-                      type="number"
-                      size="sm"
-                      [ngModel]="item.tax_rate"
-                      (ngModelChange)="updateTaxRate(item.id, $event)"
-                      customInputClass="text-right !h-7 !py-0 !w-14"
-                      customWrapperClass="!mt-0"
-                      min="0"
-                      step="1"
-                    ></app-input>
-                    <span class="text-text-secondary">%</span>
-                  </div>
-                  <select
-                    class="h-7 text-[10px] px-1.5 py-0 border border-border rounded bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
-                    [value]="item.tax_type || 'iva'"
-                    (change)="onTaxTypeChange(item.id, $event)"
-                  >
-                    <option value="iva">IVA</option>
-                    <option value="inc">INC</option>
-                  </select>
-                  <div class="ml-auto flex items-center gap-1.5">
-                    <span class="text-text-secondary">
-                      {{ itemEffectiveInclude(item) ? 'Incluido' : 'Agregado' }}
+                    <span
+                      class="uppercase tracking-wider font-bold text-text-secondary/60"
+                    >
+                      IVA
                     </span>
-                    <app-toggle
-                      [checked]="itemEffectiveInclude(item)"
-                      (changed)="onItemIncludeToggle(item, $event)"
-                      ariaLabel="Precio con IVA incluido para esta línea"
-                    ></app-toggle>
+                    <div class="flex items-center gap-1">
+                      <app-input
+                        type="number"
+                        size="sm"
+                        [ngModel]="item.tax_rate"
+                        (ngModelChange)="updateTaxRate(item.id, $event)"
+                        customInputClass="text-right !h-7 !py-0 !w-14"
+                        customWrapperClass="!mt-0"
+                        min="0"
+                        step="1"
+                      ></app-input>
+                      <span class="text-text-secondary">%</span>
+                    </div>
+                    <select
+                      class="h-7 text-[10px] px-1.5 py-0 border border-border rounded bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)]"
+                      [value]="item.tax_type || 'iva'"
+                      (change)="onTaxTypeChange(item.id, $event)"
+                    >
+                      <option value="iva">IVA</option>
+                      <option value="inc">INC</option>
+                    </select>
+                    <div class="ml-auto flex items-center gap-1.5">
+                      <span class="text-text-secondary">
+                        {{ itemEffectiveInclude(item) ? 'Incluido' : 'Agregado' }}
+                      </span>
+                      <app-toggle
+                        [checked]="itemEffectiveInclude(item)"
+                        (changed)="onItemIncludeToggle(item, $event)"
+                        ariaLabel="Precio con IVA incluido para esta línea"
+                      ></app-toggle>
+                    </div>
                   </div>
-                </div>
+                }
                 <!-- Config Trigger (Variants / Lot / Unit) -->
                 <div
                   class="flex items-center gap-1.5 text-[10px] mt-1 px-2 py-1 rounded-md border border-dashed border-border hover:border-primary hover:bg-primary/5 cursor-pointer transition-colors"
@@ -526,6 +531,16 @@ export class PopCartComponent {
   // ============================================================
   // IVA cycle (F1): header mode + per-line tax capture
   // ============================================================
+
+  /** Maestro "¿Esta compra tiene IVA?": gobierna la visibilidad y el cálculo. */
+  hasVat(): boolean {
+    return this.cartState()?.has_vat ?? false;
+  }
+
+  /** Encender/apagar el IVA de toda la orden (recomputa todas las líneas). */
+  onHasVatToggle(value: boolean): void {
+    this.cartService.setHasVat(value);
+  }
 
   /** Header dominant mode: whether captured prices already include tax. */
   headerIncludeTax(): boolean {

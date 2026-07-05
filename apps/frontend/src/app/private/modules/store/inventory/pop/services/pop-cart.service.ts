@@ -59,11 +59,15 @@ const INITIAL_STATE: PopCartState = {
   // net prices (the common Colombian B2B purchase-invoice layout). The header
   // toggle flips this to `true` for IVA-included prices.
   prices_include_tax: false,
+  // IVA cycle — maestro "¿Esta compra tiene IVA?". Apagado por defecto: cero
+  // IVA hasta que el usuario lo encienda (o el escáner detecte IVA).
+  has_vat: false,
   supplierId: null,
   locationId: null,
   orderDate: new Date(),
-  expectedDate: undefined,
-  shippingMethod: undefined,
+  // F3 defaults: fecha de entrega = hoy y método de envío = recolección (pickup).
+  expectedDate: new Date(),
+  shippingMethod: 'pickup',
   shippingCost: 0,
   paymentTerms: undefined,
   notes: '',
@@ -475,7 +479,11 @@ export class PopCartService {
         stock_uom_id: request.stock_uom_id ?? null,
         addedAt: new Date(),
       };
-      this.recalculateItemTotals(newItem, currentState.prices_include_tax);
+      this.recalculateItemTotals(
+        newItem,
+        currentState.prices_include_tax,
+        currentState.has_vat,
+      );
       const updatedItems = [newItem, ...currentState.items];
       return {
         ...currentState,
@@ -510,6 +518,7 @@ export class PopCartService {
       this.recalculateItemTotals(
         updatedItems[existingItemIndex],
         currentState.prices_include_tax,
+        currentState.has_vat,
       );
     } else {
       // Add new item
@@ -535,7 +544,11 @@ export class PopCartService {
         stock_uom_id: request.stock_uom_id ?? null,
         addedAt: new Date(),
       };
-      this.recalculateItemTotals(newItem, currentState.prices_include_tax);
+      this.recalculateItemTotals(
+        newItem,
+        currentState.prices_include_tax,
+        currentState.has_vat,
+      );
       updatedItems = [newItem, ...currentState.items];
     }
 
@@ -589,6 +602,7 @@ export class PopCartService {
     this.recalculateItemTotals(
       updatedItems[itemIndex],
       currentState.prices_include_tax,
+      currentState.has_vat,
     );
 
     return {
@@ -635,11 +649,14 @@ export class PopCartService {
   private recalculateItemTotals(
     item: PopCartItem,
     headerPricesIncludeTax: boolean,
+    hasVat: boolean,
   ): void {
     const quantity = Number(item.quantity) || 0;
     const unitCost = Number(item.unit_cost) || 0;
     const discountPct = Number(item.discount) || 0;
-    const taxRate = Number(item.tax_rate) || 0;
+    // Maestro "¿Esta compra tiene IVA?": apagado ⇒ la tasa se ignora (0), el
+    // neto = precio y el impuesto de la línea es 0 (sin importar el modo).
+    const taxRate = hasVat ? Number(item.tax_rate) || 0 : 0;
     const r = taxRate / 100;
 
     // Discount applies to the gross unit price first.
@@ -672,10 +689,26 @@ export class PopCartService {
     const current = this.currentState;
     const items = current.items.map((item) => {
       const clone = { ...item };
-      this.recalculateItemTotals(clone, value);
+      this.recalculateItemTotals(clone, value, current.has_vat);
       return clone;
     });
     this.updateState({ prices_include_tax: value, items });
+  }
+
+  /**
+   * IVA cycle — maestro "¿Esta compra tiene IVA?". Enciende/apaga el IVA de
+   * toda la orden y recomputa cada línea con el valor nuevo (apagado ⇒ IVA 0,
+   * neto = precio). El escáner de facturas lo enciende al detectar IVA.
+   */
+  setHasVat(value: boolean): void {
+    const current = this.currentState;
+    if (current.has_vat === value) return;
+    const items = current.items.map((item) => {
+      const clone = { ...item };
+      this.recalculateItemTotals(clone, current.prices_include_tax, value);
+      return clone;
+    });
+    this.updateState({ has_vat: value, items });
   }
 
   /**
@@ -720,7 +753,7 @@ export class PopCartService {
     const items = [...current.items];
     const updated = { ...items[index] };
     mutator(updated);
-    this.recalculateItemTotals(updated, current.prices_include_tax);
+    this.recalculateItemTotals(updated, current.prices_include_tax, current.has_vat);
     items[index] = updated;
     this.updateState({ items });
   }
@@ -780,6 +813,15 @@ export class PopCartService {
     const headerInclude: boolean =
       (order as any).prices_include_tax ?? INITIAL_STATE.prices_include_tax;
     const rawItems = order.purchase_order_items || order.items || [];
+    // Maestro IVA: la orden tiene IVA si viene marcada, o (compat con órdenes
+    // previas al maestro) si el header la incluía o alguna línea trae tasa /
+    // monto de impuesto > 0.
+    const hasVat: boolean =
+      (order as any).has_vat ??
+      (headerInclude ||
+        rawItems.some(
+          (it: any) => Number(it.tax_rate) > 0 || Number(it.tax_amount) > 0,
+        ));
     const items: PopCartItem[] = rawItems.map(item => {
       const product = item.products || item.product;
       const popProduct: PopProduct = {
@@ -836,7 +878,7 @@ export class PopCartService {
         addedAt: new Date()
       };
 
-      this.recalculateItemTotals(cartItem, headerInclude);
+      this.recalculateItemTotals(cartItem, headerInclude, hasVat);
       return cartItem;
     });
 
@@ -844,6 +886,7 @@ export class PopCartService {
       ...INITIAL_STATE,
       orderId: order.id,
       prices_include_tax: headerInclude,
+      has_vat: hasVat,
       items: items,
       supplierId: order.supplier_id,
       locationId: order.location_id,

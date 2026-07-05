@@ -461,6 +461,8 @@ export class PopComponent implements OnInit, OnDestroy {
                     ? Number(variant.cost_price)
                     : result.unit_cost,
                   lot_info: result.lot_info,
+                  purchase_uom_id: result.purchase_uom_id,
+                  stock_uom_id: result.stock_uom_id,
                 })
                 .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
             });
@@ -519,6 +521,8 @@ export class PopComponent implements OnInit, OnDestroy {
               ? Number(variant.cost_price)
               : result.unit_cost,
             lot_info: result.lot_info,
+            purchase_uom_id: result.purchase_uom_id,
+            stock_uom_id: result.stock_uom_id,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       });
@@ -548,6 +552,11 @@ export class PopComponent implements OnInit, OnDestroy {
           quantity: result.quantity,
           unit_cost: result.unit_cost,
           lot_info: result.lot_info,
+          // Propagar las FKs de UoM del insumo (antes se descartaban → la
+          // línea quedaba sin unidad de compra/stock y el backend no derivaba
+          // el factor al recibir).
+          purchase_uom_id: result.purchase_uom_id,
+          stock_uom_id: result.stock_uom_id,
         })
         .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
@@ -657,6 +666,18 @@ export class PopComponent implements OnInit, OnDestroy {
       if (!Number.isNaN(parsedDate.getTime())) {
         this.popCartService.setOrderDate(parsedDate);
       }
+    }
+
+    // IVA cycle (maestro): si el escáner detectó IVA en alguna línea, enciende
+    // "¿Esta compra tiene IVA?" ANTES del loop para que las líneas nuevas se
+    // agreguen con el maestro ya activo. El neto ya viene aplastado y el modo es
+    // adicional (prices_include_tax=false) ⇒ no hay doble resta. No se apaga si
+    // el usuario ya lo tenía encendido.
+    const scanHasVat = data.editedItems.some(
+      (it) => it.tax_rate != null && Number(it.tax_rate) > 0,
+    );
+    if (scanHasVat) {
+      this.popCartService.setHasVat(true);
     }
 
     let addedCount = 0;
@@ -1149,8 +1170,7 @@ export class PopComponent implements OnInit, OnDestroy {
   onConfigureFromModal(): void {
     this.showCartModal.set(false);
     if (this.header) {
-      this.header.showMobileSettings.set(true);
-      setTimeout(() => this.header.flashConfigWarning(), 50);
+      this.header.openConfigModal();
     }
   }
 
@@ -1217,7 +1237,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     if (!state.supplierId || !state.locationId || state.items.length === 0) {
       if ((!state.supplierId || !state.locationId) && this.header) {
-        this.header.flashConfigWarning();
+        this.header.openConfigModal();
       }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
@@ -1245,7 +1265,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     if (!state.supplierId || !state.locationId) {
       if (this.header) {
-        this.header.flashConfigWarning();
+        this.header.openConfigModal();
       }
       this.toastService.warning(
         'Por favor selecciona proveedor y bodega antes de guardar.',
@@ -1282,7 +1302,7 @@ export class PopComponent implements OnInit, OnDestroy {
         this.showCartModal.set(true);
       }
       if ((!state.supplierId || !state.locationId) && this.header) {
-        this.header.flashConfigWarning();
+        this.header.openConfigModal();
       }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',
@@ -1302,7 +1322,7 @@ export class PopComponent implements OnInit, OnDestroy {
         this.showCartModal.set(true);
       }
       if ((!state.supplierId || !state.locationId) && this.header) {
-        this.header.flashConfigWarning();
+        this.header.openConfigModal();
       }
       this.toastService.warning(
         'Por favor complete los campos requeridos: proveedor, bodega y al menos un producto.',

@@ -797,6 +797,15 @@ export class PopProductConfigModalComponent {
   readonly purchaseUomId = signal<number | null>(null);
   readonly stockUomId = signal<number | null>(null);
   /**
+   * Costo por unidad de compra y cantidad capturados por
+   * `<app-pop-uom-capture>`. En configure mode antes se descartaban → el
+   * costo del insumo tecleado se perdía al confirmar. Cuando están presentes,
+   * `onConfirm` los usa como fuente de verdad del `unit_cost`/`quantity` de la
+   * línea del carrito (fallback: costo del producto / 1).
+   */
+  readonly capturedUnitCost = signal<number | null>(null);
+  readonly capturedQuantity = signal<number | null>(null);
+  /**
    * Fase 3: is the product we are configuring a pure ingredient?
    * `is_ingredient && !is_sellable`. Used to switch the modal to the
    * unit-aware cost-capture mode.
@@ -946,6 +955,9 @@ export class PopProductConfigModalComponent {
    * this modal; the preview updates live.
    */
   private initializeIngredientUoMDefaults(): void {
+    // Limpiar el costo/cantidad capturados de un producto/sesión previa.
+    this.capturedUnitCost.set(null);
+    this.capturedQuantity.set(null);
     const p: any = this.product();
     if (!p) return;
     if (!this.isPureIngredient() || !this.storeSupportsIngredients()) {
@@ -1084,6 +1096,10 @@ export class PopProductConfigModalComponent {
   onUomCaptureChanged(result: PopUomCaptureResult): void {
     this.purchaseUomId.set(result.purchaseUomId);
     this.stockUomId.set(result.stockUomId);
+    // Capturar costo/cantidad en AMBOS modos: configure mode ya no descarta el
+    // costo del insumo (bug: se perdía). Create mode además espeja el form.
+    this.capturedUnitCost.set(result.unitCost);
+    this.capturedQuantity.set(result.quantity);
     if (this.createMode()) {
       // The sub-component is the source of truth for ingredient cost AND
       // batch quantity (bidirectional capture). Keep the identity form in
@@ -1241,10 +1257,10 @@ export class PopProductConfigModalComponent {
             this.confirmed.emit({
               mode: 'configure',
               variants: createdVariants,
-              quantity: 1,
-              unit_cost: Number(
-                this.product()?.cost || this.product()?.cost_price || 0,
-              ),
+              quantity: this.capturedQuantity() ?? 1,
+              unit_cost:
+                this.capturedUnitCost() ??
+                Number(this.product()?.cost || this.product()?.cost_price || 0),
               pricing_type: pricingType,
               lot_info: lotInfo,
               purchase_uom_id: this.purchaseUomId(),
@@ -1276,10 +1292,12 @@ export class PopProductConfigModalComponent {
         this.confirmed.emit({
           mode: 'configure',
           variant,
-          quantity: 1,
-          unit_cost: variant?.cost_price
-            ? Number(variant.cost_price)
-            : Number(this.product()?.cost || this.product()?.cost_price || 0),
+          quantity: this.capturedQuantity() ?? 1,
+          unit_cost:
+            this.capturedUnitCost() ??
+            (variant?.cost_price
+              ? Number(variant.cost_price)
+              : Number(this.product()?.cost || this.product()?.cost_price || 0)),
           pricing_type: pricingType,
           lot_info: lotInfo,
           purchase_uom_id: this.purchaseUomId(),
@@ -1289,10 +1307,10 @@ export class PopProductConfigModalComponent {
         this.confirmed.emit({
           mode: 'configure',
           variants: selectedVariants,
-          quantity: 1,
-          unit_cost: Number(
-            this.product()?.cost || this.product()?.cost_price || 0,
-          ),
+          quantity: this.capturedQuantity() ?? 1,
+          unit_cost:
+            this.capturedUnitCost() ??
+            Number(this.product()?.cost || this.product()?.cost_price || 0),
           pricing_type: pricingType,
           lot_info: lotInfo,
           purchase_uom_id: this.purchaseUomId(),
@@ -1302,10 +1320,10 @@ export class PopProductConfigModalComponent {
     } else {
       this.confirmed.emit({
         mode: 'configure',
-        quantity: 1,
-        unit_cost: Number(
-          this.product()?.cost || this.product()?.cost_price || 0,
-        ),
+        quantity: this.capturedQuantity() ?? 1,
+        unit_cost:
+          this.capturedUnitCost() ??
+          Number(this.product()?.cost || this.product()?.cost_price || 0),
         pricing_type: pricingType,
         lot_info: lotInfo,
         purchase_uom_id: this.purchaseUomId(),

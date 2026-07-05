@@ -247,6 +247,14 @@ export interface PopCartState {
    * this for mixed invoices.
    */
   prices_include_tax: boolean;
+  /**
+   * IVA cycle — maestro "¿Esta compra tiene IVA?". `false` (default) ⇒ cero
+   * IVA en toda la orden: cada línea ignora su `tax_rate`, el neto = precio y
+   * el resumen no muestra IVA. `true` ⇒ se aplica el IVA por línea (tasa 19%
+   * por defecto) con su modo efectivo (`prices_include_tax` por línea ??
+   * header). El escáner de facturas lo enciende al detectar IVA.
+   */
+  has_vat: boolean;
   supplierId: number | null;
   locationId: number | null;
   orderDate: Date;
