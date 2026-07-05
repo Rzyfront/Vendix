@@ -438,6 +438,121 @@ export interface BankExportResult {
   total_amount: number;
 }
 
+// ─── DIAN Electronic Payroll (DSPNE) & Bank Export ──────────
+// Frontend contracts mirroring the backend payroll-runs endpoints:
+//   POST runs/:id/send-dian
+//   GET  runs/:id/dian-status
+//   POST runs/:id/items/:itemId/send-adjustment
+//   GET  runs/bank-export/banks
+//   GET  runs/:id/validate-bank-data
+//   POST runs/:id/export-ach
+
+/** DIAN document lifecycle status returned by the provider. */
+export type DianStatusValue = 'pending' | 'accepted' | 'rejected' | 'error';
+
+/** Provider status payload (mirrors PayrollStatusResponse). */
+export interface DianStatusResponse {
+  tracking_id: string;
+  status: DianStatusValue;
+  cune?: string;
+  message?: string;
+  raw_response?: Record<string, unknown>;
+}
+
+/** Envelope returned by GET runs/:id/dian-status. */
+export interface DianStatusView {
+  payroll_run_id: number;
+  payroll_number: string;
+  current_status: string;
+  dian_status: DianStatusResponse;
+}
+
+/** Per-item send result inside the DIAN send summary. */
+export interface DianItemResult {
+  employee_document: string;
+  success: boolean;
+  cune?: string;
+  message?: string;
+}
+
+/** Envelope returned by POST runs/:id/send-dian. */
+export interface DianSendResult {
+  payroll_run: PayrollRun;
+  dian_summary: {
+    total_items: number;
+    sent: number;
+    failed: number;
+    all_success: boolean;
+    message?: string;
+    item_results: DianItemResult[];
+  };
+}
+
+/** Body for POST runs/:id/items/:itemId/send-adjustment (Nota de Ajuste 103). */
+export interface DianAdjustmentPayload {
+  predecessor_cune: string;
+  predecessor_document_number: string;
+  predecessor_generation_date: string;
+  /** '1' = ajuste, '2' = reemplazo. Backend defaults to '1'. */
+  adjustment_type?: '1' | '2';
+}
+
+/** Provider adjustment result (mirrors the DIAN provider sendAdjustment). */
+export interface DianAdjustmentProviderResult {
+  success: boolean;
+  tracking_id: string;
+  cune?: string;
+  xml?: string;
+  message?: string;
+}
+
+/** Envelope returned by the send-adjustment endpoint. */
+export interface DianAdjustmentResult {
+  payroll_run_id: number;
+  payroll_item_id: number;
+  adjustment_result: DianAdjustmentProviderResult;
+}
+
+/** Bank option from GET runs/bank-export/banks. */
+export interface BankOption {
+  code: string;
+  name: string;
+}
+
+/** A valid employee row eligible for the ACH batch. */
+export interface BankBatchEmployee {
+  employee_id: number;
+  employee_code?: string;
+  first_name: string;
+  last_name: string;
+  document_type?: string;
+  document_number?: string;
+  bank_name?: string | null;
+  bank_account_number?: string | null;
+  bank_account_type?: string | null;
+  net_pay: number;
+}
+
+/** An employee row rejected from the ACH batch with its reasons. */
+export interface BankInvalidEmployee {
+  employee_id: number;
+  name: string;
+  errors: string[];
+}
+
+/** Result of GET runs/:id/validate-bank-data. */
+export interface BankDataValidationResult {
+  valid: BankBatchEmployee[];
+  invalid: BankInvalidEmployee[];
+}
+
+/** Body for POST runs/:id/export-ach. */
+export interface ExportAchDto {
+  bank: string;
+  source_account?: string;
+  source_account_type?: string;
+}
+
 export interface PayrollUpdateAvailable {
   year: number;
   decree_ref: string | null;

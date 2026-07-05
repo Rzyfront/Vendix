@@ -8,6 +8,14 @@ import {
   EmployeeStats,
   PayrollStats,
   ExistingEmployeePayload,
+  DianSendResult,
+  DianStatusView,
+  DianAdjustmentPayload,
+  DianAdjustmentResult,
+  BankOption,
+  BankDataValidationResult,
+  BankExportResult,
+  ExportAchDto,
 } from '../../interfaces/payroll.interface';
 
 // ─── Load Employees ───────────────────────────────────────
@@ -258,6 +266,104 @@ export const setPayrollRunDateRange = createAction(
   props<{ dateFrom: string; dateTo: string }>(),
 );
 export const clearPayrollRunFilters = createAction('[Payroll] Clear Payroll Run Filters');
+
+// ─── DIAN: Send Electronic Payroll ────────────────────────
+export const sendToDian = createAction(
+  '[Payroll] Send To DIAN',
+  props<{ runId: number }>(),
+);
+export const sendToDianSuccess = createAction(
+  '[Payroll] Send To DIAN Success',
+  props<{ runId: number; result: DianSendResult }>(),
+);
+export const sendToDianFailure = createAction(
+  '[Payroll] Send To DIAN Failure',
+  props<{ runId: number; error: string }>(),
+);
+
+// ─── DIAN: Status Polling ─────────────────────────────────
+// `loadDianStatus` starts a polling loop that fetches the DIAN status until
+// a terminal state (accepted / rejected / error) is reached or the deadline
+// hits. `dianStatusResult` carries each non-terminal tick; `loadDianStatusSuccess`
+// carries the terminal snapshot; `stopDianStatusPolling` cancels an in-flight loop.
+export const loadDianStatus = createAction(
+  '[Payroll] Load DIAN Status',
+  props<{ runId: number; intervalMs?: number; timeoutMs?: number }>(),
+);
+export const dianStatusResult = createAction(
+  '[Payroll] DIAN Status Result',
+  props<{ runId: number; status: DianStatusView }>(),
+);
+export const loadDianStatusSuccess = createAction(
+  '[Payroll] Load DIAN Status Success',
+  props<{ runId: number; status: DianStatusView }>(),
+);
+export const loadDianStatusFailure = createAction(
+  '[Payroll] Load DIAN Status Failure',
+  props<{ runId: number; error: string }>(),
+);
+export const dianStatusPollingTimeout = createAction(
+  '[Payroll] DIAN Status Polling Timeout',
+  props<{ runId: number }>(),
+);
+export const stopDianStatusPolling = createAction(
+  '[Payroll] Stop DIAN Status Polling',
+  props<{ runId: number }>(),
+);
+
+// ─── DIAN: Adjustment Note (tipo 103, per-item) ───────────
+export const sendAdjustment = createAction(
+  '[Payroll] Send Adjustment',
+  props<{ runId: number; itemId: number; payload: DianAdjustmentPayload }>(),
+);
+export const sendAdjustmentSuccess = createAction(
+  '[Payroll] Send Adjustment Success',
+  props<{ runId: number; itemId: number; result: DianAdjustmentResult }>(),
+);
+export const sendAdjustmentFailure = createAction(
+  '[Payroll] Send Adjustment Failure',
+  props<{ runId: number; itemId: number; error: string }>(),
+);
+
+// ─── Bank Export: Available Banks ─────────────────────────
+export const loadAvailableBanks = createAction('[Payroll] Load Available Banks');
+export const loadAvailableBanksSuccess = createAction(
+  '[Payroll] Load Available Banks Success',
+  props<{ banks: BankOption[] }>(),
+);
+export const loadAvailableBanksFailure = createAction(
+  '[Payroll] Load Available Banks Failure',
+  props<{ error: string }>(),
+);
+
+// ─── Bank Export: Validate Employee Bank Data ─────────────
+export const validateBankData = createAction(
+  '[Payroll] Validate Bank Data',
+  props<{ runId: number }>(),
+);
+export const validateBankDataSuccess = createAction(
+  '[Payroll] Validate Bank Data Success',
+  props<{ result: BankDataValidationResult }>(),
+);
+export const validateBankDataFailure = createAction(
+  '[Payroll] Validate Bank Data Failure',
+  props<{ error: string }>(),
+);
+export const clearBankValidation = createAction('[Payroll] Clear Bank Validation');
+
+// ─── Bank Export: Generate ACH File ───────────────────────
+export const exportAch = createAction(
+  '[Payroll] Export ACH',
+  props<{ runId: number; payload: ExportAchDto }>(),
+);
+export const exportAchSuccess = createAction(
+  '[Payroll] Export ACH Success',
+  props<{ result: BankExportResult }>(),
+);
+export const exportAchFailure = createAction(
+  '[Payroll] Export ACH Failure',
+  props<{ error: string }>(),
+);
 
 // ─── Clear State ──────────────────────────────────────────
 export const clearPayrollState = createAction('[Payroll] Clear State');
