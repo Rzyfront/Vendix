@@ -316,6 +316,14 @@ export class AuthModalComponent {
   readonly claimableEmail = signal<string | null>(null);
   readonly recoveryPending = signal(false);
 
+  /**
+   * Tracks the last raw error string surfaced as a toast/errorMessage, so we
+   * don't re-fire the same error toast on every effect re-run (the effect
+   * re-evaluates whenever `isOpen` flips). Cleared back to null when the
+   * facade clears the error so the next fresh error still surfaces.
+   */
+  private readonly lastShownError = signal<string | null>(null);
+
   // Legal Documents state
   readonly pendingDocuments = signal<PendingDocument[]>([]);
   readonly acceptedDocuments = signal<Record<number, boolean>>({});
@@ -368,11 +376,8 @@ export class AuthModalComponent {
       }
     });
 
-    // Track the last error string we surfaced so we don't re-fire the toast
-  // on every signal tick (the effect re-runs whenever isOpen flips).
-  private readonly lastShownError = signal<string | null>(null);
-
-  // Listen for auth errors — effect sobre signal de facade
+    // Listen for auth errors — deduped via lastShownError to avoid
+    // re-firing the toast on every effect tick (isOpen flips re-run it).
     effect(() => {
       const error = this.authFacade.authError();
       const open = this.isOpen();
@@ -388,8 +393,8 @@ export class AuthModalComponent {
           this.toast.error(message, title, 4000);
         });
       } else if (!error) {
-        // Reset when the facade clears the error so the next fresh
-        // error gets surfaced instead of being treated as a duplicate.
+        // Reset tracker when facade clears the error so the next fresh
+        // error still surfaces instead of being treated as a duplicate.
         this.lastShownError.set(null);
       }
     });
