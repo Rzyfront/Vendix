@@ -379,8 +379,11 @@ export class AuthModalComponent {
       }
     });
 
-    // Listen for auth errors — deduped via lastShownError to avoid
-    // re-firing the toast on every effect tick (isOpen flips re-run it).
+    // Listen for auth errors — surface them only in the inline banner
+    // (errorMessage). Removed the toast.error() call because the global
+    // authError signal persists between sessions and the toast kept
+    // re-firing stale errors on every modal open. The inline banner is
+    // cleared when the user starts typing or switches tabs.
     effect(() => {
       const error = this.authFacade.authError();
       const open = this.isOpen();
@@ -393,11 +396,8 @@ export class AuthModalComponent {
           const { title, message } = this.mapErrorToUserFriendly(rawMessage);
           this.errorTitle.set(title);
           this.errorMessage.set(message);
-          this.toast.error(message, title, 4000);
         });
       } else if (!error) {
-        // Reset tracker when facade clears the error so the next fresh
-        // error still surfaces instead of being treated as a duplicate.
         this.lastShownError.set(null);
       }
     });
