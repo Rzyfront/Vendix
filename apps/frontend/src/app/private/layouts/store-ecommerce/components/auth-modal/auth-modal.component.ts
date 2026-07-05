@@ -368,19 +368,29 @@ export class AuthModalComponent {
       }
     });
 
-    // Listen for auth errors — effect sobre signal de facade
+    // Track the last error string we surfaced so we don't re-fire the toast
+  // on every signal tick (the effect re-runs whenever isOpen flips).
+  private readonly lastShownError = signal<string | null>(null);
+
+  // Listen for auth errors — effect sobre signal de facade
     effect(() => {
       const error = this.authFacade.authError();
       const open = this.isOpen();
       if (error && open) {
+        const rawMessage =
+          typeof error === 'string' ? error : extractApiErrorMessage(error);
+        if (this.lastShownError() === rawMessage) return;
+        this.lastShownError.set(rawMessage);
         untracked(() => {
-          const rawMessage =
-            typeof error === 'string' ? error : extractApiErrorMessage(error);
           const { title, message } = this.mapErrorToUserFriendly(rawMessage);
           this.errorTitle.set(title);
           this.errorMessage.set(message);
           this.toast.error(message, title, 4000);
         });
+      } else if (!error) {
+        // Reset when the facade clears the error so the next fresh
+        // error gets surfaced instead of being treated as a duplicate.
+        this.lastShownError.set(null);
       }
     });
 
