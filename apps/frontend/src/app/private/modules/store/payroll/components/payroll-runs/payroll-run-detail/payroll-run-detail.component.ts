@@ -4,11 +4,11 @@ import {
   output,
   inject,
   effect,
+  computed,
   DestroyRef,
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { DatePipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
 import { Subject, firstValueFrom } from 'rxjs';
@@ -27,11 +27,29 @@ import {
   approvePayrollRunFailure,
   sendPayrollRunFailure,
   payPayrollRunFailure,
+  sendToDian,
+  sendToDianSuccess,
+  sendToDianFailure,
+  loadDianStatus,
+  loadAvailableBanks,
+  validateBankData,
+  exportAch,
 } from '../../../state/actions/payroll.actions';
+import {
+  selectDianStatusByRun,
+  selectDianLoading,
+  selectAvailableBanks,
+  selectAvailableBanksLoading,
+  selectBankValidationResult,
+  selectBankValidationLoading,
+  selectBankExportResult,
+  selectBankExportLoading,
+} from '../../../state/selectors/payroll.selectors';
 import {
   PayrollRun,
   PayrollItem,
   PayrollNovelty,
+  DianStatusView,
 } from '../../../interfaces/payroll.interface';
 import { PayrollService } from '../../../services/payroll.service';
 import {
@@ -46,6 +64,8 @@ import {
   ModalComponent,
   ButtonComponent,
   IconComponent,
+  BadgeComponent,
+  SelectorComponent,
   StepsLineComponent,
   ResponsiveDataViewComponent,
 } from '../../../../../../../shared/components';
@@ -55,6 +75,8 @@ import type {
   ItemListCardConfig,
   StepsLineItem,
   ButtonVariant,
+  BadgeVariant,
+  SelectorOption,
 } from '../../../../../../../shared/components';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-detail.component';
@@ -63,10 +85,11 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
   selector: 'vendix-payroll-run-detail',
   standalone: true,
   imports: [
-    DatePipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
+    BadgeComponent,
+    SelectorComponent,
     StepsLineComponent,
     ResponsiveDataViewComponent,
     PayrollItemDetailComponent,
@@ -112,15 +135,15 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
           <div class="p-3 bg-[var(--color-background)] rounded-lg grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <span class="text-xs text-[var(--color-text-secondary)] block">Inicio del Periodo</span>
-              <span class="text-sm font-medium">{{ payrollRun()!.period_start | date:'dd/MM/yyyy' }}</span>
+              <span class="text-sm font-medium">{{ formatDate(payrollRun()!.period_start) }}</span>
             </div>
             <div>
               <span class="text-xs text-[var(--color-text-secondary)] block">Fin del Periodo</span>
-              <span class="text-sm font-medium">{{ payrollRun()!.period_end | date:'dd/MM/yyyy' }}</span>
+              <span class="text-sm font-medium">{{ formatDate(payrollRun()!.period_end) }}</span>
             </div>
             <div>
               <span class="text-xs text-[var(--color-text-secondary)] block">Fecha de Pago</span>
-              <span class="text-sm font-medium">{{ payrollRun()!.payment_date ? (payrollRun()!.payment_date | date:'dd/MM/yyyy') : 'Sin definir' }}</span>
+              <span class="text-sm font-medium">{{ payrollRun()!.payment_date ? formatDate(payrollRun()!.payment_date!) : 'Sin definir' }}</span>
             </div>
             <div>
               <span class="text-xs text-[var(--color-text-secondary)] block">Items</span>
@@ -147,6 +170,110 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
               <span class="text-lg font-bold text-green-800">{{ formatNumber(payrollRun()!.total_net_pay) }}</span>
             </div>
           </div>
+
+          <!-- 4b. NOMINA ELECTRONICA DIAN + EXPORT BANCARIO (visible desde aprobada) -->
+          @if (isDianEligible(payrollRun()!.status)) {
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+
+              <!-- DIAN electronic payroll (DSPNE) -->
+              <div class="p-3 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]">
+                <div class="flex items-center justify-between gap-2 mb-2">
+                  <div class="flex items-center gap-2">
+                    <app-icon name="landmark" [size]="16" class="text-[var(--color-primary)]"></app-icon>
+                    <span class="text-sm font-semibold text-[var(--color-text-primary)]">Nomina Electronica DIAN</span>
+                  </div>
+                  <app-badge [variant]="dianBadge().variant" size="sm">{{ dianBadge().label }}</app-badge>
+                </div>
+
+                @if (dianCune()) {
+                  <div class="flex items-center justify-between gap-2 text-xs py-0.5">
+                    <span class="text-[var(--color-text-secondary)]">CUNE</span>
+                    <span class="font-mono text-[10px] text-[var(--color-text-primary)] break-all text-right">{{ dianCune() }}</span>
+                  </div>
+                }
+
+                @if (dianStatusView()?.dian_status?.message; as msg) {
+                  <p class="text-[11px] text-[var(--color-text-secondary)] mt-1">{{ msg }}</p>
+                }
+
+                @if (!dianAccepted()) {
+                  <div class="mt-2">
+                    <app-button variant="primary" size="sm" (clicked)="onSendDian()" [loading]="dianLoading()">
+                      <app-icon slot="icon" name="send" [size]="14" class="mr-1"></app-icon>
+                      {{ dianStatusView() ? 'Reenviar a DIAN' : 'Enviar a DIAN' }}
+                    </app-button>
+                  </div>
+                }
+              </div>
+
+              <!-- Bank export (ACH) -->
+              <div class="p-3 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]">
+                <div class="flex items-center gap-2 mb-2">
+                  <app-icon name="banknote" [size]="16" class="text-[var(--color-primary)]"></app-icon>
+                  <span class="text-sm font-semibold text-[var(--color-text-primary)]">Export Bancario (ACH)</span>
+                </div>
+
+                <div class="space-y-2">
+                  <app-button variant="outline" size="sm" (clicked)="onValidateBankData()" [loading]="bankValidationLoading()">
+                    <app-icon slot="icon" name="shield-check" [size]="14" class="mr-1"></app-icon>
+                    Validar datos bancarios
+                  </app-button>
+
+                  @if (bankValidationResult(); as bv) {
+                    <div class="text-xs rounded-md p-2 bg-[var(--color-surface)]">
+                      <div class="flex items-center gap-3">
+                        <span class="text-[var(--color-success-text)] font-medium">{{ bv.valid.length }} validos</span>
+                        <span class="text-[var(--color-error-text)] font-medium">{{ bv.invalid.length }} con errores</span>
+                      </div>
+                      @if (bv.invalid.length > 0) {
+                        <div class="mt-1 space-y-0.5">
+                          @for (inv of bv.invalid; track inv.employee_id) {
+                            <div class="flex items-start justify-between gap-2">
+                              <span class="text-[var(--color-text-secondary)]">{{ inv.name }}</span>
+                              <span class="text-[var(--color-error-text)] text-[10px] text-right">{{ inv.errors.join(', ') }}</span>
+                            </div>
+                          }
+                        </div>
+                      }
+                    </div>
+                  }
+
+                  <app-selector
+                    [options]="bankOptions()"
+                    placeholder="Selecciona un banco"
+                    size="sm"
+                    (valueChange)="selectedBank.set($any($event))"
+                  ></app-selector>
+
+                  <input type="text"
+                         [value]="sourceAccount()"
+                         (input)="sourceAccount.set($any($event.target).value)"
+                         placeholder="Cuenta origen (opcional)"
+                         class="w-full px-2 py-1.5 text-xs rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)]" />
+
+                  <app-button variant="primary" size="sm"
+                              (clicked)="onExportAch()"
+                              [disabled]="!selectedBank()"
+                              [loading]="bankExportLoading()">
+                    <app-icon slot="icon" name="download" [size]="14" class="mr-1"></app-icon>
+                    Exportar ACH
+                  </app-button>
+
+                  @if (bankExportResult(); as be) {
+                    <div class="text-xs rounded-md p-2 bg-[var(--color-surface)]">
+                      <a [href]="be.download_url" target="_blank" rel="noopener"
+                         class="text-[var(--color-primary)] underline underline-offset-2 break-all">
+                        {{ be.file_name }}
+                      </a>
+                      <p class="text-[var(--color-text-secondary)] mt-0.5">
+                        {{ be.record_count }} registros · {{ formatNumber(be.total_amount) }}
+                      </p>
+                    </div>
+                  }
+                </div>
+              </div>
+            </div>
+          }
 
           <!-- 5. DESGLOSE POR EMPLEADO -->
           @if (payrollRun()!.items && payrollRun()!.items!.length > 0) {
@@ -320,6 +447,7 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
     <vendix-payroll-item-detail
       [isOpen]="employeeDetailOpen()"
       [item]="selectedItem"
+      [runId]="payrollRun()?.id ?? null"
       (isOpenChange)="employeeDetailOpen.set($event)"
     ></vendix-payroll-item-detail>
   `,
@@ -335,6 +463,57 @@ export class PayrollRunDetailComponent {
   private actions$ = inject(Actions);
   private destroyRef = inject(DestroyRef);
 private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation token para fast-track pipeline
+
+  // ── DIAN + Bank export state (NgRx signals) ───────────
+  private readonly dianStatusByRun = this.store.selectSignal(selectDianStatusByRun);
+  readonly dianLoading = this.store.selectSignal(selectDianLoading);
+  private readonly availableBanks = this.store.selectSignal(selectAvailableBanks);
+  readonly availableBanksLoading = this.store.selectSignal(selectAvailableBanksLoading);
+  readonly bankValidationResult = this.store.selectSignal(selectBankValidationResult);
+  readonly bankValidationLoading = this.store.selectSignal(selectBankValidationLoading);
+  readonly bankExportResult = this.store.selectSignal(selectBankExportResult);
+  readonly bankExportLoading = this.store.selectSignal(selectBankExportLoading);
+
+  /** DIAN status view for the current run (null until fetched). */
+  readonly dianStatusView = computed<DianStatusView | null>(() => {
+    const id = this.payrollRun()?.id;
+    return id != null ? (this.dianStatusByRun()[id] ?? null) : null;
+  });
+
+  readonly dianAccepted = computed(
+    () => this.dianStatusView()?.dian_status?.status === 'accepted',
+  );
+
+  readonly dianCune = computed<string | null>(
+    () => this.dianStatusView()?.dian_status?.cune ?? null,
+  );
+
+  readonly dianBadge = computed<{ label: string; variant: BadgeVariant }>(() => {
+    const status = this.dianStatusView()?.dian_status?.status;
+    switch (status) {
+      case 'accepted':
+        return { label: 'Aceptado', variant: 'success' };
+      case 'rejected':
+        return { label: 'Rechazado', variant: 'error' };
+      case 'error':
+        return { label: 'Error', variant: 'error' };
+      case 'pending':
+        return { label: 'Enviado', variant: 'info' };
+      default:
+        return { label: 'No enviado', variant: 'neutral' };
+    }
+  });
+
+  /** Bank options for the ACH selector. */
+  readonly bankOptions = computed<SelectorOption[]>(() =>
+    this.availableBanks().map((bank) => ({ value: bank.code, label: bank.name })),
+  );
+
+  readonly selectedBank = signal<string | null>(null);
+  readonly sourceAccount = signal<string>('');
+
+  /** One-shot guard so banks are requested only once per open eligible run. */
+  private banksRequested = false;
 
   // ── StepsLine ─────────────────────────────────────────
   statusSteps: StepsLineItem[] = [
@@ -441,6 +620,21 @@ private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation to
       this.updateStatusIndex();
       this.rebuildTableData();
       this.loadAppliedNovelties(run);
+    });
+
+    // Lazily load the ACH bank catalogue once the modal shows a DIAN-eligible run.
+    effect(() => {
+      const run = this.payrollRun();
+      if (
+        this.isOpen() &&
+        run &&
+        this.isDianEligible(run.status) &&
+        this.availableBanks().length === 0 &&
+        !this.banksRequested
+      ) {
+        this.banksRequested = true;
+        this.store.dispatch(loadAvailableBanks());
+      }
     });
 
     this.destroyRef.onDestroy(() => {
@@ -627,8 +821,7 @@ private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation to
         this.dispatchNextStep(nextStatus, id);
       }
     } catch {
-      // Timeout or other error
-      console.warn('[PayrollRunDetail] Fast-track timeout on step:', currentStatus);
+      // Timeout or other error — stop the pipeline gracefully.
       this.stopFastTrack();
     }
   }
@@ -728,6 +921,57 @@ private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation to
 
   formatNumber(value: number): string {
     return this.currencyService.format(Number(value) || 0);
+  }
+
+  /** UTC-safe date-only formatting (prevents off-by-one on pure dates). */
+  formatDate(value: string): string {
+    return value ? formatDateOnlyUTC(value) : 'Sin definir';
+  }
+
+  // ── DIAN + Bank export actions ────────────────────────
+
+  /** DIAN electronic payroll + bank export are available once the run is approved. */
+  isDianEligible(status: string): boolean {
+    return ['approved', 'sent', 'accepted', 'rejected', 'paid'].includes(status);
+  }
+
+  async onSendDian(): Promise<void> {
+    const run = this.payrollRun();
+    if (!run) return;
+    const runId = run.id;
+
+    const actionPromise = firstValueFrom(
+      this.actions$.pipe(
+        ofType(sendToDianSuccess, sendToDianFailure),
+        takeUntilDestroyed(this.destroyRef),
+      ),
+    );
+    this.store.dispatch(sendToDian({ runId }));
+
+    const action: any = await actionPromise;
+    if (action.type === sendToDianSuccess.type) {
+      // Kick off the polling loop to reflect acceptance/rejection.
+      this.store.dispatch(loadDianStatus({ runId }));
+    }
+  }
+
+  onValidateBankData(): void {
+    const run = this.payrollRun();
+    if (!run) return;
+    this.store.dispatch(validateBankData({ runId: run.id }));
+  }
+
+  onExportAch(): void {
+    const run = this.payrollRun();
+    const bank = this.selectedBank();
+    if (!run || !bank) return;
+    const account = this.sourceAccount().trim();
+    this.store.dispatch(
+      exportAch({
+        runId: run.id,
+        payload: { bank, source_account: account || undefined },
+      }),
+    );
   }
 
   getRemainingSteps(status: string): string[] {
