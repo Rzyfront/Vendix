@@ -322,7 +322,17 @@ export class AuthModalComponent {
    * re-evaluates whenever `isOpen` flips). Cleared back to null when the
    * facade clears the error so the next fresh error still surfaces.
    */
-  private readonly lastShownError = signal<string | null>(null);
+  /**
+   * Tracks the last raw error string surfaced as a toast/errorMessage so we
+   * don't re-fire the same error toast on every effect re-run (isOpen flips
+   * re-run it). Seeded with the current facade error so the FIRST render of
+   * the modal doesn't re-surface a stale error from a previous login/
+   * register attempt. Cleared back to null when the facade clears the error
+   * so the next fresh error still surfaces.
+   */
+  private readonly lastShownError = signal<string | null>(
+    this.authFacade.authError(),
+  );
 
   // Legal Documents state
   readonly pendingDocuments = signal<PendingDocument[]>([]);
