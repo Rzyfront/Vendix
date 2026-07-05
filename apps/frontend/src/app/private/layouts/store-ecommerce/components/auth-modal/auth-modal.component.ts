@@ -494,6 +494,21 @@ export class AuthModalComponent {
       };
     }
 
+    // Customer account claimable via password reset (POS / backoffice
+    // pre-existing customer). MUST come BEFORE the generic "ya existe"
+    // check below because the backend message contains both substrings.
+    if (
+      errorLower.includes('auth_customer_claimable_001') ||
+      errorLower.includes('recoverable via password reset')
+    ) {
+      this.claimableEmail.set(this.authForm.get('email')?.value ?? null);
+      return {
+        title: 'Ya tienes cuenta con este correo',
+        message:
+          'Detectamos que este correo ya está registrado como cliente. Te enviamos un link para que actives tu contraseña y vincules tu cuenta con esta tienda.',
+      };
+    }
+
     // Email already exists
     if (
       errorLower.includes('ya existe') ||
@@ -504,21 +519,6 @@ export class AuthModalComponent {
         title: 'Correo ya registrado',
         message:
           'Ya existe una cuenta con este correo. Intenta iniciar sesión.',
-      };
-    }
-
-    // Customer account claimable via password reset (POS / backoffice
-    // pre-existing customer). Surface a recovery action instead of
-    // dead-ending the register flow.
-    if (
-      errorLower.includes('auth_customer_claimable_001') ||
-      errorLower.includes('recoverable via password reset')
-    ) {
-      this.claimableEmail.set(this.authForm.get('email')?.value ?? null);
-      return {
-        title: 'Ya tienes cuenta con este correo',
-        message:
-          'Detectamos que este correo ya está registrado como cliente. Te enviamos un link para que actives tu contraseña y vincules tu cuenta con esta tienda.',
       };
     }
 
