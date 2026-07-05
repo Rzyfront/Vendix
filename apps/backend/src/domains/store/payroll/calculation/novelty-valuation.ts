@@ -3,6 +3,7 @@ import {
   DEFAULT_MONTHLY_HOURS,
   DEFAULT_OVERTIME_RATES,
   DEFAULT_INCAPACITY_GENERAL_EMPLOYER_RATE,
+  INCAPACITY_EMPLOYER_DAYS,
 } from './colombian-rules';
 
 /**
@@ -44,6 +45,24 @@ export interface ValuatedNovelty {
   percentage?: number;
   date_start?: string;
   date_end?: string;
+  /**
+   * ── Cost-bearer split for paid absences (incapacities and licensed leaves) ──
+   *
+   * For a general-illness incapacity the employer pays days 1-2 and the EPS
+   * reimburses day 3+; for maternity/paternity leave the EPS bears 100%; for a
+   * labor incapacity the ARL bears 100%. These fields let the accounting entry
+   * post `reimbursable_amount` as a receivable (cuenta por cobrar) instead of a
+   * payroll cost, without re-deriving the rule.
+   *
+   * Invariant when present: `amount === employer_amount + reimbursable_amount`.
+   * Absent for salary earnings and deductions — there the whole `amount` is an
+   * employer cost.
+   */
+  employer_amount?: number;
+  /** Portion reimbursable by a third party (EPS/ARL). A receivable, not a cost. */
+  reimbursable_amount?: number;
+  /** Entity that reimburses `reimbursable_amount`. */
+  reimbursed_by?: 'eps' | 'arl';
 }
 
 /** Overtime/surcharge novelty types valued by the hour. */
@@ -84,8 +103,15 @@ function round(value: number): number {
  * - Overtime          = hourly × hours × (1 + rate)
  * - Surcharge         = hourly × hours × rate
  * - Vacation / paid leave        = (base_salary / 30) × days
- * - Incapacity (general illness) = (base_salary / 30) × days × 66.67% (employer share)
- * - Incapacity (labor/ARL)       = (base_salary / 30) × days (100%)
+ * - Incapacity (general illness) = (base_salary / 30) × days × 66.67%, split by
+ *   tramo: days 1-2 borne by the EMPLOYER, day 3+ reimbursed by the EPS with a
+ *   daily floor of 1 SMMLV / 30.
+ * - Incapacity (labor/ARL)       = (base_salary / 30) × days (100%), reimbursed
+ *   by the ARL from day 1.
+ * - Maternity / paternity leave  = (base_salary / 30) × days (100%), borne by
+ *   the EPS (a reimbursement, not an employer cost).
+ * - Bereavement leave (luto)     = (base_salary / 30) × days, borne by the
+ *   employer (5 business days by law — Ley 1280/2009).
  * - Unpaid leave      = days_adjustment (reduces worked_days, no payment)
  * - Bonus / commission / other_deduction = manual amount
  *
@@ -146,29 +172,62 @@ export function valuateNovelty(
   switch (type) {
     case 'vacation':
     case 'leave_paid':
+    case 'bereavement_leave':
+      // Employer-borne paid absences: no reimbursement.
       return {
         ...base,
         kind: 'earning',
         amount: round(daily_value * days),
+        employer_amount: round(daily_value * days),
+        reimbursable_amount: 0,
       };
 
     case 'incapacity_general': {
+      // Days 1-2 are borne by the employer; day 3+ is reimbursed by the EPS,
+      // with a per-day floor of 1 SMMLV / 30.
       const rate =
         percentage_override > 0 ? percentage_override : incapacity_general_rate;
+      const daily_payment = daily_value * rate;
+      const employer_days = Math.min(days, INCAPACITY_EMPLOYER_DAYS);
+      const eps_days = Math.max(days - INCAPACITY_EMPLOYER_DAYS, 0);
+      const eps_daily_floor = rules.minimum_wage / 30;
+      const eps_daily = Math.max(daily_payment, eps_daily_floor);
+      const employer_amount = round(daily_payment * employer_days);
+      const reimbursable_amount = round(eps_daily * eps_days);
       return {
         ...base,
         kind: 'earning',
-        amount: round(daily_value * days * rate),
+        amount: round(employer_amount + reimbursable_amount),
         percentage: rate,
+        employer_amount,
+        reimbursable_amount,
+        ...(reimbursable_amount > 0 ? { reimbursed_by: 'eps' as const } : {}),
       };
     }
 
     case 'incapacity_laboral':
-      // ARL incapacity: paid at 100% of the daily salary.
+      // ARL incapacity: paid at 100% of the daily salary and reimbursed by the
+      // ARL from day 1 (never an employer cost).
       return {
         ...base,
         kind: 'earning',
         amount: round(daily_value * days),
+        employer_amount: 0,
+        reimbursable_amount: round(daily_value * days),
+        reimbursed_by: 'arl',
+      };
+
+    case 'maternity_leave':
+    case 'paternity_leave':
+      // Maternity/paternity leave: paid at 100% of the daily salary and borne
+      // by the EPS (a reimbursement, not an employer cost).
+      return {
+        ...base,
+        kind: 'earning',
+        amount: round(daily_value * days),
+        employer_amount: 0,
+        reimbursable_amount: round(daily_value * days),
+        reimbursed_by: 'eps',
       };
 
     case 'leave_unpaid':

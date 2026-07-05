@@ -8,6 +8,14 @@ import { AdvancesService } from '../advances/advances.service';
 import { NoveltiesService } from '../novelties/novelties.service';
 import { valuateNovelty, ValuatedNovelty } from './novelty-valuation';
 import {
+  EXONERATION_MAX_SMMLV,
+  FSP_SOLIDARITY_RATE,
+  IBC_MAX_SMMLV,
+  IBC_MIN_SMMLV,
+  INTEGRAL_IBC_FACTOR,
+  getFspRate,
+} from './colombian-rules';
+import {
   Art387Deductions,
   RetentionProcedure,
   calculateLaborWithholding,
@@ -18,6 +26,11 @@ interface EmployeeCalculationInput {
   id: number;
   base_salary: Prisma.Decimal;
   arl_risk_level: number | null;
+  /**
+   * Salary modality. `integral` employees cotize social security on 70% of the
+   * salary (factor prestacional excluded). Absent → treated as `ordinary`.
+   */
+  salary_type?: 'ordinary' | 'integral';
   /**
    * Snapshot del perfil fiscal (art. 387 ET) del empleado, resuelto fuera
    * del cálculo para que la función pura no consulte Prisma. Si llega
@@ -61,6 +74,12 @@ interface EarningsBreakdown {
     quantity: number;
     type: number;
     payment: number;
+    /** Portion of `payment` borne by the employer (incapacity days 1-2). */
+    employer_amount?: number;
+    /** Portion of `payment` reimbursed by a third party (EPS day 3+ / ARL). */
+    reimbursable_amount?: number;
+    /** Entity that reimburses `reimbursable_amount`. */
+    reimbursed_by?: 'eps' | 'arl';
   }>;
   licenses?: Array<{
     start_date: string;
@@ -68,6 +87,12 @@ interface EarningsBreakdown {
     quantity: number;
     type: string;
     payment: number;
+    /** Portion of `payment` borne by the employer (e.g. bereavement leave). */
+    employer_amount?: number;
+    /** Portion of `payment` reimbursed by the EPS (maternity/paternity leave). */
+    reimbursable_amount?: number;
+    /** Entity that reimburses `reimbursable_amount`. */
+    reimbursed_by?: 'eps' | 'arl';
   }>;
   bonuses?: Array<{ taxable: number; non_taxable: number }>;
   commissions?: number;
@@ -79,6 +104,20 @@ interface DeductionsBreakdown {
   pension: number;
   retention: number;
   advance_deduction: number;
+  /**
+   * Fondo de Solidaridad Pensional (employee side). Combined amount (solidarity
+   * + subsistence subaccounts). 0 when the IBC is below 4 SMMLV. The DSPNE XML
+   * split is emitted via `solidarity_fund_amount` / `subsistence_fund_amount`.
+   */
+  fsp: number;
+  /** FSP solidarity subaccount (1% base) — DSPNE `FondoSP`. Present when > 0. */
+  solidarity_fund_amount?: number;
+  /** FSP solidarity subaccount rate as a percentage (e.g. 1). */
+  solidarity_fund_pct?: number;
+  /** FSP additional "subsistencia" subaccount — DSPNE `FondoSubsistencia`. Present when > 0. */
+  subsistence_fund_amount?: number;
+  /** FSP subsistence subaccount rate as a percentage (e.g. 0.2). */
+  subsistence_fund_pct?: number;
   /** Manual deduction novelties — same shape read by mapDeductions (DSPNE). */
   other_deductions?: Array<{ description: string; amount: number }>;
   total: number;
@@ -286,6 +325,7 @@ export class PayrollCalculationService {
           id: employee.id,
           base_salary: employee.base_salary,
           arl_risk_level: employee.arl_risk_level,
+          salary_type: employee.salary_type,
           fiscal_profile: fiscal_profiles_map.get(employee.id),
         },
         worked_days,
@@ -484,6 +524,15 @@ export class PayrollCalculationService {
             quantity: novelty.days || 0,
             type: DSPNE_INCAPACITY_TYPE[novelty.novelty_type],
             payment: novelty.amount,
+            ...(novelty.employer_amount !== undefined
+              ? { employer_amount: novelty.employer_amount }
+              : {}),
+            ...(novelty.reimbursable_amount !== undefined
+              ? { reimbursable_amount: novelty.reimbursable_amount }
+              : {}),
+            ...(novelty.reimbursed_by
+              ? { reimbursed_by: novelty.reimbursed_by }
+              : {}),
           });
           non_ibc_novelty_earnings += novelty.amount;
           break;
@@ -494,6 +543,37 @@ export class PayrollCalculationService {
             quantity: novelty.days || 0,
             type: 'remunerada',
             payment: novelty.amount,
+          });
+          non_ibc_novelty_earnings += novelty.amount;
+          break;
+        case 'maternity_leave':
+        case 'paternity_leave':
+          // EPS-borne leave (100%): reported as a license and reimbursable.
+          license_entries.push({
+            start_date: start,
+            end_date: end,
+            quantity: novelty.days || 0,
+            type:
+              novelty.novelty_type === 'maternity_leave'
+                ? 'maternidad'
+                : 'paternidad',
+            payment: novelty.amount,
+            employer_amount: novelty.employer_amount ?? 0,
+            reimbursable_amount: novelty.reimbursable_amount ?? novelty.amount,
+            reimbursed_by: novelty.reimbursed_by ?? 'eps',
+          });
+          non_ibc_novelty_earnings += novelty.amount;
+          break;
+        case 'bereavement_leave':
+          // Employer-borne remunerated leave (luto, 5 business days by law).
+          license_entries.push({
+            start_date: start,
+            end_date: end,
+            quantity: novelty.days || 0,
+            type: 'luto',
+            payment: novelty.amount,
+            employer_amount: novelty.employer_amount ?? novelty.amount,
+            reimbursable_amount: novelty.reimbursable_amount ?? 0,
           });
           non_ibc_novelty_earnings += novelty.amount;
           break;
@@ -533,7 +613,8 @@ export class PayrollCalculationService {
     );
 
     // IBC: proportional salary + salary novelty earnings (transport subsidy
-    // and non-salary replacements stay out).
+    // and non-salary replacements stay out). This is the salary-income base
+    // used for the labor withholding (retefuente).
     const ibc_base = this.round(proportional_salary + salary_novelty_earnings);
 
     const total_earnings = this.round(
@@ -543,12 +624,51 @@ export class PayrollCalculationService {
         non_ibc_novelty_earnings,
     );
 
-    // Deductions (employee portion) - calculated on the IBC, not on the
-    // transport subsidy
-    const health_deduction = this.round(ibc_base * rules.health_employee_rate);
-    const pension_deduction = this.round(
-      ibc_base * rules.pension_employee_rate,
+    // ── Social-security contribution base (IBC for salud/pensión/FSP/aportes) ──
+    // - Salario integral cotiza on 70% of the salary (factor prestacional out).
+    // - Clamped to the legal floor (1 SMMLV) and ceiling (25 SMMLV), prorated by
+    //   the worked-days proportion so partial periods keep their proration.
+    const is_integral = employee.salary_type === 'integral';
+    const integral_factor = is_integral ? INTEGRAL_IBC_FACTOR : 1;
+    const contribution_base_raw = this.round(ibc_base * integral_factor);
+    const ibc_floor = this.round(
+      rules.minimum_wage * IBC_MIN_SMMLV * proportion,
     );
+    const ibc_ceiling = this.round(
+      rules.minimum_wage * IBC_MAX_SMMLV * proportion,
+    );
+    const contribution_base = Math.min(
+      Math.max(contribution_base_raw, ibc_floor),
+      ibc_ceiling,
+    );
+
+    // Monthly-equivalent IBC in SMMLV drives the staggered FSP rate and the
+    // Ley 1607 exoneration threshold (both are monthly brackets, so a partial
+    // period is scaled back up to a full month before it is classified).
+    const monthly_equivalent_ibc =
+      proportion > 0
+        ? contribution_base_raw / proportion
+        : contribution_base_raw;
+    const ibc_in_smmlv =
+      rules.minimum_wage > 0 ? monthly_equivalent_ibc / rules.minimum_wage : 0;
+
+    // Deductions (employee portion) - calculated on the contribution base, not
+    // on the transport subsidy.
+    const health_deduction = this.round(
+      contribution_base * rules.health_employee_rate,
+    );
+    const pension_deduction = this.round(
+      contribution_base * rules.pension_employee_rate,
+    );
+
+    // FSP (Fondo de Solidaridad Pensional): staggered employee deduction on the
+    // pension IBC. 0 below 4 SMMLV. Split into the solidarity (1%) and the
+    // additional "subsistencia" subaccounts for the DSPNE XML.
+    const fsp_rate = getFspRate(ibc_in_smmlv);
+    const fsp = this.round(contribution_base * fsp_rate);
+    const fsp_solidarity_amount =
+      fsp_rate > 0 ? this.round(contribution_base * FSP_SOLIDARITY_RATE) : 0;
+    const fsp_subsistence_amount = this.round(fsp - fsp_solidarity_amount);
 
     // Labor withholding (retefuente):
     // - With a UVT configured: art. 383 ET progressive table (procedure 1)
@@ -619,23 +739,43 @@ export class PayrollCalculationService {
     const total_deductions = this.round(
       health_deduction +
         pension_deduction +
+        fsp +
         retention +
         advance_deduction +
         other_deductions_total,
     );
 
-    // Employer costs (calculated on the IBC)
+    // Employer costs (calculated on the contribution base).
+    //
+    // Ley 1607/2012 exoneration (art. 114-1 ET): an exonerated society does NOT
+    // pay employer health (8.5%), SENA (2%) nor ICBF (3%) for employees whose
+    // monthly IBC is below 10 SMMLV. Pension (12%), ARL and the compensation
+    // fund (caja, 4%) are always due.
+    //
+    // TODO(exoneration-flag): gate this on an explicit organization/employer
+    // `is_exonerated` flag once the schema exposes one. It does NOT exist today,
+    // so — per the Colombian default for SAS/limitadas — we assume the society
+    // is exonerated and gate purely by the 10-SMMLV threshold. Reported as a
+    // knowledge gap.
+    const is_exonerated_for_employee = ibc_in_smmlv < EXONERATION_MAX_SMMLV;
+
     const arl_rate =
       rules.arl_rates[employee.arl_risk_level || 1] || rules.arl_rates[1];
-    const health_employer = this.round(ibc_base * rules.health_employer_rate);
+    const health_employer = is_exonerated_for_employee
+      ? 0
+      : this.round(contribution_base * rules.health_employer_rate);
     const pension_employer = this.round(
-      ibc_base * rules.pension_employer_rate,
+      contribution_base * rules.pension_employer_rate,
     );
-    const arl_cost = this.round(ibc_base * arl_rate);
-    const sena_cost = this.round(ibc_base * rules.sena_rate);
-    const icbf_cost = this.round(ibc_base * rules.icbf_rate);
+    const arl_cost = this.round(contribution_base * arl_rate);
+    const sena_cost = is_exonerated_for_employee
+      ? 0
+      : this.round(contribution_base * rules.sena_rate);
+    const icbf_cost = is_exonerated_for_employee
+      ? 0
+      : this.round(contribution_base * rules.icbf_rate);
     const compensation_fund_cost = this.round(
-      ibc_base * rules.compensation_fund_rate,
+      contribution_base * rules.compensation_fund_rate,
     );
     const total_employer_costs = this.round(
       health_employer +
@@ -646,13 +786,17 @@ export class PayrollCalculationService {
         compensation_fund_cost,
     );
 
-    // Provisions (monthly accrual, on the IBC)
-    const severance = this.round(ibc_base * rules.severance_rate);
+    // Provisions (monthly accrual). Salario integral provisions on 70% of the
+    // salary (factor prestacional excluded); the 25-SMMLV cap does NOT apply to
+    // provisions, so this uses the integral-adjusted base rather than the
+    // clamped contribution base.
+    const provision_base = this.round(ibc_base * integral_factor);
+    const severance = this.round(provision_base * rules.severance_rate);
     const severance_interest = this.round(
       severance * (rules.severance_interest_rate / 12),
     );
-    const vacation = this.round(ibc_base * rules.vacation_rate);
-    const bonus = this.round(ibc_base * rules.bonus_rate);
+    const vacation = this.round(provision_base * rules.vacation_rate);
+    const bonus = this.round(provision_base * rules.bonus_rate);
     const total_provisions = this.round(
       severance + severance_interest + vacation + bonus,
     );
@@ -681,6 +825,19 @@ export class PayrollCalculationService {
         pension: pension_deduction,
         retention,
         advance_deduction,
+        fsp,
+        ...(fsp_solidarity_amount > 0
+          ? {
+              solidarity_fund_amount: fsp_solidarity_amount,
+              solidarity_fund_pct: this.round(FSP_SOLIDARITY_RATE * 100),
+            }
+          : {}),
+        ...(fsp_subsistence_amount > 0
+          ? {
+              subsistence_fund_amount: fsp_subsistence_amount,
+              subsistence_fund_pct: this.round((fsp_rate - FSP_SOLIDARITY_RATE) * 100),
+            }
+          : {}),
         ...(other_deduction_entries.length
           ? { other_deductions: other_deduction_entries }
           : {}),
