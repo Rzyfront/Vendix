@@ -2,6 +2,8 @@ import {
   IsNotEmpty,
   IsString,
   IsNumber,
+  IsInt,
+  Min,
   IsEnum,
   IsOptional,
   IsDateString,
@@ -64,6 +66,27 @@ export class PurchaseOrderItemDto {
   @IsNumber()
   @IsOptional()
   stock_uom_id?: number;
+
+  /**
+   * "Contenido por envase" — manual cross-dimension conversion factor. When
+   * the purchase unit is a discrete package (dimension `count`, e.g. una
+   * bolsita) and the stock unit is a continuous magnitude (`mass`/`volume`,
+   * e.g. g/ml), the factor CANNOT be derived from the catalog `factor_to_base`
+   * (different dimensions). The operator supplies it manually here: how many
+   * stock units each purchase unit contains (e.g. 250 g por bolsita). In that
+   * cross-dimension case this value IS the factor and the backend skips the
+   * same-dimension validation. Ignored (catalog derivation used instead) for
+   * same-dimension conversions.
+   */
+  @ApiProperty({
+    description:
+      'Contenido por envase: manual purchase→stock factor for cross-dimension (count → mass/volume) ingredient lines.',
+    required: false,
+  })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  purchase_to_stock_factor?: number;
 
   /**
    * Ingredient flags. Apply ONLY to NEW products created from this order line

@@ -378,21 +378,47 @@ export class PurchaseOrdersService {
                 'Unidad de medida no encontrada en el catálogo para el insumo.',
               );
             }
-            if (stockUom.dimension !== purchaseUom.dimension) {
-              throw new BadRequestException(
-                `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse.`,
+
+            // "Contenido por envase" (cross-dimension): when the purchase unit
+            // is a discrete package (`count`, e.g. una bolsita) and the stock
+            // unit is a continuous magnitude (`mass`/`volume`, e.g. g/ml), the
+            // factor CANNOT be derived from factor_to_base. The operator sends
+            // it manually as `purchase_to_stock_factor` (= cuánto contenido
+            // trae cada envase, p.ej. 250 g). We trust that value and SKIP the
+            // same-dimension validation. The DTO guarantees Int >= 1.
+            const manualFactor = item.purchase_to_stock_factor;
+            const isCrossDimensionPackaging =
+              purchaseUom.dimension === 'count' &&
+              (stockUom.dimension === 'mass' ||
+                stockUom.dimension === 'volume');
+
+            if (
+              manualFactor != null &&
+              Number.isInteger(manualFactor) &&
+              manualFactor >= 1 &&
+              isCrossDimensionPackaging
+            ) {
+              purchaseToStockFactor = manualFactor;
+            } else {
+              // Same-dimension (or no manual factor): derive from the catalog
+              // and enforce shared dimension so factor_to_base is meaningful.
+              // (Validación defensiva intacta para todo caso no cross-dimension.)
+              if (stockUom.dimension !== purchaseUom.dimension) {
+                throw new BadRequestException(
+                  `Las unidades de stock (${stockUom.code}) y compra (${purchaseUom.code}) deben pertenecer a la misma dimensión para poder convertirse.`,
+                );
+              }
+              const derived = Math.round(
+                Number(purchaseUom.factor_to_base) /
+                  Number(stockUom.factor_to_base),
               );
+              if (!Number.isFinite(derived) || derived < 1) {
+                throw new BadRequestException(
+                  `Factor de conversión inválido entre ${purchaseUom.code} y ${stockUom.code}: debe ser >= 1.`,
+                );
+              }
+              purchaseToStockFactor = derived;
             }
-            const derived = Math.round(
-              Number(purchaseUom.factor_to_base) /
-                Number(stockUom.factor_to_base),
-            );
-            if (!Number.isFinite(derived) || derived < 1) {
-              throw new BadRequestException(
-                `Factor de conversión inválido entre ${purchaseUom.code} y ${stockUom.code}: debe ser >= 1.`,
-              );
-            }
-            purchaseToStockFactor = derived;
           }
 
           // Check if product with SKU exists to avoid duplicates
@@ -608,6 +634,30 @@ export class PurchaseOrdersService {
                 deleteMany: {},
                 create: taxCategoryIds.map((id) => ({ tax_category_id: id })),
               };
+            }
+
+            // Insumo (configure de producto existente): persistir la config UoM
+            // + factor en el producto YA en el create. `purchase_order_items` no
+            // almacena `purchase_to_stock_factor`, y el caso cross-dimension
+            // (count→mass/volume) NO es re-derivable del catálogo en receive, por
+            // lo que el producto es el único portador del factor hasta la
+            // recepción. resolveUoMConversion exige `is_ingredient=true` + factor
+            // para multiplicar, así que ambos deben quedar en el producto aquí.
+            // (syncIngredientConfigOnReceipt sigue como backfill de labels /
+            // same-dimension al recibir.) No se neutraliza pricing/ecommerce del
+            // producto existente para no clobberear su config de venta.
+            if (effectiveIsIngredient) {
+              productUpdateData.is_ingredient = true;
+              if (item.purchase_uom_id != null) {
+                productUpdateData.purchase_uom_id = item.purchase_uom_id;
+              }
+              if (item.stock_uom_id != null) {
+                productUpdateData.stock_uom_id = item.stock_uom_id;
+              }
+              if (purchaseToStockFactor != null) {
+                productUpdateData.purchase_to_stock_factor =
+                  purchaseToStockFactor;
+              }
             }
 
             await tx.products.update({
@@ -1132,6 +1182,122 @@ export class PurchaseOrdersService {
     return { basePrice: existingBasePrice, profitMargin: margin };
   }
 
+  /**
+   * F2 — Persist the ingredient UoM config captured on the PO line onto the
+   * product at receipt time, WITHOUT ever clobbering existing values with
+   * null/empty. Idempotent: re-receiving the same line resolves to the same
+   * values and produces a no-op update.
+   *
+   * Sources of the "config capturada":
+   *   - purchase_uom_id / stock_uom_id: captured on the PO item at create
+   *     (only ingredient orders carry them; retail lines have them null).
+   *   - purchase_to_stock_factor: derived from the catalog when both UoMs share
+   *     a dimension. For the cross-dimension "contenido por envase" case
+   *     (count → mass/volume) the factor is NOT derivable and must already live
+   *     on the product (inherited at create, F1) — it is left intact here.
+   *   - stock_unit / purchase_unit labels: sourced from the UoM `code`.
+   *
+   * Only fields that are (a) resolvable AND (b) empty on the product OR differ
+   * are written; a field is never overwritten with null/empty. New products
+   * already inherit the full config at create (F1), so this is a no-op for them.
+   */
+  private async syncIngredientConfigOnReceipt(
+    productId: number,
+    orderItem:
+      | { purchase_uom_id?: number | null; stock_uom_id?: number | null }
+      | undefined
+      | null,
+    tx: any,
+  ): Promise<void> {
+    const capturedPurchaseUomId = orderItem?.purchase_uom_id ?? null;
+    const capturedStockUomId = orderItem?.stock_uom_id ?? null;
+
+    // Nothing captured on the line → not an ingredient line, no-op.
+    if (capturedPurchaseUomId == null && capturedStockUomId == null) {
+      return;
+    }
+
+    const product = await tx.products.findFirst({
+      where: { id: productId },
+      select: {
+        id: true,
+        purchase_uom_id: true,
+        stock_uom_id: true,
+        purchase_to_stock_factor: true,
+        stock_unit: true,
+        purchase_unit: true,
+      },
+    });
+    if (!product) return;
+
+    // When both FKs are present, resolve the catalog rows to derive the factor
+    // (same-dimension only) and the human-readable unit labels.
+    let derivedFactor: number | undefined;
+    let stockUnitLabel: string | undefined;
+    let purchaseUnitLabel: string | undefined;
+    if (capturedPurchaseUomId != null && capturedStockUomId != null) {
+      const uoms = await tx.units_of_measure.findMany({
+        where: { id: { in: [capturedStockUomId, capturedPurchaseUomId] } },
+      });
+      const stockUom = uoms.find((u) => u.id === capturedStockUomId);
+      const purchaseUom = uoms.find((u) => u.id === capturedPurchaseUomId);
+      if (stockUom && purchaseUom) {
+        stockUnitLabel = stockUom.code;
+        purchaseUnitLabel = purchaseUom.code;
+        // Same-dimension → derivable from factor_to_base. Cross-dimension
+        // (count → mass/volume) → NOT derivable; keep the product's existing
+        // manual factor (F1) untouched.
+        if (stockUom.dimension === purchaseUom.dimension) {
+          const factor = Math.round(
+            Number(purchaseUom.factor_to_base) /
+              Number(stockUom.factor_to_base),
+          );
+          if (Number.isFinite(factor) && factor >= 1) {
+            derivedFactor = factor;
+          }
+        }
+      }
+    }
+
+    // Fill/patch only when the captured value is present AND the product is
+    // empty or differs. Never write null/empty.
+    const data: Record<string, any> = {};
+    if (
+      capturedPurchaseUomId != null &&
+      product.purchase_uom_id !== capturedPurchaseUomId
+    ) {
+      data.purchase_uom_id = capturedPurchaseUomId;
+    }
+    if (
+      capturedStockUomId != null &&
+      product.stock_uom_id !== capturedStockUomId
+    ) {
+      data.stock_uom_id = capturedStockUomId;
+    }
+    if (
+      derivedFactor != null &&
+      product.purchase_to_stock_factor !== derivedFactor
+    ) {
+      data.purchase_to_stock_factor = derivedFactor;
+    }
+    if (stockUnitLabel && (product.stock_unit ?? '') !== stockUnitLabel) {
+      data.stock_unit = stockUnitLabel;
+    }
+    if (
+      purchaseUnitLabel &&
+      (product.purchase_unit ?? '') !== purchaseUnitLabel
+    ) {
+      data.purchase_unit = purchaseUnitLabel;
+    }
+
+    if (Object.keys(data).length > 0) {
+      await tx.products.update({
+        where: { id: productId },
+        data,
+      });
+    }
+  }
+
   async receive(id: number, dto: ReceivePurchaseOrderDto) {
     const result = await this.prisma.$transaction(async (tx) => {
       // Create reception record
@@ -1485,6 +1651,11 @@ export class PurchaseOrdersService {
               }
             }
           }
+
+          // F2 — persist the ingredient UoM config captured on the PO line
+          // onto the product at receipt time (idempotent; never clobbers with
+          // null/empty). New products already inherit the config at create (F1).
+          await this.syncIngredientConfigOnReceipt(productId, orderItem, tx);
         }
       }
 

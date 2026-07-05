@@ -2568,8 +2568,21 @@ export class ProductCreatePageComponent {
   private get stockCapacity(): number {
     return Number((this.product as any)?.purchase_to_stock_factor) || 1;
   }
-  /** Etiqueta de la unidad mínima (ml, g, ...). */
+  /**
+   * Etiqueta de la unidad mínima de stock (ml, g, ...). Se resuelve desde el
+   * catálogo UoM (`uomOptions()`) por `stock_uom_id` del producto — mismo
+   * patrón que `unitCapacity`. Lee la señal `uomOptions()` así que reacciona
+   * cuando el catálogo resuelve. Fallback al legacy `stock_unit` (casi siempre
+   * vacío) solo si el catálogo no resuelve el id. Alimenta los 3 bloques del
+   * "Desglose del insumo" (volumen abierto / capacidad / volumen total); los
+   * envases sellados se etiquetan aparte en "und".
+   */
   get stockUnitLabel(): string {
+    const stockId = Number((this.product as any)?.stock_uom_id ?? 0);
+    if (stockId) {
+      const code = this.uomOptions().find((u) => u.id === stockId)?.code;
+      if (code) return code;
+    }
     return ((this.product as any)?.stock_unit as string) || '';
   }
   /**

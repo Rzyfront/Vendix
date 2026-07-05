@@ -13,6 +13,10 @@ import { FormsModule } from '@angular/forms';
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../shared/components/selector/selector.component';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { UomService } from '../../services/uom.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
@@ -46,6 +50,14 @@ export interface PopUomCaptureResult {
    * cost. In configure mode it defaults to 1 and is informational.
    */
   quantity: number;
+  /**
+   * F1 (contenido por envase): cuántas unidades de STOCK trae cada unidad de
+   * COMPRA. Solo es relevante (>=1) cuando la compra es un envase (dimensión
+   * `count`) y el stock es masa/volumen — el catálogo no puede derivar el
+   * factor por diferencia de dimensión y el usuario lo teclea. En el resto de
+   * casos vale 0 (el backend deriva el factor por UoM).
+   */
+  contentPerPackage: number;
 }
 
 /**
@@ -74,7 +86,7 @@ export interface PopUomCaptureResult {
 @Component({
   selector: 'app-pop-uom-capture',
   standalone: true,
-  imports: [FormsModule, IconComponent, InputComponent],
+  imports: [FormsModule, IconComponent, InputComponent, SelectorComponent],
   template: `
     <div
       class="rounded-xl border border-primary/20 bg-primary/5 p-3 space-y-3"
@@ -88,64 +100,54 @@ export interface PopUomCaptureResult {
           class="text-primary-600"
         ></app-icon>
         <p
-          class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
+          class="text-[10px] text-muted uppercase font-bold tracking-wider"
         >
           Unidad de medida del insumo
         </p>
       </div>
 
       <!-- Helper text -->
-      <p class="text-xs text-text-muted">
+      <p class="text-xs text-muted">
         Captura el costo por la <strong>unidad de compra</strong>
         (la presentación que llega del proveedor). El sistema lo
         convertirá automáticamente a la unidad de stock usando el
         factor de la UoM.
       </p>
 
-      <!-- UoM selects -->
+      <!-- UoM selects (app-selector: tokens semánticos + dropdown accesible) -->
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
         <div>
           <label class="block text-xs font-medium text-text-primary mb-1">
             Unidad de compra
             <span class="text-destructive">*</span>
           </label>
-          <select
-            class="w-full px-2 py-1.5 text-sm rounded-lg border border-border bg-surface text-text-primary"
+          <app-selector
+            size="sm"
+            [options]="uomOptions()"
             [ngModel]="purchaseUomId()"
             (ngModelChange)="onPurchaseUomChange($event)"
-          >
-            <option [ngValue]="null">— Seleccionar —</option>
-            @for (u of uomCatalog(); track u.id) {
-              <option [ngValue]="u.id">
-                {{ u.code }} — {{ u.name }}
-              </option>
-            }
-          </select>
+            placeholder="— Seleccionar —"
+          ></app-selector>
         </div>
         <div>
           <label class="block text-xs font-medium text-text-primary mb-1">
             Unidad de stock
             <span class="text-destructive">*</span>
           </label>
-          <select
-            class="w-full px-2 py-1.5 text-sm rounded-lg border border-border bg-surface text-text-primary"
+          <app-selector
+            size="sm"
+            [options]="uomOptions()"
             [ngModel]="stockUomId()"
             (ngModelChange)="onStockUomChange($event)"
-          >
-            <option [ngValue]="null">— Seleccionar —</option>
-            @for (u of uomCatalog(); track u.id) {
-              <option [ngValue]="u.id">
-                {{ u.code }} — {{ u.name }}
-              </option>
-            }
-          </select>
+            placeholder="— Seleccionar —"
+          ></app-selector>
         </div>
       </div>
 
-      <!-- Capacity preview -->
+      <!-- Capacity preview (misma dimensión → factor derivado del catálogo) -->
       @if (unitCapacity(); as cap) {
         <div
-          class="flex items-center gap-2 text-xs text-primary bg-white/60 rounded-lg px-2 py-1.5"
+          class="flex items-center gap-2 text-xs text-primary bg-surface/60 rounded-lg px-2 py-1.5"
           data-testid="pop-uom-capacity-preview"
         >
           <app-icon name="info" [size]="12"></app-icon>
@@ -156,6 +158,41 @@ export interface PopUomCaptureResult {
         </div>
       }
 
+      <!-- F1: contenido por envase (compra = envase 'count' → stock masa/volumen).
+           El catálogo no puede derivar el factor por diferencia de dimensión,
+           así que el usuario teclea cuántas unidades de stock trae cada envase. -->
+      @if (needsManualContent()) {
+        <div data-testid="pop-uom-content-per-package">
+          <label class="block text-[11px] font-medium text-muted mb-1">
+            Contenido por envase
+            <span class="text-destructive">*</span>
+          </label>
+          <app-input
+            type="number"
+            size="sm"
+            min="1"
+            step="1"
+            placeholder="Ej: 250"
+            [ngModel]="contentPerPackage() || null"
+            (ngModelChange)="onContentPerPackageEdit($event)"
+          ></app-input>
+          @if (packagePreview(); as pkg) {
+            <div
+              class="mt-1.5 flex flex-col gap-0.5 text-xs text-primary bg-surface/60 rounded-lg px-2 py-1.5"
+              data-testid="pop-uom-content-preview"
+            >
+              <span class="flex items-center gap-2">
+                <app-icon name="info" [size]="12"></app-icon>
+                1 {{ pkg.purchaseUnit }} = {{ pkg.content }} {{ pkg.stockUnit }}.
+              </span>
+              <span class="text-muted">
+                Costo por {{ pkg.stockUnit }}: {{ pkg.costPerStockLabel }}
+              </span>
+            </div>
+          }
+        </div>
+      }
+
       <!-- Bidirectional cost capture -->
       <div
         class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1"
@@ -163,7 +200,7 @@ export interface PopUomCaptureResult {
       >
         <div>
           <label
-            class="block text-[11px] font-medium text-text-muted mb-1 flex items-center gap-1"
+            class="block text-[11px] font-medium text-muted mb-1 flex items-center gap-1"
           >
             <span
               class="inline-block w-1.5 h-1.5 rounded-full"
@@ -185,7 +222,7 @@ export interface PopUomCaptureResult {
         </div>
         <div>
           <label
-            class="block text-[11px] font-medium text-text-muted mb-1 flex items-center gap-1"
+            class="block text-[11px] font-medium text-muted mb-1 flex items-center gap-1"
           >
             <span
               class="inline-block w-1.5 h-1.5 rounded-full"
@@ -206,7 +243,7 @@ export interface PopUomCaptureResult {
           ></app-input>
         </div>
         <div>
-          <label class="block text-[11px] font-medium text-text-muted mb-1">
+          <label class="block text-[11px] font-medium text-muted mb-1">
             Cantidad del lote
           </label>
           <app-input
@@ -220,7 +257,7 @@ export interface PopUomCaptureResult {
       </div>
 
       <!-- Dynamic cost label / hint -->
-      <p class="text-[11px] text-text-muted">
+      <p class="text-[11px] text-muted">
         <strong>Etiqueta del costo:</strong>
         {{ costInputLabel() }}
       </p>
@@ -282,6 +319,11 @@ export class PopUomCaptureComponent {
   readonly unitCost = signal<number>(0);
   /** Echo of the user's input so the field round-trips nicely. */
   readonly quantity = signal<number>(1);
+  /**
+   * F1: contenido por envase (entero ≥1). 0 = sin capturar / no aplica. Solo
+   * es relevante en el caso count→masa/volumen (ver `needsManualContent`).
+   */
+  readonly contentPerPackage = signal<number>(0);
 
   /**
    * Tracks which cost field the user edited last. Determines which field
@@ -305,6 +347,60 @@ export class PopUomCaptureComponent {
     if (!purchaseId) return 'Costo por unidad de compra';
     const purchase = this.uomCatalog().find((u) => u.id === purchaseId);
     return purchase ? `Costo por ${purchase.code}` : 'Costo por unidad de compra';
+  });
+
+  /** Opciones para los `app-selector` de UoM (compra / stock). */
+  readonly uomOptions = computed<SelectorOption[]>(() =>
+    this.uomCatalog().map((u) => ({
+      value: u.id,
+      label: `${u.code} — ${u.name}`,
+    })),
+  );
+
+  /**
+   * F1: ¿la compra es un envase (dimensión `count`) y el stock es masa/volumen?
+   * En ese caso el catálogo no puede derivar el factor (dimensiones distintas)
+   * y el usuario debe teclear el contenido por envase.
+   */
+  readonly needsManualContent = computed<boolean>(() => {
+    const purchaseId = this.purchaseUomId();
+    const stockId = this.stockUomId();
+    if (!purchaseId || !stockId) return false;
+    const opts = this.uomCatalog();
+    const purchase = opts.find((u) => u.id === purchaseId);
+    const stock = opts.find((u) => u.id === stockId);
+    if (!purchase || !stock) return false;
+    return (
+      purchase.dimension === 'count' &&
+      (stock.dimension === 'mass' || stock.dimension === 'volume')
+    );
+  });
+
+  /**
+   * F1: preview del caso count→masa/volumen: "1 envase = N unidad" + costo por
+   * unidad de stock derivado (costo por envase / contenido). Null hasta que el
+   * usuario teclee un contenido válido (>=1).
+   */
+  readonly packagePreview = computed<{
+    content: number;
+    purchaseUnit: string;
+    stockUnit: string;
+    costPerStockLabel: string;
+  } | null>(() => {
+    if (!this.needsManualContent()) return null;
+    const content = this.contentPerPackage();
+    if (!Number.isFinite(content) || content < 1) return null;
+    const purchase = this.uomCatalog().find((u) => u.id === this.purchaseUomId());
+    const stock = this.uomCatalog().find((u) => u.id === this.stockUomId());
+    if (!purchase || !stock) return null;
+    const unit = this.unitCost();
+    const costPerStock = content > 0 ? unit / content : 0;
+    return {
+      content,
+      purchaseUnit: purchase.code,
+      stockUnit: stock.code,
+      costPerStockLabel: this.currencyService.format(costPerStock || 0),
+    };
   });
 
   readonly unitCapacity = computed<{
@@ -377,6 +473,8 @@ export class PopUomCaptureComponent {
     this.stockUomId.set(this.initialStockUomId());
     this.unitCost.set(this.initialUnitCost() || 0);
     this.quantity.set(this.initialQuantity() > 0 ? this.initialQuantity() : 1);
+    // F1: cada apertura arranca sin contenido por envase (0 = sin capturar).
+    this.contentPerPackage.set(0);
     this.lastEdited.set('unit');
   }
 
@@ -384,13 +482,14 @@ export class PopUomCaptureComponent {
   // UoM handlers
   // ----------------------------------------------------------------
 
-  onPurchaseUomChange(id: number | null): void {
-    this.purchaseUomId.set(id);
+  onPurchaseUomChange(value: number | string | null): void {
+    // `app-selector` emite `string | number | null`; normalizamos a number|null.
+    this.purchaseUomId.set(value == null ? null : Number(value));
     this.emit();
   }
 
-  onStockUomChange(id: number | null): void {
-    this.stockUomId.set(id);
+  onStockUomChange(value: number | string | null): void {
+    this.stockUomId.set(value == null ? null : Number(value));
     this.emit();
   }
 
@@ -439,6 +538,17 @@ export class PopUomCaptureComponent {
    * quantity edits stays coherent (E2E #4: total stays at 30 000 while
    * the unit cost tracks 5 000 → 10 000 → 2 500).
    */
+  /**
+   * F1: el usuario teclea el contenido por envase (entero ≥1). No afecta el
+   * costo por envase (`unitCost`) ni el anclaje bidireccional; solo alimenta el
+   * factor envase→stock y el preview del costo por unidad de stock.
+   */
+  onContentPerPackageEdit(raw: any): void {
+    const n = Math.floor(Number(raw));
+    this.contentPerPackage.set(Number.isFinite(n) && n >= 1 ? n : 0);
+    this.emit();
+  }
+
   onQuantityEdit(raw: any): void {
     const qty = Math.max(1, Math.floor(Number(raw) || 1));
     const anchor = this.lastEdited();
@@ -473,6 +583,9 @@ export class PopUomCaptureComponent {
       stockUomId: this.stockUomId(),
       unitCost: this.unitCost(),
       quantity: this.quantity(),
+      // F1: solo emite un contenido válido cuando el caso lo requiere; en el
+      // resto va 0 y el backend deriva el factor por UoM.
+      contentPerPackage: this.needsManualContent() ? this.contentPerPackage() : 0,
     });
   }
 }

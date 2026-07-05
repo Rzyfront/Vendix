@@ -26,33 +26,29 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
   imports: [NgClass, IconComponent],
   template: `
     @if (isConfigured()) {
-      <div class="relative w-full">
-        <!-- Pill trigger -->
+      <div class="relative">
+        <!-- Pill trigger (compact) -->
         <button
           type="button"
           (click)="toggle()"
-          class="flex items-center gap-2 w-full px-3 py-2 rounded-xl bg-primary/5 border border-primary/20 hover:bg-primary/10 active:scale-[0.99] transition-all min-h-[44px]"
+          class="flex items-center gap-1.5 max-w-[180px] px-2.5 py-2 rounded-xl bg-primary/5 border border-primary/20 hover:bg-primary/10 active:scale-[0.99] transition-all min-h-[40px]"
         >
           <app-icon name="truck" [size]="15" class="text-primary flex-shrink-0"></app-icon>
           <span class="text-sm font-semibold text-text-primary truncate">
             {{ supplierName() || 'Proveedor' }}
           </span>
-          <span class="text-border" aria-hidden="true">&middot;</span>
-          <span class="text-xs font-medium text-text-secondary truncate">
-            {{ locationName() || 'Bodega' }}
-          </span>
           <app-icon
             name="chevron-down"
             [size]="16"
-            class="text-text-secondary ml-auto flex-shrink-0 transition-transform duration-200"
+            class="text-text-secondary flex-shrink-0 transition-transform duration-200"
             [ngClass]="{ 'rotate-180': isOpen() }"
           ></app-icon>
         </button>
 
-        <!-- Detail panel -->
+        <!-- Detail panel (anchored right) -->
         @if (isOpen()) {
           <div
-            class="absolute left-0 right-0 top-full mt-2 bg-surface rounded-xl border border-border shadow-lg z-50 overflow-hidden"
+            class="absolute right-0 top-full mt-2 min-w-[250px] max-w-[calc(100vw-2rem)] bg-surface rounded-xl border border-border shadow-lg z-50 overflow-hidden"
             (click)="$event.stopPropagation()"
           >
             <div class="p-3 space-y-2.5">
@@ -115,7 +111,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
       <button
         type="button"
         (click)="edit.emit()"
-        class="flex items-center gap-2 w-full px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm hover:bg-amber-100 active:scale-95 transition-all min-h-[44px] justify-center"
+        class="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm hover:bg-amber-100 active:scale-95 transition-all min-h-[44px] justify-center"
         aria-label="Configurar orden de compra"
       >
         <app-icon name="settings" [size]="16"></app-icon>

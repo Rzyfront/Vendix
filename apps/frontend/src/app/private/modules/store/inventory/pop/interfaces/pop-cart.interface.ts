@@ -152,6 +152,16 @@ export interface PreBulkData {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * F1 (contenido por envase): cuántas unidades de STOCK trae cada unidad de
+   * COMPRA cuando la compra es un envase (dimensión `count`) y el stock es
+   * masa/volumen — el catálogo NO puede derivar el factor porque las
+   * dimensiones difieren, así que el usuario lo teclea (entero ≥1). Viaja
+   * dentro de `prebulk_data` (sobrevive la copia del carrito) y `pop.component`
+   * lo mapea al item de la orden como `purchase_to_stock_factor`. Undefined en
+   * retail o cuando ambas unidades comparten dimensión (el backend deriva).
+   */
+  contentPerPackage?: number;
 }
 
 /**
@@ -203,6 +213,13 @@ export interface PopCartItem {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * F1 (contenido por envase): factor manual envase→stock (entero ≥1) para el
+   * caso count→masa/volumen. Espejo del campo homónimo en `prebulk_data`; se
+   * mapea al `purchase_to_stock_factor` del item de la orden. Undefined cuando
+   * el backend puede derivar el factor por UoM (misma dimensión) o en retail.
+   */
+  contentPerPackage?: number;
   addedAt: Date;
 }
 
@@ -289,6 +306,12 @@ export interface AddToPopCartRequest {
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
   /**
+   * F1 (contenido por envase): factor manual envase→stock (entero ≥1) para el
+   * caso count→masa/volumen. El carrito lo transporta preferentemente dentro
+   * de `prebulk_data`; este campo top-level queda listo para propagación futura.
+   */
+  contentPerPackage?: number;
+  /**
    * IVA cycle (F3 wiring): override de IVA por línea proveniente del escáner
    * de facturas. `tax_rate` es PORCENTAJE (19), no fracción — el escáner emite
    * fracción y `pop.component.ts` la convierte ×100 antes de llegar aquí.
@@ -347,6 +370,13 @@ export interface PopProductConfigResult {
    */
   purchase_uom_id?: number | null;
   stock_uom_id?: number | null;
+  /**
+   * F1 (contenido por envase): factor manual envase→stock (entero ≥1) capturado
+   * por `pop-uom-capture` en el caso count→masa/volumen. `pop.component` lo
+   * propaga al carrito y lo mapea al `purchase_to_stock_factor` del item de la
+   * orden. Undefined cuando el backend deriva el factor por UoM o en retail.
+   */
+  contentPerPackage?: number;
 }
 
 /**

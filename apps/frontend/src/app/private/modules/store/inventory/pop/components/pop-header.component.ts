@@ -56,44 +56,42 @@ import { InventoryService } from "../../services/inventory.service";
   ],
   template: `
     <div class="px-4 lg:px-6 py-4 lg:py-5 bg-surface rounded-t-xl">
-      <div class="flex flex-col gap-4">
-        <!-- Top Row: Title -->
-        <div class="flex items-center justify-between gap-3">
-          <div class="flex items-center gap-3">
-            <div
-              class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center"
+      <!-- Single row: Title (left) + purchase config (right) -->
+      <div class="flex items-center justify-between gap-3">
+        <!-- Title -->
+        <div class="flex items-center gap-3 min-w-0">
+          <div
+            class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0"
+          >
+            <app-icon
+              name="shopping-bag"
+              [size]="20"
+              class="text-primary lg:hidden"
+            ></app-icon>
+            <app-icon
+              name="shopping-bag"
+              [size]="24"
+              class="text-primary hidden lg:block"
+            ></app-icon>
+          </div>
+          <div class="flex flex-col min-w-0">
+            <h1
+              class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2"
             >
-              <app-icon
-                name="shopping-bag"
-                [size]="20"
-                class="text-primary lg:hidden"
-              ></app-icon>
-              <app-icon
-                name="shopping-bag"
-                [size]="24"
-                class="text-primary hidden lg:block"
-              ></app-icon>
-            </div>
-            <div class="flex flex-col">
-              <h1
-                class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2"
-              >
-                <span class="hidden sm:inline">Vendix</span> POP
-                <app-badge variant="primary" class="text-xs">Compra</app-badge>
-              </h1>
-              <span
-                class="text-xs text-text-secondary font-medium hidden sm:block"
-              >
-                Punto de Compra
-              </span>
-            </div>
+              <span class="hidden sm:inline">Vendix</span> POP
+              <app-badge variant="primary" class="text-xs">Compra</app-badge>
+            </h1>
+            <span
+              class="text-xs text-text-secondary font-medium hidden sm:block"
+            >
+              Punto de Compra
+            </span>
           </div>
         </div>
 
         <!-- Purchase config: desktop mini-card / button (>= xl) -->
-        <div class="hidden xl:flex">
+        <div class="hidden xl:flex flex-shrink-0">
           <app-pop-order-config-card
-            class="w-full"
             [isConfigured]="isConfigured()"
             [supplierName]="getSupplierName()"
             [locationName]="getLocationName()"
@@ -105,9 +103,8 @@ import { InventoryService } from "../../services/inventory.service";
         </div>
 
         <!-- Purchase config: mobile/tablet dropdown / button (< xl) -->
-        <div class="flex xl:hidden">
+        <div class="flex xl:hidden flex-shrink-0">
           <app-pop-order-config-dropdown
-            class="w-full"
             [isConfigured]="isConfigured()"
             [supplierName]="getSupplierName()"
             [locationName]="getLocationName()"

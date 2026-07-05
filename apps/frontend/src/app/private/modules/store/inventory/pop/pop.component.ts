@@ -463,6 +463,8 @@ export class PopComponent implements OnInit, OnDestroy {
                   lot_info: result.lot_info,
                   purchase_uom_id: result.purchase_uom_id,
                   stock_uom_id: result.stock_uom_id,
+                  // F1: contenido por envase (factor manual envase→stock).
+                  contentPerPackage: result.contentPerPackage,
                 })
                 .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
             });
@@ -523,6 +525,8 @@ export class PopComponent implements OnInit, OnDestroy {
             lot_info: result.lot_info,
             purchase_uom_id: result.purchase_uom_id,
             stock_uom_id: result.stock_uom_id,
+            // F1: contenido por envase (factor manual envase→stock).
+            contentPerPackage: result.contentPerPackage,
           })
           .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       });
@@ -557,6 +561,8 @@ export class PopComponent implements OnInit, OnDestroy {
           // el factor al recibir).
           purchase_uom_id: result.purchase_uom_id,
           stock_uom_id: result.stock_uom_id,
+          // F1: contenido por envase (factor manual envase→stock).
+          contentPerPackage: result.contentPerPackage,
         })
         .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
@@ -1276,6 +1282,8 @@ export class PopComponent implements OnInit, OnDestroy {
     const userId = this.authFacade.getUserId() || 0;
 
     const request = cartToPurchaseOrderRequest(draftState, userId, undefined);
+    // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
+    this.attachPurchaseToStockFactor(request, draftState);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1407,6 +1415,8 @@ export class PopComponent implements OnInit, OnDestroy {
     const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
+    // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
+    this.attachPurchaseToStockFactor(request, state);
 
     this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
@@ -1430,6 +1440,8 @@ export class PopComponent implements OnInit, OnDestroy {
     const userId = this.authFacade.getUserId() || 0;
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
+    // F1: mapea el contenido por envase capturado → purchase_to_stock_factor.
+    this.attachPurchaseToStockFactor(request, state);
 
     this.toastService.info('Creando orden e ingresando inventario...');
 
@@ -1493,6 +1505,32 @@ export class PopComponent implements OnInit, OnDestroy {
           error.error?.message || error.message || 'Error al crear la orden';
         this.toastService.error(errorMsg);
       },
+    });
+  }
+
+  /**
+   * F1 (contenido por envase): adjunta `purchase_to_stock_factor` a cada línea
+   * del request de orden. El `pop-cart.service` arma el `PopCartItem` con
+   * campos explícitos (no propaga columnas nuevas top-level), así que el factor
+   * viaja dentro de `prebulk_data.contentPerPackage` (productos nuevos = flujo
+   * principal de alta de insumo). Aquí lo leemos por índice (mapeo 1:1 con
+   * `cartToPurchaseOrderRequest`) y lo escribimos con el nombre EXACTO que
+   * espera el backend. Solo se adjunta con un contenido válido (>=1); en el
+   * resto el backend deriva el factor por UoM (misma dimensión).
+   */
+  private attachPurchaseToStockFactor(
+    request: CreatePurchaseOrderRequest,
+    state: PopCartState,
+  ): void {
+    request.items.forEach((reqItem, i) => {
+      const cartItem: any = state.items[i];
+      if (!cartItem) return;
+      const raw =
+        cartItem.prebulk_data?.contentPerPackage ?? cartItem.contentPerPackage;
+      const content = Number(raw);
+      if (Number.isFinite(content) && content >= 1) {
+        (reqItem as any).purchase_to_stock_factor = Math.round(content);
+      }
     });
   }
 

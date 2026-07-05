@@ -136,8 +136,14 @@ export class ProductsService {
    * cliente. Por eso se sobrescribe cualquier purchase_to_stock_factor enviado.
    *
    * Reglas:
-   * - Requiere que ambas unidades compartan la MISMA dimension (no se puede
-   *   convertir, p.ej., volumen a peso) → BadRequest si difieren.
+   * - Caso cross-dimension "contenido por envase": si la unidad de compra es
+   *   discreta (`count`, p.ej. una bolsita) y la de stock es continua
+   *   (`mass`/`volume`, p.ej. g/ml), el factor NO se puede derivar de
+   *   factor_to_base. El operador lo envía manualmente (`manual_factor`, entero
+   *   >= 1 = contenido por envase) → se respeta y se OMITE la validación de
+   *   misma-dimensión.
+   * - Resto de casos: requiere que ambas unidades compartan la MISMA dimension
+   *   (no se puede convertir, p.ej., volumen a peso) → BadRequest si difieren.
    * - factor = round(purchase.factor_to_base / stock.factor_to_base).
    * - Si solo viene uno de los dos FKs (o ninguno), NO se toca el factor:
    *   devuelve undefined y el caller deja el valor existente intacto.
@@ -145,6 +151,7 @@ export class ProductsService {
   private async derivePurchaseToStockFactor(
     stock_uom_id: number | null | undefined,
     purchase_uom_id: number | null | undefined,
+    manual_factor?: number | null,
   ): Promise<number | undefined> {
     if (
       stock_uom_id === undefined ||
@@ -168,6 +175,21 @@ export class ProductsService {
         'Unidad de medida no encontrada en el catálogo',
         { stock_uom_id, purchase_uom_id },
       );
+    }
+
+    // Cross-dimension "contenido por envase": compra `count` (envase) → stock
+    // `mass`/`volume` (contenido). El factor es manual; se respeta sin validar
+    // misma-dimensión (no es derivable del catálogo).
+    const isCrossDimensionPackaging =
+      purchaseUom.dimension === 'count' &&
+      (stockUom.dimension === 'mass' || stockUom.dimension === 'volume');
+    if (
+      manual_factor != null &&
+      Number.isInteger(manual_factor) &&
+      manual_factor >= 1 &&
+      isCrossDimensionPackaging
+    ) {
+      return manual_factor;
     }
 
     if (stockUom.dimension !== purchaseUom.dimension) {
@@ -611,6 +633,7 @@ export class ProductsService {
       const derivedFactor = await this.derivePurchaseToStockFactor(
         sanitizedDto.stock_uom_id,
         sanitizedDto.purchase_uom_id,
+        sanitizedDto.purchase_to_stock_factor,
       );
 
       const result = await this.prisma.$transaction(
@@ -2009,6 +2032,7 @@ export class ProductsService {
         ? await this.derivePurchaseToStockFactor(
             effectiveStockUomId,
             effectivePurchaseUomId,
+            sanitizedDto.purchase_to_stock_factor,
           )
         : undefined;
 

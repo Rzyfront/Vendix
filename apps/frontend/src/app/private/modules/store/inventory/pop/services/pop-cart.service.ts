@@ -514,6 +514,8 @@ export class PopCartService {
         quantity: newQuantity,
         lot_info: request.lot_info || existingItem.lot_info,
         notes: request.notes || existingItem.notes,
+        contentPerPackage:
+          request.contentPerPackage ?? existingItem.contentPerPackage,
       };
       this.recalculateItemTotals(
         updatedItems[existingItemIndex],
@@ -542,6 +544,8 @@ export class PopCartService {
         // Fase 4: UoM preseleccionadas (scanner uom_hint) — sugerencia.
         purchase_uom_id: request.purchase_uom_id ?? null,
         stock_uom_id: request.stock_uom_id ?? null,
+        // Contenido por envase (factor manual count→masa/volumen) — flujo configure.
+        contentPerPackage: request.contentPerPackage,
         addedAt: new Date(),
       };
       this.recalculateItemTotals(

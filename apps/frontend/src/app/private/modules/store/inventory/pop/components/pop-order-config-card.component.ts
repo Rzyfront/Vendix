@@ -16,7 +16,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
   template: `
     @if (isConfigured()) {
       <div
-        class="flex items-center gap-3 px-3 py-2 bg-primary/5 border border-primary/20 rounded-xl min-h-[44px] w-full"
+        class="flex items-center gap-3 px-3 py-2 bg-primary/5 border border-primary/20 rounded-xl min-h-[44px]"
       >
         <!-- Proveedor -->
         <div class="flex items-center gap-1.5 min-w-0">
@@ -74,7 +74,7 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
       <button
         type="button"
         (click)="edit.emit()"
-        class="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm hover:bg-amber-100 active:scale-95 transition-all min-h-[44px] w-full justify-center"
+        class="flex items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-700 text-sm hover:bg-amber-100 active:scale-95 transition-all min-h-[44px] justify-center"
         aria-label="Configurar orden de compra"
       >
         <app-icon name="settings" [size]="16"></app-icon>

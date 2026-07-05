@@ -111,7 +111,7 @@ export type { PopProductConfigResult };
                   </p>
                   <div class="flex items-center gap-3 mt-0.5">
                     @if (product()?.code) {
-                      <span class="text-xs text-text-muted font-mono"
+                      <span class="text-xs text-muted font-mono"
                         >SKU: {{ product()?.code }}</span
                       >
                     }
@@ -136,7 +136,7 @@ export type { PopProductConfigResult };
                 data-testid="pop-create-identity"
               >
                 <p
-                  class="text-[10px] text-text-muted uppercase font-bold tracking-wider"
+                  class="text-[10px] text-muted uppercase font-bold tracking-wider"
                 >
                   Identidad del producto
                 </p>
@@ -343,13 +343,13 @@ export type { PopProductConfigResult };
                 <div class="p-3 bg-muted/20 rounded-xl border border-border/50">
                   <div class="flex items-start gap-2">
                     <div class="flex-1">
-                      <input
+                      <app-input
                         type="text"
+                        size="sm"
                         [(ngModel)]="attr.name"
                         placeholder="Nombre (ej: Color)"
-                        (blur)="generateNewVariants()"
-                        class="w-full px-2.5 py-1.5 text-sm rounded-lg border border-border bg-surface text-text-primary placeholder:text-text-muted focus:ring-1 focus:ring-primary focus:border-primary outline-none"
-                      />
+                        (inputBlur)="generateNewVariants()"
+                      ></app-input>
                     </div>
                     <button
                       (click)="removeAttribute(variantAttributes.indexOf(attr))"
@@ -383,7 +383,7 @@ export type { PopProductConfigResult };
                       }
                       <input
                         type="text"
-                        class="flex-1 border-none p-0 text-sm focus:ring-0 focus:outline-none min-w-[80px] bg-transparent text-text-primary placeholder:text-text-muted"
+                        class="flex-1 border-none p-0 text-sm focus:ring-0 focus:outline-none min-w-[80px] bg-transparent text-text-primary placeholder:text-muted"
                         [placeholder]="
                           attr.values.length === 0
                             ? 'Escribe y presiona Enter'
@@ -426,7 +426,7 @@ export type { PopProductConfigResult };
                   </div>
                   <button
                     (click)="generateNewVariants()"
-                    class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
+                    class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg bg-primary text-[var(--color-text-on-primary)] hover:bg-primary/90 transition-colors"
                   >
                     <app-icon name="zap" [size]="12"></app-icon> Generar
                   </button>
@@ -436,7 +436,7 @@ export type { PopProductConfigResult };
               <!-- Generated Variants List -->
               @if (generatedVariants.length > 0) {
                 <div class="flex flex-col gap-1.5">
-                  <span class="text-xs font-medium text-text-muted px-1">
+                  <span class="text-xs font-medium text-muted px-1">
                     {{ generatedVariants.length }} variantes generadas
                   </span>
                   @for (variant of generatedVariants; track $index) {
@@ -458,18 +458,19 @@ export type { PopProductConfigResult };
                         >
                           {{ variant.name }}
                         </p>
-                        <p class="text-[10px] text-text-muted font-mono">
+                        <p class="text-[10px] text-muted font-mono">
                           {{ variant.sku }}
                         </p>
                       </div>
-                      <div class="flex-shrink-0">
-                        <input
+                      <div class="flex-shrink-0 w-24">
+                        <app-input
                           type="number"
-                          [(ngModel)]="variant.cost_price"
+                          size="sm"
+                          [currency]="true"
+                          prefix="$"
                           min="0"
-                          step="0.01"
-                          class="w-20 px-2 py-1 text-xs text-right rounded-lg border border-border bg-surface text-text-primary focus:ring-1 focus:ring-primary focus:border-primary outline-none"
-                        />
+                          [(ngModel)]="variant.cost_price"
+                        ></app-input>
                       </div>
                     </div>
                   }
@@ -477,7 +478,7 @@ export type { PopProductConfigResult };
               }
 
               @if (variantAttributes.length === 0) {
-                <p class="text-sm text-text-muted text-center py-4">
+                <p class="text-sm text-muted text-center py-4">
                   Agrega atributos para crear variantes del producto.
                 </p>
               }
@@ -487,7 +488,7 @@ export type { PopProductConfigResult };
             <div class="flex flex-col gap-2">
               @if (!isEditing()) {
                 <div class="flex items-center justify-between px-1 pb-1">
-                  <span class="text-xs text-text-muted">
+                  <span class="text-xs text-muted">
                     {{ selectedVariantIds.size }} de
                     {{ product()?.product_variants?.length }} seleccionadas
                   </span>
@@ -528,7 +529,7 @@ export type { PopProductConfigResult };
                       <app-icon
                         name="check"
                         [size]="12"
-                        class="text-white"
+                        class="text-[var(--color-text-on-primary)]"
                       ></app-icon>
                     }
                   </div>
@@ -539,14 +540,14 @@ export type { PopProductConfigResult };
                     <app-icon
                       name="layers"
                       [size]="18"
-                      class="text-text-muted"
+                      class="text-muted"
                     ></app-icon>
                   </div>
                   <div class="flex-1 min-w-0">
                     <p class="font-medium text-sm text-text-primary truncate">
                       {{ getVariantLabel(variant) }}
                     </p>
-                    <p class="text-xs text-text-muted font-mono mt-0.5">
+                    <p class="text-xs text-muted font-mono mt-0.5">
                       SKU: {{ variant.sku }}
                     </p>
                   </div>
@@ -562,7 +563,7 @@ export type { PopProductConfigResult };
                         [class]="
                           isVariantLowStock(variant)
                             ? 'text-warning'
-                            : 'text-text-muted'
+                            : 'text-muted'
                         "
                       >
                         {{ variant.stock_quantity }} disp.
@@ -573,7 +574,7 @@ export type { PopProductConfigResult };
               }
 
               @if (!product()?.product_variants?.length) {
-                <p class="text-sm text-text-muted text-center py-4">
+                <p class="text-sm text-muted text-center py-4">
                   Este producto no tiene variantes configuradas.
                 </p>
               }
@@ -623,7 +624,7 @@ export type { PopProductConfigResult };
               </div>
             </div>
 
-            <p class="text-xs text-text-muted">
+            <p class="text-xs text-muted">
               Estos datos se enviarán al proveedor con la orden de compra.
             </p>
           </div>
@@ -806,6 +807,14 @@ export class PopProductConfigModalComponent {
   readonly capturedUnitCost = signal<number | null>(null);
   readonly capturedQuantity = signal<number | null>(null);
   /**
+   * F1 (contenido por envase): factor manual envase→stock capturado por
+   * `<app-pop-uom-capture>` en el caso count→masa/volumen. `null` = sin capturar
+   * / no aplica. `onConfirm` lo propaga (a `prebulkData` en create, a
+   * `PopProductConfigResult` en configure) y `pop.component` lo mapea al
+   * `purchase_to_stock_factor` del item de la orden.
+   */
+  readonly capturedContentPerPackage = signal<number | null>(null);
+  /**
    * Fase 3: is the product we are configuring a pure ingredient?
    * `is_ingredient && !is_sellable`. Used to switch the modal to the
    * unit-aware cost-capture mode.
@@ -813,10 +822,14 @@ export class PopProductConfigModalComponent {
   readonly isPureIngredient = computed(() => {
     const p: any = this.product();
     if (!p) return false;
-    const sellable = p.is_sellable === undefined || p.is_sellable === null
-      ? true
-      : !!p.is_sellable;
-    return !!p.is_ingredient && !sellable;
+    if (!p.is_ingredient) return false;
+    // F3 (hardening): antes se asumía `is_sellable=true` cuando llegaba
+    // undefined/null y eso OCULTABA la captura de insumo (bug). Ahora solo un
+    // producto EXPLÍCITAMENTE vendible (`is_sellable === true`, p.ej. agua dual)
+    // se trata como no-insumo; un insumo con `is_sellable` sin normalizar
+    // (undefined/null) muestra la captura y permite Confirmar. Retail
+    // (`is_ingredient` falsy) sigue oculto — sin regresión.
+    return p.is_sellable !== true;
   });
   /**
    * Effective ingredient mode — drives the venta/consumo UoM switch.
@@ -830,6 +843,25 @@ export class PopProductConfigModalComponent {
     if (!this.storeSupportsIngredients()) return false;
     if (this.createMode()) return this.isIngredient();
     return this.isPureIngredient();
+  });
+  /**
+   * F1: ¿la selección de UoM exige teclear el contenido por envase? Verdadero
+   * cuando la compra es un envase (dimensión `count`) y el stock es
+   * masa/volumen — el catálogo no puede derivar el factor. Espeja la lógica de
+   * `pop-uom-capture.needsManualContent` para gatear `canConfirm` en create.
+   */
+  readonly needsManualContentPerPackage = computed<boolean>(() => {
+    const purchaseId = this.purchaseUomId();
+    const stockId = this.stockUomId();
+    if (!purchaseId || !stockId) return false;
+    const opts = this.uomCatalog();
+    const purchase = opts.find((u) => u.id === purchaseId);
+    const stock = opts.find((u) => u.id === stockId);
+    if (!purchase || !stock) return false;
+    return (
+      purchase.dimension === 'count' &&
+      (stock.dimension === 'mass' || stock.dimension === 'volume')
+    );
   });
   /**
    * Fase 3: live preview of the purchase→stock factor the backend will
@@ -958,6 +990,8 @@ export class PopProductConfigModalComponent {
     // Limpiar el costo/cantidad capturados de un producto/sesión previa.
     this.capturedUnitCost.set(null);
     this.capturedQuantity.set(null);
+    // F1: limpiar el contenido por envase capturado.
+    this.capturedContentPerPackage.set(null);
     const p: any = this.product();
     if (!p) return;
     if (!this.isPureIngredient() || !this.storeSupportsIngredients()) {
@@ -1100,6 +1134,10 @@ export class PopProductConfigModalComponent {
     // costo del insumo (bug: se perdía). Create mode además espeja el form.
     this.capturedUnitCost.set(result.unitCost);
     this.capturedQuantity.set(result.quantity);
+    // F1: contenido por envase (solo válido en count→masa/volumen; 0 = no aplica).
+    this.capturedContentPerPackage.set(
+      result.contentPerPackage >= 1 ? result.contentPerPackage : null,
+    );
     if (this.createMode()) {
       // The sub-component is the source of truth for ingredient cost AND
       // batch quantity (bidirectional capture). Keep the identity form in
@@ -1134,7 +1172,19 @@ export class PopProductConfigModalComponent {
       // are mandatory. Variant management is hidden in create mode.
       if (this.identityForm.invalid) return false;
       if (this.isIngredient()) {
-        return this.purchaseUomId() != null && this.stockUomId() != null;
+        if (this.purchaseUomId() == null || this.stockUomId() == null) {
+          return false;
+        }
+        // F1: en el caso count→masa/volumen el factor NO se puede derivar del
+        // catálogo, así que el contenido por envase es obligatorio. En el resto
+        // de casos no se exige (el backend deriva por UoM).
+        if (
+          this.needsManualContentPerPackage() &&
+          !((this.capturedContentPerPackage() ?? 0) >= 1)
+        ) {
+          return false;
+        }
+        return true;
       }
       return true;
     }
@@ -1144,6 +1194,15 @@ export class PopProductConfigModalComponent {
     if (this.hasVariantsToggle() && this.selectedVariantIds.size === 0)
       return false;
     return true;
+  }
+
+  /**
+   * F1: contenido por envase validado (entero ≥1) o `undefined` cuando no
+   * aplica. Reutilizado por todas las ramas de `onConfirm`.
+   */
+  private resolvedContentPerPackage(): number | undefined {
+    const c = this.capturedContentPerPackage();
+    return c != null && c >= 1 ? Math.round(c) : undefined;
   }
 
   onConfirm(): void {
@@ -1176,6 +1235,12 @@ export class PopProductConfigModalComponent {
         // UoM FKs only travel for ingredients; retail stays null.
         purchase_uom_id: ingredient ? this.purchaseUomId() : null,
         stock_uom_id: ingredient ? this.stockUomId() : null,
+        // F1: contenido por envase (solo insumo, caso count→masa/volumen).
+        // Viaja dentro de prebulkData porque el carrito copia `prebulk_data`
+        // completo; `pop.component` lo mapea a `purchase_to_stock_factor`.
+        contentPerPackage: ingredient
+          ? this.resolvedContentPerPackage()
+          : undefined,
         // F3: impuesto sugerido (neto ya aplastado en unitCost del form).
         tax_category_ids: taxCategoryIds,
       };
@@ -1265,6 +1330,7 @@ export class PopProductConfigModalComponent {
               lot_info: lotInfo,
               purchase_uom_id: this.purchaseUomId(),
               stock_uom_id: this.stockUomId(),
+              contentPerPackage: this.resolvedContentPerPackage(),
             });
 
             this.creatingVariants.set(false);
@@ -1302,6 +1368,7 @@ export class PopProductConfigModalComponent {
           lot_info: lotInfo,
           purchase_uom_id: this.purchaseUomId(),
           stock_uom_id: this.stockUomId(),
+          contentPerPackage: this.resolvedContentPerPackage(),
         });
       } else {
         this.confirmed.emit({
@@ -1315,6 +1382,7 @@ export class PopProductConfigModalComponent {
           lot_info: lotInfo,
           purchase_uom_id: this.purchaseUomId(),
           stock_uom_id: this.stockUomId(),
+          contentPerPackage: this.resolvedContentPerPackage(),
         });
       }
     } else {
@@ -1328,6 +1396,7 @@ export class PopProductConfigModalComponent {
         lot_info: lotInfo,
         purchase_uom_id: this.purchaseUomId(),
         stock_uom_id: this.stockUomId(),
+        contentPerPackage: this.resolvedContentPerPackage(),
       });
     }
 
