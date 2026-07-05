@@ -483,16 +483,23 @@ export class ProviderAvailabilityComponent {
    * the modal's two-section layout. Pulled out as a method to work around
    * the Angular template-parser bug with arrow functions in `@let`.
    */
-  getGroupedSlots(): {
+  /**
+   * Group the busy/free slot list into morning/afternoon for the detail
+   * modal. Promoted to a `computed` so the template re-renders when the
+   * underlying `detailSlots` re-evaluates after the calendar fetch — when
+   * it was a plain method, Angular only re-ran the call when the modal
+   * instance itself was dirty, missing the async update.
+   */
+  readonly groupedSlots = computed<{
     morning: Array<{ time: string; status: 'busy' | 'free' }>;
     afternoon: Array<{ time: string; status: 'busy' | 'free' }>;
-  } {
+  }>(() => {
     const all = this.detailSlots();
     return {
       morning: all.filter((entry) => entry.time.includes('AM')),
       afternoon: all.filter((entry) => entry.time.includes('PM')),
     };
-  }
+  });
 
   /**
    * Returns a per-hour busy/free breakdown for a given provider + date, used
