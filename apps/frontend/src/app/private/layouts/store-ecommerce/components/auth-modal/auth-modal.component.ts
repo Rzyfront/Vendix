@@ -114,64 +114,9 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           </button>
         </div>
 
-        <!-- Error Message -->
-        @if (errorMessage()) {
-          <div
-            class="p-4 rounded-lg bg-red-50 border border-red-200"
-            role="alert"
-          >
-            <div class="flex items-start gap-3">
-              <app-icon
-                name="alert-circle"
-                [size]="20"
-                class="text-red-500 mt-0.5 flex-shrink-0"
-              ></app-icon>
-              <div class="flex-1">
-                <p class="text-sm font-medium text-red-800">{{ errorTitle() }}</p>
-                <p class="text-sm text-red-700 mt-1">{{ errorMessage() }}</p>
-              </div>
-            </div>
-          </div>
-        }
-
-        <!-- Customer account claim CTA — surfaced when the register
-             endpoint reports AUTH_CUSTOMER_CLAIMABLE_001 (POS / backoffice
-             pre-existing customer with the same email). Triggers the
-             customer-only password reset flow. -->
-        @if (claimableEmail()) {
-          <div
-            class="p-4 rounded-lg bg-amber-50 border border-amber-200"
-            role="status"
-          >
-            <div class="flex items-start gap-3">
-              <app-icon
-                name="key-round"
-                [size]="20"
-                class="text-amber-600 mt-0.5 flex-shrink-0"
-              ></app-icon>
-              <div class="flex-1">
-                <p class="text-sm font-medium text-amber-900">
-                  ¿Ya tienes cuenta con este correo?
-                </p>
-                <p class="text-sm text-amber-800 mt-1">
-                  Te enviamos un link para activar tu contraseña y vincular
-                  tu cuenta a esta tienda.
-                </p>
-                <app-button
-                  class="mt-3"
-                  variant="primary"
-                  size="sm"
-                  [disabled]="recoveryPending()"
-                  [loading]="recoveryPending()"
-                  [showTextWhileLoading]="true"
-                  (onClick)="onStartRecovery()"
-                >
-                  {{ recoveryPending() ? 'Enviando...' : 'Enviar link de activación' }}
-                </app-button>
-              </div>
-            </div>
-          </div>
-        }
+        <!-- Error Message banner removed: the recovery CTA below replaces it
+             for the customer-claimable case, and for other errors the
+             inline field-level validators are sufficient. -->
 
         <form
           id="authForm"
@@ -233,6 +178,49 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
                     especial
                   </li>
                 </ul>
+              </div>
+            </div>
+          }
+
+          <!-- Customer account claim CTA — surfaces when the register
+               endpoint reports AUTH_CUSTOMER_CLAIMABLE_001 (POS / backoffice
+               pre-existing customer with the same email). Triggers the
+               customer-only password reset flow. -->
+          @if (claimableEmail()) {
+            <div
+              class="p-4 rounded-lg bg-amber-50 border border-amber-200"
+              role="status"
+            >
+              <div class="flex items-start gap-3">
+                <app-icon
+                  name="key-round"
+                  [size]="20"
+                  class="text-amber-600 mt-0.5 flex-shrink-0"
+                ></app-icon>
+                <div class="flex-1">
+                  <p class="text-sm font-medium text-amber-900">
+                    ¿Ya tienes cuenta con este correo?
+                  </p>
+                  <p class="text-sm text-amber-800 mt-1">
+                    Te enviamos un link para activar tu contraseña y
+                    vincular tu cuenta a esta tienda.
+                  </p>
+                  <app-button
+                    class="mt-3"
+                    variant="primary"
+                    size="sm"
+                    [disabled]="recoveryPending()"
+                    [loading]="recoveryPending()"
+                    [showTextWhileLoading]="true"
+                    (onClick)="onStartRecovery()"
+                  >
+                    {{
+                      recoveryPending()
+                        ? 'Enviando...'
+                        : 'Enviar link de activación'
+                    }}
+                  </app-button>
+                </div>
               </div>
             </div>
           }
