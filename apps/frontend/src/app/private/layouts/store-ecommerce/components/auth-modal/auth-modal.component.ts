@@ -20,6 +20,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { AuthFacade } from '../../../../../core/store';
 import { TenantFacade } from '../../../../../core/store';
+import { AuthService } from '../../../../../core/services/auth.service';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -128,6 +129,45 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
               <div class="flex-1">
                 <p class="text-sm font-medium text-red-800">{{ errorTitle() }}</p>
                 <p class="text-sm text-red-700 mt-1">{{ errorMessage() }}</p>
+              </div>
+            </div>
+          </div>
+        }
+
+        <!-- Customer account claim CTA — surfaced when the register
+             endpoint reports AUTH_CUSTOMER_CLAIMABLE_001 (POS / backoffice
+             pre-existing customer with the same email). Triggers the
+             customer-only password reset flow. -->
+        @if (claimableEmail()) {
+          <div
+            class="p-4 rounded-lg bg-amber-50 border border-amber-200"
+            role="status"
+          >
+            <div class="flex items-start gap-3">
+              <app-icon
+                name="key-round"
+                [size]="20"
+                class="text-amber-600 mt-0.5 flex-shrink-0"
+              ></app-icon>
+              <div class="flex-1">
+                <p class="text-sm font-medium text-amber-900">
+                  ¿Ya tienes cuenta con este correo?
+                </p>
+                <p class="text-sm text-amber-800 mt-1">
+                  Te enviamos un link para activar tu contraseña y vincular
+                  tu cuenta a esta tienda.
+                </p>
+                <app-button
+                  class="mt-3"
+                  variant="primary"
+                  size="sm"
+                  [disabled]="recoveryPending()"
+                  [loading]="recoveryPending()"
+                  [showTextWhileLoading]="true"
+                  (onClick)="onStartRecovery()"
+                >
+                  {{ recoveryPending() ? 'Enviando...' : 'Enviar link de activación' }}
+                </app-button>
               </div>
             </div>
           </div>
@@ -267,6 +307,15 @@ export class AuthModalComponent {
   readonly errorMessage = signal<string | null>(null);
   readonly errorTitle = signal('Error de autenticación');
 
+  /**
+   * Set when the backend returns AUTH_CUSTOMER_CLAIMABLE_001 — the email
+   * the user tried to register is already on file as a POS / backoffice
+   * customer. The UI then offers a one-click password reset to claim
+   * the existing account instead of dead-ending with a generic 409.
+   */
+  readonly claimableEmail = signal<string | null>(null);
+  readonly recoveryPending = signal(false);
+
   // Legal Documents state
   readonly pendingDocuments = signal<PendingDocument[]>([]);
   readonly acceptedDocuments = signal<Record<number, boolean>>({});
@@ -275,6 +324,7 @@ export class AuthModalComponent {
 
   private fb = inject(FormBuilder);
   private authFacade = inject(AuthFacade);
+  private authService = inject(AuthService);
   private tenantFacade = inject(TenantFacade);
   private legalService = inject(LegalService);
   private destroyRef = inject(DestroyRef);
@@ -424,6 +474,21 @@ export class AuthModalComponent {
         title: 'Correo ya registrado',
         message:
           'Ya existe una cuenta con este correo. Intenta iniciar sesión.',
+      };
+    }
+
+    // Customer account claimable via password reset (POS / backoffice
+    // pre-existing customer). Surface a recovery action instead of
+    // dead-ending the register flow.
+    if (
+      errorLower.includes('auth_customer_claimable_001') ||
+      errorLower.includes('recoverable via password reset')
+    ) {
+      this.claimableEmail.set(this.authForm.get('email')?.value ?? null);
+      return {
+        title: 'Ya tienes cuenta con este correo',
+        message:
+          'Detectamos que este correo ya está registrado como cliente. Te enviamos un link para que actives tu contraseña y vincules tu cuenta con esta tienda.',
       };
     }
 
@@ -586,10 +651,44 @@ export class AuthModalComponent {
 
   onClose(): void {
     this.errorMessage.set(null);
+    this.claimableEmail.set(null);
+    this.recoveryPending.set(false);
     this.closed.emit();
     this.authForm.reset();
     this.pendingDocuments.set([]);
     this.acceptedDocuments.set({});
+  }
+
+  /**
+   * Triggered by the "¿Recuperar contraseña?" CTA that the modal surfaces
+   * when the register endpoint reports AUTH_CUSTOMER_CLAIMABLE_001. Fires
+   * the customer-only password-reset request and shows the same generic
+   * toast regardless of whether the email is on file, to avoid enumeration.
+   */
+  onStartRecovery(): void {
+    const email = this.claimableEmail() ?? this.authForm.get('email')?.value;
+    const storeId = this.tenantFacade.getCurrentStoreId();
+    if (!email || !storeId) return;
+
+    this.recoveryPending.set(true);
+    this.authService.forgotCustomerPassword(email, storeId).subscribe({
+      next: () => {
+        this.recoveryPending.set(false);
+        this.toast.success(
+          'Si el correo está registrado como cliente, te enviamos un link para activar tu cuenta.',
+          'Revisa tu bandeja de entrada',
+        );
+      },
+      error: () => {
+        this.recoveryPending.set(false);
+        // Same generic message — backend intentionally doesn't reveal
+        // whether the email exists. Don't leak via the error either.
+        this.toast.success(
+          'Si el correo está registrado como cliente, te enviamos un link para activar tu cuenta.',
+          'Revisa tu bandeja de entrada',
+        );
+      },
+    });
   }
 
   onSubmit(): void {
