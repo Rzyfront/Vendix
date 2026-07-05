@@ -7,6 +7,7 @@ import {
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
+import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import {
@@ -19,6 +20,7 @@ import { PayrollService } from '../../../services/payroll.service';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import {
   SelectorComponent,
   SelectorOption,
@@ -35,6 +37,7 @@ import { EmployeeFiscalProfileFormComponent } from '../employee-fiscal-profile/e
     ModalComponent,
     ButtonComponent,
     InputComponent,
+    IconComponent,
     SelectorComponent,
     EmployeeFiscalProfileFormComponent,
   ],
@@ -318,6 +321,18 @@ import { EmployeeFiscalProfileFormComponent } from '../employee-fiscal-profile/e
         <div
           class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
         >
+          @if (employee()) {
+            <app-button
+              class="mr-auto"
+              variant="outline"
+              size="sm"
+              (clicked)="onGenerateForm220()"
+            >
+              <app-icon name="file-text" [size]="16" slot="icon"></app-icon>
+              Certificado 220
+            </app-button>
+          }
+
           <app-button variant="outline" size="sm" (clicked)="onClose()">
             Cerrar
           </app-button>
@@ -347,6 +362,7 @@ export class EmployeeDetailComponent {
   private payrollService = inject(PayrollService);
   private fb = inject(FormBuilder);
   private store = inject(Store);
+  private router = inject(Router);
 
   employeeForm: FormGroup = this.fb.group({});
   readonly loading = toSignal(this.store.select(selectEmployeesLoading), {
@@ -537,6 +553,26 @@ export class EmployeeDetailComponent {
 
   onClose() {
     this.isOpenChange.emit(false);
+  }
+
+  /**
+   * Navigate to the withholding-tax module's "Certificados" viewer to generate
+   * the employee's "Certificado de Ingresos y Retenciones" (Formulario 220 DIAN).
+   * The employee id + tax year are passed as query params so a follow-up can
+   * auto-open the certificate; the viewer currently opens on its Certificados tab.
+   */
+  onGenerateForm220(): void {
+    const emp = this.employee();
+    if (!emp) return;
+    this.router.navigate(['/admin/accounting/taxes/withholding'], {
+      queryParams: {
+        tab: 'certificates',
+        kind: 'employee',
+        employeeId: emp.id,
+        year: new Date().getFullYear(),
+      },
+    });
+    this.onClose();
   }
 
   getStatusLabel(status: string): string {

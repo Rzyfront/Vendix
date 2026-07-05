@@ -120,6 +120,17 @@ export const reportsRoutes: Routes = [
           { path: 'financial-refunds', loadComponent: () => import('./pages/generic-report-page/generic-report-page.component').then(c => c.GenericReportPageComponent), data: { reportId: 'financial-refunds' } },
         ],
       },
+      {
+        path: 'payroll',
+        loadComponent: () => import('./components/reports-shell/reports-shell.component').then(c => c.ReportsShellComponent),
+        data: { categoryId: 'payroll' },
+        children: [
+          { path: '', redirectTo: 'payroll-summary', pathMatch: 'full' },
+          { path: 'payroll-summary', loadComponent: () => import('./pages/payroll/payroll-summary-report/payroll-summary-report.component').then(c => c.PayrollSummaryReportComponent) },
+          { path: 'payroll-by-employee', loadComponent: () => import('./pages/payroll/payroll-by-employee-report/payroll-by-employee-report.component').then(c => c.PayrollByEmployeeReportComponent) },
+          { path: 'payroll-provisions', loadComponent: () => import('./pages/payroll/payroll-provisions-report/payroll-provisions-report.component').then(c => c.PayrollProvisionsReportComponent) },
+        ],
+      },
     ],
   },
 ];

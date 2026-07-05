@@ -159,7 +159,9 @@ export class MenuFilterService {
     'Períodos de Nómina': 'payroll_runs',
     'Configuración Nómina': 'payroll_settings',
     Liquidaciones: 'payroll_settlements',
+    Novedades: 'payroll_novelties',
     Adelantos: 'payroll_advances',
+    PILA: 'payroll_pila',
 
     // Legal / Tax modules
     Retenciones: 'accounting_withholding_tax',
