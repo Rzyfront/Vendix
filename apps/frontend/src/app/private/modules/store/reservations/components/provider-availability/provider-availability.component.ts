@@ -458,9 +458,11 @@ export class ProviderAvailabilityComponent {
 
   openDetail(provider: ProviderAvailabilityRow, date: string): void {
     this.selectedDetail.set({ provider, date });
-    // Fetch actual bookings for this provider+date so we show real busy times
-    // instead of the synthetic first-N-slots approximation.
-    this.detailBookings.set([]);
+    // Don't reset detailBookings to [] here — if the modal re-renders or
+    // openDetail is called twice (which happens with some signal-effect
+    // race conditions), the second call would wipe the first response's
+    // data and the modal flashes "all free" before the second response
+    // arrives. Just overwrite with the new response when it lands.
     this.service.getCalendar(date, date).subscribe({
       next: (byDate) => {
         const bookings = byDate[date] || [];
