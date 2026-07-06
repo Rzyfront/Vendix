@@ -6,7 +6,7 @@ import {
   Modal,
   ScrollView,
   StyleSheet,
-  Dimensions,
+  useWindowDimensions,
   type View as ViewType,
 } from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
@@ -51,9 +51,8 @@ const PRESETS: { value: DatePreset; label: string }[] = [
 ];
 
 // ── Layout tokens (paridad con options-dropdown) ─────────────────────────
-const SCREEN_WIDTH = Dimensions.get('window').width;
+const POPOVER_MAX_WIDTH = 220;
 const SCREEN_MARGIN = 12;
-const POPOVER_WIDTH = Math.min(220, SCREEN_WIDTH - SCREEN_MARGIN * 2);
 const POPOVER_GAP = 4;
 
 const styles = StyleSheet.create({
@@ -120,7 +119,6 @@ const styles = StyleSheet.create({
   },
   popover: {
     position: 'absolute',
-    width: POPOVER_WIDTH,
     backgroundColor: colors.card,
     borderRadius: borderRadius.md,
     borderWidth: 1,
@@ -187,6 +185,11 @@ export { presetToDateRange };
 interface TriggerPos { x: number; y: number; width: number; height: number; }
 
 export function DateRangeFilter({ value, onChange, showDateInput = true }: DateRangeFilterProps) {
+  // useWindowDimensions es reactivo a orientation change y window resize.
+  // NO usar Dimensions.get('window') — solo lee el ancho al mount.
+  const { width: screenWidth } = useWindowDimensions();
+  const popoverWidth = Math.min(POPOVER_MAX_WIDTH, screenWidth - SCREEN_MARGIN * 2);
+
   const [open, setOpen] = useState(false);
   const [triggerPos, setTriggerPos] = useState<TriggerPos | null>(null);
   const triggerRef = useRef<ViewType>(null);
@@ -205,13 +208,13 @@ export function DateRangeFilter({ value, onChange, showDateInput = true }: DateR
   const popoverPos = useMemo(() => {
     if (!open || !triggerPos) return null;
     let left = triggerPos.x;
-    if (left + POPOVER_WIDTH > SCREEN_WIDTH - SCREEN_MARGIN) {
-      left = SCREEN_WIDTH - POPOVER_WIDTH - SCREEN_MARGIN;
+    if (left + popoverWidth > screenWidth - SCREEN_MARGIN) {
+      left = screenWidth - popoverWidth - SCREEN_MARGIN;
     }
     if (left < SCREEN_MARGIN) left = SCREEN_MARGIN;
     const top = triggerPos.y + triggerPos.height + POPOVER_GAP;
     return { top, left };
-  }, [open, triggerPos]);
+  }, [open, triggerPos, popoverWidth, screenWidth]);
 
   const onPresetSelect = useCallback(
     (preset: DatePreset) => {
@@ -296,7 +299,7 @@ export function DateRangeFilter({ value, onChange, showDateInput = true }: DateR
         <Pressable style={styles.backdrop} onPress={onClose}>
           {popoverPos && (
             <Pressable
-              style={[styles.popover, { top: popoverPos.top, left: popoverPos.left }]}
+              style={[styles.popover, { top: popoverPos.top, left: popoverPos.left, width: popoverWidth }]}
               onPress={(e) => e.stopPropagation?.()}
             >
               <View style={styles.popoverHeader}>
