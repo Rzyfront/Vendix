@@ -144,6 +144,20 @@ import { EmployeeFiscalProfileFormComponent } from '../employee-fiscal-profile/e
                 [control]="employeeForm.get('document_number')"
                 [required]="true"
               ></app-input>
+
+              <app-input
+                label="Fecha de nacimiento"
+                type="date"
+                formControlName="birth_date"
+                [control]="employeeForm.get('birth_date')"
+              ></app-input>
+
+              <app-selector
+                label="Género"
+                formControlName="gender"
+                [options]="genderOptions"
+                placeholder="Seleccione..."
+              ></app-selector>
             </div>
           </div>
 
@@ -167,6 +181,20 @@ import { EmployeeFiscalProfileFormComponent } from '../employee-fiscal-profile/e
                 label="Tipo de Contrato"
                 formControlName="contract_type"
                 [options]="contractTypeOptions"
+                [required]="true"
+              ></app-selector>
+
+              <app-input
+                label="Fecha fin de contrato"
+                type="date"
+                formControlName="contract_end_date"
+                [control]="employeeForm.get('contract_end_date')"
+              ></app-input>
+
+              <app-selector
+                label="Tipo de salario"
+                formControlName="salary_type"
+                [options]="salaryTypeOptions"
                 [required]="true"
               ></app-selector>
 
@@ -383,6 +411,18 @@ export class EmployeeDetailComponent {
     { label: 'Termino Fijo', value: 'fixed_term' },
     { label: 'Prestacion de Servicios', value: 'service' },
     { label: 'Aprendizaje', value: 'apprentice' },
+    { label: 'Obra o labor', value: 'obra_labor' },
+  ];
+
+  salaryTypeOptions: SelectorOption[] = [
+    { label: 'Ordinario', value: 'ordinary' },
+    { label: 'Integral', value: 'integral' },
+  ];
+
+  genderOptions: SelectorOption[] = [
+    { label: 'Masculino', value: 'male' },
+    { label: 'Femenino', value: 'female' },
+    { label: 'Otro', value: 'other' },
   ];
 
   paymentFrequencyOptions: SelectorOption[] = [
@@ -412,8 +452,12 @@ export class EmployeeDetailComponent {
       last_name: ['', [Validators.required, Validators.minLength(2)]],
       document_type: ['CC', [Validators.required]],
       document_number: ['', [Validators.required]],
+      birth_date: [''],
+      gender: [''],
       hire_date: ['', [Validators.required]],
+      contract_end_date: [''],
       contract_type: ['indefinite', [Validators.required]],
+      salary_type: ['ordinary'],
       position: [''],
       department: [''],
       cost_center: ['administrative'],
@@ -454,14 +498,28 @@ export class EmployeeDetailComponent {
       hireDateStr = toUTCDateString(d);
     }
 
+    let birthDateStr = '';
+    if (employee.birth_date) {
+      birthDateStr = toUTCDateString(new Date(employee.birth_date));
+    }
+
+    let contractEndDateStr = '';
+    if (employee.contract_end_date) {
+      contractEndDateStr = toUTCDateString(new Date(employee.contract_end_date));
+    }
+
     this.employeeForm.patchValue({
       user_id: employee.user_id || '',
       first_name: employee.first_name,
       last_name: employee.last_name,
       document_type: employee.document_type,
       document_number: employee.document_number,
+      birth_date: birthDateStr,
+      gender: employee.gender || '',
       hire_date: hireDateStr,
+      contract_end_date: contractEndDateStr,
       contract_type: employee.contract_type,
+      salary_type: employee.salary_type || 'ordinary',
       position: employee.position || '',
       department: employee.department || '',
       cost_center: employee.cost_center || 'administrative',
@@ -494,8 +552,12 @@ export class EmployeeDetailComponent {
           last_name: formValue.last_name,
           document_type: formValue.document_type,
           document_number: formValue.document_number,
+          birth_date: formValue.birth_date || undefined,
+          gender: formValue.gender || undefined,
           hire_date: formValue.hire_date,
+          contract_end_date: formValue.contract_end_date || undefined,
           contract_type: formValue.contract_type,
+          salary_type: formValue.salary_type || undefined,
           position: formValue.position || undefined,
           department: formValue.department || undefined,
           cost_center: formValue.cost_center || undefined,
