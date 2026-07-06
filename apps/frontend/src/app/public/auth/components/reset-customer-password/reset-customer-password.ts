@@ -132,6 +132,39 @@ export function passwordStrengthValidator(
                   placeholder="••••••••"
                 ></app-input>
 
+                <!-- Specific password-strength feedback. Mirrors the
+                     hierarchy in the validator: length, then char classes. -->
+                @if (resetPasswordForm.get('new_password')?.touched) {
+                  @let strength =
+                    resetPasswordForm.get('new_password')?.errors
+                      ?.['passwordStrength'];
+                  @if (strength && !strength.isValidLength) {
+                    <div class="text-sm text-[var(--color-destructive)]">
+                      La contraseña debe tener mínimo 8 caracteres.
+                    </div>
+                  } @else if (strength && !strength.hasUpperCase) {
+                    <div class="text-sm text-[var(--color-destructive)]">
+                      Debe incluir al menos una letra mayúscula.
+                    </div>
+                  } @else if (strength && !strength.hasLowerCase) {
+                    <div class="text-sm text-[var(--color-destructive)]">
+                      Debe incluir al menos una letra minúscula.
+                    </div>
+                  } @else if (strength && !strength.hasNumeric) {
+                    <div class="text-sm text-[var(--color-destructive)]">
+                      Debe incluir al menos un número.
+                    </div>
+                  } @else if (strength && !strength.hasSymbol) {
+                    <div class="text-sm text-[var(--color-destructive)]">
+                      Debe incluir al menos un carácter especial (!@#$%…).
+                    </div>
+                  } @else {
+                    <div class="text-sm text-green-600">
+                      ✓ Contraseña segura.
+                    </div>
+                  }
+                }
+
                 <app-input
                   label="Confirmar Nueva Contraseña"
                   formControlName="confirmPassword"
