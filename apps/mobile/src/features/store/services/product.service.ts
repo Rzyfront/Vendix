@@ -14,6 +14,8 @@ import type {
   Brand,
   TaxCategory,
   PriceTier,
+  BulkProductAnalysisResult,
+  BulkUploadResult,
 } from '../types';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
@@ -295,4 +297,160 @@ export const ProductService = {
     );
     return unwrap<{ description: string }>(res);
   },
+
+  /* ============================================================
+   * Bulk product upload (wizard 3-step)
+   * ============================================================
+   * Implementa el flujo del web `bulk-upload-modal.component.ts`:
+   * analyze (dry-run con validación cell-by-cell) → upload-session (commit).
+   * Los templates se descargan con `getBulkUploadTemplate(type)`.
+   */
+
+  /**
+   * Descarga la plantilla Excel para carga masiva.
+   * `type='products'` → plantilla de productos (17 columnas).
+   * `type='services'` → plantilla de servicios (27 columnas).
+   * Devuelve un Blob listo para `FileSystem.writeAsStringAsync`.
+   */
+  async getBulkUploadTemplate(type: 'products' | 'services' = 'products'): Promise<Blob> {
+    const res = await apiClient.get(
+      `${Endpoints.STORE.PRODUCTS.BULK_TEMPLATE_DOWNLOAD}?type=${type}`,
+      { responseType: 'blob' },
+    );
+    return res.data as Blob;
+  },
+
+  /**
+   * Descarga un XLSX con los productos actuales del store, en el mismo
+   * formato de la plantilla + 3 columnas informativas (precio compra,
+   * cantidad actual, tiene imagen). Pensado para auditoría/edición rápida.
+   */
+  async exportCurrentProducts(): Promise<Blob> {
+    const res = await apiClient.get(Endpoints.STORE.PRODUCTS.BULK_EXPORT, {
+      responseType: 'blob',
+    });
+    return res.data as Blob;
+  },
+
+  /**
+   * Paso 1 del wizard: analiza el archivo Excel/CSV sin procesar (dry-run).
+   * Devuelve el `session_id` que se usará en `uploadBulkProductsFromSession`,
+   * más el análisis per-row con `status` (ready/warning/error) y
+   * `modified_fields`/`nulled_fields` para el cell-level preview del Paso 2.
+   */
+  async analyzeBulkProducts(file: { uri: string; name: string }): Promise<BulkProductAnalysisResult> {
+    const formData = new FormData();
+    // @ts-expect-error RN FormData accepts file objects with uri/name/type
+    formData.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const res = await apiClient.post(Endpoints.STORE.PRODUCTS.BULK_ANALYZE, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return unwrap<BulkProductAnalysisResult>(res);
+  },
+
+  /**
+   * Paso 3 del wizard: procesa la carga desde una sesión previamente analizada.
+   * El backend descarga el XLSX de S3 (subido en analyze), lo re-parsea y
+   * aplica create/update por SKU.
+   */
+  async uploadBulkProductsFromSession(sessionId: string): Promise<BulkUploadResult> {
+    const res = await apiClient.post(
+      Endpoints.STORE.PRODUCTS.BULK_UPLOAD_SESSION,
+      { session_id: sessionId },
+    );
+    return unwrap<BulkUploadResult>(res);
+  },
+
+  /**
+   * Cancela una sesión de análisis, eliminando el XLSX temporal en S3.
+   * Se llama al cerrar el modal sin haber completado la carga, para no
+   * dejar archivos huérfanos.
+   */
+  async cancelBulkProductSession(sessionId: string): Promise<void> {
+    const endpoint = Endpoints.STORE.PRODUCTS.BULK_CANCEL_SESSION.replace(
+      ':sessionId',
+      sessionId,
+    );
+    await apiClient.delete(endpoint);
+  },
+
+  /* ============================================================
+   * Bulk image upload (wizard 3-step)
+   * ============================================================ */
+
+  /**
+   * Descarga la plantilla ZIP para carga masiva de imágenes.
+   * `type='example'` → ZIP con carpetas de ejemplo.
+   * `type='store-skus'` → ZIP con los SKUs reales del store.
+   */
+  async getBulkImageTemplate(type: 'example' | 'store-skus' = 'example'): Promise<Blob> {
+    const res = await apiClient.get(
+      `${Endpoints.STORE.PRODUCTS.BULK_IMAGES_TEMPLATE}?type=${type}`,
+      { responseType: 'blob' },
+    );
+    return res.data as Blob;
+  },
+
+  /**
+   * Analiza un ZIP de imágenes (dry-run). Devuelve el session_id y el
+   * análisis SKU por SKU con advertencias/errores.
+   */
+  async analyzeBulkImages(file: { uri: string; name: string; size: number }): Promise<BulkImageAnalysisResult & { session_id: string }> {
+    const formData = new FormData();
+    // @ts-expect-error RN FormData accepts file objects with uri/name/type
+    formData.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: 'application/zip',
+    });
+    const res = await apiClient.post(Endpoints.STORE.PRODUCTS.BULK_IMAGES_ANALYZE, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return unwrap<BulkImageAnalysisResult & { session_id: string }>(res);
+  },
+
+  /**
+   * Procesa las imágenes de una sesión previamente analizada.
+   */
+  async uploadBulkImagesFromSession(sessionId: string): Promise<BulkImageUploadResult> {
+    const res = await apiClient.post(
+      Endpoints.STORE.PRODUCTS.BULK_IMAGES_UPLOAD_SESSION,
+      { session_id: sessionId },
+    );
+    return unwrap<BulkImageUploadResult>(res);
+  },
 };
+
+export interface BulkImageAnalysisResult {
+  total_skus: number;
+  ready: number;
+  with_warnings: number;
+  with_errors: number;
+  skus: Array<{
+    sku: string;
+    product_name: string | null;
+    images_in_zip: number;
+    valid_images: number;
+    current_image_count: number;
+    images_to_upload: number;
+    status: 'ready' | 'warning' | 'error';
+    warnings: string[];
+    errors: string[];
+  }>;
+}
+
+export interface BulkImageUploadResult {
+  total_skus_processed: number;
+  successful: number;
+  failed: number;
+  skipped: number;
+  results: Array<{
+    sku: string;
+    status: 'success' | 'error' | 'skipped';
+    message: string;
+  }>;
+}
