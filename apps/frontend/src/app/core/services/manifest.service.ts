@@ -31,7 +31,10 @@ export class ManifestService {
   private currentManifestUrl: string | null = null;
 
   private static readonly DEFAULT_THEME_COLOR = '#2F6F4E';
-  private static readonly STORE_MONO_LOGO = '/vlogomono.png';
+  // Marca Vendix a color (vlogo.png) renderizada a 192/512. Es el ícono
+  // instalable por defecto para TODO dominio sin logo de tenant propio
+  // (plataforma, organización o tienda sin logo). El logo mono (vlogomono)
+  // NO se usa nunca como ícono de app instalada: queda solo para la UI interna.
   private static readonly VENDIX_ICON_192 = '/icons/vendix-192.png';
   private static readonly VENDIX_ICON_512 = '/icons/vendix-512.png';
 
@@ -52,7 +55,7 @@ export class ManifestService {
       const appName = this.resolveName(config, appType);
       const themeColor =
         branding?.primary_color || ManifestService.DEFAULT_THEME_COLOR;
-      const icons = this.resolveIcons(branding, appType, origin);
+      const icons = this.resolveIcons(branding, origin);
 
       const manifest = {
         id: '/',
@@ -95,15 +98,16 @@ export class ManifestService {
   }
 
   /**
-   * Cascada de iconos:
+   * Cascada de iconos del ÍCONO DE APP INSTALADA (no del logo interno de la UI):
    *  1. Logo del tenant (`branding.logo_url ?? favicon_url`, ya URL absoluta S3) →
    *     una sola URL declarada multi-size; sin `type` porque puede no ser PNG.
-   *  2. Sin logo + app de tienda → marca mono `/vlogomono.png` (misma URL multi-size).
-   *  3. Sin logo + plataforma/organización → iconos default Vendix (PNG 192/512).
+   *  2. Cualquier otro caso (plataforma, organización o tienda SIN logo, incluidos
+   *     `vendix.online` / `www.vendix.online` que no resuelven logo) → marca Vendix
+   *     a COLOR (`vlogo.png` a 192/512). El logo mono `vlogomono.png` NUNCA se usa
+   *     como ícono instalable; queda reservado para el logo interno de la UI.
    */
   private resolveIcons(
     branding: BrandingConfig | undefined,
-    appType: AppType,
     origin: string,
   ): Array<{ src: string; sizes: string; type?: string }> {
     const tenantLogo = branding?.logo_url ?? branding?.favicon_url;
@@ -112,14 +116,6 @@ export class ManifestService {
       return [
         { src: tenantLogo, sizes: '192x192' },
         { src: tenantLogo, sizes: '512x512' },
-      ];
-    }
-
-    if (this.isStoreApp(appType)) {
-      const mono = `${origin}${ManifestService.STORE_MONO_LOGO}`;
-      return [
-        { src: mono, sizes: '192x192' },
-        { src: mono, sizes: '512x512' },
       ];
     }
 
