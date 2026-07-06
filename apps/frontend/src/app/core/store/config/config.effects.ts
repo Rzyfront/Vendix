@@ -5,6 +5,7 @@ import { switchMap, map, catchError, tap } from 'rxjs/operators';
 import { Store } from '@ngrx/store';
 import { AppConfigService } from '../../services/app-config.service';
 import { ThemeService } from '../../services/theme.service';
+import { ManifestService } from '../../services/manifest.service';
 import * as ConfigActions from './config.actions';
 import * as TenantActions from '../tenant/tenant.actions';
 
@@ -13,6 +14,7 @@ export class ConfigEffects {
   private actions$ = inject(Actions);
   private appConfigService = inject(AppConfigService);
   private themeService = inject(ThemeService);
+  private manifestService = inject(ManifestService);
   private store = inject(Store);
 
   initializeApp$ = createEffect(() =>
@@ -38,6 +40,9 @@ export class ConfigEffects {
           // Una vez que la configuración es exitosa, podemos realizar tareas secundarias
           // como aplicar el tema y actualizar otros stores.
           this.themeService.applyAppConfiguration(config);
+          // Inyecta el Web App Manifest dinámico por hostname/tenant para que la
+          // SPA sea instalable con la marca correcta (nombre, iconos, color).
+          this.manifestService.applyManifest(config.domainConfig);
           this.store.dispatch(
             TenantActions.setDomainConfig({
               domainConfig: config.domainConfig,

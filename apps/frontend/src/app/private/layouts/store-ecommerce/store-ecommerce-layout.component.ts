@@ -195,7 +195,7 @@ export class StoreEcommerceLayoutComponent {
           tenantConfig.branding?.logo_url || tenantConfig.branding?.logo?.url;
 
         this.store_logo.set(
-          storeLogo || inicioLogo || brandingLogo || tenantLogo || null,
+          storeLogo || inicioLogo || brandingLogo || tenantLogo || 'vlogomono.png',
         );
 
         if (ecommerceConfig.footer) {

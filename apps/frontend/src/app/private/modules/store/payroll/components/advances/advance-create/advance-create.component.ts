@@ -10,7 +10,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
-  FormBuilder,
+  FormControl,
   FormGroup,
   Validators,
   ReactiveFormsModule,
@@ -30,6 +30,15 @@ import {
   SelectorOption,
 } from '../../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
+
+interface AdvanceFormControls {
+  employee_id: FormControl<number | null>;
+  amount_requested: FormControl<number | null>;
+  installments: FormControl<number>;
+  frequency: FormControl<string>;
+  advance_date: FormControl<string>;
+  reason: FormControl<string>;
+}
 
 @Component({
   selector: 'app-advance-create',
@@ -63,7 +72,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             label="Monto Solicitado"
             [currency]="true"
             formControlName="amount_requested"
-            [control]="form.get('amount_requested')"
+            [control]="form.controls.amount_requested"
             [required]="true"
             placeholder="0"
           ></app-input>
@@ -73,7 +82,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
               label="Numero de Cuotas"
               type="number"
               formControlName="installments"
-              [control]="form.get('installments')"
+              [control]="form.controls.installments"
               [required]="true"
               placeholder="1"
             ></app-input>
@@ -89,7 +98,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             label="Fecha del Adelanto"
             type="date"
             formControlName="advance_date"
-            [control]="form.get('advance_date')"
+            [control]="form.controls.advance_date"
             [required]="true"
           ></app-input>
 
@@ -135,13 +144,12 @@ export class AdvanceCreateComponent {
   readonly isOpen = model<boolean>(false);
   readonly created = output<void>();
 
-  private fb = inject(FormBuilder);
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
 
   constructor() {
-    const today = toLocalDateString();
-    this.form.patchValue({ advance_date: today });
+    this.form.patchValue({ advance_date: toLocalDateString() });
+    this.loadEmployees();
   }
   readonly submitting = signal(false);
   readonly employeeOptions = signal<SelectorOption[]>([]);
@@ -152,13 +160,22 @@ export class AdvanceCreateComponent {
     { label: 'Semanal', value: 'weekly' },
   ];
 
-  form: FormGroup = this.fb.group({
-    employee_id: [null, [Validators.required]],
-    amount_requested: [null, [Validators.required, Validators.min(1)]],
-    installments: [1, [Validators.required, Validators.min(1)]],
-    frequency: ['monthly'],
-    advance_date: ['', [Validators.required]],
-    reason: [''],
+  readonly form = new FormGroup<AdvanceFormControls>({
+    employee_id: new FormControl<number | null>(null, [Validators.required]),
+    amount_requested: new FormControl<number | null>(null, [
+      Validators.required,
+      Validators.min(1),
+    ]),
+    installments: new FormControl(1, {
+      nonNullable: true,
+      validators: [Validators.required, Validators.min(1)],
+    }),
+    frequency: new FormControl('monthly', { nonNullable: true }),
+    advance_date: new FormControl('', {
+      nonNullable: true,
+      validators: [Validators.required],
+    }),
+    reason: new FormControl('', { nonNullable: true }),
   });
 
   private loadEmployees(): void {
@@ -184,11 +201,11 @@ export class AdvanceCreateComponent {
     }
 
     this.submitting.set(true);
-    const val = this.form.value;
+    const val = this.form.getRawValue();
 
     const dto: CreateAdvanceDto = {
-      employee_id: val.employee_id,
-      amount_requested: val.amount_requested,
+      employee_id: Number(val.employee_id),
+      amount_requested: Number(val.amount_requested),
       installments: val.installments,
       frequency: val.frequency || undefined,
       advance_date: val.advance_date,
@@ -205,7 +222,14 @@ export class AdvanceCreateComponent {
             description: 'Adelanto creado exitosamente',
           });
           this.submitting.set(false);
-          this.form.reset({ installments: 1, frequency: 'monthly' });
+          this.form.reset({
+            employee_id: null,
+            amount_requested: null,
+            installments: 1,
+            frequency: 'monthly',
+            advance_date: toLocalDateString(),
+            reason: '',
+          });
           this.created.emit();
           this.onClose();
         },

@@ -115,6 +115,16 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '2505',
     description: 'Salarios por Pagar',
   },
+  // Drenaje de aportes al pagar la nómina: 2370 (EPS/ARL/SENA/ICBF/CCF) y 2380
+  // (pensión). Débitos del asiento de pago contra banco.
+  'payroll.paid.health_social_payable': {
+    code: '2370',
+    description: 'Aportes EPS/Parafiscales por Pagar',
+  },
+  'payroll.paid.pension_social_payable': {
+    code: '2380',
+    description: 'Aportes Pensión por Pagar',
+  },
   'payroll.paid.bank': { code: '1110', description: 'Banco' },
   'order.completed.cogs': { code: '6135', description: 'Costo de Ventas' },
   'order.completed.inventory': { code: '1435', description: 'Inventario' },
@@ -581,59 +591,195 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '5105',
     description: 'Aux. Transporte Nómina',
   },
+  // Provisiones prestacionales — GASTO (Decreto 2650: subcuentas 5105/5205/7205
+  // por centro de costo, antes 5205 plano). Base = administrativo.
   'payroll.approved.provision_severance': {
-    code: '5205',
+    code: '510530',
     description: 'Gasto Cesantías',
   },
   'payroll.approved.provision_severance_interest': {
-    code: '5205',
+    code: '510533',
     description: 'Gasto Intereses Cesantías',
   },
   'payroll.approved.provision_vacation': {
-    code: '5205',
+    code: '510539',
     description: 'Gasto Vacaciones',
   },
   'payroll.approved.provision_bonus': {
-    code: '5205',
+    code: '510536',
     description: 'Gasto Prima de Servicios',
   },
+  // Aportes patronales — GASTO (Decreto 2650: subcuentas 5105, antes 5110
+  // "Honorarios" = clasificación errónea). Base = administrativo.
   'payroll.approved.health_employer': {
-    code: '5110',
-    description: 'EPS Empleador (Gasto)',
+    code: '510568',
+    description: 'Aportes EPS Empleador (Gasto)',
   },
   'payroll.approved.pension_employer': {
-    code: '5110',
-    description: 'AFP Empleador (Gasto)',
+    code: '510569',
+    description: 'Aportes Pensión Empleador (Gasto)',
   },
-  'payroll.approved.arl_expense': { code: '5110', description: 'ARL (Gasto)' },
+  'payroll.approved.arl_expense': {
+    code: '510570',
+    description: 'Aportes ARL (Gasto)',
+  },
   'payroll.approved.sena_expense': {
-    code: '5110',
-    description: 'SENA (Gasto)',
+    code: '510578',
+    description: 'Aportes SENA (Gasto)',
   },
   'payroll.approved.icbf_expense': {
-    code: '5110',
-    description: 'ICBF (Gasto)',
+    code: '510575',
+    description: 'Aportes ICBF (Gasto)',
   },
   'payroll.approved.compensation_fund_expense': {
-    code: '5110',
-    description: 'Caja Compensación (Gasto)',
+    code: '510572',
+    description: 'Aportes Caja Compensación (Gasto)',
   },
-  // Nómina individual — pasivos provisiones (créditos)
-  'payroll.approved.liability_severance': {
-    code: '2610',
-    description: 'Cesantías por Pagar',
+  // Provisiones prestacionales — PASIVO (Decreto 2650: 2510/2515/2520/2525).
+  // Claves NUEVAS (las 26xx anteriores quedan obsoletas): keys nuevas evitan
+  // depender del re-seed de mappings ya materializados (seed CREATE-ONLY).
+  'payroll.approved.severance_payable': {
+    code: '2510',
+    description: 'Cesantías Consolidadas por Pagar',
   },
-  'payroll.approved.liability_severance_interest': {
-    code: '2615',
-    description: 'Intereses Cesantías por Pagar',
+  'payroll.approved.severance_interest_payable': {
+    code: '2515',
+    description: 'Intereses sobre Cesantías por Pagar',
   },
-  'payroll.approved.liability_vacation': {
-    code: '2620',
-    description: 'Vacaciones por Pagar',
+  'payroll.approved.vacation_payable': {
+    code: '2525',
+    description: 'Vacaciones Consolidadas por Pagar',
   },
-  'payroll.approved.liability_bonus': {
-    code: '2625',
+  'payroll.approved.bonus_payable': {
+    code: '2520',
     description: 'Prima de Servicios por Pagar',
+  },
+  // Reembolsables de incapacidad/licencia (EPS día 3+ / ARL) → CxC 1355.
+  'payroll.approved.reimbursable_receivable': {
+    code: '1355',
+    description: 'Incapacidades/Licencias por Cobrar (EPS/ARL)',
+  },
+  // Aportes patronales GASTO por centro de costo (ventas 52xx / operativo 72xx).
+  'payroll.approved.health_employer.administrative': {
+    code: '510568',
+    description: 'Aportes EPS Empleador (Admin)',
+  },
+  'payroll.approved.health_employer.sales': {
+    code: '520568',
+    description: 'Aportes EPS Empleador (Ventas)',
+  },
+  'payroll.approved.health_employer.operational': {
+    code: '720568',
+    description: 'Aportes EPS Empleador (Operativo)',
+  },
+  'payroll.approved.pension_employer.administrative': {
+    code: '510569',
+    description: 'Aportes Pensión Empleador (Admin)',
+  },
+  'payroll.approved.pension_employer.sales': {
+    code: '520569',
+    description: 'Aportes Pensión Empleador (Ventas)',
+  },
+  'payroll.approved.pension_employer.operational': {
+    code: '720569',
+    description: 'Aportes Pensión Empleador (Operativo)',
+  },
+  'payroll.approved.arl_expense.administrative': {
+    code: '510570',
+    description: 'Aportes ARL (Admin)',
+  },
+  'payroll.approved.arl_expense.sales': {
+    code: '520570',
+    description: 'Aportes ARL (Ventas)',
+  },
+  'payroll.approved.arl_expense.operational': {
+    code: '720570',
+    description: 'Aportes ARL (Operativo)',
+  },
+  'payroll.approved.sena_expense.administrative': {
+    code: '510578',
+    description: 'Aportes SENA (Admin)',
+  },
+  'payroll.approved.sena_expense.sales': {
+    code: '5205',
+    description: 'Aportes SENA (Ventas)',
+  },
+  'payroll.approved.sena_expense.operational': {
+    code: '7205',
+    description: 'Aportes SENA (Operativo)',
+  },
+  'payroll.approved.icbf_expense.administrative': {
+    code: '510575',
+    description: 'Aportes ICBF (Admin)',
+  },
+  'payroll.approved.icbf_expense.sales': {
+    code: '5205',
+    description: 'Aportes ICBF (Ventas)',
+  },
+  'payroll.approved.icbf_expense.operational': {
+    code: '7205',
+    description: 'Aportes ICBF (Operativo)',
+  },
+  'payroll.approved.compensation_fund_expense.administrative': {
+    code: '510572',
+    description: 'Aportes Caja Compensación (Admin)',
+  },
+  'payroll.approved.compensation_fund_expense.sales': {
+    code: '520572',
+    description: 'Aportes Caja Compensación (Ventas)',
+  },
+  'payroll.approved.compensation_fund_expense.operational': {
+    code: '7205',
+    description: 'Aportes Caja Compensación (Operativo)',
+  },
+  // Provisiones prestacionales GASTO por centro de costo.
+  'payroll.approved.provision_severance.administrative': {
+    code: '510530',
+    description: 'Gasto Cesantías (Admin)',
+  },
+  'payroll.approved.provision_severance.sales': {
+    code: '520530',
+    description: 'Gasto Cesantías (Ventas)',
+  },
+  'payroll.approved.provision_severance.operational': {
+    code: '720530',
+    description: 'Gasto Cesantías (Operativo)',
+  },
+  'payroll.approved.provision_severance_interest.administrative': {
+    code: '510533',
+    description: 'Gasto Intereses Cesantías (Admin)',
+  },
+  'payroll.approved.provision_severance_interest.sales': {
+    code: '520533',
+    description: 'Gasto Intereses Cesantías (Ventas)',
+  },
+  'payroll.approved.provision_severance_interest.operational': {
+    code: '720533',
+    description: 'Gasto Intereses Cesantías (Operativo)',
+  },
+  'payroll.approved.provision_vacation.administrative': {
+    code: '510539',
+    description: 'Gasto Vacaciones (Admin)',
+  },
+  'payroll.approved.provision_vacation.sales': {
+    code: '520539',
+    description: 'Gasto Vacaciones (Ventas)',
+  },
+  'payroll.approved.provision_vacation.operational': {
+    code: '720539',
+    description: 'Gasto Vacaciones (Operativo)',
+  },
+  'payroll.approved.provision_bonus.administrative': {
+    code: '510536',
+    description: 'Gasto Prima de Servicios (Admin)',
+  },
+  'payroll.approved.provision_bonus.sales': {
+    code: '520536',
+    description: 'Gasto Prima de Servicios (Ventas)',
+  },
+  'payroll.approved.provision_bonus.operational': {
+    code: '720536',
+    description: 'Gasto Prima de Servicios (Operativo)',
   },
   // Nómina individual — aportes patronales por pagar (créditos)
   'payroll.approved.health_employer_payable': {

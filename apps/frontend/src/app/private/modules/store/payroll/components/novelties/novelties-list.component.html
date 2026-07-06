@@ -42,16 +42,41 @@
     </div>
   </div>
 
+  <!-- Loading State -->
+  @if (loading()) {
+    <div class="p-4 md:p-6 text-center">
+      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+      <p class="mt-2 text-text-secondary">Cargando novedades...</p>
+    </div>
+  }
+
+  <!-- Empty State -->
+  @if (!loading() && novelties().length === 0) {
+    <app-empty-state
+      icon="calendar-days"
+      [title]="getEmptyStateTitle()"
+      [description]="getEmptyStateDescription()"
+      actionButtonText="Nueva novedad"
+      actionButtonIcon="plus"
+      [showActionButton]="!hasFilters"
+      [showClearFilters]="hasFilters"
+      (actionClick)="create.emit()"
+      (clearFiltersClick)="clearFilters()"
+    ></app-empty-state>
+  }
+
   <!-- Responsive Data View -->
-  <div class="px-2 pb-2 pt-3 md:p-4">
-    <app-responsive-data-view
-      [data]="novelties()"
-      [columns]="columns"
-      [cardConfig]="cardConfig"
-      [actions]="actions"
-      [loading]="loading()"
-      emptyMessage="No hay novedades registradas"
-      emptyIcon="calendar-days"
-    ></app-responsive-data-view>
-  </div>
+  @if (!loading() && novelties().length > 0) {
+    <div class="px-2 pb-2 pt-3 md:p-4">
+      <app-responsive-data-view
+        [data]="novelties()"
+        [columns]="columns"
+        [cardConfig]="cardConfig"
+        [actions]="actions"
+        [loading]="loading()"
+        emptyMessage="No hay novedades registradas"
+        emptyIcon="calendar-days"
+      ></app-responsive-data-view>
+    </div>
+  }
 </app-card>

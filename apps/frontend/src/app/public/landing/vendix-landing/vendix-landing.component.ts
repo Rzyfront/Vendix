@@ -72,7 +72,7 @@ export class VendixLandingComponent implements OnInit {
       branding: {
         name: 'Vendix',
         logo: {
-          url: 'assets/images/logo.png'}}});
+          url: 'vlogo.png'}}});
 
     // Always use default content for landing page
     this.initializeDefaultContent();

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PayrollRules } from '../calculation/interfaces/payroll-rules.interface';
 import { SettlementCalculation } from './interfaces/settlement-calculation.interface';
 
@@ -15,6 +15,14 @@ interface SettlementCalculationParams {
 
 @Injectable()
 export class SettlementCalculationService {
+  private readonly logger = new Logger(SettlementCalculationService.name);
+
+  /**
+   * Minimum indemnification for obra/labor contracts (Art. 64 CST):
+   * the remaining time to finish the work, never below 15 days of salary.
+   */
+  private static readonly OBRA_LABOR_MIN_DAYS = 15;
+
   /**
    * Calculate full settlement for an employee based on Colombian labor law.
    */
@@ -132,7 +140,12 @@ export class SettlementCalculationService {
 
   /**
    * Calculate indemnification per Art. 64 CST.
-   * Only applies when termination_reason is 'without_just_cause'.
+   * Only applies when termination_reason is 'without_just_cause'. The formula
+   * branches by contract_type (which comes from the employee record):
+   * - fixed_term: wages for the remaining time until contract_end_date.
+   * - obra_labor: wages for the remaining time to finish the work, min 15 days.
+   * - indefinite: tiered day count based on tenure and salary bracket.
+   * - apprentice / service: not subject to Art. 64 indemnification.
    */
   private calculateIndemnification(
     base_salary: number,
@@ -149,16 +162,75 @@ export class SettlementCalculationService {
 
     const daily_salary = base_salary / 30;
 
-    // Fixed term: salary for remaining contract days
-    if (contract_type === 'fixed_term' && contract_end_date) {
-      const remaining_days = this.calculateWorkedDays360(
-        termination_date,
-        contract_end_date,
-      );
-      return this.round(daily_salary * remaining_days);
-    }
+    switch (contract_type) {
+      // Art. 64 CST inc. 1: contrato a término fijo -> salarios del tiempo
+      // faltante entre la fecha de terminación y la fecha de fin de contrato.
+      case 'fixed_term': {
+        if (!contract_end_date) {
+          this.logger.warn(
+            'Indemnización de contrato a término fijo sin contract_end_date: ' +
+              'no se puede calcular el tiempo faltante (Art. 64 CST inc. 1). ' +
+              'Se retorna 0; requiere revisión manual de la fecha de fin de contrato.',
+          );
+          return 0;
+        }
+        const remaining_days = this.calculateWorkedDays360(
+          termination_date,
+          contract_end_date,
+        );
+        return this.round(daily_salary * remaining_days);
+      }
 
-    // Indefinite contract
+      // Art. 64 CST: contrato por obra o labor -> salarios del tiempo faltante
+      // para terminar la obra, nunca inferior a 15 días.
+      case 'obra_labor': {
+        let remaining_days = SettlementCalculationService.OBRA_LABOR_MIN_DAYS;
+        if (contract_end_date) {
+          remaining_days = Math.max(
+            this.calculateWorkedDays360(termination_date, contract_end_date),
+            SettlementCalculationService.OBRA_LABOR_MIN_DAYS,
+          );
+        } else {
+          this.logger.warn(
+            'Indemnización de contrato por obra/labor sin fecha estimada de ' +
+              'terminación de la obra: se aplica el mínimo legal de ' +
+              `${SettlementCalculationService.OBRA_LABOR_MIN_DAYS} días (Art. 64 CST).`,
+          );
+        }
+        return this.round(daily_salary * remaining_days);
+      }
+
+      // Contrato de aprendizaje y prestación de servicios: no generan
+      // indemnización por Art. 64 CST.
+      case 'apprentice':
+      case 'service':
+        return 0;
+
+      // Art. 64 CST inc. 4: contrato a término indefinido (comportamiento base).
+      case 'indefinite':
+      default:
+        return this.calculateIndefiniteIndemnification(
+          base_salary,
+          hire_date,
+          termination_date,
+          daily_salary,
+          rules,
+        );
+    }
+  }
+
+  /**
+   * Indemnification for an indefinite-term contract (Art. 64 CST inc. 4).
+   * <= 10 SMLMV: 30 days first year + 20 days per additional year.
+   * >  10 SMLMV: 20 days first year + 15 days per additional year.
+   */
+  private calculateIndefiniteIndemnification(
+    base_salary: number,
+    hire_date: Date,
+    termination_date: Date,
+    daily_salary: number,
+    rules: PayrollRules,
+  ): number {
     const total_days_worked = this.calculateWorkedDays360(
       hire_date,
       termination_date,
@@ -172,13 +244,13 @@ export class SettlementCalculationService {
       const additional_years = Math.max(years_worked - 1, 0);
       const additional_days = Math.ceil(additional_years) * 15;
       return this.round(daily_salary * (first_year_days + additional_days));
-    } else {
-      // <= 10 SMLMV: 30 days first year + 20 days per additional year
-      const first_year_days = 30;
-      const additional_years = Math.max(years_worked - 1, 0);
-      const additional_days = Math.ceil(additional_years) * 20;
-      return this.round(daily_salary * (first_year_days + additional_days));
     }
+
+    // <= 10 SMLMV: 30 days first year + 20 days per additional year
+    const first_year_days = 30;
+    const additional_years = Math.max(years_worked - 1, 0);
+    const additional_days = Math.ceil(additional_years) * 20;
+    return this.round(daily_salary * (first_year_days + additional_days));
   }
 
   /**

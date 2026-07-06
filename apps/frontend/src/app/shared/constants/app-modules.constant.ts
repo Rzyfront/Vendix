@@ -573,9 +573,21 @@ export const APP_MODULES: {
           description: 'Liquidaci\u00f3n por terminaci\u00f3n de empleados',
         },
         {
+          key: 'payroll_novelties',
+          label: 'Novedades',
+          description:
+            'Novedades de n\u00f3mina: incapacidades, licencias, horas extra y ausencias',
+        },
+        {
           key: 'payroll_advances',
           label: 'Adelantos',
           description: 'Adelantos y pr\u00e9stamos a empleados',
+        },
+        {
+          key: 'payroll_pila',
+          label: 'PILA',
+          description:
+            'Planilla Integrada de Liquidaci\u00f3n de Aportes (PILA)',
         },
         {
           key: 'payroll_settings',

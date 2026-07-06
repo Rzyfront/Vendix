@@ -285,7 +285,7 @@ export class StoreAdminLayoutComponent {
     const store = this.storeSignal();
     const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
     if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
-    return store?.logo_url || null;
+    return store?.logo_url || 'vlogomono.png';
   });
 
   readonly planDisplayName = computed(() => {
@@ -708,6 +708,12 @@ export class StoreAdminLayoutComponent {
           label: 'Contabilidad',
           icon: 'circle',
           route: '/admin/reports/accounting',
+          alwaysVisible: true,
+        },
+        {
+          label: 'Nómina',
+          icon: 'circle',
+          route: '/admin/reports/payroll',
           alwaysVisible: true,
         },
       ],

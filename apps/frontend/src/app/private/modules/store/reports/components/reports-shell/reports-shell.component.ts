@@ -87,7 +87,7 @@ export class ReportsShellComponent {
     const categoryId = this.categoryId();
     if (!categoryId) return [];
 
-    const isModuleCategory = categoryId === 'accounting' || categoryId === 'payroll';
+    const isModuleCategory = categoryId === 'accounting';
 
     return getReportsByCategory(categoryId)
       .filter(report => !isModuleCategory || this.reportsWithModuleView.has(report.id))

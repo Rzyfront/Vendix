@@ -3877,6 +3877,18 @@ enum contract_type_enum {
   fixed_term
   service
   apprentice
+  obra_labor
+}
+
+enum salary_type_enum {
+  ordinary
+  integral
+}
+
+enum gender_enum {
+  male
+  female
+  other
 }
 
 enum cost_center_enum {
@@ -3931,6 +3943,9 @@ enum payroll_novelty_type_enum {
   vacation
   leave_paid
   leave_unpaid
+  maternity_leave
+  paternity_leave
+  bereavement_leave
   bonus
   commission
   other_deduction
@@ -4860,11 +4875,15 @@ model employees {
   last_name           String                   @db.VarChar(100)
   document_type       String                   @db.VarChar(20)
   document_number     String                   @db.VarChar(50)
+  birth_date          DateTime?                @db.Date
+  gender              gender_enum?
   hire_date           DateTime                 @db.Timestamp(6)
   termination_date    DateTime?                @db.Timestamp(6)
   termination_reason  termination_reason_enum?
   status              employee_status_enum     @default(active)
   contract_type       contract_type_enum
+  contract_end_date   DateTime?                @db.Date
+  salary_type         salary_type_enum         @default(ordinary)
   position            String?                  @db.VarChar(100)
   department          String?                  @db.VarChar(100)
   cost_center         cost_center_enum         @default(administrative)

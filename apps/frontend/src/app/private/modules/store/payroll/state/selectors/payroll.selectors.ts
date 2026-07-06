@@ -128,6 +128,77 @@ export const selectPayrollRunDateTo = createSelector(
   (state) => state.payrollRunDateTo,
 );
 
+// ─── DIAN Electronic Payroll ──────────────────────────────
+export const selectDianStatusByRun = createSelector(
+  selectPayrollState,
+  (state) => state.dianStatusByRun,
+);
+
+/** DIAN status view for a specific run (null when not yet fetched). */
+export const selectDianStatusForRun = (runId: number) =>
+  createSelector(
+    selectDianStatusByRun,
+    (byRun) => byRun[runId] ?? null,
+  );
+
+export const selectDianLoading = createSelector(
+  selectPayrollState,
+  (state) => state.dianLoading,
+);
+
+export const selectDianSendResult = createSelector(
+  selectPayrollState,
+  (state) => state.dianSendResult,
+);
+
+export const selectAdjustmentLoadingByItem = createSelector(
+  selectPayrollState,
+  (state) => state.adjustmentLoadingByItem,
+);
+
+/** True while the adjustment note for a specific payroll item is in flight. */
+export const selectAdjustmentLoadingForItem = (itemId: number) =>
+  createSelector(
+    selectAdjustmentLoadingByItem,
+    (byItem) => byItem[itemId] ?? false,
+  );
+
+export const selectAdjustmentResultByItem = createSelector(
+  selectPayrollState,
+  (state) => state.adjustmentResultByItem,
+);
+
+// ─── Bank Export (ACH) ────────────────────────────────────
+export const selectAvailableBanks = createSelector(
+  selectPayrollState,
+  (state) => state.availableBanks,
+);
+
+export const selectAvailableBanksLoading = createSelector(
+  selectPayrollState,
+  (state) => state.availableBanksLoading,
+);
+
+export const selectBankValidationResult = createSelector(
+  selectPayrollState,
+  (state) => state.bankValidationResult,
+);
+
+export const selectBankValidationLoading = createSelector(
+  selectPayrollState,
+  (state) => state.bankValidationLoading,
+);
+
+export const selectBankExportResult = createSelector(
+  selectPayrollState,
+  (state) => state.bankExportResult,
+);
+
+export const selectBankExportLoading = createSelector(
+  selectPayrollState,
+  (state) => state.bankExportLoading,
+);
+
 // ─── Shared ───────────────────────────────────────────────
 export const selectPayrollError = createSelector(
   selectPayrollState,

@@ -527,6 +527,11 @@ export class ContextualLoginComponent implements OnInit {
     if (!logo && domainConfig.isMainVendixDomain) {
       logo = 'vlogo.png';
     }
+    // Store-context fallback: use the mono brand only for a store login with
+    // no tenant logo. Never for vendix/organization contexts.
+    if (!logo && this.contextType() === 'store') {
+      logo = 'vlogomono.png';
+    }
     this.logoUrl.set(logo);
   }
 

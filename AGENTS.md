@@ -44,7 +44,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-naming-conventions` |
 | -- | `vendix-notifications-system` |
 | -- | `vendix-panel-ui` |
+| -- | `vendix-payroll` |
 | -- | `vendix-permissions` |
+| -- | `vendix-pila-flatfile` |
 | -- | `vendix-prisma-scopes` |
 | -- | `vendix-redis-quota` |
 | -- | `vendix-restaurant-ops` |
@@ -95,6 +97,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
+| Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Checking current development app status | `buildcheck-dev` |
 | Checking if a Vendix Linear issue already exists | `linear-issues` |
@@ -179,6 +182,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing or creating any Angular component under apps/frontend (Zoneless patterns apply) | `vendix-zoneless-signals` |
 | Editing or creating any file under apps/mobile | `mobile-dev` |
 | Editing or creating frontend web code | `vendix-frontend` |
+| Editing payroll calculation, IBC, FSP, exoneration, or integral salary logic | `vendix-payroll` |
 | Editing recipes, BOM explosion, or sub-recipe production orders | `vendix-restaurant-ops` |
 | Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
@@ -189,6 +193,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Fixing signal-used-without-invoking bugs (!this.flag vs !this.flag()) | `vendix-zoneless-signals` |
 | Formatting chart axis labels with dates | `vendix-date-timezone` |
 | General Development | `how-to-dev` |
+| Generating or editing the PILA flat file (Resolución 2388/2016) | `vendix-pila-flatfile` |
 | Handling Errors | `vendix-error-handling` |
 | Handling store context | `vendix-multi-tenant-context` |
 | Implementing AI streaming | `vendix-ai-streaming` |
@@ -211,6 +216,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Listing Vendix issues in Linear | `linear-issues` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
+| Mapping PILA novelties ING/RET/VSP/LMA/IGE/VAC/IRL | `vendix-pila-flatfile` |
 | Mapping store_subscription_state_enum to allow/warn/block | `vendix-subscription-gate` |
 | Migrating legacy Angular patterns (BehaviorSubject, take(1).subscribe) to Signals | `vendix-zoneless-signals` |
 | Modifying StockLevelManager service | `vendix-inventory-stock` |
@@ -296,6 +302,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
 | Working on notifications dropdown or bell badge UI | `vendix-notifications-system` |
+| Working under apps/backend/src/domains/store/payroll | `vendix-payroll` |
+| Working under apps/backend/src/domains/store/payroll/pila | `vendix-pila-flatfile` |
 | Working with @defer, @if, @for control flow blocks in templates | `vendix-zoneless-signals` |
 | Working with AI agent or tool-use | `vendix-ai-engine` |
 | Working with AI async processing | `vendix-ai-queue` |
@@ -316,11 +324,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with BullMQ for AI | `vendix-ai-queue` |
 | Working with CurrencyPipe or CurrencyFormatService | `vendix-currency-formatting` |
 | Working with DIAN NIT ownership | `vendix-fiscal-scope` |
+| Working with DIAN electronic payroll (DSPNE), CUNE, or adjustment note 103 | `vendix-payroll` |
 | Working with EventSource for AI | `vendix-ai-streaming` |
 | Working with MCP server | `vendix-ai-engine` |
 | Working with MCP server | `vendix-mcp-server` |
 | Working with McpController | `vendix-mcp-server` |
 | Working with MenuFilterService or menu filtering | `vendix-panel-ui` |
+| Working with PILA record types 1/2, positional layout, or IBC caps | `vendix-pila-flatfile` |
 | Working with Prisma scoped services | `vendix-prisma-scopes` |
 | Working with RAG pipeline | `vendix-ai-embeddings-rag` |
 | Working with SSE endpoints for AI | `vendix-ai-streaming` |
@@ -342,6 +352,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with order_items.inventory_consumed_at_fire flag | `vendix-restaurant-ops` |
 | Working with organization operating scope STORE vs ORGANIZATION | `vendix-operating-scope` |
 | Working with organizations.fiscal_scope | `vendix-fiscal-scope` |
+| Working with payroll novelties, incapacity valuation, or final settlements | `vendix-payroll` |
 | Working with permissions-roles seed | `vendix-permissions` |
 | Working with product_type_enum='prepared' or the is_sellable/is_ingredient/is_combo/is_batch_produced flags | `vendix-restaurant-ops` |
 | Working with products that have variants but do not track stock | `vendix-product-variants` |

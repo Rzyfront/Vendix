@@ -7,8 +7,10 @@ import { QueryPilaReportDto } from './dto/query-pila-report.dto';
 import { QueryPilaSubmissionsDto } from './dto/query-pila-submissions.dto';
 
 /**
- * Reporte PILA de apoyo (carga manual en operador PILA).
- * El archivo plano oficial Res. 2388/2016 está fuera de alcance.
+ * Reportes PILA:
+ * - `report` / `generate` / `export` (CSV): reporte de apoyo para carga manual.
+ * - `flat-file`: ARCHIVO PLANO oficial Res. 2388/2016 (registro tipo 1 + tipo 2
+ *   por cotizante), listo para pago por operador (SOI / Aportes en Línea).
  */
 @Controller('store/payroll/pila')
 export class PilaReportController {
@@ -57,6 +59,28 @@ export class PilaReportController {
 
     res.set({
       'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+    res.send(content);
+  }
+
+  /**
+   * Descarga el ARCHIVO PLANO oficial PILA (Res. 2388/2016) del período.
+   * Registro tipo 1 (encabezado) + un registro tipo 2 por cotizante, en
+   * formato de ancho fijo. Content-Type text/plain, extensión .txt.
+   * Registra la exportación en `pila_submissions`.
+   */
+  @Get('flat-file')
+  @Permissions('store:payroll:runs:read')
+  async exportFlatFile(
+    @Query() query: QueryPilaReportDto,
+    @Res() res: Response,
+  ) {
+    const { filename, content } =
+      await this.pila_report_service.generateFlatFile(query.year, query.month);
+
+    res.set({
+      'Content-Type': 'text/plain; charset=utf-8',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
     res.send(content);

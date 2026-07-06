@@ -42,6 +42,13 @@ import {
   EmployeeFiscalProfileUpdateDto,
   CalculateSemesterRateDto,
   CalculateSemesterRateResult,
+  DianSendResult,
+  DianStatusView,
+  DianAdjustmentPayload,
+  DianAdjustmentResult,
+  BankOption,
+  BankDataValidationResult,
+  ExportAchDto,
 } from '../interfaces/payroll.interface';
 import {
   BulkEmployeeAnalysisResult,
@@ -401,15 +408,55 @@ export class PayrollService {
     return this.http.post<ApiResponse<any>>(this.getApiUrl(`runs/${runId}/generate-payslips`), {});
   }
 
-  exportAch(runId: number, bank: string): Observable<Blob> {
-    return this.http.post(this.getApiUrl(`runs/${runId}/export-ach`), null, {
-      params: { bank },
-      responseType: 'blob',
-    });
+  /**
+   * Generates the ACH bank file for a run. The backend returns a JSON
+   * envelope with the uploaded file metadata (download_url), NOT a blob,
+   * and expects the bank/source-account in the request body.
+   */
+  exportAch(runId: number, payload: ExportAchDto): Observable<ApiResponse<BankExportResult>> {
+    return this.http.post<ApiResponse<BankExportResult>>(
+      this.getApiUrl(`runs/${runId}/export-ach`),
+      payload,
+    );
   }
 
-  validateBankData(runId: number): Observable<ApiResponse<any>> {
-    return this.http.get<ApiResponse<any>>(this.getApiUrl(`runs/${runId}/validate-bank-data`));
+  validateBankData(runId: number): Observable<ApiResponse<BankDataValidationResult>> {
+    return this.http.get<ApiResponse<BankDataValidationResult>>(
+      this.getApiUrl(`runs/${runId}/validate-bank-data`),
+    );
+  }
+
+  getAvailableBanks(): Observable<ApiResponse<BankOption[]>> {
+    return this.http.get<ApiResponse<BankOption[]>>(this.getApiUrl('runs/bank-export/banks'));
+  }
+
+  // ─── DIAN Electronic Payroll (DSPNE) ──────────────────
+
+  /** POST runs/:id/send-dian — transmits the run to DIAN (DSPNE). */
+  sendToDian(runId: number): Observable<ApiResponse<DianSendResult>> {
+    return this.http.post<ApiResponse<DianSendResult>>(
+      this.getApiUrl(`runs/${runId}/send-dian`),
+      {},
+    );
+  }
+
+  /** GET runs/:id/dian-status — polls the DIAN acceptance status. */
+  getDianStatus(runId: number): Observable<ApiResponse<DianStatusView>> {
+    return this.http.get<ApiResponse<DianStatusView>>(
+      this.getApiUrl(`runs/${runId}/dian-status`),
+    );
+  }
+
+  /** POST runs/:id/items/:itemId/send-adjustment — Nota de Ajuste (tipo 103). */
+  sendAdjustment(
+    runId: number,
+    itemId: number,
+    payload: DianAdjustmentPayload,
+  ): Observable<ApiResponse<DianAdjustmentResult>> {
+    return this.http.post<ApiResponse<DianAdjustmentResult>>(
+      this.getApiUrl(`runs/${runId}/items/${itemId}/send-adjustment`),
+      payload,
+    );
   }
 
   // ─── Helpers ──────────────────────────────────────────

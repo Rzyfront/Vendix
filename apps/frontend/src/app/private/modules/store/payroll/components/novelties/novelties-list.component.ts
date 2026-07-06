@@ -2,6 +2,7 @@ import { Component, computed, inject, input, output } from '@angular/core';
 
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
@@ -32,6 +33,7 @@ import {
   standalone: true,
   imports: [
     CardComponent,
+    EmptyStateComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
@@ -55,6 +57,7 @@ export class NoveltiesListComponent {
 
   // Filter state
   filterValues: FilterValues = {};
+  searchTerm = '';
 
   // Filter configs (employee options arrive async)
   readonly filterConfigs = computed<FilterConfig[]>(() => [
@@ -196,6 +199,7 @@ export class NoveltiesListComponent {
   ];
 
   onSearch(term: string): void {
+    this.searchTerm = term;
     this.search.emit(term);
   }
 
@@ -205,8 +209,30 @@ export class NoveltiesListComponent {
   }
 
   clearFilters(): void {
+    this.searchTerm = '';
     this.filterValues = {};
     this.filter.emit({});
+  }
+
+  get hasFilters(): boolean {
+    return !!(
+      this.searchTerm ||
+      this.filterValues['employee_id'] ||
+      this.filterValues['novelty_type'] ||
+      this.filterValues['status']
+    );
+  }
+
+  getEmptyStateTitle(): string {
+    return this.hasFilters
+      ? 'Ninguna novedad coincide con sus filtros'
+      : 'No hay novedades registradas';
+  }
+
+  getEmptyStateDescription(): string {
+    return this.hasFilters
+      ? 'Intente ajustar sus términos de búsqueda o filtros'
+      : 'Comience registrando la primera novedad de nómina.';
   }
 
   onActionClick(action: string): void {
