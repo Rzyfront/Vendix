@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { InventoryService, ProductService } from '@/features/store/services';
+import { InventoryService, ProductService, PromotionsService } from '@/features/store/services';
 import type {
   Brand,
   CreateProductDto,
@@ -399,6 +399,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   // re-fetchea el producto. Sólo hidratamos desde el backend la primera
   // vez; las selecciones del usuario se preservan en re-fetches.
   const tierOverridesHydrated = useRef(false);
+  const promotionsHydrated = useRef(false);
 
   const { data: product, isLoading: productLoading } = useQuery({
     queryKey: ['product', productId],
@@ -426,10 +427,10 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const inventoryLocations = locationsQuery.data?.data ?? [];
 
   // Promociones activas (para la sección Promociones & Operaciones).
-  // TODO: implementar getPromotions en el service cuando el backend
-  // exponga el endpoint de promociones. Mientras tanto, array vacío
-  // para que el MultiSelector renderice correctamente.
-  const promotions: { id: number; name: string }[] = [];
+  const { data: activePromotions = [] } = useQuery({
+    queryKey: ['promotions', 'active'],
+    queryFn: () => PromotionsService.getActive(),
+  });
 
   // Lista de tarifas de precio (multi-tarifa). Se cargan siempre que
   // el usuario active el toggle, para que pueda elegir cuáles aplican.
@@ -594,6 +595,15 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           };
         }),
       }));
+    }
+
+    // Hidratar las promociones asignadas al producto (solo en edit mode).
+    if (mode === 'edit' && productId && !promotionsHydrated.current) {
+      promotionsHydrated.current = true;
+      (async () => {
+        const assigned = await PromotionsService.getProductPromotions(Number(productId));
+        setForm((prev) => ({ ...prev, promotion_ids: assigned }));
+      })();
     }
   }, [product, productTierOverrides]);
 
@@ -1224,6 +1234,14 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           await syncPriceTierOverrides(savedId);
         } catch (err) {
           console.warn('No se pudieron sincronizar los overrides de tarifas', err);
+        }
+        // Las promociones se persisten via endpoint separado (no van en el DTO).
+        if (mode === 'edit' && savedId) {
+          try {
+            await ProductService.updatePromotions(savedId, form.promotion_ids ?? []);
+          } catch (err) {
+            console.warn('No se pudieron sincronizar las promociones', err);
+          }
         }
       }
 
@@ -2130,7 +2148,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 tooltip="Descuentos o campañas activas asociadas a este producto. Se aplican automáticamente al checkout."
                 values={form.promotion_ids ?? []}
                 onChange={(v) => updateField('promotion_ids', v)}
-                options={((promotions as { id: number; name: string }[]) || []).map((p) => ({
+                options={(activePromotions ?? []).map((p: any) => ({
                   value: p.id,
                   label: p.name,
                 }))}

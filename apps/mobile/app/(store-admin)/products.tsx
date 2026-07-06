@@ -49,6 +49,7 @@ export default function ProductsListScreen() {
   const storeId = useTenantStore((s) => s.storeId);
   const canCreate = useCan('store:products:create');
   const canDelete = useCan('store:products:delete');
+  const canUpdate = useCan('store:products:update');
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -393,10 +394,13 @@ export default function ProductsListScreen() {
           renderItem={({ item }) => (
             <ProductCard
               product={item}
+              onPress={() => router.push({ pathname: '/(store-admin)/products/[id]', params: { id: String(item.id) } })}
               onEdit={() => router.push({ pathname: '/(store-admin)/products/edit', params: { id: String(item.id) } })}
               onToggle={() => toggleStateMutation.mutate(item)}
               onMore={() => setDeleteTarget(item)}
               isToggling={toggleStateMutation.isPending && toggleStateMutation.variables?.id === item.id}
+              canUpdate={canUpdate}
+              canDelete={canDelete}
             />
           )}
           ListFooterComponent={
@@ -480,25 +484,33 @@ export default function ProductsListScreen() {
 
 interface ProductCardProps {
   product: Product;
+  onPress: () => void;
   onEdit: () => void;
   onToggle: () => void;
   onMore: () => void;
   isToggling: boolean;
+  canUpdate: boolean;
+  canDelete: boolean;
 }
 
-function ProductCard({ product, onEdit, onToggle, onMore, isToggling }: ProductCardProps) {
+function ProductCard({ product, onPress, onEdit, onToggle, onMore, isToggling, canUpdate, canDelete }: ProductCardProps) {
   const stateVariant: any = product.state === 'active' ? 'success' : product.state === 'archived' ? 'warning' : 'neutral';
   const stateLabel = product.state === 'active' ? 'active' : product.state === 'archived' ? 'archivado' : 'inactive';
 
   return (
-    <View
-      style={{
-        backgroundColor: colors.card,
-        borderRadius: borderRadius.lg,
-        borderWidth: 1,
-        borderColor: colorScales.gray[200],
-        overflow: 'hidden',
-      }}
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [
+        {
+          backgroundColor: colors.card,
+          borderRadius: borderRadius.lg,
+          borderWidth: 1,
+          borderColor: colorScales.gray[200],
+          overflow: 'hidden',
+        },
+        pressed && { opacity: 0.7 },
+      ]}
     >
       {/* TOP ROW: image (left) + content-top (title + badge + SKU) */}
       <View
@@ -576,27 +588,28 @@ function ProductCard({ product, onEdit, onToggle, onMore, isToggling }: ProductC
 
         {/* 3 action buttons in a horizontal row (right) */}
         <View style={{ flexDirection: 'row', gap: spacing[1] }}>
-          {/* Edit (pencil) — blue */}
-          <Pressable
-            onPress={onEdit}
-            hitSlop={6}
-            style={({ pressed }) => [
-              {
-                width: 32,
-                height: 32,
-                borderRadius: borderRadius.md,
-                backgroundColor: colorScales.blue[100],
-                alignItems: 'center',
-                justifyContent: 'center',
-              },
-              pressed && { opacity: 0.7 },
-            ]}
-          >
-            <Icon name="pencil" size={15} color={colorScales.blue[600] ?? '#2563EB'} />
-          </Pressable>
+          {canUpdate && (
+            <Pressable
+              onPress={onEdit}
+              hitSlop={6}
+              style={({ pressed }) => [
+                {
+                  width: 32,
+                  height: 32,
+                  borderRadius: borderRadius.md,
+                  backgroundColor: colorScales.blue[100],
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                },
+                pressed && { opacity: 0.7 },
+              ]}
+            >
+              <Icon name="pencil" size={15} color={colorScales.blue[600] ?? '#2563EB'} />
+            </Pressable>
+          )}
 
-          {/* Toggle state (power) — orange when active, green when inactive */}
-          <Pressable
+          {canUpdate && (
+            <Pressable
             onPress={onToggle}
             disabled={isToggling}
             hitSlop={6}
@@ -619,9 +632,10 @@ function ProductCard({ product, onEdit, onToggle, onMore, isToggling }: ProductC
               color={product.state === 'active' ? '#EA580C' : colorScales.green[700] ?? '#15803D'}
             />
           </Pressable>
+          )}
 
-          {/* More "..." (3 horizontal dots) — gray → opens Eliminar confirm */}
-          <Pressable
+          {canDelete && (
+            <Pressable
             onPress={onMore}
             hitSlop={6}
             style={({ pressed }) => [
@@ -638,9 +652,10 @@ function ProductCard({ product, onEdit, onToggle, onMore, isToggling }: ProductC
           >
             <Icon name="more-horizontal" size={15} color={colors.text.secondary} />
           </Pressable>
+          )}
         </View>
       </View>
-    </View>
+    </Pressable>
   );
 }
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, Image } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Image, Pressable } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ProductService } from '@/features/store/services';
@@ -12,6 +12,7 @@ import { Button } from '@/shared/components/button/button';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
+import { useCan } from '@/core/auth/use-permissions';
 import { spacing, typography, colorScales, colors } from '@/shared/theme';
 
 const stateVariant = (state: ProductState) =>
@@ -34,6 +35,8 @@ export default function ProductDetailScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const canUpdate = useCan('store:products:update');
+  const canDelete = useCan('store:products:delete');
 
   const { data: product, isLoading } = useQuery({
     queryKey: ['product', id],
@@ -75,6 +78,15 @@ export default function ProductDetailScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Header con back arrow */}
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()} hitSlop={8} style={styles.backBtn}>
+          <Icon name="chevron-left" size={24} color={colors.text.primary} />
+        </Pressable>
+        <Text style={styles.headerTitle} numberOfLines={1}>Detalle del producto</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
       <ScrollView showsVerticalScrollIndicator={false}>
         <View style={styles.imagePlaceholder}>
           {product.image_url ? (
@@ -152,27 +164,31 @@ export default function ProductDetailScreen() {
       </ScrollView>
 
       <View style={styles.footer}>
-        <View style={styles.footerRow}>
+        {canUpdate && (
+          <View style={styles.footerRow}>
+            <Button
+              title="Editar"
+              onPress={() => router.push({ pathname: '/products/edit', params: { id } } as never)}
+              variant="primary"
+              fullWidth
+            />
+            <Button
+              title={product.state === 'active' ? 'Desactivar' : 'Activar'}
+              onPress={() => toggleStateMutation.mutate()}
+              variant="secondary"
+              loading={toggleStateMutation.isPending}
+              fullWidth
+            />
+          </View>
+        )}
+        {canDelete && (
           <Button
-            title="Editar"
-            onPress={() => router.push({ pathname: '/products/edit', params: { id } } as never)}
-            variant="primary"
+            title="Eliminar"
+            onPress={() => setShowDeleteDialog(true)}
+            variant="destructive"
             fullWidth
           />
-          <Button
-            title={product.state === 'active' ? 'Desactivar' : 'Activar'}
-            onPress={() => toggleStateMutation.mutate()}
-            variant="secondary"
-            loading={toggleStateMutation.isPending}
-            fullWidth
-          />
-        </View>
-        <Button
-          title="Eliminar"
-          onPress={() => setShowDeleteDialog(true)}
-          variant="destructive"
-          fullWidth
-        />
+        )}
       </View>
 
       <ConfirmDialog
@@ -195,6 +211,27 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[4],
+    paddingBottom: spacing[2],
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.text.primary,
+    flex: 1,
+    textAlign: 'center',
   },
   loadingContainer: {
     flex: 1,

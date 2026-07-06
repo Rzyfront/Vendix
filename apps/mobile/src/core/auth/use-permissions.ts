@@ -10,7 +10,8 @@ export type Permission =
   | 'store:brands:delete'
   | 'store:categories:create'
   | 'store:categories:update'
-  | 'store:categories:delete';
+  | 'store:categories:delete'
+  | 'store:promotions:read';
 
 export function usePermissions() {
   const permissions = useAuthStore((s) => s.permissions);

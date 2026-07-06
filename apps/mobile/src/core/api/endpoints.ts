@@ -36,7 +36,7 @@ export const Endpoints = {
       BY_BRAND: '/store/products/brand/:brandId',
       LOW_STOCK: '/store/products/low-stock/:threshold',
       GENERATE_DESCRIPTION: '/store/products/generate-description',
-      PROMOTIONS: '/store/products/:productId/promotions',
+      PROMOTIONS: '/store/products/:id/promotions',
       BULK_UPLOAD: '/store/products/bulk-upload',
       BULK_IMAGE_UPLOAD: '/store/products/bulk-image-upload',
     },
@@ -112,6 +112,11 @@ export const Endpoints = {
     },
     PAYMENTS: {
       POS: '/store/payments/pos',
+    },
+    PROMOTIONS: {
+      LIST: '/store/promotions',
+      ACTIVE: '/store/promotions/active',
+      GET: '/store/promotions/:id',
     },
     CASH_REGISTERS: {
       LIST: '/store/cash-registers',
