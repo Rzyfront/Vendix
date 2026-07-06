@@ -53,10 +53,10 @@ import {
                 class="text-primary-600"
               ></app-icon>
             </div>
-            <h3 class="text-base font-semibold text-gray-900">
+            <h3 class="text-base font-semibold text-text-primary">
               Carga masiva de empleados
             </h3>
-            <p class="text-xs text-gray-500 mt-0.5">
+            <p class="text-xs text-muted-foreground mt-0.5">
               Importa empleados de una sola vez
             </p>
           </div>
@@ -134,23 +134,23 @@ import {
           </div>
 
           <!-- Excel structure visual -->
-          <div class="bg-gray-50 border rounded-lg px-3 py-2">
-            <p class="text-[11px] font-medium text-gray-700 mb-1">
+          <div class="bg-background border rounded-lg px-3 py-2">
+            <p class="text-[11px] font-medium text-text-secondary mb-1">
               Ejemplo de Excel:
             </p>
             <div class="overflow-x-auto">
-              <table class="text-[10px] text-gray-500 font-mono">
+              <table class="text-[10px] text-muted-foreground font-mono">
                 <thead>
-                  <tr class="border-b border-gray-200">
-                    <th class="px-2 py-0.5 text-left text-gray-600">Nombre</th>
-                    <th class="px-2 py-0.5 text-left text-gray-600">
+                  <tr class="border-b border-border">
+                    <th class="px-2 py-0.5 text-left text-text-secondary">Nombre</th>
+                    <th class="px-2 py-0.5 text-left text-text-secondary">
                       Documento
                     </th>
-                    <th class="px-2 py-0.5 text-right text-gray-600">
+                    <th class="px-2 py-0.5 text-right text-text-secondary">
                       Salario
                     </th>
-                    <th class="px-2 py-0.5 text-left text-gray-600">Cargo</th>
-                    <th class="px-2 py-0.5 text-left text-gray-600">
+                    <th class="px-2 py-0.5 text-left text-text-secondary">Cargo</th>
+                    <th class="px-2 py-0.5 text-left text-text-secondary">
                       Tipo Contrato
                     </th>
                   </tr>
@@ -177,25 +177,25 @@ import {
 
           <!-- Auto-advance + don't show again -->
           <div
-            class="flex items-center justify-between pt-1.5 border-t border-gray-100"
+            class="flex items-center justify-between pt-1.5 border-t border-border"
           >
             <label class="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"
                 [checked]="dontShowIntroAgain()"
                 (change)="toggleDontShowAgain()"
-                class="w-3.5 h-3.5 rounded border-gray-300 text-primary-600 focus:ring-primary-600"
+                class="w-3.5 h-3.5 rounded border-border text-primary-600 focus:ring-primary-600"
               />
-              <span class="text-[11px] text-gray-500">No volver a mostrar</span>
+              <span class="text-[11px] text-muted-foreground">No volver a mostrar</span>
             </label>
             <div class="flex items-center gap-1.5">
-              <div class="w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
+              <div class="w-16 h-1 bg-border rounded-full overflow-hidden">
                 <div
                   class="h-full bg-primary-600 rounded-full transition-all duration-100"
                   [style.width.%]="introProgress()"
                 ></div>
               </div>
-              <span class="text-[10px] text-gray-400"
+              <span class="text-[10px] text-muted-foreground"
                 >{{ introCountdown() }}s</span
               >
             </div>
@@ -235,7 +235,7 @@ import {
 
             <!-- Template Download (single card) -->
             <div>
-              <p class="text-xs font-medium text-gray-700 mb-2">
+              <p class="text-xs font-medium text-text-secondary mb-2">
                 1. Descarga la plantilla
               </p>
               <div
@@ -271,11 +271,11 @@ import {
 
             <!-- File Upload -->
             <div>
-              <p class="text-xs font-medium text-gray-700 mb-2">
+              <p class="text-xs font-medium text-text-secondary mb-2">
                 2. Sube tu archivo
               </p>
               <div
-                class="border-2 border-dashed border-gray-300 rounded-lg p-5 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer"
+                class="border-2 border-dashed border-border rounded-lg p-5 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer"
                 (dragover)="onDragOver($event)"
                 (dragleave)="onDragLeave($event)"
                 (drop)="onDrop($event)"
@@ -295,13 +295,13 @@ import {
                   <app-icon
                     name="upload-cloud"
                     [size]="36"
-                    class="mx-auto text-gray-400 mb-2"
+                    class="mx-auto text-muted-foreground mb-2"
                     [class.text-blue-500]="isDragging()"
                   ></app-icon>
-                  <p class="text-sm text-gray-900 font-medium">
+                  <p class="text-sm text-text-primary font-medium">
                     Arrastra tu archivo Excel aquí
                   </p>
-                  <p class="text-xs text-gray-500 mt-0.5">
+                  <p class="text-xs text-muted-foreground mt-0.5">
                     o haz clic para seleccionar · .xlsx, .xls, .csv · Máximo 5
                     MB
                   </p>
@@ -313,10 +313,10 @@ import {
                     [size]="36"
                     class="mx-auto text-green-500 mb-2"
                   ></app-icon>
-                  <p class="text-sm text-gray-900 font-medium">
+                  <p class="text-sm text-text-primary font-medium">
                     {{ selectedFile()!.name }}
                   </p>
-                  <p class="text-xs text-gray-500 mt-0.5">
+                  <p class="text-xs text-muted-foreground mt-0.5">
                     {{ formatFileSize(selectedFile()!.size) }}
                   </p>
                 }
@@ -362,10 +362,10 @@ import {
                   [size]="36"
                   class="text-primary-600 animate-spin"
                 ></app-icon>
-                <p class="text-sm text-gray-900 font-medium">
+                <p class="text-sm text-text-primary font-medium">
                   Analizando archivo...
                 </p>
-                <p class="text-xs text-gray-500 mt-1">
+                <p class="text-xs text-muted-foreground mt-1">
                   Verificando empleados, documentos y datos
                 </p>
               </div>
@@ -424,66 +424,66 @@ import {
                 class="hidden md:block border rounded-lg overflow-hidden mt-3"
               >
                 <div class="max-h-52 overflow-y-auto">
-                  <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50 sticky top-0">
+                  <table class="min-w-full divide-y divide-border">
+                    <thead class="bg-background sticky top-0">
                       <tr>
                         <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase"
                         >
                           Nombre
                         </th>
                         <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase"
                         >
                           Documento
                         </th>
                         <th
-                          class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase"
                         >
                           Salario
                         </th>
                         <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase"
                         >
                           Tipo Contrato
                         </th>
                         <th
-                          class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase"
                         >
                           Acción
                         </th>
                         <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase"
                         >
                           Estado
                         </th>
                       </tr>
                     </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
+                    <tbody class="bg-background divide-y divide-border">
                       @for (
                         item of analysisResult()!.employees;
                         track item.row_number
                       ) {
                         <tr>
                           <td
-                            class="px-3 py-2 text-sm text-gray-900 max-w-[180px] truncate"
+                            class="px-3 py-2 text-sm text-text-primary max-w-[180px] truncate"
                           >
                             {{ item.name }} {{ item.last_name }}
                           </td>
                           <td
-                            class="px-3 py-2 text-sm font-mono text-xs text-gray-600"
+                            class="px-3 py-2 text-sm font-mono text-xs text-text-secondary"
                           >
                             {{ item.document_type }} {{ item.document_number }}
                           </td>
                           <td
-                            class="px-3 py-2 text-sm text-right text-gray-700"
+                            class="px-3 py-2 text-sm text-right text-text-secondary"
                           >
                             {{
                               item.base_salary
                                 | currency: 'COP' : 'symbol-narrow' : '1.0-0'
                             }}
                           </td>
-                          <td class="px-3 py-2 text-sm text-gray-600">
+                          <td class="px-3 py-2 text-sm text-text-secondary">
                             {{ item.contract_type || '—' }}
                           </td>
                           <td class="px-3 py-2 text-sm text-center">
@@ -533,7 +533,7 @@ import {
                         @if (
                           item.warnings.length > 0 || item.errors.length > 0
                         ) {
-                          <tr class="bg-gray-50">
+                          <tr class="bg-background">
                             <td colspan="6" class="px-3 py-2">
                               @for (warning of item.warnings; track warning) {
                                 <p
@@ -576,10 +576,10 @@ import {
                   item of analysisResult()!.employees;
                   track item.row_number
                 ) {
-                  <div class="border rounded-lg p-3 bg-white">
+                  <div class="border rounded-lg p-3 bg-background">
                     <div class="flex items-center justify-between mb-2">
                       <span
-                        class="text-sm font-medium text-gray-900 truncate mr-2"
+                        class="text-sm font-medium text-text-primary truncate mr-2"
                         >{{ item.name }} {{ item.last_name }}</span
                       >
                       <span
@@ -601,10 +601,10 @@ import {
                         }}
                       </span>
                     </div>
-                    <p class="text-xs text-gray-500 font-mono mb-2">
+                    <p class="text-xs text-muted-foreground font-mono mb-2">
                       {{ item.document_type }} {{ item.document_number }}
                     </p>
-                    <div class="flex gap-3 text-xs text-gray-600 mb-1">
+                    <div class="flex gap-3 text-xs text-text-secondary mb-1">
                       <span>{{
                         item.base_salary
                           | currency: 'COP' : 'symbol-narrow' : '1.0-0'
@@ -629,7 +629,7 @@ import {
                       </span>
                     </div>
                     @if (item.warnings.length > 0 || item.errors.length > 0) {
-                      <div class="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                      <div class="mt-2 pt-2 border-t border-border space-y-1">
                         @for (warning of item.warnings; track warning) {
                           <p
                             class="text-[11px] text-amber-700 flex items-start gap-1"
@@ -664,10 +664,10 @@ import {
                   [size]="36"
                   class="text-primary-600 animate-spin"
                 ></app-icon>
-                <p class="text-sm text-gray-900 font-medium">
+                <p class="text-sm text-text-primary font-medium">
                   Cargando empleados...
                 </p>
-                <p class="text-xs text-gray-500 mt-1">
+                <p class="text-xs text-muted-foreground mt-1">
                   Esto puede tomar unos momentos
                 </p>
               </div>
@@ -690,14 +690,14 @@ import {
             <!-- Results -->
             @if (uploadResults() && !isUploading()) {
               <!-- Summary -->
-              <div class="bg-white border rounded-lg overflow-hidden">
+              <div class="bg-background border rounded-lg overflow-hidden">
                 <div
-                  class="bg-gray-50 px-3 py-2 border-b flex justify-between items-center"
+                  class="bg-background px-3 py-2 border-b flex justify-between items-center"
                 >
-                  <h4 class="text-sm font-medium text-gray-900">
+                  <h4 class="text-sm font-medium text-text-primary">
                     Resumen de Carga
                   </h4>
-                  <span class="text-xs text-gray-500"
+                  <span class="text-xs text-muted-foreground"
                     >{{ uploadResults()!.total_processed || 0 }} empleados</span
                   >
                 </div>
@@ -772,42 +772,42 @@ import {
               <!-- Detail Table -->
               <div class="border rounded-lg overflow-hidden">
                 <div
-                  class="bg-gray-50 px-3 py-2 border-b text-gray-800 font-medium text-xs flex items-center"
+                  class="bg-background px-3 py-2 border-b text-text-primary font-medium text-xs flex items-center"
                 >
                   <app-icon name="list" [size]="14" class="mr-1.5"></app-icon>
                   Detalle por Empleado
                 </div>
-                <div class="max-h-48 overflow-y-auto bg-white">
-                  <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-gray-50">
+                <div class="max-h-48 overflow-y-auto bg-background">
+                  <table class="min-w-full divide-y divide-border">
+                    <thead class="bg-background">
                       <tr>
                         <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase"
                         >
                           Empleado
                         </th>
                         <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase"
                         >
                           Documento
                         </th>
                         <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase"
                         >
                           Estado
                         </th>
                         <th
-                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase"
                         >
                           Detalle
                         </th>
                       </tr>
                     </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
+                    <tbody class="bg-background divide-y divide-border">
                       @for (result of uploadResults()!.results; track $index) {
                         <tr>
                           <td
-                            class="px-3 py-2 text-sm text-gray-900 max-w-[150px] truncate"
+                            class="px-3 py-2 text-sm text-text-primary max-w-[150px] truncate"
                           >
                             {{
                               result.employee_name ||
@@ -816,7 +816,7 @@ import {
                             }}
                           </td>
                           <td
-                            class="px-3 py-2 whitespace-nowrap text-sm font-mono text-xs text-gray-600"
+                            class="px-3 py-2 whitespace-nowrap text-sm font-mono text-xs text-text-secondary"
                           >
                             {{ result.document_number || '—' }}
                           </td>
@@ -837,7 +837,7 @@ import {
                               }}
                             </span>
                           </td>
-                          <td class="px-3 py-2 text-sm text-gray-600">
+                          <td class="px-3 py-2 text-sm text-text-secondary">
                             {{ result.message }}
                           </td>
                         </tr>
@@ -855,7 +855,7 @@ import {
       <!-- Footer -->
       <div
         slot="footer"
-        class="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4"
+        class="flex justify-end gap-2 pt-4 border-t border-border mt-4"
       >
         @if (showingIntro()) {
           <app-button variant="outline" (clicked)="onCancel()"
