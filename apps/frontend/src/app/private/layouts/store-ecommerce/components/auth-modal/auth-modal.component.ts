@@ -212,7 +212,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
                     [disabled]="recoveryPending()"
                     [loading]="recoveryPending()"
                     [showTextWhileLoading]="true"
-                    (onClick)="onStartRecovery()"
+                    (clicked)="onStartRecovery()"
                   >
                     {{
                       recoveryPending()
@@ -692,6 +692,7 @@ export class AuthModalComponent {
   onStartRecovery(): void {
     const email = this.claimableEmail() ?? this.authForm.get('email')?.value;
     const storeId = this.tenantFacade.getCurrentStoreId();
+    console.log('[onStartRecovery]', { email, storeId, claimableEmail: this.claimableEmail() });
     if (!email || !storeId) return;
 
     this.recoveryPending.set(true);
@@ -699,8 +700,9 @@ export class AuthModalComponent {
       next: () => {
         this.recoveryPending.set(false);
         this.toast.success(
-          'Si el correo está registrado como cliente, te enviamos un link para activar tu cuenta.',
-          'Revisa tu bandeja de entrada',
+          'Te enviamos un email con un link para activar tu cuenta. Revisa tu bandeja de entrada (incluye spam).',
+          'Email enviado',
+          5000,
         );
       },
       error: () => {
@@ -708,8 +710,9 @@ export class AuthModalComponent {
         // Same generic message — backend intentionally doesn't reveal
         // whether the email exists. Don't leak via the error either.
         this.toast.success(
-          'Si el correo está registrado como cliente, te enviamos un link para activar tu cuenta.',
-          'Revisa tu bandeja de entrada',
+          'Te enviamos un email con un link para activar tu cuenta. Revisa tu bandeja de entrada (incluye spam).',
+          'Email enviado',
+          5000,
         );
       },
     });
