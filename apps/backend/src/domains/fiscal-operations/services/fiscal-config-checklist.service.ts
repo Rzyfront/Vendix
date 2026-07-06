@@ -10,6 +10,19 @@ export interface FiscalConfigChecklistItem {
   detail: string;
   /** Semantic navigation key — the frontend maps it to a concrete route. */
   link_hint: string;
+  /**
+   * Severity of the requirement:
+   * - `blocker`: a hard requirement of an *active* fiscal area (fiscal
+   *   identity, DIAN/PUC/period/mappings/invoice-resolution while their area
+   *   is active). Missing it prevents operating fiscally.
+   * - `required`: still needed for a complete setup but not a hard blocker.
+   */
+  severity: 'blocker' | 'required';
+  /**
+   * Present only when the item is incomplete and has a clear destination.
+   * `navigate` is the wizard step id / route (mirrors `link_hint`).
+   */
+  action?: { label: string; navigate: string };
 }
 
 export interface FiscalConfigChecklist {
@@ -69,6 +82,8 @@ export class FiscalConfigChecklistService {
     const accountingActive =
       status.fiscal_status.accounting.state !== 'INACTIVE';
     const payrollActive = status.fiscal_status.payroll.state !== 'INACTIVE';
+    const invoicingActive =
+      status.fiscal_status.invoicing.state !== 'INACTIVE';
 
     const identityComplete = Boolean(
       prefill.legal_data?.nit &&
@@ -98,6 +113,13 @@ export class FiscalConfigChecklistService {
           ? `NIT ${prefill.legal_data!.nit}-${prefill.legal_data!.nit_dv}, régimen ${prefill.legal_data!.fiscal_regime}`
           : 'Faltan NIT, dígito de verificación o régimen tributario',
         link_hint: 'settings/fiscal',
+        // Fiscal identity is the base requirement for every fiscal area.
+        severity: 'blocker',
+        action: this.actionFor(
+          identityComplete,
+          'Completar identidad',
+          'settings/fiscal',
+        ),
       },
       {
         key: 'dian_config',
@@ -109,6 +131,10 @@ export class FiscalConfigChecklistService {
             ? 'El certificado digital está vencido'
             : 'Falta cargar el certificado digital DIAN',
         link_hint: 'fiscal/dian',
+        // The DIAN certificate is a hard requirement only while invoicing is
+        // an active area.
+        severity: invoicingActive ? 'blocker' : 'required',
+        action: this.actionFor(dianComplete, 'Configurar DIAN', 'fiscal/dian'),
       },
       {
         key: 'puc',
@@ -118,6 +144,12 @@ export class FiscalConfigChecklistService {
           ? `${prefill.puc!.total_accounts} cuentas (${prefill.puc!.postable_accounts} imputables)`
           : 'No hay cuentas contables creadas',
         link_hint: 'accounting/chart-of-accounts',
+        severity: accountingActive ? 'blocker' : 'required',
+        action: this.actionFor(
+          pucComplete,
+          'Crear cuentas',
+          'accounting/chart-of-accounts',
+        ),
       },
       {
         key: 'accounting_period',
@@ -127,6 +159,12 @@ export class FiscalConfigChecklistService {
           ? `Período abierto: ${prefill.accounting_period!.name}`
           : 'No existe un período fiscal abierto',
         link_hint: 'accounting/periods',
+        severity: accountingActive ? 'blocker' : 'required',
+        action: this.actionFor(
+          periodComplete,
+          'Abrir período',
+          'accounting/periods',
+        ),
       },
       {
         key: 'default_taxes',
@@ -136,6 +174,12 @@ export class FiscalConfigChecklistService {
           ? `${prefill.default_taxes!.total_categories} categorías y ${prefill.default_taxes!.total_rates} tarifas`
           : 'No hay categorías de impuestos configuradas',
         link_hint: 'taxes',
+        severity: 'required',
+        action: this.actionFor(
+          taxesComplete,
+          'Configurar impuestos',
+          'taxes',
+        ),
       },
       {
         key: 'accounting_mappings',
@@ -145,10 +189,18 @@ export class FiscalConfigChecklistService {
           ? `${prefill.accounting_mappings!.total} mapeos activos`
           : 'No hay mapeos contables activos',
         link_hint: 'accounting/mappings',
+        severity: accountingActive ? 'blocker' : 'required',
+        action: this.actionFor(
+          mappingsComplete,
+          'Configurar mapeos',
+          'accounting/mappings',
+        ),
       },
       this.conditionalItem({
         key: 'withholding_concepts',
         label: 'Conceptos de retención',
+        severity: 'required',
+        actionLabel: 'Configurar retenciones',
         applicable: accountingActive,
         complete: withholdingCount > 0,
         completeDetail: `${withholdingCount} conceptos de retención activos`,
@@ -166,6 +218,14 @@ export class FiscalConfigChecklistService {
             ? `${resolutionCount} resoluciones activas`
             : 'No hay resoluciones de facturación activas',
         link_hint: 'invoicing/resolutions',
+        // The invoicing resolution is a hard requirement only while invoicing
+        // is an active area.
+        severity: invoicingActive ? 'blocker' : 'required',
+        action: this.actionFor(
+          resolutionCount > 0,
+          'Crear resolución',
+          'invoicing/resolutions',
+        ),
       },
       {
         key: 'uvt_current_year',
@@ -175,10 +235,14 @@ export class FiscalConfigChecklistService {
           ? `UVT ${currentYear} registrada: ${uvtRow.value_cop}`
           : `No hay valor UVT registrado para ${currentYear}`,
         link_hint: 'fiscal/uvt',
+        severity: 'required',
+        action: this.actionFor(Boolean(uvtRow), 'Registrar UVT', 'fiscal/uvt'),
       },
       this.conditionalItem({
         key: 'payroll_config',
         label: 'Configuración de nómina',
+        severity: 'required',
+        actionLabel: 'Configurar nómina',
         applicable: payrollActive,
         complete: payrollComplete,
         completeDetail: 'Configuración mínima de nómina registrada',
@@ -207,6 +271,8 @@ export class FiscalConfigChecklistService {
   private conditionalItem(params: {
     key: string;
     label: string;
+    severity: 'blocker' | 'required';
+    actionLabel: string;
     applicable: boolean;
     complete: boolean;
     completeDetail: string;
@@ -215,12 +281,15 @@ export class FiscalConfigChecklistService {
     link_hint: string;
   }): FiscalConfigChecklistItem {
     if (!params.applicable) {
+      // Not-applicable items are reported complete (never penalized) and carry
+      // no action — there is nothing for the operator to do.
       return {
         key: params.key,
         label: params.label,
         complete: true,
         detail: params.notApplicableDetail,
         link_hint: params.link_hint,
+        severity: params.severity,
       };
     }
     return {
@@ -231,6 +300,24 @@ export class FiscalConfigChecklistService {
         ? params.completeDetail
         : params.incompleteDetail,
       link_hint: params.link_hint,
+      severity: params.severity,
+      action: this.actionFor(
+        params.complete,
+        params.actionLabel,
+        params.link_hint,
+      ),
     };
+  }
+
+  /**
+   * Builds the `action` for an item: only present when the item is incomplete
+   * (there is something to do). `navigate` mirrors the item's `link_hint`.
+   */
+  private actionFor(
+    complete: boolean,
+    label: string,
+    navigate: string,
+  ): { label: string; navigate: string } | undefined {
+    return complete ? undefined : { label, navigate };
   }
 }
