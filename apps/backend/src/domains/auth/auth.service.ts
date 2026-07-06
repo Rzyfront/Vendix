@@ -28,6 +28,8 @@ import { DefaultPanelUIService } from '../../common/services/default-panel-ui.se
 import { toTitleCase } from '@common/utils/format.util';
 import { mergeUserConfigPanelUi } from '../../common/utils/panel-ui-merge.util';
 import { TOKEN_DEFAULTS } from './constants/token.constants';
+import { DomainConfigService } from '../../common/config/domain.config';
+import { CustomersService } from '../store/customers/customers.service';
 import { S3Service } from '@common/services/s3.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { organizations } from '@prisma/client';
@@ -89,6 +91,7 @@ export class AuthService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly s3Service: S3Service,
     private readonly eventEmitter: EventEmitter2,
+    private readonly customersService: CustomersService,
   ) {}
 
   /**
@@ -2806,11 +2809,49 @@ export class AuthService {
     });
 
     if (user.email) {
-      await this.emailService.sendPasswordResetEmail(
-        user.email,
-        token,
-        user.first_name,
-      );
+      // Build a customer-specific reset URL pointing to the ecommerce
+      // storefront (not the backoffice). Without this, the generic
+      // sendPasswordResetEmail links to /auth/reset-owner-password on the
+      // backoffice domain — which is the wrong place for a customer.
+      const ecommerceDomain = await this.prismaService.domain_settings.findFirst({
+        where: { store_id, app_type: 'STORE_ECOMMERCE', status: 'active' },
+        select: { hostname: true },
+      });
+      let customResetUrl: string | undefined;
+      if (ecommerceDomain?.hostname) {
+        const baseDomain = DomainConfigService.getBaseDomain();
+        // hostname may already include the base domain (e.g. 'nike-shop.vendix.com')
+        // — concat only when it doesn't.
+        const fullHost = ecommerceDomain.hostname.endsWith(`.${baseDomain}`) ||
+          ecommerceDomain.hostname === baseDomain
+          ? ecommerceDomain.hostname
+          : `${ecommerceDomain.hostname}.${baseDomain}`;
+        customResetUrl = `https://${fullHost}/auth/reset-customer-password?token=${token}&store_id=${store_id}`;
+      }
+      if (customResetUrl) {
+        const { EmailTemplates } = await import('../../email/templates/email-templates');
+        const template = EmailTemplates.getPasswordResetTemplate({
+          username: user.first_name,
+          email: user.email,
+          token,
+          resetUrl: customResetUrl,
+          userType: 'customer',
+        });
+        await this.emailService.sendEmail(
+          user.email,
+          template.subject,
+          template.html,
+          template.text,
+        );
+      } else {
+        // Fallback to the standard (owner) template if the store has no
+        // ecommerce domain configured — keeps the recovery flow alive.
+        await this.emailService.sendPasswordResetEmail(
+          user.email,
+          token,
+          user.first_name,
+        );
+      }
     }
 
     await this.auditService.logAuth(
@@ -2839,6 +2880,7 @@ export class AuthService {
   async resetCustomerPassword(
     token: string,
     newPassword: string,
+    store_id?: number,
   ): Promise<{ message: string; activated: boolean }> {
     const resetToken =
       await this.prismaService.password_reset_tokens.findUnique({
@@ -2910,6 +2952,19 @@ export class AuthService {
         where: { user_id: resetToken.user_id },
       }),
     ]);
+
+    // Link the customer to the ecommerce store (idempotent) and ensure
+    // the account is active. claimCustomerAccount does both: it
+    // inserts a store_users row if missing and activates the user if
+    // still pending. Without this, the customer reset their password
+    // but the store still didn't know about them — the link is the
+    // whole point of the recovery flow.
+    if (store_id) {
+      await this.customersService.claimCustomerAccount(
+        resetToken.user_id,
+        store_id,
+      );
+    }
 
     await this.auditService.logAuth(
       resetToken.user_id,

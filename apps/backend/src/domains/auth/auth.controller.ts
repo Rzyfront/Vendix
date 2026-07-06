@@ -479,6 +479,7 @@ export class AuthController {
       const result = await this.authService.resetCustomerPassword(
         resetCustomerDto.token,
         resetCustomerDto.new_password,
+        resetCustomerDto.store_id,
       );
       return this.responseService.success(result, result.message);
     } catch (error) {

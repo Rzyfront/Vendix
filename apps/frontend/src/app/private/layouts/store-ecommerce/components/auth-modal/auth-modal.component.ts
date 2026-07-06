@@ -458,7 +458,6 @@ export class AuthModalComponent {
   private mapErrorToUserFriendly(error: string): {
     title: string;
     message: string;
-    useRecoveryToast?: boolean;
   } {
     const errorLower = error.toLowerCase();
 
@@ -499,7 +498,6 @@ export class AuthModalComponent {
         title: 'Ya tienes cuenta con este correo',
         message:
           'Detectamos que este correo ya está registrado como cliente. Te enviaremos un link para que actives tu contraseña.',
-        useRecoveryToast: true,
       };
     }
 

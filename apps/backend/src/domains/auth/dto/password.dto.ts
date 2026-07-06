@@ -1,4 +1,11 @@
-import { IsEmail, IsString, IsNotEmpty, MinLength, IsInt } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  IsNotEmpty,
+  MinLength,
+  IsInt,
+  IsOptional,
+} from 'class-validator';
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 
 export class ForgotPasswordDto {
@@ -98,4 +105,18 @@ export class ResetCustomerPasswordDto {
   @IsNotEmpty()
   @MinLength(8)
   new_password: string;
+
+  /**
+   * The ecommerce store the recovery flow was initiated from. The
+   * controller will link the customer to this store (idempotent) and
+   * activate the account in a single transaction.
+   */
+  @ApiProperty({
+    example: 10,
+    description: 'ID of the ecommerce store the user is recovering on',
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  store_id?: number;
 }

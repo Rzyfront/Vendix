@@ -229,6 +229,8 @@ export class ResetCustomerPasswordComponent implements OnInit {
     );
   }
 
+  readonly storeId = signal<number | null>(null);
+
   ngOnInit(): void {
     this.route.queryParamMap
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -240,6 +242,10 @@ export class ResetCustomerPasswordComponent implements OnInit {
           );
         }
         this.token.set(t);
+        // store_id is appended by the backend's email template so the
+        // reset endpoint can link the customer to the ecommerce store.
+        const sid = Number(params.get('store_id'));
+        this.storeId.set(Number.isFinite(sid) && sid > 0 ? sid : null);
       });
   }
 
@@ -252,7 +258,7 @@ export class ResetCustomerPasswordComponent implements OnInit {
     this.isLoading.set(true);
     const { new_password } = this.resetPasswordForm.value;
     this.authService
-      .resetCustomerPassword(this.token()!, new_password)
+      .resetCustomerPassword(this.token()!, new_password, this.storeId() ?? undefined)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (resp: any) => {
