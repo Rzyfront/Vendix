@@ -332,6 +332,34 @@ export class SuperadminPqrsComponent {
   readonly total = signal(0);
   readonly totalPages = signal(1);
 
+  /**
+   * @deprecated Pagination is now rendered through the shared
+   * `<app-pagination>` component (see the template's
+   * `@if (totalPages() > 1)` block). This property remains for one
+   * release so any external template, story, or test that still calls
+   * it keeps compiling. Use `totalPages()` and `page()` directly when
+   * you need the pagination window numbers. Will be removed in the
+   * next major release.
+   */
+  pageNumbers = (): (number | '…')[] => {
+    const total = this.totalPages();
+    const current = this.page();
+    const pages: (number | '…')[] = [];
+    const window = 2;
+    for (let p = 1; p <= total; p++) {
+      if (
+        p === 1 ||
+        p === total ||
+        (p >= current - window && p <= current + window)
+      ) {
+        pages.push(p);
+      } else if (pages[pages.length - 1] !== '…') {
+        pages.push('…');
+      }
+    }
+    return pages;
+  };
+
   /** Quick filter — drives the StickyHeader tabs at the top. */
   readonly quickFilter = signal<'all' | 'overdue' | 'pending' | 'new'>('all');
 
@@ -370,15 +398,23 @@ export class SuperadminPqrsComponent {
     // StickyHeaderComponent emits tabChanged as Event; raw buttons
     // emit plain strings. Accept both and coerce.
     const raw = typeof filter === 'string' ? filter : '';
+    // Back-compat alias: a previous release exposed this filter as
+    // 'expiring' (SLA-warn bucket). It was renamed to 'pending' to
+    // align with the store-admin semantic — same label now means the
+    // same thing in both views. Bookmarks, deep-links, and any external
+    // caller that still emits 'expiring' should keep working for at
+    // least one release; normalize before validating against the
+    // current signal union.
+    const normalized = raw === 'expiring' ? 'pending' : raw;
     if (
-      raw !== 'all' &&
-      raw !== 'overdue' &&
-      raw !== 'pending' &&
-      raw !== 'new'
+      normalized !== 'all' &&
+      normalized !== 'overdue' &&
+      normalized !== 'pending' &&
+      normalized !== 'new'
     ) {
       return;
     }
-this.quickFilter.set(raw);
+    this.quickFilter.set(normalized);
     this.page.set(1);
     this.fetch();
   }
@@ -542,6 +578,23 @@ this.quickFilter.set(raw);
       (s['WAITING_RESPONSE'] || 0) +
       (s['REOPENED'] || 0)
     );
+  }
+
+  /**
+   * @deprecated Removed during the quick-filter rename (`'expiring'`
+   * → `'pending'`). The legacy "expiring" semantic counted tickets in
+   * the SLA-warn bucket (1–3 days remaining). Migrate to
+   * `pendingCount()`, which counts open-status tickets awaiting action
+   * — the new `'pending'` semantic. This wrapper preserves the old
+   * warn-only count so any external template or test that still calls
+   * it doesn't break compile-time. Will be removed in the next major
+   * release.
+   */
+  expiringCount(): number {
+    return this.tickets().filter((t) => {
+      const info = this.slaInfo(t);
+      return info.status === 'warn';
+    }).length;
   }
 
   /**
