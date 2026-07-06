@@ -57,22 +57,23 @@ Practical rule: receiving money/inventory is usually debit; owing money is credi
 | `1592` | Accumulated depreciation |
 | `2205` | Suppliers / accounts payable |
 | `2335` | Costs and expenses payable / partner commissions |
-| `2365` | Withholding tax |
-| `2370` | Payroll withholdings and contributions |
-| `2380` | Pension payable |
+| `2365` | Withholding tax (PUC: "Retención en la Fuente") |
+| `236505` | Labor withholding — retefuente salarial (child of `2365`) |
+| `2370` | Payroll withholdings and contributions ("Retenciones y Aportes de Nómina"): EPS `237005`, ARL `237006`, pension `237010`, CCF `237025`, ICBF `237030`, SENA `237035` |
+| `2380` | Módulo lo usa para pensión por pagar; nombre PUC real = "Acreedores Varios" |
 | `2408` | VAT payable |
-| `2505` | Salaries payable |
-| `2610` | Severance provision |
-| `2615` | Severance interest provision |
-| `2620` | Vacation provision |
-| `2625` | Service bonus provision |
+| `2505` | Salaries payable ("Salarios por Pagar") |
+| `2510` | Cesantías Consolidadas — labor provision liability (credit) |
+| `2515` | Intereses sobre Cesantías — labor provision liability (credit) |
+| `2520` | Prima de Servicios — labor provision liability (credit) |
+| `2525` | Vacaciones Consolidadas — labor provision liability (credit) |
 | `2805` | Customer advances / wallet / layaway |
 | `4135` | Sales revenue |
 | `4175` | Sales returns / contra revenue |
 | `4245` | Gain on asset sale |
 | `4295` | Miscellaneous income / cash overage |
-| `5105` | Administrative payroll expense |
-| `5110` | Employer social security/parafiscal expense |
+| `5105` | Payroll expense ("Gastos de Personal"). Employer-contribution subaccounts: EPS `510568`, pension `510569`, ARL `510570`, CCF `510572`, ICBF `510575`, SENA `510578`; provision subaccounts: severance `510530`, interest `510533`, bonus `510536`, vacation `510539` |
+| `5110` | Professional fees ("Honorarios") — **NOT payroll**. Never post employer contributions here (that was a Decreto 2650 misclassification); use `5105` subaccounts |
 | `5195` | General expenses |
 | `5199` | Provisions / depreciation expense |
 | `5205` | Sales payroll expense |
@@ -100,10 +101,13 @@ Practical rule: receiving money/inventory is usually debit; owing money is credi
 
 ## Payroll Rules
 
-- Payroll approval is accrual: debit salary/social-security expenses, credit salaries payable, deductions, and employer liabilities.
-- Payroll payment is cash execution: debit payable/liability accounts and credit bank.
-- Cost centers choose expense class: `administrative` -> `5105`, `sales` -> `5205`, `operational` -> `7205`.
-- Monthly provisions normally use severance `2610`, severance interest `2615`, vacation `2620`, service bonus `2625`.
+- **Accrual (approval)** is a single entry per run (idempotent by `payroll_runs.accounting_entry_id`, never by `source_type`): debit salary expense `5105`, employer-contribution `5105` subaccounts, and provision `5105` subaccounts; credit net salaries payable `2505`, employee deductions/employer contributions payable `2370`/`2380`, labor withholding `236505`, and labor provision liabilities `2510`/`2515`/`2520`/`2525`.
+- **Payment** is cash execution: debit `2505` + `2370` + `2380`, credit bank `1110`. Guard: never post the payment if the accrual did not post (no `accounting_entry_id`) — otherwise you drain liabilities with no expense counterpart.
+- Cost centers choose the expense class: `administrative` -> `5105`, `sales` -> `5205`, `operational` -> `7205`.
+- **Labor provisions post to class 25xx, NOT 26xx**: cesantías `2510`, intereses `2515`, prima `2520`, vacaciones `2525`. The `26xx` accounts are **obsolete for payroll** (and mislabeled historically — `2610`="Para Obligaciones Laborales", `2615`="Para Obligaciones Fiscales", `2620`="Pensiones de Jubilación", `2625`="Prima de Servicios por Pagar"); the module posts to none of them.
+- Employer contributions (health/pension/ARL/SENA/ICBF/CCF) are expensed to `5105` subaccounts (`510568`…`510578`), never to `5110` (Honorarios).
+- Incapacity/leave reimbursable-from-EPS is posted to `1355` (semantically-forced use; its real PUC name is "Anticipos de Impuestos y Contribuciones").
+- Advance deductions credit `1450` (Anticipos a Empleados). See `vendix-payroll` for the full state machine and `vendix-pila-flatfile` for social-security reporting.
 
 ## Mapping Ownership
 
