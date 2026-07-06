@@ -1,9 +1,13 @@
 import { Component, inject, DestroyRef, signal, computed } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { DatePipe, NgClass } from '@angular/common';
-import { FormsModule } from '@angular/forms';
+import {
+  FormControl,
+  FormGroup,
+  ReactiveFormsModule,
+  Validators } from '@angular/forms';
 
-import { finalize } from 'rxjs/operators';
+import { finalize, startWith } from 'rxjs/operators';
 
 import { PayrollService } from '../../services/payroll.service';
 import {
@@ -11,6 +15,11 @@ import {
   PayrollUpdateAvailable } from '../../interfaces/payroll.interface';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import {
+  SelectorComponent,
+  SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
   StickyHeaderComponent,
   StickyHeaderActionButton } from '../../../../../../shared/components/sticky-header/sticky-header.component';
@@ -38,8 +47,39 @@ interface SettingsCard {
 
 interface DiffEntry {
   field: string;
-  current: any;
-  system: any;
+  current: unknown;
+  system: unknown;
+}
+
+/**
+ * Controles del formulario tipado de reglas de nómina. Los rates se editan
+ * como porcentaje visible (ej. 8.33) y se persisten como decimal (0.0833).
+ * Los valores de moneda y umbrales se editan/persisten como número crudo.
+ * ARL se aplana a arl_1..arl_5 (porcentaje) para simplificar el binding.
+ */
+interface PayrollRulesFormControls {
+  minimum_wage: FormControl<number | null>;
+  transport_subsidy: FormControl<number | null>;
+  transport_subsidy_threshold: FormControl<number | null>;
+  retention_exempt_threshold: FormControl<number | null>;
+  days_per_month: FormControl<number | null>;
+  days_per_year: FormControl<number | null>;
+  severance_rate: FormControl<number | null>;
+  severance_interest_rate: FormControl<number | null>;
+  vacation_rate: FormControl<number | null>;
+  bonus_rate: FormControl<number | null>;
+  health_employee_rate: FormControl<number | null>;
+  pension_employee_rate: FormControl<number | null>;
+  health_employer_rate: FormControl<number | null>;
+  pension_employer_rate: FormControl<number | null>;
+  sena_rate: FormControl<number | null>;
+  icbf_rate: FormControl<number | null>;
+  compensation_fund_rate: FormControl<number | null>;
+  arl_1: FormControl<number | null>;
+  arl_2: FormControl<number | null>;
+  arl_3: FormControl<number | null>;
+  arl_4: FormControl<number | null>;
+  arl_5: FormControl<number | null>;
 }
 
 const FIELD_LABELS: Record<string, string> = {
@@ -61,7 +101,14 @@ const FIELD_LABELS: Record<string, string> = {
   icbf_rate: 'ICBF',
   compensation_fund_rate: 'Caja de compensación' };
 
-const PERCENT_FIELDS = new Set([
+const CURRENCY_KEYS = ['minimum_wage', 'transport_subsidy'] as const;
+/** Umbrales/calendario editables como número crudo (los días son readonly). */
+const NUMBER_KEYS = [
+  'transport_subsidy_threshold',
+  'retention_exempt_threshold',
+] as const;
+const READONLY_KEYS = ['days_per_month', 'days_per_year'] as const;
+const PERCENT_KEYS = [
   'severance_rate',
   'severance_interest_rate',
   'vacation_rate',
@@ -73,16 +120,20 @@ const PERCENT_FIELDS = new Set([
   'sena_rate',
   'icbf_rate',
   'compensation_fund_rate',
-]);
+] as const;
+const ARL_LEVELS = [1, 2, 3, 4, 5] as const;
 
-const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
+const CURRENCY_FIELDS = new Set<string>(CURRENCY_KEYS);
+const PERCENT_FIELDS = new Set<string>(PERCENT_KEYS);
 
 @Component({
   selector: 'vendix-payroll-settings',
   standalone: true,
   imports: [
-    FormsModule,
+    ReactiveFormsModule,
     IconComponent,
+    InputComponent,
+    SelectorComponent,
     StickyHeaderComponent,
     DatePipe,
     NgClass,
@@ -90,34 +141,25 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
   template: `
     <app-sticky-header
       title="Configuración de Nómina"
-      [subtitle]="'Año fiscal ' + selectedYear"
+      [subtitle]="'Año fiscal ' + selectedYear()"
       icon="settings"
       [badgeText]="hasChanges() ? 'Cambios sin guardar' : ''"
       [badgeColor]="'yellow'"
       [badgePulse]="hasChanges()"
-      [actions]="headerActions"
+      [actions]="headerActions()"
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
 
     <div class="w-full px-2 md:px-0 mt-4">
       <!-- Year Selector -->
       <div class="flex items-center gap-2 mb-4">
-        <div
-          class="flex items-center gap-1.5 bg-surface border border-border rounded-lg px-2.5 py-1.5"
-        >
-          <span class="text-xs font-medium text-text-muted">Año fiscal</span>
-          <select
-            [ngModel]="selectedYear"
-            (ngModelChange)="onYearChange($event)"
-            class="text-sm font-semibold text-text-primary bg-transparent border-none focus:outline-none cursor-pointer appearance-none pr-4"
-            style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23999%22 stroke-width=%222%22%3E%3Cpath d=%22M6 9l6 6 6-6%22/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 0 center;"
-          >
-            @for (year of availableYears; track year) {
-              <option [value]="year">
-                {{ year }}
-              </option>
-            }
-          </select>
+        <div class="w-40">
+          <app-selector
+            label="Año fiscal"
+            size="sm"
+            [formControl]="yearControl"
+            [options]="yearOptions()"
+          ></app-selector>
         </div>
       </div>
 
@@ -258,136 +300,134 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
       }
 
       <!-- Grouped Cards Grid -->
-      @if (!loading() && rules()) {
-        <div class="payroll-grid">
-          @for (card of cards; track card) {
-            <div class="payroll-card rounded-xl overflow-hidden">
-              <!-- Card Header with Icon -->
-              <div
-                class="flex items-center gap-2.5 px-4 py-3 md:px-5 md:py-4 border-b border-border"
-              >
+      @if (!loading() && loaded()) {
+        <form [formGroup]="form">
+          <div class="payroll-grid">
+            @for (card of cards; track card.title) {
+              <div class="payroll-card rounded-xl overflow-hidden">
+                <!-- Card Header with Icon -->
                 <div
-                  class="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0"
-                  [ngClass]="[card.iconBgClass, card.iconTextClass]"
+                  class="flex items-center gap-2.5 px-4 py-3 md:px-5 md:py-4 border-b border-border"
                 >
-                  <app-icon [name]="card.icon" [size]="18" />
-                </div>
-                <h3 class="text-sm font-semibold text-text-primary">
-                  {{ card.title }}
-                </h3>
-              </div>
-              <!-- Card Body: Subsections -->
-              <div class="p-3 md:p-4">
-                @for (sub of card.subsections; track sub; let last = $last) {
-                  <h4
-                    class="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2"
+                  <div
+                    class="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0"
+                    [ngClass]="[card.iconBgClass, card.iconTextClass]"
                   >
-                    {{ sub.title }}
-                  </h4>
-                  <div class="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
-                    @for (field of sub.fields; track field) {
-                      <div class="relative">
-                        <label
-                          class="block text-[11px] font-medium text-text-secondary mb-1 leading-tight"
-                        >
-                          {{ field.label }}
-                          @if (isModified(field.key)) {
-                            <span
-                              class="ml-1 inline-block w-1.5 h-1.5 bg-primary-600 rounded-full align-middle"
-                              title="Modificado"
-                            ></span>
+                    <app-icon [name]="card.icon" [size]="18" />
+                  </div>
+                  <h3 class="text-sm font-semibold text-text-primary">
+                    {{ card.title }}
+                  </h3>
+                </div>
+                <!-- Card Body: Subsections -->
+                <div class="p-3 md:p-4">
+                  @for (
+                    sub of card.subsections;
+                    track sub.title;
+                    let last = $last
+                  ) {
+                    <h4
+                      class="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2"
+                    >
+                      {{ sub.title }}
+                    </h4>
+                    <div
+                      class="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3"
+                    >
+                      @for (field of sub.fields; track field.key) {
+                        <div>
+                          <label
+                            class="block text-[11px] font-medium text-text-secondary mb-1 leading-tight"
+                          >
+                            {{ field.label }}
+                            @if (isModified(field.key)) {
+                              <span
+                                class="ml-1 inline-block w-1.5 h-1.5 bg-primary-600 rounded-full align-middle"
+                                title="Modificado"
+                              ></span>
+                            }
+                          </label>
+                          @switch (field.type) {
+                            @case ('currency') {
+                              <app-input
+                                size="sm"
+                                [currency]="true"
+                                [formControlName]="field.key"
+                              ></app-input>
+                            }
+                            @case ('percent') {
+                              <app-input
+                                size="sm"
+                                type="number"
+                                step="0.01"
+                                [suffixIcon]="true"
+                                [formControlName]="field.key"
+                              >
+                                <span
+                                  slot="suffix-icon"
+                                  class="text-[10px] text-text-muted font-medium"
+                                  >%</span
+                                >
+                              </app-input>
+                            }
+                            @case ('number') {
+                              <app-input
+                                size="sm"
+                                type="number"
+                                step="1"
+                                [formControlName]="field.key"
+                              ></app-input>
+                            }
                           }
-                        </label>
-                        <div class="relative">
-                          @if (field.type === 'currency') {
+                        </div>
+                      }
+                    </div>
+                    @if (!last || card.includeArl) {
+                      <hr class="border-t border-border/60 my-3 md:my-4" />
+                    }
+                  }
+                  <!-- ARL Rates (only in Seguridad Social card) -->
+                  @if (card.includeArl) {
+                    <h4
+                      class="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2"
+                    >
+                      Tarifas ARL por Nivel de Riesgo
+                    </h4>
+                    <div class="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
+                      @for (level of arlLevels; track level) {
+                        <div>
+                          <label
+                            class="block text-[11px] font-medium text-text-secondary mb-1"
+                          >
+                            Nivel {{ level }}
+                            @if (isArlModified(level)) {
+                              <span
+                                class="ml-1 inline-block w-1.5 h-1.5 bg-primary-600 rounded-full align-middle"
+                              ></span>
+                            }
+                          </label>
+                          <app-input
+                            size="sm"
+                            type="number"
+                            step="0.001"
+                            [suffixIcon]="true"
+                            [formControlName]="'arl_' + level"
+                          >
                             <span
-                              class="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted font-medium"
-                              >$</span
-                            >
-                            <input
-                              type="number"
-                              [ngModel]="getFieldValue(field.key)"
-                              (ngModelChange)="onFieldChange(field.key, $event)"
-                              [disabled]="field.readonly"
-                              class="w-full pl-6 pr-2 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-600/40 focus:border-primary-600/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                              step="100"
-                            />
-                          }
-                          @if (field.type === 'percent') {
-                            <input
-                              type="number"
-                              [ngModel]="getPercentValue(field.key)"
-                              (ngModelChange)="
-                                onPercentChange(field.key, $event)
-                              "
-                              [disabled]="field.readonly"
-                              class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-600/40 focus:border-primary-600/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                              step="0.01"
-                            />
-                            <span
-                              class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted font-medium"
+                              slot="suffix-icon"
+                              class="text-[10px] text-text-muted font-medium"
                               >%</span
                             >
-                          }
-                          @if (field.type === 'number') {
-                            <input
-                              type="number"
-                              [ngModel]="getFieldValue(field.key)"
-                              (ngModelChange)="onFieldChange(field.key, $event)"
-                              [disabled]="field.readonly"
-                              class="w-full px-2.5 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-600/40 focus:border-primary-600/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                              step="1"
-                            />
-                          }
+                          </app-input>
                         </div>
-                      </div>
-                    }
-                  </div>
-                  @if (!last || card.includeArl) {
-                    <hr class="border-t border-border/60 my-3 md:my-4" />
+                      }
+                    </div>
                   }
-                }
-                <!-- ARL Rates (only in Seguridad Social card) -->
-                @if (card.includeArl) {
-                  <h4
-                    class="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2"
-                  >
-                    Tarifas ARL por Nivel de Riesgo
-                  </h4>
-                  <div class="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
-                    @for (level of [1, 2, 3, 4, 5]; track level) {
-                      <div class="relative">
-                        <label
-                          class="block text-[11px] font-medium text-text-secondary mb-1"
-                        >
-                          Nivel {{ level }}
-                          @if (isArlModified(level)) {
-                            <span
-                              class="ml-1 inline-block w-1.5 h-1.5 bg-primary-600 rounded-full align-middle"
-                            ></span>
-                          }
-                        </label>
-                        <div class="relative">
-                          <input
-                            type="number"
-                            [ngModel]="getArlPercent(level)"
-                            (ngModelChange)="onArlChange(level, $event)"
-                            class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary-600/40 focus:border-primary-600/40 transition-colors"
-                            step="0.001"
-                          />
-                          <span
-                            class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted font-medium"
-                            >%</span
-                          >
-                        </div>
-                      </div>
-                    }
-                  </div>
-                }
+                </div>
               </div>
-            </div>
-          }
-        </div>
+            }
+          </div>
+        </form>
       }
     </div>
   `,
@@ -421,19 +461,131 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
 export class PayrollSettingsComponent {
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
+  private currencyFormat = inject(CurrencyFormatService);
   private destroyRef = inject(DestroyRef);
-readonly rules = signal<PayrollRules | null>(null);
-  defaultRules: PayrollRules | null = null;
-  editedFields: Partial<PayrollRules> = {};
+
   readonly loading = signal(false);
   readonly saving = signal(false);
   readonly applying_defaults = signal(false);
-  selectedYear = String(new Date().getFullYear());
-  availableYears: string[] = [this.selectedYear];
-  readonly hasChanges = signal(false);
 
-  available_update = signal<PayrollUpdateAvailable | null>(null);
-  show_diff = signal(false);
+  readonly available_update = signal<PayrollUpdateAvailable | null>(null);
+  readonly show_diff = signal(false);
+
+  readonly arlLevels = ARL_LEVELS;
+
+  /** Selector de año (fuente de verdad para el año fiscal activo). */
+  readonly yearControl = new FormControl<string>(
+    String(new Date().getFullYear()),
+    { nonNullable: true },
+  );
+  readonly selectedYear = toSignal(
+    this.yearControl.valueChanges.pipe(startWith(this.yearControl.value)),
+    { initialValue: this.yearControl.value },
+  );
+  readonly availableYears = signal<string[]>([
+    String(new Date().getFullYear()),
+  ]);
+  readonly yearOptions = computed<SelectorOption[]>(() =>
+    this.availableYears().map((y) => ({ value: y, label: y })),
+  );
+
+  /** Snapshot de los valores cargados (en formato de formulario). */
+  private readonly baseline = signal<Record<string, number> | null>(null);
+  /** True cuando ya hay reglas cargadas (habilita el render del grid). */
+  readonly loaded = computed(() => this.baseline() !== null);
+
+  readonly form = new FormGroup<PayrollRulesFormControls>({
+    minimum_wage: new FormControl<number | null>(null, [Validators.min(0)]),
+    transport_subsidy: new FormControl<number | null>(null, [
+      Validators.min(0),
+    ]),
+    transport_subsidy_threshold: new FormControl<number | null>(null, [
+      Validators.min(0),
+    ]),
+    retention_exempt_threshold: new FormControl<number | null>(null, [
+      Validators.min(0),
+    ]),
+    days_per_month: new FormControl<number | null>({
+      value: null,
+      disabled: true,
+    }),
+    days_per_year: new FormControl<number | null>({
+      value: null,
+      disabled: true,
+    }),
+    severance_rate: new FormControl<number | null>(null, [Validators.min(0)]),
+    severance_interest_rate: new FormControl<number | null>(null, [
+      Validators.min(0),
+    ]),
+    vacation_rate: new FormControl<number | null>(null, [Validators.min(0)]),
+    bonus_rate: new FormControl<number | null>(null, [Validators.min(0)]),
+    health_employee_rate: new FormControl<number | null>(null, [
+      Validators.min(0),
+    ]),
+    pension_employee_rate: new FormControl<number | null>(null, [
+      Validators.min(0),
+    ]),
+    health_employer_rate: new FormControl<number | null>(null, [
+      Validators.min(0),
+    ]),
+    pension_employer_rate: new FormControl<number | null>(null, [
+      Validators.min(0),
+    ]),
+    sena_rate: new FormControl<number | null>(null, [Validators.min(0)]),
+    icbf_rate: new FormControl<number | null>(null, [Validators.min(0)]),
+    compensation_fund_rate: new FormControl<number | null>(null, [
+      Validators.min(0),
+    ]),
+    arl_1: new FormControl<number | null>(null, [Validators.min(0)]),
+    arl_2: new FormControl<number | null>(null, [Validators.min(0)]),
+    arl_3: new FormControl<number | null>(null, [Validators.min(0)]),
+    arl_4: new FormControl<number | null>(null, [Validators.min(0)]),
+    arl_5: new FormControl<number | null>(null, [Validators.min(0)]),
+  });
+
+  /** Valores actuales del form puenteados a signal (zoneless-safe). */
+  private readonly formValue = toSignal(
+    this.form.valueChanges.pipe(startWith(this.form.getRawValue())),
+    { initialValue: this.form.getRawValue() },
+  );
+
+  /** Estado de validez puenteado a signal (form.status no es reactivo). */
+  private readonly formStatus = toSignal(
+    this.form.statusChanges.pipe(startWith(this.form.status)),
+    { initialValue: this.form.status },
+  );
+  readonly formValid = computed(() => this.formStatus() === 'VALID');
+
+  /** Claves cuyo valor difiere del snapshot cargado. */
+  readonly modifiedKeys = computed<Set<string>>(() => {
+    const base = this.baseline();
+    if (!base) return new Set<string>();
+    const current = this.formValue() as Record<string, number | null>;
+    const changed = new Set<string>();
+    for (const key of [...CURRENCY_KEYS, ...NUMBER_KEYS, ...PERCENT_KEYS]) {
+      if (!this.numEq(current[key], base[key])) changed.add(key);
+    }
+    for (const level of ARL_LEVELS) {
+      const k = `arl_${level}`;
+      if (!this.numEq(current[k], base[k])) changed.add(k);
+    }
+    return changed;
+  });
+
+  readonly hasChanges = computed(() => this.modifiedKeys().size > 0);
+
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
+    const saving = this.saving();
+    return [
+      {
+        id: 'save',
+        label: saving ? 'Guardando...' : 'Guardar',
+        variant: 'primary',
+        icon: 'save',
+        loading: saving,
+        disabled: !this.hasChanges() || saving || !this.formValid() },
+    ];
+  });
 
   readonly diffEntries = computed<DiffEntry[]>(() => {
     const update = this.available_update();
@@ -443,16 +595,6 @@ readonly rules = signal<PayrollRules | null>(null);
       current: values.current,
       system: values.system }));
   });
-
-  headerActions: StickyHeaderActionButton[] = [
-    {
-      id: 'save',
-      label: 'Guardar',
-      variant: 'primary',
-      icon: 'save',
-      loading: false,
-      disabled: true },
-  ];
 
   cards: SettingsCard[] = [
     {
@@ -591,8 +733,11 @@ readonly rules = signal<PayrollRules | null>(null);
   constructor() {
     this.loadYears();
 
-    this.destroyRef.onDestroy(() => {
-    });
+    // El cambio de año recarga reglas y updates (el default inicial se aplica
+    // con emitEvent:false para no disparar una recarga duplicada).
+    this.yearControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.onYearChange());
   }
 
   private loadYears(): void {
@@ -601,8 +746,9 @@ readonly rules = signal<PayrollRules | null>(null);
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.availableYears = res.data.years;
-          this.selectedYear = res.data.default_year;
+          this.availableYears.set(res.data.years);
+          this.yearControl.setValue(res.data.default_year, {
+            emitEvent: false });
           this.loadRules();
           this.loadAvailableUpdates();
         },
@@ -616,25 +762,9 @@ readonly rules = signal<PayrollRules | null>(null);
     if (actionId === 'save') this.saveChanges();
   }
 
-  private updateHeaderActions(): void {
-    const saving = this.saving();
-    this.headerActions = [
-      {
-        id: 'save',
-        label: saving ? 'Guardando...' : 'Guardar',
-        variant: 'primary',
-        icon: 'save',
-        loading: saving,
-        disabled: !this.hasChanges() || saving },
-    ];
-  }
-
-  onYearChange(year: string): void {
-    this.selectedYear = year;
-    this.editedFields = {};
-    this.hasChanges.set(false);
+  private onYearChange(): void {
+    this.baseline.set(null);
     this.show_diff.set(false);
-    this.updateHeaderActions();
     this.loadRules();
     this.loadAvailableUpdates();
   }
@@ -642,15 +772,16 @@ readonly rules = signal<PayrollRules | null>(null);
   private loadRules(): void {
     this.loading.set(true);
     this.payrollService
-      .getPayrollRules(+this.selectedYear)
+      .getPayrollRules(+this.yearControl.value)
       .pipe(
         takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
       )
       .subscribe({
         next: (res) => {
-          this.rules.set({ ...res.data });
-          this.defaultRules = { ...res.data };
+          const values = this.rulesToFormValues(res.data);
+          this.baseline.set(values);
+          this.form.patchValue(values);
         },
         error: () => {
           this.toastService.error('Error al cargar las reglas de nómina');
@@ -663,7 +794,7 @@ readonly rules = signal<PayrollRules | null>(null);
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          const year = +this.selectedYear;
+          const year = +this.yearControl.value;
           const update = res.data.find((u) => u.year === year && u.has_diff);
           this.available_update.set(update ?? null);
         },
@@ -692,9 +823,6 @@ readonly rules = signal<PayrollRules | null>(null);
           this.toastService.success('Parámetros actualizados correctamente');
           this.available_update.set(null);
           this.show_diff.set(false);
-          this.editedFields = {};
-          this.hasChanges.set(false);
-          this.updateHeaderActions();
           this.loadRules();
         },
         error: () => {
@@ -708,106 +836,107 @@ readonly rules = signal<PayrollRules | null>(null);
     return FIELD_LABELS[field] ?? field;
   }
 
-  formatValue(field: string, value: any): string {
+  formatValue(field: string, value: unknown): string {
     if (value === null || value === undefined) return '—';
     if (CURRENCY_FIELDS.has(field)) {
-      return new Intl.NumberFormat('es-CO', {
-        style: 'currency',
-        currency: 'COP',
-        maximumFractionDigits: 0 }).format(Number(value));
+      return this.currencyFormat.format(Number(value), 0);
     }
     if (PERCENT_FIELDS.has(field)) {
-      return (Math.round(Number(value) * 10000) / 100).toFixed(2) + '%';
+      return this.toPercent(value).toFixed(2) + '%';
     }
     return String(value);
-  }
-
-  // --- Field value accessors ---
-
-  getFieldValue(key: keyof PayrollRules): number {
-    const rules = this.rules();
-    if (!rules) return 0;
-    const val = rules[key];
-    if (typeof val === 'number') return val;
-    return 0;
-  }
-
-  getPercentValue(key: keyof PayrollRules): number {
-    return Math.round(this.getFieldValue(key) * 10000) / 100;
-  }
-
-  getArlPercent(level: number): number {
-    const rules = this.rules();
-    if (!rules) return 0;
-    return Math.round((rules.arl_rates[level] || 0) * 10000) / 100;
-  }
-
-  // --- Field change handlers ---
-
-  onFieldChange(key: keyof PayrollRules, value: number): void {
-    const rules = this.rules();
-    if (!rules) return;
-    (rules as any)[key] = value;
-    this.rules.set({ ...rules });
-    (this.editedFields as any)[key] = value;
-    this.hasChanges.set(true);
-    this.updateHeaderActions();
-  }
-
-  onPercentChange(key: keyof PayrollRules, percent: number): void {
-    const decimal = Math.round(percent * 100) / 10000;
-    this.onFieldChange(key, decimal);
-  }
-
-  onArlChange(level: number, percent: number): void {
-    const rules = this.rules();
-    if (!rules) return;
-    const decimal = Math.round(percent * 100) / 10000;
-    this.rules.set({
-      ...rules,
-      arl_rates: { ...rules.arl_rates, [level]: decimal } });
-    this.editedFields.arl_rates = {
-      ...this.editedFields.arl_rates,
-      [level]: decimal };
-    this.hasChanges.set(true);
-    this.updateHeaderActions();
   }
 
   // --- Modified indicators ---
 
   isModified(key: keyof PayrollRules): boolean {
-    return key in this.editedFields;
+    return this.modifiedKeys().has(key);
   }
 
   isArlModified(level: number): boolean {
-    return (
-      !!this.editedFields.arl_rates && level in this.editedFields.arl_rates
-    );
+    return this.modifiedKeys().has(`arl_${level}`);
+  }
+
+  // --- Value mapping (rules ⇄ form) ---
+
+  private rulesToFormValues(rules: PayrollRules): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const key of CURRENCY_KEYS) out[key] = Number(rules[key]) || 0;
+    for (const key of NUMBER_KEYS) out[key] = Number(rules[key]) || 0;
+    for (const key of READONLY_KEYS) out[key] = Number(rules[key]) || 0;
+    for (const key of PERCENT_KEYS) out[key] = this.toPercent(rules[key]);
+    for (const level of ARL_LEVELS) {
+      out[`arl_${level}`] = this.toPercent(rules.arl_rates?.[level] ?? 0);
+    }
+    return out;
+  }
+
+  /** Decimal (0.0833) → porcentaje visible (8.33). */
+  private toPercent(decimal: unknown): number {
+    return Math.round((Number(decimal) || 0) * 10000) / 100;
+  }
+
+  /** Porcentaje visible (8.33) → decimal persistido (0.0833). */
+  private toDecimal(percent: unknown): number {
+    return Math.round((Number(percent) || 0) * 100) / 10000;
+  }
+
+  private numEq(a: unknown, b: unknown): boolean {
+    return Math.abs((Number(a) || 0) - (Number(b) || 0)) < 1e-9;
   }
 
   // --- Save ---
 
-  saveChanges(): void {
-    if (!this.hasChanges() || this.saving()) return;
+  private buildPatch(): Partial<PayrollRules> {
+    const current = this.form.getRawValue() as Record<string, number | null>;
+    const base = this.baseline();
+    const patch: Partial<PayrollRules> = {};
+    if (!base) return patch;
 
+    for (const key of CURRENCY_KEYS) {
+      if (!this.numEq(current[key], base[key])) {
+        patch[key] = Number(current[key]) || 0;
+      }
+    }
+    for (const key of NUMBER_KEYS) {
+      if (!this.numEq(current[key], base[key])) {
+        patch[key] = Number(current[key]) || 0;
+      }
+    }
+    for (const key of PERCENT_KEYS) {
+      if (!this.numEq(current[key], base[key])) {
+        patch[key] = this.toDecimal(current[key]);
+      }
+    }
+    const arl: Record<number, number> = {};
+    let arlChanged = false;
+    for (const level of ARL_LEVELS) {
+      const k = `arl_${level}`;
+      if (!this.numEq(current[k], base[k])) {
+        arl[level] = this.toDecimal(current[k]);
+        arlChanged = true;
+      }
+    }
+    if (arlChanged) patch.arl_rates = arl;
+    return patch;
+  }
+
+  saveChanges(): void {
+    if (!this.hasChanges() || this.saving() || !this.formValid()) return;
+
+    const patch = this.buildPatch();
     this.saving.set(true);
-    this.updateHeaderActions();
     this.payrollService
-      .updatePayrollRules(+this.selectedYear, this.editedFields)
+      .updatePayrollRules(+this.yearControl.value, patch)
       .pipe(
         takeUntilDestroyed(this.destroyRef),
-        finalize(() => {
-          this.saving.set(false);
-          this.updateHeaderActions();
-        }),
+        finalize(() => this.saving.set(false)),
       )
       .subscribe({
         next: (res) => {
-          this.rules.set({ ...res.data });
-          this.defaultRules = { ...res.data };
-          this.editedFields = {};
-          this.hasChanges.set(false);
-          this.updateHeaderActions();
+          const values = this.rulesToFormValues(res.data);
+          this.baseline.set(values);
+          this.form.patchValue(values);
           this.toastService.success(
             'Reglas de nómina actualizadas exitosamente',
           );
@@ -817,3 +946,4 @@ readonly rules = signal<PayrollRules | null>(null);
         } });
   }
 }
+

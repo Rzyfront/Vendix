@@ -10,6 +10,7 @@ export const REPORT_CATEGORIES: ReportCategory[] = [
   { id: 'reviews', label: 'Reseñas', description: 'Reportes de reseñas y satisfaccion de clientes', icon: 'star', color: 'var(--color-accent)' },
   { id: 'financial', label: 'Financiero', description: 'Reportes de gastos, perdidas y ganancias, caja y cuentas por pagar', icon: 'wallet', color: 'var(--color-destructive)' },
   { id: 'accounting', label: 'Contabilidad', description: 'Reportes contables: balance de prueba, balance general, libro mayor e impuestos', icon: 'scale', color: 'var(--color-info)' },
+  { id: 'payroll', label: 'Nómina', description: 'Reportes de nómina: resumen por período, detalle por empleado y provisiones laborales', icon: 'banknote', color: 'var(--color-primary)' },
 ];
 
 export const REPORT_DEFINITIONS: ReportDefinition[] = [
@@ -926,6 +927,104 @@ export const REPORT_DEFINITIONS: ReportDefinition[] = [
       { key: 'net_margin', label: 'Margen Neto', type: 'percentage', icon: 'percent' },
     ],
     dataEndpoint: 'store/analytics/financial/profit-loss',
+  },
+
+  // ─── NÓMINA (3) ───────────────────────────────────────────────────────────────
+
+  {
+    id: 'payroll-summary',
+    category: 'payroll',
+    title: 'Resumen de Nómina',
+    description: 'Devengados, deducciones, costos patronales y neto por período',
+    detailedDescription:
+      'Consolidado de las corridas de nómina del período: total devengado, deducciones, costos patronales, pago neto y número de empleados por período liquidado.',
+    icon: 'banknote',
+    route: '/admin/reports/payroll/payroll-summary',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'payroll_number',
+    columns: [
+      { key: 'period', header: 'Período', type: 'text' },
+      { key: 'payroll_number', header: 'No. Nómina', type: 'text' },
+      { key: 'employee_count', header: 'Empleados', type: 'number', footer: 'sum' },
+      { key: 'total_earnings', header: 'Devengado', type: 'currency', footer: 'sum' },
+      { key: 'total_deductions', header: 'Deducciones', type: 'currency', footer: 'sum' },
+      { key: 'employer_costs', header: 'Costos Patronales', type: 'currency', footer: 'sum' },
+      { key: 'net_pay', header: 'Neto', type: 'currency', footer: 'sum' },
+    ],
+    exportFilename: 'resumen-nomina',
+    stats: [
+      { key: 'total_earnings', label: 'Total Devengado', type: 'currency', icon: 'banknote' },
+      { key: 'total_deductions', label: 'Total Deducciones', type: 'currency', icon: 'trending-down' },
+      { key: 'employer_costs', label: 'Costos Patronales', type: 'currency', icon: 'coins' },
+      { key: 'net_pay', label: 'Total Neto', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/reports/payroll/summary',
+  },
+
+  {
+    id: 'payroll-by-employee',
+    category: 'payroll',
+    title: 'Nómina por Empleado',
+    description: 'Detalle de devengados, deducciones y neto por empleado',
+    detailedDescription:
+      'Desglose por empleado de la nómina liquidada en el período: salario base, días trabajados, devengados, deducciones y pago neto.',
+    icon: 'users',
+    route: '/admin/reports/payroll/payroll-by-employee',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'employee_name',
+    columns: [
+      { key: 'employee_name', header: 'Empleado', type: 'text' },
+      { key: 'position', header: 'Cargo', type: 'text' },
+      { key: 'department', header: 'Departamento', type: 'text' },
+      { key: 'base_salary', header: 'Salario Base', type: 'currency' },
+      { key: 'earnings', header: 'Devengado', type: 'currency', footer: 'sum' },
+      { key: 'deductions', header: 'Deducciones', type: 'currency', footer: 'sum' },
+      { key: 'net_pay', header: 'Neto', type: 'currency', footer: 'sum' },
+    ],
+    exportFilename: 'nomina-por-empleado',
+    stats: [
+      { key: 'earnings', label: 'Total Devengado', type: 'currency', icon: 'banknote' },
+      { key: 'deductions', label: 'Total Deducciones', type: 'currency', icon: 'trending-down' },
+      { key: 'net_pay', label: 'Total Neto', type: 'currency', icon: 'dollar-sign' },
+      { key: '_count', label: 'Registros', type: 'number', icon: 'users' },
+    ],
+    dataEndpoint: 'store/reports/payroll/by-employee',
+  },
+
+  {
+    id: 'payroll-provisions',
+    category: 'payroll',
+    title: 'Provisiones Laborales',
+    description: 'Cesantías, intereses, primas y vacaciones acumuladas',
+    detailedDescription:
+      'Provisiones laborales acumuladas por empleado activo: cesantías, intereses a las cesantías, prima de servicios y vacaciones, con el total provisionado.',
+    icon: 'piggy-bank',
+    route: '/admin/reports/payroll/payroll-provisions',
+    requiresDateRange: true,
+    requiresFiscalPeriod: false,
+    type: 'list' as ReportType,
+    trackKey: 'employee_name',
+    columns: [
+      { key: 'employee_name', header: 'Empleado', type: 'text' },
+      { key: 'base_salary', header: 'Salario Base', type: 'currency' },
+      { key: 'severance', header: 'Cesantías', type: 'currency', footer: 'sum' },
+      { key: 'severance_interest', header: 'Int. Cesantías', type: 'currency', footer: 'sum' },
+      { key: 'bonus', header: 'Prima', type: 'currency', footer: 'sum' },
+      { key: 'vacation', header: 'Vacaciones', type: 'currency', footer: 'sum' },
+      { key: 'total_provisions', header: 'Total Provisiones', type: 'currency', footer: 'sum' },
+    ],
+    exportFilename: 'provisiones-laborales',
+    stats: [
+      { key: 'severance', label: 'Cesantías', type: 'currency', icon: 'piggy-bank' },
+      { key: 'bonus', label: 'Prima', type: 'currency', icon: 'coins' },
+      { key: 'vacation', label: 'Vacaciones', type: 'currency', icon: 'calendar' },
+      { key: 'total_provisions', label: 'Total Provisiones', type: 'currency', icon: 'dollar-sign' },
+    ],
+    dataEndpoint: 'store/reports/payroll/provisions',
   },
 ];
 

@@ -3,6 +3,12 @@ import {
   PayrollRun,
   EmployeeStats,
   PayrollStats,
+  DianStatusView,
+  DianSendResult,
+  DianAdjustmentResult,
+  BankOption,
+  BankDataValidationResult,
+  BankExportResult,
 } from '../interfaces/payroll.interface';
 
 export interface PayrollState {
@@ -56,6 +62,26 @@ export interface PayrollState {
   payrollRunFrequencyFilter: string;
   payrollRunDateFrom: string;
   payrollRunDateTo: string;
+
+  // ── DIAN Electronic Payroll (DSPNE) ──
+  /** Latest DIAN status view keyed by payroll run id. */
+  dianStatusByRun: Record<number, DianStatusView>;
+  /** True while a send-to-DIAN or status poll is in flight. */
+  dianLoading: boolean;
+  /** Summary of the last send-to-DIAN transmission. */
+  dianSendResult: DianSendResult | null;
+  /** Per-item adjustment-note loading flags, keyed by payroll item id. */
+  adjustmentLoadingByItem: Record<number, boolean>;
+  /** Per-item adjustment-note results, keyed by payroll item id. */
+  adjustmentResultByItem: Record<number, DianAdjustmentResult>;
+
+  // ── Bank Export (ACH) ──
+  availableBanks: BankOption[];
+  availableBanksLoading: boolean;
+  bankValidationResult: BankDataValidationResult | null;
+  bankValidationLoading: boolean;
+  bankExportResult: BankExportResult | null;
+  bankExportLoading: boolean;
 }
 
 export const initialPayrollState: PayrollState = {
@@ -99,4 +125,19 @@ export const initialPayrollState: PayrollState = {
   payrollRunFrequencyFilter: '',
   payrollRunDateFrom: '',
   payrollRunDateTo: '',
+
+  // DIAN
+  dianStatusByRun: {},
+  dianLoading: false,
+  dianSendResult: null,
+  adjustmentLoadingByItem: {},
+  adjustmentResultByItem: {},
+
+  // Bank export
+  availableBanks: [],
+  availableBanksLoading: false,
+  bankValidationResult: null,
+  bankValidationLoading: false,
+  bankExportResult: null,
+  bankExportLoading: false,
 };

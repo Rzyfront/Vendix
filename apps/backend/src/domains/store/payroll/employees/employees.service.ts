@@ -193,8 +193,14 @@ export class EmployeesService {
             last_name: dto.last_name,
             document_type: dto.document_type,
             document_number: dto.document_number,
+            birth_date: dto.birth_date ? new Date(dto.birth_date) : undefined,
+            gender: dto.gender ?? undefined,
             hire_date: new Date(dto.hire_date),
             contract_type: dto.contract_type as any,
+            contract_end_date: dto.contract_end_date
+              ? new Date(dto.contract_end_date)
+              : undefined,
+            salary_type: dto.salary_type ?? undefined,
             base_salary: new Prisma.Decimal(dto.base_salary),
             payment_frequency: (dto.payment_frequency || 'monthly') as any,
             position: dto.position || null,
@@ -410,6 +416,14 @@ export class EmployeesService {
 
     if (dto.hire_date) {
       update_data.hire_date = new Date(dto.hire_date);
+    }
+
+    if (dto.birth_date) {
+      update_data.birth_date = new Date(dto.birth_date);
+    }
+
+    if (dto.contract_end_date) {
+      update_data.contract_end_date = new Date(dto.contract_end_date);
     }
 
     // Check for duplicate user_id

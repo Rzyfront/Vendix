@@ -8,8 +8,9 @@ import {
   TemplateRef,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { startWith } from 'rxjs/operators';
 
 import { PayrollService } from '../services/payroll.service';
 import {
@@ -70,11 +71,11 @@ const FLAG_LABELS: Record<string, string> = {
   unpaid_leave: 'Lic. No Remun.',
 };
 
-const FLAG_CLASSES: Record<string, string> = {
-  vacation: 'bg-teal-100 text-teal-700',
-  incapacity_general: 'bg-orange-100 text-orange-700',
-  incapacity_laboral: 'bg-red-100 text-red-700',
-  unpaid_leave: 'bg-gray-100 text-gray-600',
+const FLAG_VARIANTS: Record<string, BadgeVariant> = {
+  vacation: 'info',
+  incapacity_general: 'warning',
+  incapacity_laboral: 'error',
+  unpaid_leave: 'neutral',
 };
 
 @Component({
@@ -263,12 +264,9 @@ const FLAG_CLASSES: Record<string, string> = {
     <ng-template #flagsTpl let-row>
       <div class="flex flex-wrap gap-1">
         @for (flag of row.active_flags; track flag) {
-          <span
-            class="px-1.5 py-0.5 rounded-full text-[10px] font-medium whitespace-nowrap"
-            [class]="getFlagClass(flag)"
-          >
+          <app-badge [variant]="getFlagVariant(flag)" size="xsm">
             {{ getFlagLabel(flag) }}
-          </span>
+          </app-badge>
         }
         @if (!row.active_flags?.length && !row._is_total) {
           <span class="text-xs text-text-secondary">—</span>
@@ -295,8 +293,8 @@ export class PayrollPilaPageComponent {
 
   /** Estado más reciente (no-void) de la planilla del período seleccionado. */
   readonly currentPeriodStatus = computed(() => {
-    const year = this.yearControl.value;
-    const month = this.monthControl.value;
+    const year = this.yearValue();
+    const month = this.monthValue();
     return (
       this.submissions().find(
         (s) =>
@@ -326,6 +324,17 @@ export class PayrollPilaPageComponent {
   readonly monthControl = new FormControl<number>(new Date().getMonth() + 1, {
     nonNullable: true,
   });
+
+  // FormControl.value NO es reactivo en computed() (zoneless): se puentea el
+  // valor a signals para que los computed dependientes recalculen al cambiar.
+  private readonly yearValue = toSignal(
+    this.yearControl.valueChanges.pipe(startWith(this.yearControl.value)),
+    { initialValue: this.yearControl.value },
+  );
+  private readonly monthValue = toSignal(
+    this.monthControl.valueChanges.pipe(startWith(this.monthControl.value)),
+    { initialValue: this.monthControl.value },
+  );
 
   readonly yearOptions: SelectorOption[] = Array.from({ length: 6 }, (_, i) => {
     const year = new Date().getFullYear() - i;
@@ -376,8 +385,8 @@ export class PayrollPilaPageComponent {
         align: 'right',
         cellClass: (_: any, item: any) =>
           item?._is_total
-            ? 'font-bold text-green-700'
-            : 'font-semibold text-green-600',
+            ? 'font-bold text-success'
+            : 'font-semibold text-success',
       },
     ];
   });
@@ -539,8 +548,8 @@ export class PayrollPilaPageComponent {
     return FLAG_LABELS[flag] || flag;
   }
 
-  getFlagClass(flag: string): string {
-    return FLAG_CLASSES[flag] || 'bg-gray-100 text-gray-600';
+  getFlagVariant(flag: string): BadgeVariant {
+    return FLAG_VARIANTS[flag] || 'neutral';
   }
 
   private toTableRow(emp: PilaEmployeeRow): Record<string, any> {
