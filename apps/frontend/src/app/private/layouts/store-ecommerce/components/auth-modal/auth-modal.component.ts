@@ -692,7 +692,6 @@ export class AuthModalComponent {
   onStartRecovery(): void {
     const email = this.claimableEmail() ?? this.authForm.get('email')?.value;
     const storeId = this.tenantFacade.getCurrentStoreId();
-    console.log('[onStartRecovery]', { email, storeId, claimableEmail: this.claimableEmail() });
     if (!email || !storeId) return;
 
     this.recoveryPending.set(true);
