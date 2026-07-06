@@ -394,7 +394,7 @@ export default function ProductsListScreen() {
           renderItem={({ item }) => (
             <ProductCard
               product={item}
-              onPress={() => router.push({ pathname: '/(store-admin)/products/[id]', params: { id: String(item.id) } })}
+              onPress={() => router.push({ pathname: '/(store-admin)/products/edit', params: { id: String(item.id) } })}
               onEdit={() => router.push({ pathname: '/(store-admin)/products/edit', params: { id: String(item.id) } })}
               onToggle={() => toggleStateMutation.mutate(item)}
               onMore={() => setDeleteTarget(item)}
