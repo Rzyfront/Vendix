@@ -93,8 +93,8 @@ import {
   SerialSummary,
 } from '../../../serial-numbers/services/serial-numbers.service';
 import { ProductSerialsManagerModalComponent } from '../../../serial-numbers/components/product-serials-manager-modal/product-serials-manager-modal.component';
-import { SaveRequirementsModalComponent } from '../../components/save-requirements-modal/save-requirements-modal.component';
-import { SaveRequirement } from '../../components/save-requirements-modal/save-requirements.interface';
+import { SaveRequirementsModalComponent } from '../../../../../../shared/components/save-requirements-modal/save-requirements-modal.component';
+import { SaveRequirement } from '../../../../../../shared/components/save-requirements-modal/save-requirements.interface';
 import { mapBackendErrorToRequirements } from '../../utils/product-save-requirements';
 
 interface VariantAttribute {

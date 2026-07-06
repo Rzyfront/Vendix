@@ -12,6 +12,9 @@ import {
 import { FiscalWizardStepHost } from '../wizard-step.contract';
 import { IconComponent } from '../../icon/icon.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { SaveRequirementsModalComponent } from '../../save-requirements-modal/save-requirements-modal.component';
+import { SaveRequirement } from '../../save-requirements-modal/save-requirements.interface';
+import { mapFiscalBackendErrorToRequirements } from '../utils/fiscal-requirements.util';
 
 interface ValidationRow {
   step: FiscalWizardStepId;
@@ -27,7 +30,7 @@ interface ValidationRow {
 @Component({
   selector: 'app-fiscal-validation-step',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, SaveRequirementsModalComponent],
   template: `
     <div class="validation-step">
       <div class="validation-list">
@@ -91,6 +94,15 @@ interface ValidationRow {
           {{ localError() }}
         </p>
       }
+
+      <!-- Prevalidacion accionable (aditiva a las filas inline): ante un 409
+           FISCAL_STATUS_INCOMPLETE (o el pre-check) explica el "por que" con un
+           CTA "Volver a {paso}" por cada requisito faltante. -->
+      <app-save-requirements-modal
+        [(isOpen)]="requirementsModalOpen"
+        [requirements]="fiscalRequirements()"
+        (action)="onRequirementAction($event)"
+      />
     </div>
   `,
   styles: [
@@ -248,6 +260,10 @@ export class FiscalValidationStepComponent
   readonly stepId: FiscalWizardStepId = 'validation';
   readonly submitting = signal(false);
   readonly localError = signal<string | null>(null);
+
+  /** Shared requirements modal: visibility + rows (prevalidacion accionable). */
+  readonly requirementsModalOpen = signal(false);
+  readonly fiscalRequirements = signal<SaveRequirement[]>([]);
 
   /** True while the on-enter prefill refresh is in flight. */
   readonly refreshing = signal(false);
@@ -465,6 +481,9 @@ export class FiscalValidationStepComponent
           `Faltan pasos por completar antes de activar: ${missingHere.join(', ')}. ` +
             'Selecciona cada paso de la lista para abrirlo y completarlo.',
         );
+        // Aditivo: abre el modal compartido con una fila accionable por cada
+        // paso pendiente (sin llegar a golpear el backend con un 409 previsto).
+        this.openFiscalRequirementsFromPendingRows();
         return null;
       }
     }
@@ -484,12 +503,64 @@ export class FiscalValidationStepComponent
       // surfaced the missing-step banner. Don't override it with the raw
       // userMessage; the validation list is the source of truth now.
       const parsed = parseApiError(e);
-      if (parsed.errorCode !== 'FISCAL_STATUS_INCOMPLETE') {
+      if (parsed.errorCode === 'FISCAL_STATUS_INCOMPLETE') {
+        // Aditivo: además del banner/filas inline, abre el modal compartido con
+        // el "por qué" accionable (una fila por paso faltante, CTA "Volver a").
+        this.openFiscalRequirementsFromError(e);
+      } else {
         this.localError.set(parsed.userMessage);
       }
       return null;
     } finally {
       this.submitting.set(false);
+    }
+  }
+
+  /**
+   * Construye las filas del modal desde el 409 real del backend, reutilizando
+   * el `finalizeMissingSteps` capturado por el servicio y el `reasonFor` local
+   * para un motivo especifico por paso.
+   */
+  private openFiscalRequirementsFromError(err: unknown): void {
+    const requirements = mapFiscalBackendErrorToRequirements(err, {
+      reasonFor: (step) => this.reasonFor(step),
+      missingSteps: this.service.finalizeMissingSteps(),
+    });
+    if (requirements.length === 0) return;
+    this.fiscalRequirements.set(requirements);
+    this.requirementsModalOpen.set(true);
+  }
+
+  /**
+   * Pre-submit (sin 409 todavia): construye las filas a partir de las filas
+   * pendientes ya calculadas por `rows()`, reutilizando el mismo builder para
+   * garantizar el CTA "Volver a {paso}".
+   */
+  private openFiscalRequirementsFromPendingRows(): void {
+    const pending = this.rows()
+      .filter((r) => !r.completed)
+      .map((r) => r.step);
+    if (pending.length === 0) return;
+    const area = this.service.selectedAreas()[0] ?? 'invoicing';
+    const requirements = mapFiscalBackendErrorToRequirements(null, {
+      reasonFor: (step) => this.reasonFor(step),
+      missingSteps: { [area]: pending } as Partial<
+        Record<FiscalArea, FiscalWizardStepId[]>
+      >,
+    });
+    if (requirements.length === 0) return;
+    this.fiscalRequirements.set(requirements);
+    this.requirementsModalOpen.set(true);
+  }
+
+  /**
+   * CTA de una fila del modal: navega al paso indicado via el servicio del
+   * wizard (goToStep) y cierra el modal.
+   */
+  onRequirementAction(req: SaveRequirement): void {
+    if (req.action?.kind === 'navigate' && req.action.target) {
+      this.requirementsModalOpen.set(false);
+      this.service.goToStep(req.action.target as FiscalWizardStepId);
     }
   }
 }

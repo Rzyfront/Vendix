@@ -1,5 +1,5 @@
 import { parseApiError } from '../../../../../core/utils/parse-api-error';
-import { SaveRequirement } from '../components/save-requirements-modal/save-requirements.interface';
+import { SaveRequirement } from '../../../../../shared/components/save-requirements-modal/save-requirements.interface';
 
 /**
  * Información curada para traducir un código de error del backend a una fila
