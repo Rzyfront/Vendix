@@ -35,7 +35,11 @@ export function passwordsMatchValidator(
     : null;
 }
 
-// Custom validator: password strength (8+ chars, mixed case, number, symbol).
+// Custom validator: password strength (8+ chars, mixed case, number).
+// Aligned with the backend's `validatePasswordStrength` and the DTO
+// description — the previous version required a symbol but neither
+// the server nor the DTO did, so users were seeing failures for
+// passwords the server would accept.
 export function passwordStrengthValidator(
   control: AbstractControl,
 ): ValidationErrors | null {
@@ -47,11 +51,10 @@ export function passwordStrengthValidator(
   const hasUpperCase = /[A-Z]/.test(value);
   const hasLowerCase = /[a-z]/.test(value);
   const hasNumeric = /[0-9]/.test(value);
-  const hasSymbol = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(value);
   const isValidLength = value.length >= 8;
 
   const passwordValid =
-    hasUpperCase && hasLowerCase && hasNumeric && hasSymbol && isValidLength;
+    hasUpperCase && hasLowerCase && hasNumeric && isValidLength;
 
   if (!passwordValid) {
     return {
@@ -59,7 +62,6 @@ export function passwordStrengthValidator(
         hasUpperCase,
         hasLowerCase,
         hasNumeric,
-        hasSymbol,
         isValidLength,
       },
     };
@@ -153,10 +155,6 @@ export function passwordStrengthValidator(
                   } @else if (strength && !strength.hasNumeric) {
                     <div class="text-sm text-[var(--color-destructive)]">
                       Debe incluir al menos un número.
-                    </div>
-                  } @else if (strength && !strength.hasSymbol) {
-                    <div class="text-sm text-[var(--color-destructive)]">
-                      Debe incluir al menos un carácter especial (!@#$%…).
                     </div>
                   } @else {
                     <div class="text-sm text-green-600">
