@@ -24,6 +24,7 @@ import {
   BulkProductAnalysisResult,
   BulkProductUploadResult,
 } from '../interfaces/bulk-product-analysis.interface';
+import { PRODUCT_SAVE_ERROR_MAP } from '../utils/product-save-requirements';
 
 interface ApiResponse<T> {
   success: boolean;
@@ -649,7 +650,16 @@ export class ProductsService {
     // Mensajes de error más descriptivos
     let errorMessage = 'Ocurrió un error';
 
-    if (typeof error === 'string') {
+    // El backend envía `error_code` (VendixHttpException). Si lo conocemos,
+    // usamos el mensaje curado en español del catálogo — así el texto que
+    // recibe la UI (modal de requisitos o toast) explica el escenario concreto
+    // aunque este handler aplane el error a string y pierda el código.
+    const backendCode: string | undefined =
+      error?.error?.error_code ?? error?.error_code;
+
+    if (backendCode && PRODUCT_SAVE_ERROR_MAP[backendCode]) {
+      errorMessage = PRODUCT_SAVE_ERROR_MAP[backendCode].reason;
+    } else if (typeof error === 'string') {
       errorMessage = error;
     } else if (error.error?.message) {
       errorMessage = error.error.message;

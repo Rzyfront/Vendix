@@ -3788,3 +3788,10 @@
   [stockLevels]="product?.stock_levels ?? []"
   (changed)="loadSerialSummary()"
 />
+
+<!-- ─── Modal de requisitos para guardar (checklist humano) ──────────── -->
+<app-save-requirements-modal
+  [(isOpen)]="isRequirementsModalOpen"
+  [requirements]="saveRequirements()"
+  (action)="onRequirementAction($event)"
+/>

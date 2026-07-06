@@ -1,0 +1,62 @@
+<app-modal
+  [(isOpen)]="isOpen"
+  title="No se puede guardar todavía"
+  subtitle="Completa lo siguiente para guardar el producto"
+  size="md"
+>
+  <div class="requirements-body">
+    <!-- Banner resumen -->
+    <div class="requirements-banner" role="status" aria-live="polite">
+      <app-icon name="alert-triangle" [size]="16" />
+      <div class="requirements-banner__body">
+        <strong>
+          Faltan {{ count() }} cosa(s) por resolver antes de guardar.
+        </strong>
+        <small>
+          Resuelve cada punto de la lista para poder guardar el producto.
+        </small>
+      </div>
+    </div>
+
+    <!-- Lista de requisitos: blockers arriba, luego obligatorios -->
+    <div class="requirements-list">
+      @for (req of blockers(); track req.id) {
+        <div class="requirement-row requirement-row--blocker">
+          <span class="requirement-state requirement-state--blocker">
+            <app-icon name="lock" [size]="14" />
+          </span>
+          <div class="requirement-row__body">
+            <strong>{{ req.label }}</strong>
+            <small class="requirement-row__reason">{{ req.reason }}</small>
+          </div>
+          @if (req.action) {
+            <app-button size="sm" variant="outline" (clicked)="onCta(req)">
+              {{ req.action.label }}
+            </app-button>
+          }
+        </div>
+      }
+
+      @for (req of requiredItems(); track req.id) {
+        <div class="requirement-row">
+          <span class="requirement-state">
+            <app-icon name="alert-circle" [size]="14" />
+          </span>
+          <div class="requirement-row__body">
+            <strong>{{ req.label }}</strong>
+            <small class="requirement-row__reason">{{ req.reason }}</small>
+          </div>
+          @if (req.action) {
+            <app-button size="sm" variant="outline" (clicked)="onCta(req)">
+              {{ req.action.label }}
+            </app-button>
+          }
+        </div>
+      }
+    </div>
+  </div>
+
+  <div slot="footer" class="flex justify-end">
+    <app-button variant="primary" (clicked)="close()">Entendido</app-button>
+  </div>
+</app-modal>
