@@ -2026,8 +2026,27 @@ export class AutoEntryService {
     try {
       const run = await this.prisma.withoutScope().payroll_runs.findFirst({
         where: { id: data.payroll_run_id },
-        select: { id: true, accounting_entity_id: true },
+        select: {
+          id: true,
+          accounting_entity_id: true,
+          accounting_entry_id: true,
+        },
       });
+      // Guarda: no drenar pasivos si la causación no quedó posteada. En el
+      // camino no-electrónico el paso 1 puede fallar (p.ej. subcuenta PUC
+      // ausente o drift de balance) y su error se traga arriba; sin esta
+      // guarda el pago dejaría 2505/2370/2380 con saldo débito huérfano sin
+      // el gasto contrapartida. Si la causación existe, accounting_entry_id
+      // está seteado (writeback de createAutoEntry para source 'payroll.approved').
+      if (!run?.accounting_entry_id) {
+        const msg =
+          `Payroll paid #${data.payroll_run_id}: causación ausente; ` +
+          `se omite el asiento de pago para no drenar pasivos sin causación`;
+        this.logger.error(msg);
+        result.failed += 1;
+        result.errors.push(msg);
+        return result;
+      }
       const items = await this.loadPayrollAccrualItems(data.payroll_run_id);
 
       let total_salaries = 0; // → 2505 (nómina por pagar)
