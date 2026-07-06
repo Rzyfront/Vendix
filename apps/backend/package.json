@@ -34,6 +34,7 @@
     "db:roku:wipe": "ts-node -r tsconfig-paths/register scripts/roku-demo/wipe-roku.ts",
     "migrate:fiscal-status": "ts-node -r tsconfig-paths/register scripts/migrate-fiscal-status.ts",
     "verify:fiscal-status": "ts-node -r tsconfig-paths/register scripts/verify-fiscal-status-migration.ts",
+    "migrate:cost-price": "ts-node -r tsconfig-paths/register scripts/backfill-cost-price.ts",
     "// ----- DOCKER -----": "",
     "docker:build": "npm run build",
     "docker:start": "npm run start:prod",
