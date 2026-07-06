@@ -12,6 +12,7 @@ import {
   UseGuards,
   ParseIntPipe,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
@@ -453,6 +454,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('forgot-customer-password')
   @HttpCode(HttpStatus.OK)
   async forgotCustomerPassword(@Body() forgotCustomerDto: ForgotCustomerPasswordDto) {
@@ -472,6 +474,7 @@ export class AuthController {
   }
 
   @Public()
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('reset-customer-password')
   @HttpCode(HttpStatus.OK)
   async resetCustomerPassword(@Body() resetCustomerDto: ResetCustomerPasswordDto) {

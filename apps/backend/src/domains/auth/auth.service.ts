@@ -2932,12 +2932,21 @@ export class AuthService {
     const wasPending = resetToken.users.state !== 'active';
     const wasUnverified = !resetToken.users.email_verified;
 
-    await this.prismaService.$transaction([
-      this.prismaService.password_reset_tokens.update({
-        where: { id: resetToken.id },
+    // Atomic consume: only mark `used = true` if the row is still
+    // unused. If two concurrent requests race, only the first one
+    // updates the row — the second sees count = 0 and bails. The
+    // second statement then throws and the whole $transaction rolls
+    // back, so the password change is not persisted.
+    const consumed = await this.prismaService.$transaction(async (tx) => {
+      const result = await tx.password_reset_tokens.updateMany({
+        where: { id: resetToken.id, used: false, expires_at: { gt: new Date() } },
         data: { used: true },
-      }),
-      this.prismaService.users.update({
+      });
+      if (result.count === 0) {
+        // Another request consumed this token first. Abort.
+        return null;
+      }
+      await tx.users.update({
         where: { id: resetToken.user_id },
         data: {
           password: hashedPassword,
@@ -2947,11 +2956,15 @@ export class AuthService {
             ? { state: 'active', email_verified: true }
             : {}),
         },
-      }),
-      this.prismaService.refresh_tokens.deleteMany({
+      });
+      await tx.refresh_tokens.deleteMany({
         where: { user_id: resetToken.user_id },
-      }),
-    ]);
+      });
+      return result;
+    });
+    if (!consumed) {
+      throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
+    }
 
     // Link the customer to the ecommerce store (idempotent) and ensure
     // the account is active. claimCustomerAccount does both: it
