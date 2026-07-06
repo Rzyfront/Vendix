@@ -555,6 +555,43 @@ export class AvailabilityService {
     return `${y}-${m}-${d}`;
   }
 
+  /**
+   * Resolves the working-days mask for the store that owns `product_id`.
+   *
+   * Reads `store_settings.settings.availability.working_days` (Mon-Fri by
+   * default). Falls back to `[1, 2, 3, 4, 5]` when the setting is missing,
+   * the row doesn't exist, or `availability.working_days` is malformed —
+   * matching the historic hardcoded skip-weekend behavior so existing
+   * stores are unaffected.
+   */
+  private async getStoreWorkingDays(product_id: number): Promise<number[]> {
+    const DEFAULT_WORKING_DAYS = [1, 2, 3, 4, 5] as const;
+
+    const product = await this.prisma.products.findFirst({
+      where: { id: product_id },
+      select: { store_id: true },
+    });
+    if (!product?.store_id) {
+      return [...DEFAULT_WORKING_DAYS];
+    }
+
+    const storeSettings = await this.prisma.store_settings.findUnique({
+      where: { store_id: product.store_id },
+      select: { settings: true },
+    });
+
+    const raw = (storeSettings?.settings as any)?.availability?.working_days;
+    if (
+      Array.isArray(raw) &&
+      raw.length > 0 &&
+      raw.every((d) => Number.isInteger(d) && d >= 0 && d <= 6)
+    ) {
+      return raw as number[];
+    }
+
+    return [...DEFAULT_WORKING_DAYS];
+  }
+
   private async generateGenericSlots(
     product_id: number,
     date_from: string,
@@ -577,11 +614,17 @@ export class AvailabilityService {
       select: { date: true, start_time: true, end_time: true },
     });
 
+    // Resolve the store's working-days setting. Default (Mon-Fri) matches
+    // the historic hardcoded skip-weekend behavior so existing stores are
+    // unaffected. Stores that open weekends override via
+    // `store_settings.settings.availability.working_days`.
+    const workingDays = await this.getStoreWorkingDays(product_id);
+
     for (const currentDate of dates) {
       const dateStr = this.formatDate(currentDate);
       const dayOfWeek = currentDate.getUTCDay();
 
-      if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+      if (!workingDays.includes(dayOfWeek)) continue;
 
       const timeSlots = this.generateTimeSlots(
         '08:00',

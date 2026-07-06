@@ -19,6 +19,7 @@ import {
   PanelUISettingsDto,
   AccountingFlowsSettingsDto,
   ModuleFlowsSettingsDto,
+  AvailabilitySettingsDto,
 } from './settings-schemas.dto';
 import { EcommerceSettingsDto } from '../../ecommerce/dto/ecommerce-settings.dto';
 
@@ -89,6 +90,12 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => OperationsSettingsDto)
   operations?: OperationsSettingsDto;
+
+  @ApiProperty({ type: AvailabilitySettingsDto, required: false })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => AvailabilitySettingsDto)
+  availability?: AvailabilitySettingsDto;
 
   @ApiProperty({ type: DispatchSettingsDto, required: false })
   @IsOptional()

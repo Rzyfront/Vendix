@@ -342,6 +342,13 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
     },
 
+    // Availability - Generic-slot fallback. Mon-Fri matches the historic
+    // hardcoded skip-weekend behavior in `AvailabilityService.generateGenericSlots`;
+    // stores that open on weekends override via this setting.
+    availability: {
+      working_days: [1, 2, 3, 4, 5],
+    },
+
     // Operations - Preparation and delivery defaults
     operations: {
       default_preparation_time_minutes: 15,
