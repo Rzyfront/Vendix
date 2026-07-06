@@ -1583,9 +1583,6 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     return { label: labelText, subLabel: t.name, value: t.id };
                   })}
                   placeholder="Seleccionar impuestos…"
-                  searchable
-                  searchPlaceholder="Buscar impuesto…"
-                  tooltip="Impuestos que se suman al precio base en facturación y checkout (IVA, INC, retenciones)."
                 />
               </View>
               <Pressable
@@ -1689,7 +1686,6 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 <MultiSelector
                   label="Tarifas aplicables"
                   placeholder="Buscar y seleccionar tarifas..."
-                  tooltip="Selecciona las tarifas que aplican a este producto. Solo las seleccionadas mostrarán precio, margen y cantidad por empaque configurables."
                   values={form.enabled_price_tier_ids ?? []}
                   onChange={(values) => {
                     // Usamos el formulario funcional de setForm para
@@ -1715,8 +1711,6 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                       ? `Empaque x${tier.units_per_package}`
                       : undefined,
                   }))}
-                  searchable
-                  searchPlaceholder="Buscar..."
                 />
                 <View style={styles.priceTiersHint}>
                   <Icon name="info" size={16} color={colorScales.gray[500]} />
@@ -2145,15 +2139,12 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
               <MultiSelector
                 label="Promociones"
                 placeholder="Seleccionar promociones..."
-                tooltip="Descuentos o campañas activas asociadas a este producto. Se aplican automáticamente al checkout."
                 values={form.promotion_ids ?? []}
                 onChange={(v) => updateField('promotion_ids', v)}
                 options={(activePromotions ?? []).map((p: any) => ({
                   value: p.id,
                   label: p.name,
                 }))}
-                searchable
-                searchPlaceholder="Buscar..."
               />
             </View>
 
@@ -2577,12 +2568,9 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   <MultiSelector
                     label="Marca"
                     placeholder="Seleccionar marca..."
-                    tooltip="Marca del producto. Se usa para filtros en catálogo y reportes de ventas."
                     values={form.brand_ids ?? []}
                     onChange={(v) => updateField('brand_ids', v)}
                     options={((brands as Brand[]) || []).map((b) => ({ label: b.name, value: b.id }))}
-                    searchable
-                    searchPlaceholder="Buscar..."
                   />
                 </View>
                 <Pressable
@@ -2600,12 +2588,9 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   <MultiSelector
                     label="Categorías"
                     placeholder="Seleccionar categorías..."
-                    tooltip="Categorías donde aparecerá el producto. Un producto puede pertenecer a varias a la vez."
                     values={form.category_ids}
                     onChange={(v) => updateField('category_ids', v)}
                     options={((categories as ProductCategory[]) || []).map((c) => ({ label: c.name, value: c.id }))}
-                    searchable
-                    searchPlaceholder="Buscar..."
                   />
                 </View>
                 <Pressable
