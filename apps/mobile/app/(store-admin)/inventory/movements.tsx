@@ -7,7 +7,6 @@ import { useRouter } from 'expo-router';
 import { InventoryService } from '@/features/store/services/inventory.service';
 import type { StockMovement, MovementType } from '@/features/store/types';
 import { MOVEMENT_TYPE_LABELS, MOVEMENT_INBOUND_TYPES, MOVEMENT_OUTBOUND_TYPES } from '@/features/store/types';
-import { useTenantStore } from '@/core/store/tenant.store';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { Icon } from '@/shared/components/icon/icon';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
@@ -295,7 +294,6 @@ const MovementCard = ({
 
 export default function MovementsScreen() {
   const router = useRouter();
-  const currentStoreId = useTenantStore((s) => s.storeId);
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState<MovementType | 'all'>('all');
   const [page, setPage] = useState(1);
@@ -329,10 +327,16 @@ export default function MovementsScreen() {
 
   const allMovements: StockMovement[] = data?.data ?? [];
 
-  // Filtro client-side por tienda (mismo workaround que en adjustments)
-  const movements = currentStoreId
-    ? allMovements.filter((m) => m.store_id === Number(currentStoreId))
-    : allMovements;
+  // Sin filtro client-side por tienda — el backend ya hace scoping
+  // automático via `StorePrismaService` (que inyecta `store_id` en el
+  // WHERE según el contexto del RequestContext). El filtro client-side
+  // previo comparaba `m.store_id` (derivado de from_location/to_location
+  // del movement) con `Number(currentStoreId)` (id del store activo del
+  // usuario) — pero `m.store_id` puede ser null si el backend no hidrata
+  // las relaciones de location, o no matchear si el movement es entre
+  // tiendas distintas (transfers). Resultado: movements.filter devolvía
+  // array vacío y el UI mostraba "(0)" en todas las cards.
+  const movements = allMovements;
 
   // Paginación — derivada de la metadata de la respuesta del backend.
   const pagination = data?.pagination ?? {
@@ -444,9 +448,12 @@ export default function MovementsScreen() {
           )}
           ListHeaderComponent={
             <View>
-              <View style={styles.titleRow}>
-                <Text style={styles.listTitle}>Movimientos ({pagination.total})</Text>
-              </View>
+              {/* Title "Movimientos ({pagination.total})" eliminado por
+                  feedback del usuario (task #46) — el contador de paginación
+                  ya aparece en el Pagination del footer ("Mostrando X de Y")
+                  y en los Stats del header (cards "Total/Inbound/Outbound").
+                  Sin este titleRow, las cards quedan pegadas al search/filter
+                  row sin un header redundante. */}
               <View style={styles.searchRow}>
                 <View style={styles.searchInputWrap}>
                   <Icon name="search" size={16} color={colorScales.gray[400]} style={styles.searchIcon} />

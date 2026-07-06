@@ -414,6 +414,8 @@ import {
   ArrowDown,
   ArrowUp,
   CircleSlash,
+  ToggleRight,
+  ToggleLeft,
   Ban as BanIcon,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
@@ -841,6 +843,8 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'pencil-line': PencilLine,
   'edit-3': Edit3,
   'circle-slash': CircleSlash,
+  'toggle-right': ToggleRight,
+  'toggle-left': ToggleLeft,
   'ban-solid': BanIcon,
 };
 
