@@ -22,6 +22,7 @@ import { FiscalPeriodsService } from './fiscal-periods/fiscal-periods.service';
 // Reports
 import { AccountingReportsController } from './reports/accounting-reports.controller';
 import { AccountingReportsService } from './reports/accounting-reports.service';
+import { InventoryReconciliationService } from './reports/inventory-reconciliation.service';
 
 // Account Mappings
 import { AccountMappingController } from './account-mappings/account-mapping.controller';
@@ -102,6 +103,7 @@ import { DepreciationCalculatorService } from './fixed-assets/depreciation-calcu
     JournalEntryFlowService,
     FiscalPeriodsService,
     AccountingReportsService,
+    InventoryReconciliationService,
     AccountMappingService,
     AutoEntryService,
     AccountingEventsListener,

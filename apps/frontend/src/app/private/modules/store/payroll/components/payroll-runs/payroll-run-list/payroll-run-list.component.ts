@@ -18,7 +18,6 @@ import {
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import {
   InputsearchComponent,
-  ButtonComponent,
   TableColumn,
   TableAction,
   ResponsiveDataViewComponent,
@@ -27,8 +26,8 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
-  IconComponent,
   PaginationComponent,
+  EmptyStateComponent,
 } from '../../../../../../../shared/components/index';
 
 @Component({
@@ -40,9 +39,8 @@ import {
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
-    IconComponent,
     PaginationComponent,
+    EmptyStateComponent,
   ],
   templateUrl: './payroll-run-list.component.html',
 })

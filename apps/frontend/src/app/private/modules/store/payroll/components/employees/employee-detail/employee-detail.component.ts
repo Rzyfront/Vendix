@@ -7,6 +7,7 @@ import {
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
+import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import {
@@ -19,11 +20,13 @@ import { PayrollService } from '../../../services/payroll.service';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
+import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../../shared/components/selector/selector.component';
 import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
+import { EmployeeFiscalProfileFormComponent } from '../employee-fiscal-profile/employee-fiscal-profile-form.component';
 
 @Component({
   selector: 'vendix-employee-detail',
@@ -34,7 +37,9 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
     ModalComponent,
     ButtonComponent,
     InputComponent,
+    IconComponent,
     SelectorComponent,
+    EmployeeFiscalProfileFormComponent,
   ],
   template: `
     <app-modal
@@ -139,6 +144,20 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
                 [control]="employeeForm.get('document_number')"
                 [required]="true"
               ></app-input>
+
+              <app-input
+                label="Fecha de nacimiento"
+                type="date"
+                formControlName="birth_date"
+                [control]="employeeForm.get('birth_date')"
+              ></app-input>
+
+              <app-selector
+                label="Género"
+                formControlName="gender"
+                [options]="genderOptions"
+                placeholder="Seleccione..."
+              ></app-selector>
             </div>
           </div>
 
@@ -162,6 +181,20 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
                 label="Tipo de Contrato"
                 formControlName="contract_type"
                 [options]="contractTypeOptions"
+                [required]="true"
+              ></app-selector>
+
+              <app-input
+                label="Fecha fin de contrato"
+                type="date"
+                formControlName="contract_end_date"
+                [control]="employeeForm.get('contract_end_date')"
+              ></app-input>
+
+              <app-selector
+                label="Tipo de salario"
+                formControlName="salary_type"
+                [options]="salaryTypeOptions"
                 [required]="true"
               ></app-selector>
 
@@ -266,6 +299,20 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
           </div>
         </form>
 
+        <!-- Fiscal Profile (art. 387 ET) -->
+        @if (employee() && employee()!.status === 'active') {
+          <div class="mt-6 pt-4 border-t border-border">
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Perfil Fiscal (art. 387 ET)
+            </h3>
+            <vendix-employee-fiscal-profile-form
+              [employeeId]="employee()!.id"
+            ></vendix-employee-fiscal-profile-form>
+          </div>
+        }
+
         <!-- Terminate Action -->
         @if (employee() && employee()!.status === 'active') {
           <div class="mt-5 pt-4 border-t border-border space-y-2">
@@ -302,6 +349,18 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
         <div
           class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
         >
+          @if (employee()) {
+            <app-button
+              class="mr-auto"
+              variant="outline"
+              size="sm"
+              (clicked)="onGenerateForm220()"
+            >
+              <app-icon name="file-text" [size]="16" slot="icon"></app-icon>
+              Certificado 220
+            </app-button>
+          }
+
           <app-button variant="outline" size="sm" (clicked)="onClose()">
             Cerrar
           </app-button>
@@ -331,6 +390,7 @@ export class EmployeeDetailComponent {
   private payrollService = inject(PayrollService);
   private fb = inject(FormBuilder);
   private store = inject(Store);
+  private router = inject(Router);
 
   employeeForm: FormGroup = this.fb.group({});
   readonly loading = toSignal(this.store.select(selectEmployeesLoading), {
@@ -351,6 +411,18 @@ export class EmployeeDetailComponent {
     { label: 'Termino Fijo', value: 'fixed_term' },
     { label: 'Prestacion de Servicios', value: 'service' },
     { label: 'Aprendizaje', value: 'apprentice' },
+    { label: 'Obra o labor', value: 'obra_labor' },
+  ];
+
+  salaryTypeOptions: SelectorOption[] = [
+    { label: 'Ordinario', value: 'ordinary' },
+    { label: 'Integral', value: 'integral' },
+  ];
+
+  genderOptions: SelectorOption[] = [
+    { label: 'Masculino', value: 'male' },
+    { label: 'Femenino', value: 'female' },
+    { label: 'Otro', value: 'other' },
   ];
 
   paymentFrequencyOptions: SelectorOption[] = [
@@ -380,8 +452,12 @@ export class EmployeeDetailComponent {
       last_name: ['', [Validators.required, Validators.minLength(2)]],
       document_type: ['CC', [Validators.required]],
       document_number: ['', [Validators.required]],
+      birth_date: [''],
+      gender: [''],
       hire_date: ['', [Validators.required]],
+      contract_end_date: [''],
       contract_type: ['indefinite', [Validators.required]],
+      salary_type: ['ordinary'],
       position: [''],
       department: [''],
       cost_center: ['administrative'],
@@ -422,14 +498,28 @@ export class EmployeeDetailComponent {
       hireDateStr = toUTCDateString(d);
     }
 
+    let birthDateStr = '';
+    if (employee.birth_date) {
+      birthDateStr = toUTCDateString(new Date(employee.birth_date));
+    }
+
+    let contractEndDateStr = '';
+    if (employee.contract_end_date) {
+      contractEndDateStr = toUTCDateString(new Date(employee.contract_end_date));
+    }
+
     this.employeeForm.patchValue({
       user_id: employee.user_id || '',
       first_name: employee.first_name,
       last_name: employee.last_name,
       document_type: employee.document_type,
       document_number: employee.document_number,
+      birth_date: birthDateStr,
+      gender: employee.gender || '',
       hire_date: hireDateStr,
+      contract_end_date: contractEndDateStr,
       contract_type: employee.contract_type,
+      salary_type: employee.salary_type || 'ordinary',
       position: employee.position || '',
       department: employee.department || '',
       cost_center: employee.cost_center || 'administrative',
@@ -462,8 +552,12 @@ export class EmployeeDetailComponent {
           last_name: formValue.last_name,
           document_type: formValue.document_type,
           document_number: formValue.document_number,
+          birth_date: formValue.birth_date || undefined,
+          gender: formValue.gender || undefined,
           hire_date: formValue.hire_date,
+          contract_end_date: formValue.contract_end_date || undefined,
           contract_type: formValue.contract_type,
+          salary_type: formValue.salary_type || undefined,
           position: formValue.position || undefined,
           department: formValue.department || undefined,
           cost_center: formValue.cost_center || undefined,
@@ -521,6 +615,26 @@ export class EmployeeDetailComponent {
 
   onClose() {
     this.isOpenChange.emit(false);
+  }
+
+  /**
+   * Navigate to the withholding-tax module's "Certificados" viewer to generate
+   * the employee's "Certificado de Ingresos y Retenciones" (Formulario 220 DIAN).
+   * The employee id + tax year are passed as query params so a follow-up can
+   * auto-open the certificate; the viewer currently opens on its Certificados tab.
+   */
+  onGenerateForm220(): void {
+    const emp = this.employee();
+    if (!emp) return;
+    this.router.navigate(['/admin/accounting/taxes/withholding'], {
+      queryParams: {
+        tab: 'certificates',
+        kind: 'employee',
+        employeeId: emp.id,
+        year: new Date().getFullYear(),
+      },
+    });
+    this.onClose();
   }
 
   getStatusLabel(status: string): string {

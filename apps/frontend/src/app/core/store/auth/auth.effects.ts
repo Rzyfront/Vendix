@@ -18,6 +18,11 @@ import { ConfigFacade } from '../config';
 import { AuthFacade } from './auth.facade';
 import { isTokenExpired } from '../persistence';
 import { ThemeService } from '../../services/theme.service';
+import { ManifestService } from '../../services/manifest.service';
+import {
+  BrandingConfig,
+  DomainConfig,
+} from '../../models/domain-config.interface';
 import { TenantFacade } from '../tenant';
 import * as AuthActions from './auth.actions';
 import * as ConfigActions from '../config/config.actions';
@@ -33,6 +38,7 @@ export class AuthEffects {
   private authFacade = inject(AuthFacade);
   private appConfigService = inject(AppConfigService);
   private themeService = inject(ThemeService);
+  private manifestService = inject(ManifestService);
   private onboardingWizardService = inject(OnboardingWizardService);
   private tokenRefreshTimer = inject(TokenRefreshTimerService);
   private tenantFacade = inject(TenantFacade);
@@ -660,9 +666,12 @@ export class AuthEffects {
           AuthActions.loginCustomerSuccess,
           AuthActions.restoreAuthState,
         ),
-        withLatestFrom(this.tenantFacade.isVendixDomain$),
+        withLatestFrom(
+          this.tenantFacade.isVendixDomain$,
+          this.tenantFacade.domainConfig$,
+        ),
         filter(([_, isVendixDomain]) => !isVendixDomain),
-        tap(([action]) => {
+        tap(([action, , domainConfig]) => {
           const storeSettings = (action as any).store_settings;
           if (!storeSettings?.app) return;
 
@@ -680,6 +689,32 @@ export class AuthEffects {
             fonts: { primary: 'Inter' },
             favicon: app.favicon_url,
           });
+
+          // Refresca el Web App Manifest con el branding del tenant post-login,
+          // fusionando los campos de store_settings.app sobre el DomainConfig actual.
+          if (domainConfig) {
+            const brandedConfig: DomainConfig = {
+              ...domainConfig,
+              store_name: domainConfig.store_name || app.name,
+              customConfig: {
+                ...domainConfig.customConfig,
+                branding: {
+                  ...domainConfig.customConfig?.branding,
+                  name: app.name ?? domainConfig.customConfig?.branding?.name,
+                  primary_color:
+                    app.primary_color ??
+                    domainConfig.customConfig?.branding?.primary_color,
+                  logo_url:
+                    app.logo_url ??
+                    domainConfig.customConfig?.branding?.logo_url,
+                  favicon_url:
+                    app.favicon_url ??
+                    domainConfig.customConfig?.branding?.favicon_url,
+                } as BrandingConfig,
+              },
+            };
+            this.manifestService.applyManifest(brandedConfig);
+          }
         }),
       ),
     { dispatch: false },

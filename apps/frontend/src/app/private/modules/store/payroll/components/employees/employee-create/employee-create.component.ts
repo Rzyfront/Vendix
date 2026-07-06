@@ -112,6 +112,20 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                 placeholder="Ej: 1234567890"
                 [required]="true"
               ></app-input>
+
+              <app-input
+                label="Fecha de nacimiento"
+                type="date"
+                formControlName="birth_date"
+                [control]="employeeForm.get('birth_date')"
+              ></app-input>
+
+              <app-selector
+                label="Género"
+                formControlName="gender"
+                [options]="genderOptions"
+                placeholder="Seleccione..."
+              ></app-selector>
             </div>
           </div>
 
@@ -135,6 +149,20 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                 label="Tipo de Contrato"
                 formControlName="contract_type"
                 [options]="contractTypeOptions"
+                [required]="true"
+              ></app-selector>
+
+              <app-input
+                label="Fecha fin de contrato"
+                type="date"
+                formControlName="contract_end_date"
+                [control]="employeeForm.get('contract_end_date')"
+              ></app-input>
+
+              <app-selector
+                label="Tipo de salario"
+                formControlName="salary_type"
+                [options]="salaryTypeOptions"
                 [required]="true"
               ></app-selector>
 
@@ -342,6 +370,18 @@ export class EmployeeCreateComponent {
     { label: 'Termino Fijo', value: 'fixed_term' },
     { label: 'Prestacion de Servicios', value: 'service' },
     { label: 'Aprendizaje', value: 'apprentice' },
+    { label: 'Obra o labor', value: 'obra_labor' },
+  ];
+
+  salaryTypeOptions: SelectorOption[] = [
+    { label: 'Ordinario', value: 'ordinary' },
+    { label: 'Integral', value: 'integral' },
+  ];
+
+  genderOptions: SelectorOption[] = [
+    { label: 'Masculino', value: 'male' },
+    { label: 'Femenino', value: 'female' },
+    { label: 'Otro', value: 'other' },
   ];
 
   paymentFrequencyOptions: SelectorOption[] = [
@@ -380,9 +420,13 @@ export class EmployeeCreateComponent {
       last_name: ['', [Validators.required, Validators.minLength(2)]],
       document_type: ['CC', [Validators.required]],
       document_number: ['', [Validators.required]],
+      birth_date: [''],
+      gender: [''],
       // Employment
       hire_date: [today, [Validators.required]],
+      contract_end_date: [''],
       contract_type: ['indefinite', [Validators.required]],
+      salary_type: ['ordinary'],
       position: [''],
       department: [''],
       cost_center: ['administrative'],
@@ -479,8 +523,12 @@ export class EmployeeCreateComponent {
       last_name: formValue.last_name,
       document_type: formValue.document_type,
       document_number: formValue.document_number,
+      birth_date: formValue.birth_date || undefined,
+      gender: formValue.gender || undefined,
       hire_date: formValue.hire_date,
+      contract_end_date: formValue.contract_end_date || undefined,
       contract_type: formValue.contract_type,
+      salary_type: formValue.salary_type || undefined,
       position: formValue.position || undefined,
       department: formValue.department || undefined,
       cost_center: formValue.cost_center || undefined,
@@ -521,6 +569,7 @@ export class EmployeeCreateComponent {
     this.employeeForm.reset({
       document_type: 'CC',
       contract_type: 'indefinite',
+      salary_type: 'ordinary',
       payment_frequency: 'monthly',
       cost_center: 'administrative',
       hire_date: toLocalDateString(),

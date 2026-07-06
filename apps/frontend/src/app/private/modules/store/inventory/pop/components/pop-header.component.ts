@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   output,
   signal,
   inject,
@@ -9,23 +10,18 @@ import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
 import { Observable, of } from "rxjs";
 import { catchError, map, tap } from "rxjs/operators";
 
-import { FormsModule } from "@angular/forms";
-
-import {
-  SelectorComponent,
-  SelectorOption,
-} from "../../../../../../shared/components/selector/selector.component";
+import { SelectorOption } from "../../../../../../shared/components/selector/selector.component";
 import { IconComponent } from "../../../../../../shared/components/icon/icon.component";
-import { ButtonComponent } from "../../../../../../shared/components/button/button.component";
-import { InputComponent } from "../../../../../../shared/components/input/input.component";
 import { BadgeComponent } from "../../../../../../shared/components/badge/badge.component";
-import { TooltipComponent } from "../../../../../../shared/components/tooltip/tooltip.component";
+
+import { PopOrderConfigModalComponent } from "./pop-order-config-modal.component";
+import { PopOrderConfigCardComponent } from "./pop-order-config-card.component";
+import { PopOrderConfigDropdownComponent } from "./pop-order-config-dropdown.component";
 
 import { PopCartService, ShippingMethod } from "../services/pop-cart.service";
 import { PopSupplier, PopLocation } from "../interfaces/pop-cart.interface";
 
 // Local constants
-// Force rebuild 2
 const SHIPPING_METHOD_LABELS = {
   supplier_transport: "Transporte Proveedor",
   freight: "Flete",
@@ -38,364 +34,114 @@ import { InventoryService } from "../../services/inventory.service";
 
 /**
  * POP Header Component
- * Displays supplier, warehouse, dates, and shipping method selectors
+ *
+ * Muestra el título del POP y la configuración de la orden de compra
+ * (proveedor, bodega, fechas, método de envío) siguiendo el patrón POS
+ * caja/cliente: un botón (sin configurar) que abre un modal, y una vez
+ * configurada una mini-card compacta (desktop ≥ xl) o un dropdown (< xl).
+ *
+ * Este componente sigue siendo el dueño de la data (suppliers/locations),
+ * el quick-create y la sincronización con `PopCartService`; los tres
+ * sub-componentes de configuración son presentacionales.
  */
 @Component({
   selector: "app-pop-header",
   standalone: true,
   imports: [
-    FormsModule,
-    SelectorComponent,
     IconComponent,
-    ButtonComponent,
-    InputComponent,
     BadgeComponent,
-    TooltipComponent
-],
+    PopOrderConfigModalComponent,
+    PopOrderConfigCardComponent,
+    PopOrderConfigDropdownComponent,
+  ],
   template: `
     <div class="px-4 lg:px-6 py-4 lg:py-5 bg-surface rounded-t-xl">
-      <div class="flex flex-col gap-4 lg:gap-6">
-        <!-- Top Row: Title + Mobile Settings Toggle -->
-        <div class="flex items-center justify-between gap-3">
-          <div class="flex items-center gap-3">
-            <div
-              class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center"
-              >
-              <app-icon
-                name="shopping-bag"
-                [size]="20"
-                class="text-primary lg:hidden"
-              ></app-icon>
-              <app-icon
-                name="shopping-bag"
-                [size]="24"
-                class="text-primary hidden lg:block"
-              ></app-icon>
-            </div>
-            <div class="flex flex-col">
-              <h1 class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2">
-                <span class="hidden sm:inline">Vendix</span> POP
-                <app-badge variant="primary" class="text-xs">Compra</app-badge>
-              </h1>
-              <span class="text-xs text-text-secondary font-medium hidden sm:block">
-                Punto de Compra
-              </span>
-            </div>
-          </div>
-    
-          <!-- Mobile Settings Toggle -->
-          <button
-            class="lg:hidden flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-surface hover:bg-muted transition-colors"
-            (click)="toggleMobileSettings()"
-            >
-            <app-icon [name]="showMobileSettings() ? 'chevron-up' : 'settings'" [size]="18"></app-icon>
-            <span class="text-xs font-medium">{{ showMobileSettings() ? 'Ocultar' : 'Ajustes' }}</span>
-          </button>
-        </div>
-    
-        <!-- Mobile: Quick Summary Badges (when settings collapsed) -->
-        @if (!showMobileSettings() && (selectedSupplierId() || selectedLocationId() || expectedDate())) {
+      <!-- Single row: Title (left) + purchase config (right) -->
+      <div class="flex items-center justify-between gap-3">
+        <!-- Title -->
+        <div class="flex items-center gap-3 min-w-0">
           <div
-            class="lg:hidden flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1"
+            class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0"
+          >
+            <app-icon
+              name="shopping-bag"
+              [size]="20"
+              class="text-primary lg:hidden"
+            ></app-icon>
+            <app-icon
+              name="shopping-bag"
+              [size]="24"
+              class="text-primary hidden lg:block"
+            ></app-icon>
+          </div>
+          <div class="flex flex-col min-w-0">
+            <h1
+              class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2"
             >
-            <!-- Proveedor Badge -->
-            @if (getSupplierName()) {
-              <div
-                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-primary/10 text-primary shrink-0"
-                >
-                <app-icon name="truck" [size]="14"></app-icon>
-                <span class="text-xs font-medium truncate max-w-[80px]">{{ getSupplierName() }}</span>
-              </div>
-            }
-            <!-- Arrow -->
-            @if (getSupplierName() && getLocationName()) {
-              <app-icon
-                name="chevron-right"
-                [size]="14"
-                class="text-text-muted shrink-0"
-              ></app-icon>
-            }
-            <!-- Bodega Badge -->
-            @if (getLocationName()) {
-              <div
-                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 shrink-0"
-                >
-                <app-icon name="warehouse" [size]="14"></app-icon>
-                <span class="text-xs font-medium truncate max-w-[80px]">{{ getLocationName() }}</span>
-              </div>
-            }
-            <!-- Arrow -->
-            @if (getLocationName() && expectedDate()) {
-              <app-icon
-                name="chevron-right"
-                [size]="14"
-                class="text-text-muted shrink-0"
-              ></app-icon>
-            }
-            <!-- Fecha Entrega Badge -->
-            @if (expectedDate()) {
-              <div
-                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-amber-500/10 text-amber-600 shrink-0"
-                >
-                <app-icon name="calendar" [size]="14"></app-icon>
-                <span class="text-xs font-medium">{{ formatDateShort(expectedDate()) }}</span>
-              </div>
-            }
+              <span class="hidden sm:inline">Vendix</span> POP
+              <app-badge variant="primary" class="text-xs">Compra</app-badge>
+            </h1>
+            <span
+              class="text-xs text-text-secondary font-medium hidden sm:block"
+            >
+              Punto de Compra
+            </span>
           </div>
-        }
-    
-        <!-- Desktop: Full Filters Grid (always visible) -->
-        <div class="hidden lg:grid lg:grid-cols-5 gap-4">
-          <!-- 1+2. Supplier + Warehouse (wrapped for flash warning) -->
-          <div class="col-span-2 grid grid-cols-2 gap-4 relative rounded-lg"
-            [class.config-flash-warning]="showConfigWarning()">
-            <app-tooltip
-              position="top"
-              color="ai"
-              size="sm"
-              content="Selecciona proveedor y bodega"
-              [visible]="showConfigWarning()"
-              class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
-            ></app-tooltip>
+        </div>
 
-            <!-- 1. Supplier Selector -->
-            <div class="flex flex-col gap-1.5 min-w-0">
-              <label
-                class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1"
-                >
-                Proveedor <span class="text-destructive">*</span>
-              </label>
-              <div class="flex gap-2">
-                <app-selector
-                  class="flex-1 min-w-0"
-                  size="sm"
-                  [options]="supplierOptions()"
-                  [ngModel]="selectedSupplierId()"
-                  (ngModelChange)="onSupplierChange($event)"
-                  placeholder="Seleccionar..."
-                ></app-selector>
-                <div class="relative"
-                  (mouseenter)="hoveredTooltip.set('supplier')"
-                  (mouseleave)="hoveredTooltip.set(null)">
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    customClasses="!px-2 flex items-center justify-center"
-                    (clicked)="openSupplierModal.emit()"
-                    >
-                    <app-icon name="plus" [size]="18" slot="icon" ></app-icon>
-                  </app-button>
-                  <app-tooltip position="top" size="sm" color="ai" content="Nuevo Proveedor"
-                    [visible]="hoveredTooltip() === 'supplier'"
-                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10"
-                  ></app-tooltip>
-                </div>
-              </div>
-            </div>
-    
-            <!-- 2. Warehouse Selector -->
-            <div class="flex flex-col gap-1.5 min-w-0">
-              <label
-                class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1"
-                >
-                Bodega <span class="text-destructive">*</span>
-              </label>
-              <div class="flex gap-2">
-                <app-selector
-                  class="flex-1 min-w-0"
-                  size="sm"
-                  [options]="locationOptions()"
-                  [ngModel]="selectedLocationId()"
-                  (ngModelChange)="onLocationChange($event)"
-                  placeholder="Seleccionar..."
-                ></app-selector>
-                <div class="relative"
-                  (mouseenter)="hoveredTooltip.set('warehouse')"
-                  (mouseleave)="hoveredTooltip.set(null)">
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    customClasses="!px-2 flex items-center justify-center"
-                    (clicked)="openWarehouseModal.emit()"
-                    >
-                    <app-icon name="plus" [size]="18" slot="icon" ></app-icon>
-                  </app-button>
-                  <app-tooltip position="top" size="sm" color="ai" content="Nueva Bodega"
-                    [visible]="hoveredTooltip() === 'warehouse'"
-                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10"
-                  ></app-tooltip>
-                </div>
-              </div>
-            </div>
-          </div>
-    
-          <!-- 3. Order Date -->
-          <div class="flex flex-col gap-1.5 min-w-0">
-            <label class="text-xs font-semibold text-text-secondary pl-0.5"
-              >Fecha Orden</label
-              >
-              <app-input
-                type="date"
-                size="sm"
-                [ngModel]="orderDate()"
-                (ngModelChange)="onOrderDateChange($event)"
-                customWrapperClass="!mt-0"
-              ></app-input>
-            </div>
-    
-            <!-- 4. Delivery Date -->
-            <div class="flex flex-col gap-1.5 min-w-0">
-              <label class="text-xs font-semibold text-text-secondary pl-0.5"
-                >Fecha Entrega</label
-                >
-                <app-input
-                  type="date"
-                  size="sm"
-                  [ngModel]="expectedDate()"
-                  (ngModelChange)="onExpectedDateChange($event)"
-                  [min]="minExpectedDate()"
-                  customWrapperClass="!mt-0"
-                ></app-input>
-              </div>
-    
-              <!-- 5. Shipping Method -->
-              <div class="flex flex-col gap-1.5 min-w-0">
-                <label class="text-xs font-semibold text-text-secondary pl-0.5"
-                  >Método Envío</label
-                  >
-                  <div class="h-9">
-                    <app-selector
-                      class="w-full h-full"
-                      size="sm"
-                      [options]="shippingMethodOptions()"
-                      [ngModel]="shippingMethod()"
-                      (ngModelChange)="onShippingMethodChange($event)"
-                      placeholder="Elegir método..."
-                    ></app-selector>
-                  </div>
-                </div>
-              </div>
-    
-              <!-- Mobile: Collapsible Settings -->
-              @if (showMobileSettings()) {
-                <div class="lg:hidden">
-                  <!-- Row 1: Supplier + Warehouse -->
-                  <div class="grid grid-cols-2 gap-3 mb-3 relative rounded-lg"
-                    [class.config-flash-warning]="showConfigWarning()">
-                    <app-tooltip
-                      position="top"
-                      color="ai"
-                      size="sm"
-                      content="Selecciona proveedor y bodega"
-                      [visible]="showConfigWarning()"
-                      class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
-                    ></app-tooltip>
-                    <div class="flex flex-col gap-1.5 min-w-0">
-                      <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
-                        Proveedor <span class="text-destructive">*</span>
-                      </label>
-                      <div class="flex gap-1">
-                        <app-selector
-                          class="flex-1 min-w-0"
-                          size="sm"
-                          [options]="supplierOptions()"
-                          [ngModel]="selectedSupplierId()"
-                          (ngModelChange)="onSupplierChange($event)"
-                          placeholder="Seleccionar..."
-                        ></app-selector>
-                        <app-button
-                          variant="outline"
-                          size="sm"
-                          customClasses="!px-2 flex items-center justify-center"
-                          (clicked)="openSupplierModal.emit()"
-                          >
-                          <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
-                        </app-button>
-                      </div>
-                    </div>
-                    <div class="flex flex-col gap-1.5 min-w-0">
-                      <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
-                        Bodega <span class="text-destructive">*</span>
-                      </label>
-                      <div class="flex gap-1">
-                        <app-selector
-                          class="flex-1 min-w-0"
-                          size="sm"
-                          [options]="locationOptions()"
-                          [ngModel]="selectedLocationId()"
-                          (ngModelChange)="onLocationChange($event)"
-                          placeholder="Seleccionar..."
-                        ></app-selector>
-                        <app-button
-                          variant="outline"
-                          size="sm"
-                          customClasses="!px-2 flex items-center justify-center"
-                          (clicked)="openWarehouseModal.emit()"
-                          >
-                          <app-icon name="plus" [size]="16" slot="icon" ></app-icon>
-                        </app-button>
-                      </div>
-                    </div>
-                  </div>
-                  <!-- Row 2: Dates -->
-                  <div class="grid grid-cols-2 gap-3 mb-3">
-                    <div class="flex flex-col gap-1.5 min-w-0">
-                      <label class="text-xs font-semibold text-text-secondary pl-0.5">Fecha Orden</label>
-                      <app-input
-                        type="date"
-                        size="sm"
-                        [ngModel]="orderDate()"
-                        (ngModelChange)="onOrderDateChange($event)"
-                        customWrapperClass="!mt-0"
-                      ></app-input>
-                    </div>
-                    <div class="flex flex-col gap-1.5 min-w-0">
-                      <label class="text-xs font-semibold text-text-secondary pl-0.5">Fecha Entrega</label>
-                      <app-input
-                        type="date"
-                        size="sm"
-                        [ngModel]="expectedDate()"
-                        (ngModelChange)="onExpectedDateChange($event)"
-                        [min]="minExpectedDate()"
-                        customWrapperClass="!mt-0"
-                      ></app-input>
-                    </div>
-                  </div>
-                  <!-- Row 3: Shipping Method -->
-                  <div class="flex flex-col gap-1.5 min-w-0">
-                    <label class="text-xs font-semibold text-text-secondary pl-0.5">Método Envío</label>
-                    <app-selector
-                      class="w-full"
-                      size="sm"
-                      [options]="shippingMethodOptions()"
-                      [ngModel]="shippingMethod()"
-                      (ngModelChange)="onShippingMethodChange($event)"
-                      placeholder="Elegir método..."
-                    ></app-selector>
-                  </div>
-                </div>
-              }
-            </div>
-          </div>
-    `,
+        <!-- Purchase config: desktop mini-card / button (>= xl) -->
+        <div class="hidden xl:flex flex-shrink-0">
+          <app-pop-order-config-card
+            [isConfigured]="isConfigured()"
+            [supplierName]="getSupplierName()"
+            [locationName]="getLocationName()"
+            [orderDateLabel]="orderDateLabel()"
+            [expectedDateLabel]="expectedDateLabel()"
+            [shippingLabel]="shippingLabel()"
+            (edit)="openConfigModal()"
+          ></app-pop-order-config-card>
+        </div>
+
+        <!-- Purchase config: mobile/tablet dropdown / button (< xl) -->
+        <div class="flex xl:hidden flex-shrink-0">
+          <app-pop-order-config-dropdown
+            [isConfigured]="isConfigured()"
+            [supplierName]="getSupplierName()"
+            [locationName]="getLocationName()"
+            [orderDateLabel]="orderDateLabel()"
+            [expectedDateLabel]="expectedDateLabel()"
+            [shippingLabel]="shippingLabel()"
+            (edit)="openConfigModal()"
+          ></app-pop-order-config-dropdown>
+        </div>
+      </div>
+    </div>
+
+    <!-- Purchase config modal (proveedor / bodega / fechas / envío) -->
+    <app-pop-order-config-modal
+      [(isOpen)]="configModalOpen"
+      [supplierOptions]="supplierOptions()"
+      [locationOptions]="locationOptions()"
+      [shippingMethodOptions]="shippingMethodOptions()"
+      [selectedSupplierId]="selectedSupplierId()"
+      [selectedLocationId]="selectedLocationId()"
+      [orderDate]="orderDate()"
+      [expectedDate]="expectedDate()"
+      [shippingMethod]="shippingMethod()"
+      [minExpectedDate]="minExpectedDate()"
+      (supplierChange)="onSupplierChange($event)"
+      (locationChange)="onLocationChange($event)"
+      (orderDateChange)="onOrderDateChange($event)"
+      (expectedDateChange)="onExpectedDateChange($event)"
+      (shippingMethodChange)="onShippingMethodChange($event)"
+      (openSupplierModal)="openSupplierModal.emit()"
+      (openWarehouseModal)="openWarehouseModal.emit()"
+    ></app-pop-order-config-modal>
+  `,
   styles: [
     `
       :host {
         display: block;
-      }
-
-      @keyframes configFlashWarning {
-        0%   { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);   border-color: transparent; }
-        15%  { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.4); border-color: #f59e0b; }
-        30%  { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);   border-color: transparent; }
-        55%  { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.4); border-color: #f59e0b; }
-        70%  { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);   border-color: transparent; }
-        100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);   border-color: transparent; }
-      }
-
-      .config-flash-warning {
-        animation: configFlashWarning 1.2s ease-out;
-        border: 2px solid transparent;
       }
     `,
   ],
@@ -405,7 +151,6 @@ export class PopHeaderComponent {
   private suppliersService = inject(SuppliersService);
   private inventoryService = inject(InventoryService);
   private destroyRef = inject(DestroyRef);
-  private configWarningTimeout: any;
 
   // Data
   readonly suppliers = signal<PopSupplier[]>([]);
@@ -424,14 +169,31 @@ export class PopHeaderComponent {
   readonly shippingMethod = signal("");
   readonly minExpectedDate = signal("");
 
-  // Mobile state
-  readonly showMobileSettings = signal(false);
+  // Config modal visibility (button/mini-card/dropdown → modal).
+  readonly configModalOpen = signal(false);
 
-  // Tooltip hover state
-  readonly hoveredTooltip = signal<string | null>(null);
+  /** Configurada = proveedor + bodega elegidos (fechas/envío tienen default). */
+  readonly isConfigured = computed(
+    () => !!this.selectedSupplierId() && !!this.selectedLocationId(),
+  );
 
-  // Config warning flash
-  readonly showConfigWarning = signal(false);
+  /** Etiqueta legible del método de envío para la mini-card / dropdown. */
+  readonly shippingLabel = computed(() => {
+    const m = this.shippingMethod();
+    return m
+      ? (SHIPPING_METHOD_LABELS[m as keyof typeof SHIPPING_METHOD_LABELS] ?? m)
+      : "";
+  });
+
+  /** Fecha de orden formateada (dd/mm) para el resumen. */
+  readonly orderDateLabel = computed(() =>
+    this.formatDateShort(this.orderDate()),
+  );
+
+  /** Fecha de entrega formateada (dd/mm) para el resumen. */
+  readonly expectedDateLabel = computed(() =>
+    this.formatDateShort(this.expectedDate()),
+  );
 
   readonly openSupplierModal = output<void>();
   readonly openWarehouseModal = output<void>();
@@ -462,28 +224,20 @@ export class PopHeaderComponent {
           this.shippingMethod.set(state.shippingMethod || "");
         }
       });
-
-    this.destroyRef.onDestroy(() => {
-      if (this.configWarningTimeout) {
-        clearTimeout(this.configWarningTimeout);
-      }
-    });
   }
 
-  /**
-   * Flash the supplier+warehouse section with an amber warning animation.
-   */
-  flashConfigWarning(): void {
-    this.showConfigWarning.set(false);
-    if (this.configWarningTimeout) {
-      clearTimeout(this.configWarningTimeout);
-    }
-    setTimeout(() => {
-      this.showConfigWarning.set(true);
-      this.configWarningTimeout = setTimeout(() => {
-        this.showConfigWarning.set(false);
-      }, 3000);
-    }, 0);
+  // ============================================================
+  // Config modal (gate: crear/recibir sin configurar lo abre)
+  // ============================================================
+
+  /** Abre el modal de configuración (proveedor/bodega/fechas/envío). */
+  openConfigModal(): void {
+    this.configModalOpen.set(true);
+  }
+
+  /** Cierra el modal de configuración. */
+  closeConfigModal(): void {
+    this.configModalOpen.set(false);
   }
 
   // ============================================================
@@ -654,14 +408,6 @@ export class PopHeaderComponent {
     const [year, month, day] = dateStr.split("-").map(Number);
     const date = new Date(year, month - 1, day);
     return date.toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
-  }
-
-  // ============================================================
-  // Mobile Helpers
-  // ============================================================
-
-  toggleMobileSettings(): void {
-    this.showMobileSettings.set(!this.showMobileSettings());
   }
 
   getSupplierName(): string {

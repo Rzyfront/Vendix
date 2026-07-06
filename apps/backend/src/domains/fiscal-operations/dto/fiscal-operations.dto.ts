@@ -268,6 +268,17 @@ export class ReopenFiscalCloseDto {
   reason!: string;
 }
 
+/**
+ * Body para anular (`void`) o rechazar (`reject`) una declaración. El motivo es
+ * opcional; cuando la declaración es de IVA y estuvo liquidada, ambos flujos
+ * disparan la reversa contable del asiento de liquidación (F5, paso 18).
+ */
+export class VoidTaxDeclarationDto {
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
 export class FiscalRulesQueryDto {
   @IsOptional()
   @Type(() => Number)

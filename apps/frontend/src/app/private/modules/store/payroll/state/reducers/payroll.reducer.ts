@@ -296,6 +296,140 @@ export const payrollReducer = createReducer(
     payrollRunDateTo: '',
   })),
 
+  // ─── DIAN: Send Electronic Payroll ──────────────────────
+  on(PayrollActions.sendToDian, (state) => ({
+    ...state,
+    dianLoading: true,
+    error: null,
+  })),
+  on(PayrollActions.sendToDianSuccess, (state, { result }) => ({
+    ...state,
+    dianLoading: false,
+    dianSendResult: result,
+    // The current run detail is refetched (properly mapped) by the effect
+    // instead of trusting the raw send envelope shape.
+    error: null,
+  })),
+  on(PayrollActions.sendToDianFailure, (state, { error }) => ({
+    ...state,
+    dianLoading: false,
+    error,
+  })),
+
+  // ─── DIAN: Status Polling ───────────────────────────────
+  on(PayrollActions.loadDianStatus, (state) => ({
+    ...state,
+    dianLoading: true,
+    error: null,
+  })),
+  on(
+    PayrollActions.dianStatusResult,
+    PayrollActions.loadDianStatusSuccess,
+    (state, { runId, status }) => ({
+      ...state,
+      dianStatusByRun: { ...state.dianStatusByRun, [runId]: status },
+    }),
+  ),
+  on(PayrollActions.loadDianStatusSuccess, (state) => ({
+    ...state,
+    dianLoading: false,
+  })),
+  on(PayrollActions.loadDianStatusFailure, (state, { error }) => ({
+    ...state,
+    dianLoading: false,
+    error,
+  })),
+  on(PayrollActions.dianStatusPollingTimeout, (state) => ({
+    ...state,
+    dianLoading: false,
+  })),
+  on(PayrollActions.stopDianStatusPolling, (state) => ({
+    ...state,
+    dianLoading: false,
+  })),
+
+  // ─── DIAN: Adjustment Note (per-item loading) ───────────
+  on(PayrollActions.sendAdjustment, (state, { itemId }) => ({
+    ...state,
+    adjustmentLoadingByItem: {
+      ...state.adjustmentLoadingByItem,
+      [itemId]: true,
+    },
+    error: null,
+  })),
+  on(PayrollActions.sendAdjustmentSuccess, (state, { itemId, result }) => ({
+    ...state,
+    adjustmentLoadingByItem: {
+      ...state.adjustmentLoadingByItem,
+      [itemId]: false,
+    },
+    adjustmentResultByItem: {
+      ...state.adjustmentResultByItem,
+      [itemId]: result,
+    },
+  })),
+  on(PayrollActions.sendAdjustmentFailure, (state, { itemId, error }) => ({
+    ...state,
+    adjustmentLoadingByItem: {
+      ...state.adjustmentLoadingByItem,
+      [itemId]: false,
+    },
+    error,
+  })),
+
+  // ─── Bank Export: Available Banks ───────────────────────
+  on(PayrollActions.loadAvailableBanks, (state) => ({
+    ...state,
+    availableBanksLoading: true,
+  })),
+  on(PayrollActions.loadAvailableBanksSuccess, (state, { banks }) => ({
+    ...state,
+    availableBanks: banks,
+    availableBanksLoading: false,
+  })),
+  on(PayrollActions.loadAvailableBanksFailure, (state) => ({
+    ...state,
+    availableBanksLoading: false,
+  })),
+
+  // ─── Bank Export: Validate Bank Data ────────────────────
+  on(PayrollActions.validateBankData, (state) => ({
+    ...state,
+    bankValidationLoading: true,
+    error: null,
+  })),
+  on(PayrollActions.validateBankDataSuccess, (state, { result }) => ({
+    ...state,
+    bankValidationResult: result,
+    bankValidationLoading: false,
+  })),
+  on(PayrollActions.validateBankDataFailure, (state, { error }) => ({
+    ...state,
+    bankValidationLoading: false,
+    error,
+  })),
+  on(PayrollActions.clearBankValidation, (state) => ({
+    ...state,
+    bankValidationResult: null,
+  })),
+
+  // ─── Bank Export: Generate ACH File ─────────────────────
+  on(PayrollActions.exportAch, (state) => ({
+    ...state,
+    bankExportLoading: true,
+    error: null,
+  })),
+  on(PayrollActions.exportAchSuccess, (state, { result }) => ({
+    ...state,
+    bankExportResult: result,
+    bankExportLoading: false,
+  })),
+  on(PayrollActions.exportAchFailure, (state, { error }) => ({
+    ...state,
+    bankExportLoading: false,
+    error,
+  })),
+
   // ─── Clear State ────────────────────────────────────────
   on(PayrollActions.clearPayrollState, () => initialPayrollState),
 );

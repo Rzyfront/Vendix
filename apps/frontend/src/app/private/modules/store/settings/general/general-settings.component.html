@@ -125,6 +125,25 @@
           </section>
         }
 
+        <!-- Membership (Zona Fit) Section — gym industry only -->
+        @if (isGym()) {
+          <section id="section-membership" class="settings-section">
+            <div class="section-header">
+              <div class="section-icon section-icon--teal">
+                <app-icon name="dumbbell" size="18"></app-icon>
+              </div>
+              <h2 class="section-title">Zona Fit</h2>
+            </div>
+            <div class="section-body">
+              <app-setting-toggle
+                label="Validación de acceso en segundo plano"
+                description="Permite validar el acceso de los miembros de forma continua en segundo plano."
+                [ngModel]="settings().membership?.ambient_access_enabled ?? false"
+                (changed)="onSectionChange('membership', { ambient_access_enabled: $event })" />
+            </div>
+          </section>
+        }
+
         <!-- Dispatch Section -->
         <section id="section-dispatch" class="settings-section">
           <div class="section-header">

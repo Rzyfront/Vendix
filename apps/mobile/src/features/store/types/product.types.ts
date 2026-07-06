@@ -246,6 +246,7 @@ export interface CreateProductDto {
   sale_price?: number;
   available_for_ecommerce?: boolean;
   sku?: string;
+  barcode?: string;
   stock_quantity?: number;
   track_inventory?: boolean;
   state?: ProductState;

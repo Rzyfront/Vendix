@@ -2,6 +2,8 @@ import {
   IsNotEmpty,
   IsString,
   IsNumber,
+  IsInt,
+  Min,
   IsEnum,
   IsOptional,
   IsDateString,
@@ -9,9 +11,17 @@ import {
   IsBoolean,
   ValidateNested,
 } from 'class-validator';
+import { IsIn } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
-import { purchase_order_status_enum, purchase_order_type_enum } from '@prisma/client';
+import {
+  purchase_order_status_enum,
+  purchase_order_type_enum,
+  tax_type_enum,
+} from '@prisma/client';
+
+/** Allowed fiscal tax classifications for a purchase line (F1 IVA lifecycle). */
+const TAX_TYPE_VALUES = Object.values(tax_type_enum) as string[];
 
 export class PurchaseOrderItemDto {
   @ApiProperty({ description: 'Product ID' })
@@ -58,6 +68,27 @@ export class PurchaseOrderItemDto {
   stock_uom_id?: number;
 
   /**
+   * "Contenido por envase" — manual cross-dimension conversion factor. When
+   * the purchase unit is a discrete package (dimension `count`, e.g. una
+   * bolsita) and the stock unit is a continuous magnitude (`mass`/`volume`,
+   * e.g. g/ml), the factor CANNOT be derived from the catalog `factor_to_base`
+   * (different dimensions). The operator supplies it manually here: how many
+   * stock units each purchase unit contains (e.g. 250 g por bolsita). In that
+   * cross-dimension case this value IS the factor and the backend skips the
+   * same-dimension validation. Ignored (catalog derivation used instead) for
+   * same-dimension conversions.
+   */
+  @ApiProperty({
+    description:
+      'Contenido por envase: manual purchase→stock factor for cross-dimension (count → mass/volume) ingredient lines.',
+    required: false,
+  })
+  @IsInt()
+  @Min(1)
+  @IsOptional()
+  purchase_to_stock_factor?: number;
+
+  /**
    * Ingredient flags. Apply ONLY to NEW products created from this order line
    * (when the item has no `product_id`). Existing products keep their own
    * flags untouched. Effective only if the store's industries support the
@@ -90,6 +121,34 @@ export class PurchaseOrderItemDto {
   @IsNumber()
   @IsOptional()
   tax_rate?: number;
+
+  /**
+   * F1 IVA lifecycle — fiscal classification of the line tax. Defaults to
+   * `iva` when omitted (see PurchaseOrdersService.deriveLineTax). Validated
+   * against `tax_type_enum`.
+   */
+  @ApiProperty({
+    description: 'F1: line tax type (iva | inc | ica | ...). Defaults to iva.',
+    enum: tax_type_enum,
+    required: false,
+  })
+  @IsIn(TAX_TYPE_VALUES)
+  @IsOptional()
+  tax_type?: string;
+
+  /**
+   * F1 IVA lifecycle — per-line override of the header `prices_include_tax`.
+   * When present it INVERTS the header mode for this line only (mixed
+   * invoices). When absent the line inherits the header value.
+   */
+  @ApiProperty({
+    description:
+      'F1: per-line override of header prices_include_tax (mixed invoices).',
+    required: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  prices_include_tax?: boolean;
 
   @ApiProperty({ description: 'Expected delivery date (optional)' })
   @IsDateString()
@@ -249,6 +308,20 @@ export class CreatePurchaseOrderDto {
   @IsEnum(purchase_order_type_enum)
   @IsOptional()
   order_type?: purchase_order_type_enum = purchase_order_type_enum.retail;
+
+  /**
+   * F1 IVA lifecycle — dominant tax mode for the whole invoice. When true,
+   * line `unit_price` is tax-INCLUSIVE (gross); when false the tax is ADDED
+   * on top. Individual lines may override via `prices_include_tax` on the item.
+   */
+  @ApiProperty({
+    description:
+      'F1: dominant invoice tax mode. true = line prices already include tax.',
+    required: false,
+  })
+  @IsBoolean()
+  @IsOptional()
+  prices_include_tax?: boolean;
 
   @ApiProperty({ description: 'Order date' })
   @IsDateString()

@@ -27,7 +27,10 @@ import {
   SelectorComponent,
   PaginationComponent,
 } from '../../../../../../app/shared/components';
-import { StickyHeaderComponent } from '../../../../../../app/shared/components/sticky-header/sticky-header.component';
+import {
+  StickyHeaderComponent,
+  StickyHeaderActionButton,
+} from '../../../../../../app/shared/components/sticky-header/sticky-header.component';
 
 @Component({
   selector: 'app-customer-details',
@@ -57,6 +60,8 @@ import { StickyHeaderComponent } from '../../../../../../app/shared/components/s
         backRoute="/admin/customers/all"
         [badgeText]="customer()?.state === 'active' ? 'Activo' : customer()?.state === 'inactive' ? 'Inactivo' : ''"
         [badgeColor]="customer()?.state === 'active' ? 'green' : 'red'"
+        [actions]="gymProfileActions()"
+        (actionClicked)="onHeaderAction($event)"
       ></app-sticky-header>
     
       <!-- Content -->
@@ -701,6 +706,32 @@ export class CustomerDetailsComponent {
   errorMessage = signal<string | null>(null);
   walletError = signal<string | null>(null);
   topUpError = signal<string | null>(null);
+
+  // Deep-link to the member profile (Membership Suite). Only meaningful for
+  // `gym`/`service`-industry stores; the destination page is gated by the
+  // store:memberships:read permission and the memberships panel_ui
+  // visibility.
+  gymProfileActions = computed<StickyHeaderActionButton[]>(() =>
+    this.customerId() != null
+      ? [
+          {
+            id: 'gym-profile',
+            label: 'Perfil de socio (gimnasio)',
+            icon: 'dumbbell',
+            variant: 'outline',
+          },
+        ]
+      : [],
+  );
+
+  onHeaderAction(actionId: string): void {
+    if (actionId === 'gym-profile' && this.customerId() != null) {
+      this.router.navigate([
+        '/admin/memberships/members/profile',
+        this.customerId(),
+      ]);
+    }
+  }
 
   paymentMethodOptions = [
     { value: 'cash', label: 'Efectivo' },

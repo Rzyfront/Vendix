@@ -16,6 +16,7 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
 // store-scoped only; org-level renders would either flash stale data or show
 // the wrong tienda's status.
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { FiscalGateOutletComponent } from '../../../core/components/fiscal-gate-outlet.component';
 import { FiscalObligationBannerComponent } from '../../../shared/components/fiscal-obligation-banner/fiscal-obligation-banner.component';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 
@@ -42,6 +43,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     SidebarComponent,
     HeaderComponent,
     PaywallOutletComponent,
+    FiscalGateOutletComponent,
     FiscalObligationBannerComponent,
   ],
   template: `
@@ -95,6 +97,9 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
 
     <!-- Subscription paywall (driven by interceptor + access service) -->
     <app-paywall-outlet />
+
+    <!-- F4 — Gate "no responsable de IVA" (driven by interceptor + form gate) -->
+    <app-fiscal-gate-outlet />
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
 })

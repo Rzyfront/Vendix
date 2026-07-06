@@ -70,6 +70,33 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '5110',
     description: 'Seguridad Social',
   },
+  // Cost center: Administrative
+  'payroll.approved.payroll_expense.administrative': {
+    code: '5105',
+    description: 'Gastos de Personal (Administrativo)',
+  },
+  'payroll.approved.social_security.administrative': {
+    code: '5105',
+    description: 'Seguridad Social (Administrativo)',
+  },
+  // Cost center: Operational (Mano de Obra Directa - Costo)
+  'payroll.approved.payroll_expense.operational': {
+    code: '7205',
+    description: 'Mano de Obra Directa (Operacional)',
+  },
+  'payroll.approved.social_security.operational': {
+    code: '7205',
+    description: 'Seguridad Social M.O.D. (Operacional)',
+  },
+  // Cost center: Sales (Gastos de Personal - Ventas)
+  'payroll.approved.payroll_expense.sales': {
+    code: '5205',
+    description: 'Gastos de Personal (Ventas)',
+  },
+  'payroll.approved.social_security.sales': {
+    code: '5205',
+    description: 'Seguridad Social (Ventas)',
+  },
   'payroll.approved.salaries_payable': {
     code: '2505',
     description: 'Salarios por Pagar',
@@ -77,9 +104,26 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'payroll.approved.health_payable': { code: '2370', description: 'EPS' },
   'payroll.approved.pension_payable': { code: '2380', description: 'Pension' },
   'payroll.approved.withholdings': { code: '2365', description: 'Retenciones' },
+  // B1: segregación de retefuente laboral en 236505 (child of 2365).
+  // El resto de retenciones distintas a retención en la fuente laboral se
+  // sigue acreditando a la cuenta 2365 genérica vía `payroll.approved.withholdings`.
+  'payroll.approved.labor_withholding': {
+    code: '236505',
+    description: 'Retención en la Fuente - Laboral',
+  },
   'payroll.paid.salaries_payable': {
     code: '2505',
     description: 'Salarios por Pagar',
+  },
+  // Drenaje de aportes al pagar la nómina: 2370 (EPS/ARL/SENA/ICBF/CCF) y 2380
+  // (pensión). Débitos del asiento de pago contra banco.
+  'payroll.paid.health_social_payable': {
+    code: '2370',
+    description: 'Aportes EPS/Parafiscales por Pagar',
+  },
+  'payroll.paid.pension_social_payable': {
+    code: '2380',
+    description: 'Aportes Pensión por Pagar',
   },
   'payroll.paid.bank': { code: '1110', description: 'Banco' },
   'order.completed.cogs': { code: '6135', description: 'Costo de Ventas' },
@@ -102,8 +146,12 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Compra/Gasto soportado',
   },
   'support_document.accepted.vat_deductible': {
-    code: '2408',
-    description: 'IVA descontable',
+    code: '240804',
+    description: 'IVA Descontable en Compras',
+  },
+  'support_document.accepted.iva_deductible': {
+    code: '240804',
+    description: 'IVA Descontable en Compras (tipado)',
   },
   'support_document.accepted.withholding_payable': {
     code: '2365',
@@ -112,6 +160,20 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'support_document.accepted.accounts_payable': {
     code: '2205',
     description: 'Proveedor documento soporte',
+  },
+  // F2 IVA lifecycle — VAT-only recognition of a POP purchase (O-48
+  // responsible). `purchase_order.received` already posts DR 1435(net)/CR
+  // 2205(net); this complement posts ONLY DR 240804 (IVA descontable) / CR
+  // 2205 (proveedores) for the deductible VAT, completing the payable to gross
+  // WITHOUT touching inventory or contabilizing expense (5195). Do NOT reuse
+  // support_document.accepted here — that handler also debits 5195 + full 2205.
+  'purchase.vat_recognized.iva_deductible': {
+    code: '240804',
+    description: 'IVA Descontable en Compras (reconocimiento POP)',
+  },
+  'purchase.vat_recognized.accounts_payable': {
+    code: '2205',
+    description: 'Proveedores (complemento IVA compra)',
   },
   // Purchase order payments
   'purchase_order.payment.accounts_payable': {
@@ -181,12 +243,12 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   },
   // ── Typed fiscal tax routing (per tax_type) ───────────────────────────
   // AutoEntryService.resolveTaxLines posts one line per fiscal type using
-  // `<event>.<tax_type>_payable`. IVA → 2408 (same as legacy vat_payable, no
-  // regression), INC → 2436 (Impuesto al Consumo), ICA → 2412. The legacy
-  // `vat_payable` keys above remain as fallback when no breakdown is present.
+  // `<event>.<tax_type>_payable`. IVA → 240802 (IVA Generado por Ventas, hoja
+  // del control 2408), INC → 2436 (Impuesto al Consumo), ICA → 2412. The legacy
+  // `vat_payable` keys above remain in 2408 as fallback when no breakdown is present.
   'invoice.validated.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (factura)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (factura)',
   },
   'invoice.validated.inc_payable': {
     code: '2436',
@@ -197,8 +259,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA por Pagar (factura)',
   },
   'payment.received.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (venta directa)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (venta directa)',
   },
   'payment.received.inc_payable': {
     code: '2436',
@@ -209,8 +271,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA por Pagar (venta directa)',
   },
   'credit_sale.created.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (venta a crédito)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (venta a crédito)',
   },
   'credit_sale.created.inc_payable': {
     code: '2436',
@@ -221,8 +283,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA por Pagar (venta a crédito)',
   },
   'refund.completed.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (reversa devolución)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (reversa devolución)',
   },
   'refund.completed.inc_payable': {
     code: '2436',
@@ -241,8 +303,8 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Devoluciones en Ventas (nota crédito)',
   },
   'credit_note.accepted.iva_payable': {
-    code: '2408',
-    description: 'IVA por Pagar (reversa nota crédito)',
+    code: '240802',
+    description: 'IVA Generado por Ventas (reversa nota crédito)',
   },
   'credit_note.accepted.inc_payable': {
     code: '2436',
@@ -516,15 +578,6 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Cuentas por pagar a vinculados',
   },
   // Comisiones (Pasarelas de Pago)
-  'commission.calculated.commission_expense': {
-    code: '5295',
-    description: 'Gastos por Comisiones',
-  },
-  'commission.calculated.commission_payable': {
-    code: '2335',
-    description: 'Comisiones por Pagar',
-  },
-  // Commissions
   'commission.calculated.expense': {
     code: '5295',
     description: 'Gastos Diversos - Comisiones',
@@ -538,59 +591,195 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '5105',
     description: 'Aux. Transporte Nómina',
   },
+  // Provisiones prestacionales — GASTO (Decreto 2650: subcuentas 5105/5205/7205
+  // por centro de costo, antes 5205 plano). Base = administrativo.
   'payroll.approved.provision_severance': {
-    code: '5205',
+    code: '510530',
     description: 'Gasto Cesantías',
   },
   'payroll.approved.provision_severance_interest': {
-    code: '5205',
+    code: '510533',
     description: 'Gasto Intereses Cesantías',
   },
   'payroll.approved.provision_vacation': {
-    code: '5205',
+    code: '510539',
     description: 'Gasto Vacaciones',
   },
   'payroll.approved.provision_bonus': {
-    code: '5205',
+    code: '510536',
     description: 'Gasto Prima de Servicios',
   },
+  // Aportes patronales — GASTO (Decreto 2650: subcuentas 5105, antes 5110
+  // "Honorarios" = clasificación errónea). Base = administrativo.
   'payroll.approved.health_employer': {
-    code: '5110',
-    description: 'EPS Empleador (Gasto)',
+    code: '510568',
+    description: 'Aportes EPS Empleador (Gasto)',
   },
   'payroll.approved.pension_employer': {
-    code: '5110',
-    description: 'AFP Empleador (Gasto)',
+    code: '510569',
+    description: 'Aportes Pensión Empleador (Gasto)',
   },
-  'payroll.approved.arl_expense': { code: '5110', description: 'ARL (Gasto)' },
+  'payroll.approved.arl_expense': {
+    code: '510570',
+    description: 'Aportes ARL (Gasto)',
+  },
   'payroll.approved.sena_expense': {
-    code: '5110',
-    description: 'SENA (Gasto)',
+    code: '510578',
+    description: 'Aportes SENA (Gasto)',
   },
   'payroll.approved.icbf_expense': {
-    code: '5110',
-    description: 'ICBF (Gasto)',
+    code: '510575',
+    description: 'Aportes ICBF (Gasto)',
   },
   'payroll.approved.compensation_fund_expense': {
-    code: '5110',
-    description: 'Caja Compensación (Gasto)',
+    code: '510572',
+    description: 'Aportes Caja Compensación (Gasto)',
   },
-  // Nómina individual — pasivos provisiones (créditos)
-  'payroll.approved.liability_severance': {
-    code: '2610',
-    description: 'Cesantías por Pagar',
+  // Provisiones prestacionales — PASIVO (Decreto 2650: 2510/2515/2520/2525).
+  // Claves NUEVAS (las 26xx anteriores quedan obsoletas): keys nuevas evitan
+  // depender del re-seed de mappings ya materializados (seed CREATE-ONLY).
+  'payroll.approved.severance_payable': {
+    code: '2510',
+    description: 'Cesantías Consolidadas por Pagar',
   },
-  'payroll.approved.liability_severance_interest': {
-    code: '2615',
-    description: 'Intereses Cesantías por Pagar',
+  'payroll.approved.severance_interest_payable': {
+    code: '2515',
+    description: 'Intereses sobre Cesantías por Pagar',
   },
-  'payroll.approved.liability_vacation': {
-    code: '2620',
-    description: 'Vacaciones por Pagar',
+  'payroll.approved.vacation_payable': {
+    code: '2525',
+    description: 'Vacaciones Consolidadas por Pagar',
   },
-  'payroll.approved.liability_bonus': {
-    code: '2625',
+  'payroll.approved.bonus_payable': {
+    code: '2520',
     description: 'Prima de Servicios por Pagar',
+  },
+  // Reembolsables de incapacidad/licencia (EPS día 3+ / ARL) → CxC 1355.
+  'payroll.approved.reimbursable_receivable': {
+    code: '1355',
+    description: 'Incapacidades/Licencias por Cobrar (EPS/ARL)',
+  },
+  // Aportes patronales GASTO por centro de costo (ventas 52xx / operativo 72xx).
+  'payroll.approved.health_employer.administrative': {
+    code: '510568',
+    description: 'Aportes EPS Empleador (Admin)',
+  },
+  'payroll.approved.health_employer.sales': {
+    code: '520568',
+    description: 'Aportes EPS Empleador (Ventas)',
+  },
+  'payroll.approved.health_employer.operational': {
+    code: '720568',
+    description: 'Aportes EPS Empleador (Operativo)',
+  },
+  'payroll.approved.pension_employer.administrative': {
+    code: '510569',
+    description: 'Aportes Pensión Empleador (Admin)',
+  },
+  'payroll.approved.pension_employer.sales': {
+    code: '520569',
+    description: 'Aportes Pensión Empleador (Ventas)',
+  },
+  'payroll.approved.pension_employer.operational': {
+    code: '720569',
+    description: 'Aportes Pensión Empleador (Operativo)',
+  },
+  'payroll.approved.arl_expense.administrative': {
+    code: '510570',
+    description: 'Aportes ARL (Admin)',
+  },
+  'payroll.approved.arl_expense.sales': {
+    code: '520570',
+    description: 'Aportes ARL (Ventas)',
+  },
+  'payroll.approved.arl_expense.operational': {
+    code: '720570',
+    description: 'Aportes ARL (Operativo)',
+  },
+  'payroll.approved.sena_expense.administrative': {
+    code: '510578',
+    description: 'Aportes SENA (Admin)',
+  },
+  'payroll.approved.sena_expense.sales': {
+    code: '5205',
+    description: 'Aportes SENA (Ventas)',
+  },
+  'payroll.approved.sena_expense.operational': {
+    code: '7205',
+    description: 'Aportes SENA (Operativo)',
+  },
+  'payroll.approved.icbf_expense.administrative': {
+    code: '510575',
+    description: 'Aportes ICBF (Admin)',
+  },
+  'payroll.approved.icbf_expense.sales': {
+    code: '5205',
+    description: 'Aportes ICBF (Ventas)',
+  },
+  'payroll.approved.icbf_expense.operational': {
+    code: '7205',
+    description: 'Aportes ICBF (Operativo)',
+  },
+  'payroll.approved.compensation_fund_expense.administrative': {
+    code: '510572',
+    description: 'Aportes Caja Compensación (Admin)',
+  },
+  'payroll.approved.compensation_fund_expense.sales': {
+    code: '520572',
+    description: 'Aportes Caja Compensación (Ventas)',
+  },
+  'payroll.approved.compensation_fund_expense.operational': {
+    code: '7205',
+    description: 'Aportes Caja Compensación (Operativo)',
+  },
+  // Provisiones prestacionales GASTO por centro de costo.
+  'payroll.approved.provision_severance.administrative': {
+    code: '510530',
+    description: 'Gasto Cesantías (Admin)',
+  },
+  'payroll.approved.provision_severance.sales': {
+    code: '520530',
+    description: 'Gasto Cesantías (Ventas)',
+  },
+  'payroll.approved.provision_severance.operational': {
+    code: '720530',
+    description: 'Gasto Cesantías (Operativo)',
+  },
+  'payroll.approved.provision_severance_interest.administrative': {
+    code: '510533',
+    description: 'Gasto Intereses Cesantías (Admin)',
+  },
+  'payroll.approved.provision_severance_interest.sales': {
+    code: '520533',
+    description: 'Gasto Intereses Cesantías (Ventas)',
+  },
+  'payroll.approved.provision_severance_interest.operational': {
+    code: '720533',
+    description: 'Gasto Intereses Cesantías (Operativo)',
+  },
+  'payroll.approved.provision_vacation.administrative': {
+    code: '510539',
+    description: 'Gasto Vacaciones (Admin)',
+  },
+  'payroll.approved.provision_vacation.sales': {
+    code: '520539',
+    description: 'Gasto Vacaciones (Ventas)',
+  },
+  'payroll.approved.provision_vacation.operational': {
+    code: '720539',
+    description: 'Gasto Vacaciones (Operativo)',
+  },
+  'payroll.approved.provision_bonus.administrative': {
+    code: '510536',
+    description: 'Gasto Prima de Servicios (Admin)',
+  },
+  'payroll.approved.provision_bonus.sales': {
+    code: '520536',
+    description: 'Gasto Prima de Servicios (Ventas)',
+  },
+  'payroll.approved.provision_bonus.operational': {
+    code: '720536',
+    description: 'Gasto Prima de Servicios (Operativo)',
   },
   // Nómina individual — aportes patronales por pagar (créditos)
   'payroll.approved.health_employer_payable': {
@@ -711,6 +900,26 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
   'saas_revenue.partner_payable': {
     code: '2335',
     description: 'CxP Comisión partner SaaS (plataforma Vendix)',
+  },
+  // VAT settlement (liquidación de IVA al aprobar la declaración) — netea el
+  // IVA generado contra el descontable y deja el neto a pagar o a favor:
+  //   DR 240802 (generado) / CR 240804 (descontable) + neto → CR 240810 (a
+  //   pagar) o DR 135520 (a favor). Ver AutoEntryService.onVatSettlement (F5).
+  'vat.declaration.settled.iva_generated': {
+    code: '240802',
+    description: 'IVA Generado por Ventas (liquidación)',
+  },
+  'vat.declaration.settled.iva_deductible': {
+    code: '240804',
+    description: 'IVA Descontable en Compras (liquidación)',
+  },
+  'vat.declaration.settled.vat_payable': {
+    code: '240810',
+    description: 'IVA por Pagar - Liquidación',
+  },
+  'vat.declaration.settled.vat_favor': {
+    code: '135520',
+    description: 'Saldo a Favor en IVA',
   },
 };
 

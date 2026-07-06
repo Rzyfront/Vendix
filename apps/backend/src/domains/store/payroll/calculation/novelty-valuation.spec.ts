@@ -205,4 +205,91 @@ describe('valuateNovelty', () => {
       ),
     ).toThrow("unsupported novelty type 'unknown_type'");
   });
+
+  // ── Incapacity tramo split (employer days 1-2, EPS day 3+) ──
+
+  it('splits a general incapacity into employer (days 1-2) and EPS (day 3+)', () => {
+    const result = valuateNovelty(
+      novelty({ novelty_type: 'incapacity_general', days: 3 }),
+      BASE_SALARY,
+      rules,
+    );
+    expect(result.employer_amount).toBe(102_227.33); // 2 días × 51.113,67
+    expect(result.reimbursable_amount).toBe(51_113.67); // 1 día EPS
+    expect(result.reimbursed_by).toBe('eps');
+    expect(result.amount).toBe(153_341); // employer + EPS
+  });
+
+  it('applies the 1 SMMLV/30 daily floor to the EPS portion of a low-salary incapacity', () => {
+    const base = rules.minimum_wage; // 1 SMMLV
+    const result = valuateNovelty(
+      novelty({ novelty_type: 'incapacity_general', days: 5 }),
+      base,
+      rules,
+    );
+    const rate = rules.incapacity_general_employer_rate as number;
+    const daily_pay = (base / 30) * rate;
+    const daily_floor = rules.minimum_wage / 30; // piso EPS
+    const employer = Math.round(daily_pay * 2 * 100) / 100; // días 1-2
+    const eps = Math.round(daily_floor * 3 * 100) / 100; // días 3-5 al piso
+    expect(daily_floor).toBeGreaterThan(daily_pay); // el piso realmente aplica
+    expect(result.employer_amount).toBe(employer);
+    expect(result.reimbursable_amount).toBe(eps);
+    expect(result.amount).toBe(Math.round((employer + eps) * 100) / 100);
+  });
+
+  it('marks a labor incapacity as fully reimbursed by the ARL from day 1', () => {
+    const result = valuateNovelty(
+      novelty({ novelty_type: 'incapacity_laboral', days: 4 }),
+      BASE_SALARY,
+      rules,
+    );
+    expect(result.amount).toBe(306_666.67); // 100%
+    expect(result.employer_amount).toBe(0);
+    expect(result.reimbursable_amount).toBe(306_666.67);
+    expect(result.reimbursed_by).toBe('arl');
+  });
+
+  // ── Typified leaves (maternity / paternity / bereavement) ──
+
+  it('pays maternity leave 100% and marks it fully reimbursable by the EPS', () => {
+    const result = valuateNovelty(
+      novelty({
+        novelty_type: 'maternity_leave',
+        days: 30,
+        date_end: new Date('2026-07-04'),
+      }),
+      BASE_SALARY,
+      rules,
+    );
+    expect(result.kind).toBe('earning');
+    expect(result.amount).toBe(2_300_000); // 76.666,67 × 30
+    expect(result.employer_amount).toBe(0);
+    expect(result.reimbursable_amount).toBe(2_300_000);
+    expect(result.reimbursed_by).toBe('eps');
+  });
+
+  it('pays paternity leave from the EPS (not an employer cost)', () => {
+    const result = valuateNovelty(
+      novelty({ novelty_type: 'paternity_leave', days: 14 }),
+      BASE_SALARY,
+      rules,
+    );
+    expect(result.employer_amount).toBe(0);
+    expect(result.reimbursed_by).toBe('eps');
+    expect(result.reimbursable_amount).toBe(result.amount);
+  });
+
+  it('pays bereavement leave (luto) from the employer, no reimbursement', () => {
+    const result = valuateNovelty(
+      novelty({ novelty_type: 'bereavement_leave', days: 5 }),
+      BASE_SALARY,
+      rules,
+    );
+    expect(result.kind).toBe('earning');
+    expect(result.amount).toBe(383_333.33); // 76.666,67 × 5
+    expect(result.employer_amount).toBe(383_333.33);
+    expect(result.reimbursable_amount).toBe(0);
+    expect(result.reimbursed_by).toBeUndefined();
+  });
 });

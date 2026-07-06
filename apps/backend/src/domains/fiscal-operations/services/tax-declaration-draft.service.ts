@@ -9,6 +9,7 @@ import {
   tax_declaration_type_enum,
   withholding_type_enum,
 } from '@prisma/client';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { FiscalOperationsContext } from './fiscal-context-resolver.service';
@@ -70,7 +71,35 @@ export class TaxDeclarationDraftService {
     private readonly audit: FiscalAuditService,
     private readonly exogenousGenerator: ExogenousGeneratorService,
     private readonly fiscalRules: FiscalRulesService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
+
+  /**
+   * F5 — Payload compartido del ciclo de liquidación de IVA. Los montos van
+   * congelados (una declaración aprobada está LOCKED y no se puede recalcular,
+   * así que generado/descontable no cambian entre liquidar y reversar). El
+   * asiento se fecha en `period_end` tanto en la liquidación como en su espejo.
+   */
+  private buildVatSettlementEventPayload(draft: {
+    id: number;
+    organization_id: number;
+    store_id: number | null;
+    accounting_entity_id: number;
+    generated_tax_amount: Prisma.Decimal | number | null;
+    deductible_tax_amount: Prisma.Decimal | number | null;
+    period_end: Date;
+  }) {
+    return {
+      declaration_id: draft.id,
+      organization_id: draft.organization_id,
+      store_id: draft.store_id,
+      accounting_entity_id: draft.accounting_entity_id,
+      generated_tax_amount: Number(draft.generated_tax_amount || 0),
+      deductible_tax_amount: Number(draft.deductible_tax_amount || 0),
+      period_end: draft.period_end,
+      user_id: RequestContextService.getUserId(),
+    };
+  }
 
   async list(contexts: FiscalOperationsContext[], query: FiscalListQueryDto) {
     const page = query.page ?? 1;
@@ -262,6 +291,20 @@ export class TaxDeclarationDraftService {
       previous_status: draft.status,
       new_status: approved.status,
     });
+
+    // F5 (paso 17): al aprobar una declaración de IVA con el período AÚN
+    // abierto, disparamos la liquidación contable (netea generado vs
+    // descontable → neto a pagar/favor). El listener de contabilidad postea el
+    // asiento; los montos ya están congelados (aprobada = LOCKED, sin
+    // recálculo). El fallo contable NUNCA revierte la aprobación (el asiento es
+    // idempotente por source en createAutoEntry). El early-return de
+    // status==='approved' evita re-emitir en aprobaciones repetidas.
+    if (approved.declaration_type === 'vat') {
+      this.eventEmitter.emit(
+        'vat.declaration.approved',
+        this.buildVatSettlementEventPayload(approved),
+      );
+    }
     return approved;
   }
 
@@ -294,6 +337,18 @@ export class TaxDeclarationDraftService {
       new_status: voided.status,
       metadata: { reason },
     });
+
+    // F5 (paso 18): al anular una declaración de IVA que pudo haber sido
+    // liquidada (pasó por 'approved'), disparamos la reversa contable (asiento
+    // espejo). El listener SÓLO reversa si existe la liquidación original, así
+    // que anular una declaración nunca aprobada es inocuo. El fallo contable
+    // NUNCA revierte la anulación.
+    if (voided.declaration_type === 'vat') {
+      this.eventEmitter.emit(
+        'vat.declaration.reversed',
+        this.buildVatSettlementEventPayload(voided),
+      );
+    }
     return voided;
   }
 
@@ -352,6 +407,55 @@ export class TaxDeclarationDraftService {
       new_status: accepted.status,
     });
     return accepted;
+  }
+
+  /**
+   * Marca una declaración como RECHAZADA (p.ej. la DIAN rechazó la presentación
+   * ya realizada). Sólo aplica desde 'submitted' (ver
+   * DECLARATION_STATUS_TRANSITIONS).
+   *
+   * El rechazo es TRANSITORIO, no terminal: un rechazo de la DIAN NO extingue la
+   * obligación de IVA del período — la declaración se corrige y se re-presenta
+   * (`rejected → ready/submitted → approved` es un ciclo alcanzable). Por eso el
+   * rechazo YA NO reversa el asiento de liquidación de IVA. Reversar aquí y luego
+   * re-aprobar dejaba la liquidación en neto 0 (la reversa `R` cancelaba la
+   * liquidación original `L`) subvalorando el IVA por pagar en el mayor
+   * (240802/240804/240810), porque `onVatSettlement` deduplica por
+   * `declaration_id` y NO re-postea al re-aprobar viniendo de `ready`. SÓLO el
+   * `void` (estado TERMINAL 'voided', sin ruta de regreso a 'approved') reversa
+   * la liquidación — ver `voidDraft`.
+   *
+   * El fallo de auditoría NUNCA revierte el rechazo.
+   */
+  async markRejected(
+    contexts: FiscalOperationsContext[],
+    id: number,
+    reason?: string,
+  ) {
+    const draft = await this.findOne(contexts, id);
+    if (draft.status === 'rejected') return draft;
+    this.assertStatusTransition(draft.status, 'rejected');
+
+    const rejected = await this.prisma.tax_declaration_drafts.update({
+      where: { id: draft.id },
+      data: {
+        status: 'rejected',
+        notes: reason ?? draft.notes,
+      },
+    });
+    await this.audit.logForResource(rejected, {
+      event_type: 'fiscal.declaration.rejected',
+      resource_type: 'tax_declaration_draft',
+      declaration_id: rejected.id,
+      obligation_id: rejected.obligation_id,
+      previous_status: draft.status,
+      new_status: rejected.status,
+      metadata: { reason },
+    });
+
+    // El rechazo es transitorio (se corrige y re-presenta): NO reversa la
+    // liquidación de IVA. Sólo el `void` terminal la reversa (ver voidDraft).
+    return rejected;
   }
 
   private buildDraftData(
@@ -764,6 +868,27 @@ export class TaxDeclarationDraftService {
     context: FiscalOperationsContext,
     period: ReturnType<typeof resolveFiscalPeriodRange>,
   ): Promise<DeclarationCalculation> {
+    // El ICA se declara en el municipio donde se ejerce la actividad → código
+    // DANE del MUNICIPIO de la TIENDA (no de la dirección del cliente).
+    //
+    // Multi-municipio: cuando la org tiene tiendas en varios municipios
+    // (fiscal_scope=STORE ⇒ varios accounting_entity uno por tienda; o
+    // fiscal_scope=ORGANIZATION + operating_scope=ORGANIZATION ⇒ varios stores
+    // consolidados), cada municipio genera SU PROPIO renglón de declaración.
+    //
+    // CIIU en cascada store→org→null: store.ciiu_code ?? organization.ciiu_code
+    // ?? null. La búsqueda en ica_municipal_rates primero intenta match
+    // (municipality+CIIU); si no hay, fallback a (municipality+NULL = tarifa
+    // genérica municipal); si tampoco, NO se inventa tarifa — warning
+    // `ICA_RATE_NOT_CONFIGURED` y sin renglón para ese municipio.
+    //
+    // Normalización: el seed usa códigos DANE de 5 chars (Divipola), pero la
+    // columna stores.municipality_code admite hasta 10. Para tolerar captura
+    // de 5/8/10 chars (la api-colombia usa IDs numéricos no-DANE, y los
+    // formularios a veces incluyen dígitos extra), el match contra la tabla
+    // de tarifas intenta el código tal cual; si no hay match, intenta con
+    // los primeros 5 chars (Divipola). Documentado en el plan: usar
+    // `LEFT(?, 5)` para no replanificar.
     const invoices = await this.prisma.invoices.findMany({
       where: {
         accounting_entity_id: context.accounting_entity_id,
@@ -776,51 +901,295 @@ export class TaxDeclarationDraftService {
       },
       orderBy: { issue_date: 'asc' },
     });
-    const rate = await this.prisma.ica_municipal_rates.findFirst({
-      where: { is_active: true },
-      orderBy: { effective_date: 'desc' },
+
+    const organization = await this.prisma.organizations.findUnique({
+      where: { id: context.organization_id },
+      select: { ciiu_code: true },
     });
-    const ratePerMil = Number(rate?.rate_per_mil || 0);
-    const base = invoices.reduce((sum, invoice) => {
-      const sign = invoice.invoice_type === 'credit_note' ? -1 : 1;
-      return sum + Number(invoice.subtotal_amount || 0) * sign;
-    }, 0);
-    const tax = (base * ratePerMil) / 1000;
+    const orgCiiu = organization?.ciiu_code ?? null;
+
+    // Resolución de tiendas a iterar:
+    // - STORE scope → solo la tienda dueña del accounting_entity.
+    // - ORGANIZATION scope → todas las tiendas activas de la org (multi-municipio).
+    let storesToIterate: Array<{
+      id: number;
+      municipality_code: string | null;
+      ciiu_code: string | null;
+    }> = [];
+    if (context.fiscal_scope === 'STORE' && context.store_id) {
+      const store = await this.prisma.stores.findUnique({
+        where: { id: context.store_id },
+        select: {
+          id: true,
+          municipality_code: true,
+          ciiu_code: true,
+        },
+      });
+      storesToIterate = store ? [store] : [];
+    } else {
+      storesToIterate = await this.prisma.stores.findMany({
+        where: { organization_id: context.organization_id, is_active: true },
+        select: {
+          id: true,
+          municipality_code: true,
+          ciiu_code: true,
+        },
+      });
+    }
+
+    // Agrupar facturas por tienda: `invoices.store_id` es NOT NULL (columna
+    // Int obligatoria en schema.prisma, siempre poblada por invoicing.service
+    // y credit-notes.service antes de escribir), así que cada factura se
+    // atribuye SIEMPRE a la tienda que la emitió — sin excepción, tanto en
+    // STORE scope (una sola tienda) como en ORGANIZATION scope multi-tienda
+    // consolidada. Esto evita contar la misma factura más de una vez cuando
+    // la org tiene facturas de 2+ tiendas/municipios.
+    //
+    // Mapa de líneas por tienda para asignar correctamente en STORE scope y
+    // en ORGANIZATION scope multi-tienda.
+    type StoreBucket = {
+      storeId: number | null;
+      municipalityCode: string | null;
+      municipalityNormalized: string | null;
+      ciiuCode: string | null;
+      ratePerMil: number;
+      rateMunicipalityName: string | null;
+      rateCiiuDescription: string | null;
+      rateMatchKind: 'municipality_ciiu' | 'municipality_only' | 'none';
+      base: number;
+      tax: number;
+      invoiceCount: number;
+      lines: Prisma.tax_declaration_linesCreateManyInput[];
+    };
+    const bucketsByStoreId = new Map<number, StoreBucket>();
+    const unconfiguredWarnings: Array<{
+      code: string;
+      store_id?: number | null;
+      municipality_code?: string | null;
+    }> = [];
+
+    for (const store of storesToIterate) {
+      const storeCiiu = store.ciiu_code ?? orgCiiu ?? null;
+      const municipalityCode = store.municipality_code
+        ? String(store.municipality_code).trim()
+        : null;
+      const municipalityNormalized =
+        municipalityCode && municipalityCode.length >= 5
+          ? municipalityCode.slice(0, 5)
+          : municipalityCode;
+
+      let rate: {
+        rate_per_mil: any;
+        municipality_code: string;
+        municipality_name: string;
+        ciiu_code: string | null;
+        ciiu_description: string | null;
+      } | null = null;
+      let matchKind: StoreBucket['rateMatchKind'] = 'none';
+
+      if (municipalityCode) {
+        // 1) Match exacto por (municipality_code, ciiu_code).
+        if (storeCiiu) {
+          rate = await this.prisma.ica_municipal_rates.findFirst({
+            where: {
+              municipality_code: municipalityCode,
+              ciiu_code: storeCiiu,
+              is_active: true,
+            },
+            orderBy: { effective_date: 'desc' },
+            select: {
+              rate_per_mil: true,
+              municipality_code: true,
+              municipality_name: true,
+              ciiu_code: true,
+              ciiu_description: true,
+            },
+          });
+          if (rate) matchKind = 'municipality_ciiu';
+        }
+
+        // 2) Fallback: tarifa genérica municipal (ciiu_code IS NULL).
+        if (!rate) {
+          rate = await this.prisma.ica_municipal_rates.findFirst({
+            where: {
+              municipality_code: municipalityCode,
+              ciiu_code: null,
+              is_active: true,
+            },
+            orderBy: { effective_date: 'desc' },
+            select: {
+              rate_per_mil: true,
+              municipality_code: true,
+              municipality_name: true,
+              ciiu_code: true,
+              ciiu_description: true,
+            },
+          });
+          if (rate) matchKind = 'municipality_only';
+        }
+
+        // 3) Último intento: si municipality_code tiene >5 chars y no matchea,
+        // intentar con los primeros 5 (Divipola). Esto cubre casos donde la
+        // captura devuelve 8/10 chars pero la tabla tarifaria usa 5.
+        if (!rate && municipalityNormalized && municipalityNormalized !== municipalityCode) {
+          if (storeCiiu) {
+            rate = await this.prisma.ica_municipal_rates.findFirst({
+              where: {
+                municipality_code: municipalityNormalized,
+                ciiu_code: storeCiiu,
+                is_active: true,
+              },
+              orderBy: { effective_date: 'desc' },
+              select: {
+                rate_per_mil: true,
+                municipality_code: true,
+                municipality_name: true,
+                ciiu_code: true,
+                ciiu_description: true,
+              },
+            });
+            if (rate) matchKind = 'municipality_ciiu';
+          }
+          if (!rate) {
+            rate = await this.prisma.ica_municipal_rates.findFirst({
+              where: {
+                municipality_code: municipalityNormalized,
+                ciiu_code: null,
+                is_active: true,
+              },
+              orderBy: { effective_date: 'desc' },
+              select: {
+                rate_per_mil: true,
+                municipality_code: true,
+                municipality_name: true,
+                ciiu_code: true,
+                ciiu_description: true,
+              },
+            });
+            if (rate) matchKind = 'municipality_only';
+          }
+        }
+      }
+
+      if (!rate || !municipalityCode) {
+        // Store sin municipio configurado, o sin tarifa en la tabla → warning.
+        // NUNCA inventar tarifa: emitir warning y no agregar renglón.
+        if (!municipalityCode) {
+          unconfiguredWarnings.push({
+            code: 'ICA_RATE_NOT_CONFIGURED',
+            store_id: store.id,
+            municipality_code: null,
+          });
+        } else {
+          unconfiguredWarnings.push({
+            code: 'ICA_RATE_NOT_CONFIGURED',
+            store_id: store.id,
+            municipality_code: municipalityCode,
+          });
+        }
+        continue;
+      }
+
+      const ratePerMil = Number(rate.rate_per_mil || 0);
+
+      // Filtrar facturas atribuibles a esta tienda: `store_id` es NOT NULL en
+      // `invoices`, así que cada factura pertenece a exactamente una tienda.
+      // Nunca reasignar el pool completo aquí — eso duplicaría la base/tax
+      // por cada tienda del loop cuando la org tiene 2+ tiendas.
+      const storeInvoices = invoices.filter(
+        (invoice) => (invoice as any).store_id === store.id,
+      );
+
+      const base = storeInvoices.reduce((sum, invoice) => {
+        const sign = invoice.invoice_type === 'credit_note' ? -1 : 1;
+        return sum + Number(invoice.subtotal_amount || 0) * sign;
+      }, 0);
+
+      const tax = (base * ratePerMil) / 1000;
+
+      const bucket: StoreBucket = {
+        storeId: store.id,
+        municipalityCode,
+        municipalityNormalized,
+        ciiuCode: storeCiiu,
+        ratePerMil,
+        rateMunicipalityName: rate.municipality_name,
+        rateCiiuDescription: rate.ciiu_description,
+        rateMatchKind: matchKind,
+        base,
+        tax,
+        invoiceCount: storeInvoices.length,
+        lines: storeInvoices.map((invoice) => {
+          const sign = invoice.invoice_type === 'credit_note' ? -1 : 1;
+          const invoiceBase = Number(invoice.subtotal_amount || 0) * sign;
+          return {
+            declaration_id: 0,
+            line_type: 'ica_base',
+            source_type: 'invoice',
+            source_id: invoice.id,
+            description: `${invoice.invoice_type} ${invoice.invoice_number}`,
+            base_amount: invoiceBase,
+            tax_amount: (invoiceBase * ratePerMil) / 1000,
+            metadata: {
+              store_id: store.id,
+              municipality_code: municipalityCode,
+              municipality_name: rate.municipality_name,
+              ciiu_code: storeCiiu,
+              ciiu_description: rate.ciiu_description,
+              rate_per_mil: ratePerMil,
+              rate_match_kind: matchKind,
+            },
+          };
+        }),
+      };
+      bucketsByStoreId.set(store.id, bucket);
+    }
+
+    // Consolidar líneas + totales a partir de los buckets.
+    const allLines: Prisma.tax_declaration_linesCreateManyInput[] = [];
+    let totalBase = 0;
+    let totalTax = 0;
+    for (const bucket of bucketsByStoreId.values()) {
+      allLines.push(...bucket.lines);
+      totalBase += bucket.base;
+      totalTax += bucket.tax;
+    }
 
     return {
       totals: {
-        gross_base_amount: base,
-        taxable_base_amount: base,
-        generated_tax_amount: tax,
-        balance_due: Math.max(tax, 0),
-        total_payable: Math.max(tax, 0),
+        gross_base_amount: totalBase,
+        taxable_base_amount: totalBase,
+        generated_tax_amount: totalTax,
+        balance_due: Math.max(totalTax, 0),
+        total_payable: Math.max(totalTax, 0),
       },
-      lines: invoices.map((invoice) => {
-        const sign = invoice.invoice_type === 'credit_note' ? -1 : 1;
-        const baseAmount = Number(invoice.subtotal_amount || 0) * sign;
-        return {
-          declaration_id: 0,
-          line_type: 'ica_base',
-          source_type: 'invoice',
-          source_id: invoice.id,
-          description: `${invoice.invoice_type} ${invoice.invoice_number}`,
-          base_amount: baseAmount,
-          tax_amount: (baseAmount * ratePerMil) / 1000,
-          metadata: {
-            municipality_code: rate?.municipality_code,
-            municipality_name: rate?.municipality_name,
-            rate_per_mil: ratePerMil,
-          },
-        };
-      }),
+      lines: allLines,
       rules_snapshot: await this.resolveRulesSnapshot(
         context,
         'ica',
         period.period_year,
       ),
-      source_snapshot: { invoice_count: invoices.length },
+      source_snapshot: {
+        invoice_count: invoices.length,
+        stores_with_rate: Array.from(bucketsByStoreId.values()).map(
+          (bucket) => ({
+            store_id: bucket.storeId,
+            municipality_code: bucket.municipalityCode,
+            ciiu_code: bucket.ciiuCode,
+            rate_per_mil: bucket.ratePerMil,
+            rate_match_kind: bucket.rateMatchKind,
+            base: bucket.base,
+            tax: bucket.tax,
+            invoice_count: bucket.invoiceCount,
+          }),
+        ),
+        stores_without_rate: unconfiguredWarnings.map((warning) => ({
+          store_id: warning.store_id,
+          municipality_code: warning.municipality_code,
+        })),
+      },
       validation_summary: {
-        warnings: rate ? [] : [{ code: 'ICA_RATE_NOT_CONFIGURED' }],
+        warnings: unconfiguredWarnings,
       },
     };
   }

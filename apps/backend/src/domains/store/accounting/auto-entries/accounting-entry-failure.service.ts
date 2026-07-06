@@ -4,6 +4,8 @@ import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { AutoEntryEventData } from './auto-entry.service';
+import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
+import { ErrorCodes } from '../../../../common/errors/error-codes';
 
 export const ACCOUNTING_ENTRY_RETRY_QUEUE = 'accounting-entry-retry';
 
@@ -21,6 +23,13 @@ export interface AccountingEntryRetryJob {
  * el error en `accounting_entry_failures` y encola un reintento en la cola
  * BullMQ `accounting-entry-retry`. El reintento es seguro porque
  * `createAutoEntry` es idempotente por `(source_type, source_id, entity)`.
+ *
+ * C2: cuando el fallo viene de un período fiscal CERRADO
+ * (`FISCAL_PERIOD_CLOSED`), el reintento NO se encola: postear retroactivamente
+ * sobre un mes cerrado rompe la contabilidad ya emitida (declaraciones,
+ * exógena, informes). El fallo se persiste igual para auditoría pero el job
+ * BullMQ se omite. La detección usa el `error_code` del `VendixHttpException`
+ * y un fallback por substring del mensaje para tolerar serializaciones JSON.
  */
 @Injectable()
 export class AccountingEntryFailureService {
@@ -31,6 +40,28 @@ export class AccountingEntryFailureService {
     @InjectQueue(ACCOUNTING_ENTRY_RETRY_QUEUE)
     private readonly retry_queue: Queue,
   ) {}
+
+  /**
+   * Devuelve true si el error proviene de un período fiscal cerrado y por
+   * tanto NO debe encolarse un reintento automático (el posteo retroactivo
+   * sobre un mes cerrado es incorrecto y la fila queda solo como auditoría).
+   *
+   * Detección por dos vías (en orden):
+   * 1. `error instanceof VendixHttpException` con `errorCode ===
+   *    ErrorCodes.FISCAL_PERIOD_CLOSED.code` — caso ideal cuando el servicio
+   *    lanzó la excepción tipada.
+   * 2. Fallback por substring del mensaje: tolerante si la excepción fue
+   *    serializada (p.ej. por `JSON.stringify` en el caller) o re-empaquetada
+   *    por el global filter.
+   */
+  private isClosedPeriodError(error: Error): boolean {
+    const targetCode = ErrorCodes.FISCAL_PERIOD_CLOSED.code;
+    if (error instanceof VendixHttpException) {
+      if ((error as VendixHttpException).errorCode === targetCode) return true;
+    }
+    const message = error?.message ?? String(error);
+    return message.includes(targetCode);
+  }
 
   /**
    * Best-effort: registra el fallo y encola el reintento. NUNCA lanza — el
@@ -44,6 +75,7 @@ export class AccountingEntryFailureService {
   ): Promise<void> {
     try {
       const db = this.prisma.withoutScope();
+      const is_closed_period = this.isClosedPeriodError(error);
       // Dedup: si ya hay un fallo NO resuelto para el mismo origen, solo se
       // incrementa el contador de intentos (no se apila otro job/fila).
       const existing = event_data.source_id
@@ -66,6 +98,15 @@ export class AccountingEntryFailureService {
             error_message: error.message ?? String(error),
           },
         });
+        // Si el primer fallo era reintable y este intento ya detectó período
+        // cerrado, no encolar más.
+        if (is_closed_period) {
+          this.logger.warn(
+            `Failure #${existing.id} for ${event_data.source_type}#${
+              event_data.source_id ?? '?'
+            } now classified as FISCAL_PERIOD_CLOSED — skipping retry.`,
+          );
+        }
         return;
       }
 
@@ -80,6 +121,14 @@ export class AccountingEntryFailureService {
           error_message: error.message ?? String(error),
         },
       });
+      if (is_closed_period) {
+        // C2: NO encolar reintento. La fila queda como bitácora de auditoría.
+        this.logger.warn(
+          `Recorded auto-entry failure #${row.id} for ${event_data.source_type}` +
+            `#${event_data.source_id ?? '?'} — FISCAL_PERIOD_CLOSED, no retry queued.`,
+        );
+        return;
+      }
       await this.enqueueRetry(row.id);
       this.logger.warn(
         `Recorded auto-entry failure #${row.id} for ${event_data.source_type}` +

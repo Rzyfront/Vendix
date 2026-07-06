@@ -137,6 +137,18 @@ export class DefaultPanelUIService {
         restaurant_ops_kds: true,
         restaurant_ops_tables: true,
         restaurant_ops_menus: true,
+        // Memberships (generalized membership core).
+        // `default_visible_for_privileged_users=true` (owner/admin see the
+        // parent + submodules on next login), `show_new_badge=yes` (user
+        // dropdown banner + Settings → "Módulos del Panel" surface the keys
+        // as new until the privileged user activates/toggles them).
+        // Industry gating is enforced separately in `INDUSTRY_HIDDEN_MODULES`:
+        // visible cuando la industria incluye `gym` o `service`; el resto de
+        // industrias lo ocultan por defecto.
+        memberships: true,
+        memberships_plans: true,
+        memberships_members: true,
+        memberships_access: true,
         reports: true,
         invoicing: true,
         invoicing_invoices: true,

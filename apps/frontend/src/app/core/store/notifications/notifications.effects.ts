@@ -106,6 +106,13 @@ export class NotificationsEffects {
           this.eventSource.onmessage = (event: MessageEvent) => {
             try {
               const data = JSON.parse(event.data);
+              // El hub SSE por tienda es compartido: además de notificaciones
+              // del bell puede multiplexar eventos de otros dominios (p.ej.
+              // 'membership-access' del acceso ambiental de gym). Esos no son
+              // notificaciones — se ignoran para no ensuciar la campana.
+              if (!data?.id || data.type === 'membership-access') {
+                return;
+              }
               const notification: AppNotification = {
                 id: data.id,
                 type: data.type,

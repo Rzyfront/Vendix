@@ -34,4 +34,10 @@ export class CreateSettlementDto {
   @IsNumber()
   @Type(() => Number)
   pending_salary_days?: number = 0;
+
+  // Fecha de fin de contrato a término fijo: base para calcular la
+  // indemnización por terminación anticipada sin justa causa.
+  @IsOptional()
+  @IsDateString()
+  contract_end_date?: string;
 }

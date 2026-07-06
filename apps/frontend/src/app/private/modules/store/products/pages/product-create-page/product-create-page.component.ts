@@ -44,6 +44,7 @@ import {
   CurrencyFormatService,
 } from '../../../../../../shared/pipes/currency';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
+import { FiscalGateService } from '../../../../../../core/services/fiscal-gate.service';
 import {
   CreateProductDto,
   CreateProductImageDto,
@@ -474,6 +475,7 @@ export class ProductCreatePageComponent {
   private destroyRef = inject(DestroyRef);
   private barcodeService = inject(PosBarcodeService);
   private readonly authFacade = inject(AuthFacade);
+  private readonly fiscalGate = inject(FiscalGateService);
   private readonly uomService = inject(UomService);
   private readonly serialNumbersService = inject(SerialNumbersService);
 
@@ -509,6 +511,13 @@ export class ProductCreatePageComponent {
    */
   readonly isRestaurant = computed(() =>
     this.storeIndustries().includes('restaurant'),
+  );
+  /**
+   * `true` solo si la tienda tiene la industria `service`. Gatea el tipo
+   * "Servicio" en el selector, igual que `isRestaurant` gatea "Plato preparado".
+   */
+  readonly isServiceIndustry = computed(() =>
+    this.storeIndustries().includes('service'),
   );
   /**
    * Fase 0: capability resolver reused from the auth facade. Identical
@@ -764,7 +773,47 @@ export class ProductCreatePageComponent {
   isReleasingReservations = false;
   categoryOptions: MultiSelectorOption[] = [];
   brandOptions: SelectorOption[] = [];
-  readonly taxCategoryOptions = signal<MultiSelectorOption[]>([]);
+  // F4 — Gate "no responsable de IVA". Fuente cruda de categorías (para
+  // getters de precio) + estado de bloqueo del comercio.
+  private readonly taxCategoriesSig = signal<TaxCategory[]>([]);
+  readonly isVatBlocked = this.authFacade.isVatBlocked;
+  /**
+   * Set de ids de categorías cuyo `tax_type === 'iva'`. Solo el IVA se bloquea;
+   * INC/ICA/retenciones quedan permitidos.
+   */
+  private readonly ivaTaxCategoryIdSet = computed(
+    () =>
+      new Set(
+        this.taxCategoriesSig()
+          .filter((c) => (c.tax_type ?? '').toLowerCase() === 'iva')
+          .map((c) => c.id),
+      ),
+  );
+  /**
+   * Opciones del multi-selector de impuestos. Cuando el comercio NO es
+   * responsable de IVA, las opciones IVA se muestran con candado y
+   * `disabled: true` (el multi-selector no las deja seleccionar).
+   */
+  readonly taxCategoryOptions = computed<MultiSelectorOption[]>(() => {
+    const blocked = this.isVatBlocked();
+    const ivaIds = this.ivaTaxCategoryIdSet();
+    return this.taxCategoriesSig().map((cat) => {
+      const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
+      const rate = parseFloat(String(rawRate));
+      const finalRate = isNaN(rate) ? 0 : rate;
+      const isIva = ivaIds.has(cat.id);
+      const lock = blocked && isIva;
+      return {
+        value: cat.id,
+        label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
+        description: lock
+          ? 'Requiere ser responsable de IVA ante la DIAN'
+          : cat.description,
+        disabled: lock,
+        icon: lock ? 'lock' : undefined,
+      };
+    });
+  });
   stateOptions: SelectorOption[] = [
     { value: ProductState.ACTIVE, label: 'Activo' },
     { value: ProductState.INACTIVE, label: 'Inactivo' },
@@ -785,11 +834,14 @@ export class ProductCreatePageComponent {
   readonly productTypeOptions = computed<{ value: string; label: string }[]>(
     () => {
       this.formUpdateTrigger(); // reactividad ante cambios del formulario
-      const base = [
-        { value: 'physical', label: 'Producto Físico' },
-        { value: 'service', label: 'Servicio' },
-      ];
       const current = this.productForm?.get('product_type')?.value;
+      const base = [{ value: 'physical', label: 'Producto Físico' }];
+      // "Servicio" solo con la industria `service` activa (o al editar un
+      // servicio ya creado en una tienda mal configurada, para no perder el
+      // valor). Mismo patrón que "Plato preparado" con la industria restaurant.
+      if (this.isServiceIndustry() || current === 'service') {
+        base.push({ value: 'service', label: 'Servicio' });
+      }
       if (this.isRestaurant() || current === 'prepared') {
         base.push({ value: 'prepared', label: 'Plato preparado' });
       }
@@ -1187,6 +1239,26 @@ export class ProductCreatePageComponent {
       });
     this.syncPricingTypeControlState(this.isService);
 
+    // F4 — Gate "no responsable de IVA": si el comercio no es responsable y el
+    // usuario agrega una categoría IVA, revertimos el cambio (emitEvent:false
+    // para no reentrar) y abrimos el modal de activación fiscal. INC/ICA/
+    // retenciones no se tocan; las lecturas nunca se bloquean.
+    this.productForm
+      .get('tax_category_ids')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((ids: number[] | null) => {
+        if (!this.isVatBlocked()) return;
+        const selected = Array.isArray(ids) ? ids : [];
+        const ivaIds = this.ivaTaxCategoryIdSet();
+        const hasIva = selected.some((id) => ivaIds.has(id));
+        if (!hasIva) return;
+        const filtered = selected.filter((id) => !ivaIds.has(id));
+        this.productForm
+          .get('tax_category_ids')
+          ?.setValue(filtered, { emitEvent: false });
+        this.fiscalGate.openVatResponsibleGate();
+      });
+
     // Auto-cargar proveedores cuando se activa requires_booking (o al entrar en edit con el flag ya activo)
     effect(() => {
       const enabled = this.requiresBookingSig();
@@ -1562,9 +1634,14 @@ export class ProductCreatePageComponent {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
     const selectedTaxIds =
       this.productForm.get('tax_category_ids')?.value || [];
+    // F4 — si el comercio no es responsable de IVA, el IVA nunca compone el
+    // precio calculado (aunque quedara un id residual en el control).
+    const ivaIds = this.ivaTaxCategoryIdSet();
+    const blocked = this.isVatBlocked();
 
     let totalTaxRate = 0;
     selectedTaxIds.forEach((id: number) => {
+      if (blocked && ivaIds.has(id)) return;
       const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
       if (taxCat) {
         // Extraer la tasa del primer tax_rate si no existe en el nivel superior
@@ -1581,9 +1658,13 @@ export class ProductCreatePageComponent {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
     const selectedTaxIds =
       this.productForm.get('tax_category_ids')?.value || [];
+    // F4 — excluir IVA del desglose cuando el comercio no es responsable.
+    const ivaIds = this.ivaTaxCategoryIdSet();
+    const blocked = this.isVatBlocked();
 
     return selectedTaxIds
       .map((id: number) => {
+        if (blocked && ivaIds.has(id)) return null;
         const taxCat = this.allTaxCategories.find((tc) => tc.id === id);
         if (!taxCat) return null;
         const rawRate = taxCat.rate ?? taxCat.tax_rates?.[0]?.rate ?? 0;
@@ -1788,26 +1869,25 @@ export class ProductCreatePageComponent {
     });
   }
 
+  /**
+   * F4 — Filtro defensivo: elimina ids de categorías IVA del payload cuando el
+   * comercio no es responsable de IVA. El backend igualmente rechaza con
+   * `FISCAL_VAT_NOT_RESPONSIBLE_001`; esto evita el viaje de ida/vuelta.
+   */
+  private sanitizeTaxCategoryIds(ids: number[]): number[] {
+    if (!this.isVatBlocked()) return ids;
+    const ivaIds = this.ivaTaxCategoryIdSet();
+    return ids.filter((id) => !ivaIds.has(id));
+  }
+
   private loadTaxCategories(): void {
     this.taxesService.getTaxCategories().subscribe({
       next: (taxCategories: TaxCategory[]) => {
         this.allTaxCategories = taxCategories;
-        if (taxCategories.length > 0) {
-          this.taxCategoryOptions.set(
-            taxCategories.map((cat: TaxCategory) => {
-              // Extraer la tasa del primer tax_rate si no existe en el nivel superior
-              const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
-              const rate = parseFloat(String(rawRate));
-              const finalRate = isNaN(rate) ? 0 : rate;
-
-              return {
-                value: cat.id,
-                label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
-                description: cat.description,
-              };
-            }),
-          );
-        }
+        // F4 — alimenta el signal; `taxCategoryOptions` es un computed que
+        // deriva las opciones (con candado en IVA si el comercio no es
+        // responsable). Ver declaración de `taxCategoryOptions`.
+        this.taxCategoriesSig.set(taxCategories);
       },
       error: (error: any) => {
         console.error('Error loading tax categories:', error);
@@ -2439,18 +2519,7 @@ export class ProductCreatePageComponent {
   }
 
   onTaxCategoryCreated(taxCategory: TaxCategory): void {
-    const rawRate = taxCategory.rate ?? taxCategory.tax_rates?.[0]?.rate ?? 0;
-    const rate = parseFloat(String(rawRate));
-    const finalRate = isNaN(rate) ? 0 : rate;
-    this.taxCategoryOptions.update(options => [
-      ...options,
-      {
-        value: taxCategory.id,
-        label: `${taxCategory.name} (${(finalRate * 100).toFixed(0)}%)`,
-        description: taxCategory.description,
-      },
-    ]);
-    this.allTaxCategories = [...this.allTaxCategories, taxCategory];
+    this.loadTaxCategories();
     // Add to current selection
     const currentIds = this.productForm.get('tax_category_ids')?.value || [];
     if (taxCategory && taxCategory.id) {
@@ -2509,8 +2578,21 @@ export class ProductCreatePageComponent {
   private get stockCapacity(): number {
     return Number((this.product as any)?.purchase_to_stock_factor) || 1;
   }
-  /** Etiqueta de la unidad mínima (ml, g, ...). */
+  /**
+   * Etiqueta de la unidad mínima de stock (ml, g, ...). Se resuelve desde el
+   * catálogo UoM (`uomOptions()`) por `stock_uom_id` del producto — mismo
+   * patrón que `unitCapacity`. Lee la señal `uomOptions()` así que reacciona
+   * cuando el catálogo resuelve. Fallback al legacy `stock_unit` (casi siempre
+   * vacío) solo si el catálogo no resuelve el id. Alimenta los 3 bloques del
+   * "Desglose del insumo" (volumen abierto / capacidad / volumen total); los
+   * envases sellados se etiquetan aparte en "und".
+   */
   get stockUnitLabel(): string {
+    const stockId = Number((this.product as any)?.stock_uom_id ?? 0);
+    if (stockId) {
+      const code = this.uomOptions().find((u) => u.id === stockId)?.code;
+      if (code) return code;
+    }
     return ((this.product as any)?.stock_unit as string) || '';
   }
   /**
@@ -3087,7 +3169,10 @@ export class ProductCreatePageComponent {
           ? Number(formValue.stock_quantity)
           : undefined,
       category_ids: formValue.category_ids || [],
-      tax_category_ids: formValue.tax_category_ids || [],
+      // F4 — filtro defensivo de ids IVA cuando el comercio no es responsable.
+      tax_category_ids: this.sanitizeTaxCategoryIds(
+        formValue.tax_category_ids || [],
+      ),
       brand_id: formValue.brand_ids?.[0]
         ? Number(formValue.brand_ids[0])
         : null,

@@ -1,0 +1,512 @@
+<div class="w-full">
+  <app-sticky-header
+    title="Detalle de membresía"
+    [subtitle]="headerSubtitle()"
+    icon="user"
+    [showBackButton]="true"
+    backRoute="/admin/memberships/members"
+    [badgeText]="statusLabel()"
+    [badgeColor]="headerBadgeColor()"
+    [actions]="headerActions()"
+    (actionClicked)="onHeaderAction($event)"
+  ></app-sticky-header>
+
+  @if (isLoading()) {
+    <div class="flex justify-center py-16">
+      <app-spinner></app-spinner>
+    </div>
+  }
+
+  @if (!isLoading() && membership(); as m) {
+    <div class="max-w-[1600px] mx-auto">
+      <!-- ── Info bar (plan / vigencia / renovación) ───────────────── -->
+      <div class="bg-surface border border-border rounded-lg px-3 py-2 mb-4">
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px]">
+          <div class="flex items-center gap-1.5 text-text-primary font-medium">
+            <app-icon name="layers" size="14" class="text-text-secondary" />
+            <span>Plan:</span>
+            <span class="text-text-secondary font-normal">{{ planName() }}</span>
+          </div>
+          <span class="w-px h-3.5 bg-border"></span>
+          <div class="flex items-center gap-1.5 text-text-primary font-medium">
+            <app-icon name="calendar" size="14" class="text-text-secondary" />
+            <span>Vigencia:</span>
+            <span class="text-text-secondary font-normal">
+              {{ formatDate(m.period_start) }} → {{ formatDate(m.period_end) }}
+            </span>
+          </div>
+          <span class="w-px h-3.5 bg-border"></span>
+          <div class="flex items-center gap-1.5">
+            <span
+              class="px-2 py-0.5 text-[10px] font-bold uppercase rounded tracking-wider"
+              [class]="
+                m.auto_renew
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-gray-100 text-gray-600'
+              "
+            >
+              {{ m.auto_renew ? "Renovación auto." : "Renovación manual" }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Stats (4 KPIs) ────────────────────────────────────────── -->
+      <div
+        class="stats-container sticky top-[52px] z-20 bg-background md:static md:bg-transparent mb-4"
+      >
+        <app-stats
+          title="Días restantes"
+          [value]="daysRemainingDisplay()"
+          [smallText]="daysRemainingSmall()"
+          iconName="hourglass"
+          iconBgColor="bg-indigo-100"
+          iconColor="text-indigo-600"
+        />
+        <app-stats
+          title="Estado"
+          [value]="statusLabel()"
+          [smallText]="planName()"
+          iconName="activity"
+          iconBgColor="bg-blue-100"
+          iconColor="text-blue-600"
+        />
+        <app-stats
+          title="Precio del plan"
+          [value]="planPriceDisplay()"
+          smallText="Tarifa vigente"
+          iconName="credit-card"
+          iconBgColor="bg-emerald-100"
+          iconColor="text-emerald-600"
+        />
+        <app-stats
+          title="Antigüedad"
+          [value]="membershipAgeDays()"
+          smallText="Días como socio"
+          iconName="award"
+          iconBgColor="bg-amber-100"
+          iconColor="text-amber-600"
+        />
+      </div>
+
+      <!-- ── Main grid ─────────────────────────────────────────────── -->
+      <div class="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-3 lg:gap-5">
+        <!-- ═══ COLUMNA IZQUIERDA ═══ -->
+        <div class="flex flex-col gap-3">
+          <!-- 1. HERO DEL SOCIO -->
+          <app-card shadow="sm" [responsivePadding]="true" [showHeader]="true">
+            <div slot="header" class="member-card-header">
+              <div class="member-card-title">
+                <span class="member-card-title-icon">
+                  <app-icon name="user-check" size="18" />
+                </span>
+                <div class="min-w-0">
+                  <h3>Información del socio</h3>
+                  <p>Contacto y datos de la membresía</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="member-card-content">
+              <section class="member-hero-panel">
+                <div class="member-identity">
+                  <div class="member-avatar" aria-hidden="true">
+                    {{ customerInitial() }}
+                  </div>
+                  <div class="member-name-block">
+                    <span class="member-eyebrow">Socio</span>
+                    <h2>{{ customerName() }}</h2>
+                    <div class="member-data-pills">
+                      <span
+                        class="member-data-pill"
+                        [class.member-data-pill-muted]="!m.customer?.email"
+                      >
+                        <app-icon name="mail" size="13" />
+                        {{ m.customer?.email ? "Correo registrado" : "Sin correo" }}
+                      </span>
+                      <span
+                        class="member-data-pill"
+                        [class.member-data-pill-muted]="!m.customer?.phone"
+                      >
+                        <app-icon name="phone" size="13" />
+                        {{ m.customer?.phone ? "Teléfono registrado" : "Sin teléfono" }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="member-contact-panel">
+                  @if (m.customer?.email) {
+                    <a
+                      class="member-contact-line"
+                      [href]="'mailto:' + m.customer?.email"
+                    >
+                      <span class="member-contact-icon">
+                        <app-icon name="mail" size="15" />
+                      </span>
+                      <span class="member-contact-copy">
+                        <span>Correo</span>
+                        <strong>{{ m.customer?.email }}</strong>
+                      </span>
+                    </a>
+                  } @else {
+                    <div class="member-contact-line is-muted">
+                      <span class="member-contact-icon">
+                        <app-icon name="mail" size="15" />
+                      </span>
+                      <span class="member-contact-copy">
+                        <span>Correo</span>
+                        <strong>Sin correo registrado</strong>
+                      </span>
+                    </div>
+                  }
+
+                  @if (m.customer?.phone) {
+                    <a
+                      class="member-contact-line"
+                      [href]="'tel:' + m.customer?.phone"
+                    >
+                      <span class="member-contact-icon">
+                        <app-icon name="phone" size="15" />
+                      </span>
+                      <span class="member-contact-copy">
+                        <span>Teléfono</span>
+                        <strong>{{ m.customer?.phone }}</strong>
+                      </span>
+                    </a>
+                  } @else {
+                    <div class="member-contact-line is-muted">
+                      <span class="member-contact-icon">
+                        <app-icon name="phone" size="15" />
+                      </span>
+                      <span class="member-contact-copy">
+                        <span>Teléfono</span>
+                        <strong>Sin teléfono registrado</strong>
+                      </span>
+                    </div>
+                  }
+                </div>
+              </section>
+
+              <div class="member-card-footer">
+                <app-button variant="outline" size="sm" (clicked)="goToProfile()">
+                  <app-icon slot="icon" name="clipboard-list" [size]="16" />
+                  Perfil de socio (gimnasio)
+                </app-button>
+              </div>
+            </div>
+          </app-card>
+
+          <!-- 2. PLAN Y VIGENCIA -->
+          <app-card shadow="sm" [responsivePadding]="true" [showHeader]="true">
+            <div slot="header" class="flex items-center gap-2">
+              <app-icon name="layers" [size]="18" class="text-primary" />
+              <h3 class="text-base font-bold text-[var(--color-text-primary)]">
+                Plan y vigencia
+              </h3>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <div class="flex flex-col gap-1">
+                <span class="detail-label">Plan</span>
+                <span class="detail-value">{{ planName() }}</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="detail-label">Precio</span>
+                <span class="detail-value">{{ planPrice() | currency }}</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="detail-label">Inicio</span>
+                <span class="detail-value">{{ formatDate(m.period_start) }}</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <span class="detail-label">Vence</span>
+                <span class="detail-value">{{ formatDate(m.period_end) }}</span>
+              </div>
+            </div>
+
+            @if (vigencia().hasRange) {
+              <div class="mt-5">
+                <div class="flex items-center justify-between mb-1.5">
+                  <span class="detail-label">Progreso de vigencia</span>
+                  <span class="text-xs font-bold text-[var(--color-text-primary)]">
+                    {{ vigencia().elapsedDays }} / {{ vigencia().totalDays }} días
+                  </span>
+                </div>
+                <div class="member-progress-track">
+                  <div
+                    class="member-progress-fill"
+                    [style.width.%]="vigencia().percent"
+                    [style.background]="statusColor()"
+                  ></div>
+                </div>
+                <p class="text-[11px] text-text-secondary mt-1.5">
+                  {{ daysRemainingSmall() }}
+                </p>
+              </div>
+            }
+          </app-card>
+
+          <!-- 3. CREDENCIALES DE ACCESO -->
+          <app-card shadow="sm" [responsivePadding]="true" [showHeader]="true">
+            <div slot="header" class="flex items-center justify-between w-full">
+              <div class="flex items-center gap-2">
+                <app-icon name="key-round" [size]="18" class="text-primary" />
+                <h3 class="text-base font-bold text-[var(--color-text-primary)]">
+                  Credenciales de acceso
+                </h3>
+              </div>
+              @if (credentials().length) {
+                <span
+                  class="text-[11px] font-medium text-gray-500 bg-[var(--color-background)] px-2.5 py-1 rounded-lg"
+                >
+                  {{ credentials().length }}
+                </span>
+              }
+            </div>
+
+            @if (credentials().length) {
+              <div class="flex flex-col gap-2">
+                @for (cred of credentials(); track cred.id) {
+                  <div class="member-credential-row">
+                    <span class="member-credential-icon">
+                      <app-icon [name]="credentialIcon(cred.credential_type)" [size]="16" />
+                    </span>
+                    <div class="min-w-0 flex-1">
+                      <p class="text-sm font-semibold text-[var(--color-text-primary)]">
+                        {{ credentialTypeLabel(cred.credential_type) }}
+                      </p>
+                      <p class="text-xs font-mono text-text-secondary truncate">
+                        {{ cred.credential_value_masked }}
+                      </p>
+                    </div>
+                    <span
+                      class="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                      [class]="
+                        cred.is_active
+                          ? 'bg-emerald-100 text-emerald-700'
+                          : 'bg-gray-100 text-gray-500'
+                      "
+                    >
+                      {{ cred.is_active ? "Activa" : "Inactiva" }}
+                    </span>
+                  </div>
+                }
+              </div>
+            } @else {
+              <div class="member-empty-state">
+                <app-icon name="key-round" [size]="22" class="text-text-secondary" />
+                <span>Sin credenciales registradas</span>
+              </div>
+            }
+          </app-card>
+
+          <!-- 4. ACCESOS RECIENTES -->
+          <app-card shadow="sm" [responsivePadding]="true" [showHeader]="true">
+            <div slot="header" class="flex items-center gap-2">
+              <app-icon name="door-open" [size]="18" class="text-primary" />
+              <h3 class="text-base font-bold text-[var(--color-text-primary)]">
+                Accesos recientes
+              </h3>
+            </div>
+
+            @if (accessTimelineSteps().length) {
+              <app-timeline
+                class="block pt-1"
+                [steps]="accessTimelineSteps()"
+                [collapsible]="true"
+                expand_label="Ver todos los accesos"
+                collapse_label="Ocultar accesos"
+                size="sm"
+              >
+                <ng-template #stepTemplate let-step>
+                  <div class="flex flex-col sm:flex-row sm:justify-between gap-1">
+                    <div class="flex items-center gap-2">
+                      <span
+                        class="inline-block w-2 h-2 rounded-full flex-shrink-0"
+                        [style.background]="accessResultColor(step.data.result)"
+                      ></span>
+                      <div>
+                        <p
+                          class="text-sm font-bold"
+                          [style.color]="accessResultColor(step.data.result)"
+                        >
+                          {{ step.label }}
+                        </p>
+                        @if (step.data.reason) {
+                          <p class="text-xs text-gray-500 mt-0.5">
+                            {{ step.data.reason }}
+                          </p>
+                        }
+                      </div>
+                    </div>
+                    <span
+                      class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter whitespace-nowrap"
+                    >
+                      {{ step.date }}
+                    </span>
+                  </div>
+                </ng-template>
+              </app-timeline>
+            } @else {
+              <div class="member-empty-state">
+                <app-icon name="door-open" [size]="22" class="text-text-secondary" />
+                <span>Sin accesos registrados</span>
+              </div>
+            }
+          </app-card>
+        </div>
+
+        <!-- ═══ COLUMNA DERECHA (SIDEBAR) ═══ -->
+        <div class="flex flex-col gap-3 pt-1 lg:pt-0">
+          <!-- Acciones de estado -->
+          <app-card shadow="sm" [responsivePadding]="true">
+            <h2
+              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
+            >
+              Acciones
+            </h2>
+
+            @if (hasTransitions()) {
+              <div class="flex flex-col gap-2">
+                @if (canReactivate()) {
+                  <app-button
+                    variant="success"
+                    [fullWidth]="true"
+                    [disabled]="actionInProgress()"
+                    (clicked)="runTransition('reactivate')"
+                  >
+                    <app-icon slot="icon" name="play" [size]="16" />
+                    Reactivar
+                  </app-button>
+                }
+                @if (canFreeze()) {
+                  <app-button
+                    variant="secondary"
+                    [fullWidth]="true"
+                    [disabled]="actionInProgress()"
+                    (clicked)="runTransition('freeze')"
+                  >
+                    <app-icon slot="icon" name="pause" [size]="16" />
+                    Congelar
+                  </app-button>
+                }
+                @if (canSuspend()) {
+                  <app-button
+                    variant="outline-warning"
+                    [fullWidth]="true"
+                    [disabled]="actionInProgress()"
+                    (clicked)="runTransition('suspend')"
+                  >
+                    <app-icon slot="icon" name="ban" [size]="16" />
+                    Suspender
+                  </app-button>
+                }
+                @if (canCancel()) {
+                  <app-button
+                    variant="outline-danger"
+                    [fullWidth]="true"
+                    [disabled]="actionInProgress()"
+                    (clicked)="runTransition('cancel')"
+                  >
+                    <app-icon slot="icon" name="x-circle" [size]="16" />
+                    Cancelar membresía
+                  </app-button>
+                }
+              </div>
+            } @else {
+              <div
+                class="text-[10px] text-center text-text-secondary font-bold uppercase tracking-widest bg-[var(--color-surface)] py-3 rounded-xl border border-dashed border-border"
+              >
+                No hay acciones disponibles
+              </div>
+            }
+          </app-card>
+
+          <!-- Resumen -->
+          <app-card shadow="sm" [responsivePadding]="true">
+            <h2
+              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
+            >
+              Resumen
+            </h2>
+            <div class="space-y-2.5">
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-text-secondary">Plan</span>
+                <span class="font-semibold text-gray-900">{{ planName() }}</span>
+              </div>
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-text-secondary">Precio del plan</span>
+                <span class="font-semibold text-gray-900">{{ planPrice() | currency }}</span>
+              </div>
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-text-secondary">Inicio</span>
+                <span class="font-semibold text-gray-900">{{ formatDate(m.period_start) }}</span>
+              </div>
+              <div class="flex justify-between items-center text-sm">
+                <span class="text-text-secondary">Vence</span>
+                <span class="font-semibold text-gray-900">{{ formatDate(m.period_end) }}</span>
+              </div>
+              <div
+                class="pt-3 mt-1 border-t border-border flex justify-between items-center"
+              >
+                <span class="text-sm font-bold text-gray-900">Renovación auto.</span>
+                <span
+                  class="px-2 py-0.5 rounded-full text-[11px] font-bold"
+                  [class]="
+                    m.auto_renew
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-gray-100 text-gray-500'
+                  "
+                >
+                  {{ m.auto_renew ? "Activada" : "Desactivada" }}
+                </span>
+              </div>
+            </div>
+          </app-card>
+
+          <!-- Datos editables -->
+          <app-card shadow="sm" [responsivePadding]="true" [showHeader]="true">
+            <div slot="header" class="flex items-center gap-2">
+              <app-icon name="edit" [size]="18" class="text-primary" />
+              <h3 class="text-base font-bold text-[var(--color-text-primary)]">
+                Datos de la membresía
+              </h3>
+            </div>
+            <form [formGroup]="metaForm" class="space-y-4">
+              <app-setting-toggle
+                formControlName="auto_renew"
+                label="Renovación automática"
+                description="Marca la membresía para renovarse al vencer."
+              />
+              <app-textarea
+                formControlName="notes"
+                label="Notas"
+                placeholder="Observaciones internas."
+                [rows]="3"
+                [maxlength]="2000"
+              />
+              <div class="flex justify-end">
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  [loading]="isSavingMeta()"
+                  [disabled]="!canSaveMeta()"
+                  (clicked)="saveMeta()"
+                >
+                  Guardar cambios
+                </app-button>
+              </div>
+            </form>
+          </app-card>
+        </div>
+      </div>
+    </div>
+  }
+
+  <app-membership-renew-modal
+    [(open)]="showRenewModal"
+    [membership]="membership()"
+    (renewed)="onRenewed($event)"
+  />
+</div>

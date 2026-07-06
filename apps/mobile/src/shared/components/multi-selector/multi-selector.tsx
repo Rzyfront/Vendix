@@ -1,5 +1,13 @@
-import { useMemo, useState } from 'react';
-import { Alert, Pressable, Text, View, StyleSheet, TextInput, type ViewStyle } from 'react-native';
+import { useRef, useState } from 'react';
+import {
+  Pressable,
+  Text,
+  View,
+  Modal,
+  StyleSheet,
+  ScrollView,
+  type ViewStyle,
+} from 'react-native';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 
@@ -8,12 +16,6 @@ export interface MultiSelectorOption<T = string | number> {
   value: T;
   imageUrl?: string | null;
   icon?: string;
-  /**
-   * Etiqueta secundaria que se muestra a la derecha del `label`, alineada
-   * al final y truncada al 40% del ancho. Útil para mostrar el nombre de
-   * la categoría junto al nombre de la opción (mirrors el patrón web).
-   */
-  subLabel?: string;
 }
 
 interface MultiSelectorProps<T = string | number> {
@@ -24,29 +26,14 @@ interface MultiSelectorProps<T = string | number> {
   placeholder?: string;
   label?: string;
   disabled?: boolean;
-  /**
-   * Muestra una barra de búsqueda en el popover cuando está abierto.
-   * Útil cuando la lista de opciones es larga. El filtrado es
-   * case-insensitive por `label`.
-   */
-  searchable?: boolean;
-  /** Texto placeholder del input de búsqueda. */
-  searchPlaceholder?: string;
-  /** Texto cuando no hay opciones disponibles. */
-  emptyText?: string;
-  /**
-   * Texto del tooltip mostrado al lado del label (mirror web).
-   * Renderiza un ícono help-circle que al tap muestra el texto en un Alert.
-   */
-  tooltip?: string;
   style?: ViewStyle;
 }
 
-function normalize(value: string): string {
-  return value
-    .toLocaleLowerCase('es-CO')
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '');
+function arraysEqual<T>(a: T[], b: T[]): boolean {
+  if (a.length !== b.length) return false;
+  const sortedA = [...a].sort();
+  const sortedB = [...b].sort();
+  return sortedA.every((v, i) => sortedB[i] === v);
 }
 
 export function MultiSelector<T = string | number>({
@@ -57,24 +44,22 @@ export function MultiSelector<T = string | number>({
   placeholder = 'Seleccionar…',
   label,
   disabled = false,
-  searchable = false,
-  searchPlaceholder = 'Buscar…',
-  emptyText = 'No hay opciones disponibles',
-  tooltip,
   style,
 }: MultiSelectorProps<T>) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState('');
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+  const triggerRef = useRef<View>(null);
+
+  function measureTrigger() {
+    if (triggerRef.current) {
+      triggerRef.current.measureInWindow((x, y, w, h) => {
+        setPos({ top: y + h + 4, left: x, width: w });
+      });
+    }
+    setOpen(true);
+  }
 
   const selectedOptions = options.filter((o) => values.includes(o.value));
-
-  const filteredOptions = useMemo(() => {
-    if (!searchable) return options;
-    const trimmed = query.trim();
-    if (!trimmed) return options;
-    const needle = normalize(trimmed);
-    return options.filter((opt) => normalize(opt.label).includes(needle));
-  }, [options, query, searchable]);
 
   function toggle(value: T) {
     const set = new Set(values);
@@ -91,29 +76,13 @@ export function MultiSelector<T = string | number>({
     onChange([]);
   }
 
-  function close() {
-    setOpen(false);
-    setQuery('');
-  }
-
   return (
     <View style={style}>
-      {label && (
-        <Text style={styles.label}>
-          {label}
-          {tooltip && (
-            <Text
-              onPress={() => Alert.alert(label, tooltip)}
-              style={styles.helpIconInline}
-            >
-              {' '}ⓘ
-            </Text>
-          )}
-        </Text>
-      )}
+      {label && <Text style={styles.label}>{label}</Text>}
 
       <Pressable
-        onPress={() => !disabled && setOpen((current) => !current)}
+        ref={triggerRef}
+        onPress={() => !disabled && measureTrigger()}
         disabled={disabled}
         style={({ pressed }) => [
           styles.trigger,
@@ -122,9 +91,7 @@ export function MultiSelector<T = string | number>({
         ]}
       >
         {selectedOptions.length === 0 ? (
-          <Text style={[styles.triggerText, styles.placeholder]} numberOfLines={1}>
-            {placeholder}
-          </Text>
+          <Text style={[styles.triggerText, styles.placeholder]}>{placeholder}</Text>
         ) : (
           <View style={styles.chipsRow}>
             {selectedOptions.map((opt) => (
@@ -143,58 +110,27 @@ export function MultiSelector<T = string | number>({
             ))}
           </View>
         )}
-        <Icon
-          name={open ? 'chevron-up' : 'chevron-down'}
-          size={18}
-          color={colors.text.secondary}
-        />
+        <Icon name={open ? "chevron-up" : "chevron-down"} size={18} color={colors.text.secondary} />
       </Pressable>
 
-      {/*
-        Popover renderizado INLINE (sin <Modal>) para evitar el bug conocido
-        de RN donde el <TextInput> dentro de un Modal transparente pierde
-        el foco en cuanto aparece el teclado. Al renderizar el popover
-        como un View normal en el árbol, el teclado funciona nativo.
-      */}
-      {open && (
-        <View style={styles.popover}>
-          <View style={styles.popoverHeader}>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)} statusBarTranslucent>
+        <Pressable style={styles.backdrop} onPress={() => setOpen(false)} />
+        <View style={[styles.dropdown, { top: pos.top, left: pos.left, width: pos.width }]}>
+          <View style={styles.modalHeader}>
             <Text style={styles.modalHint}>
               {values.length === 0
                 ? 'Toca para agregar'
                 : `${values.length} seleccionado${values.length === 1 ? '' : 's'}`}
               {max ? ` (máx. ${max})` : ''}
             </Text>
-            <View style={{ flexDirection: 'row', gap: spacing[2] }}>
-              {values.length > 0 && (
-                <Pressable onPress={clear} hitSlop={8}>
-                  <Text style={styles.clearText}>Limpiar</Text>
-                </Pressable>
-              )}
-              <Pressable onPress={close} hitSlop={8}>
-                <Text style={styles.clearText}>Cerrar</Text>
+            {values.length > 0 && (
+              <Pressable onPress={clear} hitSlop={8}>
+                <Text style={styles.clearText}>Limpiar</Text>
               </Pressable>
-            </View>
+            )}
           </View>
-
-          {searchable && (
-            <SearchInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder={searchPlaceholder}
-            />
-          )}
-
-          {filteredOptions.length === 0 ? (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyText}>
-                {searchable && query.trim()
-                  ? `Sin resultados para "${query.trim()}"`
-                  : emptyText}
-              </Text>
-            </View>
-          ) : (
-            filteredOptions.map((opt) => {
+          <View style={styles.list}>
+            {options.map((opt) => {
               const isSelected = values.includes(opt.value);
               const isDisabled = !!max && !isSelected && values.length >= max;
               return (
@@ -209,57 +145,15 @@ export function MultiSelector<T = string | number>({
                     isDisabled && styles.disabled,
                   ]}
                 >
-                  <View style={[styles.checkbox, isSelected && styles.checkboxSelected]}>
-                    {isSelected && <Icon name="check" size={12} color="#FFFFFF" />}
-                  </View>
-                  <Text style={styles.optionLabel} numberOfLines={1}>
-                    {opt.label}
-                  </Text>
-                  {opt.subLabel !== undefined && opt.subLabel !== '' && (
-                    <Text style={styles.optionSubLabel} numberOfLines={1}>
-                      {opt.subLabel}
-                    </Text>
-                  )}
+                  {opt.icon && <Icon name={opt.icon} size={18} color={colors.text.primary} />}
+                  <Text style={styles.optionLabel}>{opt.label}</Text>
+                  {isSelected && <Icon name="check" size={18} color={colors.primary} />}
                 </Pressable>
               );
-            })
-          )}
+            })}
+          </View>
         </View>
-      )}
-    </View>
-  );
-}
-
-/**
- * Input de búsqueda con borde primary en focus.
- */
-function SearchInput({
-  value,
-  onChangeText,
-  placeholder,
-}: {
-  value: string;
-  onChangeText: (v: string) => void;
-  placeholder: string;
-}) {
-  const [focused, setFocused] = useState(false);
-  return (
-    <View style={[styles.searchBox, focused && styles.searchBoxFocused]}>
-      <TextInput
-        style={styles.searchInput}
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={colors.text.muted}
-        autoCorrect={false}
-        autoCapitalize="none"
-        returnKeyType="search"
-        // Importante: NO usar autoFocus aquí porque al renderizar el
-        // popover inline, autoFocus puede provocar focus theft con
-        // otros inputs. El usuario debe tocar el input para enfocarlo.
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-      />
+      </Modal>
     </View>
   );
 }
@@ -284,7 +178,7 @@ const styles = StyleSheet.create({
     gap: spacing[2],
   },
   triggerPressed: {
-    backgroundColor: colorScales.gray[100],
+    backgroundColor: colorScales.gray[50],
   },
   triggerText: {
     flex: 1,
@@ -296,6 +190,27 @@ const styles = StyleSheet.create({
   },
   disabled: {
     opacity: 0.5,
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  dropdown: {
+    position: 'absolute',
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 8,
   },
   chipsRow: {
     flex: 1,
@@ -322,22 +237,7 @@ const styles = StyleSheet.create({
   chipRemove: {
     padding: 2,
   },
-  // Popover (renderizado inline, sin Modal). Mismo visual que la web:
-  // card con border-radius, sombra, header con hint + acciones.
-  popover: {
-    marginTop: spacing[1.5],
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    backgroundColor: colors.card,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    elevation: 8,
-    overflow: 'hidden',
-  },
-  popoverHeader: {
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -349,12 +249,14 @@ const styles = StyleSheet.create({
   modalHint: {
     fontSize: typography.fontSize.sm,
     color: colors.text.secondary,
-    flexShrink: 1,
   },
   clearText: {
     fontSize: typography.fontSize.sm,
     color: colors.primary,
     fontWeight: '500',
+  },
+  list: {
+    maxHeight: 400,
   },
   option: {
     flexDirection: 'row',
@@ -373,65 +275,8 @@ const styles = StyleSheet.create({
   },
   optionLabel: {
     flex: 1,
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.base,
     color: colors.text.primary,
-  },
-  optionSubLabel: {
-    fontSize: typography.fontSize.xs,
-    color: colors.text.secondary,
-    maxWidth: '40%',
-    flexShrink: 0,
-  },
-  checkbox: {
-    width: 16,
-    height: 16,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1.5,
-    borderColor: colorScales.gray[300],
-    backgroundColor: colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkboxSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary,
-  },
-  // Búsqueda
-  searchBox: {
-    marginHorizontal: spacing[3],
-    marginTop: spacing[3],
-    marginBottom: spacing[2],
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[1.5],
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colorScales.gray[300],
-  },
-  searchBoxFocused: {
-    borderColor: colors.primary,
-    borderWidth: 1.5,
-  },
-  searchInput: {
-    fontSize: typography.fontSize.sm,
-    color: colors.text.primary,
-    paddingVertical: 0,
-  },
-  emptyState: {
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[6],
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emptyText: {
-    fontSize: typography.fontSize.sm,
-    color: colors.text.muted,
-    textAlign: 'center',
-  },
-  helpIconInline: {
-    color: colorScales.gray[400],
-    fontSize: 12,
-    fontWeight: typography.fontWeight.normal as any,
   },
 });
 

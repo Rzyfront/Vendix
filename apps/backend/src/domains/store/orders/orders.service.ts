@@ -23,10 +23,71 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 import { resolveStockUnitsConsumed } from '../products/services/packaging.util';
+import {
+  assertCanChargeVat,
+  isVatResponsible,
+} from '@common/helpers/vat-responsibility.helper';
 
 @Injectable()
 export class OrdersService {
   private readonly logger = new Logger(OrdersService.name);
+
+  /**
+   * F4 — Gate "no responsable de IVA" (escritura de venta POS/manual).
+   *
+   * Un comercio no responsable de IVA no puede COBRAR IVA en una venta. Las
+   * líneas de orden no cargan `tax_type`, así que el IVA se detecta vía las
+   * asignaciones de impuesto del producto (`tax_categories.tax_type='iva'`).
+   *
+   * Solo verifica cuando hay líneas con impuesto (>0) — ventas sin impuesto no
+   * requieren chequeo. Además, resuelve `fiscal_data` una sola vez y corta
+   * temprano si el comercio SÍ es responsable (camino feliz mayoritario).
+   * Indeterminado ⇒ responsable (no bloquea).
+   */
+  private async assertSaleVatAllowed(
+    items: Array<{ product_id?: number | null; tax_amount_item?: number | null }>,
+  ): Promise<void> {
+    const taxedProductIds = Array.from(
+      new Set(
+        items
+          .filter(
+            (it) => it.product_id && Number(it.tax_amount_item ?? 0) > 0,
+          )
+          .map((it) => it.product_id as number),
+      ),
+    );
+    if (taxedProductIds.length === 0) return;
+
+    let fiscalData: any = null;
+    try {
+      fiscalData = await this.settingsService.getFiscalData();
+    } catch {
+      // fiscal_data no resoluble ⇒ indeterminado ⇒ responsable.
+      return;
+    }
+    if (isVatResponsible(fiscalData)) return;
+
+    // Comercio no responsable: rechazar si algún producto vendido tiene una
+    // categoría de impuesto tipo `iva` asignada. Se evalúa en JS (no en un
+    // filtro de relación to-one) para evitar ambigüedad de sintaxis Prisma.
+    const soldProducts = await this.prisma.products.findMany({
+      where: { id: { in: taxedProductIds } },
+      select: {
+        id: true,
+        product_tax_assignments: {
+          select: { tax_categories: { select: { tax_type: true } } },
+        },
+      },
+    });
+    const chargesVat = soldProducts.some((p) =>
+      (p.product_tax_assignments ?? []).some(
+        (a) => (a.tax_categories?.tax_type ?? '').toLowerCase() === 'iva',
+      ),
+    );
+    if (chargesVat) {
+      assertCanChargeVat(fiscalData, 'sale');
+    }
+  }
 
   constructor(
     private prisma: StorePrismaService,
@@ -96,6 +157,9 @@ export class OrdersService {
         }
       }
     }
+
+    // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
+    await this.assertSaleVatAllowed(createOrderDto.items);
 
     let retries = 3;
     while (retries > 0) {
@@ -669,6 +733,9 @@ export class OrdersService {
       dto.items,
       ctx,
     );
+
+    // F4 — comercio no responsable de IVA no puede cobrar IVA en la venta.
+    await this.assertSaleVatAllowed(dto.items);
 
     // Calculate totals from items
     const subtotal =

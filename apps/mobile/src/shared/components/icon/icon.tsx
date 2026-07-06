@@ -11,6 +11,7 @@ import {
   UserCheck,
   UserPlus,
   Mail,
+  MailCheck,
   Phone,
   Building2,
   Store,
@@ -91,6 +92,9 @@ import {
   CheckSquare,
   Square,
   CheckCircle,
+  XCircle,
+  AlertCircle,
+  BellRing,
   Flag,
   Star,
   Globe,
@@ -404,7 +408,6 @@ import {
   Repeat,
   CornerDownLeft,
   ShieldOff,
-  XCircle,
   CheckCircle2,
   PencilLine,
   Edit3,
@@ -427,6 +430,7 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'user-check': UserCheck,
   'user-plus': UserPlus,
   mail: Mail,
+  'mail-check': MailCheck,
   'map-pin': MapPin,
   phone: Phone,
   building: Building2,
@@ -439,6 +443,10 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   calculator: Calculator,
   wallet: Wallet,
   'bar-chart': BarChart3,
+  // Mantenemos `bar-chart-3` mapeado a `ChartBar` para paridad con
+  // apps/frontend (lucide-react), donde ese nombre existe pero RN no lo
+  // provee. El alias `bar-chart` usa `BarChart3` directamente.
+  'bar-chart-3': ChartBar,
   settings: Settings,
   shield: Shield,
   bot: Bot,
@@ -509,6 +517,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'check-square': CheckSquare,
   square: Square,
   'check-circle': CheckCircle,
+  'x-circle': XCircle,
+  'alert-circle': AlertCircle,
+  'bell-ring': BellRing,
   flag: Flag,
   star: Star,
   globe: Globe,
@@ -826,7 +837,6 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   repeat: Repeat,
   'corner-down-left': CornerDownLeft,
   'shield-off': ShieldOff,
-  'x-circle': XCircle,
   'check-circle-2': CheckCircle2,
   'pencil-line': PencilLine,
   'edit-3': Edit3,
@@ -838,13 +848,22 @@ interface IconProps {
   name: string;
   size?: number;
   color?: string;
+  strokeWidth?: number;
   style?: StyleProp<ViewStyle>;
 }
 
-export function Icon({ name, size = 24, color = colors.text.primary, style }: IconProps) {
+export type IconName = keyof typeof iconMap;
+
+export function Icon({
+  name,
+  size = 24,
+  color = colors.text.primary,
+  strokeWidth = 2,
+  style,
+}: IconProps) {
   const LucideIcon = iconMap[name];
   if (!LucideIcon) {
     return <View style={[{ width: size, height: size }, style]} />;
   }
-  return <LucideIcon size={size} color={color} strokeWidth={2} style={style} />;
+  return <LucideIcon size={size} color={color} strokeWidth={strokeWidth} style={style} />;
 }

@@ -266,6 +266,10 @@ export interface FiscalDataSettings {
   is_withholding_agent?: boolean;
   is_self_withholder?: boolean;
   vat_periodicity?: FiscalVatPeriodicity;
+  /** Código DANE (Divipola) del municipio — columna real `stores.municipality_code`. */
+  municipality_code?: string;
+  /** Código CIIU dedicado — columna real `stores.ciiu_code` / `organizations.ciiu_code`. */
+  ciiu_code?: string;
   [key: string]: unknown;
 }
 

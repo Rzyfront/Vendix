@@ -344,6 +344,30 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "8666f016",
+      "created_by": "rzy",
+      "created_at": "2026-07-03T14:24:01Z",
+      "sessions": 9,
+      "memories": 44,
+      "prompts": 0
+    },
+    {
+      "id": "4f04be9c",
+      "created_by": "rzy",
+      "created_at": "2026-07-05T07:33:56Z",
+      "sessions": 17,
+      "memories": 43,
+      "prompts": 0
+    },
+    {
+      "id": "4cdc0212",
+      "created_by": "rzy",
+      "created_at": "2026-07-06T04:25:06Z",
+      "sessions": 3,
+      "memories": 10,
+      "prompts": 0
     }
   ]
 }

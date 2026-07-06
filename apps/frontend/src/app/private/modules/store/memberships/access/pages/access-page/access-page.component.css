@@ -1,0 +1,422 @@
+:host {
+  display: block;
+}
+
+/* ─────────────────────────────  Aforo layout  ───────────────────────────── */
+.aforo-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 8px 24px;
+}
+@media (min-width: 768px) {
+  .aforo-wrap {
+    gap: 16px;
+    padding: 16px 0 32px;
+  }
+}
+
+/* ───────────────────────────  Live counter hero  ─────────────────────────── */
+.aforo-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 20px;
+  border-radius: 16px;
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+@media (min-width: 768px) {
+  .aforo-hero {
+    flex-direction: row;
+    align-items: center;
+    gap: 28px;
+    padding: 28px 32px;
+  }
+}
+.aforo-hero.is-full {
+  border-color: #fca5a5;
+  background: linear-gradient(0deg, rgba(220, 38, 38, 0.04), rgba(220, 38, 38, 0.04)),
+    var(--color-surface, #ffffff);
+}
+
+.aforo-gauge {
+  --ring: #16a34a;
+  flex: 0 0 auto;
+  width: 150px;
+  height: 150px;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  background:
+    conic-gradient(var(--ring) calc(var(--pct, 0) * 1%), transparent 0),
+    var(--color-background, #f3f4f6);
+  /* Ring is redrawn on every SSE tick; keep it cheap (no transition:all). */
+  transition: background 0.3s ease;
+  box-shadow: inset 0 0 0 10px var(--color-surface, #ffffff);
+}
+.aforo-gauge-inner {
+  width: 112px;
+  height: 112px;
+  border-radius: 9999px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: var(--color-surface, #ffffff);
+}
+.aforo-count {
+  font-size: 44px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--color-text-primary, #111827);
+  font-variant-numeric: tabular-nums;
+}
+.aforo-count-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary, #6b7280);
+}
+.aforo-cap {
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.aforo-meta {
+  flex: 1 1 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.aforo-meta-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.aforo-state-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+}
+.aforo-state-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--color-text-primary, #111827);
+}
+.aforo-state-label.full {
+  color: #dc2626;
+}
+.aforo-state-label.muted {
+  color: var(--color-text-secondary, #6b7280);
+  font-weight: 600;
+}
+.aforo-syncing {
+  font-size: 11px;
+  color: var(--color-text-secondary, #9ca3af);
+  font-style: italic;
+}
+
+.aforo-bar {
+  width: 100%;
+  height: 12px;
+  border-radius: 9999px;
+  background: var(--color-background, #eef0f3);
+  overflow: hidden;
+}
+.aforo-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+  /* width-only transition — SSE ticks must not re-trigger a full animation. */
+  transition: width 0.4s ease;
+}
+.aforo-bar-legend {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b7280);
+  font-variant-numeric: tabular-nums;
+}
+.aforo-hint {
+  font-size: 13px;
+  color: var(--color-text-secondary, #6b7280);
+  line-height: 1.4;
+}
+
+/* ─────────────────────────────  Actions  ────────────────────────────────── */
+.aforo-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+@media (min-width: 900px) {
+  .aforo-actions {
+    grid-template-columns: 1.4fr 1fr 1fr;
+    gap: 24px;
+  }
+}
+.aforo-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.aforo-block + .aforo-block {
+  border-top: 1px solid var(--color-border, #eceef1);
+  padding-top: 16px;
+}
+@media (min-width: 900px) {
+  .aforo-block + .aforo-block {
+    border-top: none;
+    border-left: 1px solid var(--color-border, #eceef1);
+    padding-top: 0;
+    padding-left: 24px;
+  }
+}
+.aforo-block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary, #111827);
+}
+.aforo-block-title app-icon {
+  color: var(--color-primary, #2f6f4e);
+}
+.aforo-block-desc {
+  font-size: 12.5px;
+  color: var(--color-text-secondary, #6b7280);
+  line-height: 1.4;
+}
+.aforo-tag {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-primary, #2f6f4e);
+  background: rgba(47, 111, 78, 0.1);
+  padding: 2px 8px;
+  border-radius: 9999px;
+}
+
+.aforo-checkin {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.aforo-select,
+.aforo-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text-primary, #111827);
+  font-size: 14px;
+  outline: none;
+}
+.aforo-select:focus,
+.aforo-input:focus {
+  border-color: var(--color-primary, #2f6f4e);
+  box-shadow: 0 0 0 3px rgba(47, 111, 78, 0.12);
+}
+.aforo-checkin-result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid;
+  background: var(--color-background, #f9fafb);
+}
+.aforo-result-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: #ffffff;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  white-space: nowrap;
+}
+.aforo-result-reason {
+  font-size: 12.5px;
+  color: var(--color-text-secondary, #4b5563);
+}
+
+/* Adjust +/- */
+.aforo-adjust {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.aforo-step {
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text-primary, #111827);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.aforo-step:hover:not(:disabled) {
+  border-color: var(--color-primary, #2f6f4e);
+  background: rgba(47, 111, 78, 0.06);
+}
+.aforo-step:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.aforo-adjust-value {
+  min-width: 40px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary, #111827);
+}
+
+/* ─────────────────────────────  Buttons  ────────────────────────────────── */
+.aforo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+.aforo-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.aforo-btn.full-width {
+  width: 100%;
+}
+.aforo-btn.primary {
+  background: var(--color-primary, #2f6f4e);
+  color: #ffffff;
+}
+.aforo-btn.primary:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+.aforo-btn.outline {
+  background: var(--color-surface, #ffffff);
+  border-color: var(--color-border, #d1d5db);
+  color: var(--color-text-primary, #111827);
+}
+.aforo-btn.outline:hover:not(:disabled) {
+  border-color: var(--color-primary, #2f6f4e);
+  color: var(--color-primary, #2f6f4e);
+}
+.aforo-btn.ghost {
+  background: transparent;
+  color: var(--color-text-secondary, #6b7280);
+}
+.aforo-btn.ghost:hover:not(:disabled) {
+  background: var(--color-background, #f3f4f6);
+}
+
+/* ─────────────────────────────  Config  ─────────────────────────────────── */
+.aforo-config {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.aforo-config-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.aforo-config-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 768px) {
+  .aforo-config-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 20px 28px;
+  }
+}
+.aforo-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.aforo-field.dimmed {
+  opacity: 0.5;
+}
+.aforo-field-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+}
+.aforo-field-hint {
+  font-size: 11px;
+  color: var(--color-text-secondary, #9ca3af);
+}
+.aforo-interval {
+  display: flex;
+  gap: 8px;
+}
+.aforo-chip {
+  flex: 1 1 auto;
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border, #d1d5db);
+  background: var(--color-surface, #ffffff);
+  color: var(--color-text-secondary, #6b7280);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.aforo-chip.active {
+  border-color: var(--color-primary, #2f6f4e);
+  background: rgba(47, 111, 78, 0.08);
+  color: var(--color-primary, #2f6f4e);
+}
+.aforo-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.aforo-schedule-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(217, 119, 6, 0.08);
+  border: 1px solid rgba(217, 119, 6, 0.2);
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: #92400e;
+}
+.aforo-schedule-note app-icon {
+  flex: 0 0 auto;
+  color: #d97706;
+}
+.aforo-config-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid var(--color-border, #eceef1);
+  padding-top: 14px;
+}

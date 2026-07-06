@@ -49,7 +49,9 @@ describe('PayrollCalculationService — labor withholding (art. 383 ET)', () => 
       }),
     );
     expect(calc.deductions.retention_details?.method).toBe('art383_proc1');
-    expect(calc.deductions.total).toBe(400_000 + 400_000 + 365_600);
+    // FSP 1% on the IBC (10.000.000 = 7,02 SMMLV → tramo 4–16 SMMLV).
+    expect(calc.deductions.fsp).toBe(100_000);
+    expect(calc.deductions.total).toBe(400_000 + 400_000 + 100_000 + 365_600);
   });
 
   it('excludes the transport subsidy from the withholding base', () => {
@@ -215,6 +217,7 @@ describe('PayrollCalculationService — payroll novelties integration', () => {
         payment: 383_333.33,
       },
     ]);
+    // Incapacity general (3 días): tramo 1-2 empleador, día 3 EPS (reembolsable).
     expect(calc.earnings.disabilities).toEqual([
       {
         start_date: '2026-06-05',
@@ -222,6 +225,9 @@ describe('PayrollCalculationService — payroll novelties integration', () => {
         quantity: 3,
         type: 1,
         payment: 153_341,
+        employer_amount: 102_227.33, // 2 días × (2.300.000/30) × 66,67%
+        reimbursable_amount: 51_113.67, // 1 día EPS
+        reimbursed_by: 'eps',
       },
     ]);
 
@@ -230,7 +236,12 @@ describe('PayrollCalculationService — payroll novelties integration', () => {
     const ibc = 2_300_000 + 175_000 + 120_000 + 300_000; // 2.895.000
     expect(calc.deductions.health).toBe(115_800); // 2.895.000 × 4%
     expect(calc.deductions.pension).toBe(115_800);
-    expect(calc.employer_costs.health).toBe(246_075); // 2.895.000 × 8,5%
+    // Ley 1607 exoneration: 2.895.000 = 2,03 SMMLV < 10 SMMLV → employer health,
+    // SENA and ICBF are 0; pension (12%) is always due.
+    expect(calc.employer_costs.health).toBe(0);
+    expect(calc.employer_costs.sena).toBe(0);
+    expect(calc.employer_costs.icbf).toBe(0);
+    expect(calc.employer_costs.pension).toBe(347_400); // 2.895.000 × 12%
 
     // Withholding base = IBC (salary income), not vacations/incapacities
     expect(calc.deductions.retention_details).toEqual(
@@ -339,6 +350,9 @@ describe('PayrollCalculationService — payroll novelties integration', () => {
       },
       payroll_novelties: { findMany: jest.fn() },
       payroll_items: { findFirst: jest.fn() },
+      withoutScope: jest.fn().mockReturnValue({
+        employee_fiscal_profiles: { findMany: jest.fn().mockResolvedValue([]) },
+      }),
       $transaction: jest.fn().mockImplementation(async (cb: any) => cb(tx)),
     };
     const advances = {
@@ -395,5 +409,144 @@ describe('PayrollCalculationService — payroll novelties integration', () => {
       55,
     );
     expect(novelties_service.releaseFromRun).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('PayrollCalculationService — FSP, exoneration, integral salary & IBC caps', () => {
+  const UVT_2026 = 52374;
+  const rules = COLOMBIAN_PAYROLL_DEFAULTS_2026;
+  const SMMLV = rules.minimum_wage; // 1.423.500
+
+  const createService = () =>
+    new PayrollCalculationService(
+      {} as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+  const employee = (
+    base_salary: number,
+    salary_type: 'ordinary' | 'integral' = 'ordinary',
+  ) => ({
+    id: 700,
+    base_salary: new Prisma.Decimal(base_salary),
+    arl_risk_level: 1,
+    salary_type,
+  });
+
+  it('withholds no FSP below 4 SMMLV', () => {
+    const service = createService();
+    const calc = service.calculateEmployeePayroll(
+      employee(SMMLV * 2), // 2 SMMLV
+      30,
+      rules,
+      0,
+      UVT_2026,
+      2026,
+    );
+    expect(calc.deductions.fsp).toBe(0);
+    expect(calc.deductions.solidarity_fund_amount).toBeUndefined();
+  });
+
+  it('staggers FSP: 1.2% in the 16–17 SMMLV tramo, split solidarity + subsistence', () => {
+    const service = createService();
+    const base = 24_000_000; // 16,86 SMMLV → tramo [16,17) = 1,2%
+    const calc = service.calculateEmployeePayroll(
+      employee(base),
+      30,
+      rules,
+      0,
+      UVT_2026,
+      2026,
+    );
+    expect(calc.deductions.fsp).toBe(288_000); // 24.000.000 × 1,2%
+    expect(calc.deductions.solidarity_fund_amount).toBe(240_000); // 1%
+    expect(calc.deductions.solidarity_fund_pct).toBe(1);
+    expect(calc.deductions.subsistence_fund_amount).toBe(48_000); // 0,2%
+    expect(calc.deductions.subsistence_fund_pct).toBeCloseTo(0.2, 5);
+  });
+
+  it('caps the contribution base at 25 SMMLV (health/pension) while FSP tramo uses the real salary', () => {
+    const service = createService();
+    const base = 50_000_000; // 35,12 SMMLV → clamp a 25 SMMLV
+    const calc = service.calculateEmployeePayroll(
+      employee(base),
+      30,
+      rules,
+      0,
+      UVT_2026,
+      2026,
+    );
+    const ceiling = SMMLV * 25; // 35.587.500
+    expect(calc.deductions.health).toBe(Math.round(ceiling * 0.04 * 100) / 100);
+    expect(calc.deductions.pension).toBe(
+      Math.round(ceiling * 0.04 * 100) / 100,
+    );
+    // >20 SMMLV → 2% FSP, applied to the capped base.
+    expect(calc.deductions.fsp).toBe(Math.round(ceiling * 0.02 * 100) / 100);
+  });
+
+  it('exonerates employer health/SENA/ICBF below 10 SMMLV but always charges pension/ARL/caja', () => {
+    const service = createService();
+    const base = SMMLV * 5; // 5 SMMLV < 10 → exonerado
+    const calc = service.calculateEmployeePayroll(
+      employee(base),
+      30,
+      rules,
+      0,
+      UVT_2026,
+      2026,
+    );
+    expect(calc.employer_costs.health).toBe(0);
+    expect(calc.employer_costs.sena).toBe(0);
+    expect(calc.employer_costs.icbf).toBe(0);
+    expect(calc.employer_costs.pension).toBe(
+      Math.round(base * 0.12 * 100) / 100,
+    );
+    expect(calc.employer_costs.compensation_fund).toBe(
+      Math.round(base * 0.04 * 100) / 100,
+    );
+    expect(calc.employer_costs.arl).toBeGreaterThan(0);
+  });
+
+  it('charges full employer contributions at or above 10 SMMLV', () => {
+    const service = createService();
+    const base = SMMLV * 12; // 12 SMMLV ≥ 10 → NO exonerado
+    const calc = service.calculateEmployeePayroll(
+      employee(base),
+      30,
+      rules,
+      0,
+      UVT_2026,
+      2026,
+    );
+    expect(calc.employer_costs.health).toBe(
+      Math.round(base * 0.085 * 100) / 100,
+    );
+    expect(calc.employer_costs.sena).toBe(Math.round(base * 0.02 * 100) / 100);
+    expect(calc.employer_costs.icbf).toBe(Math.round(base * 0.03 * 100) / 100);
+  });
+
+  it('uses 70% of the salary as the SS base for salario integral', () => {
+    const service = createService();
+    const base = 25_000_000; // integral; IBC = 17.500.000 (12,29 SMMLV → no exonerado)
+    const ss = base * 0.7; // 17.500.000
+    const calc = service.calculateEmployeePayroll(
+      employee(base, 'integral'),
+      30,
+      rules,
+      0,
+      UVT_2026,
+      2026,
+    );
+    expect(calc.deductions.health).toBe(Math.round(ss * 0.04 * 100) / 100); // 700.000
+    expect(calc.deductions.pension).toBe(Math.round(ss * 0.04 * 100) / 100);
+    expect(calc.deductions.fsp).toBe(Math.round(ss * 0.01 * 100) / 100); // 12,29 SMMLV → 1%
+    expect(calc.employer_costs.health).toBe(Math.round(ss * 0.085 * 100) / 100);
+    // Provisions also on the 70% base (factor prestacional excluded).
+    expect(calc.provisions.severance).toBe(
+      Math.round((ss / 12) * 100) / 100,
+    );
   });
 });

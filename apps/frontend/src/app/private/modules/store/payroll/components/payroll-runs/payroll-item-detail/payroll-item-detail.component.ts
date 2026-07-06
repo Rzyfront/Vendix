@@ -3,13 +3,19 @@ import {
   input,
   output,
   inject,
-  effect,
+  computed,
+  signal,
 } from '@angular/core';
+import { Store } from '@ngrx/store';
 
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { ExpandableCardComponent } from '../../../../../../../shared/components/expandable-card/expandable-card.component';
+import {
+  BadgeComponent,
+  type BadgeVariant,
+} from '../../../../../../../shared/components/badge/badge.component';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import {
   PayrollItem,
@@ -19,14 +25,55 @@ import {
   LicenseEarningDetail,
   BonusEarningDetail,
   RetentionDetails,
+  DianItemResult,
+  DianAdjustmentPayload,
 } from '../../../interfaces/payroll.interface';
-import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
+import { sendAdjustment } from '../../../state/actions/payroll.actions';
+import {
+  selectDianSendResult,
+  selectAdjustmentLoadingByItem,
+  selectAdjustmentResultByItem,
+} from '../../../state/selectors/payroll.selectors';
+import {
+  formatDateOnlyUTC,
+  toUTCDateString,
+} from '../../../../../../../shared/utils/date.util';
 
 interface EntryRow {
   key: string;
   label: string;
   value: number;
 }
+
+interface DerivedEntries {
+  earningsEntries: EntryRow[];
+  deductionsEntries: EntryRow[];
+  employerCostsEntries: EntryRow[];
+  provisionsEntries: EntryRow[];
+  provisionsTotal: number;
+  overtimeDetails: OvertimeEarningDetail[];
+  vacationDetails: VacationEarningDetail[];
+  disabilityDetails: DisabilityEarningDetail[];
+  licenseDetails: LicenseEarningDetail[];
+  bonusDetails: BonusEarningDetail[];
+  otherDeductions: Array<{ description: string; amount: number }>;
+  retentionDetails: RetentionDetails | null;
+}
+
+const EMPTY_DERIVED: DerivedEntries = {
+  earningsEntries: [],
+  deductionsEntries: [],
+  employerCostsEntries: [],
+  provisionsEntries: [],
+  provisionsTotal: 0,
+  overtimeDetails: [],
+  vacationDetails: [],
+  disabilityDetails: [],
+  licenseDetails: [],
+  bonusDetails: [],
+  otherDeductions: [],
+  retentionDetails: null,
+};
 
 @Component({
   selector: 'vendix-payroll-item-detail',
@@ -35,14 +82,15 @@ interface EntryRow {
     ModalComponent,
     ButtonComponent,
     IconComponent,
-    ExpandableCardComponent
-],
+    ExpandableCardComponent,
+    BadgeComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="isOpenChange.emit(false)"
-      [title]="modalTitle"
+      [title]="modalTitle()"
       size="lg"
     >
       @if (item()) {
@@ -66,25 +114,101 @@ interface EntryRow {
           </div>
         </div>
 
-        <!-- 2. Resumen (4 mini-cards con colores) -->
+        <!-- 2. Resumen (4 mini-cards con tokens semanticos dark-safe) -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-          <div class="p-3 rounded-lg bg-blue-50 border border-blue-100 text-center">
-            <p class="text-[10px] uppercase tracking-wide text-blue-600">Devengado</p>
-            <p class="text-sm font-bold text-blue-700">{{ formatCurrency(item()!.total_earnings) }}</p>
+          <div class="p-3 rounded-lg text-center bg-[var(--color-info-bg)] border border-[var(--color-border)]">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-info-text)]">Devengado</p>
+            <p class="text-sm font-bold text-[var(--color-info-text)]">{{ formatCurrency(item()!.total_earnings) }}</p>
           </div>
-          <div class="p-3 rounded-lg bg-red-50 border border-red-100 text-center">
-            <p class="text-[10px] uppercase tracking-wide text-red-600">Deducciones</p>
-            <p class="text-sm font-bold text-red-700">{{ formatCurrency(item()!.total_deductions) }}</p>
+          <div class="p-3 rounded-lg text-center bg-[var(--color-error-bg)] border border-[var(--color-border)]">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-error-text)]">Deducciones</p>
+            <p class="text-sm font-bold text-[var(--color-error-text)]">{{ formatCurrency(item()!.total_deductions) }}</p>
           </div>
-          <div class="p-3 rounded-lg bg-yellow-50 border border-yellow-100 text-center">
-            <p class="text-[10px] uppercase tracking-wide text-yellow-600">Costos Emp.</p>
-            <p class="text-sm font-bold text-yellow-700">{{ formatCurrency(item()!.total_employer_costs) }}</p>
+          <div class="p-3 rounded-lg text-center bg-[var(--color-warning-bg)] border border-[var(--color-border)]">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-warning-text)]">Costos Emp.</p>
+            <p class="text-sm font-bold text-[var(--color-warning-text)]">{{ formatCurrency(item()!.total_employer_costs) }}</p>
           </div>
-          <div class="p-3 rounded-lg bg-green-50 border border-green-100 text-center">
-            <p class="text-[10px] uppercase tracking-wide text-green-600">Neto a Pagar</p>
-            <p class="text-sm font-bold text-green-700">{{ formatCurrency(item()!.net_pay) }}</p>
+          <div class="p-3 rounded-lg text-center bg-[var(--color-success-bg)] border border-[var(--color-border)]">
+            <p class="text-[10px] uppercase tracking-wide text-[var(--color-success-text)]">Neto a Pagar</p>
+            <p class="text-sm font-bold text-[var(--color-success-text)]">{{ formatCurrency(item()!.net_pay) }}</p>
           </div>
         </div>
+
+        <!-- 2b. NOMINA ELECTRONICA DIAN (por item) -->
+        @if (hasDianInfo() || (itemRejected() && runId() != null)) {
+          <div class="mb-4 p-3 rounded-lg bg-[var(--color-background)] border border-[var(--color-border)]">
+            <div class="flex items-center justify-between gap-2 mb-2">
+              <span class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)]">
+                Nomina Electronica DIAN
+              </span>
+              @if (itemDianBadge(); as badge) {
+                <app-badge [variant]="badge.variant" size="xs">{{ badge.label }}</app-badge>
+              }
+            </div>
+
+            @if (itemCune()) {
+              <div class="flex items-center justify-between gap-2 text-xs py-0.5">
+                <span class="text-[var(--color-text-secondary)]">CUNE</span>
+                <span class="font-mono text-[10px] text-[var(--color-text-primary)] break-all text-right">{{ itemCune() }}</span>
+              </div>
+            }
+
+            @if (dianItemResult()?.message; as msg) {
+              <p class="text-[11px] text-[var(--color-text-secondary)] mt-1">{{ msg }}</p>
+            }
+
+            @if (adjustmentResult()?.adjustment_result?.message; as adjMsg) {
+              <p class="text-[11px] text-[var(--color-text-secondary)] mt-1">Ajuste: {{ adjMsg }}</p>
+            }
+
+            <!-- Accion: Nota de ajuste (tipo 103) para items rechazados -->
+            @if (itemRejected() && runId() != null) {
+              @if (!showAdjustForm()) {
+                <div class="mt-2">
+                  <app-button variant="outline" size="sm" (clicked)="openAdjustForm()" [loading]="adjustmentLoading()">
+                    <app-icon slot="icon" name="file-signature" [size]="14" class="mr-1"></app-icon>
+                    Nota de ajuste
+                  </app-button>
+                </div>
+              } @else {
+                <div class="mt-2 space-y-2">
+                  <div>
+                    <label class="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)] block mb-1">CUNE predecesor</label>
+                    <input type="text"
+                           [value]="adjPredecessorCune()"
+                           (input)="adjPredecessorCune.set($any($event.target).value)"
+                           class="w-full px-2 py-1.5 text-xs rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)]" />
+                  </div>
+                  <div>
+                    <label class="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)] block mb-1">Documento predecesor</label>
+                    <input type="text"
+                           [value]="adjPredecessorDoc()"
+                           (input)="adjPredecessorDoc.set($any($event.target).value)"
+                           class="w-full px-2 py-1.5 text-xs rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)]" />
+                  </div>
+                  <div>
+                    <label class="text-[10px] uppercase tracking-wide text-[var(--color-text-secondary)] block mb-1">Fecha de generacion</label>
+                    <input type="date"
+                           [value]="adjPredecessorDate()"
+                           (input)="adjPredecessorDate.set($any($event.target).value)"
+                           class="w-full px-2 py-1.5 text-xs rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)]" />
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <app-button variant="primary" size="sm"
+                                (clicked)="submitAdjustment()"
+                                [disabled]="!adjustValid()"
+                                [loading]="adjustmentLoading()">
+                      Enviar ajuste
+                    </app-button>
+                    <app-button variant="ghost" size="sm" (clicked)="showAdjustForm.set(false)">
+                      Cancelar
+                    </app-button>
+                  </div>
+                </div>
+              }
+            }
+          </div>
+        }
 
         <!-- 3. ExpandableCards por seccion -->
         <div class="space-y-3">
@@ -98,21 +222,21 @@ interface EntryRow {
               <span class="ml-auto text-sm font-bold text-blue-700">{{ formatCurrency(item()!.total_earnings) }}</span>
             </div>
             <div class="px-4 py-3 space-y-1">
-              @for (entry of earningsEntries; track entry.key) {
+              @for (entry of earningsEntries(); track entry.key) {
                 <div class="flex justify-between items-center text-xs py-1">
                   <span class="text-[var(--color-text-secondary)]">{{ entry.label }}</span>
                   <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(entry.value) }}</span>
                 </div>
               }
-              @if (earningsEntries.length === 0 && !hasEarningsDetails) {
+              @if (earningsEntries().length === 0 && !hasEarningsDetails()) {
                 <p class="text-xs text-[var(--color-text-secondary)]">Sin detalle</p>
               }
 
               <!-- Horas extras y recargos -->
-              @if (overtimeDetails.length > 0) {
+              @if (overtimeDetails().length > 0) {
                 <div class="mt-2 pt-2 border-t border-[var(--color-border)]">
                   <p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">Horas Extras y Recargos</p>
-                  @for (entry of overtimeDetails; track $index) {
+                  @for (entry of overtimeDetails(); track $index) {
                     <div class="flex justify-between items-center text-xs py-1">
                       <span class="text-[var(--color-text-secondary)]">
                         {{ getOvertimeLabel(entry.type) }}
@@ -125,10 +249,10 @@ interface EntryRow {
               }
 
               <!-- Vacaciones -->
-              @if (vacationDetails.length > 0) {
+              @if (vacationDetails().length > 0) {
                 <div class="mt-2 pt-2 border-t border-[var(--color-border)]">
                   <p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">Vacaciones</p>
-                  @for (entry of vacationDetails; track $index) {
+                  @for (entry of vacationDetails(); track $index) {
                     <div class="flex justify-between items-center text-xs py-1">
                       <span class="text-[var(--color-text-secondary)]">
                         {{ formatDateRange(entry.start_date, entry.end_date) }}
@@ -141,10 +265,10 @@ interface EntryRow {
               }
 
               <!-- Incapacidades -->
-              @if (disabilityDetails.length > 0) {
+              @if (disabilityDetails().length > 0) {
                 <div class="mt-2 pt-2 border-t border-[var(--color-border)]">
                   <p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">Incapacidades</p>
-                  @for (entry of disabilityDetails; track $index) {
+                  @for (entry of disabilityDetails(); track $index) {
                     <div class="flex justify-between items-center text-xs py-1">
                       <span class="text-[var(--color-text-secondary)]">
                         {{ getDisabilityLabel(entry.type) }} · {{ formatDateRange(entry.start_date, entry.end_date) }}
@@ -157,10 +281,10 @@ interface EntryRow {
               }
 
               <!-- Licencias -->
-              @if (licenseDetails.length > 0) {
+              @if (licenseDetails().length > 0) {
                 <div class="mt-2 pt-2 border-t border-[var(--color-border)]">
                   <p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">Licencias</p>
-                  @for (entry of licenseDetails; track $index) {
+                  @for (entry of licenseDetails(); track $index) {
                     <div class="flex justify-between items-center text-xs py-1">
                       <span class="text-[var(--color-text-secondary)]">
                         {{ getLicenseLabel(entry.type) }} · {{ formatDateRange(entry.start_date, entry.end_date) }}
@@ -173,10 +297,10 @@ interface EntryRow {
               }
 
               <!-- Bonificaciones -->
-              @if (bonusDetails.length > 0) {
+              @if (bonusDetails().length > 0) {
                 <div class="mt-2 pt-2 border-t border-[var(--color-border)]">
                   <p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">Bonificaciones</p>
-                  @for (entry of bonusDetails; track $index) {
+                  @for (entry of bonusDetails(); track $index) {
                     <div class="flex justify-between items-center text-xs py-1">
                       <span class="text-[var(--color-text-secondary)]">Bonificación {{ $index + 1 }}</span>
                       <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(entry.taxable + entry.non_taxable) }}</span>
@@ -197,21 +321,21 @@ interface EntryRow {
               <span class="ml-auto text-sm font-bold text-red-700">{{ formatCurrency(item()!.total_deductions) }}</span>
             </div>
             <div class="px-4 py-3 space-y-1">
-              @for (entry of deductionsEntries; track entry.key) {
+              @for (entry of deductionsEntries(); track entry.key) {
                 <div class="flex justify-between items-center text-xs py-1">
                   <span class="text-[var(--color-text-secondary)]">{{ entry.label }}</span>
                   <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(entry.value) }}</span>
                 </div>
               }
-              @if (deductionsEntries.length === 0 && otherDeductions.length === 0) {
+              @if (deductionsEntries().length === 0 && otherDeductions().length === 0) {
                 <p class="text-xs text-[var(--color-text-secondary)]">Sin detalle</p>
               }
 
               <!-- Otras deducciones (novedades manuales) -->
-              @if (otherDeductions.length > 0) {
+              @if (otherDeductions().length > 0) {
                 <div class="mt-2 pt-2 border-t border-[var(--color-border)]">
                   <p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-1">Otras Deducciones</p>
-                  @for (entry of otherDeductions; track $index) {
+                  @for (entry of otherDeductions(); track $index) {
                     <div class="flex justify-between items-center text-xs py-1">
                       <span class="text-[var(--color-text-secondary)]">{{ entry.description }}</span>
                       <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(entry.amount) }}</span>
@@ -221,7 +345,7 @@ interface EntryRow {
               }
 
               <!-- Desglose retefuente art. 383 ET -->
-              @if (retentionDetails) {
+              @if (retentionDetails(); as ret) {
                 <div class="mt-2 p-3 bg-[var(--color-background)] rounded-lg">
                   <p class="text-[11px] font-semibold uppercase tracking-wide text-[var(--color-text-secondary)] mb-2">
                     Retefuente — Art. 383 ET (Procedimiento 1)
@@ -229,27 +353,27 @@ interface EntryRow {
                   <div class="space-y-1">
                     <div class="flex justify-between items-center text-xs py-0.5">
                       <span class="text-[var(--color-text-secondary)]">Base depurada</span>
-                      <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(retentionDetails.base_depurada) }}</span>
+                      <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(ret.base_depurada) }}</span>
                     </div>
                     <div class="flex justify-between items-center text-xs py-0.5">
                       <span class="text-[var(--color-text-secondary)]">Renta exenta (25%)</span>
-                      <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(retentionDetails.exempt_amount) }}</span>
+                      <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(ret.exempt_amount) }}</span>
                     </div>
                     <div class="flex justify-between items-center text-xs py-0.5">
                       <span class="text-[var(--color-text-secondary)]">Base en UVT</span>
-                      <span class="font-medium text-[var(--color-text-primary)]">{{ retentionDetails.base_uvt }} UVT</span>
+                      <span class="font-medium text-[var(--color-text-primary)]">{{ ret.base_uvt }} UVT</span>
                     </div>
                     <div class="flex justify-between items-center text-xs py-0.5">
                       <span class="text-[var(--color-text-secondary)]">Tarifa marginal</span>
-                      <span class="font-medium text-[var(--color-text-primary)]">{{ getMarginalRatePercent(retentionDetails.marginal_rate) }}%</span>
+                      <span class="font-medium text-[var(--color-text-primary)]">{{ getMarginalRatePercent(ret.marginal_rate) }}%</span>
                     </div>
                     <div class="flex justify-between items-center text-xs py-0.5">
                       <span class="text-[var(--color-text-secondary)]">UVT usada</span>
-                      <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(retentionDetails.uvt_value) }}</span>
+                      <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(ret.uvt_value) }}</span>
                     </div>
                     <div class="flex justify-between items-center text-xs py-0.5 border-t border-[var(--color-border)] mt-1 pt-1">
                       <span class="text-[var(--color-text-secondary)] font-semibold">Retención calculada</span>
-                      <span class="font-semibold text-[var(--color-text-primary)]">{{ formatCurrency(retentionDetails.retention) }}</span>
+                      <span class="font-semibold text-[var(--color-text-primary)]">{{ formatCurrency(ret.retention) }}</span>
                     </div>
                   </div>
                 </div>
@@ -267,30 +391,30 @@ interface EntryRow {
               <span class="ml-auto text-sm font-bold text-yellow-700">{{ formatCurrency(item()!.total_employer_costs) }}</span>
             </div>
             <div class="px-4 py-3 space-y-1">
-              @for (entry of employerCostsEntries; track entry.key) {
+              @for (entry of employerCostsEntries(); track entry.key) {
                 <div class="flex justify-between items-center text-xs py-1">
                   <span class="text-[var(--color-text-secondary)]">{{ entry.label }}</span>
                   <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(entry.value) }}</span>
                 </div>
               }
-              @if (employerCostsEntries.length === 0) {
+              @if (employerCostsEntries().length === 0) {
                 <p class="text-xs text-[var(--color-text-secondary)]">Sin detalle</p>
               }
             </div>
           </app-expandable-card>
 
           <!-- Provisiones (solo si hay datos) -->
-          @if (provisionsEntries.length > 0) {
+          @if (provisionsEntries().length > 0) {
             <app-expandable-card>
               <div slot="header" class="flex items-center gap-2 flex-1 min-w-0">
                 <div class="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center flex-shrink-0">
                   <app-icon name="coins" [size]="14" class="text-purple-600"></app-icon>
                 </div>
                 <span class="text-sm font-semibold text-[var(--color-text-primary)]">Provisiones</span>
-                <span class="ml-auto text-sm font-bold text-purple-700">{{ formatCurrency(provisionsTotal) }}</span>
+                <span class="ml-auto text-sm font-bold text-purple-700">{{ formatCurrency(provisionsTotal()) }}</span>
               </div>
               <div class="px-4 py-3 space-y-1">
-                @for (entry of provisionsEntries; track entry.key) {
+                @for (entry of provisionsEntries(); track entry.key) {
                   <div class="flex justify-between items-center text-xs py-1">
                     <span class="text-[var(--color-text-secondary)]">{{ entry.label }}</span>
                     <span class="font-medium text-[var(--color-text-primary)]">{{ formatCurrency(entry.value) }}</span>
@@ -315,77 +439,156 @@ interface EntryRow {
 export class PayrollItemDetailComponent {
   readonly isOpen = input<boolean>(false);
   readonly item = input<PayrollItem | null>(null);
+  /** Run id — required to dispatch a per-item adjustment note. */
+  readonly runId = input<number | null>(null);
   readonly isOpenChange = output<boolean>();
 
   private currencyService = inject(CurrencyFormatService);
+  private store = inject(Store);
 
-  earningsEntries: EntryRow[] = [];
-  deductionsEntries: EntryRow[] = [];
-  employerCostsEntries: EntryRow[] = [];
-  provisionsEntries: EntryRow[] = [];
-  provisionsTotal = 0;
-  modalTitle = '';
+  // ── DIAN store reads (signals) ────────────────────────
+  private readonly dianSendResult = this.store.selectSignal(selectDianSendResult);
+  private readonly adjustmentLoadingByItem = this.store.selectSignal(
+    selectAdjustmentLoadingByItem,
+  );
+  private readonly adjustmentResultByItem = this.store.selectSignal(
+    selectAdjustmentResultByItem,
+  );
 
-  // Detalle de novedades dentro de earnings (shapes DSPNE del backend)
-  overtimeDetails: OvertimeEarningDetail[] = [];
-  vacationDetails: VacationEarningDetail[] = [];
-  disabilityDetails: DisabilityEarningDetail[] = [];
-  licenseDetails: LicenseEarningDetail[] = [];
-  bonusDetails: BonusEarningDetail[] = [];
-  otherDeductions: Array<{ description: string; amount: number }> = [];
-  retentionDetails: RetentionDetails | null = null;
+  // ── Derived entries (computed, zoneless-safe — reemplaza el effect) ──
+  private readonly derived = computed<DerivedEntries>(() => {
+    const item = this.item();
+    if (!item) return EMPTY_DERIVED;
 
-  get hasEarningsDetails(): boolean {
+    const earnings = item.earnings || {};
+    const deductions = item.deductions || {};
+
+    let provisionsEntries: EntryRow[] = [];
+    let provisionsTotal = 0;
+    if (item.provisions) {
+      provisionsEntries = this.toEntryRows(item.provisions);
+      provisionsTotal =
+        item.provisions['total'] ??
+        provisionsEntries.reduce((sum, e) => sum + e.value, 0);
+    }
+
+    return {
+      earningsEntries: this.toEntryRows(item.earnings),
+      deductionsEntries: this.toEntryRows(item.deductions),
+      employerCostsEntries: this.toEntryRows(item.employer_costs),
+      provisionsEntries,
+      provisionsTotal,
+      overtimeDetails: Array.isArray(earnings.overtime) ? earnings.overtime : [],
+      vacationDetails: Array.isArray(earnings.vacations) ? earnings.vacations : [],
+      disabilityDetails: Array.isArray(earnings.disabilities)
+        ? earnings.disabilities
+        : [],
+      licenseDetails: Array.isArray(earnings.licenses) ? earnings.licenses : [],
+      bonusDetails: Array.isArray(earnings.bonuses) ? earnings.bonuses : [],
+      otherDeductions: Array.isArray(deductions.other_deductions)
+        ? deductions.other_deductions
+        : [],
+      retentionDetails:
+        deductions.retention_details &&
+        typeof deductions.retention_details === 'object'
+          ? deductions.retention_details
+          : null,
+    };
+  });
+
+  readonly earningsEntries = computed(() => this.derived().earningsEntries);
+  readonly deductionsEntries = computed(() => this.derived().deductionsEntries);
+  readonly employerCostsEntries = computed(() => this.derived().employerCostsEntries);
+  readonly provisionsEntries = computed(() => this.derived().provisionsEntries);
+  readonly provisionsTotal = computed(() => this.derived().provisionsTotal);
+  readonly overtimeDetails = computed(() => this.derived().overtimeDetails);
+  readonly vacationDetails = computed(() => this.derived().vacationDetails);
+  readonly disabilityDetails = computed(() => this.derived().disabilityDetails);
+  readonly licenseDetails = computed(() => this.derived().licenseDetails);
+  readonly bonusDetails = computed(() => this.derived().bonusDetails);
+  readonly otherDeductions = computed(() => this.derived().otherDeductions);
+  readonly retentionDetails = computed(() => this.derived().retentionDetails);
+
+  readonly hasEarningsDetails = computed(() => {
+    const d = this.derived();
     return (
-      this.overtimeDetails.length > 0 ||
-      this.vacationDetails.length > 0 ||
-      this.disabilityDetails.length > 0 ||
-      this.licenseDetails.length > 0 ||
-      this.bonusDetails.length > 0
+      d.overtimeDetails.length > 0 ||
+      d.vacationDetails.length > 0 ||
+      d.disabilityDetails.length > 0 ||
+      d.licenseDetails.length > 0 ||
+      d.bonusDetails.length > 0
     );
-  }
+  });
 
-  /** Códigos DSPNE de horas extras/recargos → etiqueta en español. */
-  private readonly OVERTIME_LABELS: Record<string, string> = {
-    HED: 'H.E. Diurna',
-    HEN: 'H.E. Nocturna',
-    HEDDF: 'H.E. Dominical Diurna',
-    HENDF: 'H.E. Dominical Nocturna',
-    RN: 'Recargo Nocturno',
-    RDDF: 'Recargo Dominical',
-  };
+  readonly modalTitle = computed(() => {
+    const item = this.item();
+    if (!item) return '';
+    const emp = item.employee;
+    return emp ? `${emp.first_name} ${emp.last_name}` : `Empleado #${item.employee_id}`;
+  });
 
-  private readonly ENTRY_LABELS: Record<string, string | null> = {
-    base_salary: 'Salario Base',
-    transport_subsidy: 'Auxilio de Transporte',
-    health: 'Salud (EPS)',
-    pension: 'Pension (AFP)',
-    retention: 'Retencion en la Fuente',
-    advance_deduction: 'Descuento Anticipos',
-    commissions: 'Comisiones',
-    arl: 'ARL',
-    sena: 'SENA',
-    icbf: 'ICBF',
-    compensation_fund: 'Caja de Compensacion',
-    severance: 'Cesantias',
-    severance_interest: 'Intereses de Cesantias',
-    vacation: 'Vacaciones',
-    bonus: 'Prima de Servicios',
-    total: null,
-  };
+  // ── DIAN per-item derived state ───────────────────────
+  readonly dianItemResult = computed<DianItemResult | null>(() => {
+    const doc = this.item()?.employee?.document_number;
+    const results = this.dianSendResult()?.dian_summary?.item_results;
+    if (!doc || !results) return null;
+    return results.find((r) => r.employee_document === doc) ?? null;
+  });
 
-  private readonly COST_CENTER_LABELS: Record<string, string> = {
-    operational: 'Operativo',
-    administrative: 'Administrativo',
-    sales: 'Ventas',
-  };
+  readonly adjustmentResult = computed(() => {
+    const id = this.item()?.id;
+    return id != null ? (this.adjustmentResultByItem()[id] ?? null) : null;
+  });
 
-  constructor() {
-    effect(() => {
-      this.computeEntries();
-      this.computeTitle();
-    });
-  }
+  readonly adjustmentLoading = computed(() => {
+    const id = this.item()?.id;
+    return id != null ? (this.adjustmentLoadingByItem()[id] ?? false) : false;
+  });
+
+  readonly itemCune = computed<string | null>(
+    () =>
+      this.adjustmentResult()?.adjustment_result?.cune ??
+      this.dianItemResult()?.cune ??
+      null,
+  );
+
+  readonly itemRejected = computed(() => {
+    const r = this.dianItemResult();
+    return !!r && !r.success;
+  });
+
+  readonly hasDianInfo = computed(
+    () => this.dianItemResult() !== null || this.adjustmentResult() !== null,
+  );
+
+  readonly itemDianBadge = computed<{ label: string; variant: BadgeVariant } | null>(
+    () => {
+      const adj = this.adjustmentResult();
+      if (adj) {
+        return adj.adjustment_result?.success
+          ? { label: 'Ajuste enviado', variant: 'success' }
+          : { label: 'Ajuste fallido', variant: 'error' };
+      }
+      const r = this.dianItemResult();
+      if (!r) return null;
+      return r.success
+        ? { label: 'Enviado a DIAN', variant: 'success' }
+        : { label: 'Rechazado', variant: 'error' };
+    },
+  );
+
+  // ── Adjustment note form (signal-backed, zoneless-safe) ──
+  readonly showAdjustForm = signal(false);
+  readonly adjPredecessorCune = signal('');
+  readonly adjPredecessorDoc = signal('');
+  readonly adjPredecessorDate = signal('');
+
+  readonly adjustValid = computed(
+    () =>
+      this.adjPredecessorCune().trim() !== '' &&
+      this.adjPredecessorDoc().trim() !== '' &&
+      this.adjPredecessorDate().trim() !== '',
+  );
 
   formatCurrency(value: number | undefined | null): string {
     return this.currencyService.format(Number(value) || 0);
@@ -396,65 +599,25 @@ export class PayrollItemDetailComponent {
     return this.COST_CENTER_LABELS[costCenter] || costCenter;
   }
 
-  private computeTitle(): void {
-    const item = this.item();
-    if (!item) {
-      this.modalTitle = '';
-      return;
-    }
-    const emp = item.employee;
-    this.modalTitle = emp
-      ? `${emp.first_name} ${emp.last_name}`
-      : `Empleado #${item.employee_id}`;
+  openAdjustForm(): void {
+    this.adjPredecessorCune.set(this.dianItemResult()?.cune ?? '');
+    this.adjPredecessorDoc.set(this.item()?.employee?.document_number ?? '');
+    this.adjPredecessorDate.set(toUTCDateString(new Date()));
+    this.showAdjustForm.set(true);
   }
 
-  private computeEntries(): void {
+  submitAdjustment(): void {
     const item = this.item();
-    if (!item) {
-      this.earningsEntries = [];
-      this.deductionsEntries = [];
-      this.employerCostsEntries = [];
-      this.provisionsEntries = [];
-      this.provisionsTotal = 0;
-      this.overtimeDetails = [];
-      this.vacationDetails = [];
-      this.disabilityDetails = [];
-      this.licenseDetails = [];
-      this.bonusDetails = [];
-      this.otherDeductions = [];
-      this.retentionDetails = null;
-      return;
-    }
-
-    this.earningsEntries = this.toEntryRows(item.earnings);
-    this.deductionsEntries = this.toEntryRows(item.deductions);
-    this.employerCostsEntries = this.toEntryRows(item.employer_costs);
-
-    // Detail arrays persisted by the calculation alongside the flat keys
-    const earnings = item.earnings || {};
-    this.overtimeDetails = Array.isArray(earnings.overtime) ? earnings.overtime : [];
-    this.vacationDetails = Array.isArray(earnings.vacations) ? earnings.vacations : [];
-    this.disabilityDetails = Array.isArray(earnings.disabilities) ? earnings.disabilities : [];
-    this.licenseDetails = Array.isArray(earnings.licenses) ? earnings.licenses : [];
-    this.bonusDetails = Array.isArray(earnings.bonuses) ? earnings.bonuses : [];
-
-    const deductions = item.deductions || {};
-    this.otherDeductions = Array.isArray(deductions.other_deductions)
-      ? deductions.other_deductions
-      : [];
-    this.retentionDetails =
-      deductions.retention_details &&
-      typeof deductions.retention_details === 'object'
-        ? deductions.retention_details
-        : null;
-
-    if (item.provisions) {
-      this.provisionsEntries = this.toEntryRows(item.provisions);
-      this.provisionsTotal = item.provisions['total'] || this.provisionsEntries.reduce((sum, e) => sum + e.value, 0);
-    } else {
-      this.provisionsEntries = [];
-      this.provisionsTotal = 0;
-    }
+    const runId = this.runId();
+    if (!item || runId == null || !this.adjustValid()) return;
+    const payload: DianAdjustmentPayload = {
+      predecessor_cune: this.adjPredecessorCune().trim(),
+      predecessor_document_number: this.adjPredecessorDoc().trim(),
+      predecessor_generation_date: this.adjPredecessorDate(),
+      adjustment_type: '1',
+    };
+    this.store.dispatch(sendAdjustment({ runId, itemId: item.id, payload }));
+    this.showAdjustForm.set(false);
   }
 
   private toEntryRows(obj: Record<string, unknown> | undefined | null): EntryRow[] {
@@ -515,7 +678,42 @@ export class PayrollItemDetailComponent {
     // Fallback: capitalize and replace underscores
     return key
       .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(' ');
   }
+
+  /** Códigos DSPNE de horas extras/recargos → etiqueta en español. */
+  private readonly OVERTIME_LABELS: Record<string, string> = {
+    HED: 'H.E. Diurna',
+    HEN: 'H.E. Nocturna',
+    HEDDF: 'H.E. Dominical Diurna',
+    HENDF: 'H.E. Dominical Nocturna',
+    RN: 'Recargo Nocturno',
+    RDDF: 'Recargo Dominical',
+  };
+
+  private readonly ENTRY_LABELS: Record<string, string | null> = {
+    base_salary: 'Salario Base',
+    transport_subsidy: 'Auxilio de Transporte',
+    health: 'Salud (EPS)',
+    pension: 'Pension (AFP)',
+    retention: 'Retencion en la Fuente',
+    advance_deduction: 'Descuento Anticipos',
+    commissions: 'Comisiones',
+    arl: 'ARL',
+    sena: 'SENA',
+    icbf: 'ICBF',
+    compensation_fund: 'Caja de Compensacion',
+    severance: 'Cesantias',
+    severance_interest: 'Intereses de Cesantias',
+    vacation: 'Vacaciones',
+    bonus: 'Prima de Servicios',
+    total: null,
+  };
+
+  private readonly COST_CENTER_LABELS: Record<string, string> = {
+    operational: 'Operativo',
+    administrative: 'Administrativo',
+    sales: 'Ventas',
+  };
 }

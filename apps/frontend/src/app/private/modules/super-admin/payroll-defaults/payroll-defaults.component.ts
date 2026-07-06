@@ -20,6 +20,7 @@ import {
   CardComponent,
   OptionsDropdownComponent,
   DropdownAction} from '../../../../shared/components/index';
+import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-payroll-defaults',
@@ -131,14 +132,14 @@ tableColumns: TableColumn[] = [
       sortable: true,
       priority: 3,
       transform: (value: string | null) =>
-        value ? new Date(value).toLocaleDateString('es-CO') : '—'},
+        value ? formatDateOnlyUTC(value) : '—'},
     {
       key: 'updated_at',
       label: 'Actualizado',
       sortable: true,
       priority: 3,
       transform: (value: string) =>
-        new Date(value).toLocaleDateString('es-CO')},
+        formatDateOnlyUTC(value)},
   ];
 
   cardConfig: ItemListCardConfig = {

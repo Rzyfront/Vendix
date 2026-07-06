@@ -42,7 +42,12 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'payroll.approved.health_payable': '2370',
   'payroll.approved.pension_payable': '2380',
   'payroll.approved.withholdings': '2365',
+  // B1: segregación de retefuente laboral en 236505 (child of 2365).
+  'payroll.approved.labor_withholding': '236505',
   'payroll.paid.salaries_payable': '2505',
+  // Drenaje de aportes al pagar la nómina.
+  'payroll.paid.health_social_payable': '2370',
+  'payroll.paid.pension_social_payable': '2380',
   'payroll.paid.bank': '1110',
   'order.completed.cogs': '6135',
   'order.completed.inventory': '1435',
@@ -51,9 +56,16 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'purchase_order.received.inventory': '1435',
   'purchase_order.received.accounts_payable': '2205',
   'support_document.accepted.expense': '5195',
-  'support_document.accepted.vat_deductible': '2408',
+  'support_document.accepted.vat_deductible': '240804',
+  'support_document.accepted.iva_deductible': '240804',
   'support_document.accepted.withholding_payable': '2365',
   'support_document.accepted.accounts_payable': '2205',
+  // F2 IVA lifecycle — VAT-only recognition of a POP purchase (dual-source
+  // with DEFAULT_ACCOUNT_MAPPINGS): DR 240804 (IVA descontable) / CR 2205
+  // (proveedores). Complements purchase_order.received (DR 1435 net / CR 2205
+  // net) so the payable reaches gross without contabilizing expense (5195).
+  'purchase.vat_recognized.iva_deductible': '240804',
+  'purchase.vat_recognized.accounts_payable': '2205',
   'purchase_order.payment.accounts_payable': '2205',
   'purchase_order.payment.cash_bank': '1110',
   'inventory.adjusted.inventory': '1435',
@@ -79,25 +91,25 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'credit_sale.created.vat_payable': '2408',
   // Phase 1: Refund VAT reversal
   'refund.completed.vat_payable': '2408',
-  // Typed fiscal tax routing (per tax_type): IVA→2408, INC→2436, ICA→2412.
+  // Typed fiscal tax routing (per tax_type): IVA→240802, INC→2436, ICA→2412.
   // Mirrors DEFAULT_ACCOUNT_MAPPINGS so AutoEntryService.resolveTaxLines posts
   // each fiscal type to its own PUC account instead of collapsing into 2408.
-  'invoice.validated.iva_payable': '2408',
+  'invoice.validated.iva_payable': '240802',
   'invoice.validated.inc_payable': '2436',
   'invoice.validated.ica_payable': '2412',
-  'payment.received.iva_payable': '2408',
+  'payment.received.iva_payable': '240802',
   'payment.received.inc_payable': '2436',
   'payment.received.ica_payable': '2412',
-  'credit_sale.created.iva_payable': '2408',
+  'credit_sale.created.iva_payable': '240802',
   'credit_sale.created.inc_payable': '2436',
   'credit_sale.created.ica_payable': '2412',
-  'refund.completed.iva_payable': '2408',
+  'refund.completed.iva_payable': '240802',
   'refund.completed.inc_payable': '2436',
   'refund.completed.ica_payable': '2412',
   // Credit notes (nota crédito aceptada) — reversa espejo de la venta.
   // Mirrors DEFAULT_ACCOUNT_MAPPINGS (dual-source rule).
   'credit_note.accepted.sales_returns': '4175',
-  'credit_note.accepted.iva_payable': '2408',
+  'credit_note.accepted.iva_payable': '240802',
   'credit_note.accepted.inc_payable': '2436',
   'credit_note.accepted.ica_payable': '2412',
   'credit_note.accepted.accounts_receivable': '1305',
@@ -166,21 +178,58 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'commission.calculated.payable': '2335',
   // Nómina individual — gastos de nómina (débitos)
   'payroll.approved.transport_subsidy': '5105',
-  'payroll.approved.provision_severance': '5205',
-  'payroll.approved.provision_severance_interest': '5205',
-  'payroll.approved.provision_vacation': '5205',
-  'payroll.approved.provision_bonus': '5205',
-  'payroll.approved.health_employer': '5110',
-  'payroll.approved.pension_employer': '5110',
-  'payroll.approved.arl_expense': '5110',
-  'payroll.approved.sena_expense': '5110',
-  'payroll.approved.icbf_expense': '5110',
-  'payroll.approved.compensation_fund_expense': '5110',
-  // Nómina individual — pasivos provisiones (créditos)
-  'payroll.approved.liability_severance': '2610',
-  'payroll.approved.liability_severance_interest': '2615',
-  'payroll.approved.liability_vacation': '2620',
-  'payroll.approved.liability_bonus': '2625',
+  // Provisiones prestacionales GASTO (Decreto 2650: 5105 subcuentas por CC).
+  'payroll.approved.provision_severance': '510530',
+  'payroll.approved.provision_severance_interest': '510533',
+  'payroll.approved.provision_vacation': '510539',
+  'payroll.approved.provision_bonus': '510536',
+  // Aportes patronales GASTO (Decreto 2650: 5105 subcuentas, antes 5110).
+  'payroll.approved.health_employer': '510568',
+  'payroll.approved.pension_employer': '510569',
+  'payroll.approved.arl_expense': '510570',
+  'payroll.approved.sena_expense': '510578',
+  'payroll.approved.icbf_expense': '510575',
+  'payroll.approved.compensation_fund_expense': '510572',
+  // Provisiones prestacionales PASIVO (Decreto 2650: 2510/2515/2520/2525).
+  // Claves nuevas: las liability_* 26xx quedan obsoletas.
+  'payroll.approved.severance_payable': '2510',
+  'payroll.approved.severance_interest_payable': '2515',
+  'payroll.approved.vacation_payable': '2525',
+  'payroll.approved.bonus_payable': '2520',
+  // Reembolsables incapacidad/licencia (EPS/ARL) → CxC 1355.
+  'payroll.approved.reimbursable_receivable': '1355',
+  // Aportes patronales GASTO por centro de costo.
+  'payroll.approved.health_employer.administrative': '510568',
+  'payroll.approved.health_employer.sales': '520568',
+  'payroll.approved.health_employer.operational': '720568',
+  'payroll.approved.pension_employer.administrative': '510569',
+  'payroll.approved.pension_employer.sales': '520569',
+  'payroll.approved.pension_employer.operational': '720569',
+  'payroll.approved.arl_expense.administrative': '510570',
+  'payroll.approved.arl_expense.sales': '520570',
+  'payroll.approved.arl_expense.operational': '720570',
+  'payroll.approved.sena_expense.administrative': '510578',
+  'payroll.approved.sena_expense.sales': '5205',
+  'payroll.approved.sena_expense.operational': '7205',
+  'payroll.approved.icbf_expense.administrative': '510575',
+  'payroll.approved.icbf_expense.sales': '5205',
+  'payroll.approved.icbf_expense.operational': '7205',
+  'payroll.approved.compensation_fund_expense.administrative': '510572',
+  'payroll.approved.compensation_fund_expense.sales': '520572',
+  'payroll.approved.compensation_fund_expense.operational': '7205',
+  // Provisiones prestacionales GASTO por centro de costo.
+  'payroll.approved.provision_severance.administrative': '510530',
+  'payroll.approved.provision_severance.sales': '520530',
+  'payroll.approved.provision_severance.operational': '720530',
+  'payroll.approved.provision_severance_interest.administrative': '510533',
+  'payroll.approved.provision_severance_interest.sales': '520533',
+  'payroll.approved.provision_severance_interest.operational': '720533',
+  'payroll.approved.provision_vacation.administrative': '510539',
+  'payroll.approved.provision_vacation.sales': '520539',
+  'payroll.approved.provision_vacation.operational': '720539',
+  'payroll.approved.provision_bonus.administrative': '510536',
+  'payroll.approved.provision_bonus.sales': '520536',
+  'payroll.approved.provision_bonus.operational': '720536',
   // Nómina individual — aportes patronales por pagar (créditos)
   'payroll.approved.health_employer_payable': '2370',
   'payroll.approved.pension_employer_payable': '2380',
@@ -218,6 +267,13 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // Partner Payout Paid (RNC-MF-3) — Pago de batch de comisiones a partner
   'saas_partner_payout.commissions_payable': '2335',
   'saas_partner_payout.cash_bank': '1110',
+  // VAT settlement (liquidación de IVA al aprobar la declaración). Mirrors
+  // DEFAULT_ACCOUNT_MAPPINGS (dual-source): DR 240802 (generado) / CR 240804
+  // (descontable) + neto → CR 240810 (a pagar) o DR 135520 (a favor).
+  'vat.declaration.settled.iva_generated': '240802',
+  'vat.declaration.settled.iva_deductible': '240804',
+  'vat.declaration.settled.vat_payable': '240810',
+  'vat.declaration.settled.vat_favor': '135520',
 };
 
 /**

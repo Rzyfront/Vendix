@@ -33,11 +33,32 @@ export class CreateEmployeeDto {
   @MaxLength(50)
   document_number: string;
 
+  @IsOptional()
+  @IsDateString()
+  birth_date?: string;
+
+  @IsOptional()
+  @IsEnum(['male', 'female', 'other'])
+  gender?: 'male' | 'female' | 'other';
+
   @IsDateString()
   hire_date: string;
 
-  @IsEnum(['indefinite', 'fixed_term', 'service', 'apprentice'])
-  contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
+  @IsEnum(['indefinite', 'fixed_term', 'service', 'apprentice', 'obra_labor'])
+  contract_type:
+    | 'indefinite'
+    | 'fixed_term'
+    | 'service'
+    | 'apprentice'
+    | 'obra_labor';
+
+  @IsOptional()
+  @IsDateString()
+  contract_end_date?: string;
+
+  @IsOptional()
+  @IsEnum(['ordinary', 'integral'])
+  salary_type?: 'ordinary' | 'integral';
 
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)

@@ -18,6 +18,7 @@ import { KitchenOrderDeliveredListener } from './listeners/kitchen-order-deliver
 import { KitchenOrderDeliveryRevertedListener } from './listeners/kitchen-order-delivery-reverted.listener';
 import { PaymentFromDispatchRouteListener } from './listeners/payment-from-dispatch-route.listener';
 import { InventorySerialNumbersModule } from '../../inventory/serial-numbers/inventory-serial-numbers.module';
+import { OrderStockCommitModule } from '../../inventory/shared/order-stock-commit.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { InventorySerialNumbersModule } from '../../inventory/serial-numbers/inv
     CashRegistersModule,
     SettingsModule,
     InventorySerialNumbersModule,
+    OrderStockCommitModule,
   ],
   controllers: [OrderFlowController, OrderRefundsController],
   providers: [

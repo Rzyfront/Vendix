@@ -574,6 +574,68 @@ export async function seedPermissionsAndRoles(
       method: 'GET',
     },
 
+    // Membresías — Planes / Membresías / Accesos (núcleo de membresía genérico)
+    {
+      name: 'store:membership_plans:read',
+      description: 'Ver planes de membresía',
+      path: '/api/store/memberships/plans',
+      method: 'GET',
+    },
+    {
+      name: 'store:membership_plans:create',
+      description: 'Crear plan de membresía',
+      path: '/api/store/memberships/plans',
+      method: 'POST',
+    },
+    {
+      name: 'store:membership_plans:update',
+      description: 'Actualizar plan de membresía',
+      path: '/api/store/memberships/plans/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:membership_plans:delete',
+      description: 'Eliminar plan de membresía',
+      path: '/api/store/memberships/plans/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'store:memberships:read',
+      description: 'Ver membresías',
+      path: '/api/store/memberships',
+      method: 'GET',
+    },
+    {
+      name: 'store:memberships:create',
+      description: 'Crear membresías',
+      path: '/api/store/memberships',
+      method: 'POST',
+    },
+    {
+      name: 'store:memberships:update',
+      description: 'Actualizar membresías',
+      path: '/api/store/memberships/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:membership_access:read',
+      description: 'Ver accesos de membresía',
+      path: '/api/store/memberships/access',
+      method: 'GET',
+    },
+    {
+      name: 'store:membership_access:create',
+      description: 'Registrar accesos de membresía',
+      path: '/api/store/memberships/access',
+      method: 'POST',
+    },
+    {
+      name: 'store:membership_access:update',
+      description: 'Gestionar accesos de membresía',
+      path: '/api/store/memberships/access/:id',
+      method: 'PATCH',
+    },
+
     // Órdenes
     {
       name: 'store:orders:create',

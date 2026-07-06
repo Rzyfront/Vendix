@@ -736,6 +736,12 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Insufficient stock',
   },
+  INV_STOCK_002: {
+    code: 'INV_STOCK_002',
+    httpStatus: 409,
+    devMessage:
+      'Insufficient available stock to deliver order (no reservation and available stock is not enough)',
+  },
   POS_STOCK_INSUFFICIENT_001: {
     code: 'POS_STOCK_INSUFFICIENT_001',
     httpStatus: 409,
@@ -1246,11 +1252,27 @@ export const ErrorCodes = {
     httpStatus: 412,
     devMessage: 'Fiscal accounting is blocked until DIAN acceptance exists',
   },
+  FISCAL_PERIOD_CLOSED: {
+    code: 'FISCAL_PERIOD_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'Fiscal period covering entry_date is closed; auto-entry cannot be posted',
+  },
   FISCAL_DOCUMENT_UNSUPPORTED: {
     code: 'FISCAL_DOCUMENT_UNSUPPORTED',
     httpStatus: 501,
     devMessage:
       'This fiscal document type is not implemented for DIAN own software',
+  },
+  // F4 — Gate "no responsable de IVA". El comercio NO es responsable de IVA
+  // ante la DIAN (fiscal_data: O-49 sin O-48, o régimen SIMPLIFICADO): no
+  // puede asignar IVA a un producto ni cobrarlo en una venta. `details`
+  // incluye `context: 'product' | 'sale'` y `cta: '/admin/fiscal/wizard'`.
+  FISCAL_VAT_NOT_RESPONSIBLE_001: {
+    code: 'FISCAL_VAT_NOT_RESPONSIBLE_001',
+    httpStatus: 412,
+    devMessage:
+      'Commerce is not VAT responsible (DIAN): cannot assign or charge IVA',
   },
 
   // Payroll
@@ -1380,6 +1402,23 @@ export const ErrorCodes = {
     code: 'PAYROLL_VALIDATE_002',
     httpStatus: 400,
     devMessage: 'User with CUSTOMER role cannot be linked as employee',
+  },
+  PAYROLL_FISCAL_PROFILE_001: {
+    code: 'PAYROLL_FISCAL_PROFILE_001',
+    httpStatus: 400,
+    devMessage:
+      'fixed_retention_rate is required when retention_procedure is proc2',
+  },
+  PAYROLL_FISCAL_PROFILE_002: {
+    code: 'PAYROLL_FISCAL_PROFILE_002',
+    httpStatus: 404,
+    devMessage: 'Employee fiscal profile not found',
+  },
+  PAYROLL_FISCAL_PROFILE_003: {
+    code: 'PAYROLL_FISCAL_PROFILE_003',
+    httpStatus: 400,
+    devMessage:
+      'No payroll income history found in the lookback window to calculate the fixed semester rate (art. 386 ET)',
   },
 
   // Payroll novelties

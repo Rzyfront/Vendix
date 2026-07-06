@@ -31,6 +31,11 @@ export interface FiscalDataSettings {
   // is_self_withholder: tenant may be subject to being withheld (Caso 2, autorretenedor).
   is_withholding_agent?: boolean;
   is_self_withholder?: boolean;
+  // ICA location (Colombia). Mirrors the real columns `stores.municipality_code`
+  // / `stores.ciiu_code` (read/write symmetry with getFiscalData/updateFiscalData
+  // and with tax-declaration-draft.service.ts:calculateIca).
+  municipality_code?: string;
+  ciiu_code?: string;
 }
 
 // ============================================================================
@@ -327,6 +332,9 @@ export interface StoreSettings {
   // Restaurant - restaurant suite behavior toggles
   restaurant?: RestaurantSettings;
 
+  // Membership - gym/membership suite behavior toggles
+  membership?: MembershipSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -514,6 +522,40 @@ export interface RestaurantSettings {
    * the normal POS payment flow.
    */
   enable_table_checkout: boolean;
+}
+
+export interface MembershipSettings {
+  /**
+   * Enables ambient (background) access validation for gym memberships.
+   * Only relevant when the store's `general.industries` includes `'gym'`.
+   * When false (default), ambient access validation is disabled.
+   */
+  ambient_access_enabled: boolean;
+  /**
+   * Enables capacity (aforo) control for the membership area.
+   * When false (default), capacity control is disabled.
+   */
+  capacity_control_enabled?: boolean;
+  /**
+   * Maximum number of people allowed inside (aforo máximo).
+   * Default `0`.
+   */
+  max_capacity?: number;
+  /**
+   * When true, a turnstile controls entries/exits and automatic leveling is
+   * disabled. Default `false`.
+   */
+  turnstile_mode?: boolean;
+  /**
+   * Enables automatic capacity leveling (time-based decrement of the
+   * occupancy count). Default `false`.
+   */
+  auto_leveling_enabled?: boolean;
+  /**
+   * Interval in hours after which automatic leveling decrements the occupancy
+   * count by 1 person. Allowed values: `1` or `2`. Default `2`.
+   */
+  auto_leveling_interval_hours?: number;
 }
 
 // ============================================================================

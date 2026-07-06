@@ -396,6 +396,18 @@ export class HeaderComponent {
       const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
       if (domainConfig?.isMainVendixDomain) {
         this.storeLogo.set('vlogo.png');
+      } else {
+        // Store-context fallback: brand the header with the mono logo only
+        // when inside a STORE app type and the store has no logo of its own.
+        // ORG_ADMIN / SUPER_ADMIN keep falling back to their generic icon.
+        const appType = this.authFacade.selectedAppType();
+        if (
+          appType === 'STORE_ADMIN' ||
+          appType === 'STORE_ECOMMERCE' ||
+          appType === 'STORE_LANDING'
+        ) {
+          this.storeLogo.set('vlogomono.png');
+        }
       }
     }
 

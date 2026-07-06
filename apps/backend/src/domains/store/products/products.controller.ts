@@ -30,6 +30,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { Req } from '@nestjs/common';
 import { AuthenticatedRequest } from '@common/interfaces/authenticated-request.interface';
 import { ResponseService } from '@common/responses/response.service';
+import { VendixHttpException } from '@common/errors';
 
 @Controller('store/products')
 @UseGuards(PermissionsGuard)
@@ -77,6 +78,10 @@ export class ProductsController {
         'Producto creado exitosamente',
       );
     } catch (error) {
+      // IVA cycle (F4): deja propagar las excepciones tipadas Vendix (p.ej.
+      // FISCAL_VAT_NOT_RESPONSIBLE_001) al AllExceptionsFilter para conservar
+      // el status 412 + error_code + details; el resto usa el legacy.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al crear el producto',
         error.response?.message || error.message,
@@ -227,6 +232,8 @@ export class ProductsController {
         'Producto actualizado exitosamente',
       );
     } catch (error) {
+      // IVA cycle (F4): propaga la excepción tipada del gate al filtro.
+      if (error instanceof VendixHttpException) throw error;
       return this.responseService.error(
         error.message || 'Error al actualizar el producto',
         error.response?.message || error.message,

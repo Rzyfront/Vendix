@@ -408,13 +408,23 @@ export class FiscalCloseService {
     if (session.status !== 'approved' && session.status !== 'ready') {
       throw new BadRequestException('Fiscal close must be approved or ready');
     }
-    const blockingFailures = session.checks.filter(
+
+    // Re-validación en caliente: entre approve y close pueden entrar asientos
+    // draft u otros cambios que invaliden los resultados persistidos. Se reusa
+    // runChecks (evalúa + persiste y preserva overrides manuales auditados)
+    // para que el cierre nunca se apoye en checks stale.
+    const revalidated = await this.runChecks(contexts, session.id);
+    const blockingFailures = revalidated.checks.filter(
       (check) => check.blocking && check.status === 'failed',
     );
     if (blockingFailures.length > 0) {
-      throw new BadRequestException(
-        'Blocking checks must pass or be overridden',
-      );
+      throw new BadRequestException({
+        error_code: 'FISCAL_CLOSE_BLOCKING_CHECKS_FAILED',
+        message: 'Blocking checks must pass or be overridden',
+        details: {
+          failed_checks: blockingFailures.map((check) => check.check_key),
+        },
+      });
     }
 
     const closed = await this.prisma.$transaction(async (tx) => {

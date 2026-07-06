@@ -47,12 +47,14 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
   "invoice_number": "string",
   "invoice_date": "YYYY-MM-DD",
   "payment_terms": "string or null",
+  "prices_include_tax": boolean,
   "line_items": [
     {
       "description": "string — product name as printed",
       "quantity": number,
       "unit_price": number,
       "total": number,
+      "tax_rate": number,
       "sku_if_visible": "string or null — product code/reference if visible"
     }
   ],
@@ -69,7 +71,15 @@ RULES:
 4. tax_amount = ONLY IVA. Do not include retenciones (ReteFuente, ReteICA, ReteIVA).
 5. Use null when a field is not present. Never invent data.
 6. Extract ALL visible line items. Use "sku_if_visible" for codes in columns like "Código", "Ref", "SKU".
-7. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.`,
+7. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.
+8. "prices_include_tax": a SINGLE boolean for the WHOLE invoice — do the printed unit_price / line totals already INCLUDE IVA?
+   (a) true when the document states prices already include tax: legends like "IVA incluido", "precios con IVA", "valores con IVA incluido", "IVA INC", or a POS/consumer receipt whose line totals already contain the tax and there is NO separate IVA line added on top.
+   (b) false when IVA is added on top of a net subtotal: there is a separate IVA / impuesto line and subtotal + tax_amount ≈ total (the common Colombian B2B purchase-invoice layout).
+   (c) Arithmetic fallback when there is no legend: if subtotal + tax_amount ≈ total (within rounding) ⇒ false. If the line totals already equal the grand total with the tax embedded (subtotal ≈ total, tax_amount is a portion of it) ⇒ true. When still ambiguous, default to false.
+9. "tax_rate" (per line): the IVA/consumption rate for THAT line, as a DECIMAL FRACTION — NOT a percentage.
+   - 0.19 = standard IVA (19%). 0.05 = reduced rate (5%, some foods / INC). 0 = exempt, excluded, or 0% (excluido / exento / no grava).
+   - Read the per-line tax column when the invoice shows one. Otherwise infer from the invoice's global IVA: if a single IVA rate applies to the taxed items, use that fraction on the taxed lines and 0 on the exempt ones.
+   - ALWAYS return the fraction (0.19), never 19 and never "19%". tax_amount stays the IVA total only (rule 4); do NOT fold tax_rate into it.`,
       // prompt_template is null — for vision apps, text instructions must be
       // in the same message as the image (handled by scanInvoice()).
       prompt_template: null,
@@ -103,12 +113,14 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
   "invoice_number": "string",
   "invoice_date": "YYYY-MM-DD",
   "payment_terms": "string or null",
+  "prices_include_tax": boolean,
   "line_items": [
     {
       "description": "string — product name as printed",
       "quantity": number,
       "unit_price": number,
       "total": number,
+      "tax_rate": number,
       "sku_if_visible": "string or null",
       "presentation": "string or null",
       "pack_size": number or null,
@@ -130,7 +142,15 @@ RULES:
 6. presentation: extract verbatim when visible (e.g. "X 1 L", "CAJA 12 UN", "1 KG"). null if not present.
 7. pack_size: number of base units inside ONE presentation, when computable from the line (e.g. "12-unit case" → 12). null if not derivable.
 8. uom_hint: use one of L, ml, kg, g, unit. If unsure, use null.
-9. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.`,
+9. confidence: 90-100 clear image, 70-89 partially unclear, below 70 poor quality.
+10. "prices_include_tax": a SINGLE boolean for the WHOLE invoice — do the printed unit_price / line totals already INCLUDE IVA?
+    (a) true when the document states prices already include tax: legends like "IVA incluido", "precios con IVA", "valores con IVA incluido", "IVA INC", or a POS/consumer receipt whose line totals already contain the tax and there is NO separate IVA line added on top.
+    (b) false when IVA is added on top of a net subtotal: there is a separate IVA / impuesto line and subtotal + tax_amount ≈ total (the common Colombian B2B purchase-invoice layout).
+    (c) Arithmetic fallback when there is no legend: if subtotal + tax_amount ≈ total (within rounding) ⇒ false. If the line totals already equal the grand total with the tax embedded (subtotal ≈ total, tax_amount is a portion of it) ⇒ true. When still ambiguous, default to false.
+11. "tax_rate" (per line): the IVA/consumption rate for THAT line, as a DECIMAL FRACTION — NOT a percentage.
+    - 0.19 = standard IVA (19%). 0.05 = reduced rate (5%, some foods / INC). 0 = exempt, excluded, or 0% (excluido / exento / no grava).
+    - Read the per-line tax column when the invoice shows one. Otherwise infer from the invoice's global IVA: if a single IVA rate applies to the taxed items, use that fraction on the taxed lines and 0 on the exempt ones.
+    - ALWAYS return the fraction (0.19), never 19 and never "19%". tax_amount stays the IVA total only (rule 4); do NOT fold tax_rate into it.`,
       prompt_template: null,
     },
         {

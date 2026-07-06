@@ -129,6 +129,16 @@ export class MenuFilterService {
     Mesas: 'restaurant_ops_tables',
     Cartas: 'restaurant_ops_menus',
 
+    // Memberships (Membership Suite) — padre + 3 submódulos. El padre
+    // "Zona Fit" mapea al key padre para que el sidebar renderice el grupo
+    // cuando la industria (gym o service) lo permita; cada submódulo se mapea a
+    // su propia key para que "Módulos del Panel" pueda prender/apagar
+    // granularmente.
+    'Zona Fit': 'memberships',
+    Planes: 'memberships_plans',
+    Miembros: 'memberships_members',
+    Accesos: 'memberships_access',
+
     // ERP Modules
     Facturación: 'invoicing',
     Facturas: 'invoicing_invoices',
@@ -149,7 +159,9 @@ export class MenuFilterService {
     'Períodos de Nómina': 'payroll_runs',
     'Configuración Nómina': 'payroll_settings',
     Liquidaciones: 'payroll_settlements',
+    Novedades: 'payroll_novelties',
     Adelantos: 'payroll_advances',
+    PILA: 'payroll_pila',
 
     // Legal / Tax modules
     Retenciones: 'accounting_withholding_tax',

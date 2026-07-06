@@ -13,10 +13,14 @@ export interface Employee {
   last_name: string;
   document_type: string;
   document_number: string;
+  birth_date?: string | null;
+  gender?: 'male' | 'female' | 'other' | null;
   hire_date: string;
+  contract_end_date?: string | null;
   termination_date?: string;
   status: 'active' | 'inactive' | 'terminated';
-  contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
+  contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice' | 'obra_labor';
+  salary_type?: 'ordinary' | 'integral';
   position?: string;
   department?: string;
   cost_center?: 'operational' | 'administrative' | 'sales';
@@ -180,8 +184,12 @@ export interface CreateEmployeeDto {
   last_name: string;
   document_type: string;
   document_number: string;
+  birth_date?: string | null;
+  gender?: 'male' | 'female' | 'other' | null;
   hire_date: string;
-  contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice';
+  contract_end_date?: string | null;
+  contract_type: 'indefinite' | 'fixed_term' | 'service' | 'apprentice' | 'obra_labor';
+  salary_type?: 'ordinary' | 'integral';
   position?: string;
   department?: string;
   cost_center?: 'operational' | 'administrative' | 'sales';
@@ -438,6 +446,121 @@ export interface BankExportResult {
   total_amount: number;
 }
 
+// ─── DIAN Electronic Payroll (DSPNE) & Bank Export ──────────
+// Frontend contracts mirroring the backend payroll-runs endpoints:
+//   POST runs/:id/send-dian
+//   GET  runs/:id/dian-status
+//   POST runs/:id/items/:itemId/send-adjustment
+//   GET  runs/bank-export/banks
+//   GET  runs/:id/validate-bank-data
+//   POST runs/:id/export-ach
+
+/** DIAN document lifecycle status returned by the provider. */
+export type DianStatusValue = 'pending' | 'accepted' | 'rejected' | 'error';
+
+/** Provider status payload (mirrors PayrollStatusResponse). */
+export interface DianStatusResponse {
+  tracking_id: string;
+  status: DianStatusValue;
+  cune?: string;
+  message?: string;
+  raw_response?: Record<string, unknown>;
+}
+
+/** Envelope returned by GET runs/:id/dian-status. */
+export interface DianStatusView {
+  payroll_run_id: number;
+  payroll_number: string;
+  current_status: string;
+  dian_status: DianStatusResponse;
+}
+
+/** Per-item send result inside the DIAN send summary. */
+export interface DianItemResult {
+  employee_document: string;
+  success: boolean;
+  cune?: string;
+  message?: string;
+}
+
+/** Envelope returned by POST runs/:id/send-dian. */
+export interface DianSendResult {
+  payroll_run: PayrollRun;
+  dian_summary: {
+    total_items: number;
+    sent: number;
+    failed: number;
+    all_success: boolean;
+    message?: string;
+    item_results: DianItemResult[];
+  };
+}
+
+/** Body for POST runs/:id/items/:itemId/send-adjustment (Nota de Ajuste 103). */
+export interface DianAdjustmentPayload {
+  predecessor_cune: string;
+  predecessor_document_number: string;
+  predecessor_generation_date: string;
+  /** '1' = ajuste, '2' = reemplazo. Backend defaults to '1'. */
+  adjustment_type?: '1' | '2';
+}
+
+/** Provider adjustment result (mirrors the DIAN provider sendAdjustment). */
+export interface DianAdjustmentProviderResult {
+  success: boolean;
+  tracking_id: string;
+  cune?: string;
+  xml?: string;
+  message?: string;
+}
+
+/** Envelope returned by the send-adjustment endpoint. */
+export interface DianAdjustmentResult {
+  payroll_run_id: number;
+  payroll_item_id: number;
+  adjustment_result: DianAdjustmentProviderResult;
+}
+
+/** Bank option from GET runs/bank-export/banks. */
+export interface BankOption {
+  code: string;
+  name: string;
+}
+
+/** A valid employee row eligible for the ACH batch. */
+export interface BankBatchEmployee {
+  employee_id: number;
+  employee_code?: string;
+  first_name: string;
+  last_name: string;
+  document_type?: string;
+  document_number?: string;
+  bank_name?: string | null;
+  bank_account_number?: string | null;
+  bank_account_type?: string | null;
+  net_pay: number;
+}
+
+/** An employee row rejected from the ACH batch with its reasons. */
+export interface BankInvalidEmployee {
+  employee_id: number;
+  name: string;
+  errors: string[];
+}
+
+/** Result of GET runs/:id/validate-bank-data. */
+export interface BankDataValidationResult {
+  valid: BankBatchEmployee[];
+  invalid: BankInvalidEmployee[];
+}
+
+/** Body for POST runs/:id/export-ach. */
+export interface ExportAchDto {
+  bank: string;
+  source_account?: string;
+  source_account_type?: string;
+}
+
 export interface PayrollUpdateAvailable {
   year: number;
   decree_ref: string | null;
@@ -585,3 +708,100 @@ export interface PilaReport {
   employees: PilaEmployeeRow[];
   totals: PilaTotals;
 }
+
+// ── PILA Submissions (tracking de generación/exportación) ──────────────
+
+export type PilaSubmissionStatus = 'generated' | 'exported' | 'void';
+
+export interface PilaSubmission {
+  id: number;
+  organization_id: number;
+  accounting_entity_id: number;
+  period_year: number;
+  period_month: number;
+  status: PilaSubmissionStatus;
+  employees_count: number;
+  total_earnings: string;
+  total_contributions: string;
+  metadata: Record<string, unknown> | null;
+  exported_at: string | null;
+  exported_by_user_id: number | null;
+  voided_at: string | null;
+  voided_by_user_id: number | null;
+  void_reason: string | null;
+  created_by_user_id: number | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface QueryPilaSubmissionsDto {
+  year?: number;
+  month?: number;
+  status?: PilaSubmissionStatus;
+  page?: number;
+  limit?: number;
+}
+
+export interface PilaSubmissionListResponse {
+  data: PilaSubmission[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage?: boolean;
+    hasPreviousPage?: boolean;
+  };
+}
+
+// ── Perfil fiscal (art. 387 ET) ────────────────────────────────────────
+
+export type RetentionProcedure = 'proc1' | 'proc2';
+
+export interface EmployeeFiscalProfile {
+  id?: number;
+  employee_id?: number;
+  certificate_year?: number;
+  dependents_count: number;
+  housing_interest_monthly: number;
+  prepaid_medicine_monthly: number;
+  voluntary_pension_monthly: number;
+  afc_monthly: number;
+  retention_procedure: RetentionProcedure;
+  fixed_retention_rate: number | null;
+  rate_semester: string | null;
+  last_calculated_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EmployeeFiscalProfileUpdateDto {
+  dependents_count?: number;
+  housing_interest_monthly?: number;
+  prepaid_medicine_monthly?: number;
+  voluntary_pension_monthly?: number;
+  afc_monthly?: number;
+  retention_procedure?: RetentionProcedure;
+  fixed_retention_rate?: number;
+  rate_semester?: string;
+}
+
+/**
+ * B5 — Procedimiento 2 (art. 386 ET): body/response de la acción de
+ * cálculo automático del porcentaje fijo semestral.
+ */
+export interface CalculateSemesterRateDto {
+  /** YYYY-1|YYYY-2. Si se omite, el backend resuelve el semestre vigente. */
+  semester?: string;
+}
+
+export interface CalculateSemesterRateResult extends EmployeeFiscalProfile {
+  calculation_detail: {
+    months_used: number;
+    average_taxable_earnings: number;
+    average_base_depurada: number;
+    average_retention_proc1: number;
+    marginal_rate: number;
+  };
+}
+

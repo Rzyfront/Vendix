@@ -5,11 +5,13 @@ import {
   DestroyRef,
   inject,
   signal,
+  computed,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { startWith } from 'rxjs/operators';
 
 import {
-  FormBuilder,
+  FormControl,
   FormGroup,
   Validators,
   ReactiveFormsModule,
@@ -28,6 +30,14 @@ import {
   SelectorComponent,
   SelectorOption,
 } from '../../../../../../../shared/components/selector/selector.component';
+
+interface SettlementFormControls {
+  employee_id: FormControl<number | null>;
+  termination_date: FormControl<string>;
+  termination_reason: FormControl<string>;
+  pending_salary_days: FormControl<number | null>;
+  notes: FormControl<string>;
+}
 
 @Component({
   selector: 'app-settlement-create',
@@ -107,7 +117,7 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || submitting()"
+            [disabled]="!formValid() || submitting()"
             [loading]="submitting()"
           >
             Crear Liquidacion
@@ -122,7 +132,6 @@ export class SettlementCreateComponent {
   isOpenChange = output<boolean>();
   created = output<void>();
 
-  private fb = inject(FormBuilder);
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
@@ -139,13 +148,26 @@ export class SettlementCreateComponent {
     { label: 'Muerte del Trabajador', value: 'death' },
   ];
 
-  form: FormGroup = this.fb.group({
-    employee_id: [null, [Validators.required]],
-    termination_date: ['', [Validators.required]],
-    termination_reason: ['', [Validators.required]],
-    pending_salary_days: [null],
-    notes: [''],
+  readonly form = new FormGroup<SettlementFormControls>({
+    employee_id: new FormControl<number | null>(null, [Validators.required]),
+    termination_date: new FormControl('', {
+      nonNullable: true,
+      validators: [Validators.required],
+    }),
+    termination_reason: new FormControl('', {
+      nonNullable: true,
+      validators: [Validators.required],
+    }),
+    pending_salary_days: new FormControl<number | null>(null),
+    notes: new FormControl('', { nonNullable: true }),
   });
+
+  /** Estado del form puenteado a signal (form.status no es reactivo en computed). */
+  private readonly formStatus = toSignal(
+    this.form.statusChanges.pipe(startWith(this.form.status)),
+    { initialValue: this.form.status },
+  );
+  readonly formValid = computed(() => this.formStatus() === 'VALID');
 
   constructor() {
     this.loadEmployees();
@@ -176,14 +198,14 @@ export class SettlementCreateComponent {
     }
 
     this.submitting.set(true);
-    const val = this.form.value;
+    const val = this.form.getRawValue();
 
     const dto: CreateSettlementDto = {
-      employee_id: val.employee_id,
+      employee_id: Number(val.employee_id),
       termination_date: val.termination_date,
       termination_reason: val.termination_reason,
       notes: val.notes || undefined,
-      pending_salary_days: val.pending_salary_days || undefined,
+      pending_salary_days: val.pending_salary_days ?? undefined,
     };
 
     this.payrollService

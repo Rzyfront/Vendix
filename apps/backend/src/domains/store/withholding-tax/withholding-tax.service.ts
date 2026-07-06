@@ -14,8 +14,19 @@ import {
   PreviewWithholdingDto,
   CalculationsQueryDto,
 } from './dto';
-import { WithholdingCertificateData } from './interfaces/withholding.interface';
-import { WithholdingLine } from 'src/common/interfaces/withholding-breakdown.interface';
+import {
+  WithholdingCertificateData,
+  SufferedWithholdingCertificateData,
+  EmployeeIncomeCertificateData,
+} from './interfaces/withholding.interface';
+import {
+  WithholdingLine,
+  WithholdingRoleValue,
+  WithholdingTypeValue,
+  buildWithholdingAccountRole,
+} from 'src/common/interfaces/withholding-breakdown.interface';
+import { deriveCounterpartyType } from './withholding-classification.util';
+import { scaleBreakdownToTotal } from 'src/common/interfaces/tax-breakdown.interface';
 
 @Injectable()
 export class WithholdingTaxService {
@@ -257,7 +268,15 @@ export class WithholdingTaxService {
     const invoice = await this.prisma.invoices.findFirst({
       where: { id: invoice_id },
       include: {
-        supplier: { select: { id: true, name: true, tax_id: true } },
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            tax_id: true,
+            tax_regime: true,
+            person_type: true,
+          },
+        },
       },
     });
 
@@ -305,7 +324,23 @@ export class WithholdingTaxService {
       },
     });
 
-    // Save the calculation
+    // ----- Typed fields (A5) -----
+    // Legacy `applyWithholding` is always PRACTICED (tenant buys from supplier).
+    // The `role` / `withholding_type` / `counterparty_type` columns were added
+    // in migration 20260609130300_add_withholding_calc_role_counterparty; the
+    // legacy path now persists typed values to keep audit rows homogeneous with
+    // the FLOW path (withholding-flow.service.persistWithholdingLines).
+    const role: WithholdingRoleValue = 'practiced';
+    const withholding_type = (result.withholding_type ??
+      concept.withholding_type) as WithholdingTypeValue;
+    const counterparty_type = invoice.supplier
+      ? deriveCounterpartyType(
+          invoice.supplier.tax_regime,
+          invoice.supplier.person_type,
+        )
+      : null;
+
+    // Save the calculation with typed fields
     const calculation = await this.prisma.withholding_calculations.create({
       data: {
         organization_id: context.organization_id,
@@ -314,6 +349,9 @@ export class WithholdingTaxService {
         invoice_id,
         supplier_id: invoice.supplier_id || null,
         concept_id: concept.id,
+        role,
+        counterparty_type,
+        withholding_type,
         base_amount: new Prisma.Decimal(base_amount),
         withholding_rate: new Prisma.Decimal(result.rate),
         withholding_amount: new Prisma.Decimal(result.withholding_amount),
@@ -322,18 +360,54 @@ export class WithholdingTaxService {
       },
     });
 
-    // Emit event for auto-entry creation
+    // Build the typed withholding breakdown (single line — legacy path is one
+    // concept per call). Reuse `scaleBreakdownToTotal` from the tax-breakdown
+    // contract to ensure rounding-consistent totals with the scalar
+    // `withholding_amount` (no-op for the single-line legacy case, but locks
+    // the invariant: sum(breakdown.amount) === withholding_amount).
+    const baseLine: WithholdingLine = {
+      withholding_type,
+      concept_code: concept.code,
+      concept_id: concept.id,
+      rate: result.rate,
+      base: base_amount,
+      amount: result.withholding_amount,
+      role,
+      account_role: buildWithholdingAccountRole(role, withholding_type),
+      // Regresión cero: el handler legacy `onWithholdingApplied` siempre postea
+      // al padre 2365 (no consulta `concept.account_code`). Pinning `account_code`
+      // aquí preserva el asiento actual (DR 5195 / CR 2365 / CR 2205) con cuentas
+      // y montos idénticos. El `account_role` queda tipado para futura expansión
+      // y queda visible en el payload del evento.
+      account_code: '2365',
+    };
+    const scaled = scaleBreakdownToTotal(
+      [{ tax_type: 'withholding', tax_amount: baseLine.amount }],
+      baseLine.amount,
+    );
+    const breakdown: WithholdingLine[] =
+      scaled.length > 0 ? [{ ...baseLine, amount: scaled[0].tax_amount }] : [baseLine];
+
+    // Emit event for auto-entry creation (typed payload: role + type + counterparty
+    // type + breakdown). The listener (`accounting-events.listener.ts:1016`) and
+    // handler (`auto-entry.service.onWithholdingApplied:2763`) already accept
+    // `withholding_breakdown: WithholdingLine[]` and route through
+    // `resolveWithholdingLines` → typed mapping fallback chain.
     const net_amount = base_amount - result.withholding_amount;
     this.event_emitter.emit('withholding.applied', {
       organization_id: context.organization_id,
       store_id: context.store_id,
       accounting_entity_id: accounting_entity.id,
       invoice_id,
+      role,
+      withholding_type,
+      counterparty_type,
       base_amount,
       withholding_amount: result.withholding_amount,
       net_amount,
       concept_name: result.concept_name,
       supplier_name: invoice.supplier?.name || 'N/A',
+      withholding_breakdown: breakdown,
       user_id: context.user_id,
     });
 
@@ -403,6 +477,13 @@ export class WithholdingTaxService {
 
   // ===== Certificate Generation =====
 
+  /**
+   * Certificado de retención en la fuente PRACTICADA a un proveedor (art. 381
+   * ET) — el tenant es el agente retenedor. `role` no se filtra explícitamente
+   * porque la columna nace `@default(practiced)` (nunca null) y las filas
+   * legacy sin FLOW ya persisten `practiced` (A5); filtrar por `supplier_id`
+   * es suficiente y evita excluir filas antiguas por un filtro redundante.
+   */
   async generateCertificate(
     supplier_id: number,
     year: number,
@@ -478,6 +559,266 @@ export class WithholdingTaxService {
       year,
       total_base: Math.round(total_base * 100) / 100,
       total_withheld: Math.round(total_withheld * 100) / 100,
+      monthly_breakdown,
+    };
+  }
+
+  /**
+   * Certificado de retención "SUFRIDA" (art. 381 ET desde el lado del
+   * retenido): un tercero (customer o supplier, según cómo haya operado como
+   * agente retenedor sobre el tenant) practicó retención al tenant en una
+   * venta. Reusa `withholding_calculations` con `role='suffered'` (mismo
+   * origen que exógena 1003 — ver `exogenous-generator.service.ts:306`).
+   *
+   * Tolerante a filas históricas: si `withholding_type` viene null (fila
+   * pre-A5/pre-FLOW sin tipar), se etiqueta "Retención" genérico en vez de
+   * reventar — nunca se asume que todo el histórico está tipado.
+   */
+  async generateSufferedCertificate(
+    counterparty_type: 'customer' | 'supplier',
+    counterparty_id: number,
+    year: number,
+  ): Promise<SufferedWithholdingCertificateData> {
+    const context = RequestContextService.getContext()!;
+
+    let counterparty_name = '';
+    let counterparty_nit = '';
+
+    if (counterparty_type === 'customer') {
+      // `users` getter on StorePrismaService returns the unscoped baseClient
+      // (see vendix-prisma-scopes) — organization_id must be filtered
+      // manually here to avoid leaking a customer's name across tenants.
+      const customer = await this.prisma.users.findFirst({
+        where: { id: counterparty_id, organization_id: context.organization_id },
+        select: {
+          first_name: true,
+          last_name: true,
+          document_number: true,
+        },
+      });
+      if (!customer) {
+        throw new VendixHttpException(
+          ErrorCodes.WHT_CALCULATION_ERROR,
+          'Customer not found',
+        );
+      }
+      counterparty_name = `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim();
+      counterparty_nit = customer.document_number || '';
+    } else {
+      const supplier = await this.prisma.suppliers.findFirst({
+        where: { id: counterparty_id },
+        select: { name: true, tax_id: true },
+      });
+      if (!supplier) {
+        throw new VendixHttpException(
+          ErrorCodes.WHT_CALCULATION_ERROR,
+          'Supplier not found',
+        );
+      }
+      counterparty_name = supplier.name;
+      counterparty_nit = supplier.tax_id || '';
+    }
+
+    // NOTE: no filtramos por `accounting_entity_id` aquí — las filas
+    // persistidas por `WithholdingFlowService.persistWithholdingLines` desde
+    // flujos POS/checkout pueden traerlo null (ver `ctx.accounting_entity_id
+    // ?? null`, fuera del scope de este cambio). `withholding_calculations`
+    // ya está scoped por tenant vía `StorePrismaService` (scoped_client), así
+    // que `organization_id`/`store_id` son suficientes para el aislamiento —
+    // exigir `accounting_entity_id` excluiría certificados legítimos.
+    const calculations = await this.prisma.withholding_calculations.findMany({
+      where: {
+        organization_id: context.organization_id,
+        role: 'suffered',
+        year,
+        ...(counterparty_type === 'customer'
+          ? { customer_id: counterparty_id }
+          : { supplier_id: counterparty_id }),
+      },
+      include: {
+        concept: { select: { code: true, name: true } },
+      },
+      orderBy: { created_at: 'asc' },
+    });
+
+    const monthly_breakdown: SufferedWithholdingCertificateData['monthly_breakdown'] =
+      [];
+    let total_base = 0;
+    let total_withheld = 0;
+
+    for (const calc of calculations) {
+      const month = calc.created_at
+        ? new Date(calc.created_at).getMonth() + 1
+        : 1;
+      const base = Number(calc.base_amount);
+      const amount = Number(calc.withholding_amount);
+      const rate = Number(calc.withholding_rate);
+      // Fallback tolerante: filas históricas sin `withholding_type` tipado
+      // (pre-A5) no revientan el certificado, solo pierden el detalle del tipo.
+      const withholding_type = calc.withholding_type || 'retefuente';
+
+      monthly_breakdown.push({
+        month,
+        concept: calc.concept?.name || 'N/A',
+        withholding_type,
+        base,
+        rate,
+        amount,
+      });
+
+      total_base += base;
+      total_withheld += amount;
+    }
+
+    return {
+      counterparty_type,
+      counterparty_name,
+      counterparty_nit,
+      year,
+      total_base: Math.round(total_base * 100) / 100,
+      total_withheld: Math.round(total_withheld * 100) / 100,
+      monthly_breakdown,
+    };
+  }
+
+  /**
+   * Certificado de Ingresos y Retenciones (Formulario 220 DIAN) por empleado
+   * y año gravable. Fuente: `payroll_items` del empleado en corridas cuyo
+   * `period_end` cae en el año solicitado, filtrando SOLO estados
+   * consolidados (nunca 'draft'/'rejected'/'cancelled' — mismo criterio que
+   * `calculateSemesterRate`). Lee directamente `earnings.base_salary` /
+   * `deductions.health` / `deductions.pension` / `deductions.retention`
+   * (retefuente laboral, segregada a 236505 desde B1) ya persistidos —
+   * nunca se recalcula nómina histórica.
+   */
+  async generateEmployeeCertificate(
+    employee_id: number,
+    year: number,
+  ): Promise<EmployeeIncomeCertificateData> {
+    const context = RequestContextService.getContext()!;
+    const unscoped = this.prisma.withoutScope() as any;
+
+    const employee = await unscoped.employees.findFirst({
+      where: { id: employee_id, organization_id: context.organization_id },
+      select: {
+        first_name: true,
+        last_name: true,
+        document_type: true,
+        document_number: true,
+      },
+    });
+
+    if (!employee) {
+      throw new VendixHttpException(
+        ErrorCodes.WHT_CALCULATION_ERROR,
+        'Employee not found',
+      );
+    }
+
+    const accounting_entity =
+      await this.fiscalScope.resolveAccountingEntityForFiscal({
+        organization_id: context.organization_id!,
+        store_id: context.store_id ?? null,
+      });
+
+    const year_start = new Date(Date.UTC(year, 0, 1));
+    const year_end = new Date(Date.UTC(year + 1, 0, 1));
+
+    const payroll_items = await unscoped.payroll_items.findMany({
+      where: {
+        employee_id,
+        accounting_entity_id: accounting_entity.id,
+        payroll_run: {
+          period_end: { gte: year_start, lt: year_end },
+          status: {
+            in: ['calculated', 'approved', 'sent', 'accepted', 'paid'],
+          },
+        },
+      },
+      select: {
+        earnings: true,
+        deductions: true,
+        payroll_run: { select: { period_end: true } },
+      },
+      orderBy: { payroll_run: { period_end: 'asc' } },
+    });
+
+    const monthly_breakdown: EmployeeIncomeCertificateData['monthly_breakdown'] =
+      [];
+    let total_salaries = 0;
+    let total_health_deduction = 0;
+    let total_pension_deduction = 0;
+    let total_withholding = 0;
+
+    for (const item of payroll_items) {
+      const period_end = item.payroll_run?.period_end
+        ? new Date(item.payroll_run.period_end)
+        : null;
+      const month = period_end ? period_end.getUTCMonth() + 1 : 1;
+
+      const earnings = (item.earnings ?? {}) as Record<string, any>;
+      const deductions = (item.deductions ?? {}) as Record<string, any>;
+
+      // Ingreso gravable del mes: base_salary + horas extra + bonos gravables
+      // + comisiones (mismo criterio que EmployeeFiscalProfileService, no se
+      // reinventa el cálculo del ingreso base).
+      const overtime_total = Array.isArray(earnings.overtime)
+        ? earnings.overtime.reduce(
+            (sum: number, e: any) => sum + Number(e.amount || 0),
+            0,
+          )
+        : 0;
+      const bonuses_taxable_total = Array.isArray(earnings.bonuses)
+        ? earnings.bonuses.reduce(
+            (sum: number, b: any) => sum + Number(b.taxable || 0),
+            0,
+          )
+        : 0;
+      const commissions = Number(earnings.commissions || 0);
+      const salary =
+        Number(earnings.base_salary || 0) +
+        overtime_total +
+        bonuses_taxable_total +
+        commissions;
+
+      // Fallback tolerante: `deductions.retention` puede no existir en meses
+      // muy antiguos previos a la retefuente laboral (o si el empleado no
+      // tuvo retención ese mes) — se trata como 0, nunca revienta.
+      const health_deduction = Number(deductions.health || 0);
+      const pension_deduction = Number(deductions.pension || 0);
+      const withholding = Number(deductions.retention || 0);
+
+      monthly_breakdown.push({
+        month,
+        salary: Math.round(salary * 100) / 100,
+        health_deduction: Math.round(health_deduction * 100) / 100,
+        pension_deduction: Math.round(pension_deduction * 100) / 100,
+        withholding: Math.round(withholding * 100) / 100,
+      });
+
+      total_salaries += salary;
+      total_health_deduction += health_deduction;
+      total_pension_deduction += pension_deduction;
+      total_withholding += withholding;
+    }
+
+    const employer = await unscoped.accounting_entities.findFirst({
+      where: { id: accounting_entity.id },
+      select: { legal_name: true, name: true, tax_id: true },
+    });
+
+    return {
+      employee_name: `${employee.first_name ?? ''} ${employee.last_name ?? ''}`.trim(),
+      employee_document_type: employee.document_type || '',
+      employee_document_number: employee.document_number || '',
+      employer_name: employer?.legal_name || employer?.name || '',
+      employer_nit: employer?.tax_id || '',
+      year,
+      total_salaries: Math.round(total_salaries * 100) / 100,
+      total_health_deduction: Math.round(total_health_deduction * 100) / 100,
+      total_pension_deduction:
+        Math.round(total_pension_deduction * 100) / 100,
+      total_withholding: Math.round(total_withholding * 100) / 100,
       monthly_breakdown,
     };
   }

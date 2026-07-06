@@ -36,6 +36,19 @@ import {
   QueryNoveltyDto,
   NoveltyListResponse,
   PilaReport,
+  QueryPilaSubmissionsDto,
+  PilaSubmissionListResponse,
+  EmployeeFiscalProfile,
+  EmployeeFiscalProfileUpdateDto,
+  CalculateSemesterRateDto,
+  CalculateSemesterRateResult,
+  DianSendResult,
+  DianStatusView,
+  DianAdjustmentPayload,
+  DianAdjustmentResult,
+  BankOption,
+  BankDataValidationResult,
+  ExportAchDto,
 } from '../interfaces/payroll.interface';
 import {
   BulkEmployeeAnalysisResult,
@@ -86,6 +99,41 @@ export class PayrollService {
 
   getAvailableUsers(): Observable<ApiResponse<AvailableUser[]>> {
     return this.http.get<ApiResponse<AvailableUser[]>>(this.getApiUrl('employees/available-users'));
+  }
+
+  // ─── Fiscal profile (art. 387 ET — deducciones retefuente laboral) ───
+
+  getEmployeeFiscalProfile(
+    id: number,
+  ): Observable<ApiResponse<EmployeeFiscalProfile>> {
+    return this.http.get<ApiResponse<EmployeeFiscalProfile>>(
+      this.getApiUrl(`employees/${id}/fiscal-profile`),
+    );
+  }
+
+  upsertEmployeeFiscalProfile(
+    id: number,
+    dto: EmployeeFiscalProfileUpdateDto,
+  ): Observable<ApiResponse<EmployeeFiscalProfile>> {
+    return this.http.put<ApiResponse<EmployeeFiscalProfile>>(
+      this.getApiUrl(`employees/${id}/fiscal-profile`),
+      dto,
+    );
+  }
+
+  /**
+   * B5 — Procedimiento 2 (art. 386 ET): calcula el porcentaje fijo del
+   * semestre indicado (o el vigente si se omite) a partir del histórico de
+   * 12 meses de nómina, y lo persiste en el perfil fiscal del empleado.
+   */
+  calculateSemesterRate(
+    id: number,
+    dto: CalculateSemesterRateDto = {},
+  ): Observable<ApiResponse<CalculateSemesterRateResult>> {
+    return this.http.post<ApiResponse<CalculateSemesterRateResult>>(
+      this.getApiUrl(`employees/${id}/fiscal-profile/calculate-semester-rate`),
+      dto,
+    );
   }
 
   // ─── Bulk Upload (Session-based) ──────────────────────
@@ -327,11 +375,27 @@ export class PayrollService {
     });
   }
 
+  generatePilaReport(year: number, month: number): Observable<ApiResponse<PilaReport>> {
+    return this.http.get<ApiResponse<PilaReport>>(this.getApiUrl('pila/generate'), {
+      params: { year, month },
+    });
+  }
+
   exportPilaCsv(year: number, month: number): Observable<Blob> {
     return this.http.get(this.getApiUrl('pila/export'), {
       params: { year, month },
       responseType: 'blob',
     });
+  }
+
+  getPilaSubmissions(
+    query: QueryPilaSubmissionsDto = {},
+  ): Observable<PilaSubmissionListResponse> {
+    const params = this.buildParams(query as Record<string, any>);
+    return this.http.get<PilaSubmissionListResponse>(
+      this.getApiUrl('pila/submissions'),
+      { params },
+    );
   }
 
   // ─── Paystubs & ACH ───────────────────────────────────
@@ -344,15 +408,55 @@ export class PayrollService {
     return this.http.post<ApiResponse<any>>(this.getApiUrl(`runs/${runId}/generate-payslips`), {});
   }
 
-  exportAch(runId: number, bank: string): Observable<Blob> {
-    return this.http.post(this.getApiUrl(`runs/${runId}/export-ach`), null, {
-      params: { bank },
-      responseType: 'blob',
-    });
+  /**
+   * Generates the ACH bank file for a run. The backend returns a JSON
+   * envelope with the uploaded file metadata (download_url), NOT a blob,
+   * and expects the bank/source-account in the request body.
+   */
+  exportAch(runId: number, payload: ExportAchDto): Observable<ApiResponse<BankExportResult>> {
+    return this.http.post<ApiResponse<BankExportResult>>(
+      this.getApiUrl(`runs/${runId}/export-ach`),
+      payload,
+    );
   }
 
-  validateBankData(runId: number): Observable<ApiResponse<any>> {
-    return this.http.get<ApiResponse<any>>(this.getApiUrl(`runs/${runId}/validate-bank-data`));
+  validateBankData(runId: number): Observable<ApiResponse<BankDataValidationResult>> {
+    return this.http.get<ApiResponse<BankDataValidationResult>>(
+      this.getApiUrl(`runs/${runId}/validate-bank-data`),
+    );
+  }
+
+  getAvailableBanks(): Observable<ApiResponse<BankOption[]>> {
+    return this.http.get<ApiResponse<BankOption[]>>(this.getApiUrl('runs/bank-export/banks'));
+  }
+
+  // ─── DIAN Electronic Payroll (DSPNE) ──────────────────
+
+  /** POST runs/:id/send-dian — transmits the run to DIAN (DSPNE). */
+  sendToDian(runId: number): Observable<ApiResponse<DianSendResult>> {
+    return this.http.post<ApiResponse<DianSendResult>>(
+      this.getApiUrl(`runs/${runId}/send-dian`),
+      {},
+    );
+  }
+
+  /** GET runs/:id/dian-status — polls the DIAN acceptance status. */
+  getDianStatus(runId: number): Observable<ApiResponse<DianStatusView>> {
+    return this.http.get<ApiResponse<DianStatusView>>(
+      this.getApiUrl(`runs/${runId}/dian-status`),
+    );
+  }
+
+  /** POST runs/:id/items/:itemId/send-adjustment — Nota de Ajuste (tipo 103). */
+  sendAdjustment(
+    runId: number,
+    itemId: number,
+    payload: DianAdjustmentPayload,
+  ): Observable<ApiResponse<DianAdjustmentResult>> {
+    return this.http.post<ApiResponse<DianAdjustmentResult>>(
+      this.getApiUrl(`runs/${runId}/items/${itemId}/send-adjustment`),
+      payload,
+    );
   }
 
   // ─── Helpers ──────────────────────────────────────────

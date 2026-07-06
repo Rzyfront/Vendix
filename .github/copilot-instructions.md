@@ -49,7 +49,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-naming-conventions` |
 | -- | `vendix-notifications-system` |
 | -- | `vendix-panel-ui` |
+| -- | `vendix-payroll` |
 | -- | `vendix-permissions` |
+| -- | `vendix-pila-flatfile` |
 | -- | `vendix-prisma-scopes` |
 | -- | `vendix-redis-quota` |
 | -- | `vendix-restaurant-ops` |
@@ -94,11 +96,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Binding form controls in Angular templates | `vendix-angular-forms` |
 | Bootstrapping local Linear credentials for Vendix | `linear-connect` |
 | Branching off or rebasing onto origin/dev before work | `git-workflow` |
+| Building an HTML slide-deck of bugs found and tickets validated in a sprint window | `qa-report` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
 | Changing COGS, CPP, FIFO, inventory_cost_layers, or inventory valuation snapshots | `vendix-inventory-valuation` |
 | Changing fiscal scope behavior | `vendix-fiscal-scope` |
 | Changing onboarding account_type behavior | `vendix-operating-scope` |
+| Changing the payroll_runs or settlement state machine or its events | `vendix-payroll` |
 | Checking Docker development logs after code changes | `buildcheck-dev` |
 | Checking current development app status | `buildcheck-dev` |
 | Checking if a Vendix Linear issue already exists | `linear-issues` |
@@ -117,6 +121,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Configuring middleware | `vendix-backend-middleware` |
 | Configuring panel_ui visibility | `vendix-panel-ui` |
 | Configuring the Vendix Linear API key | `linear-connect` |
+| Confirming a production fix matches its requirement or reporting defects | `verify-ticket-prod` |
 | Consulting or updating keys/README.md production runbook | `vendix-cloud-operations` |
 | Creating AI queue processors | `vendix-ai-queue` |
 | Creating AI-powered features | `vendix-ai-engine` |
@@ -127,6 +132,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating Frontend Modules | `vendix-frontend-module` |
 | Creating SaaS subscription invoices or rev-share splits | `vendix-saas-billing` |
 | Creating Seeds | `vendix-prisma-seed` |
+| Creating a QA sprint report as a web presentation | `qa-report` |
 | Creating a bug in Linear for Vendix | `linear-issues` |
 | Creating a new skill | `skill-creator` |
 | Creating a ticket in Linear | `linear-issues` |
@@ -160,12 +166,15 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
 | Declaring MCP servers, CLI commands, or web research alongside skills in a plan | `how-to-plan` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
+| Designing happy-path, sad-path, or brute-force test flows for a feature | `how-to-test` |
 | Developing features for the mobile app | `mobile-dev` |
 | Discovering reusable assets before proposing new code | `how-to-plan` |
 | Displaying data lists, implementing responsive tables, creating mobile card views | `vendix-frontend-data-display` |
 | Displaying or formatting dates in frontend | `vendix-date-timezone` |
 | Displaying or formatting money/currency values | `vendix-currency-formatting` |
 | Distinguishing panel_ui visibility from backend authorization | `vendix-permissions` |
+| Documenting user stories or writing HU-X.Y stories for a feature | `user-story-flows` |
+| Drawing graphical user-story flow diagrams (nodes, branches, states) | `user-story-flows` |
 | Driving a browser to confirm UI behavior with agent-browser | `how-to-test` |
 | EC2 maintenance, deployment disk issues, or Docker layer/pull failures | `vendix-ec2-maintenance` |
 | Editing @Permissions decorators | `vendix-permissions` |
@@ -178,6 +187,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Editing or creating any Angular component under apps/frontend (Zoneless patterns apply) | `vendix-zoneless-signals` |
 | Editing or creating any file under apps/mobile | `mobile-dev` |
 | Editing or creating frontend web code | `vendix-frontend` |
+| Editing payroll calculation, IBC, FSP, exoneration, or integral salary logic | `vendix-payroll` |
 | Editing recipes, BOM explosion, or sub-recipe production orders | `vendix-restaurant-ops` |
 | Editing tables, table sessions, or order split logic | `vendix-restaurant-ops` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
@@ -188,6 +198,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Fixing signal-used-without-invoking bugs (!this.flag vs !this.flag()) | `vendix-zoneless-signals` |
 | Formatting chart axis labels with dates | `vendix-date-timezone` |
 | General Development | `how-to-dev` |
+| Generating or editing the PILA flat file (Resolución 2388/2016) | `vendix-pila-flatfile` |
 | Handling Errors | `vendix-error-handling` |
 | Handling store context | `vendix-multi-tenant-context` |
 | Implementing AI streaming | `vendix-ai-streaming` |
@@ -210,6 +221,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Listing Vendix issues in Linear | `linear-issues` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
+| Mapping PILA novelties ING/RET/VSP/LMA/IGE/VAC/IRL | `vendix-pila-flatfile` |
 | Mapping store_subscription_state_enum to allow/warn/block | `vendix-subscription-gate` |
 | Migrating legacy Angular patterns (BehaviorSubject, take(1).subscribe) to Signals | `vendix-zoneless-signals` |
 | Modifying StockLevelManager service | `vendix-inventory-stock` |
@@ -220,12 +232,14 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Modifying the POS for restaurant flow (fire, open table, split bill) | `vendix-restaurant-ops` |
 | Modifying the POS open-table flow that propagates an optional customer to the session and draft order | `vendix-restaurant-ops` |
 | Modifying the POS payment close-out against an open table (table_session_id, applyPosPaymentToTableSession, table status cleaning) | `vendix-restaurant-ops` |
+| Non-destructive production verification with the demo account | `verify-ticket-prod` |
 | Onboarding a new developer to the team's Engram memory | `vendix-engram` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
 | Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
 | Picking concrete verification mechanisms (curl, build, audit, log inspection) per step | `how-to-plan` |
 | Planning structural changes, multi-file changes, broad refactors, or new features | `how-to-plan` |
 | Printing documents with date fields | `vendix-date-timezone` |
+| Producing an animated flow view of a feature to share as a Claude Artifact | `user-story-flows` |
 | Protecting backend endpoints with auth, roles, or permissions | `vendix-backend-auth` |
 | Protecting store write operations behind a subscription | `vendix-subscription-gate` |
 | Pulling the latest Engram memories (engram sync --import) before starting work | `git-workflow` |
@@ -235,24 +249,29 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Reaching the app via the local vhost vendix.com instead of localhost | `how-to-test` |
 | Recovering from a missing or invalid LINEAR_API_KEY in the Vendix repo | `linear-connect` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
+| Reporting QA results with charts and a critical/urgent section | `qa-report` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
 | Resolving a knowledge gap by creating or updating a skill | `skill-creator` |
 | Resolving and caching Vendix team/project/labels UUIDs in .linear/config.json | `linear-connect` |
 | Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
+| Running a controlled E2E verification of a shipped ticket on www.vendix.online | `verify-ticket-prod` |
 | Running an automated code review (pr-code-review) on a PR before merging | `git-workflow` |
 | Running an end-to-end frontend flow in a browser | `how-to-test` |
 | Running the 80% pass gate before merging a PR (git-workflow RULE 8) | `pr-code-review` |
 | Running the Plan Validation Checklist before requesting approval | `how-to-plan` |
 | Saving an Engram memory before pushing non-trivial changes | `git-workflow` |
 | Saving or consulting persistent project memory with Engram (mem_save, mem_search, mem_context, mem_sync) | `vendix-engram` |
+| Saving user-story artifacts as HTML under docs/ at the repo root | `user-story-flows` |
 | Scoping inventory, suppliers, purchases, accounting, reports, or transfers by store vs organization | `vendix-operating-scope` |
 | Searching for an existing Vendix issue in Linear | `linear-issues` |
+| Security, abuse, or data-integrity probing of a specific flow | `how-to-test` |
 | Selecting the correct skills for each plan step using the Skill Selection Matrix | `how-to-plan` |
 | Self-bootstrap Engram on a fresh dev machine | `vendix-engram` |
 | Setting up or migrating an Engram installation (brew, setup, MCP, plugin, doctor) | `vendix-engram` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
+| Summarizing Linear bugs and validated tickets for a sprint into a visual report | `qa-report` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
 | Troubleshoot why a skill is missing from AGENTS.md auto-invoke | `skill-sync` |
 | Understanding AI cost tracking | `vendix-ai-platform-core` |
@@ -274,6 +293,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Using toSignal() in facades — validating initialValue presence | `vendix-zoneless-signals` |
 | Validating variant availability in ecommerce, POS, cart, checkout, reservations, or catalog | `vendix-product-variants` |
 | Verifying Build | `buildcheck-dev` |
+| Verifying a Linear ticket is correctly applied in production | `verify-ticket-prod` |
 | Verifying an API endpoint or auth boundary with curl | `how-to-test` |
 | Verifying plan completeness before approval | `how-to-plan` |
 | When adding icons to components, buttons, menus, or using <app-icon> | `vendix-frontend-icons` |
@@ -287,6 +307,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
 | Working on notifications dropdown or bell badge UI | `vendix-notifications-system` |
+| Working under apps/backend/src/domains/store/payroll | `vendix-payroll` |
+| Working under apps/backend/src/domains/store/payroll/pila | `vendix-pila-flatfile` |
 | Working with @defer, @if, @for control flow blocks in templates | `vendix-zoneless-signals` |
 | Working with AI agent or tool-use | `vendix-ai-engine` |
 | Working with AI async processing | `vendix-ai-queue` |
@@ -307,11 +329,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with BullMQ for AI | `vendix-ai-queue` |
 | Working with CurrencyPipe or CurrencyFormatService | `vendix-currency-formatting` |
 | Working with DIAN NIT ownership | `vendix-fiscal-scope` |
+| Working with DIAN electronic payroll (DSPNE), CUNE, or adjustment note 103 | `vendix-payroll` |
 | Working with EventSource for AI | `vendix-ai-streaming` |
 | Working with MCP server | `vendix-ai-engine` |
 | Working with MCP server | `vendix-mcp-server` |
 | Working with McpController | `vendix-mcp-server` |
 | Working with MenuFilterService or menu filtering | `vendix-panel-ui` |
+| Working with PILA record types 1/2, positional layout, or IBC caps | `vendix-pila-flatfile` |
 | Working with Prisma scoped services | `vendix-prisma-scopes` |
 | Working with RAG pipeline | `vendix-ai-embeddings-rag` |
 | Working with SSE endpoints for AI | `vendix-ai-streaming` |
@@ -333,6 +357,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with order_items.inventory_consumed_at_fire flag | `vendix-restaurant-ops` |
 | Working with organization operating scope STORE vs ORGANIZATION | `vendix-operating-scope` |
 | Working with organizations.fiscal_scope | `vendix-fiscal-scope` |
+| Working with payroll novelties, incapacity valuation, or final settlements | `vendix-payroll` |
 | Working with permissions-roles seed | `vendix-permissions` |
 | Working with product_type_enum='prepared' or the is_sellable/is_ingredient/is_combo/is_batch_produced flags | `vendix-restaurant-ops` |
 | Working with products that have variants but do not track stock | `vendix-product-variants` |
