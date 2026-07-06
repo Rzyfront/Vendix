@@ -8,6 +8,7 @@ import * as InvoicingActions from '../actions/invoicing.actions';
 import { selectInvoicingState } from '../selectors/invoicing.selectors';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
 
 @Injectable()
 export class InvoicingEffects {
@@ -15,6 +16,14 @@ export class InvoicingEffects {
   private store = inject(Store);
   private invoicingService = inject(InvoicingService);
   private toastService = inject(ToastService);
+  /**
+   * Modal de requisitos fiscales. Ante un 4xx fiscal en una operacion de
+   * factura (validar, enviar a DIAN, aceptar/rechazar, anular, nota credito),
+   * abre el modal compartido con el motivo + CTA a la config correcta. El host
+   * del modal vive en InvoicingComponent, siempre montado cuando estas
+   * operaciones se disparan desde el detalle de factura.
+   */
+  private fiscalReq = inject(FiscalRequirementsService);
 
   // Load invoices using filter-as-state from store
   loadInvoices$ = createEffect(() =>
@@ -225,11 +234,12 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.validateInvoice(id).pipe(
           map((response) => InvoicingActions.validateInvoiceSuccess({ invoice: response.data })),
-          catchError((error) =>
-            of(InvoicingActions.validateInvoiceFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.validateInvoiceFailure({
               error: error.error?.message || error.message || 'Error validating invoice'
-            }))
-          )
+            }));
+          })
         )
       )
     )
@@ -242,11 +252,12 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.sendInvoice(id).pipe(
           map((response) => InvoicingActions.sendInvoiceSuccess({ invoice: response.data })),
-          catchError((error) =>
-            of(InvoicingActions.sendInvoiceFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.sendInvoiceFailure({
               error: error.error?.message || error.message || 'Error sending invoice'
-            }))
-          )
+            }));
+          })
         )
       )
     )
@@ -259,11 +270,12 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.acceptInvoice(id).pipe(
           map((response) => InvoicingActions.acceptInvoiceSuccess({ invoice: response.data })),
-          catchError((error) =>
-            of(InvoicingActions.acceptInvoiceFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.acceptInvoiceFailure({
               error: error.error?.message || error.message || 'Error accepting invoice'
-            }))
-          )
+            }));
+          })
         )
       )
     )
@@ -276,11 +288,12 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.rejectInvoice(id).pipe(
           map((response) => InvoicingActions.rejectInvoiceSuccess({ invoice: response.data })),
-          catchError((error) =>
-            of(InvoicingActions.rejectInvoiceFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.rejectInvoiceFailure({
               error: error.error?.message || error.message || 'Error rejecting invoice'
-            }))
-          )
+            }));
+          })
         )
       )
     )
@@ -293,11 +306,12 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.cancelInvoice(id).pipe(
           map((response) => InvoicingActions.cancelInvoiceSuccess({ invoice: response.data })),
-          catchError((error) =>
-            of(InvoicingActions.cancelInvoiceFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.cancelInvoiceFailure({
               error: error.error?.message || error.message || 'Error cancelling invoice'
-            }))
-          )
+            }));
+          })
         )
       )
     )
@@ -310,11 +324,12 @@ export class InvoicingEffects {
       switchMap(({ id }) =>
         this.invoicingService.voidInvoice(id).pipe(
           map((response) => InvoicingActions.voidInvoiceSuccess({ invoice: response.data })),
-          catchError((error) =>
-            of(InvoicingActions.voidInvoiceFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.voidInvoiceFailure({
               error: error.error?.message || error.message || 'Error voiding invoice'
-            }))
-          )
+            }));
+          })
         )
       )
     )
@@ -329,11 +344,12 @@ export class InvoicingEffects {
           map((response) =>
             InvoicingActions.createCreditNoteSuccess({ invoice: response.data })
           ),
-          catchError((error) =>
-            of(InvoicingActions.createCreditNoteFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.createCreditNoteFailure({
               error: error.error?.message || error.message || 'Error creating credit note'
-            }))
-          )
+            }));
+          })
         )
       )
     )
@@ -348,11 +364,12 @@ export class InvoicingEffects {
           map((response) =>
             InvoicingActions.createDebitNoteSuccess({ invoice: response.data })
           ),
-          catchError((error) =>
-            of(InvoicingActions.createDebitNoteFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.createDebitNoteFailure({
               error: error.error?.message || error.message || 'Error creating debit note'
-            }))
-          )
+            }));
+          })
         )
       )
     )

@@ -19,6 +19,7 @@ import {
   IconComponent,
   ItemListCardConfig,
   ResponsiveDataViewComponent,
+  SaveRequirementsModalComponent,
   SelectorComponent,
   SelectorOption,
   TableAction,
@@ -28,6 +29,7 @@ import {
 import type { BadgeVariant } from '../../../shared/components/index';
 import { CurrencyFormatService } from '../../../shared/pipes/currency/currency.pipe';
 import { ToastService } from '../../../shared/components/toast/toast.service';
+import { FiscalRequirementsService } from '../../../shared/services/fiscal-requirements.service';
 import { formatDateOnlyUTC } from '../../../shared/utils/date.util';
 import {
   FiscalApiScope,
@@ -72,6 +74,7 @@ type AuditView = 'evidence' | 'history';
     FormsModule,
     IconComponent,
     ResponsiveDataViewComponent,
+    SaveRequirementsModalComponent,
     SelectorComponent,
     TooltipComponent,
   ],
@@ -518,6 +521,16 @@ type AuditView = 'evidence' | 'history';
         </app-card>
       }
     </section>
+
+    <!-- Prevalidacion operativa: cualquier 4xx fiscal de una operacion del
+         dashboard (generar obligaciones, aprobar/presentar, cierre, etc.) se
+         explica con el mismo modal de requisitos del wizard, con CTA a la ruta
+         de configuracion correcta. -->
+    <app-save-requirements-modal
+      [(isOpen)]="fiscalReq.isOpen"
+      [requirements]="fiscalReq.requirements()"
+      (action)="fiscalReq.handleAction($event)"
+    />
   `,
 })
 export class FiscalOperationsComponent {
@@ -527,6 +540,8 @@ export class FiscalOperationsComponent {
   private readonly toast = inject(ToastService);
   private readonly currency = inject(CurrencyFormatService);
   private readonly headerActions = inject(FiscalOperationsHeaderActionsService);
+  /** Modal compartido de requisitos fiscales (accedido desde el template). */
+  readonly fiscalReq = inject(FiscalRequirementsService);
 
   private readonly routeData = toSignal(
     this.route.data.pipe(
@@ -810,8 +825,8 @@ export class FiscalOperationsComponent {
           this.toast.success('Obligaciones generadas');
           this.reloadCurrentTab();
         },
-        error: () =>
-          this.handleError('No se pudieron generar las obligaciones'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudieron generar las obligaciones'),
         complete: () => this.working.set(false),
       });
   }
@@ -827,7 +842,8 @@ export class FiscalOperationsComponent {
           this.loadObligations();
           this.loadOverview();
         },
-        error: () => this.handleError('No se pudo actualizar la obligación'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo actualizar la obligación'),
         complete: () => this.working.set(false),
       });
   }
@@ -848,7 +864,8 @@ export class FiscalOperationsComponent {
           this.loadEvidence();
           this.loadHistory();
         },
-        error: () => this.handleError('No se pudo adjuntar la evidencia'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo adjuntar la evidencia'),
         complete: () => this.working.set(false),
       });
   }
@@ -883,7 +900,8 @@ export class FiscalOperationsComponent {
           this.loadEvidence();
           this.loadHistory();
         },
-        error: () => this.handleError('No se pudo presentar la obligación'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo presentar la obligación'),
         complete: () => this.working.set(false),
       });
   }
@@ -902,7 +920,8 @@ export class FiscalOperationsComponent {
           this.loadOverview();
           this.loadHistory();
         },
-        error: () => this.handleError('No se pudo marcar como pagada'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo marcar como pagada'),
         complete: () => this.working.set(false),
       });
   }
@@ -921,7 +940,8 @@ export class FiscalOperationsComponent {
           this.loadDeclarations();
           this.loadOverview();
         },
-        error: () => this.handleError('No se pudo crear el borrador'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo crear el borrador'),
         complete: () => this.working.set(false),
       });
   }
@@ -937,7 +957,8 @@ export class FiscalOperationsComponent {
           this.loadDeclarations();
           this.loadOverview();
         },
-        error: () => this.handleError('No se pudo aprobar la declaración'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo aprobar la declaración'),
         complete: () => this.working.set(false),
       });
   }
@@ -958,7 +979,8 @@ export class FiscalOperationsComponent {
           this.loadEvidence();
           this.loadHistory();
         },
-        error: () => this.handleError('No se pudo adjuntar la evidencia'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo adjuntar la evidencia'),
         complete: () => this.working.set(false),
       });
   }
@@ -989,7 +1011,8 @@ export class FiscalOperationsComponent {
           this.loadEvidence();
           this.loadHistory();
         },
-        error: () => this.handleError('No se pudo presentar la declaración'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo presentar la declaración'),
         complete: () => this.working.set(false),
       });
   }
@@ -1027,7 +1050,7 @@ export class FiscalOperationsComponent {
           this.loadCloseSessions();
           this.loadOverview();
         },
-        error: () => this.handleError('No se pudo crear el cierre'),
+        error: (err) => this.presentOrHandle(err, 'No se pudo crear el cierre'),
         complete: () => this.working.set(false),
       });
   }
@@ -1043,7 +1066,8 @@ export class FiscalOperationsComponent {
           this.loadCloseSessions();
           this.loadOverview();
         },
-        error: () => this.handleError('No se pudieron ejecutar los checks'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudieron ejecutar los checks'),
         complete: () => this.working.set(false),
       });
   }
@@ -1063,7 +1087,8 @@ export class FiscalOperationsComponent {
           this.loadEvidence();
           this.loadHistory();
         },
-        error: () => this.handleError('No se pudo adjuntar la evidencia'),
+        error: (err) =>
+          this.presentOrHandle(err, 'No se pudo adjuntar la evidencia'),
         complete: () => this.working.set(false),
       });
   }
@@ -1080,7 +1105,7 @@ export class FiscalOperationsComponent {
           this.loadOverview();
           this.loadHistory();
         },
-        error: () => this.handleError('No se pudo aprobar el cierre'),
+        error: (err) => this.presentOrHandle(err, 'No se pudo aprobar el cierre'),
         complete: () => this.working.set(false),
       });
   }
@@ -1097,7 +1122,7 @@ export class FiscalOperationsComponent {
           this.loadOverview();
           this.loadHistory();
         },
-        error: () => this.handleError('No se pudo cerrar el periodo'),
+        error: (err) => this.presentOrHandle(err, 'No se pudo cerrar el periodo'),
         complete: () => this.working.set(false),
       });
   }
@@ -1121,7 +1146,7 @@ export class FiscalOperationsComponent {
           this.loadOverview();
           this.loadHistory();
         },
-        error: () => this.handleError('No se pudo reabrir el cierre'),
+        error: (err) => this.presentOrHandle(err, 'No se pudo reabrir el cierre'),
         complete: () => this.working.set(false),
       });
   }
@@ -1418,6 +1443,22 @@ export class FiscalOperationsComponent {
     this.toast.error(message);
     this.loading.set(false);
     this.working.set(false);
+  }
+
+  /**
+   * Manejo de error de una operacion fiscal disparada por el usuario. Si el
+   * error es traducible a requisitos fiscales, abre el modal compartido (con
+   * CTA a la config correcta) y suprime el toast crudo; si no, cae al toast +
+   * banner de siempre.
+   */
+  private presentOrHandle(err: unknown, message: string): void {
+    this.loading.set(false);
+    this.working.set(false);
+    if (this.fiscalReq.present(err)) {
+      return;
+    }
+    this.errorMessage.set(message);
+    this.toast.error(message);
   }
 
   private apiScope(): FiscalApiScope {
