@@ -398,6 +398,7 @@ export class ProviderAvailabilityComponent {
     const slotMinutes = this.slotMinutes();
     const total = Math.max(day.total_slots, 1);
     const realBookings = this.detailBookings();
+    console.log('[debug detailSlots]', { date: day.date, total, realBookingsCount: realBookings.length, firstBusy: realBookings[0] });
 
     // Build a set of slot indices that overlap with real bookings
     const busyIndices = new Set<number>();
