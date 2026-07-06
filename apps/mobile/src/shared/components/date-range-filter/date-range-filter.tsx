@@ -12,22 +12,15 @@ import {
 import { Icon } from '@/shared/components/icon/icon';
 import { DatePickerField } from '@/shared/components/date-picker-field/date-picker-field';
 import { colors, colorScales, spacing, borderRadius, typography, shadows } from '@/shared/theme';
+import type { DatePreset } from '@/shared/types/date';
 
 // ─────────────────────────────────────────────
 // Tipos — paridad con web (DateRangeFilter en
-// apps/frontend/src/app/private/modules/store/analytics/interfaces/analytics.interface.ts)
+// apps/frontend/src/app/private/modules/store/analytics/interfaces/analytics.interface.ts).
+// `DatePreset` re-exporta desde `@/shared/types/date` (única fuente de verdad).
 // ─────────────────────────────────────────────
 
-export type DatePreset =
-  | 'today'
-  | 'yesterday'
-  | 'thisWeek'
-  | 'lastWeek'
-  | 'thisMonth'
-  | 'lastMonth'
-  | 'thisYear'
-  | 'lastYear'
-  | 'custom';
+export type { DatePreset };
 
 export interface DateRangeFilterValue {
   start_date: string; // YYYY-MM-DD
@@ -185,48 +178,11 @@ function presetLabel(preset: DatePreset): string {
   return PRESETS.find((p) => p.value === preset)?.label ?? 'Personalizado';
 }
 
-function presetToDateRange(preset: DatePreset): DateRangeFilterValue | null {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const toIso = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${dd}`;
-  };
-
-  let start: Date;
-  let end: Date;
-
-  switch (preset) {
-    case 'today':
-      start = today; end = today; break;
-    case 'yesterday': {
-      start = new Date(today); start.setDate(start.getDate() - 1); end = start; break;
-    }
-    case 'thisWeek': {
-      start = new Date(today); start.setDate(start.getDate() - start.getDay()); end = today; break;
-    }
-    case 'lastWeek': {
-      start = new Date(today); start.setDate(start.getDate() - start.getDay() - 7);
-      end = new Date(start); end.setDate(end.getDate() + 6); break;
-    }
-    case 'thisMonth':
-      start = new Date(today.getFullYear(), today.getMonth(), 1); end = today; break;
-    case 'lastMonth':
-      start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-      end = new Date(today.getFullYear(), today.getMonth(), 0); break;
-    case 'thisYear':
-      start = new Date(today.getFullYear(), 0, 1); end = today; break;
-    case 'lastYear':
-      start = new Date(today.getFullYear() - 1, 0, 1);
-      end = new Date(today.getFullYear() - 1, 11, 31); break;
-    default:
-      return null;
-  }
-
-  return { start_date: toIso(start), end_date: toIso(end), preset };
-}
+// `presetToDateRange` se importa desde `./preset-to-date-range.ts` (lógica
+// pura separada del .tsx para facilitar testing con jest).
+// Re-exportado aquí para mantener el API del componente.
+import { presetToDateRange } from './preset-to-date-range';
+export { presetToDateRange };
 
 interface TriggerPos { x: number; y: number; width: number; height: number; }
 

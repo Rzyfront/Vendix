@@ -18,7 +18,7 @@
 // las recogerán automáticamente vía `getQuickLinks(excludeKey)`.
 // ─────────────────────────────────────────────
 
-import { colorScales } from '@/shared/theme';
+import { colorScales } from '@/shared/theme/colors';
 
 export interface SalesView {
   key:

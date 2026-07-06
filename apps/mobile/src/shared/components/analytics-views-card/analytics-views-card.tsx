@@ -9,7 +9,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Icon } from '@/shared/components/icon/icon';
 import { toastError } from '@/shared/components/toast/toast.store';
-import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
+import { colors, colorScales, spacing, borderRadius, typography, breakpoints } from '@/shared/theme';
 import type { SalesView } from '@/features/store/data/sales-views';
 
 // ─────────────────────────────────────────────
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
   },
 });
 
-const RESPONSIVE_BREAKPOINT = 768; // tailwind `md` default
+const RESPONSIVE_BREAKPOINT = breakpoints.md; // tailwind `md` (paridad web)
 
 export function AnalyticsViewsCard({
   views,

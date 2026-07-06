@@ -72,16 +72,11 @@ export interface SalesByProduct {
   image_url?: string | null;
 }
 
-export type DatePreset =
-  | 'today'
-  | 'yesterday'
-  | 'thisWeek'
-  | 'lastWeek'
-  | 'thisMonth'
-  | 'lastMonth'
-  | 'thisYear'
-  | 'lastYear'
-  | 'custom';
+// Re-export from canonical location to keep types unified across the app.
+// `DateRangeFilterValue` (shared) y `DateRange` (features) usan exactamente
+// el mismo union. Si agregas un preset, edita solo `shared/types/date.ts`.
+export type { DatePreset } from '@/shared/types/date';
+import type { DatePreset } from '@/shared/types/date';
 
 export interface DateRange {
   start_date: string;

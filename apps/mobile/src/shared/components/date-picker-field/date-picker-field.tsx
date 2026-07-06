@@ -5,7 +5,7 @@ import {
   Pressable,
   Modal,
   StyleSheet,
-  Dimensions,
+  useWindowDimensions,
   type View as ViewType,
 } from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
@@ -24,11 +24,9 @@ interface DatePickerFieldProps {
   accessibilityLabel?: string;
 }
 
-const SCREEN_WIDTH = Dimensions.get('window').width;
+const POPOVER_MAX_WIDTH = 300;
 const SCREEN_MARGIN = 12;
-const POPOVER_WIDTH = Math.min(300, SCREEN_WIDTH - SCREEN_MARGIN * 2);
 const POPOVER_GAP = 4;
-const DAY_CELL = Math.floor((POPOVER_WIDTH - spacing[3] * 2 - spacing[1] * 6) / 7);
 
 const MONTHS_ES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -71,7 +69,6 @@ const styles = StyleSheet.create({
   },
   popover: {
     position: 'absolute',
-    width: POPOVER_WIDTH,
     backgroundColor: colors.card,
     borderRadius: borderRadius.lg,
     borderWidth: 1,
@@ -126,7 +123,6 @@ const styles = StyleSheet.create({
     paddingBottom: spacing[1],
   },
   calendarWeekCell: {
-    width: DAY_CELL,
     textAlign: 'center',
     fontSize: 10,
     fontWeight: typography.fontWeight.bold,
@@ -139,8 +135,6 @@ const styles = StyleSheet.create({
     paddingBottom: spacing[3],
   },
   calendarDay: {
-    width: DAY_CELL,
-    height: DAY_CELL,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 2,
@@ -205,6 +199,12 @@ export function DatePickerField({
   placeholder = 'YYYY-MM-DD',
   accessibilityLabel = 'Selector de fecha',
 }: DatePickerFieldProps) {
+  // useWindowDimensions es reactivo a orientation change y window resize.
+  // NO usar Dimensions.get('window') — solo lee el ancho al mount.
+  const { width: screenWidth } = useWindowDimensions();
+  const popoverWidth = Math.min(POPOVER_MAX_WIDTH, screenWidth - SCREEN_MARGIN * 2);
+  const dayCell = Math.floor((popoverWidth - spacing[3] * 2 - spacing[1] * 6) / 7);
+
   const [open, setOpen] = useState(false);
   const [triggerPos, setTriggerPos] = useState<TriggerPos | null>(null);
   const triggerRef = useRef<ViewType>(null);
@@ -236,8 +236,8 @@ export function DatePickerField({
   const popoverPos = useMemo(() => {
     if (!open || !triggerPos) return null;
     let left = triggerPos.x;
-    if (left + POPOVER_WIDTH > SCREEN_WIDTH - SCREEN_MARGIN) {
-      left = SCREEN_WIDTH - POPOVER_WIDTH - SCREEN_MARGIN;
+    if (left + popoverWidth > screenWidth - SCREEN_MARGIN) {
+      left = screenWidth - popoverWidth - SCREEN_MARGIN;
     }
     if (left < SCREEN_MARGIN) left = SCREEN_MARGIN;
     const top = triggerPos.y + triggerPos.height + POPOVER_GAP;
@@ -328,7 +328,10 @@ export function DatePickerField({
         <Pressable style={styles.backdrop} onPress={onClose}>
           {popoverPos && (
             <Pressable
-              style={[styles.popover, { top: popoverPos.top, left: popoverPos.left }]}
+              style={[
+                styles.popover,
+                { top: popoverPos.top, left: popoverPos.left, width: popoverWidth },
+              ]}
               onPress={(e) => e.stopPropagation?.()}
             >
               {/* Calendar header */}
@@ -361,7 +364,7 @@ export function DatePickerField({
               {/* Week day labels */}
               <View style={styles.calendarWeekRow}>
                 {DAYS_ES_SHORT.map((d, i) => (
-                  <Text key={`${d}-${i}`} style={styles.calendarWeekCell}>{d}</Text>
+                  <Text key={`${d}-${i}`} style={[styles.calendarWeekCell, { width: dayCell }]}>{d}</Text>
                 ))}
               </View>
 
@@ -376,6 +379,7 @@ export function DatePickerField({
                       onPress={() => onDayPress(cell.date)}
                       style={({ pressed }) => [
                         styles.calendarDay,
+                        { width: dayCell, height: dayCell },
                         pressed && !isSelected && styles.calendarDayPressed,
                         !cell.inMonth && styles.calendarDayMuted,
                         isToday && !isSelected && styles.calendarDayToday,
