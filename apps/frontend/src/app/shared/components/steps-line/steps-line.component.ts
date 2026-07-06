@@ -33,17 +33,17 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
               <div
                 class="rounded-full flex items-center justify-center font-semibold transition-all duration-300 border-2 shrink-0"
                 [ngClass]="circleClasses"
-                [class.bg-primary]="i < currentStep()"
+                [class.bg-primary]="isCompleted(i, step)"
                 [class.border-primary]="i <= currentStep()"
-                [class.text-white]="i < currentStep()"
+                [class.text-white]="isCompleted(i, step)"
                 [class.border-border]="i > currentStep()"
                 [class.bg-surface]="i >= currentStep()"
                 [style.box-shadow]="i === currentStep() ? '0 0 0 3px ' + primaryColorAlpha : 'none'"
-                [style.color]="i === currentStep() ? primaryColor() : (i < currentStep() ? 'white' : 'var(--color-text-secondary)')"
-                [style.border-color]="i <= currentStep() ? primaryColor() : undefined"
-                [style.background-color]="i < currentStep() ? primaryColor() : undefined"
+                [style.color]="i === currentStep() ? primaryColor() : (isCompleted(i, step) ? 'white' : 'var(--color-text-secondary)')"
+                [style.border-color]="(isCompleted(i, step) || i === currentStep()) ? primaryColor() : undefined"
+                [style.background-color]="isCompleted(i, step) ? primaryColor() : undefined"
               >
-                @if (i < currentStep()) {
+                @if (isCompleted(i, step)) {
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     viewBox="0 0 24 24"
@@ -91,11 +91,11 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
                 class="rounded-full flex items-center justify-center font-semibold transition-all duration-300 border-2 shrink-0"
                 [ngClass]="circleClasses"
                 [style.box-shadow]="i === currentStep() ? '0 0 0 3px ' + primaryColorAlpha : 'none'"
-                [style.color]="i === currentStep() ? primaryColor() : (i < currentStep() ? 'white' : 'var(--color-text-secondary)')"
-                [style.border-color]="i <= currentStep() ? primaryColor() : undefined"
-                [style.background-color]="i < currentStep() ? primaryColor() : undefined"
+                [style.color]="i === currentStep() ? primaryColor() : (isCompleted(i, step) ? 'white' : 'var(--color-text-secondary)')"
+                [style.border-color]="(isCompleted(i, step) || i === currentStep()) ? primaryColor() : undefined"
+                [style.background-color]="isCompleted(i, step) ? primaryColor() : undefined"
               >
-                @if (i < currentStep()) {
+                @if (isCompleted(i, step)) {
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     viewBox="0 0 24 24"
@@ -139,6 +139,17 @@ export class StepsLineComponent {
     if (this.clickable()) {
       this.stepClicked.emit(index);
     }
+  }
+
+  /**
+   * A step reads as "completed" (✓ + filled circle) when the cursor has moved
+   * past it OR when the consumer explicitly marks it `completed`. The explicit
+   * flag lets a consumer (e.g. the fiscal wizard) reflect real backend
+   * satisfaction on steps at/after the cursor. Backward-compatible: consumers
+   * that never set `completed` keep the pure cursor-based behavior.
+   */
+  isCompleted(index: number, step: StepsLineItem): boolean {
+    return index < this.currentStep() || !!step.completed;
   }
 
   get circleOffset(): string {

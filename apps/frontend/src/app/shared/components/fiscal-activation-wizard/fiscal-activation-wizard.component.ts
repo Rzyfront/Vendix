@@ -499,12 +499,25 @@ export class FiscalActivationWizardComponent implements OnInit {
   readonly areaLabels = FISCAL_AREA_LABELS;
   readonly stepLabels = FISCAL_STEP_LABELS;
 
-  /** Steps fed to the shared <app-steps-line> connector stepper. */
-  readonly wizardSteps = computed<StepsLineItem[]>(() =>
-    this.service
-      .stepSequence()
-      .map((step) => ({ label: this.stepLabels[step] })),
-  );
+  /**
+   * Steps fed to the shared <app-steps-line> connector stepper.
+   *
+   * Data steps carry an explicit `completed` flag driven strictly by the
+   * backend's `prefill.satisfied_steps` (via `realSatisfiedDataSteps`), never
+   * the optimistic union — so the stepper's ✓ never contradicts the real
+   * validation. Non-data steps (`area_selection`, `validation`) omit the flag
+   * and keep the stepper's cursor-driven ✓.
+   */
+  readonly wizardSteps = computed<StepsLineItem[]>(() => {
+    const realSatisfied = this.service.realSatisfiedDataSteps();
+    return this.service.stepSequence().map((step) => {
+      const item: StepsLineItem = { label: this.stepLabels[step] };
+      if (this.service.isDataStep(step)) {
+        item.completed = realSatisfied.has(step);
+      }
+      return item;
+    });
+  });
 
   readonly currentTitle = computed(() => {
     const step = this.service.currentStep();
