@@ -28,12 +28,21 @@ export const PromotionsService = {
   /**
    * Obtiene los IDs de las promociones asignadas a un producto.
    * Se llama al editar un producto para hidratar el form.
+   *
+   * Backend `GET /store/products/:id/promotions` devuelve la lista de
+   * objetos `Promotion` completos (no IDs), por lo que mapeamos a IDs
+   * aquí para que el MultiSelector del form pueda hidratar
+   * `form.promotion_ids` con números puros.
    */
   async getProductPromotions(productId: number): Promise<number[]> {
     const endpoint = Endpoints.STORE.PRODUCTS.PROMOTIONS.replace(':id', String(productId));
     const res = await apiClient.get(endpoint);
-    const body = unwrap<{ data: number[] } | number[]>(res);
-    if (Array.isArray(body)) return body;
-    return (body as { data: number[] }).data ?? [];
+    const body = unwrap<
+      { data: Array<{ id: number }> } | Array<{ id: number }>
+    >(res);
+    const arr = Array.isArray(body)
+      ? body
+      : (body as { data: Array<{ id: number }> }).data ?? [];
+    return arr.map((p) => p.id);
   },
 };

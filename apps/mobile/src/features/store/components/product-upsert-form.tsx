@@ -1236,9 +1236,16 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           console.warn('No se pudieron sincronizar los overrides de tarifas', err);
         }
         // Las promociones se persisten via endpoint separado (no van en el DTO).
-        if (mode === 'edit' && savedId) {
+        // Se ejecuta tanto en edit (con productId existente) como en create
+        // (usando el id devuelto por la creación) — antes el guard
+        // `mode === 'edit' && savedId` descartaba silenciosamente las
+        // promociones seleccionadas en un producto recién creado.
+        if (savedId) {
           try {
-            await ProductService.updatePromotions(savedId, form.promotion_ids ?? []);
+            await ProductService.updatePromotions(
+              savedId,
+              form.promotion_ids ?? [],
+            );
           } catch (err) {
             console.warn('No se pudieron sincronizar las promociones', err);
           }

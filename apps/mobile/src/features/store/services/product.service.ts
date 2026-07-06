@@ -270,22 +270,19 @@ export const ProductService = {
   },
 
   /**
-   * Llama al backend de IA para generar la descripción de un producto a partir
-   * de su nombre + SKU + categoría + marca. Devuelve el texto sugerido.
+   * Persiste las promociones asignadas a un producto (PATCH separado,
+   * no bundled en el DTO de update — sigue el patrón del web y de
+   * `syncPriceTierOverrides`).
    */
-  async getPromotions(productId: number): Promise<number[]> {
-    const endpoint = Endpoints.STORE.PRODUCTS.PROMOTIONS.replace(':id', String(productId));
-    const res = await apiClient.get(endpoint);
-    const body = unwrap<{ data: number[] } | number[]>(res);
-    if (Array.isArray(body)) return body;
-    return (body as { data: number[] }).data ?? [];
-  },
-
   async updatePromotions(productId: number, ids: number[]): Promise<void> {
     const endpoint = Endpoints.STORE.PRODUCTS.PROMOTIONS.replace(':id', String(productId));
     await apiClient.patch(endpoint, { promotion_ids: ids });
   },
 
+  /**
+   * Llama al backend de IA para generar la descripción de un producto a partir
+   * de su nombre + SKU + categoría + marca. Devuelve el texto sugerido.
+   */
   async generateDescription(payload: {
     name: string;
     sku?: string;
