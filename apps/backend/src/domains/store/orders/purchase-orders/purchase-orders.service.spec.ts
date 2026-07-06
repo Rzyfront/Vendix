@@ -10,6 +10,7 @@ import { SerialNumberEnforcementService } from '../../inventory/serial-numbers/s
 import { AuditService } from '@common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { SettingsService } from '../../settings/settings.service';
+import { FiscalScopeService } from '@common/services/fiscal-scope.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
 /**
@@ -154,6 +155,11 @@ describe('PurchaseOrdersService.receive()', () => {
 
     const mockS3Service = {} as any;
     const mockSettingsService = {} as any;
+    // Step 10 dep: receive() resolves the fiscal accounting entity once for the
+    // accounting emit (wrapped in try/catch — only `entity?.id` is consumed).
+    const mockFiscalScopeService = {
+      resolveAccountingEntityForFiscal: jest.fn().mockResolvedValue({ id: 1 }),
+    };
 
     // Pre-existing constructor deps (QUI-431 serial numbers) that this spec
     // never mocked — required for Test.createTestingModule to compile the
@@ -191,6 +197,7 @@ describe('PurchaseOrdersService.receive()', () => {
         { provide: AuditService, useValue: mockAuditService },
         { provide: S3Service, useValue: mockS3Service },
         { provide: SettingsService, useValue: mockSettingsService },
+        { provide: FiscalScopeService, useValue: mockFiscalScopeService },
         { provide: EventEmitter2, useValue: mockEventEmitter },
       ],
     }).compile();
@@ -473,6 +480,14 @@ describe('PurchaseOrdersService.receive()', () => {
           { provide: AuditService, useValue: mockAuditService },
           { provide: S3Service, useValue: {} as any },
           { provide: SettingsService, useValue: {} as any },
+          {
+            provide: FiscalScopeService,
+            useValue: {
+              resolveAccountingEntityForFiscal: jest
+                .fn()
+                .mockResolvedValue({ id: 1 }),
+            },
+          },
           { provide: EventEmitter2, useValue: mockEventEmitter },
         ],
       }).compile();
@@ -709,5 +724,209 @@ describe('PurchaseOrdersService.receive()', () => {
       const total = emittedAmounts.reduce((a, b) => a + b, 0);
       expect(total).toBeCloseTo(ROUNDING_PO_TOTAL, 2);
     });
+  });
+});
+
+/**
+ * F3 — getCostPreview() ↔ receive() cost parity.
+ *
+ * The POP preview modal must show the SAME per-stock-unit cost that receive()
+ * persists to stock_levels.cost_per_unit. The preview historically computed
+ * with the NET cost and mixed purchase/stock units, so for a non-IVA-responsible
+ * tenant (O-49) with a UoM factor the modal's new_cost_per_unit diverged from
+ * the recorded cost by (among other things) the IVA factor — the observed 1.19.
+ *
+ * These tests lock the two alignment rules getCostPreview now mirrors from
+ * receive():
+ *   1. IVA capitalization — O-48 responsible → NET; O-49 non-responsible →
+ *      capitalize the per-unit IVA into the cost.
+ *   2. UoM conversion — convert the incoming purchase-unit quantity + cost to
+ *      minimum stock units via purchase_to_stock_factor, then compute CPP in
+ *      stock units (globalStock/globalCostPerUnit are already in stock units).
+ */
+describe('PurchaseOrdersService.getCostPreview()', () => {
+  const ORG_ID = 1;
+  const STORE_ID = 10;
+  const LOCATION_ID = 999;
+  const PRODUCT_ID = 555;
+
+  async function buildPreviewService(opts: {
+    taxResponsibilities: string[];
+    isIngredient: boolean;
+    purchaseToStockFactor: number | null;
+    scopedAggregate: { quantity: number; cost_per_unit: number };
+    costingMethod?: string;
+  }) {
+    const {
+      taxResponsibilities,
+      isIngredient,
+      purchaseToStockFactor,
+      scopedAggregate,
+      costingMethod = 'weighted_average',
+    } = opts;
+
+    const mockPrismaService = {
+      inventory_locations: {
+        findUnique: jest.fn().mockResolvedValue({ store_id: STORE_ID }),
+      },
+      stock_levels: {
+        // Per-location display snapshot only — does NOT feed the CPP (that
+        // comes from getScopedStockAggregate below).
+        findFirst: jest.fn().mockResolvedValue({
+          quantity_on_hand: scopedAggregate.quantity,
+          cost_per_unit: scopedAggregate.cost_per_unit,
+        }),
+      },
+      products: {
+        // resolveUoMConversion reads this (is_ingredient + factor).
+        findFirst: jest.fn().mockResolvedValue({
+          id: PRODUCT_ID,
+          is_ingredient: isIngredient,
+          purchase_to_stock_factor: purchaseToStockFactor,
+          stock_uom_id: null,
+          purchase_uom_id: null,
+        }),
+        // name + pricing snapshot for the margin UX.
+        findUnique: jest.fn().mockResolvedValue({
+          name: 'Insumo Test',
+          base_price: 3000,
+          profit_margin: 20,
+        }),
+      },
+      product_variants: { findUnique: jest.fn() },
+    };
+
+    const mockCostingService = {
+      getScopedStockAggregate: jest.fn().mockResolvedValue(scopedAggregate),
+    };
+    const mockCostingMethodResolver = {
+      resolveCostingMethod: jest.fn().mockResolvedValue(costingMethod),
+    };
+    const mockSettingsService = {
+      // isVatResponsible reads tax_responsibilities from here (RUT casilla 53).
+      getFiscalData: jest.fn().mockResolvedValue({
+        tax_responsibilities: taxResponsibilities,
+      }),
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        PurchaseOrdersService,
+        { provide: StorePrismaService, useValue: mockPrismaService },
+        { provide: StockLevelManager, useValue: {} as any },
+        { provide: CostingService, useValue: mockCostingService },
+        {
+          provide: CostingMethodResolverService,
+          useValue: mockCostingMethodResolver,
+        },
+        { provide: InventorySerialNumbersService, useValue: {} as any },
+        { provide: SerialNumberEnforcementService, useValue: {} as any },
+        { provide: AuditService, useValue: {} as any },
+        { provide: S3Service, useValue: {} as any },
+        { provide: SettingsService, useValue: mockSettingsService },
+        {
+          provide: FiscalScopeService,
+          useValue: {
+            resolveAccountingEntityForFiscal: jest
+              .fn()
+              .mockResolvedValue({ id: 1 }),
+          },
+        },
+        { provide: EventEmitter2, useValue: { emit: jest.fn() } },
+      ],
+    }).compile();
+
+    jest
+      .spyOn(RequestContextService, 'getOrganizationId')
+      .mockReturnValue(ORG_ID);
+    jest.spyOn(RequestContextService, 'getStoreId').mockReturnValue(STORE_ID);
+
+    return module.get<PurchaseOrdersService>(PurchaseOrdersService);
+  }
+
+  afterEach(() => {
+    jest.clearAllMocks();
+    jest.restoreAllMocks();
+  });
+
+  it('O-49 + IVA 19% + purchase_to_stock_factor 2: new_cost_per_unit equals what receive() persists (no 1.19 drift)', async () => {
+    // Operator buys 10 bottles @ 1000 net (IVA added on top, 19%).
+    //   deriveLineTax → net/u = 1000, tax/u = 190.
+    // O-49 non-responsible → costUnit = 1000 + 190 = 1190 (capitalized).
+    // UoM factor 2 (1 bottle = 2 stock units) →
+    //   stockQty = 10 × 2 = 20, stockUnitCost = 1190 / 2 = 595.
+    // Existing scoped stock 20 units @ 595 (same basis) →
+    //   CPP = (20×595 + 20×595) / 40 = 595.
+    //
+    // This is EXACTLY what receive() seals: orderItem.unit_cost = 1000 (net),
+    // tax_amount = 190×10, qty_ordered = 10 → ivaPerUnit = 190 → costUnit =
+    // 1190 → receiptUnitCost = 595 → calculateCostOnReceipt(20 @ 595) = 595.
+    //
+    // The pre-fix preview used the NET cost AND mixed purchase/stock units:
+    //   (20×595 + 10×1000) / (20 + 10) = 730 — the divergent value the modal
+    //   showed. Parity target is 595.
+    const service = await buildPreviewService({
+      taxResponsibilities: ['O-13'], // non-empty, no O-48 ⇒ O-49
+      isIngredient: true,
+      purchaseToStockFactor: 2,
+      scopedAggregate: { quantity: 20, cost_per_unit: 595 },
+    });
+
+    const result = await service.getCostPreview({
+      location_id: LOCATION_ID,
+      prices_include_tax: false,
+      items: [
+        { product_id: PRODUCT_ID, quantity: 10, unit_cost: 1000, tax_rate: 19 },
+      ],
+    } as any);
+
+    expect(result.items).toHaveLength(1);
+    // Parity: matches the cost_per_unit receive() would persist (595), NOT the
+    // pre-fix 730.
+    expect(result.items[0].new_cost_per_unit).toBe(595);
+  });
+
+  it('capitalizes IVA for O-49 but excludes it for O-48 — the exact 1.19 divergence disappears', async () => {
+    // Retail product (factor 1), stock at zero (reactivation) so the CPP is the
+    // incoming stock-unit cost directly, isolating the IVA treatment.
+    // unit_cost = 1000 net, IVA 19%.
+    const previewFor = (taxResponsibilities: string[]) =>
+      buildPreviewService({
+        taxResponsibilities,
+        isIngredient: false,
+        purchaseToStockFactor: null,
+        scopedAggregate: { quantity: 0, cost_per_unit: 0 },
+      });
+
+    const item = {
+      product_id: PRODUCT_ID,
+      quantity: 5,
+      unit_cost: 1000,
+      tax_rate: 19,
+    };
+
+    const nonResponsible = await previewFor(['O-13']); // O-49
+    const nonRespResult = await nonResponsible.getCostPreview({
+      location_id: LOCATION_ID,
+      prices_include_tax: false,
+      items: [item],
+    } as any);
+
+    const responsible = await previewFor(['O-48']); // O-48
+    const respResult = await responsible.getCostPreview({
+      location_id: LOCATION_ID,
+      prices_include_tax: false,
+      items: [item],
+    } as any);
+
+    const o49 = nonRespResult.items[0].new_cost_per_unit;
+    const o48 = respResult.items[0].new_cost_per_unit;
+
+    // O-49 capitalizes the 19% IVA into cost; O-48 keeps it net.
+    expect(o49).toBe(1190);
+    expect(o48).toBe(1000);
+    // The whole point of F3: the divergence is EXACTLY the IVA factor, and it
+    // now lives on the correct (persist) side, not as a preview-vs-persist gap.
+    expect(o49 / o48).toBeCloseTo(1.19, 5);
   });
 });

@@ -2541,6 +2541,19 @@ export class PurchaseOrdersService {
       storeId ?? undefined,
     );
 
+    // F3 preview↔persist parity: resolve the commerce's VAT responsibility ONCE
+    // for this preview, using the SAME source of truth as receive() (see the
+    // vatResponsible read at receive()'s cost-treatment block). O-48
+    // responsible → IVA is descontable, EXCLUDED from cost (net). O-49
+    // non-responsible → IVA is CAPITALIZED into the inventory cost. Without
+    // this, the preview shows a NET cost while receive() persists a GROSS one,
+    // so the modal's new_cost_per_unit diverges from the recorded cost_per_unit
+    // by exactly the IVA factor (the observed 1.19 for a 19% line).
+    const vatResponsible = await this.isVatResponsible(
+      organizationId,
+      storeId ?? undefined,
+    );
+
     // Scoped cost aggregates (STORE vs ORGANIZATION) are computed per-item via
     // CostingService.getScopedStockAggregate, which owns the operating-scope
     // location filter and reads UNSCOPED to include org-level warehouses.
@@ -2608,17 +2621,51 @@ export class PurchaseOrdersService {
       );
       const netUnitCost = derivedTax.unit_price_net;
 
-      const newStock = globalStock + item.quantity;
+      // ===== F3 preview↔persist parity: mirror receive()'s unit cost EXACTLY =====
+      // receive() derives the per-stock-unit cost that FIFO/CPP consumes as:
+      //   costUnit = vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit
+      //   { stockQuantity, stockUnitCost } = resolveUoMConversion(qty, costUnit)
+      // where ivaPerUnit == orderItem.tax_amount / quantity_ordered. Because
+      // create() persists tax_amount = deriveLineTax().tax_amount (= per-unit
+      // tax × quantity) and quantity_ordered = quantity, that ratio is exactly
+      // deriveLineTax()'s tax_amount_per_unit — which is what we have here.
+      //
+      // (1) IVA: O-48 responsible → NET; O-49 non-responsible → capitalize IVA.
+      const ivaPerUnit = derivedTax.tax_amount_per_unit;
+      const costUnit = vatResponsible ? netUnitCost : netUnitCost + ivaPerUnit;
+
+      // (2) UoM: convert the incoming purchase-unit quantity + capitalized cost
+      // to MINIMUM stock units via the SAME helper receive() uses. The CPP must
+      // be computed in stock units because globalStock/globalCostPerUnit come
+      // from stock_levels (already in stock units) — mixing a purchase-unit
+      // quantity into the denominator drifts the result by the conversion
+      // factor. resolveUoMConversion no-ops (factor=1) for retail products, so
+      // this is byte-for-byte identical to the old behaviour when no UoM
+      // conversion applies. `this.prisma` acts as the read client (the helper
+      // only issues a scoped products.findFirst, no writes).
+      const {
+        stockQuantity: incomingStockQty,
+        stockUnitCost: incomingStockUnitCost,
+      } = await this.resolveUoMConversion(
+        item.product_id,
+        item.quantity,
+        costUnit,
+        this.prisma,
+      );
+
+      const newStock = globalStock + incomingStockQty;
       const isReactivation = globalStock <= 0;
 
       let newCostPerUnit: number;
       if (isReactivation || costingMethod === 'fifo') {
-        // Stock at zero: previous CPP is orphaned, new cost = NET purchase price
-        newCostPerUnit = netUnitCost;
+        // Stock at zero: previous CPP is orphaned, new cost = the capitalized,
+        // stock-unit receipt cost receive() would seal.
+        newCostPerUnit = incomingStockUnitCost;
       } else {
-        // CPP (weighted average) using global stock across all locations
+        // CPP (weighted average) in STOCK units — mirrors calculateCostOnReceipt.
         newCostPerUnit =
-          (globalStock * globalCostPerUnit + item.quantity * netUnitCost) /
+          (globalStock * globalCostPerUnit +
+            incomingStockQty * incomingStockUnitCost) /
           newStock;
       }
 

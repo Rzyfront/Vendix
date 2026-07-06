@@ -127,7 +127,12 @@ export class StockLevelManager {
     // Skip stock operations for products that don't track inventory
     const productForTracking = await prisma.products.findUnique({
       where: { id: params.product_id },
-      select: { track_inventory: true, store_id: true, name: true },
+      select: {
+        track_inventory: true,
+        store_id: true,
+        name: true,
+        cost_price: true,
+      },
     });
 
     if (!productForTracking || !productForTracking.track_inventory) {
@@ -193,6 +198,35 @@ export class StockLevelManager {
 
     if (params.quantity_change > 0 && params.unit_cost !== undefined) {
       stockUpdateData.cost_per_unit = new Prisma.Decimal(params.unit_cost);
+    } else if (params.quantity_change > 0) {
+      // Fix colapso CPP — semillado central del costo. Entrada de stock SIN
+      // costo explícito (crear/editar producto, ajustes, importación, seeds):
+      // si la fila quedaría con `cost_per_unit` NULL/0, sembrarlo desde el
+      // `cost_price` de la variante/producto para que el stock histórico aporte
+      // su valor real al CPP en vez de 0. Reglas duras:
+      //   (a) NUNCA sembrar en salidas (quantity_change <= 0): ventas/consumos
+      //       no deben tocar el costo (rama else-if ya excluye ese caso).
+      //   (b) NUNCA clobberear un cost_per_unit ya válido (>0) existente.
+      //   (c) Solo sembrar si hay un cost_price > 0 disponible.
+      const currentCost = Number(existing_stock_level.cost_per_unit) || 0;
+      if (currentCost <= 0) {
+        let seedCost = 0;
+        if (params.variant_id) {
+          const variantForCost = await prisma.product_variants.findUnique({
+            where: { id: params.variant_id },
+            select: { cost_price: true },
+          });
+          seedCost =
+            Number(variantForCost?.cost_price) ||
+            Number(productForTracking.cost_price) ||
+            0;
+        } else {
+          seedCost = Number(productForTracking.cost_price) || 0;
+        }
+        if (seedCost > 0) {
+          stockUpdateData.cost_per_unit = new Prisma.Decimal(seedCost);
+        }
+      }
     }
 
     const updated_stock = await prisma.stock_levels.update({

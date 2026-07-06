@@ -517,4 +517,101 @@ describe('CostingService', () => {
       });
     });
   });
+
+  /**
+   * F1 — cost_per_unit collapse fix.
+   *
+   * Root cause: `stock_levels.cost_per_unit` is `Decimal?` with no @default, so
+   * it is born NULL on every write path except purchase receipts (create/edit
+   * product, variants, imports, adjustments, seeds all set products/variants
+   * `cost_price` but leave `cost_per_unit` NULL). The old aggregate averaged
+   * with `cost_per_unit ?? 0`, so historical stock contributed value 0 and a
+   * MORE EXPENSIVE receipt dragged the CPP DOWN.
+   *
+   * The fix replicates the canonical fallback already used by
+   * `initializeCostLayers`: cost_per_unit → variant.cost_price →
+   * product.cost_price → 0, using `||` (not `??`) so a spurious 0 falls through.
+   */
+  describe('cost_per_unit collapse fallback (F1)', () => {
+    it('case a: stock row with cost_per_unit=NULL falls back to products.cost_price (3.5M, not 0)', async () => {
+      // Aggregate reads through the UNSCOPED base client (globalPrisma).
+      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+        {
+          quantity_on_hand: 10,
+          cost_per_unit: null, // born NULL (non-receipt write path)
+          products: { cost_price: 3_500_000 },
+          product_variants: null,
+        },
+      ]);
+
+      const agg = await service.getScopedStockAggregate({
+        product_id: 1,
+        location_id: 100,
+      });
+
+      expect(agg.quantity).toBe(10);
+      // Fallback to products.cost_price — NOT 0.
+      expect(agg.cost_per_unit).toBe(3_500_000);
+    });
+
+    it('case b: 24@3.5M (via cost_price fallback) + receipt 5@7M → CPP blends UP to ~4.1M, never collapses', async () => {
+      // Founder's confirmed prod scenario: 24 units already on hand whose
+      // cost_per_unit is NULL (so the real 3.5M cost lives only in cost_price),
+      // then a 5-unit receipt at a HIGHER cost of 7M. The old code collapsed
+      // the persisted cost to 1.436.207 (blended the 24 units at 0). The fix
+      // must blend UP to (24*3.5M + 5*7M)/29 ≈ 4.103.448 — between 3.5M and 7M.
+      const existing = {
+        id: 5,
+        product_id: 1,
+        product_variant_id: null,
+        location_id: 100,
+        quantity_on_hand: 24,
+        cost_per_unit: null,
+        products: { cost_price: 3_500_000 },
+        product_variants: null,
+      };
+      (prismaService as any).stock_levels.findFirst.mockResolvedValue(existing);
+      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+        existing,
+      ]);
+
+      const result = await service.calculateCostOnReceipt({
+        product_id: 1,
+        location_id: 100,
+        quantity_received: 5,
+        unit_cost: 7_000_000,
+        costing_method: 'weighted_average',
+      });
+
+      const expected = (24 * 3_500_000 + 5 * 7_000_000) / 29; // 4,103,448.28
+      expect(result.new_scoped_cost_per_unit).toBeCloseTo(expected, 5);
+      expect(result.new_cost_per_unit).toBeCloseTo(expected, 5);
+      // Invariant: the blended cost stays BETWEEN the two costs, never below
+      // the 3.5M floor (the collapse bug produced 1.436.207).
+      expect(result.new_scoped_cost_per_unit).toBeGreaterThan(3_500_000);
+      expect(result.new_scoped_cost_per_unit).toBeLessThan(7_000_000);
+      // products.cost_price persisted with the scoped blend.
+      expect(prismaService.products.update).toHaveBeenCalledTimes(1);
+    });
+
+    it('case c: legitimate zero cost (cost_per_unit=0 AND cost_price=0) stays 0 (no false fallback)', async () => {
+      (globalPrismaService as any).stock_levels.findMany.mockResolvedValue([
+        {
+          quantity_on_hand: 10,
+          cost_per_unit: 0,
+          products: { cost_price: 0 },
+          product_variants: null,
+        },
+      ]);
+
+      const agg = await service.getScopedStockAggregate({
+        product_id: 1,
+        location_id: 100,
+      });
+
+      expect(agg.quantity).toBe(10);
+      // Every link in the fallback chain is 0 → result is 0, not a crash.
+      expect(agg.cost_per_unit).toBe(0);
+    });
+  });
 });
