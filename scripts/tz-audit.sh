@@ -15,6 +15,11 @@
 #   3. `setUTCHours` / `Date.UTC` dentro de un *.service.ts de analytics → los
 #      servicios deben delegar los límites de rango en parseDateRange(query, tz);
 #      la aritmética UTC vive SOLO en los utils (la fuente única).
+#   4. FAN-OUT: `SUM(<orden>.grand_total|tax_amount|subtotal_amount|discount_amount)`
+#      a ≤20 líneas de un `JOIN order_items` PLANO (no subquery) en un servicio de
+#      analytics → el join multiplica la fila-orden por nº de ítems e infla la suma.
+#      Hay que pre-agregar order_items por order_id (subquery `JOIN (SELECT order_id,
+#      ... FROM order_items GROUP BY order_id) oi`) antes de sumar columnas de orden.
 #
 # Se ignoran: comentarios, archivos *.spec.ts (describen el patrón en strings de
 # test) y líneas marcadas con `tz-audit:ignore` (escape hatch documentado para
@@ -46,7 +51,7 @@ report() { # $1 = título, $2 = hits (multilínea)
   fi
 }
 
-echo "== tz-audit (1/3): DATE_TRUNC literal fuera del primitivo =="
+echo "== tz-audit (1/4): DATE_TRUNC literal fuera del primitivo =="
 HITS="$(grep -rnE "DATE_TRUNC[[:space:]]*\(" "$BACKEND_SRC" --include="*.ts" 2>/dev/null \
   | grep -vE "$NOT_COMMENT" \
   | grep -vE "$SKIP_TESTS" \
@@ -54,7 +59,7 @@ HITS="$(grep -rnE "DATE_TRUNC[[:space:]]*\(" "$BACKEND_SRC" --include="*.ts" 2>/
   | grep -vF "$ALLOW_UTIL" || true)"
 report "usa localPeriodSql() en vez de DATE_TRUNC crudo" "$HITS"
 
-echo "== tz-audit (2/3): EXTRACT(... FROM tabla.columna) sin conversión de TZ =="
+echo "== tz-audit (2/4): EXTRACT(... FROM tabla.columna) sin conversión de TZ =="
 HITS="$(grep -rnE "EXTRACT[[:space:]]*\([A-Za-z_]+[[:space:]]+FROM[[:space:]]+[a-z_]+\.[a-z_]+[[:space:]]*\)" "$BACKEND_SRC" --include="*.ts" 2>/dev/null \
   | grep -vE "$NOT_COMMENT" \
   | grep -vE "$SKIP_TESTS" \
@@ -62,12 +67,42 @@ HITS="$(grep -rnE "EXTRACT[[:space:]]*\([A-Za-z_]+[[:space:]]+FROM[[:space:]]+[a
   | grep -vF "$ALLOW_UTIL" || true)"
 report "envuelve la columna en localBucketSql() antes de EXTRACT (o marca la business-date con tz-audit:ignore)" "$HITS"
 
-echo "== tz-audit (3/3): setUTCHours/Date.UTC en servicios de analytics =="
+echo "== tz-audit (3/4): setUTCHours/Date.UTC en servicios de analytics =="
 HITS="$(grep -rnE "setUTCHours|Date\.UTC" "$ANALYTICS_SERVICES" --include="*.service.ts" 2>/dev/null \
   | grep -vE "$NOT_COMMENT" \
   | grep -vE "$SKIP_TESTS" \
   | grep -vE "$IGNORE_MARK" || true)"
 report "resuelve el rango con parseDateRange(query, tz), no con aritmética UTC" "$HITS"
+
+echo "== tz-audit (4/4): fan-out SUM(columna-de-orden) sobre JOIN order_items plano =="
+# El bug es una relación entre DOS líneas dentro de un mismo query: un JOIN PLANO a
+# order_items (que multiplica la fila-orden por nº de ítems) cerca de un SUM de una
+# columna a NIVEL-ORDEN (grand_total/tax_amount/subtotal_amount/discount_amount).
+# La forma correcta pre-agrega el hijo: `JOIN (SELECT order_id, ... FROM order_items
+# GROUP BY order_id) oi` — ahí el token tras JOIN es `(`, no `order_items`, y no se
+# marca. Se exige co-ocurrencia (≤20 líneas) para NO marcar joins legítimos que solo
+# suman columnas de ítem (p.ej. products-analytics). grep pre-filtra los archivos con
+# join plano; awk confirma la proximidad. `tz-audit:ignore` excluye la línea.
+FANOUT_FILES="$(grep -rlE "JOIN[[:space:]]+order_items[^A-Za-z0-9_]" "$ANALYTICS_SERVICES" --include="*.service.ts" 2>/dev/null || true)"
+HITS=""
+if [ -n "$FANOUT_FILES" ]; then
+  HITS="$(
+    for f in $FANOUT_FILES; do
+      awk -v FN="$f" '
+        /tz-audit:ignore/ { next }
+        $0 ~ /JOIN[[:space:]]+order_items[^A-Za-z0-9_]/ { nj++; jl[nj]=NR; jt[nj]=$0 }
+        $0 ~ /SUM[[:space:]]*\([^)]*[A-Za-z_]+\.(grand_total|tax_amount|subtotal_amount|discount_amount)/ { ns++; sl[ns]=NR }
+        END {
+          for (i=1;i<=nj;i++) for (k=1;k<=ns;k++) {
+            d = jl[i]-sl[k]; if (d<0) d=-d;
+            if (d<=20) { sub(/^[[:space:]]+/,"",jt[i]); printf "%s:%d: %s\n", FN, jl[i], jt[i]; break }
+          }
+        }
+      ' "$f"
+    done
+  )"
+fi
+report "pre-agrega order_items por order_id (subquery) antes de SUM de columnas de orden — evita fan-out" "$HITS"
 
 if [ "$FAIL" -ne 0 ]; then
   echo ""

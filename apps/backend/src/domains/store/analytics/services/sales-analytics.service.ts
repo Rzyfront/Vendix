@@ -570,9 +570,13 @@ export class SalesAnalyticsService {
         ${periodSql} AS period,
         COALESCE(SUM(o.grand_total), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
-        COALESCE(SUM(oi.quantity), 0) AS units_sold
+        COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
-      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN (
+        SELECT order_id, SUM(quantity) AS units
+        FROM order_items
+        GROUP BY order_id
+      ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
         AND o.state IN ('delivered', 'finished')
         AND o.created_at >= ${startDate}
@@ -629,9 +633,13 @@ export class SalesAnalyticsService {
         EXTRACT(HOUR FROM (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql}))::int AS hour_local,
         COALESCE(SUM(o.grand_total), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
-        COALESCE(SUM(oi.quantity), 0) AS units_sold
+        COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
-      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN (
+        SELECT order_id, SUM(quantity) AS units
+        FROM order_items
+        GROUP BY order_id
+      ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
         AND o.state IN ('delivered', 'finished')
         AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql})::date

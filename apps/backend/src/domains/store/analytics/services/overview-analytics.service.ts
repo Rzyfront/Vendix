@@ -149,10 +149,14 @@ export class OverviewAnalyticsService {
       SELECT
         ${salesPeriodSql} AS period,
         COALESCE(SUM(o.grand_total - o.tax_amount), 0) AS sales,
-        COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cost_of_goods,
+        COALESCE(SUM(oi.cogs), 0) AS cost_of_goods,
         COALESCE(SUM(o.tax_amount), 0) AS taxes
       FROM orders o
-      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN (
+        SELECT order_id, SUM(quantity * COALESCE(cost_price, 0)) AS cogs
+        FROM order_items
+        GROUP BY order_id
+      ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
         AND o.state IN ('delivered', 'finished')
         AND o.created_at >= ${startDate}
