@@ -10,8 +10,12 @@ import { fillTimeSeries } from '../utils/fill-time-series.util';
 import {
   formatPeriodFromDate,
   parseDateRange,
-  getDateTruncInterval,
 } from '../utils/date.util';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  resolveStoreTimezone,
+  localPeriodSql,
+} from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { OperatingScopeService } from '@common/services/operating-scope.service';
 import { mergeStoreSettingsWithDefaults } from '../../settings/defaults/default-store-settings';
@@ -24,6 +28,19 @@ export class InventoryAnalyticsService {
     private readonly prisma: StorePrismaService,
     private readonly operatingScopeService: OperatingScopeService,
   ) {}
+
+  /**
+   * Resolves the current request's store timezone (single source of truth).
+   * Falls back to the default when there is no store context (the scoped
+   * client would already reject such a call before reaching real data).
+   */
+  private async getStoreTimezone(): Promise<string> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      return DEFAULT_STORE_TIMEZONE;
+    }
+    return resolveStoreTimezone(this.prisma, context.store_id);
+  }
 
   async getInventorySummary(query: InventoryAnalyticsQueryDto) {
     const settings = await this.loadMergedSettings();
@@ -263,7 +280,8 @@ export class InventoryAnalyticsService {
   }
 
   async getStockMovements(query: InventoryAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const where: any = {
       created_at: {
@@ -736,13 +754,15 @@ export class InventoryAnalyticsService {
   }
 
   async getMovementSummary(query: InventoryAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
     const storeId = context.store_id;
+
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     // withoutScope() needed: $queryRaw is not available on the scoped client.
     // storeId is validated above and used in the WHERE clause.
@@ -778,7 +798,6 @@ export class InventoryAnalyticsService {
   }
 
   async getMovementTrends(query: InventoryAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -787,13 +806,22 @@ export class InventoryAnalyticsService {
     }
     const storeId = context.store_id;
 
-    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
+    // Resolve the store timezone ONCE and drive both the date range and the
+    // bucketing with it (single source of truth).
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    // Bucket by the store's LOCAL calendar. `localPeriodSql` emits the period as
+    // an authoritative TEXT label (to_char(DATE_TRUNC(..., im.created_at AT TIME
+    // ZONE 'UTC' AT TIME ZONE tz))); the fill below reproduces the exact same
+    // labels by walking the local calendar.
+    const periodSql = localPeriodSql('im.created_at', tz, granularity);
 
     // withoutScope() needed: $queryRaw is not available on the scoped client.
     // storeId is validated above and used in the WHERE clause.
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
-        period: Date;
+        period: string;
         stock_in: any;
         stock_out: any;
         adjustments: any;
@@ -802,7 +830,7 @@ export class InventoryAnalyticsService {
       }>
     >`
       SELECT
-        DATE_TRUNC(${truncSql}, im.created_at) AS period,
+        ${periodSql} AS period,
         COALESCE(SUM(CASE WHEN im.movement_type IN ('stock_in', 'return') THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_in,
         COALESCE(SUM(CASE WHEN im.movement_type IN ('stock_out', 'sale', 'damage', 'expiration') THEN ABS(im.quantity) ELSE 0 END), 0) AS stock_out,
         COALESCE(SUM(CASE WHEN im.movement_type = 'adjustment' THEN ABS(im.quantity) ELSE 0 END), 0) AS adjustments,
@@ -814,12 +842,14 @@ export class InventoryAnalyticsService {
         AND im.created_at >= ${startDate}
         AND im.created_at <= ${endDate}
         ${query.location_id ? Prisma.sql`AND (im.from_location_id = ${query.location_id} OR im.to_location_id = ${query.location_id})` : Prisma.empty}
-      GROUP BY DATE_TRUNC(${truncSql}, im.created_at)
-      ORDER BY period ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
     const mapped = results.map((r) => ({
-      period: formatPeriodFromDate(new Date(r.period), granularity),
+      // period is already the authoritative local label from SQL — do NOT
+      // re-derive it in JS (that reintroduces the tz-ambiguity bug).
+      period: r.period,
       stock_in: Number(r.stock_in),
       stock_out: Number(r.stock_out),
       adjustments: Number(r.adjustments),
@@ -834,11 +864,13 @@ export class InventoryAnalyticsService {
       granularity,
       { stock_in: 0, stock_out: 0, adjustments: 0, transfers: 0, total: 0 },
       formatPeriodFromDate,
+      tz,
     );
   }
 
   async getMovementsForExport(query: InventoryAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const movements = await this.prisma.inventory_movements.findMany({
       where: {
