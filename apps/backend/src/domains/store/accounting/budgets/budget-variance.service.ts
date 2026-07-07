@@ -226,10 +226,17 @@ export class BudgetVarianceService {
     store_id: number | null,
     organization_id: number,
   ): Promise<ActualRow[]> {
+    // NOTE (store-timezone): `accounting_entries.entry_date` is a pre-localized
+    // accounting BUSINESS DATE, not a raw event instant. Auto-entries already
+    // stamp it in the store timezone, and manual entries come from a
+    // 'YYYY-MM-DD' string (UTC midnight). Extracting the calendar month from it
+    // is therefore correct as-is; wrapping it in `localBucketSql` (AT TIME ZONE)
+    // would DOUBLE-convert an already-local date and shift month-boundary
+    // entries. Hence the `tz-audit:ignore` markers below — this is not QUI-487.
     const rows = await this.prisma.withoutScope().$queryRaw<ActualRow[]>`
       SELECT
         ael.account_id,
-        EXTRACT(MONTH FROM ae.entry_date)::int as month_num,
+        EXTRACT(MONTH FROM ae.entry_date)::int as month_num, -- tz-audit:ignore business-date
         SUM(ael.debit_amount)  as total_debit,
         SUM(ael.credit_amount) as total_credit
       FROM accounting_entry_lines ael
@@ -238,7 +245,7 @@ export class BudgetVarianceService {
         AND ae.status = 'posted'
         AND (${store_id}::int IS NULL OR ae.store_id = ${store_id})
         AND ae.organization_id = ${organization_id}
-      GROUP BY ael.account_id, EXTRACT(MONTH FROM ae.entry_date)
+      GROUP BY ael.account_id, EXTRACT(MONTH FROM ae.entry_date) -- tz-audit:ignore business-date
     `;
 
     return rows;

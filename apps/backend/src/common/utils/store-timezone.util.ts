@@ -1,11 +1,24 @@
 /**
  * Store timezone — SINGLE SOURCE OF TRUTH.
  *
- * Postgres stores `created_at` as `timestamptz` (UTC). Grouping analytics with
- * a bare `DATE_TRUNC('day', created_at)` truncates in UTC, so a sale at 23:00
- * store-local time (e.g. America/Bogota, UTC-5 → 04:00Z next day) lands in the
- * wrong calendar bucket. This module centralizes every timezone concern used by
- * analytics/report bucketing so the fix lives in exactly one place.
+ * Analytics/report timestamp columns (orders.created_at, expenses.expense_date,
+ * carts.created_at, product_reviews.created_at, inventory_*.created_at,
+ * purchase_orders.created_at, cash_register_sessions.opened_at, ...) are all
+ * `timestamp without time zone` (`@db.Timestamp(6)`), and Prisma normalizes every
+ * `DateTime` to UTC on write/read — so each column physically holds the UTC
+ * wall-clock. A bare `DATE_TRUNC('day', col)` therefore truncates in UTC, and a
+ * sale at 23:00 store-local time (e.g. America/Bogota, UTC-5 → 04:00Z next day)
+ * lands in the wrong calendar bucket. This module centralizes every timezone
+ * concern used by analytics/report bucketing so the fix lives in exactly one place.
+ *
+ * Because the columns are NAIVE timestamps holding a UTC wall-clock (NOT
+ * `timestamptz`), the correct conversion is the DOUBLE idiom
+ * `col AT TIME ZONE 'UTC' AT TIME ZONE tz`: the first step reinterprets the naive
+ * value as UTC (yielding a `timestamptz`), the second renders that instant as the
+ * store's local wall-clock. (A single `col AT TIME ZONE tz` would be correct only
+ * for a genuine `timestamptz` column; applying it here would be wrong.) Verified:
+ * no analytics bucket column is `timestamptz` — every `Timestamptz(6)` in the
+ * schema belongs to infra/domain/notification/subscription tables.
  *
  * Design decisions (verified, not assumed):
  *  - The authoritative period label is produced IN SQL as TEXT via
@@ -65,6 +78,43 @@ export async function resolveStoreTimezone(
     where: { store_id: storeId },
     select: { settings: true },
   });
+  const tz = (settings?.settings as any)?.general?.timezone as
+    | string
+    | undefined;
+  return assertSafeTimezone(tz);
+}
+
+/**
+ * Minimal structural reader for a `store_settings` delegate, so this helper can
+ * accept either the scoped `StorePrismaService` or an unscoped base client
+ * (e.g. `organizationPrisma.withoutScope()`), which is what org-level dashboards
+ * need to reach across every store of the organization.
+ */
+interface StoreSettingsReader {
+  store_settings: {
+    findFirst: (args: unknown) => Promise<{ settings: unknown } | null>;
+  };
+}
+
+/**
+ * Resolves a representative IANA timezone for an ORGANIZATION dashboard that
+ * aggregates across its stores. Reads the timezone of the org's first active
+ * store from `store_settings.settings.general.timezone`, falling back to
+ * {@link DEFAULT_STORE_TIMEZONE}. Org-level views are cross-store; in practice
+ * an organization's stores share a country/timezone, so the first store's tz is
+ * the correct business-day anchor. Must be called with an UNSCOPED client
+ * (`withoutScope()`) so the `store_settings` -> `stores` join can filter by
+ * `organization_id` without the store-scope guard rejecting it.
+ */
+export async function resolveOrganizationTimezone(
+  prisma: StoreSettingsReader,
+  organizationId: number,
+): Promise<string> {
+  const settings = await prisma.store_settings.findFirst({
+    where: { stores: { organization_id: organizationId, is_active: true } },
+    select: { settings: true },
+    orderBy: { store_id: 'asc' },
+  } as unknown);
   const tz = (settings?.settings as any)?.general?.timezone as
     | string
     | undefined;
@@ -205,9 +255,10 @@ function pad(n: number): string {
 
 /**
  * Returns the safe SQL fragment `(column AT TIME ZONE 'UTC' AT TIME ZONE 'tz')`
- * that reinterprets a `timestamptz` column as the store's local wall clock.
- * `column` is a trusted code-supplied identifier (e.g. 'o.created_at'); `tz` is
- * charset-validated before being inlined.
+ * that renders a naive `timestamp` column (which Prisma fills with the UTC
+ * wall-clock) as the store's local wall clock. `column` is a trusted
+ * code-supplied identifier (e.g. 'o.created_at'); `tz` is charset-validated
+ * before being inlined.
  */
 export function localBucketSql(column: string, tz: string): Prisma.Sql {
   const safeTz = assertSafeTimezone(tz);

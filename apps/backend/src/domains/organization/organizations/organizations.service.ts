@@ -15,6 +15,12 @@ import {
   OrganizationOperatingScope,
 } from './dto';
 import { Prisma } from '@prisma/client';
+import {
+  resolveOrganizationTimezone,
+  localBucketSql,
+  localCivil,
+  zonedWallClockToUtc,
+} from '@common/utils/store-timezone.util';
 import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
 import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
@@ -375,24 +381,69 @@ export class OrganizationsService {
     const org_id = organizationId;
 
     // Dates setup
-    const now = new Date();
-    const today_start = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
+    // Business-day boundaries anchored to the organization's timezone (not the
+    // server clock). A sale at 23:00 local must count in the local calendar
+    // day/month — same day-boundary contract as store analytics (QUI-487).
+    const tz = await resolveOrganizationTimezone(
+      this.prisma.withoutScope() as any,
+      org_id,
     );
-    const current_month_start = new Date(now.getFullYear(), now.getMonth(), 1);
-    const last_month_start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const last_month_end = new Date(now.getFullYear(), now.getMonth(), 0);
+    // Local-tz wall-clock of `o.created_at` for monthly bucketing.
+    const createdAtLocal = localBucketSql('o.created_at', tz);
+    const now = new Date();
+    const localNow = localCivil(now, tz); // { year, month (1-12), day, ... }
+
+    // First instant (UTC) of the local calendar month `offset` months from the
+    // current local month. UTC arithmetic only rolls the year/month fields.
+    const localMonthStart = (offset: number): Date => {
+      const roll = new Date(
+        Date.UTC(localNow.year, localNow.month - 1 + offset, 1),
+      );
+      return zonedWallClockToUtc(
+        roll.getUTCFullYear(),
+        roll.getUTCMonth() + 1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        tz,
+      );
+    };
+
+    const today_start = zonedWallClockToUtc(
+      localNow.year,
+      localNow.month,
+      localNow.day,
+      0,
+      0,
+      0,
+      0,
+      tz,
+    );
+    const current_month_start = localMonthStart(0);
+    const last_month_start = localMonthStart(-1);
+    // Full-day inclusive end of the previous local month (day 0 of the current
+    // local month). The prior server-local `new Date(y, m, 0)` resolved to
+    // 00:00, silently truncating almost the entire last day — fixed here.
+    const lastMonthEndCivil = new Date(
+      Date.UTC(localNow.year, localNow.month - 1, 0),
+    );
+    const last_month_end = zonedWallClockToUtc(
+      lastMonthEndCivil.getUTCFullYear(),
+      lastMonthEndCivil.getUTCMonth() + 1,
+      lastMonthEndCivil.getUTCDate(),
+      23,
+      59,
+      59,
+      999,
+      tz,
+    );
 
     // Calculate period dates for profit trend
     const monthsMap: Record<string, number> = { '6m': 6, '1y': 12, all: 24 };
     const monthsToFetch = period && monthsMap[period] ? monthsMap[period] : 6;
-    const trend_start_date = new Date(
-      now.getFullYear(),
-      now.getMonth() - (monthsToFetch - 1),
-      1,
-    );
+    const trend_start_date = localMonthStart(-(monthsToFetch - 1));
 
     const [
       // 1. Total Stores & New this month
@@ -487,20 +538,20 @@ export class OrganizationsService {
       >`
         WITH monthly_orders AS (
           SELECT
-            EXTRACT(MONTH FROM o.created_at)::int as month,
-            EXTRACT(YEAR FROM o.created_at)::int as year,
+            EXTRACT(MONTH FROM ${createdAtLocal})::int as month,
+            EXTRACT(YEAR FROM ${createdAtLocal})::int as year,
             COALESCE(SUM(o.grand_total - o.shipping_cost), 0) as revenue
           FROM orders o
           INNER JOIN stores s ON s.id = o.store_id
           WHERE s.organization_id = ${org_id}
             AND o.state = 'finished'
             AND o.created_at >= ${trend_start_date}
-          GROUP BY EXTRACT(MONTH FROM o.created_at), EXTRACT(YEAR FROM o.created_at)
+          GROUP BY EXTRACT(MONTH FROM ${createdAtLocal}), EXTRACT(YEAR FROM ${createdAtLocal})
         ),
         monthly_costs AS (
           SELECT
-            EXTRACT(MONTH FROM o.created_at)::int as month,
-            EXTRACT(YEAR FROM o.created_at)::int as year,
+            EXTRACT(MONTH FROM ${createdAtLocal})::int as month,
+            EXTRACT(YEAR FROM ${createdAtLocal})::int as year,
             COALESCE(SUM(COALESCE(oi.cost_price, 0) * oi.quantity), 0) as costs
           FROM order_items oi
           INNER JOIN orders o ON oi.order_id = o.id
@@ -508,7 +559,7 @@ export class OrganizationsService {
           WHERE s.organization_id = ${org_id}
             AND o.state = 'finished'
             AND o.created_at >= ${trend_start_date}
-          GROUP BY EXTRACT(MONTH FROM o.created_at), EXTRACT(YEAR FROM o.created_at)
+          GROUP BY EXTRACT(MONTH FROM ${createdAtLocal}), EXTRACT(YEAR FROM ${createdAtLocal})
         )
         SELECT
           mo.month,
