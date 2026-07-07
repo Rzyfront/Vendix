@@ -43,9 +43,9 @@ function generateItemId(): string {
 }
 
 function getTaxRateSum(product: Product): number {
-  if (!product.tax_assignments || product.tax_assignments.length === 0) return 0;
+  if (!product.product_tax_assignments || product.product_tax_assignments.length === 0) return 0;
   let total = 0;
-  for (const assignment of product.tax_assignments) {
+  for (const assignment of product.product_tax_assignments) {
     const taxCategory = assignment.tax_category ?? (assignment as any).tax_categories;
     if (taxCategory?.tax_rates) {
       for (const rate of taxCategory.tax_rates) {

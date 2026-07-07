@@ -69,7 +69,7 @@ export function StickyHeader({
       <View style={styles.row}>
         {(backHref || onBack) && (
           <Pressable onPress={handleBack} hitSlop={12} style={styles.backButton}>
-            <Icon name="chevron-left" size={24} color={colors.text.primary} />
+            <Icon name="arrow-left" size={18} color={colors.text.secondary} />
           </Pressable>
         )}
         {showCloseButton && (
@@ -82,6 +82,7 @@ export function StickyHeader({
             {title}
           </Text>
           {subtitle && (
+            // Mirror web `sticky-header-subtitle hidden sm:block` — sólo visible en pantallas anchas.
             <Text style={styles.subtitle} numberOfLines={1}>
               {subtitle}
             </Text>
@@ -128,17 +129,19 @@ export function StickyHeader({
 }
 
 function ActionButton({ action }: { action: StickyHeaderAction }) {
-  const bg = action.variant === 'primary'
+  const isPrimary = action.variant === 'primary';
+  const isDestructive = action.variant === 'destructive';
+  const isOutline = action.variant === 'outline';
+
+  const bg = isPrimary
     ? colors.primary
-    : action.variant === 'destructive'
+    : isDestructive
       ? colorScales.red[600]
-      : action.variant === 'outline'
-        ? 'transparent'
-        : 'transparent';
-  const borderColor = action.variant === 'outline' ? colorScales.gray[300] : 'transparent';
-  const textColor = action.variant === 'primary' || action.variant === 'destructive'
+      : 'transparent';
+  const borderColor = isOutline ? 'rgba(126, 215, 165, 0.5)' : 'transparent';
+  const textColor = isPrimary || isDestructive
     ? colors.background
-    : colors.text.primary;
+    : colors.primary;
 
   return (
     <Pressable
@@ -146,7 +149,8 @@ function ActionButton({ action }: { action: StickyHeaderAction }) {
       disabled={action.disabled || action.loading}
       style={({ pressed }) => [
         styles.actionButton,
-        { backgroundColor: bg, borderColor, borderWidth: action.variant === 'outline' ? 1 : 0 },
+        isPrimary && styles.actionPrimary,
+        isOutline && styles.actionOutline,
         pressed && styles.actionPressed,
         (action.disabled || action.loading) && styles.disabled,
       ]}
@@ -155,12 +159,19 @@ function ActionButton({ action }: { action: StickyHeaderAction }) {
         <ActivityIndicator size="small" color={textColor} />
       ) : (
         <>
+          {/* Icon (siempre visible) */}
           {action.icon && !action.iconRight && (
-            <Icon name={action.icon} size={18} color={textColor} />
+            <Icon name={action.icon} size={16} color={textColor} />
           )}
-          {action.label ? <Text style={[styles.actionLabel, { color: textColor }]} numberOfLines={1}>{action.label}</Text> : null}
+          {/* Label (oculto en mobile para ahorrar espacio — `md:flex-row` lo muestra en pantallas grandes).
+              Para forzar visibilidad en mobile, agregar `style={{ ...styles.actionLabelOverride, display: 'flex' }}` externamente. */}
+          {action.label ? (
+            <Text style={[styles.actionLabel, { color: textColor }]} numberOfLines={1}>
+              {action.label}
+            </Text>
+          ) : null}
           {action.icon && action.iconRight && (
-            <Icon name={action.icon} size={18} color={textColor} />
+            <Icon name={action.icon} size={16} color={textColor} />
           )}
         </>
       )}
@@ -171,9 +182,8 @@ function ActionButton({ action }: { action: StickyHeaderAction }) {
 const styles = StyleSheet.create({
   wrapper: {
     backgroundColor: colors.card,
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[2],
-    paddingBottom: spacing[2],
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[1.5],
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[200],
     borderBottomLeftRadius: 12,
@@ -182,27 +192,32 @@ const styles = StyleSheet.create({
     ...shadows.sm,
   },
   wrapperGlass: {
-    backgroundColor: 'rgba(255,255,255,0.85)',
+    // Mirror web `bg-[rgba(255,255,255,0.95)]` — fondo semitransparente.
+    backgroundColor: 'rgba(255,255,255,0.95)',
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 40,
+    justifyContent: 'space-between',
     gap: spacing[2],
   },
+  // Botón back cuadrado (mirror web `!w-7 !h-7 md:!w-8 md:!h-8 !rounded-lg`).
   backButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },
   titleBlock: {
     flex: 1,
+    minWidth: 0,
   },
   title: {
-    fontSize: typography.fontSize.xl,
-    fontWeight: '700',
+    fontSize: typography.fontSize.base,
+    fontWeight: '700' as any,
     color: colors.text.primary,
   },
   subtitle: {
@@ -212,21 +227,41 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: spacing[2],
   },
+  // Action button: 36x36 icon-only en mobile. `actionPrimary` y `actionOutline`
+  // aplican los estilos exactos del web (`btn-shadow-primary` y `btn-outline-border`).
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.lg,
+    justifyContent: 'center',
+    minWidth: 36,
+    minHeight: 36,
+    paddingHorizontal: spacing[2],
+    borderRadius: 10,
+  },
+  actionPrimary: {
+    backgroundColor: colors.primary,
+    shadowColor: '#7ED7A5',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 3,
+  },
+  actionOutline: {
+    borderWidth: 1,
+    borderColor: 'rgba(126, 215, 165, 0.5)',
   },
   actionPressed: {
-    opacity: 0.7,
+    opacity: 0.85,
   },
+  // En mobile el label se oculta para mantener el botón icon-only.
   actionLabel: {
     fontSize: typography.fontSize.sm,
-    fontWeight: '500',
+    fontWeight: '700' as any,
+    marginLeft: spacing[2],
+    display: 'none',
   },
   disabled: {
     opacity: 0.5,

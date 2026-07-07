@@ -1,4 +1,5 @@
 export { ProductService } from './product.service';
+export { PromotionsService } from './promotions.service';
 export { OrderService } from './order.service';
 export { DashboardService, AnalyticsService } from './dashboard.service';
 export { AnalyticsDetailService } from './analytics.service';

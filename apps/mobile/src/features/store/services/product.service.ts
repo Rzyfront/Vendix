@@ -13,12 +13,27 @@ import type {
   ProductCategory,
   Brand,
   TaxCategory,
+  PriceTier,
+  BulkProductAnalysisResult,
+  BulkUploadResult,
 } from '../types';
 
 function unwrap<T>(response: { data: T | ApiResponse<T> }): T {
   const d = response.data as ApiResponse<T>;
   if (d && typeof d === 'object' && 'success' in d) return d.data;
   return response.data as T;
+}
+
+/**
+ * Payload para crear una nueva categoría de impuesto. Coincide con el
+ * endpoint backend POST /store/taxes/categories.
+ */
+export interface CreateTaxCategoryDto {
+  name: string;
+  type?: 'percentage' | 'fixed';
+  tax_type?: 'iva' | 'inc' | 'ica' | 'withholding' | 'reteiva' | 'reteica' | 'other';
+  rate: number;
+  description?: string;
 }
 
 function buildQuery(params?: Record<string, unknown>): string {
@@ -122,6 +137,105 @@ export const ProductService = {
     return unwrap<ProductImage[]>(res);
   },
 
+  /**
+   * Lista las tarifas de precio del store (multi-tarifa). Se usa en
+   * el form de producto para que el usuario seleccione cuáles aplican.
+   * Devuelve `{ data: PriceTier[], meta: { total, ... } }`.
+   */
+  async getPriceTiers(params?: { is_active?: boolean; search?: string }): Promise<PriceTier[]> {
+    const query: string[] = [];
+    if (params?.is_active !== undefined) query.push(`is_active=${params.is_active}`);
+    if (params?.search) query.push(`search=${encodeURIComponent(params.search)}`);
+    const qs = query.length ? `?${query.join('&')}` : '';
+    const res = await apiClient.get(`${Endpoints.STORE.PRICE_TIERS.LIST}${qs}`);
+    const body = unwrap<{ data?: PriceTier[] } | PriceTier[]>(res);
+    return Array.isArray(body) ? body : body.data ?? [];
+  },
+
+  /**
+   * Lista los overrides de precio (override_price, override_units_per_package)
+   * que un producto tiene configurados para cada tarifa aplicada.
+   * Se usa para hidratar el form al re-editar un producto con
+   * multi-tarifa.
+   */
+  async getProductPriceTierOverrides(productId: number): Promise<
+    Array<{
+      price_tier_id: number;
+      override_price?: number | null;
+      override_units_per_package?: number | null;
+    }>
+  > {
+    const res = await apiClient.get(
+      `/store/price-tiers/products/${productId}/overrides`,
+    );
+    const body = unwrap<unknown[] | { data?: unknown[] }>(res);
+    return Array.isArray(body) ? (body as any[]) : ((body as any).data ?? []);
+  },
+
+  /**
+   * Genera (o regenera) el link público de compra online + QR del
+   * producto. El backend busca el dominio ecommerce principal de la
+   * tienda y construye la URL + QR code. Devuelve el QR como data URL
+   * listo para renderizar en un `<Image>`.
+   */
+  async generateOnlinePurchaseLink(productId: number): Promise<{
+    generated: boolean;
+    product_id: number;
+    online_purchase_url: string | null;
+    online_purchase_qr_code: string | null;
+    qr_data_url: string | null;
+    online_purchase_domain_id: number | null;
+    domain_hostname: string | null;
+    online_purchase_generated_at: string | null;
+    online_purchase_ready: boolean;
+    online_purchase_status_reason: string | null;
+    online_purchase_status_message: string | null;
+  }> {
+    const res = await apiClient.post(
+      `/store/products/${productId}/online-purchase-link`,
+    );
+    return unwrap<{
+      generated: boolean;
+      product_id: number;
+      online_purchase_url: string | null;
+      online_purchase_qr_code: string | null;
+      qr_data_url: string | null;
+      online_purchase_domain_id: number | null;
+      domain_hostname: string | null;
+      online_purchase_generated_at: string | null;
+      online_purchase_ready: boolean;
+      online_purchase_status_reason: string | null;
+      online_purchase_status_message: string | null;
+    }>(res);
+  },
+
+  /**
+   * Crea/actualiza el override de precio y unidades por empaque de
+   * una tarifa específica sobre un producto. El backend reconcilia con
+   * la tabla `product_price_tier_overrides`.
+   */
+  async upsertProductPriceTierOverride(
+    productId: number,
+    tierId: number,
+    body: { override_price?: number; override_units_per_package?: number },
+  ): Promise<void> {
+    const endpoint = `/store/price-tiers/products/${productId}/overrides/${tierId}`;
+    await apiClient.put(endpoint, body);
+  },
+
+  /**
+   * Elimina el override de una tarifa para un producto. Se llama cuando
+   * el usuario desactiva la multi-tarifa o quita una tarifa de la
+   * selección, y esa tarifa ya tenía override persistido.
+   */
+  async removeProductPriceTierOverride(
+    productId: number,
+    tierId: number,
+  ): Promise<void> {
+    const endpoint = `/store/price-tiers/products/${productId}/overrides/${tierId}`;
+    await apiClient.delete(endpoint);
+  },
+
   async getCategories(): Promise<ProductCategory[]> {
     const res = await apiClient.get(Endpoints.STORE.CATEGORIES.LIST);
     return unwrap<ProductCategory[]>(res);
@@ -133,7 +247,218 @@ export const ProductService = {
   },
 
   async getTaxes(): Promise<TaxCategory[]> {
-    const res = await apiClient.get(Endpoints.STORE.TAXES.CATEGORIES);
-    return unwrap<TaxCategory[]>(res);
+    // Pedimos un limit alto para traer todos los impuestos en una sola llamada
+    // (la mayoría de tiendas tienen < 50). El backend siempre devuelve respuesta
+    // paginada `{ data: TaxCategory[], meta: {...} }` envuelta en el envelope estándar.
+    const res = await apiClient.get(
+      `${Endpoints.STORE.TAXES.CATEGORIES}?limit=200`,
+    );
+    const unwrapped = unwrap<TaxCategory[] | { data: TaxCategory[]; meta: unknown }>(res);
+    // Si la respuesta es paginada, devolvemos el array interno.
+    if (unwrapped && typeof unwrapped === 'object' && 'data' in unwrapped && Array.isArray((unwrapped as { data: TaxCategory[] }).data)) {
+      return (unwrapped as { data: TaxCategory[] }).data;
+    }
+    return unwrapped as TaxCategory[];
+  },
+
+  /**
+   * Crea una nueva categoría de impuesto (ej. IVA, INC, ReteFuente).
+   * Persiste en backend y devuelve el TaxCategory con el id real.
+   */
+  async createTaxCategory(data: CreateTaxCategoryDto): Promise<TaxCategory> {
+    const res = await apiClient.post(Endpoints.STORE.TAXES.CATEGORY_CREATE, data);
+    return unwrap<TaxCategory>(res);
+  },
+
+  /**
+   * Elimina una categoría de impuesto. Tras borrar, el caller debe
+   * invalidar el queryKey `['product-taxes']` para refrescar la lista.
+   */
+  async deleteTaxCategory(id: number): Promise<void> {
+    const endpoint = Endpoints.STORE.TAXES.CATEGORY_DELETE.replace(':id', String(id));
+    await apiClient.delete(endpoint);
+  },
+
+  /**
+   * Persiste las promociones asignadas a un producto (PATCH separado,
+   * no bundled en el DTO de update — sigue el patrón del web y de
+   * `syncPriceTierOverrides`).
+   */
+  async updatePromotions(productId: number, ids: number[]): Promise<void> {
+    const endpoint = Endpoints.STORE.PRODUCTS.PROMOTIONS.replace(':id', String(productId));
+    await apiClient.patch(endpoint, { promotion_ids: ids });
+  },
+
+  /**
+   * Llama al backend de IA para generar la descripción de un producto a partir
+   * de su nombre + SKU + categoría + marca. Devuelve el texto sugerido.
+   */
+  async generateDescription(payload: {
+    name: string;
+    sku?: string;
+    category_id?: number | null;
+    brand_id?: number | null;
+  }): Promise<{ description: string }> {
+    const res = await apiClient.post(
+      Endpoints.STORE.PRODUCTS.GENERATE_DESCRIPTION,
+      payload,
+    );
+    return unwrap<{ description: string }>(res);
+  },
+
+  /* ============================================================
+   * Bulk product upload (wizard 3-step)
+   * ============================================================
+   * Implementa el flujo del web `bulk-upload-modal.component.ts`:
+   * analyze (dry-run con validación cell-by-cell) → upload-session (commit).
+   * Los templates se descargan con `getBulkUploadTemplate(type)`.
+   */
+
+  /**
+   * Descarga la plantilla Excel para carga masiva.
+   * `type='products'` → plantilla de productos (17 columnas).
+   * `type='services'` → plantilla de servicios (27 columnas).
+   * Devuelve un Blob listo para `FileSystem.writeAsStringAsync`.
+   */
+  async getBulkUploadTemplate(type: 'products' | 'services' = 'products'): Promise<Blob> {
+    const res = await apiClient.get(
+      `${Endpoints.STORE.PRODUCTS.BULK_TEMPLATE_DOWNLOAD}?type=${type}`,
+      { responseType: 'blob' },
+    );
+    return res.data as Blob;
+  },
+
+  /**
+   * Descarga un XLSX con los productos actuales del store, en el mismo
+   * formato de la plantilla + 3 columnas informativas (precio compra,
+   * cantidad actual, tiene imagen). Pensado para auditoría/edición rápida.
+   */
+  async exportCurrentProducts(): Promise<Blob> {
+    const res = await apiClient.get(Endpoints.STORE.PRODUCTS.BULK_EXPORT, {
+      responseType: 'blob',
+    });
+    return res.data as Blob;
+  },
+
+  /**
+   * Paso 1 del wizard: analiza el archivo Excel/CSV sin procesar (dry-run).
+   * Devuelve el `session_id` que se usará en `uploadBulkProductsFromSession`,
+   * más el análisis per-row con `status` (ready/warning/error) y
+   * `modified_fields`/`nulled_fields` para el cell-level preview del Paso 2.
+   */
+  async analyzeBulkProducts(file: { uri: string; name: string }): Promise<BulkProductAnalysisResult> {
+    const formData = new FormData();
+    // @ts-expect-error RN FormData accepts file objects with uri/name/type
+    formData.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    });
+    const res = await apiClient.post(Endpoints.STORE.PRODUCTS.BULK_ANALYZE, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return unwrap<BulkProductAnalysisResult>(res);
+  },
+
+  /**
+   * Paso 3 del wizard: procesa la carga desde una sesión previamente analizada.
+   * El backend descarga el XLSX de S3 (subido en analyze), lo re-parsea y
+   * aplica create/update por SKU.
+   */
+  async uploadBulkProductsFromSession(sessionId: string): Promise<BulkUploadResult> {
+    const res = await apiClient.post(
+      Endpoints.STORE.PRODUCTS.BULK_UPLOAD_SESSION,
+      { session_id: sessionId },
+    );
+    return unwrap<BulkUploadResult>(res);
+  },
+
+  /**
+   * Cancela una sesión de análisis, eliminando el XLSX temporal en S3.
+   * Se llama al cerrar el modal sin haber completado la carga, para no
+   * dejar archivos huérfanos.
+   */
+  async cancelBulkProductSession(sessionId: string): Promise<void> {
+    const endpoint = Endpoints.STORE.PRODUCTS.BULK_CANCEL_SESSION.replace(
+      ':sessionId',
+      sessionId,
+    );
+    await apiClient.delete(endpoint);
+  },
+
+  /* ============================================================
+   * Bulk image upload (wizard 3-step)
+   * ============================================================ */
+
+  /**
+   * Descarga la plantilla ZIP para carga masiva de imágenes.
+   * `type='example'` → ZIP con carpetas de ejemplo.
+   * `type='store-skus'` → ZIP con los SKUs reales del store.
+   */
+  async getBulkImageTemplate(type: 'example' | 'store-skus' = 'example'): Promise<Blob> {
+    const res = await apiClient.get(
+      `${Endpoints.STORE.PRODUCTS.BULK_IMAGES_TEMPLATE}?type=${type}`,
+      { responseType: 'blob' },
+    );
+    return res.data as Blob;
+  },
+
+  /**
+   * Analiza un ZIP de imágenes (dry-run). Devuelve el session_id y el
+   * análisis SKU por SKU con advertencias/errores.
+   */
+  async analyzeBulkImages(file: { uri: string; name: string; size: number }): Promise<BulkImageAnalysisResult & { session_id: string }> {
+    const formData = new FormData();
+    // @ts-expect-error RN FormData accepts file objects with uri/name/type
+    formData.append('file', {
+      uri: file.uri,
+      name: file.name,
+      type: 'application/zip',
+    });
+    const res = await apiClient.post(Endpoints.STORE.PRODUCTS.BULK_IMAGES_ANALYZE, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return unwrap<BulkImageAnalysisResult & { session_id: string }>(res);
+  },
+
+  /**
+   * Procesa las imágenes de una sesión previamente analizada.
+   */
+  async uploadBulkImagesFromSession(sessionId: string): Promise<BulkImageUploadResult> {
+    const res = await apiClient.post(
+      Endpoints.STORE.PRODUCTS.BULK_IMAGES_UPLOAD_SESSION,
+      { session_id: sessionId },
+    );
+    return unwrap<BulkImageUploadResult>(res);
   },
 };
+
+export interface BulkImageAnalysisResult {
+  total_skus: number;
+  ready: number;
+  with_warnings: number;
+  with_errors: number;
+  skus: Array<{
+    sku: string;
+    product_name: string | null;
+    images_in_zip: number;
+    valid_images: number;
+    current_image_count: number;
+    images_to_upload: number;
+    status: 'ready' | 'warning' | 'error';
+    warnings: string[];
+    errors: string[];
+  }>;
+}
+
+export interface BulkImageUploadResult {
+  total_skus_processed: number;
+  successful: number;
+  failed: number;
+  skipped: number;
+  results: Array<{
+    sku: string;
+    status: 'success' | 'error' | 'skipped';
+    message: string;
+  }>;
+}

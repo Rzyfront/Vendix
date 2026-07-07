@@ -35,7 +35,11 @@ export interface Product {
   categories?: ProductCategory[];
   product_variants?: ProductVariant[];
   product_images?: ProductImage[];
-  tax_assignments?: ProductTaxAssignment[];
+  /**
+   * Mapeo de `product_tax_assignments` (nombre en la respuesta del backend).
+   * El backend lo devuelve con prefijo `product_` por la relación Prisma.
+   */
+  product_tax_assignments?: ProductTaxAssignment[];
   total_stock_available?: number;
 }
 
@@ -70,7 +74,13 @@ export interface ProductVariant {
 export interface ProductImage {
   id: number;
   product_id: number;
-  url: string;
+  /**
+   * El backend devuelve `image_url` directamente del modelo Prisma
+   * `product_images` (campo firmado si la key no es una URL completa).
+   * Históricamente la mobile lo leía como `url` y eso rompía la carga
+   * de imágenes al editar un producto.
+   */
+  image_url: string;
   alt_text?: string | null;
   is_main: boolean;
   sort_order: number;
@@ -248,6 +258,7 @@ export interface CreateProductDto {
   slug?: string;
   description?: string;
   base_price: number;
+  barcode?: string;
   cost_price?: number;
   profit_margin?: number;
   is_on_sale?: boolean;
@@ -270,3 +281,114 @@ export interface CreateProductDto {
 }
 
 export type UpdateProductDto = Partial<CreateProductDto>;
+
+/**
+ * Tarifa de precio (multi-tarifa). El backend devuelve estos registros
+ * en `GET /store/price-tiers` con paginación `{ data, meta }`.
+ */
+export interface PriceTier {
+  id: number;
+  store_id: number;
+  name: string;
+  code?: string | null;
+  description?: string | null;
+  is_default?: boolean;
+  is_active?: boolean;
+  is_package_unit?: boolean;
+  units_per_package?: number | null;
+  sort_order?: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+/* ============================================================
+ * Bulk product upload (wizard 3-step: analyze → upload-session)
+ * ============================================================
+ * Mirror exacto de los DTOs backend en
+ * apps/backend/src/domains/store/products/dto/bulk-product-analysis.dto.ts
+ * Cualquier divergencia causa data loss silenciosa en el wizard mobile.
+ */
+
+export interface BulkValidationMessage {
+  code: string;
+  message: string;
+  field?: string;
+}
+
+export interface BulkProductAnalysisItem {
+  row_number: number;
+  name: string;
+  sku: string;
+  product_type: 'physical' | 'service';
+  base_price: number;
+  cost_price: number;
+  stock_quantity: number;
+  track_inventory?: boolean;
+  brand_name?: string;
+  brand_will_create: boolean;
+  category_names?: string[];
+  categories_will_create: string[];
+  warehouse_code?: string;
+  warehouse_name?: string;
+  available_for_ecommerce?: boolean;
+  is_featured?: boolean;
+  allow_pos_price_override?: boolean;
+  has_multiple_price_tiers?: boolean;
+  action: 'create' | 'update';
+  existing_product_id?: number;
+  status: 'ready' | 'warning' | 'error';
+  warnings: (string | BulkValidationMessage)[];
+  errors: (string | BulkValidationMessage)[];
+  service_duration_minutes?: number;
+  service_modality?: string;
+  service_pricing_type?: string;
+  requires_booking?: boolean;
+  booking_mode?: string;
+  buffer_minutes?: number;
+  is_recurring?: boolean;
+  is_consultation?: boolean;
+  send_preconsultation?: boolean;
+  consultation_template_id?: number;
+  preconsultation_template_id?: number;
+  min_stock_level?: number;
+  max_stock_level?: number;
+  reorder_point?: number;
+  reorder_quantity?: number;
+  requires_serial_numbers?: boolean;
+  requires_batch_tracking?: boolean;
+  pricing_type?: string;
+  /** Sparse-update preview: fields with new values (not NULL marker). */
+  modified_fields?: string[];
+  /** Sparse-update preview: fields set to NULL via NULL marker. */
+  nulled_fields?: string[];
+}
+
+export interface BulkProductAnalysisResult {
+  session_id: string;
+  total_products: number;
+  ready: number;
+  with_warnings: number;
+  with_errors: number;
+  products: BulkProductAnalysisItem[];
+}
+
+export interface BulkUploadItemResult {
+  row_number?: number;
+  product_name?: string;
+  sku?: string;
+  action?: 'create' | 'update';
+  product?: unknown;
+  status: 'success' | 'error' | 'skipped';
+  message: string;
+  error?: string;
+  error_code?: string;
+}
+
+export interface BulkUploadResult {
+  success: boolean;
+  total_processed: number;
+  successful: number;
+  failed: number;
+  skipped: number;
+  results: BulkUploadItemResult[];
+}

@@ -100,9 +100,6 @@ export default function CategoriesListScreen() {
         />
 
         <View style={{ flexDirection: 'row', gap: spacing[2], alignItems: 'center' }}>
-          <Text style={{ fontSize: typography.fontSize.lg, fontWeight: '700', color: colors.text.primary, marginRight: spacing[2] }}>
-            Categorías ({total})
-          </Text>
           <View style={{ flex: 1 }}>
             <SearchBar
               placeholder="Buscar categorías..."

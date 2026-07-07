@@ -45,3 +45,8 @@ GITHUB_SECRET_INSTRUCTIONS.txt
 # Local-only planning and output artifacts
 /plans/
 /outputs/
+
+# Local dev artifacts (scripts, screenshots de referencia, etc.)
+# No deben commitearse — son temporales del dev local.
+/capturar-pantalla.js
+/referencia-*.png

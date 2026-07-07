@@ -119,6 +119,18 @@ export default function StockDetailScreen() {
               )}
             </View>
 
+            {/* UoM Headline banner — solo para ingredientes con factor de conversión */}
+            {stock && (stock as any).uom_factor && (stock as any).uom_factor !== 1 ? (
+              <View style={styles.uomBanner}>
+                <Icon name="info" size={14} color={colors.primary} />
+                <Text style={styles.uomBannerText}>
+                  {`${(stock as any).sealed_qty ?? stock.totalOnHand} sellados + 1 abierto`}
+                  {(stock as any).uom_open_label ? ` (${(stock as any).uom_open_label})` : ''}
+                  {` · Equivale a 1 ${(stock as any).uom_stock_name ?? 'unidad'} = ${(stock as any).uom_factor} ${(stock as any).uom_purchase_name ?? 'kg'}`}
+                </Text>
+              </View>
+            ) : null}
+
             <StatsGrid
               style={styles.statsWrap}
               items={[
@@ -178,6 +190,24 @@ const styles = StyleSheet.create({
   titleWrap: { paddingHorizontal: spacing[4], paddingVertical: spacing[3] },
   title: { fontSize: typography.fontSize.xl, fontWeight: '700' as any, color: colorScales.gray[900] },
   subtitle: { fontSize: typography.fontSize.sm, color: colorScales.gray[500], marginTop: 2 },
+  uomBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    paddingVertical: spacing[2.5],
+    paddingHorizontal: spacing[3],
+    marginHorizontal: spacing[4],
+    marginBottom: spacing[2],
+    backgroundColor: colorScales.green[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.green[100],
+  },
+  uomBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: colorScales.green[800],
+  },
   statsWrap: { paddingHorizontal: spacing[4], marginBottom: spacing[2] },
   sectionTitle: {
     fontSize: typography.fontSize.sm,

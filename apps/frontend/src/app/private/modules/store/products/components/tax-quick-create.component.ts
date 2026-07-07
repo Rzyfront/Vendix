@@ -150,7 +150,6 @@ export class TaxQuickCreateComponent {
       type: ['percentage', [Validators.required]],
       tax_type: ['iva', [Validators.required]],
       rate: [0, [Validators.required, Validators.min(0), Validators.max(100)]],
-      store_id: [1],
       description: ['', [Validators.maxLength(500)]],
     });
 
@@ -162,7 +161,6 @@ export class TaxQuickCreateComponent {
           type: 'percentage',
           tax_type: 'iva',
           rate: 0,
-          store_id: 1,
           description: '',
         });
       }
