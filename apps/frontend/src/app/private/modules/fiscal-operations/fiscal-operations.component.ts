@@ -1454,7 +1454,7 @@ export class FiscalOperationsComponent {
   private presentOrHandle(err: unknown, message: string): void {
     this.loading.set(false);
     this.working.set(false);
-    if (this.fiscalReq.present(err)) {
+    if (this.fiscalReq.presentFiscalError(err)) {
       return;
     }
     this.errorMessage.set(message);
