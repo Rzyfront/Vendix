@@ -165,7 +165,8 @@ export class InvoicingEffects {
           catchError((error) => {
             this.fiscalReq.presentFiscalError(error);
             return of(InvoicingActions.createFromOrderFailure({
-              error: error.error?.message || error.message || 'Error creating invoice from order'
+              error: error.error?.message || error.message || 'Error creating invoice from order',
+              errorCode: error?.error?.error_code ?? null,
             }));
           })
         )
@@ -185,7 +186,8 @@ export class InvoicingEffects {
           catchError((error) => {
             this.fiscalReq.presentFiscalError(error);
             return of(InvoicingActions.createFromSalesOrderFailure({
-              error: error.error?.message || error.message || 'Error creating invoice from sales order'
+              error: error.error?.message || error.message || 'Error creating invoice from sales order',
+              errorCode: error?.error?.error_code ?? null,
             }));
           })
         )

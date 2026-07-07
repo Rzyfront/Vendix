@@ -619,10 +619,17 @@ effect(() => {
       this.toastService.success('Factura creada exitosamente');
     } else {
       const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;
-      // Si el backend rechazo la factura por una restriccion fiscal reconocida
-      // (config DIAN incompleta, estado fiscal, periodo cerrado, etc.), lo
-      // explicamos con el modal de requisitos y suprimimos el toast crudo.
-      if (this.fiscalReq.presentFiscalError(errorAction.error)) {
+      // El effect (createFromOrder$) ya abrio el modal de requisitos fiscales:
+      // FiscalRequirementsService es singleton root y este componente monta el
+      // modal. Aqui solo SUPRIMIMOS el toast crudo cuando el fallo es una
+      // restriccion fiscal reconocida (config DIAN incompleta, estado fiscal,
+      // periodo cerrado, etc.), porque el modal ya explica el motivo + CTA. No
+      // reabrimos el modal para evitar doble apertura.
+      if (
+        this.fiscalReq.isFiscalRestriction({
+          error: { error_code: errorAction.errorCode },
+        })
+      ) {
         return;
       }
       this.toastService.error(errorAction.error || 'Error al crear la factura');
