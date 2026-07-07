@@ -50,6 +50,14 @@ export const ProductService = {
       include_inactive: query?.include_inactive,
       pos_optimized: query?.pos_optimized,
       include_variants: query?.include_variants,
+      // Paridad web `pos-product-search.component` (min/max price, sort,
+      // in-stock). Backend actual puede ignorarlos (DTO no los declara);
+      // el cliente aplica fallback local en `pos/index.tsx`.
+      min_price: query?.min_price,
+      max_price: query?.max_price,
+      in_stock: query?.in_stock,
+      sort_by: query?.sort_by,
+      sort_order: query?.sort_order,
     };
     const res = await apiClient.get(`${Endpoints.STORE.PRODUCTS.LIST}${buildQuery(params)}`);
     return unwrapPaginated<Product>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });

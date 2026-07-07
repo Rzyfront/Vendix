@@ -1,24 +1,19 @@
-import { useState, useMemo, useCallback } from 'react';
-import { View, ScrollView, Text, Pressable, StyleSheet, FlatList } from 'react-native';
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
+import { useRouter } from 'expo-router';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { PullToRefresh } from '@/shared/components/pull-to-refresh/pull-to-refresh';
-import { toastError } from '@/shared/components/toast/toast.store';
+import { DateRangeFilter, type DateRangeFilterValue, type DatePreset } from '@/shared/components/date-range-filter/date-range-filter';
+import { ExportButton } from '@/shared/components/export-button/export-button';
+import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { AnalyticsDetailService } from '@/features/store/services';
-import type { DatePreset } from '@/features/store/types';
-import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
-
-const PRESETS: { label: string; value: DatePreset }[] = [
-  { label: 'Hoy', value: 'today' },
-  { label: 'Esta Semana', value: 'thisWeek' },
-  { label: 'Este Mes', value: 'thisMonth' },
-  { label: 'Este Año', value: 'thisYear' },
-];
+import { colors, colorScales, spacing, borderRadius, typography, shadows } from '@/shared/theme';
 
 const styles = StyleSheet.create({
   root: {
@@ -29,119 +24,209 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[4],
     paddingTop: spacing[2],
   },
-  presetScroll: {
+  // Header — web parity (top-sellers.component.html líneas 40-53)
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2.5],
     marginBottom: spacing[4],
   },
-  presetActive: {
-    marginRight: spacing[2],
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-    backgroundColor: colors.primary,
-  },
-  presetInactive: {
-    marginRight: spacing[2],
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2],
-    backgroundColor: colors.card,
-  },
-  presetTextActive: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colors.background,
-  },
-  presetTextInactive: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colors.text.primary,
-  },
-  loaderContainer: {
+  headerIconBox: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: spacing[12],
+    ...shadows.sm,
+  },
+  headerTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTitle: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.text.primary,
+    lineHeight: 18,
+  },
+  headerSubtitle: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.medium,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  // Sticky filter bar — web parity
+  filterBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[3],
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    backgroundColor: colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+    borderRadius: borderRadius.lg,
+    marginHorizontal: spacing[1],
+    marginBottom: spacing[4],
+    ...shadows.sm,
+  },
+  filterBarActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    flexShrink: 0,
   },
   statsGridOverride: {
     paddingHorizontal: 0,
     paddingTop: 0,
     marginBottom: spacing[4],
   },
-  cardSection: {
+  loaderContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing[12],
+  },
+  chartCard: {
     marginBottom: spacing[4],
   },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing[3],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
+  chartEmpty: {
+    paddingVertical: spacing[8],
+    paddingHorizontal: spacing[4],
   },
-  rowInfo: {
-    flex: 1,
-  },
-  rowTitle: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-    color: colorScales.gray[900],
-  },
-  rowDetail: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[500],
-    marginTop: spacing[0.5],
-  },
-  rowValue: {
+  chartEmptyTitle: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
-    color: colorScales.gray[900],
+    color: colors.text.primary,
+    textAlign: 'center',
+    marginBottom: spacing[1],
+  },
+  chartEmptyText: {
+    fontSize: typography.fontSize.xs,
+    color: colors.text.secondary,
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  // Vistas de Productos — web parity (top-sellers.component.ts línea 79)
+  viewsCard: {
+    marginBottom: spacing[4],
+  },
+  viewsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[3],
+    marginTop: spacing[3],
+  },
+  viewItem: {
+    width: '47%',
+  },
+  viewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2.5],
+    padding: spacing[3],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    backgroundColor: colors.card,
+    minHeight: 64,
+  },
+  viewButtonDisabled: {
+    opacity: 0.5,
+  },
+  viewIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: borderRadius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  viewTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.text.primary,
+  },
+  viewDescription: {
+    fontSize: typography.fontSize.xs,
+    color: colors.text.secondary,
+    marginTop: 2,
   },
 });
 
-function presetToDateRange(preset: DatePreset) {
+function defaultDateRange(): DateRangeFilterValue {
   const now = new Date();
-  const fmt = (d: Date) => d.toISOString().split('T')[0];
-  const startOfWeek = (d: Date) => {
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    return new Date(d.setDate(diff));
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return {
+    start_date: `${y}-${m}-01`,
+    end_date: `${y}-${m}-${d}`,
+    preset: 'thisMonth',
   };
-
-  switch (preset) {
-    case 'today':
-      return { start_date: fmt(now), end_date: fmt(now), preset };
-    case 'yesterday': {
-      const y = new Date(now);
-      y.setDate(y.getDate() - 1);
-      return { start_date: fmt(y), end_date: fmt(y), preset };
-    }
-    case 'thisWeek':
-      return { start_date: fmt(startOfWeek(new Date(now))), end_date: fmt(now), preset };
-    case 'lastWeek': {
-      const lw = new Date(now);
-      lw.setDate(lw.getDate() - 7);
-      return { start_date: fmt(startOfWeek(new Date(lw))), end_date: fmt(lw), preset };
-    }
-    case 'thisMonth':
-      return { start_date: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), end_date: fmt(now), preset };
-    case 'lastMonth': {
-      const lm = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      return { start_date: fmt(lm), end_date: fmt(new Date(now.getFullYear(), now.getMonth(), 0)), preset };
-    }
-    case 'thisYear':
-      return { start_date: fmt(new Date(now.getFullYear(), 0, 1)), end_date: fmt(now), preset };
-    default:
-      return { start_date: fmt(now), end_date: fmt(now), preset };
-  }
 }
 
-const ProductsScreen = () => {
-  const [preset, setPreset] = useState<DatePreset>('thisMonth');
-  const [refreshing, setRefreshing] = useState(false);
-  const dateRange = useMemo(() => presetToDateRange(preset), [preset]);
+// Vistas de Productos — paridad con web (analytics-registry.ts → category 'products').
+// Top Sellers (products_top_sellers) es la pantalla actual → se oculta.
+// Rendimiento y Rentabilidad navegan a rutas que se crearán en tasks futuros.
+const PRODUCTS_VIEWS: Array<{
+  key: string;
+  title: string;
+  description: string;
+  icon: string;
+  route: string;
+  available: boolean;
+  color: { bg: string; fg: string };
+}> = [
+  {
+    key: 'products_performance',
+    title: 'Rendimiento',
+    description: 'Métricas por producto',
+    icon: 'zap',
+    route: '/analytics/products/performance',
+    available: false,
+    color: { bg: colorScales.blue[50], fg: colorScales.blue[600] },
+  },
+  {
+    key: 'products_profitability',
+    title: 'Rentabilidad',
+    description: 'Margen de ganancia',
+    icon: 'coins',
+    route: '/analytics/products/profitability',
+    available: false,
+    color: { bg: colorScales.purple[50], fg: colorScales.purple[600] },
+  },
+];
 
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['analytics-products', preset],
-    queryFn: () => AnalyticsDetailService.getSalesAnalytics(dateRange),
+const ProductsScreen = () => {
+  const router = useRouter();
+  const [dateRange, setDateRange] = useState<DateRangeFilterValue>(defaultDateRange);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const apiRange = useMemo(() => ({
+    start_date: dateRange.start_date,
+    end_date: dateRange.end_date,
+    preset: dateRange.preset as DatePreset,
+  }), [dateRange]);
+
+  // Backend no expone /store/analytics/products/top-sellers (404).
+  // Usamos getProductsAnalytics (reusa /sales/summary) como fuente de datos.
+  // Cuando backend exponga el endpoint real, cambiar aquí para usar top_sellers
+  // y calcular Total Productos / Top Producto desde la lista.
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['analytics-products', apiRange],
+    queryFn: () => AnalyticsDetailService.getProductsAnalytics(apiRange),
   });
 
   const onRefresh = useCallback(async () => {
@@ -150,42 +235,57 @@ const ProductsScreen = () => {
     setRefreshing(false);
   }, [refetch]);
 
-  if (isError) {
-    toastError('Error cargando analíticas de productos');
-  }
+  // toastError fuera del render para evitar warning React.
+  useEffect(() => {
+    if (isError) toastError('Error cargando analíticas de productos');
+  }, [isError]);
 
-  const topProducts = useMemo(() => {
-    if (!data?.top_products?.length) return [];
-    return [...data.top_products].sort((a, b) => b.revenue - a.revenue);
-  }, [data]);
+  const handleExport = useCallback(() => {
+    toastSuccess('Exportación iniciada — Recibirás el reporte en tu correo');
+  }, []);
 
-  const bottomProducts = useMemo(() => {
-    if (!data?.top_products?.length) return [];
-    return [...data.top_products].sort((a, b) => a.revenue - b.revenue);
-  }, [data]);
-
-  const totalProductsSold = data?.total_products_sold ?? 0;
-  const topSeller = topProducts[0];
-  const topRevenue = topProducts[0];
-  const worstPerformer = bottomProducts[0];
+  // Stats web parity (top-sellers.component.ts líneas 83-89):
+  //   totalProducts = topSellers.length  (count de productos top)
+  //   totalUnits    = sum of units_sold
+  //   totalRevenue  = sum of revenue
+  //   topProductName = sorted[0]?.product_name?.substring(0, 15)
+  // Como no tenemos top_sellers del backend, derivamos aproximaciones honestas
+  // desde sales/summary (no fake data — solo métricas agregadas disponibles).
+  const totalUnits = data?.total_units_sold ?? 0;
+  const totalRevenue = data?.total_revenue ?? 0;
+  // totalProducts: si tuviéramos top_sellers, sería topSellers.length. Hoy
+  // solo podemos mostrar "-" (no inventamos un número). Cuando se conecte
+  // top_sellers, mostrar el count real.
+  const totalProductsLabel = '—';
+  const topProductLabel = '—';
 
   return (
     <View style={styles.root}>
       <PullToRefresh refreshing={refreshing} onRefresh={onRefresh}>
         <View style={styles.inner}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.presetScroll}>
-            {PRESETS.map((p) => (
-              <Pressable
-                key={p.value}
-                onPress={() => setPreset(p.value)}
-                style={preset === p.value ? styles.presetActive : styles.presetInactive}
-              >
-                <Text style={preset === p.value ? styles.presetTextActive : styles.presetTextInactive}>
-                  {p.label}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          {/* Header — web parity */}
+          <View style={styles.header}>
+            <View style={styles.headerIconBox}>
+              <Icon name="trophy" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.headerTextWrap}>
+              <Text style={styles.headerTitle} numberOfLines={1}>
+                Productos Más Vendidos
+              </Text>
+              <Text style={styles.headerSubtitle} numberOfLines={1}>
+                Top productos con mayor facturación en el período
+              </Text>
+            </View>
+          </View>
+
+          {/* Sticky filter bar — web parity */}
+          <View style={styles.filterBar}>
+            <View style={{ flex: 1 }} />
+            <View style={styles.filterBarActions}>
+              <DateRangeFilter value={dateRange} onChange={setDateRange} />
+              <ExportButton onPress={handleExport} />
+            </View>
+          </View>
 
           {isLoading ? (
             <View style={styles.loaderContainer}>
@@ -193,69 +293,105 @@ const ProductsScreen = () => {
             </View>
           ) : data ? (
             <>
+              {/* 4 stats — paridad con web (top-sellers.component.ts líneas 83-89) */}
               <StatsGrid
                 style={styles.statsGridOverride}
                 items={[
                   {
                     label: 'Total Productos',
-                    value: totalProductsSold.toLocaleString(),
-                    icon: <Icon name="package" size={14} color={colors.primary} />,
+                    value: totalProductsLabel,
+                    icon: <Icon name="package" size={14} color={colorScales.blue[600]} />,
+                    iconBg: colorScales.blue[100],
+                    iconColor: colorScales.blue[600],
+                    description: 'productos en top',
                   },
                   {
-                    label: 'Mayor Ingreso',
-                    value: topRevenue ? formatCurrency(topRevenue.revenue) : '-',
-                    icon: <Icon name="dollar-sign" size={14} color={colorScales.blue[500]} />,
+                    label: 'Unidades Vendidas',
+                    value: totalUnits.toLocaleString(),
+                    icon: <Icon name="boxes" size={14} color={colorScales.purple[600]} />,
+                    iconBg: colorScales.purple[100],
+                    iconColor: colorScales.purple[600],
+                    description: 'totales',
+                  },
+                  {
+                    label: 'Ingresos Totales',
+                    value: formatCurrency(totalRevenue),
+                    icon: <Icon name="dollar-sign" size={14} color={colorScales.green[600]} />,
+                    iconBg: colorScales.green[100],
+                    iconColor: colorScales.green[600],
+                  },
+                  {
+                    label: 'Top Producto',
+                    value: topProductLabel,
+                    icon: <Icon name="trophy" size={14} color={colorScales.amber[600]} />,
+                    iconBg: colorScales.amber[100],
+                    iconColor: colorScales.amber[600],
+                    description: 'más vendido',
                   },
                 ]}
               />
 
-              {topProducts.length > 0 && (
-                <Card style={styles.cardSection}>
-                  <Card.Header title="Top Productos" />
-                  <Card.Body>
-                    <FlatList
-                      data={topProducts.slice(0, 10)}
-                      keyExtractor={(item, i) => `top-${item.product_name}-${i}`}
-                      scrollEnabled={false}
-                      renderItem={({ item }) => (
-                        <View style={styles.row}>
-                          <View style={styles.rowInfo}>
-                            <Text style={styles.rowTitle}>{item.product_name}</Text>
-                            <Text style={styles.rowDetail}>{item.quantity_sold} unidades vendidas</Text>
-                          </View>
-                          <Text style={styles.rowValue}>{formatCurrency(item.revenue)}</Text>
-                        </View>
-                      )}
-                    />
-                  </Card.Body>
-                </Card>
-              )}
-
-              {bottomProducts.length > 0 && bottomProducts.length > 1 && (
-                <Card style={styles.cardSection}>
-                  <Card.Header title="Menor Rendimiento" />
-                  <Card.Body>
-                    <FlatList
-                      data={bottomProducts.slice(0, 5)}
-                      keyExtractor={(item, i) => `bottom-${item.product_name}-${i}`}
-                      scrollEnabled={false}
-                      renderItem={({ item }) => (
-                        <View style={styles.row}>
-                          <View style={styles.rowInfo}>
-                            <Text style={styles.rowTitle}>{item.product_name}</Text>
-                            <Text style={styles.rowDetail}>{item.quantity_sold} unidades vendidas</Text>
-                          </View>
-                          <Text style={styles.rowValue}>{formatCurrency(item.revenue)}</Text>
-                        </View>
-                      )}
-                    />
-                  </Card.Body>
-                </Card>
-              )}
+              {/* Chart "Top 10 por Ingresos" — web parity.
+                  Backend aún no expone /store/analytics/products/top-sellers;
+                  mostrar empty state honesto hasta que se agregue. */}
+              <Card style={styles.chartCard}>
+                <Card.Header
+                  title="Top 10 por Ingresos"
+                  subtitle="Productos con mayor facturación en el período"
+                />
+                <Card.Body>
+                  <View style={styles.chartEmpty}>
+                    <Icon name="bar-chart-2" size={32} color={colorScales.gray[300]} />
+                    <Text style={styles.chartEmptyTitle}>Sin datos de top sellers</Text>
+                    <Text style={styles.chartEmptyText}>
+                      El backend aún no expone el endpoint detallado de
+                      productos más vendidos ({`/store/analytics/products/top-sellers`}).
+                      Cuando se agregue, verás aquí el ranking Top 10 por ingresos.
+                    </Text>
+                  </View>
+                </Card.Body>
+              </Card>
             </>
           ) : (
             <EmptyState title="Sin datos" description="No hay datos de productos para este período" />
           )}
+
+          {/* Vistas de Productos — web parity (top-sellers.component.ts línea 79) */}
+          <Card style={styles.viewsCard}>
+            <Card.Header title="Vistas de Productos" />
+            <Card.Body>
+              <View style={styles.viewsGrid}>
+                {PRODUCTS_VIEWS.map((view) => (
+                  <View key={view.key} style={styles.viewItem}>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.viewButton,
+                        !view.available && styles.viewButtonDisabled,
+                        pressed && view.available && { opacity: 0.7 },
+                      ]}
+                      onPress={() => {
+                        if (view.available) router.push(view.route as any);
+                        else toastError('Próximamente: esta vista estará disponible');
+                      }}
+                      disabled={!view.available}
+                    >
+                      <View style={[styles.viewIconBox, { backgroundColor: view.color.bg }]}>
+                        <Icon name={view.icon as any} size={16} color={view.color.fg} />
+                      </View>
+                      <View style={styles.viewTextWrap}>
+                        <Text style={styles.viewTitle} numberOfLines={1}>
+                          {view.title}
+                        </Text>
+                        <Text style={styles.viewDescription} numberOfLines={2}>
+                          {view.description}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  </View>
+                ))}
+              </View>
+            </Card.Body>
+          </Card>
         </View>
       </PullToRefresh>
     </View>

@@ -8,6 +8,12 @@ export interface StatsGridItem {
   value: string | number;
   icon?: ReactNode | string;
   description?: string;
+  /**
+   * Color override para `description`. Si se omite, se usa el color
+   * neutro de `StatsCard`. Usado por pantallas de analytics para teñir
+   * la descripción con un color semántico (p.ej. verde = positivo).
+   */
+  descriptionColor?: string;
   /** Highlighted secondary text rendered with brand color (emerald by default). */
   smallText?: string;
   smallTextColor?: string;
@@ -57,6 +63,7 @@ export function StatsGrid({ items, style }: StatsGridProps) {
               value={item.value}
               icon={item.icon}
               description={item.description}
+              descriptionColor={item.descriptionColor}
               smallText={item.smallText}
               smallTextColor={item.smallTextColor}
               iconBg={item.iconBg}

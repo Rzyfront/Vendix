@@ -64,6 +64,7 @@ export const Endpoints = {
       SALES_SUMMARY: '/store/analytics/sales/summary',
       SALES_TRENDS: '/store/analytics/sales/trends',
       SALES_BY_CHANNEL: '/store/analytics/sales/by-channel',
+      SALES_BY_PRODUCT: '/store/analytics/sales/by-product',
       INVENTORY_SUMMARY: '/store/analytics/inventory/summary',
       OVERVIEW: '/store/analytics/overview',
       SALES: '/store/analytics/sales',

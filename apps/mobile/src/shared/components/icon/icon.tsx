@@ -23,6 +23,7 @@ import {
   Calculator,
   Wallet,
   BarChart3,
+  BarChart2,
   Settings,
   Shield,
   Bot,
@@ -438,6 +439,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   calculator: Calculator,
   wallet: Wallet,
   'bar-chart': BarChart3,
+  // Paridad con apps/frontend (lucide-react) — `bar-chart-2` existe como
+  // nombre estable del icono. lucide-react-native lo provee directamente.
+  'bar-chart-2': BarChart2,
   // Mantenemos `bar-chart-3` mapeado a `ChartBar` para paridad con
   // apps/frontend (lucide-react), donde ese nombre existe pero RN no lo
   // provee. El alias `bar-chart` usa `BarChart3` directamente.

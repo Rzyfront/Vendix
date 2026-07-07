@@ -56,15 +56,27 @@ export interface InventorySummary {
   total_value: number;
 }
 
-export type DatePreset =
-  | 'today'
-  | 'yesterday'
-  | 'thisWeek'
-  | 'lastWeek'
-  | 'thisMonth'
-  | 'lastMonth'
-  | 'thisYear'
-  | 'custom';
+/**
+ * Fila individual de "Ventas por Producto" (analytics/sales/by-product).
+ * Paridad con apps/frontend `sales-by-product.component.ts`:
+ *   product_id, product_name, units_sold, revenue, orders_count.
+ * `image_url` es opcional — backend puede no devolverlo si el producto
+ * no tiene imagen principal configurada.
+ */
+export interface SalesByProduct {
+  product_id: number;
+  product_name: string;
+  units_sold: number;
+  revenue: number;
+  orders_count: number;
+  image_url?: string | null;
+}
+
+// Re-export from canonical location to keep types unified across the app.
+// `DateRangeFilterValue` (shared) y `DateRange` (features) usan exactamente
+// el mismo union. Si agregas un preset, edita solo `shared/types/date.ts`.
+export type { DatePreset } from '@/shared/types/date';
+import type { DatePreset } from '@/shared/types/date';
 
 export interface DateRange {
   start_date: string;

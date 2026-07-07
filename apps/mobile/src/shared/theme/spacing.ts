@@ -40,6 +40,25 @@ export const shadows = {
   xl: { shadowColor: '#000', shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.1, shadowRadius: 25, elevation: 8 },
 };
 
+/**
+ * Breakpoints alineados con Tailwind defaults (paridad web):
+ *   sm:  640   (phone landscape, tablet portrait)
+ *   md:  768   (tablet landscape — breakpoint principal de analytics)
+ *   lg:  1024  (desktop)
+ *   xl:  1280  (large desktop)
+ *
+ * Usar con `useWindowDimensions()` para comparaciones reactivas a
+ * orientation/resize. NO usar `Dimensions.get('window')` — no se
+ * actualiza en runtime.
+ */
+export const breakpoints = {
+  sm: 640,
+  md: 768,
+  lg: 1024,
+  xl: 1280,
+} as const;
+
 export type Spacing = typeof spacing;
 export type BorderRadius = typeof borderRadius;
 export type Shadows = typeof shadows;
+export type Breakpoints = typeof breakpoints;
