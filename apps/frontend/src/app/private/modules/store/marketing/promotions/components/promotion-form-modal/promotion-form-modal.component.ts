@@ -646,8 +646,9 @@ export class PromotionFormModalComponent {
     tiersCtrl?.setErrors(null);
 
     if (ruleType === 'quantity_tiered') {
-      // Tiered: `value` is irrelevant. Skip required, allow null.
-      valueCtrl?.setValidators([Validators.min(0.01)]);
+      // Tiered: `value` is irrelevant (backend ignores it and persists 0).
+      // Leave it WITHOUT validators — a persisted 0 must not invalidate the
+      // form via a hidden control while editing an existing tiered promotion.
       tiersCtrl?.setValidators([Validators.required, this.validateTiersOrder()]);
     } else {
       // Flat: existing required validators.
