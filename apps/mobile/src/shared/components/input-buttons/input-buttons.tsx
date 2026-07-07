@@ -84,8 +84,9 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    backgroundColor: colorScales.gray[50],
-    borderWidth: 0,
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colorScales.gray[300],
     borderRadius: borderRadius.full,
     padding: spacing[1],
     gap: spacing[1],

@@ -252,17 +252,19 @@ export class ProductCreateModalComponent {
     this.taxesService.getTaxCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (taxCategories: TaxCategory[]) => {
         this.allTaxCategories = taxCategories;
-        this.taxCategoryOptions.set(taxCategories.map((cat: TaxCategory) => {
-          const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
-          const rate = parseFloat(String(rawRate));
-          const finalRate = isNaN(rate) ? 0 : rate;
+        if (taxCategories.length > 0) {
+          this.taxCategoryOptions.set(taxCategories.map((cat: TaxCategory) => {
+            const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
+            const rate = parseFloat(String(rawRate));
+            const finalRate = isNaN(rate) ? 0 : rate;
 
-          return {
-            value: cat.id,
-            label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
-            description: cat.description,
-          };
-        }));
+            return {
+              value: cat.id,
+              label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
+              description: cat.description,
+            };
+          }));
+        }
       },
       error: (error: any) => {
         const message = extractApiErrorMessage(error);
@@ -318,7 +320,18 @@ export class ProductCreateModalComponent {
   }
 
   onTaxCategoryCreated(taxCategory: TaxCategory): void {
-    this.loadTaxCategories();
+    const rawRate = taxCategory.rate ?? taxCategory.tax_rates?.[0]?.rate ?? 0;
+    const rate = parseFloat(String(rawRate));
+    const finalRate = isNaN(rate) ? 0 : rate;
+    this.taxCategoryOptions.update(options => [
+      ...options,
+      {
+        value: taxCategory.id,
+        label: `${taxCategory.name} (${(finalRate * 100).toFixed(0)}%)`,
+        description: taxCategory.description,
+      },
+    ]);
+    this.allTaxCategories = [...this.allTaxCategories, taxCategory];
     const currentIds = this.productForm.get('tax_category_ids')?.value || [];
     if (taxCategory && taxCategory.id) {
       this.productForm.patchValue({

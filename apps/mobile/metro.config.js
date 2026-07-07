@@ -19,8 +19,14 @@ config.resolver.extraNodeModules = new Proxy(
     // For any other module name (defensive), fall back to the local
     // node_modules. This keeps `xlsx`/`punycode` working on Android/Hermes
     // where the default Metro resolution can miss the polyfill.
-    get: (target, name) =>
-      target[name] ?? path.join(__dirname, 'node_modules', name),
+    get: (target, name) => {
+      if (target[name]) return target[name];
+      const local = path.join(__dirname, 'node_modules', name);
+      try { return require.resolve(local); } catch {}
+      const root = path.join(monorepoRoot, 'node_modules', name);
+      try { return require.resolve(root); } catch {}
+      return local;
+    },
   },
 );
 

@@ -36,9 +36,17 @@ export const Endpoints = {
       BY_BRAND: '/store/products/brand/:brandId',
       LOW_STOCK: '/store/products/low-stock/:threshold',
       GENERATE_DESCRIPTION: '/store/products/generate-description',
-      PROMOTIONS: '/store/products/:productId/promotions',
+      PROMOTIONS: '/store/products/:id/promotions',
       BULK_UPLOAD: '/store/products/bulk-upload',
       BULK_IMAGE_UPLOAD: '/store/products/bulk-image-upload',
+      BULK_IMAGES_TEMPLATE: '/store/products/bulk-images/template/download',
+      BULK_IMAGES_ANALYZE: '/store/products/bulk-images/analyze',
+      BULK_IMAGES_UPLOAD_SESSION: '/store/products/bulk-images/upload-session',
+      BULK_TEMPLATE_DOWNLOAD: '/store/products/bulk/template/download',
+      BULK_EXPORT: '/store/products/bulk/export',
+      BULK_ANALYZE: '/store/products/bulk/analyze',
+      BULK_UPLOAD_SESSION: '/store/products/bulk/upload-session',
+      BULK_CANCEL_SESSION: '/store/products/bulk/session/:sessionId',
     },
     ORDERS: {
       LIST: '/store/orders',
@@ -59,6 +67,9 @@ export const Endpoints = {
       ITEMS_UPDATE: '/store/orders/:id/items',
       SHIPPING_ASSIGN: '/store/orders/:id/shipping',
       REFUNDS: '/store/orders/:id/refunds',
+    },
+    PRICE_TIERS: {
+      LIST: '/store/price-tiers',
     },
     ANALYTICS: {
       SALES_SUMMARY: '/store/analytics/sales/summary',
@@ -98,14 +109,23 @@ export const Endpoints = {
       UPLOAD_LOGO: '/store/brands/upload-logo',
     },
     TAXES: {
+      // El backend expone las categorías en `/store/taxes` (no `/store/taxes/categories`).
       LIST: '/store/taxes',
-      CATEGORIES: '/store/taxes/categories',
+      CATEGORIES: '/store/taxes',
+      CATEGORY_CREATE: '/store/taxes',
+      CATEGORY_UPDATE: '/store/taxes/:id',
+      CATEGORY_DELETE: '/store/taxes/:id',
     },
     PAYMENT_METHODS: {
       LIST: '/store/payments/payment-methods',
     },
     PAYMENTS: {
       POS: '/store/payments/pos',
+    },
+    PROMOTIONS: {
+      LIST: '/store/promotions',
+      ACTIVE: '/store/promotions/active',
+      GET: '/store/promotions/:id',
     },
     CASH_REGISTERS: {
       LIST: '/store/cash-registers',

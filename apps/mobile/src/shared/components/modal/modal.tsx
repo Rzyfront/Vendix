@@ -2,6 +2,8 @@ import { Modal as RNModal, View, Text, Pressable, ScrollView, StyleSheet, type V
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, spacing, typography, colorScales } from '@/shared/theme';
 
+type ModalSize = 'sm' | 'md' | 'lg' | 'xl' | 'full';
+
 interface ModalProps extends ViewProps {
   visible: boolean;
   onClose: () => void;
@@ -11,8 +13,18 @@ interface ModalProps extends ViewProps {
   showHeader?: boolean;
   showFooter?: boolean;
   footer?: React.ReactNode;
+  /** Tamaño del modal. 'full' = pantalla completa (default). */
+  size?: ModalSize;
   style?: ViewStyle;
 }
+
+const SIZE_MAX_WIDTH: Record<ModalSize, string | undefined> = {
+  sm: '92%',
+  md: '480px',
+  lg: '640px',
+  xl: '800px',
+  full: undefined,
+};
 
 const styles = StyleSheet.create({
   root: {
@@ -68,6 +80,7 @@ export function Modal({
   showHeader = true,
   showFooter = false,
   footer,
+  size = 'full',
   style,
   ...props
 }: ModalProps) {

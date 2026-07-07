@@ -118,6 +118,7 @@ export const INVENTORY_ICONS = {
   save: 'save',
   filePlus: 'file-plus',
   packageCheck: 'package-check',
+  clock: 'clock',
 } as const;
 
 export type InventoryIconName = (typeof INVENTORY_ICONS)[keyof typeof INVENTORY_ICONS];

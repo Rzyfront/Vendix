@@ -43,6 +43,14 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
     StatsComponent,
   ],
   providers: [ProductsService],
+  styles: [`
+    @media (max-width: 639px) {
+      .stats-container app-stats:first-child {
+        margin-left: -1rem;
+        padding-left: 0;
+      }
+    }
+  `],
   template: `
     <div class="w-full">
       <!-- Stats Grid: sticky at top on mobile -->
