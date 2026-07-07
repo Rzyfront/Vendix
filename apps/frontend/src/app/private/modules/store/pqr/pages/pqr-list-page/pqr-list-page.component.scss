@@ -16,62 +16,156 @@
   }
 }
 
-// ─── Quick-filter tabs ───────────────────────────────────────────────────
+// ─── Stats container ─────────────────────────────────────────────────────
 //
-// Inline tab strip (Todas / Vencidas / Pendientes / Nuevas) that used
-// to live in the deleted sticky-header. Rendered above the list card
-// as its own surface so the operator can narrow the queue by bucket
-// without opening the dropdown filters.
-//
-// Accessibility:
-//   • role="tablist" on the container, role="tab" on each button
-//   • aria-selected reflects the active state
-//   • Buttons are <button type="button"> (semantic HTML)
-//   • Min-height 44px for touch targets (mobile-first rule)
-.quick-filters {
-  display: flex;
-  gap: 0.25rem;
-  flex-wrap: wrap;
-  padding: 0 0.25rem;
+// Same shared component used by Clientes / Reportes / Ventas. The .stats-container
+// class lives on the shared <app-stats> component host, so we don't need
+// custom rules here — Vendix's design system handles spacing + responsive
+// grid internally.
 
-  &__tab {
+// ─── Primary CTA card ────────────────────────────────────────────────────
+//
+// One card that answers the only question the store owner actually has
+// when they open this page: "what do I need to do today?" Replaces the
+// previous 4-stat grid (Total / 24h / Nuevos / Respondidas) which
+// presented operator metrics without an actionable next step.
+//
+// Color states:
+//   default: calm white with green accent (all caught up)
+//   urgent : red border + tinted background (overdue exists)
+//   empty  : centered illustration + onboarding copy (no PQRs yet)
+.cta-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  transition: border-color 0.15s, background 0.15s;
+
+  &__main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  &__lead {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  &__icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: #dcfce7;
+    color: #15803d;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+
+    &--muted {
+      background: #f1f5f9;
+      color: #94a3b8;
+    }
+  }
+
+  &__copy {
+    flex: 1;
+    min-width: 0;
+
+    h2 {
+      margin: 0 0 0.25rem;
+      font-size: 1.0625rem;
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1.3;
+    }
+
+    p {
+      margin: 0;
+      color: #475569;
+      font-size: 0.875rem;
+      line-height: 1.45;
+    }
+  }
+
+  &__action {
     display: inline-flex;
     align-items: center;
-    gap: 0.4375rem;
-    padding: 0.5rem 0.875rem;
-    border: 0;
-    background: transparent;
-    color: #64748b;
-    font-size: 0.875rem;
+    gap: 0.375rem;
+    background: #16a34a;
+    color: #ffffff;
+    padding: 0.625rem 1rem;
+    border-radius: 10px;
     font-weight: 600;
-    cursor: pointer;
-    border-radius: 8px;
-    border-bottom: 2px solid transparent;
-    min-height: 44px;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    font-size: 0.875rem;
+    text-decoration: none;
+    transition: background 0.15s, transform 0.05s;
+    flex-shrink: 0;
+    box-shadow: 0 1px 2px rgba(8, 145, 78, 0.18);
 
     &:hover {
-      color: #15803d;
-      background: #f0fdf4;
+      background: #15803d;
+      transform: translateY(-1px);
     }
 
-    &:focus-visible {
-      outline: 2px solid #16a34a;
-      outline-offset: 2px;
-    }
-
-    app-icon {
-      color: currentColor;
-    }
-
-    &--active {
-      color: #15803d;
-      border-bottom-color: #16a34a;
+    &--ghost {
       background: transparent;
+      color: #15803d;
+      border: 1px solid #bbf7d0;
+      box-shadow: none;
+
+      &:hover {
+        background: #dcfce7;
+        color: #15803d;
+        transform: translateY(-1px);
+      }
+    }
+  }
+
+  &--urgent {
+    border-color: #fecaca;
+    background: linear-gradient(135deg, #fef2f2, #ffffff);
+
+    .cta-card__icon {
+      background: #fee2e2;
+      color: #b91c1c;
     }
 
-    &--active:hover {
-      background: #f0fdf4;
+    h2 {
+      color: #991b1b;
+    }
+  }
+
+  &--empty {
+    justify-content: center;
+  }
+
+  &__empty {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    color: #64748b;
+
+    h2 {
+      margin: 0 0 0.125rem;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #334155;
+    }
+
+    p {
+      margin: 0;
+      font-size: 0.875rem;
     }
   }
 }

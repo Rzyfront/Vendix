@@ -54,10 +54,22 @@
       <div>
         <code class="mono">{{ v.ticket_number }}</code>
         <span class="type-tag" [attr.data-type]="v.pqr_type">{{ typeLabel() }}</span>
-        <app-pqr-status-pill [status]="v.status"></app-pqr-status-pill>
       </div>
       <h2>{{ v.title }}</h2>
     </header>
+
+    <!-- ── Progreso del PQRS ───────────────────────────────────────────
+         Replaces the previous yellow status pill. Mirrors the
+         "PROGRESO DE LA ORDEN" pattern from the order-details page:
+         collapsed shows the current step as a single dot + label;
+         expanding reveals the full lifecycle (Recibido → Cerrado) with
+         green connector lines for completed steps. Reactive — when
+         super-admin mutates `status`, the public user sees the dot
+         advance on next reload. -->
+    <section class="ticket-progress">
+      <h3 class="ticket-progress__title">PROGRESO DEL PQRS</h3>
+      <app-timeline [steps]="lifecycleTimeline()"></app-timeline>
+    </section>
 
     <dl class="meta">
       <dt>Creado</dt>

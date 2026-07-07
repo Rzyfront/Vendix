@@ -201,10 +201,13 @@ export class MenuFilterService {
     Ayuda: 'help',
     Soporte: ['help_support', 'settings_support', 'help_pqrs'],
     'Centro de Ayuda': 'help_center',
-    // "Mis Solicitudes" (Peticiones, Quejas y Reclamos) — child of `help`.
-    // The visible label is plain Spanish for end users; the underlying
-    // `help_pqrs` key is kept for the panel_ui contract and the existing
-    // merged config of users (no migration needed).
+    // "PQRS" (Peticiones, Quejas y Reclamos) — child of `help` in the
+    // store-admin sidebar. The underlying `help_pqrs` key is kept for
+    // the panel_ui contract and the existing merged config of users
+    // (no migration needed for users who already enabled the toggle).
+    PQRS: 'help_pqrs',
+    // Legacy label kept so anyone still on the old Spanish name
+    // (and any future rebrand) keeps the same panel_ui key.
     'Mis Solicitudes': 'help_pqrs',
     // Same `help_pqrs` key for the PQR child as it appears in the
     // org-admin and super-admin sidebars. Without this entry, the

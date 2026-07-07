@@ -29,6 +29,7 @@ import {
   DropdownAction,
   FilterValues,
   StickyHeaderTab,
+  StickyHeaderActionButton,
 } from '../../../../../../shared/components';
 import { StickyHeaderComponent } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 import { PqrService } from '../../../../../../shared/services/pqr.service';
@@ -102,10 +103,26 @@ export class PqrListPageComponent {
 
   // Primary action rendered in the sticky-header's right slot. The
   // "+ Nueva solicitud" lives here (not in the CTA card) so it stays
-  // Note: the "stickyHeaderActions" computed + "onStickyHeaderAction"
-  // handler were removed when the sticky-header was deleted. The
-  // "Nueva solicitud" action is now reachable via the options-dropdown
-  // "Acciones" menu (dropdownActions → 'new-pqr').
+  // visible regardless of how many PQRs are pending — same pattern as
+  // "Ver Analítica" on the Reportes → Ventas view.
+  readonly stickyHeaderActions = computed<StickyHeaderActionButton[]>(() => [
+    {
+      id: 'new-pqr',
+      label: 'Nueva solicitud',
+      variant: 'primary',
+      icon: 'plus',
+    },
+  ]);
+
+  /**
+   * Action button click handler for the sticky-header's right slot.
+   * Currently only one action: open the "New PQR" modal.
+   */
+  onStickyHeaderAction(actionId: string): void {
+    if (actionId === 'new-pqr') {
+      this.openNewPqrModal();
+    }
+  }
 
   setQuickFilter(value: string) {
     // StickyHeaderComponent emits tabChanged as plain `string`; narrow
@@ -823,10 +840,13 @@ export class PqrListPageComponent {
     },
     {
       label: 'Editar',
-      tooltip: 'Editar estado',
+      tooltip: 'Editar contenido (título, descripción, solicitante)',
       icon: 'edit',
       variant: 'info',
-      action: (row: any) => this.openPqr(row),
+      // Navigates to the detail page with ?edit=content so the
+      // destination auto-opens the title / description / requester
+      // modal — same behavior as super-admin.
+      action: (row: any) => this.editPqr(row),
     },
   ];
 
@@ -885,6 +905,19 @@ export class PqrListPageComponent {
   /** Row click handler — routes the operator to the conversation detail. */
   openPqr(row: Pqr): void {
     this.router.navigate(['/admin/pqrs', row.id]);
+  }
+
+  /**
+   * Click handler for the Editar action — passes `?edit=content` so the
+   * detail page auto-opens the title / description / requester edit
+   * modal. Mirrors the same flow as super-admin so the icon does the
+   * same thing in both views.
+   */
+  editPqr(row: Pqr): void {
+    if (!row?.id) return;
+    this.router.navigate(['/admin/pqrs', row.id], {
+      queryParams: { edit: 'content' },
+    });
   }
 }
 
