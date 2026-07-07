@@ -5,6 +5,7 @@ import type {
   SalesSummary,
   SalesTrend,
   SalesByChannel,
+  SalesByProduct,
   InventorySummary,
   DateRange,
 } from '../types';
@@ -51,6 +52,20 @@ export const AnalyticsService = {
     const qs = new URLSearchParams(params).toString();
     const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES_BY_CHANNEL}${qs ? `?${qs}` : ''}`);
     return unwrap<SalesByChannel[]>(res);
+  },
+
+  /**
+   * Ventas por producto (analytics/sales/by-product). Paridad con
+   * apps/frontend `sales-by-product.component.ts` — el backend devuelve
+   * una lista plana con `product_id`, `product_name`, `units_sold`,
+   * `revenue`, `orders_count`. Si el rango está vacío, el endpoint usa
+   * el período por defecto del backend (mes actual).
+   */
+  async getSalesByProduct(range?: DateRange): Promise<SalesByProduct[]> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES_BY_PRODUCT}${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesByProduct[]>(res);
   },
 
   async getInventorySummary(): Promise<InventorySummary> {

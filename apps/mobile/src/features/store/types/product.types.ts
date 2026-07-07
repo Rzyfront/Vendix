@@ -55,6 +55,14 @@ export interface ProductVariant {
   effective_track_inventory?: boolean;
   image_id?: number | null;
   image?: ProductImage | null;
+  /**
+   * URL plana de la imagen específica de la variante. La retorna el
+   * backend en el endpoint POS (`products.service.ts` línea ~1193,
+   * `image_url: variant.product_images?.image_url`) — es la fuente
+   * de verdad para el thumbnail del VariantPicker. Si está ausente,
+   * cae al fallback del producto padre (`product.image_url`).
+   */
+  image_url?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -201,6 +209,17 @@ export interface ProductQuery {
   include_stock?: boolean;
   include_variants?: boolean;
   product_type?: ProductType;
+  /**
+   * Filtros de paridad web `pos-product-search.component.ts`. El backend
+   * actualmente NO los declara en `ProductQueryDto`, pero los aceptamos
+   * silenciosamente vía `whitelist: false` — el cliente aplica fallback
+   * local (sort/inStock) si la respuesta los ignora.
+   */
+  min_price?: number;
+  max_price?: number;
+  in_stock?: boolean;
+  sort_by?: 'name' | 'price' | 'stock' | 'createdAt';
+  sort_order?: 'asc' | 'desc';
 }
 
 export interface StockByLocationDto {
