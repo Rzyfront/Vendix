@@ -120,7 +120,7 @@
             ></div>
           </div>
         } @else {
-          <div class="flex-1 min-h-0 h-[200px] sm:h-[230px] lg:h-auto">
+          <div class="h-[200px] sm:h-[230px] lg:h-[280px]">
             @defer (on immediate) {
               <app-chart [options]="gaugeChartOptions()"></app-chart>
             } @placeholder {
@@ -204,7 +204,7 @@
             ></div>
           </div>
         } @else {
-          <div class="flex-1 min-h-0 h-[260px] sm:h-[340px] lg:h-auto">
+          <div class="h-[260px] sm:h-[340px] lg:h-[380px]">
             @defer (on immediate) {
               <app-chart [options]="comparativeChartOptions()"></app-chart>
             } @placeholder {
