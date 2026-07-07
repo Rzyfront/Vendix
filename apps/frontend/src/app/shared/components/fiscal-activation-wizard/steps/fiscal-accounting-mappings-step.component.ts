@@ -357,8 +357,17 @@ export class FiscalAccountingMappingsStepComponent
           name: a.name ?? a.account_name ?? '',
         })),
       );
-    } catch {
-      // Silent
+    } catch (e) {
+      // Never hide a load failure. If the chart-of-accounts or the mappings
+      // GET fails (network, 403, 5xx) the form would silently render with zero
+      // selectable accounts and the user could not tell why nothing works.
+      // Surface an inline, actionable message instead of swallowing it.
+      const parsed = parseApiError(e);
+      this.localError.set(
+        parsed.errorCode
+          ? parsed.userMessage
+          : 'No se pudieron cargar el plan de cuentas y los mapeos contables. Revisa tu conexión e inténtalo de nuevo.',
+      );
     }
   }
 

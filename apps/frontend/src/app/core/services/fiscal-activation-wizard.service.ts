@@ -178,6 +178,44 @@ export class FiscalActivationWizardService {
     return Array.from(acc);
   });
 
+  /**
+   * Wizard steps backed by a concrete tenant datum. Their stepper ✓ must track
+   * the backend's real `prefill.satisfied_steps` — never the optimistic union
+   * in {@link effectiveSatisfiedSteps} — so a data step never reads as complete
+   * while the backend still reports it missing. Non-data steps
+   * (`area_selection`, `validation`) are intentionally excluded and keep the
+   * stepper's cursor-driven ✓.
+   */
+  private readonly dataSteps: ReadonlySet<FiscalWizardStepId> =
+    new Set<FiscalWizardStepId>([
+      'legal_data',
+      'dian_config',
+      'puc',
+      'accounting_period',
+      'default_taxes',
+      'accounting_mappings',
+      'initial_inventory',
+      'payroll_config',
+    ]);
+
+  /** True when the step is backed by a concrete datum (see {@link dataSteps}). */
+  isDataStep(step: FiscalWizardStepId): boolean {
+    return this.dataSteps.has(step);
+  }
+
+  /**
+   * Data steps the backend confirms as satisfied via `prefill.satisfied_steps`
+   * (source of truth), with the optimistic union deliberately excluded. Feeds
+   * the stepper's explicit ✓ and the restore cursor so genuinely-missing data
+   * steps are never marked complete or skipped.
+   */
+  readonly realSatisfiedDataSteps = computed<ReadonlySet<FiscalWizardStepId>>(
+    () => {
+      const satisfied = this.prefill()?.satisfied_steps ?? [];
+      return new Set(satisfied.filter((step) => this.dataSteps.has(step)));
+    },
+  );
+
   async loadStatus(): Promise<FiscalStatusReadResult> {
     this.loading.set(true);
     this.error.set(null);
@@ -255,8 +293,26 @@ export class FiscalActivationWizardService {
     const sequence = this.stepSequence();
     if (sequence.length === 0) return;
 
-    const satisfied = new Set(this.effectiveSatisfiedSteps());
-    const firstUnsatisfied = sequence.find((step) => !satisfied.has(step));
+    // Cursor satisfaction is split by step kind:
+    //   • DATA steps trust the backend's real `prefill.satisfied_steps` so the
+    //     cursor never skips a genuinely-missing datum (the root of the false
+    //     ✓); a data step only counts as satisfied when the backend confirms
+    //     it, not when the optimistic union merely infers it.
+    //   • NON-DATA steps (area_selection) keep the optimistic union so the
+    //     cursor doesn't get stuck re-asking an already-made choice.
+    // With no prefill loaded yet, every step falls back to the optimistic
+    // union — byte-for-byte the previous (legacy) restore behavior.
+    const prefill = this.prefill();
+    const optimistic = new Set(this.effectiveSatisfiedSteps());
+    const realSatisfied = this.realSatisfiedDataSteps();
+    const isSatisfiedForCursor = (step: FiscalWizardStepId): boolean =>
+      prefill && this.dataSteps.has(step)
+        ? realSatisfied.has(step)
+        : optimistic.has(step);
+
+    const firstUnsatisfied = sequence.find(
+      (step) => !isSatisfiedForCursor(step),
+    );
 
     if (firstUnsatisfied) {
       const targetIndex = sequence.indexOf(firstUnsatisfied);
@@ -272,7 +328,6 @@ export class FiscalActivationWizardService {
     // the user lands on the "Finalizar activación" CTA instead of a
     // confusing blank form. If we don't have a prefill yet (legacy flow),
     // fall back to the wizard's recorded current_step.
-    const prefill = this.prefill();
     if (!prefill) {
       const currentStep = wizard.current_step || wizard.step_sequence[0];
       const index = sequence.indexOf(currentStep);

@@ -130,7 +130,23 @@ export interface FiscalWizardPrefillAccountingPeriod {
 export interface FiscalWizardPrefillDefaultTaxes {
   total_categories: number;
   total_rates: number;
-  categories: Array<{ id: number; name: string; rates: number }>;
+  categories: Array<{
+    id: number;
+    name: string;
+    rates: number;
+    /**
+     * Representative rate of the category: the raw `tax_rates.rate` decimal
+     * fraction of its primary (first, ordered by priority) rate — e.g. `0.19`
+     * for 19%. `null` when the category has no rates. The frontend maps this
+     * fraction to a percentage for display/prefill.
+     */
+    rate: number | null;
+    /**
+     * Persisted `tax_type` of the category (iva/inc/ica/withholding/…);
+     * `null` when the category has no fiscal type set.
+     */
+    tax_type: string | null;
+  }>;
 }
 
 export interface FiscalWizardPrefillAccountingMappings {

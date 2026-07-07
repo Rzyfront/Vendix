@@ -16,6 +16,7 @@ import {
   isFiscalWizardStep,
   normalizeFiscalStatusBlock,
 } from '../interfaces/fiscal-status.interface';
+import { FiscalScopeService } from './fiscal-scope.service';
 import { FiscalStatusResolverService } from './fiscal-status-resolver.service';
 import {
   buildFiscalWizardSequence,
@@ -39,6 +40,7 @@ export class FiscalStatusService {
     private readonly globalPrisma: GlobalPrismaService,
     private readonly resolver: FiscalStatusResolverService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly fiscalScope: FiscalScopeService,
   ) {}
 
   async read(
@@ -188,6 +190,20 @@ export class FiscalStatusService {
     initial_inventory: FiscalWizardPrefill['initial_inventory'];
     payroll_config: FiscalWizardPrefill['payroll_config'];
   }> {
+    // Resolve the fiscal accounting entity ONCE. This is READ-ONLY: it never
+    // creates rows and never throws — it returns `null` when the tenant has no
+    // fiscal entity yet, so PUC/period reads simply report "not configured".
+    // PUC and fiscal periods are owned per accounting entity; counting them by
+    // `organization_id` alone reported false positives (org-wide accounts) for
+    // a STORE-scoped tenant whose own entity has zero accounts/periods, which
+    // made the wizard skip seeding and left activation permanently blocked.
+    // See vendix-fiscal-scope.
+    const accounting_entity_id =
+      await this.fiscalScope.findFiscalAccountingEntityId({
+        organization_id,
+        store_id,
+      });
+
     const legal_data = await this.readLegalData(
       client,
       organization_id,
@@ -199,10 +215,10 @@ export class FiscalStatusService {
       organization_id,
       store_id,
     );
-    const puc = await this.readPuc(client, organization_id);
+    const puc = await this.readPuc(client, accounting_entity_id);
     const accounting_period = await this.readAccountingPeriod(
       client,
-      organization_id,
+      accounting_entity_id,
     );
     const default_taxes = await this.readDefaultTaxes(
       client,
@@ -297,15 +313,15 @@ export class FiscalStatusService {
       satisfied.add('accounting_mappings');
     }
 
-    // initial_inventory: prefer `costing_configured` (what the wizard step
-    // actually persists) and fall back to the legacy `configured` flag
-    // (initial_transactions > 0) for tenants that walked the older
-    // activation path. Either signal means the step is done.
+    // initial_inventory: satisfied SOLELY by the scope-aware
+    // `costing_configured` signal (the costing method the wizard step persists
+    // per fiscal scope in settings). The legacy org-wide `configured` flag
+    // (an `inventory_transactions` count) is NOT scope-safe —
+    // `inventory_transactions` has no store column — so it is kept purely
+    // informative in the prefill payload and must NOT drive satisfaction on
+    // its own, or a sibling store could falsely satisfy the step org-wide.
     if (sources.initial_inventory) {
-      if (
-        sources.initial_inventory.costing_configured === true ||
-        sources.initial_inventory.configured === true
-      ) {
+      if (sources.initial_inventory.costing_configured === true) {
         satisfied.add('initial_inventory');
       }
     }
@@ -528,12 +544,17 @@ export class FiscalStatusService {
 
   private async readPuc(
     client: any,
-    organization_id: number,
+    accounting_entity_id: number | null,
   ): Promise<FiscalWizardPrefill['puc']> {
+    // Scope the PUC count by the tenant's own accounting entity. Without an
+    // entity there is no chart of accounts to speak of → not configured.
+    if (accounting_entity_id == null) {
+      return { exists: false, total_accounts: 0, postable_accounts: 0 };
+    }
     const [total_accounts, postable_accounts] = await Promise.all([
-      client.chart_of_accounts.count({ where: { organization_id } }),
+      client.chart_of_accounts.count({ where: { accounting_entity_id } }),
       client.chart_of_accounts.count({
-        where: { organization_id, accepts_entries: true },
+        where: { accounting_entity_id, accepts_entries: true },
       }),
     ]);
     return {
@@ -545,10 +566,14 @@ export class FiscalStatusService {
 
   private async readAccountingPeriod(
     client: any,
-    organization_id: number,
+    accounting_entity_id: number | null,
   ): Promise<FiscalWizardPrefill['accounting_period']> {
+    // Fiscal periods are owned per accounting entity (the column exists on
+    // `fiscal_periods`). Without a resolved entity the period is not
+    // configured for this tenant's fiscal scope.
+    if (accounting_entity_id == null) return null;
     const period = await client.fiscal_periods.findFirst({
-      where: { organization_id, status: 'open' },
+      where: { accounting_entity_id, status: 'open' },
       orderBy: { start_date: 'desc' },
       select: {
         id: true,
@@ -580,7 +605,16 @@ export class FiscalStatusService {
       select: {
         id: true,
         name: true,
+        tax_type: true,
         _count: { select: { tax_rates: true } },
+        // Primary (representative) rate: first by priority, then id. Used to
+        // expose the real percentage so the wizard can prefill the value
+        // instead of only showing the rate count.
+        tax_rates: {
+          select: { rate: true },
+          orderBy: [{ priority: 'asc' }, { id: 'asc' }],
+          take: 1,
+        },
       },
     });
 
@@ -588,11 +622,18 @@ export class FiscalStatusService {
       (category: {
         id: number;
         name: string;
+        tax_type: string | null;
         _count: { tax_rates: number };
+        tax_rates: Array<{ rate: unknown }>;
       }) => ({
         id: category.id,
         name: category.name,
         rates: category._count.tax_rates,
+        rate:
+          category.tax_rates.length > 0
+            ? Number(category.tax_rates[0].rate)
+            : null,
+        tax_type: category.tax_type ? String(category.tax_type) : null,
       }),
     );
     return {

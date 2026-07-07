@@ -85,12 +85,15 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
 | Allocating invoice numbers with advisory locks | `vendix-saas-billing` |
+| Analyzing or comparing a web feature/module/flow against the mobile app | `mobile-parity-audit` |
 | Applying @RequireAIFeature decorator + AiAccessGuard to controllers | `vendix-subscription-gate` |
 | Applying @SkipSubscriptionGate to bypass StoreOperationsGuard on a handler/controller | `vendix-subscription-gate` |
 | Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules | `vendix-zoneless-signals` |
+| Auditing web↔mobile feature parity or mobile coverage gaps | `mobile-parity-audit` |
 | Binding form controls in Angular templates | `vendix-angular-forms` |
 | Bootstrapping local Linear credentials for Vendix | `linear-connect` |
 | Branching off or rebasing onto origin/dev before work | `git-workflow` |
+| Building a granular functional inventory of a web module for mobile replication | `mobile-parity-audit` |
 | Building an HTML slide-deck of bugs found and tickets validated in a sprint window | `qa-report` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
 | Caching frontend HTTP/dashboard/report data | `vendix-frontend-cache` |
@@ -160,6 +163,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Deciding which Vendix skill owns a pattern | `vendix-core` |
 | Decisive business-rule analysis before planning revenue, billing, subscriptions, pricing, commissions, checkout, inventory, accounting, or payments changes | `vendix-business-analysis` |
 | Declaring MCP servers, CLI commands, or web research alongside skills in a plan | `how-to-plan` |
+| Deriving a mobile implementation plan/backlog from an existing web module | `mobile-parity-audit` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
 | Designing happy-path, sad-path, or brute-force test flows for a feature | `how-to-test` |
 | Developing features for the mobile app | `mobile-dev` |
@@ -234,6 +238,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Picking concrete verification mechanisms (curl, build, audit, log inspection) per step | `how-to-plan` |
 | Planning structural changes, multi-file changes, broad refactors, or new features | `how-to-plan` |
 | Printing documents with date fields | `vendix-date-timezone` |
+| Producing a strategic gap map of what mobile has vs what it lacks relative to web | `mobile-parity-audit` |
 | Producing an animated flow view of a feature to share as a Claude Artifact | `user-story-flows` |
 | Protecting backend endpoints with auth, roles, or permissions | `vendix-backend-auth` |
 | Protecting store write operations behind a subscription | `vendix-subscription-gate` |

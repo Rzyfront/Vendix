@@ -14,7 +14,9 @@ import {
   ButtonComponent,
   ModalComponent,
   IconComponent,
+  SaveRequirementsModalComponent,
   ToastService } from '../../../../../shared/components';
+import { FiscalRequirementsService } from '../../../../../shared/services/fiscal-requirements.service';
 import { PosPaymentService } from '../services/pos-payment.service';
 import { PosTicketService } from '../services/pos-ticket.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
@@ -37,6 +39,7 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
     ButtonComponent,
     ModalComponent,
     IconComponent,
+    SaveRequirementsModalComponent,
     InvoicingNotConfiguredComponent
 ],
   template: `
@@ -231,6 +234,14 @@ import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invo
         [reason]="notConfiguredReason()"
       ></app-invoicing-not-configured>
     }
+
+    <!-- Modal de requisitos fiscales: explica un 4xx fiscal que bloquea el
+         cierre de factura con el mismo lenguaje/CTA del wizard de activacion. -->
+    <app-save-requirements-modal
+      [(isOpen)]="fiscalReq.isOpen"
+      [requirements]="fiscalReq.requirements()"
+      (action)="fiscalReq.handleAction($event)"
+    />
     `,
   styles: [
     `
@@ -351,6 +362,7 @@ export class PosOrderConfirmationComponent {
   paymentInfo: any = null;
 private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
+  readonly fiscalReq = inject(FiscalRequirementsService);
   private ticketService = inject(PosTicketService);
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
@@ -607,6 +619,19 @@ effect(() => {
       this.toastService.success('Factura creada exitosamente');
     } else {
       const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;
+      // El effect (createFromOrder$) ya abrio el modal de requisitos fiscales:
+      // FiscalRequirementsService es singleton root y este componente monta el
+      // modal. Aqui solo SUPRIMIMOS el toast crudo cuando el fallo es una
+      // restriccion fiscal reconocida (config DIAN incompleta, estado fiscal,
+      // periodo cerrado, etc.), porque el modal ya explica el motivo + CTA. No
+      // reabrimos el modal para evitar doble apertura.
+      if (
+        this.fiscalReq.isFiscalRestriction({
+          error: { error_code: errorAction.errorCode },
+        })
+      ) {
+        return;
+      }
       this.toastService.error(errorAction.error || 'Error al crear la factura');
     }
   }

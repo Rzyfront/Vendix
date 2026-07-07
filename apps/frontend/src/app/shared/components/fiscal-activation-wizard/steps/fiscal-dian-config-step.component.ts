@@ -35,6 +35,8 @@ import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
         #form
         [initialValue]="initial()"
         [disabled]="submitting() || readOnlyForStore()"
+        [hasCertificate]="hasCertificate()"
+        [certificateExpiry]="certificateExpiry()"
         (validityChange)="onValidity($event)"
       ></app-dian-config-form>
 
@@ -69,6 +71,9 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
   readonly localError = signal<string | null>(null);
   readonly initial = signal<Partial<DianConfigValue> | null>(null);
   readonly existingConfigId = signal<number | null>(null);
+  /** B3: precarga del certificado existente desde el prefill. */
+  readonly hasCertificate = signal(false);
+  readonly certificateExpiry = signal<string | null>(null);
   readonly readOnlyForStore = computed(
     () =>
       this.service.userScope() === 'store' &&
@@ -98,9 +103,17 @@ export class FiscalDianConfigStepComponent implements FiscalWizardStepHost {
     // prefill snapshot already contains the active dian_config row, which
     // is what we need to seed the form. The canonical PATCH/POST endpoints
     // in submit() are still the write path.
+    // Reset the certificate preload so a context switch never shows a stale
+    // "certificado cargado" state.
+    this.hasCertificate.set(false);
+    this.certificateExpiry.set(null);
     const dian = this.service.prefill()?.dian_config;
     if (dian) {
       this.existingConfigId.set(dian.id);
+      // B3: surface the already-uploaded certificate so the user is not forced
+      // to re-upload it. The step stays optional either way.
+      this.hasCertificate.set(dian.has_certificate ?? false);
+      this.certificateExpiry.set(dian.certificate_expiry ?? null);
       this.initial.set(this.toDianFormValue(dian));
       return;
     }

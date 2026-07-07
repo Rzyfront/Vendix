@@ -28,6 +28,7 @@ import {
   ModalComponent,
   PaginationComponent,
   ResponsiveDataViewComponent,
+  SaveRequirementsModalComponent,
   SelectorComponent,
   SelectorOption,
   SortDirection,
@@ -54,6 +55,7 @@ import {
   JournalEntrySourceType,
 } from '../../interfaces/superadmin-fiscal.interface';
 import { SuperadminFiscalService } from '../../services/superadmin-fiscal.service';
+import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
 
 interface JournalLineForm {
   account_code: FormControl<string>;
@@ -101,6 +103,7 @@ const SOURCE_TYPE_OPTIONS: SelectorOption[] = [
     ModalComponent,
     PaginationComponent,
     ResponsiveDataViewComponent,
+    SaveRequirementsModalComponent,
     SelectorComponent,
     SpinnerComponent,
     StatsComponent,
@@ -113,6 +116,7 @@ export class JournalEntriesComponent {
   private readonly fb = inject(FormBuilder);
   private readonly toast = inject(ToastService);
   private readonly currencyFormat = inject(CurrencyFormatService);
+  readonly fiscalReq = inject(FiscalRequirementsService);
 
   // ─── List state ─────────────────────────────────────────────────────────
   readonly entries = signal<JournalEntry[]>([]);
@@ -456,6 +460,11 @@ export class JournalEntriesComponent {
         },
         error: (err) => {
           this.saving.set(false);
+          // Restriccion fiscal (p. ej. periodo cerrado): mostrar el modal de
+          // requisitos con su CTA en lugar del toast crudo.
+          if (this.fiscalReq.presentFiscalError(err)) {
+            return;
+          }
           this.toast.error(
             err?.error?.message ?? 'No se pudo crear el asiento.',
           );

@@ -23,12 +23,13 @@ import {
   TaxRow,
   UI_TO_FISCAL_TAX_TYPE,
 } from '../../forms/default-taxes-form/default-taxes-form.component';
+import { ConfirmationModalComponent } from '../../confirmation-modal/confirmation-modal.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'app-fiscal-default-taxes-step',
   standalone: true,
-  imports: [CommonModule, DefaultTaxesFormComponent],
+  imports: [CommonModule, DefaultTaxesFormComponent, ConfirmationModalComponent],
   template: `
     <div class="step-body">
       <app-default-taxes-form
@@ -41,6 +42,17 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
       @if (localError()) {
         <p class="step-error" role="alert">{{ localError() }}</p>
       }
+
+      <app-confirmation-modal
+        [(isOpen)]="confirmForceOpen"
+        title="Sobrescribir impuestos actuales"
+        message="Ya tienes impuestos configurados. Al continuar con los valores predeterminados se <strong>sobrescribirán tus tarifas actuales</strong> por los valores estándar colombianos (IVA 19%, IVA 5%, IVA Exento, Impoconsumo 8%, ICA Bogotá y Retención en la Fuente). Esta acción no se puede deshacer."
+        confirmText="Sí, sobrescribir"
+        cancelText="Cancelar"
+        confirmVariant="danger"
+        (confirm)="onConfirmForce()"
+        (cancel)="onCancelForce()"
+      ></app-confirmation-modal>
     </div>
   `,
   styles: [
@@ -77,6 +89,10 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
       this.service.lastStatus()?.fiscal_scope === 'ORGANIZATION',
   );
 
+  /** Controls the "overwrite current taxes" confirmation modal (B1). */
+  readonly confirmForceOpen = signal(false);
+  private forceResolver: ((confirmed: boolean) => void) | null = null;
+
   private readonly form = viewChild.required<DefaultTaxesFormComponent>('form');
   private loadedContextKey: string | null = null;
 
@@ -86,6 +102,17 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
       if (key && key !== this.loadedContextKey) {
         this.loadedContextKey = key;
         void this.loadInitial();
+      }
+    });
+
+    // If the confirmation modal is dismissed via backdrop/escape (which does
+    // not emit confirm/cancel), still resolve the pending decision as cancel
+    // so submit() never hangs.
+    effect(() => {
+      if (!this.confirmForceOpen() && this.forceResolver) {
+        const resolve = this.forceResolver;
+        this.forceResolver = null;
+        resolve(false);
       }
     });
   }
@@ -116,15 +143,44 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
   ): Partial<DefaultTaxesValue> {
     return {
       mode: 'custom',
-      // Prefill only carries rate *counts* per category, not the rate value
-      // itself. Seed the names with 0% so the form opens pre-populated but
-      // the user can correct percentages before continuing.
+      // B2: load the REAL rate/type from the frozen prefill contract. Fall
+      // back to 0 / guessType only when the backend has no value yet.
+      // Backend `rate` is a raw decimal FRACTION (0.19 = 19%, 0.00966 = 0.966%)
+      // while the form stores the human-readable percentage (19, 5, 0.966), so
+      // multiply by 100. Round to strip binary-float artifacts
+      // (0.19 * 100 = 19.000000000000004).
       taxes: taxes.categories.map((category) => ({
         name: category.name,
-        percentage: 0,
-        type: this.guessType(category.name),
+        percentage:
+          category.rate != null
+            ? Math.round(category.rate * 100 * 1e6) / 1e6
+            : 0,
+        type: this.mapFiscalTaxType(category.tax_type, category.name),
       })),
     };
+  }
+
+  /**
+   * Maps the backend fiscal `tax_type` ('iva' | 'inc' | 'ica' | 'withholding')
+   * back to the UI tax type. Falls back to a name-based guess only when the
+   * category is not yet classified (`tax_type === null`).
+   */
+  private mapFiscalTaxType(
+    taxType: string | null,
+    name: string,
+  ): TaxRow['type'] {
+    switch ((taxType ?? '').toLowerCase()) {
+      case 'iva':
+        return 'VAT';
+      case 'inc':
+        return 'INC';
+      case 'ica':
+        return 'ICA';
+      case 'withholding':
+        return 'WITHHOLDING';
+      default:
+        return this.guessType(name);
+    }
   }
 
   private guessType(name: string): TaxRow['type'] {
@@ -154,9 +210,10 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
     form.markAllTouched();
     if (!this.valid()) return null;
 
-    this.submitting.set(true);
     this.localError.set(null);
+
     if (this.readOnlyForStore()) {
+      this.submitting.set(true);
       if (this.existingCount() === 0) {
         this.localError.set(
           'La configuración fiscal heredada todavía no tiene impuestos configurados.',
@@ -173,26 +230,25 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
       this.submitting.set(false);
       return { ref };
     }
+
+    const value = form.getValue();
+
+    // B1: re-seeding the Colombian defaults on top of an existing tax setup
+    // OVERWRITES the current rates. Ask for explicit confirmation first and
+    // only then seed with force. If the user cancels, do nothing.
+    let force = false;
+    if (value.mode === 'defaults' && this.existingCount() > 0) {
+      const confirmed = await this.askForceOverwrite();
+      if (!confirmed) return null;
+      force = true;
+    }
+
+    this.submitting.set(true);
     try {
-      const value = form.getValue();
       let count = 0;
 
       if (value.mode === 'defaults') {
-        const res: any = await firstValueFrom(
-          this.http.post(`${this.baseUrl()}/seed-default${this.service.storeQuery()}`, {
-            force: false,
-            ...this.service.storeContext(),
-          }),
-        );
-        const payload = res?.data ?? res;
-        count =
-          typeof payload?.count === 'number'
-            ? payload.count
-            : Array.isArray(payload)
-              ? payload.length
-              : Array.isArray(payload?.taxes)
-                ? payload.taxes.length
-                : 0;
+        count = await this.seedDefaults(force);
       } else {
         for (const row of value.taxes ?? []) {
           await firstValueFrom(
@@ -222,5 +278,82 @@ export class FiscalDefaultTaxesStepComponent implements FiscalWizardStepHost {
     } finally {
       this.submitting.set(false);
     }
+  }
+
+  /**
+   * POSTs the Colombian default tax set. Handles TAXES_ALREADY_SEEDED
+   * defensively (mirrors how fiscal-puc-step handles CHART_ALREADY_SEEDED):
+   * if a 409 escapes because the prefill snapshot was stale, offer to
+   * overwrite with force instead of surfacing a raw error.
+   */
+  private async seedDefaults(force: boolean): Promise<number> {
+    try {
+      const res: any = await firstValueFrom(
+        this.http.post(
+          `${this.baseUrl()}/seed-default${this.service.storeQuery()}`,
+          { force, ...this.service.storeContext() },
+        ),
+      );
+      return this.extractSeedCount(res);
+    } catch (error: any) {
+      const parsed = parseApiError(error);
+      if (parsed.errorCode !== 'TAXES_ALREADY_SEEDED' || force) {
+        // Not the "already seeded" case, or we already forced and it still
+        // failed — let the outer handler surface a safe message.
+        throw error;
+      }
+      // Stale snapshot: taxes exist but the prefill said otherwise. Offer the
+      // same overwrite decision instead of a raw error.
+      const confirmed = await this.askForceOverwrite();
+      if (!confirmed) {
+        // Keep the existing taxes; refresh the count so the step still commits.
+        await this.service.loadPrefill(true);
+        const existing =
+          this.service.prefill()?.default_taxes?.total_categories ?? 0;
+        this.existingCount.set(existing);
+        if (existing === 0) throw error;
+        return existing;
+      }
+      const res: any = await firstValueFrom(
+        this.http.post(
+          `${this.baseUrl()}/seed-default${this.service.storeQuery()}`,
+          { force: true, ...this.service.storeContext() },
+        ),
+      );
+      return this.extractSeedCount(res);
+    }
+  }
+
+  private extractSeedCount(res: any): number {
+    const payload = res?.data ?? res;
+    return typeof payload?.count === 'number'
+      ? payload.count
+      : Array.isArray(payload)
+        ? payload.length
+        : Array.isArray(payload?.taxes)
+          ? payload.taxes.length
+          : 0;
+  }
+
+  /** Opens the overwrite confirmation modal and resolves with the choice. */
+  private askForceOverwrite(): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      this.forceResolver = resolve;
+      this.confirmForceOpen.set(true);
+    });
+  }
+
+  onConfirmForce(): void {
+    const resolve = this.forceResolver;
+    this.forceResolver = null;
+    this.confirmForceOpen.set(false);
+    resolve?.(true);
+  }
+
+  onCancelForce(): void {
+    const resolve = this.forceResolver;
+    this.forceResolver = null;
+    this.confirmForceOpen.set(false);
+    resolve?.(false);
   }
 }

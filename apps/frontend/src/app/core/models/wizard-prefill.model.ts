@@ -67,7 +67,21 @@ export interface WizardPrefillAccountingPeriod {
 export interface WizardPrefillDefaultTaxes {
   total_categories: number;
   total_rates: number;
-  categories: Array<{ id: number; name: string; rates: number }>;
+  categories: Array<{
+    id: number;
+    name: string;
+    rates: number;
+    /**
+     * Real percentage of the tax rate (frozen contract). `null` when the
+     * backend could not resolve a percentage for the category.
+     */
+    rate: number | null;
+    /**
+     * Fiscal tax classification ('iva' | 'inc' | 'ica' | 'withholding').
+     * `null` when the category has not been classified yet.
+     */
+    tax_type: string | null;
+  }>;
 }
 
 export interface WizardPrefillAccountingMappings {

@@ -1,5 +1,6 @@
 import {
   Component,
+  computed,
   DestroyRef,
   effect,
   inject,
@@ -22,6 +23,7 @@ import {
   SelectorOption,
 } from '../../selector/selector.component';
 import { IconComponent } from '../../icon/icon.component';
+import { formatDateOnlyUTC } from '../../../utils/date.util';
 
 export type DianEnvironment = 'test' | 'production';
 
@@ -182,6 +184,40 @@ interface DianConfigControls {
         <h3 class="text-sm font-semibold text-text-primary">
           Certificado digital
         </h3>
+
+        @if (hasCertificate()) {
+          <div
+            class="flex items-start gap-3 p-3 rounded-lg border border-border"
+          >
+            <app-icon
+              [name]="certificateExpired() ? 'alert-triangle' : 'check-circle'"
+              [size]="18"
+              class="mt-0.5"
+              [class.text-warning]="certificateExpired()"
+              [class.text-primary]="!certificateExpired()"
+            ></app-icon>
+            <div class="text-sm">
+              <p class="font-medium text-text-primary">Certificado cargado</p>
+              @if (certificateExpiryDisplay()) {
+                @if (certificateExpired()) {
+                  <p class="text-warning">
+                    Vencido el {{ certificateExpiryDisplay() }}. Puedes
+                    continuar, pero renueva el certificado pronto.
+                  </p>
+                } @else {
+                  <p class="text-text-secondary">
+                    Vigente hasta {{ certificateExpiryDisplay() }}
+                  </p>
+                }
+              }
+              <p class="text-xs text-text-secondary mt-1">
+                No necesitas volver a subirlo. Sube un archivo solo si deseas
+                reemplazarlo.
+              </p>
+            </div>
+          </div>
+        }
+
         <div
           class="border-2 border-dashed border-border rounded-lg p-5 text-center cursor-pointer hover:border-primary/50 transition-colors"
           (click)="fileInput.click()"
@@ -190,7 +226,12 @@ interface DianConfigControls {
         >
           <app-icon name="upload-cloud" [size]="28" class="text-gray-400 mx-auto mb-2"></app-icon>
           <p class="text-sm text-text-secondary">
-            {{ selectedFileName() || 'Haga clic o arrastre su archivo .p12 aquí' }}
+            {{
+              selectedFileName() ||
+                (hasCertificate()
+                  ? 'Haga clic o arrastre para reemplazar el certificado'
+                  : 'Haga clic o arrastre su archivo .p12 aquí')
+            }}
           </p>
           @if (!selectedFileName()) {
             <p class="text-xs text-gray-400 mt-1">Solo archivos .p12 o .pfx</p>
@@ -217,12 +258,34 @@ export class DianConfigFormComponent {
   readonly initialValue = input<Partial<DianConfigValue> | null>(null);
   readonly disabled = input<boolean>(false);
 
+  /**
+   * B3: when the tenant already has a digital certificate uploaded, the form
+   * renders a "certificado cargado" state and re-upload is optional (the whole
+   * DIAN step remains optional to advance).
+   */
+  readonly hasCertificate = input<boolean>(false);
+  readonly certificateExpiry = input<string | null>(null);
+
   readonly valueChange = output<DianConfigValue>();
   readonly validityChange = output<boolean>();
 
   readonly valid = signal(false);
   readonly selectedFile = signal<File | null>(null);
   readonly selectedFileName = signal<string>('');
+
+  /** Formatted certificate expiry (date-only, UTC-safe) for display. */
+  readonly certificateExpiryDisplay = computed(() => {
+    const raw = this.certificateExpiry();
+    return raw ? formatDateOnlyUTC(raw) : null;
+  });
+
+  /** True when the existing certificate is past its validity date. */
+  readonly certificateExpired = computed(() => {
+    const raw = this.certificateExpiry();
+    if (!raw) return false;
+    const expiry = new Date(raw).getTime();
+    return !Number.isNaN(expiry) && expiry < Date.now();
+  });
 
   private readonly destroyRef = inject(DestroyRef);
 

@@ -62,6 +62,7 @@ export { DiffViewerComponent } from './diff-viewer/diff-viewer.component';
 export { StoreFiscalIdentityFormComponent } from './store-fiscal-identity-form/store-fiscal-identity-form.component';
 export { StoreUserSelectComponent } from './store-user-select/store-user-select.component';
 export { StoreUserMultiSelectComponent } from './store-user-multi-select/store-user-multi-select.component';
+export { SaveRequirementsModalComponent } from './save-requirements-modal/save-requirements-modal.component';
 
 // Services
 export { TourService } from './tour/services/tour.service';
@@ -83,6 +84,12 @@ export type { InputType, InputSize } from './input/input.component';
 export type { InputButtonOption } from './input-buttons/input-buttons.component';
 export type { SpinnerSize } from './spinner/spinner.component';
 export type { ModalSize } from './modal/modal.component';
+export type {
+  SaveRequirement,
+  SaveRequirementAction,
+  SaveRequirementActionKind,
+  SaveRequirementSeverity,
+} from './save-requirements-modal/save-requirements.interface';
 export type { InputSearchSize } from './inputsearch/inputsearch.component';
 export type {
   TableColumn,

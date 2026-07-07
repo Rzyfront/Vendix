@@ -489,6 +489,24 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'La numeracion DIAN de esta resolucion esta agotada.',
   FISCAL_DOCUMENT_UNSUPPORTED:
     'Este tipo de documento fiscal aun no esta implementado para DIAN propio.',
+  FISCAL_PERIOD_CLOSED:
+    'El periodo fiscal de esa fecha esta cerrado y no admite movimientos. Reabre el periodo o usa una fecha dentro de un periodo abierto.',
+  FISCAL_STATUS_LOCKED:
+    'El manejo fiscal esta bloqueado porque ya existen documentos fiscales emitidos. Esta configuracion ya no se puede modificar.',
+  FISCAL_STATUS_INVALID_TRANSITION:
+    'No se puede cambiar el estado fiscal desde el estado actual. Refresca la pagina y vuelve a intentarlo.',
+  FISCAL_SCOPE_MISSING_TAX_ID:
+    'Falta el NIT de la entidad fiscal. Registralo en los datos legales antes de continuar.',
+
+  // Fiscal seeding (plan de cuentas / impuestos / entidad contable)
+  TAXES_ALREADY_SEEDED:
+    'Los impuestos por defecto ya fueron creados para esta entidad fiscal. No los vuelvas a sembrar; edita los existentes en el paso de Impuestos.',
+  CHART_ALREADY_SEEDED:
+    'El plan de cuentas (PUC) ya fue creado para esta entidad fiscal. No lo vuelvas a sembrar; edita las cuentas existentes en el paso de PUC.',
+  CHART_NOT_SEEDED:
+    'Aun no existe un plan de cuentas (PUC). Crealo en el paso de PUC antes de continuar.',
+  MISSING_ACCOUNTING_ENTITY:
+    'Falta la entidad fiscal de la tienda. Completa los datos legales (NIT y razon social) antes de crear el plan de cuentas.',
 
   // Invoicing
   INVOICING_FIND_001: 'No se encontro la factura.',

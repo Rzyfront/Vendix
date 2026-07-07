@@ -303,3 +303,11 @@
     />
   </div>
 </app-modal>
+
+<!-- Modal de requisitos fiscales: explica un 4xx fiscal (p. ej. periodo
+     cerrado) que bloquea la creacion del asiento con su CTA de configuracion. -->
+<app-save-requirements-modal
+  [(isOpen)]="fiscalReq.isOpen"
+  [requirements]="fiscalReq.requirements()"
+  (action)="fiscalReq.handleAction($event)"
+/>

@@ -88,16 +88,31 @@ export class CostingService {
         quantity_on_hand: { gt: 0 },
         inventory_locations: { is: locationFilter },
       },
+      include: {
+        products: { select: { cost_price: true } },
+        product_variants: { select: { cost_price: true } },
+      },
     });
     const quantity = rows.reduce(
       (sum, sl) => sum + (sl.quantity_on_hand ?? 0),
       0,
     );
-    const value = rows.reduce(
-      (sum, sl) =>
-        sum + (sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0),
-      0,
-    );
+    const value = rows.reduce((sum, sl) => {
+      // Fix colapso CPP: `stock_levels.cost_per_unit` nace NULL en todo camino
+      // de escritura que no sea recepción de compra (crear/editar producto,
+      // variantes, importación, ajustes, seeds). Sin fallback, ese stock aporta
+      // valor 0 al agregado y una compra más cara arrastra el CPP hacia abajo.
+      // Cadena canónica (misma que `initializeCostLayers`): cost_per_unit del
+      // stock → cost_price de la variante → cost_price del producto → 0. Usa
+      // `||` (no `??`) A PROPÓSITO para que un 0 espurio caiga al siguiente
+      // eslabón.
+      const effectiveCost =
+        Number(sl.cost_per_unit) ||
+        Number(sl.product_variants?.cost_price) ||
+        Number(sl.products?.cost_price) ||
+        0;
+      return sum + (sl.quantity_on_hand ?? 0) * effectiveCost;
+    }, 0);
     return { quantity, cost_per_unit: quantity > 0 ? value / quantity : 0 };
   }
 
@@ -166,17 +181,30 @@ export class CostingService {
     const prisma = tx || this.prisma;
     const organizationId = this.getOrganizationId();
 
-    // Get current stock level for existing cost/quantity
+    // Get current stock level for existing cost/quantity. Carga las relaciones
+    // products/product_variants para el fallback de costo (mismo join, sin
+    // query extra).
     const stockLevel = await prisma.stock_levels.findFirst({
       where: {
         product_id: params.product_id,
         product_variant_id: params.variant_id || null,
         location_id: params.location_id,
       },
+      include: {
+        products: { select: { cost_price: true } },
+        product_variants: { select: { cost_price: true } },
+      },
     });
 
     const existingQty = stockLevel?.quantity_on_hand ?? 0;
-    const existingCost = Number(stockLevel?.cost_per_unit ?? 0);
+    // Fix colapso CPP: si la fila del stock nació con cost_per_unit NULL/0,
+    // la CPP de la ubicación receptora colapsaría al recibir más. Fallback
+    // canónico (`||`, no `??`): cost_per_unit → variante → producto → 0.
+    const existingCost =
+      Number(stockLevel?.cost_per_unit) ||
+      Number(stockLevel?.product_variants?.cost_price) ||
+      Number(stockLevel?.products?.cost_price) ||
+      0;
 
     // Scoped stock aggregate (multi-tenant safe): aggregate across the same
     // store (STORE scope) or organization (ORGANIZATION scope) — never cross
@@ -302,8 +330,19 @@ export class CostingService {
           product_variant_id: params.variant_id || null,
           location_id: params.location_id,
         },
+        include: {
+          products: { select: { cost_price: true } },
+          product_variants: { select: { cost_price: true } },
+        },
       });
-      const costPerUnit = Number(stockLevel?.cost_per_unit ?? 0);
+      // Fix colapso CPP: este costo alimenta el COGS de venta bajo CPP. Si el
+      // cost_per_unit del stock quedó NULL/0, el COGS sería 0. Fallback
+      // canónico (`||`, no `??`): cost_per_unit → variante → producto → 0.
+      const costPerUnit =
+        Number(stockLevel?.cost_per_unit) ||
+        Number(stockLevel?.product_variants?.cost_price) ||
+        Number(stockLevel?.products?.cost_price) ||
+        0;
 
       const cppLayers = await prisma.inventory_cost_layers.findMany({
         where: {

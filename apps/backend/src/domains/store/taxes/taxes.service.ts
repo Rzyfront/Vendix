@@ -123,6 +123,31 @@ export class TaxesService {
       );
     }
 
+    // Idempotent upsert-by-(store_id, name). The fiscal wizard's "use Colombian
+    // defaults" and manual creation can both target the same category name;
+    // an unconditional create() duplicated categories. Uniqueness is enforced
+    // via partial unique indexes that Prisma cannot model as a compound
+    // unique, so we emulate the upsert with a scope-safe findFirst (mirrors
+    // DefaultTaxesSeederService). Only reachable for fiscal_scope=STORE — the
+    // ORGANIZATION rejection above still stands.
+    const existing = await this.prisma.tax_categories.findFirst({
+      where: { name: createTaxCategoryDto.name, store_id: context.store_id },
+      select: { id: true },
+    });
+
+    if (existing) {
+      return this.prisma.tax_categories.update({
+        where: { id: existing.id },
+        data: {
+          description: createTaxCategoryDto.description,
+          tax_type: createTaxCategoryDto.tax_type ?? TaxFiscalType.IVA,
+        },
+        include: {
+          tax_rates: true,
+        },
+      });
+    }
+
     return this.prisma.tax_categories.create({
       data: {
         name: createTaxCategoryDto.name,
