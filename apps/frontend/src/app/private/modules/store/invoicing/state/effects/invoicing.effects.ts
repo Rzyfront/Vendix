@@ -162,11 +162,12 @@ export class InvoicingEffects {
           map((response) =>
             InvoicingActions.createFromOrderSuccess({ invoice: response.data })
           ),
-          catchError((error) =>
-            of(InvoicingActions.createFromOrderFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.createFromOrderFailure({
               error: error.error?.message || error.message || 'Error creating invoice from order'
-            }))
-          )
+            }));
+          })
         )
       )
     )
@@ -181,11 +182,12 @@ export class InvoicingEffects {
           map((response) =>
             InvoicingActions.createFromSalesOrderSuccess({ invoice: response.data })
           ),
-          catchError((error) =>
-            of(InvoicingActions.createFromSalesOrderFailure({
+          catchError((error) => {
+            this.fiscalReq.presentFiscalError(error);
+            return of(InvoicingActions.createFromSalesOrderFailure({
               error: error.error?.message || error.message || 'Error creating invoice from sales order'
-            }))
-          )
+            }));
+          })
         )
       )
     )
