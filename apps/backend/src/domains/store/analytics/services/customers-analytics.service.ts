@@ -16,6 +16,7 @@ import {
   DEFAULT_STORE_TIMEZONE,
   resolveStoreTimezone,
   localPeriodSql,
+  localBucketSql,
 } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
@@ -675,14 +676,14 @@ export class CustomersAnalyticsService {
       }>
     >`
       SELECT
-        EXTRACT(HOUR FROM c.created_at) as hour,
+        EXTRACT(HOUR FROM ${localBucketSql('c.created_at', tz)}) as hour,
         COUNT(c.id) as count,
         COALESCE(SUM(c.subtotal), 0) as total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
         AND c.created_at >= ${startDate}
         AND c.created_at <= ${endDate}
-      GROUP BY EXTRACT(HOUR FROM c.created_at)
+      GROUP BY EXTRACT(HOUR FROM ${localBucketSql('c.created_at', tz)})
       ORDER BY count DESC
     `;
 
