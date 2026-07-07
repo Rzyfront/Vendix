@@ -3,6 +3,7 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
 import { parseDateRange } from '../utils/date.util';
+import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -16,7 +17,8 @@ export class ReviewsAnalyticsService {
     }
     const storeId = context.store_id;
 
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const reviews = await this.prisma.reviews.findMany({
       where: {
@@ -70,7 +72,8 @@ export class ReviewsAnalyticsService {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await resolveStoreTimezone(this.prisma, context.store_id);
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const reviews = await this.prisma.reviews.findMany({
       where: {
