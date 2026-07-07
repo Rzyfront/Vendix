@@ -3,6 +3,10 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
 import { parseDateRange } from '../utils/date.util';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  resolveStoreTimezone,
+} from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -11,8 +15,22 @@ export class FinancialAnalyticsService {
 
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
+  /**
+   * Resolves the current request's store timezone (single source of truth).
+   * Falls back to the default when there is no store context (e.g. the scoped
+   * client would already reject such a call before reaching real data).
+   */
+  private async getStoreTimezone(): Promise<string> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      return DEFAULT_STORE_TIMEZONE;
+    }
+    return resolveStoreTimezone(this.prisma, context.store_id);
+  }
+
   async getTaxSummary(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     // Aggregate tax from order_item_taxes via order_items -> orders
     const orderItems = await this.prisma.order_items.findMany({
@@ -106,7 +124,8 @@ export class FinancialAnalyticsService {
   }
 
   async getCashSessionsReport(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
     const page = query.page || 1;
     const limit = query.limit || 20;
 
@@ -221,7 +240,8 @@ export class FinancialAnalyticsService {
   }
 
   async getProfitLossSummary(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const context = RequestContextService.getContext();
     if (!context?.store_id) {
@@ -337,7 +357,8 @@ export class FinancialAnalyticsService {
   }
 
   async getRefundsSummary(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const refundAggregates = await this.prisma.refunds.aggregate({
       where: {
@@ -429,7 +450,8 @@ export class FinancialAnalyticsService {
   }
 
   async getCashSessionsForExport(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const sessions = await this.prisma.cash_register_sessions.findMany({
       where: {

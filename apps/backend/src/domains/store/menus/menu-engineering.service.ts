@@ -3,6 +3,7 @@ import { RequestContextService } from '@common/context/request-context.service';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { parseDateRange } from '../analytics/utils/date.util';
+import { resolveStoreTimezone } from '@common/utils/store-timezone.util';
 
 const COMPLETED_STATES = ['delivered', 'finished'];
 
@@ -72,10 +73,14 @@ export class MenuEngineeringService {
 
   async report(query: { from?: string; to?: string }): Promise<MenuEngineeringReport> {
     const storeId = this.requireStoreId();
-    const { startDate, endDate } = parseDateRange({
-      date_from: query.from,
-      date_to: query.to,
-    } as any);
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(
+      {
+        date_from: query.from,
+        date_to: query.to,
+      } as any,
+      tz,
+    );
 
     // 1) Pull sales aggregates for completed orders in the window.
     const sales = await this.prisma.order_items.groupBy({
