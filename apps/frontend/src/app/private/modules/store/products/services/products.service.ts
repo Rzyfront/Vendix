@@ -136,7 +136,9 @@ export class ProductsService {
       .post<ApiResponse<Product>>(`${this.apiUrl}/store/products`, product)
       .pipe(
         map((response) => response.data),
-        catchError(this.handleError),
+        // Ruta de error DEDICADA: preserva `error_code` para el modal de
+        // requisitos (NO usa el `handleError` compartido que aplana a string).
+        catchError(this.handleSaveError),
       );
   }
 
@@ -147,7 +149,9 @@ export class ProductsService {
       >(`${this.apiUrl}/store/products/${id}`, product)
       .pipe(
         map((response) => response.data),
-        catchError(this.handleError),
+        // Ruta de error DEDICADA: preserva `error_code` para el modal de
+        // requisitos (NO usa el `handleError` compartido que aplana a string).
+        catchError(this.handleSaveError),
       );
   }
 
@@ -680,6 +684,68 @@ export class ProductsService {
     }
 
     return throwError(() => errorMessage);
+  }
+
+  /**
+   * Ruta de error DEDICADA para `createProduct` / `updateProduct`.
+   *
+   * A diferencia de `handleError` (compartido por el resto de métodos, que
+   * aplana el error a un **string** para toasts genéricos y PIERDE el
+   * `error_code`), esta ruta propaga un OBJETO que PRESERVA `error_code` y
+   * `details`. Así el consumidor puede llamar `mapBackendErrorToRequirements(err)`
+   * y alcanzar los casos 1 (`SYS_VALIDATION_001`, desglose por campo) y 2 (mapa
+   * curado con label + CTA) del modal de requisitos, en vez de degradar siempre
+   * al genérico (case 3).
+   *
+   * Forma del objeto propagado:
+   * - `error_code` / `details`: leídos por `parseApiError` (`body.error_code`).
+   * - `message`: texto plano en español para toast/banner cuando el consumidor
+   *   NO re-cura por código (reutiliza `PRODUCT_SAVE_ERROR_MAP` igual que
+   *   `handleError`, para no perder el texto en español).
+   * - `error`: se preserva el cuerpo CRUDO del backend para que
+   *   `mapBackendErrorToRequirements` pueda desambiguar `PROD_VALIDATE_001` con
+   *   el detalle real de la regla (`readBackendMessage` lee `err.error.message`)
+   *   y para que `extractApiErrorMessage` resuelva el mensaje de `ERROR_MESSAGES`.
+   *
+   * No usa `this` (igual que `handleError`), por lo que es seguro pasarlo por
+   * referencia a `catchError(this.handleSaveError)`.
+   */
+  private handleSaveError(error: any): Observable<never> {
+    console.error('ProductsService Save Error:', error);
+
+    const backendCode: string | undefined =
+      error?.error?.error_code ?? error?.error_code;
+
+    // Misma cascada de resolución de mensaje curado que `handleError`.
+    let message = 'No se pudo guardar el producto';
+    if (backendCode && PRODUCT_SAVE_ERROR_MAP[backendCode]) {
+      message = PRODUCT_SAVE_ERROR_MAP[backendCode].reason;
+    } else if (typeof error === 'string') {
+      message = error;
+    } else if (error?.error?.message) {
+      message = error.error.message;
+    } else if (error?.message) {
+      message = error.message;
+    } else if (error?.status === 400) {
+      message = 'Datos inválidos proporcionados';
+    } else if (error?.status === 401) {
+      message = 'Acceso no autorizado';
+    } else if (error?.status === 403) {
+      message = 'Permisos insuficientes';
+    } else if (error?.status === 404) {
+      message = 'Producto no encontrado';
+    } else if (error?.status === 409) {
+      message = 'Ya existe un producto con este SKU o slug';
+    } else if (error?.status >= 500) {
+      message = 'Error del servidor. Por favor intenta más tarde';
+    }
+
+    return throwError(() => ({
+      error_code: backendCode ?? null,
+      message,
+      details: error?.error?.details ?? null,
+      error: error?.error ?? undefined,
+    }));
   }
 
   /**
