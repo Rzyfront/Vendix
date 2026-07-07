@@ -448,6 +448,14 @@
       "sessions": 2,
       "memories": 3,
       "prompts": 0
+    },
+    {
+      "id": "0d48295c",
+      "created_by": "rzy",
+      "created_at": "2026-07-07T21:00:47Z",
+      "sessions": 0,
+      "memories": 1,
+      "prompts": 0
     }
   ]
 }
