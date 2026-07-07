@@ -440,6 +440,14 @@
       "sessions": 3,
       "memories": 7,
       "prompts": 0
+    },
+    {
+      "id": "e88b38b9",
+      "created_by": "rzy",
+      "created_at": "2026-07-07T20:38:10Z",
+      "sessions": 2,
+      "memories": 3,
+      "prompts": 0
     }
   ]
 }
