@@ -1,4 +1,5 @@
 import { Granularity } from '../dto/analytics-query.dto';
+import { enumerateLocalPeriodKeys } from '@common/utils/store-timezone.util';
 
 /**
  * Fills gaps in time-series data so every expected period appears in the output.
@@ -6,6 +7,12 @@ import { Granularity } from '../dto/analytics-query.dto';
  * SQL GROUP BY only returns rows for periods with actual data.
  * This function generates all periods between startDate and endDate,
  * then merges with real data — filling missing periods with the zero template.
+ *
+ * When `tz` is provided, the fill walks the store's LOCAL calendar and produces
+ * labels that are byte-identical to `localPeriodSql`'s `to_char(DATE_TRUNC(...))`
+ * output — so the SQL bucket label for an order matches the fill label for that
+ * same local period. When `tz` is omitted, the legacy UTC walk (using
+ * `formatPeriod`) is preserved verbatim for callers not yet migrated.
  */
 export function fillTimeSeries<T extends { period: string }>(
   results: T[],
@@ -14,12 +21,24 @@ export function fillTimeSeries<T extends { period: string }>(
   granularity: Granularity,
   zeroTemplate: Omit<T, 'period'>,
   formatPeriod: (date: Date, granularity: Granularity) => string,
+  tz?: string,
 ): T[] {
   const dataMap = new Map<string, T>();
   for (const item of results) {
     dataMap.set(item.period, item);
   }
 
+  // TZ-aware path (preferred): labels come from the local-calendar walk that
+  // mirrors the SQL. `formatPeriod` is intentionally unused here.
+  if (tz) {
+    const keys = enumerateLocalPeriodKeys(startDate, endDate, granularity, tz);
+    return keys.map(
+      (key) =>
+        dataMap.get(key) ?? ({ ...zeroTemplate, period: key } as T),
+    );
+  }
+
+  // Legacy UTC walk — preserved verbatim for callers not yet migrated.
   const filled: T[] = [];
   let cursor = alignToGranularity(new Date(startDate), granularity);
   const end = endDate;

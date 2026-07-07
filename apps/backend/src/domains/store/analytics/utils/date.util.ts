@@ -1,8 +1,14 @@
 /**
  * Shared date utilities for analytics services.
- * All date operations use UTC methods to avoid timezone-related bugs.
+ *
+ * `parseDateRange` is now timezone-aware: pass the store timezone (resolved via
+ * `resolveStoreTimezone`) and boundaries are computed against the store's LOCAL
+ * calendar via the single-source-of-truth `resolveLocalDateRange`. When `tz` is
+ * omitted the legacy UTC behavior is preserved verbatim, so existing callers
+ * that have not yet been migrated keep their exact previous semantics.
  */
 import { DatePreset, Granularity } from '../dto/analytics-query.dto';
+import { resolveLocalDateRange } from '@common/utils/store-timezone.util';
 
 export function formatPeriodFromDate(
   date: Date,
@@ -28,11 +34,21 @@ export function formatPeriodFromDate(
   }
 }
 
-export function parseDateRange(query: {
-  date_from?: string;
-  date_to?: string;
-  date_preset?: DatePreset;
-}): { startDate: Date; endDate: Date } {
+export function parseDateRange(
+  query: {
+    date_from?: string;
+    date_to?: string;
+    date_preset?: DatePreset;
+  },
+  tz?: string,
+): { startDate: Date; endDate: Date } {
+  // TZ-aware path (preferred): delegate to the single source of truth so the
+  // range boundaries align to the store's LOCAL calendar days.
+  if (tz) {
+    return resolveLocalDateRange(query, tz);
+  }
+
+  // Legacy UTC behavior — preserved verbatim for callers not yet migrated.
   if (query.date_from && query.date_to) {
     const endDate = new Date(query.date_to);
     endDate.setUTCHours(23, 59, 59, 999);
