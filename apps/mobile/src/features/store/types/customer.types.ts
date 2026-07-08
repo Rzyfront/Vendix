@@ -1,5 +1,11 @@
 export type CustomerState = 'active' | 'inactive';
 
+/** Espejo web `tax_regime` — clasificación fiscal del cliente. */
+export type TaxRegime = 'COMUN' | 'SIMPLIFICADO' | 'GRAN_CONTRIBUYENTE';
+
+/** Espejo web `person_type` — tipo de persona (natural/jurídica). */
+export type PersonType = 'NATURAL' | 'JURIDICA';
+
 export interface Customer {
   id: string;
   first_name: string;
@@ -50,7 +56,26 @@ export interface CreateCustomerDto {
   phone?: string;
   document_type?: string;
   document_number?: string;
+  tax_regime?: string;
+  person_type?: string;
+  is_withholding_agent?: boolean;
   state?: CustomerState;
 }
 
 export interface UpdateCustomerDto extends Partial<CreateCustomerDto> {}
+
+export interface BulkCustomerUploadResult {
+  success: boolean;
+  total_processed: number;
+  successful: number;
+  failed: number;
+  results: BulkCustomerUploadItemResult[];
+}
+
+export interface BulkCustomerUploadItemResult {
+  status: 'success' | 'error';
+  message?: string;
+  error?: string;
+  row_number?: number;
+  customer?: { id: string };
+}
