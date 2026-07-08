@@ -1,504 +1,631 @@
-import React, { useState } from 'react';
-import { Pressable, Text, View, StyleSheet, ScrollView, Modal, Dimensions, type ViewStyle } from 'react-native';
-import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
+import { useState, useRef, useMemo } from 'react';
+import {
+  View,
+  Text,
+  Pressable,
+  Modal,
+  StyleSheet,
+  Dimensions,
+  ScrollView,
+  type View as ViewType,
+} from 'react-native';
 import { Icon } from '@/shared/components/icon/icon';
+import { colors, colorScales, spacing, typography, borderRadius, shadows } from '@/shared/theme';
 
-export interface OptionsDropdownFilter {
-  label: string;
+// ── Interfaces (paridad con `options-dropdown.interfaces.ts` web) ─────────
+
+export type FilterType = 'select' | 'multi-select' | 'date';
+
+export interface FilterOption {
   value: string;
-  active?: boolean;
+  label: string;
 }
 
-export interface OptionsDropdownSection {
+export interface FilterConfig {
+  key: string;
   label: string;
-  options: OptionsDropdownFilter[];
-  onSelect: (value: string) => void;
+  type: FilterType;
+  options?: FilterOption[];
+  placeholder?: string;
+  disabled?: boolean;
+  helpText?: string;
+  defaultValue?: string | string[];
 }
 
-export interface OptionsDropdownAction {
+export type DropdownActionVariant = 'primary' | 'outline' | 'destructive';
+
+export interface DropdownAction {
   label: string;
-  icon?: string;
-  variant?: 'default' | 'destructive';
-  onPress: () => void;
+  icon: string;
+  /**
+   * Identificador emitido en `onActionClick` cuando el usuario hace tap.
+   * Opcional si se usa `onPress` directo (compatibilidad con brands/categories
+   * que ya tenían este patrón antes de la migración a `action`+`onActionClick`).
+   */
+  action?: string;
+  /**
+   * Click handler directo. Si se provee, se invoca en lugar de `onActionClick`.
+   * Útil cuando la acción solo necesita navegar o mutar estado local.
+   */
+  onPress?: () => void;
+  variant?: DropdownActionVariant;
+  disabled?: boolean;
 }
+
+export type FilterValues = Record<string, string | string[] | null>;
 
 interface OptionsDropdownProps {
-  filterSections?: OptionsDropdownSection[];
-  actions?: OptionsDropdownAction[];
-  triggerLabel?: string;
-  triggerIcon?: string;
-  /**
-   * Espejo web `max-width: 1023px` — el trigger colapsa a un botón
-   * cuadrado (sólo icono, sin label ni chevron). Usado por Categorías,
-   * Productos, Marcas y otras listas en mobile.
-   */
-  compact?: boolean;
-  style?: ViewStyle;
+  /** Filtros a mostrar en el dropdown de filtros. */
+  filters?: FilterConfig[];
+  /** Acciones a mostrar en el dropdown de acciones. */
+  actions?: DropdownAction[];
+  /** Mostrar el trigger de acciones. Default `true`. */
+  showActions?: boolean;
+  /** Estado actual de los filtros. */
+  filterValues?: FilterValues;
+  /** Título del dropdown de acciones. Default `'Acciones'`. */
+  actionsTitle?: string;
+  /** Título del dropdown de filtros. Default `'Filtros'`. */
+  filtersTitle?: string;
+  /** Debounce (ms) entre cambios de filtro antes de emitir `onFilterChange`. Default `350`. */
+  debounceMs?: number;
+  /** Estado de carga (deshabilita interacciones y muestra spinner simple). */
+  isLoading?: boolean;
+  /** Callback cuando un filtro cambia (después del debounce). */
+  onFilterChange?: (values: FilterValues) => void;
+  /** Callback cuando se hace click en una acción. */
+  onActionClick?: (actionKey: string) => void;
+  /** Callback cuando se hace click en "Limpiar" filtros. */
+  onClearAllFilters?: () => void;
 }
 
-export function OptionsDropdown({
-  filterSections = [],
-  actions = [],
-  triggerLabel = 'Filtros y acciones',
-  triggerIcon = 'sliders-horizontal',
-  compact = false,
-  style,
-}: OptionsDropdownProps) {
-  const [open, setOpen] = useState(false);
-  const [dropPos, setDropPos] = useState({ top: 0, right: 0 });
-  const triggerRef = React.useRef<View>(null);
-  const screenW = Dimensions.get('window').width;
+// ── Tokens de tamaño ──────────────────────────────────────────────────────
 
-  const hasFilters = filterSections.length > 0;
-  const hasActions = actions.length > 0;
-  const activeCount = filterSections.reduce(
-    (sum, s) => sum + s.options.filter((o) => o.active).length,
-    0,
-  );
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const SCREEN_MARGIN = 12;
+const DROPDOWN_WIDTH = Math.min(280, SCREEN_WIDTH - SCREEN_MARGIN * 2);
+const DROPDOWN_GAP = 4;
+const TRIGGER_WIDTH = 40;
+const TRIGGER_GAP = spacing[2]; // 8px (web: `gap: 0.5rem`)
 
-  const openDropdown = () => {
-    triggerRef.current?.measureInWindow((x, y, w, h) => {
-      // Espejo web `.options-dropdown-content` — absolute, top 100% + gap,
-      // right-aligned (filters-dropdown). En mobile (compact): el ancho
-      // del dropdown se ancla al botón trigger y aparece debajo.
-      setDropPos({
-        top: y + h + 4,
-        right: Math.max(0, screenW - (x + w)),
-      });
-      setOpen(true);
-    });
-  };
+// ── Color helpers ─────────────────────────────────────────────────────────
 
-  return (
-    <>
-      <Pressable
-        ref={triggerRef}
-        onPress={openDropdown}
-        style={({ pressed }) => [
-          styles.trigger,
-          compact && styles.triggerCompact,
-          pressed && styles.triggerPressed,
-          style,
-        ]}
-      >
-        <Icon
-          name={triggerIcon}
-          size={compact ? 18 : 16}
-          color={compact ? colors.primary : colors.text.primary}
-        />
-        {!compact && (
-          <Text style={styles.triggerLabel}>{triggerLabel}</Text>
-        )}
-        {!compact && activeCount > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{activeCount}</Text>
-          </View>
-        )}
-      </Pressable>
+const VARIANT_COLOR = {
+  primary: colors.primary,
+  outline: colorScales.gray[700],
+  destructive: colors.error,
+} as const;
 
-      {/* Dropdown anclado al trigger (espejo web .options-dropdown-content) */}
-      <Modal
-        visible={open}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
-      >
-        {/* Overlay transparente cierra el dropdown al tap fuera */}
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={() => setOpen(false)}
-        >
-          <View style={[styles.dropdown, { top: dropPos.top, right: dropPos.right }]}>
-            {/* Header — espejo .dropdown-header web (border-bottom + título) */}
-            {hasFilters && (
-              <View style={styles.dropdownHeader}>
-                <Text style={styles.dropdownTitle}>Filtros</Text>
-              </View>
-            )}
-
-            {/* Body scrolleable — espejo .filters-body web */}
-            <ScrollView
-              style={styles.dropdownScroll}
-              contentContainerStyle={styles.dropdownContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {hasFilters && (
-                <View style={styles.section}>
-                  {filterSections.map((section) => (
-                    <FilterSelectField
-                      key={section.label}
-                      label={section.label}
-                      options={section.options}
-                      onSelect={(value) => {
-                        section.onSelect(value);
-                        // No cerramos el dropdown principal — el usuario
-                        // puede querer ajustar varios filtros antes de
-                        // cerrar manualmente. Coincide con la UX web
-                        // donde el popover queda abierto hasta tap fuera.
-                      }}
-                    />
-                  ))}
-                </View>
-              )}
-
-              {hasActions && (
-                <View style={[styles.section, hasFilters && styles.sectionDivider]}>
-                  <Text style={styles.sectionTitle}>Acciones</Text>
-                  {actions.map((a, i) => (
-                    <Pressable
-                      key={`${a.label}-${i}`}
-                      onPress={() => {
-                        setOpen(false);
-                        a.onPress();
-                      }}
-                      style={({ pressed }) => [
-                        styles.action,
-                        a.variant === 'destructive' && styles.actionDestructive,
-                        pressed && styles.actionPressed,
-                      ]}
-                    >
-                      {a.icon && (
-                        <Icon
-                          name={a.icon}
-                          size={18}
-                          color={a.variant === 'destructive' ? colors.error : colors.text.primary}
-                        />
-                      )}
-                      <Text
-                        style={[
-                          styles.actionLabel,
-                          a.variant === 'destructive' && styles.actionLabelDestructive,
-                        ]}
-                      >
-                        {a.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
-    </>
-  );
+interface TriggerPos {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /**
- * FilterSelectField — espejo del `<app-selector size="sm">` web.
+ * Dropdown dual con dos triggers lado a lado — paridad exacta con
+ * `<app-options-dropdown>` web (`apps/frontend/src/app/shared/components/options-dropdown/`).
  *
- * Renderiza un campo select desplegable (no chips):
- *   · Cabecera: Pressable con label de la sección + valor actual +
- *     chevron-down a la derecha (h-8 rounded-xl border-border w-full).
- *     Mismo styling que la web CSS de `.inputsearch-wrapper`/select:
- *     bg #f4f4f4, border 1px #e6edf3, pl-3 pr-10, radius 0.75rem.
- *   · Cuerpo desplegable: lista vertical de opciones con la activa
- *     marcada (check + color primario). `bg #ffffff`, padding 16.
- *   · Mismo patrón que `<select>` HTML del web — pero sin opciones
- *     nativas (`<option>`) — sólo items-tap-internos.
+ * ## Estructura
+ * ```
+ * [⚡ Acciones] [⚙ Filtros (badge)]   ← triggers (icon-only mobile)
+ *       ↓                  ↓
+ *   popover A          popover B
+ *   ┌────────┐         ┌────────┐
+ *   │Acciones│         │Filtros 🧹│
+ *   ├────────┤         ├────────┤
+ *   │+ Nuevo │         │ Estado  │
+ *   │⟳ Actual│         │ [select]│
+ *   └────────┘         │ Tipo    │
+ *                      │ [select]│
+ *                      └────────┘
+ * ```
  *
- * Props:
- *   label    — título de la sección ("Estado", "Destacado", etc.)
- *   options  — items disponibles con `value` y `label`, marca active
- *   onSelect — callback al elegir una opción
+ * ## Comportamiento
+ * - Cada trigger abre SU propio popover (no se interfieren).
+ * - Click en backdrop cierra cualquier popover abierto.
+ * - Cambios de filtro se emiten con debounce (default 350ms — paridad web).
+ * - Variantes de action: `primary` (texto verde), `outline` (gris), `destructive` (rojo).
+ * - Filter header muestra botón "Limpiar" sólo si hay filtros activos.
+ *
+ * ## Mobile responsive (< 1024px)
+ * Los triggers son icon-only con borde primary (cuadrados 40px, radius 12px).
+ * En desktop el web muestra trigger con label, pero en mobile-first ambos son icon-only.
  */
-function FilterSelectField({
-  label,
-  options,
-  onSelect,
-}: {
-  label: string;
-  options: { label: string; value: string; active?: boolean }[];
-  onSelect: (value: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const active = options.find((o) => o.active);
-  const display = active?.label || 'Seleccionar';
-  const isPlaceholder = !active;
+export function OptionsDropdown({
+  filters = [],
+  actions = [],
+  showActions = true,
+  filterValues = {},
+  actionsTitle = 'Acciones',
+  filtersTitle = 'Filtros',
+  debounceMs = 350,
+  isLoading = false,
+  onFilterChange,
+  onActionClick,
+  onClearAllFilters,
+}: OptionsDropdownProps) {
+  const [openMenu, setOpenMenu] = useState<'actions' | 'filters' | null>(null);
+  const [triggerPos, setTriggerPos] = useState<{ actions: TriggerPos | null; filters: TriggerPos | null }>({
+    actions: null,
+    filters: null,
+  });
+  const [localValues, setLocalValues] = useState<FilterValues>(filterValues);
+
+  const actionsTriggerRef = useRef<ViewType>(null);
+  const filtersTriggerRef = useRef<ViewType>(null);
+
+  // ── Sync external filterValues → local state ─────────────────────────
+  useMemo(() => {
+    setLocalValues(filterValues);
+  }, [filterValues]);
+
+  // ── Active filters count ─────────────────────────────────────────────
+  const activeFiltersCount = useMemo(() => {
+    let count = 0;
+    for (const cfg of filters) {
+      const value = localValues[cfg.key];
+      if (Array.isArray(value)) {
+        if (value.length > 0) count++;
+      } else {
+        if (value && value !== '') count++;
+      }
+    }
+    return count;
+  }, [filters, localValues]);
+
+  const hasActiveFilter = (key: string): boolean => {
+    const value = localValues[key];
+    if (Array.isArray(value)) return value.length > 0;
+    return !!value && value !== '';
+  };
+
+  // ── Trigger open/close ────────────────────────────────────────────────
+  const measureTrigger = (ref: ViewType | null, which: 'actions' | 'filters') => {
+    if (!ref) return;
+    ref.measureInWindow((x, y, width, height) => {
+      setTriggerPos((prev) => ({ ...prev, [which]: { x, y, width, height } }));
+      setOpenMenu(which);
+    });
+  };
+
+  const handleOpenActions = () => {
+    if (openMenu === 'actions') {
+      setOpenMenu(null);
+      return;
+    }
+    measureTrigger(actionsTriggerRef.current, 'actions');
+  };
+
+  const handleOpenFilters = () => {
+    if (openMenu === 'filters') {
+      setOpenMenu(null);
+      return;
+    }
+    measureTrigger(filtersTriggerRef.current, 'filters');
+  };
+
+  const handleClose = () => setOpenMenu(null);
+
+  // ── Dropdown positioning (smart, evita overflow) ──────────────────────
+  const dropdownPosition = useMemo(() => {
+    if (!openMenu || !triggerPos[openMenu]) return null;
+    const pos = triggerPos[openMenu]!;
+
+    // Prefer right-aligned (matches web `right: 0`).
+    let left = pos.x + pos.width - DROPDOWN_WIDTH;
+    if (left < SCREEN_MARGIN) {
+      left = pos.x;
+      if (left + DROPDOWN_WIDTH > SCREEN_WIDTH - SCREEN_MARGIN) {
+        left = SCREEN_WIDTH - DROPDOWN_WIDTH - SCREEN_MARGIN;
+      }
+    }
+    const top = pos.y + pos.height + DROPDOWN_GAP;
+    return { top, left };
+  }, [openMenu, triggerPos]);
+
+  // ── Action click ──────────────────────────────────────────────────────
+  const handleActionClick = (actionKey: string) => {
+    setOpenMenu(null);
+    setTimeout(() => onActionClick?.(actionKey), 120);
+  };
+
+  // ── Filter change with debounce ───────────────────────────────────────
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleFilterChange = (key: string, value: string | string[] | null) => {
+    setLocalValues((prev) => ({ ...prev, [key]: value }));
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      onFilterChange?.({ ...localValues, [key]: value });
+    }, debounceMs);
+  };
+
+  const handleClearFilter = (key: string) => {
+    const cfg = filters.find((f) => f.key === key);
+    const cleared = cfg?.type === 'multi-select' ? [] : null;
+    setLocalValues((prev) => ({ ...prev, [key]: cleared }));
+    onFilterChange?.({ ...localValues, [key]: cleared });
+  };
+
+  const handleClearAll = () => {
+    const cleared: FilterValues = {};
+    for (const cfg of filters) {
+      cleared[cfg.key] = cfg.type === 'multi-select' ? [] : null;
+    }
+    setLocalValues(cleared);
+    onClearAllFilters?.();
+  };
 
   return (
-    <View style={styles.subsection}>
-      <Text style={styles.subsectionLabel}>{label}</Text>
-
-      {/* Cabecera del select — estilo web:
-          bg #f4f4f4, pl-3 pr-10, rounded-xl (.75rem), h-8 (mobile)
-          hover border-primary, focus border-primary + ring */}
-      <Pressable
-        onPress={() => setOpen((v) => !v)}
-        style={({ pressed }) => [
-          styles.selectField,
-          open && styles.selectFieldOpen,
-          pressed && styles.selectFieldPressed,
-        ]}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-      >
-        <Text
-          style={[styles.selectFieldText, isPlaceholder && styles.selectFieldPlaceholder]}
-          numberOfLines={1}
+    <View style={styles.container}>
+      {/* ── Actions trigger (order 1 — paridad web) ── */}
+      {showActions && actions.length > 0 && (
+        <Pressable
+          ref={actionsTriggerRef}
+          onPress={handleOpenActions}
+          hitSlop={8}
+          accessibilityLabel="Acciones"
+          style={({ pressed }) => [
+            styles.trigger,
+            openMenu === 'actions' && styles.triggerActive,
+            pressed && styles.triggerPressed,
+          ]}
         >
-          {display}
-        </Text>
-        <Icon
-          name="chevron-down"
-          size={14}
-          color={'#94A3B8'}
-          style={[styles.selectFieldChevron, open && styles.selectFieldChevronOpen]}
-        />
-      </Pressable>
-
-      {/* Lista desplegable — espejo del `<select>` HTML expandido */}
-      {open && (
-        <View style={styles.selectOptions}>
-          {options.map((opt, idx) => (
-            <Pressable
-              key={`${label}-${opt.value}-${idx}`}
-              onPress={() => {
-                onSelect(opt.value);
-                setOpen(false);
-              }}
-              style={({ pressed }) => [
-                styles.selectOption,
-                opt.active && styles.selectOptionActive,
-                pressed && !opt.active && styles.selectOptionPressed,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.selectOptionText,
-                  opt.active && styles.selectOptionTextActive,
-                ]}
-              >
-                {opt.label}
-              </Text>
-              {opt.active && <Icon name="check" size={14} color={colors.primary} />}
-            </Pressable>
-          ))}
-        </View>
+          <Icon name="plus" size={iconSizeFor(actions.length)} color={colors.primary} />
+        </Pressable>
       )}
+
+      {/* ── Filters trigger (order 2 — paridad web) ── */}
+      {filters.length > 0 && (
+        <Pressable
+          ref={filtersTriggerRef}
+          onPress={handleOpenFilters}
+          hitSlop={8}
+          accessibilityLabel="Filtros"
+          style={({ pressed }) => [
+            styles.trigger,
+            openMenu === 'filters' && styles.triggerActive,
+            pressed && styles.triggerPressed,
+          ]}
+        >
+          <Icon name="filter" size={18} color={colors.primary} />
+          {activeFiltersCount > 0 && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{activeFiltersCount}</Text>
+            </View>
+          )}
+        </Pressable>
+      )}
+
+      {/* ── Popover ── */}
+      <Modal
+        visible={openMenu !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={handleClose}
+        statusBarTranslucent
+      >
+        <Pressable style={styles.backdrop} onPress={handleClose}>
+          {dropdownPosition && openMenu === 'actions' && (
+            <Pressable
+              style={[styles.dropdown, { top: dropdownPosition.top, left: dropdownPosition.left }]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={styles.header}>
+                <Text style={styles.headerTitle}>{actionsTitle}</Text>
+              </View>
+              <View style={styles.actionList}>
+                {actions.map((action) => {
+                  const variant = action.variant ?? 'outline';
+                  const isDestructive = variant === 'destructive';
+                  const isPrimary = variant === 'primary';
+                  const color = isDestructive
+                    ? colors.error
+                    : isPrimary
+                      ? colors.primary
+                      : VARIANT_COLOR.outline;
+
+                  return (
+                    <Pressable
+                      key={action.action ?? action.label}
+                      disabled={action.disabled}
+                      style={({ pressed }) => [
+                        styles.actionItem,
+                        pressed && styles.actionItemPressed,
+                        isDestructive && pressed && styles.actionItemDestructivePressed,
+                      ]}
+                      onPress={() => {
+                        if (action.onPress) {
+                          setOpenMenu(null);
+                          setTimeout(() => action.onPress?.(), 120);
+                        } else if (action.action) {
+                          handleActionClick(action.action);
+                        }
+                      }}
+                    >
+                      <Icon name={action.icon} size={16} color={color} />
+                      <Text
+                        style={[
+                          styles.actionLabel,
+                          isPrimary && { color: colors.primary },
+                          isDestructive && { color: colors.error },
+                          action.disabled && { opacity: 0.5 },
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {action.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </Pressable>
+          )}
+
+          {dropdownPosition && openMenu === 'filters' && (
+            <Pressable
+              style={[styles.dropdown, { top: dropdownPosition.top, left: dropdownPosition.left }]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              <View style={styles.header}>
+                <Text style={styles.headerTitle}>{filtersTitle}</Text>
+                {activeFiltersCount > 0 && (
+                  <Pressable
+                    onPress={handleClearAll}
+                    style={({ pressed }) => [styles.clearAllBtn, pressed && { opacity: 0.6 }]}
+                  >
+                    <Icon name="x" size={12} color={colorScales.gray[500]} />
+                    <Text style={styles.clearAllText}>Limpiar</Text>
+                  </Pressable>
+                )}
+              </View>
+
+              <ScrollView style={styles.filtersBody} contentContainerStyle={styles.filtersBodyContent}>
+                {filters.map((cfg) => (
+                  <View key={cfg.key} style={styles.filterSection}>
+                    <View style={styles.filterSectionHeader}>
+                      <Text style={styles.filterLabel}>{cfg.label}</Text>
+                      {hasActiveFilter(cfg.key) && (
+                        <Pressable
+                          onPress={() => handleClearFilter(cfg.key)}
+                          style={({ pressed }) => [styles.clearFilterBtn, pressed && { opacity: 0.6 }]}
+                        >
+                          <Icon name="x" size={12} color={colorScales.gray[400]} />
+                        </Pressable>
+                      )}
+                    </View>
+
+                    {/* Select simple: lista de opciones como pressables */}
+                    {cfg.type === 'select' && cfg.options && (
+                      <View style={styles.optionsList}>
+                        {cfg.options.map((opt) => {
+                          const isActive = localValues[cfg.key] === opt.value;
+                          return (
+                            <Pressable
+                              key={opt.value || '__empty__'}
+                              onPress={() => handleFilterChange(cfg.key, opt.value || null)}
+                              style={({ pressed }) => [
+                                styles.optionItem,
+                                pressed && styles.optionItemPressed,
+                                isActive && styles.optionItemActive,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.optionLabel,
+                                  isActive && styles.optionLabelActive,
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {opt.label}
+                              </Text>
+                              {isActive && <Icon name="check" size={14} color={colors.primary} />}
+                            </Pressable>
+                          );
+                        })}
+                      </View>
+                    )}
+
+                    {cfg.helpText && (
+                      <Text style={styles.filterHelpText}>{cfg.helpText}</Text>
+                    )}
+                  </View>
+                ))}
+              </ScrollView>
+            </Pressable>
+          )}
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
+// Web responsive usa iconos de 16px cuando hay pocas acciones, 18px cuando hay más.
+// Como la mayoría de casos tendrá 1-3 acciones, usamos 16.
+function iconSizeFor(actionCount: number): number {
+  return actionCount > 3 ? 18 : 16;
+}
+
 const styles = StyleSheet.create({
-  trigger: {
+  // ── Container — flex row con gap (paridad web `gap: 0.5rem`) ──
+  container: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing[3],
-    paddingVertical: spacing[2],
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[300],
-    backgroundColor: colors.inputBg,
-    gap: spacing[2],
-  },
-  triggerPressed: {
-    backgroundColor: colorScales.gray[50],
-  },
-  // Espejo web `.options-dropdown-trigger` cuando max-width: 1023px.
-  // El trigger se vuelve un cuadrado 2.5rem con borde verde primario —
-  // sólo contiene el icono. Border 1px #2ecc71, color #2ecc71, radius
-  // .75rem. Aplica a Categorías, Productos, Marcas, etc. en mobile.
-  triggerCompact: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    backgroundColor: colors.inputBg, // #ffffff (bg-surface)
-    borderColor: colors.primary,    // #2ecc71
-    justifyContent: 'center',
-  },
-  triggerLabel: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: '500',
-    color: colors.text.primary,
-  },
-  badge: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.full,
-    minWidth: 20,
-    paddingHorizontal: spacing[1],
-    height: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.background,
-  },
-  // ── Dropdown anclado al trigger (espejo web .options-dropdown-content)
-  // Web:
-  //   position: absolute; top: 100%; margin-top: 0.5rem;
-  //   width: 20rem; max-width: 90vw; max-height: 80vh;
-  //   background-color: #ffffff;
-  //   border: 1px solid #e6edf3;
-  //   border-radius: .5rem;
-  //   box-shadow: rgba(0,0,0,.1) 0 10px 15px -3px,
-  //              rgba(0,0,0,.05) 0 4px 6px -2px;
-  //   z-index: 99999;
-  dropdown: {
-    position: 'absolute',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E6EDF3',
-    width: 240,                       // ≈ 20rem
-    maxWidth: '90%' as any,           // RN no acepta 'vw' directo
-    maxHeight: '70%' as any,          // RN no acepta 'vh' directo
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 15,
-    elevation: 8,
-    zIndex: 9999,
-    overflow: 'hidden',
-  },
-  // Header web: padding .75rem 1rem, border-bottom 1px #e6edf3, bg #ffffff
-  dropdownHeader: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E6EDF3',
-    backgroundColor: '#FFFFFF',
-  },
-  // .dropdown-title web: .875rem / 600 / #0f172a
-  dropdownTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#0F172A',
-  },
-  // .filters-body web: padding .75rem 1rem, gap .75rem, max-height 40vh
-  dropdownScroll: {
-    flexGrow: 0,
-    flexShrink: 1,
-  },
-  dropdownContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 12,
-  },
-  section: {
-    gap: spacing[2],
-  },
-  sectionDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colorScales.gray[200],
-    paddingTop: spacing[3],
-  },
-  sectionTitle: {
-    fontSize: typography.fontSize.xs,
-    fontWeight: '700',
-    color: colors.text.muted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: spacing[2],
-  },
-  // ── Espejo .filter-section + .filter-label web (filter-section column
-  // gap .5rem, label .875rem/500/#0f172a)
-  subsection: {
-    gap: spacing[2],
-  },
-  subsectionLabel: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: '500',
-    color: '#0F172A',
+    gap: TRIGGER_GAP,
   },
 
-  // ── Espejo <app-selector size="sm"> web (select desplegable) ──
-  // CSS base: bg #f4f4f4, border 1px #e6edf3, h-8 (mobile) / h-9 (md+),
-  // pl-3 pr-10, rounded-xl (.75rem), color #0f172a, fs .875rem.
-  // hover border-primary, focus border-primary + shadow ring.
-  selectField: {
-    flexDirection: 'row',
+  // ── Triggers (icon-only mobile) — paridad con `.options-dropdown-trigger` <1024px ──
+  trigger: {
+    width: TRIGGER_WIDTH,
+    height: TRIGGER_WIDTH,
+    borderRadius: borderRadius.lg,
     alignItems: 'center',
-    height: 32,                   // h-8 mobile (sm:h-9 = 36 sería md+)
-    paddingHorizontal: 12,       // pl-3
-    paddingRight: 40,           // pr-10 (espacio para chevron-right)
-    borderRadius: 12,            // .75rem
+    justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#E6EDF3',      // border-border web
-    backgroundColor: '#F4F4F4',  // bg #f4f4f4 (!bg-background web)
+    borderColor: colors.primary,
+    backgroundColor: colors.card,
+    position: 'relative',
   },
-  selectFieldOpen: {
-    borderColor: '#2ECC71',
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#7ED7A5',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 2,
+  triggerActive: {
+    backgroundColor: colors.primaryLight, // web: active visual feedback
   },
-  selectFieldPressed: {
-    borderColor: '#2ECC71',     // hover state
+  triggerPressed: {
+    transform: [{ scale: 0.98 }],
   },
-  selectFieldText: {
-    flex: 1,
-    fontSize: typography.fontSize.sm,
-    color: '#0F172A',
-  },
-  selectFieldPlaceholder: {
-    color: '#94A3B8',            // text-text-muted web (Seleccionar)
-  },
-  // Chevron-down absoluto web: right-3 top-1/2
-  selectFieldChevron: {
+
+  // ── Badge — paridad con `.filter-count-badge` web ──
+  badge: {
     position: 'absolute',
-    right: 12,
-    transform: [{ rotate: '0deg' }, { translateY: -7 }], // -translate-y-1/2 (mitad del icono 14px)
+    top: -4,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
-  selectFieldChevronOpen: {
-    transform: [{ rotate: '180deg' }, { translateY: -7 }],
+  badgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: typography.fontWeight.bold,
   },
-  // Lista desplegable — items con padding 12/10, hover bg, active verde
-  selectOptions: {
-    marginTop: spacing[1],
-    borderRadius: 12,
+
+  // ── Backdrop ──
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+
+  // ── Dropdown container — paridad con `.options-dropdown-content` ──
+  dropdown: {
+    position: 'absolute',
+    width: DROPDOWN_WIDTH,
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.md,
     borderWidth: 1,
-    borderColor: '#E6EDF3',
-    backgroundColor: '#FFFFFF',
+    borderColor: colors.cardBorder,
     overflow: 'hidden',
+    ...shadows.lg,
   },
-  selectOption: {
+
+  // ── Header — paridad con `.dropdown-header` ──
+  header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#E6EDF3',
-  },
-  selectOptionActive: {
-    backgroundColor: 'rgba(46, 204, 113, 0.08)',
-  },
-  selectOptionPressed: {
-    backgroundColor: '#F1F5F9',
-  },
-  selectOptionText: {
-    fontSize: typography.fontSize.sm,
-    color: '#0F172A',
-  },
-  selectOptionTextActive: {
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  action: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    paddingHorizontal: spacing[4],
     paddingVertical: spacing[3],
-    gap: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+    backgroundColor: colors.card,
   },
-  actionPressed: {
-    opacity: 0.6,
-  },
-  actionDestructive: {},
-  actionLabel: {
-    fontSize: typography.fontSize.base,
+  headerTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
     color: colors.text.primary,
   },
-  actionLabelDestructive: {
-    color: colors.error,
+  clearAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingVertical: spacing[1] + 1,
+    paddingHorizontal: spacing[2],
+    borderRadius: borderRadius.sm,
+  },
+  clearAllText: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    fontWeight: typography.fontWeight.medium,
+  },
+
+  // ── Action list — paridad con `.actions-list` ──
+  actionList: {
+    padding: spacing[2],
+    gap: 2,
+  },
+  actionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2.5],
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[2.5],
+    borderRadius: borderRadius.sm,
+  },
+  actionItemPressed: {
+    backgroundColor: colors.background,
+  },
+  actionItemDestructivePressed: {
+    backgroundColor: '#FEF2F2',
+  },
+  actionLabel: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colors.text.primary,
+  },
+
+  // ── Filters body — paridad con `.filters-body` ──
+  filtersBody: {
+    maxHeight: 320,
+  },
+  filtersBodyContent: {
+    padding: spacing[3] + 2,
+    gap: spacing[3],
+  },
+  filterSection: {
+    gap: spacing[2],
+  },
+  filterSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing[2],
+  },
+  filterLabel: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colors.text.primary,
+  },
+  clearFilterBtn: {
+    width: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.sm,
+  },
+  filterHelpText: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  optionsList: {
+    gap: 2,
+  },
+  optionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing[2],
+    paddingHorizontal: spacing[2] + 2,
+    borderRadius: borderRadius.sm,
+  },
+  optionItemPressed: {
+    backgroundColor: colors.background,
+  },
+  optionItemActive: {
+    backgroundColor: colors.primaryLight,
+  },
+  optionLabel: {
+    flex: 1,
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colors.text.primary,
+  },
+  optionLabelActive: {
+    color: colors.primary,
+    fontWeight: typography.fontWeight.semibold,
   },
 });
-
-export type { OptionsDropdownProps };

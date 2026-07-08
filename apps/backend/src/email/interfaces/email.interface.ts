@@ -73,6 +73,13 @@ export interface EmailAttachment {
   filename: string;
   content: Buffer;
   contentType: string;
+  /**
+   * Optional Content-ID for inline-embedded images (`<img src="cid:...">`).
+   * Only the SES/SMTP provider propagates it today; Resend/SendGrid treat
+   * the asset as a regular download attachment and the inline reference
+   * renders as a broken image in their clients.
+   */
+  cid?: string;
 }
 
 export interface EmailTemplate {

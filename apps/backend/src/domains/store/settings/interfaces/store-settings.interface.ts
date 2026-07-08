@@ -524,6 +524,39 @@ export interface RestaurantSettings {
   enable_table_checkout: boolean;
 }
 
+export interface FingerprintDeviceConfig {
+  /**
+   * Reader integration mode for fingerprint access validation.
+   * - `id_wrapper` (Tipo A, default): the reader emits an opaque ID directly;
+   *   Vendix stores/looks up credentials as `external_ref` and never sees
+   *   the biometric template.
+   * - `template_sdk` (Tipo B, plan only): the reader ships a template/image
+   *   to a configured SDK provider that returns an opaque ID. The endpoint
+   *   and SDK are NOT implemented yet — see plan anotación 3c.
+   */
+  reader_type: 'id_wrapper' | 'template_sdk';
+  /**
+   * SDK provider to delegate fingerprint template processing to.
+   * Only relevant when `reader_type === 'template_sdk'`.
+   */
+  sdk_provider?: 'zkteco' | 'digitalpersona' | 'generic_http';
+  /**
+   * URL of the SDK adapter for `template_sdk` mode (HTTP endpoint for
+   * `generic_http`, or vendor-specific host for `zkteco`/`digitalpersona`).
+   */
+  endpoint?: string;
+  /**
+   * Reference to an API key (NOT the key itself) used to authenticate
+   * against the configured SDK endpoint. Secrets are resolved via the
+   * settings secrets store; the reference identifies the entry.
+   */
+  api_key_ref?: string;
+  /** Request timeout in milliseconds when calling the SDK. */
+  timeout_ms?: number;
+  /** Per-verification timeout in milliseconds (latency cap per check). */
+  verify_timeout_ms?: number;
+}
+
 export interface MembershipSettings {
   /**
    * Enables ambient (background) access validation for gym memberships.
@@ -556,6 +589,12 @@ export interface MembershipSettings {
    * count by 1 person. Allowed values: `1` or `2`. Default `2`.
    */
   auto_leveling_interval_hours?: number;
+  /**
+   * Fingerprint reader device configuration for access validation.
+   * Default (`reader_type: 'id_wrapper'`) preserves the current behavior
+   * where the reader emits an opaque ID and Vendix never sees the template.
+   */
+  fingerprint_device?: FingerprintDeviceConfig;
 }
 
 // ============================================================================

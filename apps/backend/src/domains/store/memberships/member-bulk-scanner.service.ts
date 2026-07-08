@@ -682,6 +682,24 @@ export class MemberBulkScannerService {
   }
 
   /**
+   * Fold a string for accent/diacritic-insensitive matching. NFD decomposes
+   * accented characters (é → e + combining acute U+0301); we strip the combining
+   * marks (U+0300–U+036F), lowercase, replace punctuation/symbols with spaces,
+   * and collapse whitespace. So "Élite", "elite", and "ÉLITE" all fold to
+   * "elite". This is the canonical Unicode approach (superior to a hand-rolled
+   * á→a map because it covers every diacritic).
+   */
+  private normalizeForMatch(s: string | null | undefined): string {
+    return (s ?? '')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  /**
    * Replicate the 3-tier scoring from `InvoiceScannerService.matchSupplier`
    * against the in-memory list of plans for this store. Returns the best
    * match and the top-5 candidates for the UI's "mapear a existente" picker.
@@ -707,12 +725,24 @@ export class MemberBulkScannerService {
       };
     }
 
-    const target = extracted.name.toLowerCase().trim();
+    const target = this.normalizeForMatch(extracted.name);
+    // A name that folds to empty (all punctuation/whitespace) has nothing to
+    // match on. Bail out as `new`: otherwise Tier 2's `candidate.includes('')`
+    // is always true and every plan would over-match at score 65.
+    if (!target) {
+      return {
+        ref_index,
+        status: 'new',
+        matched_plan_id: null,
+        confidence: 0,
+        candidates: [],
+      };
+    }
     const scored: Array<{ id: number; name: string; code: string; score: number }> = [];
 
     // Tier 1: exact.
     const exact = existing.find(
-      (p) => p.name.toLowerCase().trim() === target,
+      (p) => this.normalizeForMatch(p.name) === target,
     );
     if (exact) {
       return {
@@ -728,7 +758,7 @@ export class MemberBulkScannerService {
 
     // Tier 2: bidirectional contains.
     for (const p of existing) {
-      const candidate = p.name.toLowerCase().trim();
+      const candidate = this.normalizeForMatch(p.name);
       if (
         candidate.includes(target) ||
         target.includes(candidate)
@@ -745,8 +775,7 @@ export class MemberBulkScannerService {
     const targetWords = target.split(/\s+/).filter((w) => w.length > 2);
     if (targetWords.length > 0) {
       for (const p of existing) {
-        const candidateWords = p.name
-          .toLowerCase()
+        const candidateWords = this.normalizeForMatch(p.name)
           .split(/\s+/)
           .filter((w) => w.length > 2);
         if (candidateWords.length === 0) continue;

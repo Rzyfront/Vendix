@@ -16,6 +16,16 @@ export class FinancialAnalyticsService {
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   /**
+   * Order states that count as REVENUE for the period. Includes 'refunded' so
+   * that an order created and refunded in the same period nets to zero instead
+   * of producing a phantom negative on net_profit (the refund subtotal is
+   * still subtracted below). Cross-period refunds are recognized in the period
+   * they occur (standard returns accounting). Keep in sync with the COGS raw
+   * SQL filter below.
+   */
+  private readonly REVENUE_STATES = ['delivered', 'finished', 'refunded'];
+
+  /**
    * Resolves the current request's store timezone (single source of truth).
    * Falls back to the default when there is no store context (e.g. the scoped
    * client would already reject such a call before reaching real data).
@@ -36,7 +46,7 @@ export class FinancialAnalyticsService {
     const orderItems = await this.prisma.order_items.findMany({
       where: {
         orders: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: this.REVENUE_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
       },
@@ -257,7 +267,7 @@ export class FinancialAnalyticsService {
     ] = await Promise.all([
       this.prisma.orders.aggregate({
         where: {
-          state: { in: this.COMPLETED_STATES },
+          state: { in: this.REVENUE_STATES },
           created_at: { gte: startDate, lte: endDate },
         },
         _sum: {
@@ -280,7 +290,7 @@ export class FinancialAnalyticsService {
         FROM order_items oi
         INNER JOIN orders o ON o.id = oi.order_id
         WHERE o.store_id = ${storeId}
-          AND o.state IN ('delivered', 'finished')
+          AND o.state IN ('delivered', 'finished', 'refunded') -- keep in sync with REVENUE_STATES
           AND o.created_at >= ${startDate}
           AND o.created_at <= ${endDate}
       `,

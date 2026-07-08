@@ -330,9 +330,20 @@ const ACCEPTED_MIMETYPES = [
                           </p>
                         }
                       </div>
-                      <app-badge [variant]="badgeForPlanStatus(p.status)" size="xsm">
-                        {{ p.status === 'existing' ? 'Existente' : (p.status === 'partial' ? 'Parcial' : 'Nuevo') }}
-                      </app-badge>
+                      <div class="flex items-center gap-2 flex-shrink-0">
+                        <app-badge [variant]="badgeForPlanStatus(p.status)" size="xsm">
+                          {{ p.status === 'existing' ? 'Existente' : (p.status === 'partial' ? 'Parcial' : 'Nuevo') }}
+                        </app-badge>
+                        <button
+                          type="button"
+                          aria-label="Eliminar plan"
+                          title="Eliminar plan"
+                          class="p-1.5 rounded-lg text-text-secondary hover:text-red-600 hover:bg-red-50 transition-colors"
+                          (click)="removePlan(p.ref_index)"
+                        >
+                          <app-icon name="trash-2" [size]="16"></app-icon>
+                        </button>
+                      </div>
                     </div>
 
                     @if (p.status === 'existing') {
@@ -443,6 +454,15 @@ const ACCEPTED_MIMETYPES = [
                           />
                           Excluir
                         </label>
+                        <button
+                          type="button"
+                          aria-label="Eliminar socio"
+                          title="Eliminar socio"
+                          class="p-1.5 rounded-lg text-text-secondary hover:text-red-600 hover:bg-red-50 transition-colors"
+                          (click)="removeMember(m.row_number)"
+                        >
+                          <app-icon name="trash-2" [size]="16"></app-icon>
+                        </button>
                       </div>
                     </div>
 
@@ -975,6 +995,35 @@ export class MemberBulkScannerModalComponent {
   onMemberExcludeToggle(member: EditableMember, excluded: boolean): void {
     const next: EditableMember = { ...member, excluded };
     this.replaceMember(next);
+  }
+
+  /** Remove a member row entirely from the review list (pre-commit draft). */
+  removeMember(row_number: number): void {
+    this.editableMembers.update((list) =>
+      list.filter((m) => m.row_number !== row_number),
+    );
+  }
+
+  /**
+   * Remove a detected plan from the review list and unlink any member that
+   * pointed at it (a membership cannot be created without a plan, so the
+   * orphaned member drops to a warning until the user reassigns or removes it).
+   */
+  removePlan(ref_index: number): void {
+    this.editablePlans.update((list) =>
+      list.filter((p) => p.ref_index !== ref_index),
+    );
+    this.editableMembers.update((list) =>
+      list.map((m) => {
+        if (m.plan_ref !== ref_index) return m;
+        const warnings = m.warnings.some((w) => /plan/i.test(w))
+          ? m.warnings
+          : [...m.warnings, 'El plan asignado fue eliminado — reasígnalo o excluye al socio.'];
+        const next: EditableMember = { ...m, plan_ref: null, warnings };
+        next.status = next.errors.length > 0 ? 'error' : 'warning';
+        return next;
+      }),
+    );
   }
 
   /**

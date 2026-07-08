@@ -93,6 +93,7 @@ export class SesProvider implements EmailProvider {
           filename: a.filename,
           content: a.content,
           contentType: a.contentType,
+          ...(a.cid ? { cid: a.cid } : {}),
         })),
       });
 

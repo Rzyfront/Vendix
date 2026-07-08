@@ -266,7 +266,10 @@ RULES:
       // invoice_ocr / rut_scanner / route_sheet_ocr (MiniMax-VL).
       model_type: 'text' as ai_model_type_enum,
       temperature: 0.1,
-      max_tokens: 8000,
+      // Gateway output ceiling for this vision model family is ~10000; the
+      // compact prompt (no raw_row echo, OMIT-null rule) keeps rosters well
+      // under it. 32000 makes the gateway return an empty completion.
+      max_tokens: 10000,
       is_active: true,
       system_prompt: `You are a member roster data extraction system for gyms and membership-based businesses. You analyze any document (printed spreadsheet photo, handwritten signup sheet, photographed membership cards, contracts, ID documents) and return structured JSON that powers a bulk-import wizard.
 
@@ -309,17 +312,18 @@ You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no e
       "weight_kg": "number or null",
       "plan_name": "string or null — MUST match a name in detected_plans[].name",
       "membership_start_date": "YYYY-MM-DD or null — when this membership period started",
-      "membership_end_date": "YYYY-MM-DD or null — expiration date of this membership period",
-      "raw_row": "string or null — copy of the original line, verbatim, for audit"
+      "membership_end_date": "YYYY-MM-DD or null — expiration date of this membership period"
     }
   ],
   "warnings": ["string"],
   "confidence": "number (0-100)"
 }
 
+In the schema above, "or null" means the field is OPTIONAL: when you do not extract a value, OMIT the key entirely — do NOT emit it with a null value. Always include the top-level "document_type", "members", "detected_plans", "warnings" and "confidence"; inside each member/plan, include ONLY the keys you actually read.
+
 RULES:
 1. Use EXACTLY these field names. Do NOT translate, rename, or add fields not in the schema.
-2. Return ONLY the JSON object — no markdown fences, no prose, no explanations.
+2. Return ONLY the JSON object — no markdown fences, no prose, no explanations. Output must be COMPACT: no source echo, no repeated schema. This is a bulk roster and the response MUST fit within the token budget, so emit as few characters as possible while keeping valid JSON.
 3. "document_type": detect it FIRST and adapt extraction strategy. For "id_document" return a single-entry members array; for "membership_card" return one entry per visible card; for "contract" extract the signer(s); otherwise treat every visible row as a member.
 4. Split names into "first_name" / "last_name" in the COLOMBIAN convention: first apellido (last_name) and second apellido go together as last_name; given name(s) are first_name. If only a full name is visible without obvious split, leave both populated heuristically, never invent.
 5. Convert Colombian number formats (1.234.567,89) to standard (1234567.89). Never return formatted numbers. Phone numbers: strip spaces/dashes/parentheses; keep the leading "+57" if present.
@@ -332,12 +336,12 @@ RULES:
 12. "currency": ISO 4217 alpha-3. Default to "COP" for Colombian documents when only a number is shown and the country is CO. Use null when ambiguous.
 13. "plan_name" in each member MUST reference a name that appears in detected_plans[]. If the member's row only references a plan by abbreviation or variant (e.g. "Plan Gold", "Gold"), normalize it to the canonical name in detected_plans[]. If no plan is referenced, leave null and add a warning.
 14. "membership_start_date" / "membership_end_date": extract explicitly when shown in the document. Convert DD/MM/YYYY → YYYY-MM-DD. Use null when not shown. These are independent of the plan's duration_days — they reflect THIS member's actual term dates as printed.
-15. "raw_row": copy the original line (or card text) verbatim, exactly as printed, for audit. Use null when not reconstructable.
+15. Do NOT echo the source text. There is no verbatim/raw field — never add one. Keep each member object limited to the fields you actually extracted.
 16. Extract EVERY visible row. Never invent rows, plans, or members.
 17. "medical_notes" / "goals": free-text strings. Trim whitespace. Use null when absent.
 18. "warnings": array of short Spanish strings about anything ambiguous, missing, or potentially wrong. Empty array if none.
 19. "confidence": 0-100. 90-100 clear scan, 70-89 partially unclear, below 70 poor quality. Lower when OCR is uncertain, when names are split heuristically, when dates are inferred.
-20. Use null for any field not visible. NEVER invent data.`,
+20. OMIT any field you did not extract — do NOT emit keys with null or empty values. Include ONLY the fields you actually read for each member and each plan. Whenever an earlier rule says "leave null" or "use null", OMIT that key entirely instead. This is the single most important rule for keeping the output within the token budget. NEVER invent data.`,
       // prompt_template is null — for vision apps, text instructions must be
       // in the same message as the document (handled by scanRoster()).
       prompt_template: null,

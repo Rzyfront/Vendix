@@ -5,6 +5,7 @@ import { ResponseModule } from '@common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { MenusModule } from '../menus/menus.module';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { EmailModule } from '../../../email/email.module';
 
 /**
  * Store-scoped Membership Access module (generalized membership core).
@@ -18,9 +19,19 @@ import { NotificationsModule } from '../notifications/notifications.module';
  *     timezone/window math as menu availability windows.
  *   - NotificationsModule: NotificationsSseService — per-store SSE hub reused to
  *     fan out `membership-access` decision events to the ambient-access stream.
+ *   - EmailModule:         EmailService + EmailBrandingService — used by
+ *     `createCredential` to send the credential to the member (Anotación 2b).
+ *     QR uses an inline CID PNG; PIN ships in body; external_ref (fingerprint)
+ *     sends an enrollment notice only — NEVER the biometric value.
  */
 @Module({
-  imports: [ResponseModule, PrismaModule, MenusModule, NotificationsModule],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    MenusModule,
+    NotificationsModule,
+    EmailModule,
+  ],
   controllers: [MembershipAccessController],
   providers: [MembershipAccessService],
   exports: [MembershipAccessService],

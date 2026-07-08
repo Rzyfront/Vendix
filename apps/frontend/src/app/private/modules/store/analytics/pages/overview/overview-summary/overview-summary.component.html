@@ -110,7 +110,7 @@
           >Porcentaje de ingresos destinado a gastos</span
         >
       </div>
-      <div class="px-3 pt-3 pb-3 sm:px-4 sm:pt-4 h-full flex flex-col">
+      <div class="px-5 pt-5 pb-5 sm:px-6 sm:pt-6 h-full flex flex-col">
         @if (loading()) {
           <div class="flex-1 min-h-[200px] flex items-center justify-center">
             <div
@@ -118,14 +118,8 @@
             ></div>
           </div>
         } @else {
-          <div class="h-[200px] sm:h-[230px] lg:h-[280px]">
-            @defer (on immediate) {
-              <app-chart [options]="gaugeChartOptions()"></app-chart>
-            } @placeholder {
-              <div
-                class="h-full bg-surface-secondary animate-pulse rounded-xl"
-              ></div>
-            }
+          <div class="py-2">
+            <app-break-even-gauge [ratio]="summary()?.breakeven_ratio ?? 0" />
           </div>
 
           <!-- Range Legend -->

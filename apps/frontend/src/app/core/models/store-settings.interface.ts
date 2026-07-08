@@ -146,6 +146,32 @@ export interface MembershipSettings {
    * count by 1 person. Allowed values: `1` or `2`. Default `2`.
    */
   auto_leveling_interval_hours?: number;
+  /**
+   * Configuration for the fingerprint reader device used for ambient access.
+   * Mirrors backend `store_settings.settings.membership.fingerprint_device`.
+   * Default: `{ reader_type: 'id_wrapper' }`.
+   */
+  fingerprint_device?: FingerprintDeviceConfig;
+}
+
+/**
+ * Fingerprint reader device configuration.
+ * - `id_wrapper` (Tipo A): the reader emits an ID directly. No adapter needed.
+ * - `template_sdk` (Tipo B): the reader sends a template/image to an SDK /
+ *   adapter that resolves the member ID.
+ * Mirrors backend `FingerprintDeviceConfig` in store-settings.interface.ts.
+ */
+export interface FingerprintDeviceConfig {
+  reader_type: 'id_wrapper' | 'template_sdk';
+  sdk_provider?: 'zkteco' | 'digitalpersona' | 'generic_http';
+  /** URL of the SDK/adapter endpoint for `template_sdk`. */
+  endpoint?: string;
+  /** Reference to the API key (never the key itself). */
+  api_key_ref?: string;
+  /** Capture/SDK timeout in milliseconds. */
+  timeout_ms?: number;
+  /** Verify timeout in milliseconds. */
+  verify_timeout_ms?: number;
 }
 
 export interface CheckoutSettings {
