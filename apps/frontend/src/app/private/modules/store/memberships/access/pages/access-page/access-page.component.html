@@ -392,6 +392,105 @@
     </app-card>
   }
 
+  <!-- ══════════════════ Configuración de acceso (dispositivo huella) ══════════════════ -->
+  @if (activeTab() === 'configuracion') {
+    <app-card title="Configuración de acceso" subtitle="Dispositivo de huella">
+      <div class="form-grid">
+        <label class="aforo-field-label">Tipo de lector</label>
+        <div class="aforo-interval">
+          <button
+            type="button"
+            class="aforo-chip"
+            [class.active]="cfgFingerprintReaderType() === 'id_wrapper'"
+            (click)="cfgFingerprintReaderType.set('id_wrapper')"
+          >
+            Tipo A · ID directo
+          </button>
+          <button
+            type="button"
+            class="aforo-chip"
+            [class.active]="cfgFingerprintReaderType() === 'template_sdk'"
+            (click)="cfgFingerprintReaderType.set('template_sdk')"
+          >
+            Tipo B · Template + SDK
+          </button>
+        </div>
+
+        @if (cfgFingerprintReaderType() === 'template_sdk') {
+          <label class="aforo-field-label">Proveedor SDK</label>
+          <div class="aforo-interval">
+            <button
+              type="button"
+              class="aforo-chip"
+              [class.active]="cfgFingerprintSdkProvider() === 'zkteco'"
+              (click)="cfgFingerprintSdkProvider.set('zkteco')"
+            >
+              ZKTeco
+            </button>
+            <button
+              type="button"
+              class="aforo-chip"
+              [class.active]="cfgFingerprintSdkProvider() === 'digitalpersona'"
+              (click)="cfgFingerprintSdkProvider.set('digitalpersona')"
+            >
+              DigitalPersona
+            </button>
+            <button
+              type="button"
+              class="aforo-chip"
+              [class.active]="cfgFingerprintSdkProvider() === 'generic_http'"
+              (click)="cfgFingerprintSdkProvider.set('generic_http')"
+            >
+              Genérico HTTP
+            </button>
+          </div>
+
+          <label class="aforo-field-label">Endpoint del adapter</label>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="https://adapter.example.com/identify"
+            [value]="cfgFingerprintEndpoint()"
+            (input)="onFingerprintEndpointInput($any($event.target).value)"
+          />
+
+          <label class="aforo-field-label">Referencia de API key</label>
+          <input
+            class="form-input"
+            type="text"
+            placeholder="adapter_api_key_ref"
+            [value]="cfgFingerprintApiKeyRef()"
+            (input)="onFingerprintApiKeyRefInput($any($event.target).value)"
+          />
+
+          <label class="aforo-field-label">Timeout (ms)</label>
+          <input
+            class="form-input"
+            type="number"
+            min="0"
+            placeholder="5000"
+            [value]="cfgFingerprintTimeout() ?? ''"
+            (input)="onFingerprintTimeoutInput($any($event.target).value)"
+          />
+        } @else {
+          <p class="text-text-secondary">
+            El lector emite un ID directamente. No se requiere configuración
+            adicional.
+          </p>
+        }
+      </div>
+
+      <div class="aforo-schedule-note">
+        <app-icon name="alert-triangle" />
+        <span>
+          El template biométrico nunca se persiste en Vendix (Ley 1581). Solo se
+          guarda la referencia (<code>external_ref</code>) que devuelve el
+          dispositivo o SDK.
+        </span>
+      </div>
+    </app-card>
+  }
+
   <app-membership-credential-form-modal
     [(open)]="showCredentialModal"
     [credential]="editingCredential()"

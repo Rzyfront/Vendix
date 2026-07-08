@@ -7,6 +7,7 @@ import {
   AccessLogQuery,
   AccessValidationResult,
   CreateCredentialDto,
+  CreateCredentialResponse,
   CredentialQuery,
   GymAccessCredential,
   GymAccessLog,
@@ -92,9 +93,11 @@ export class MembershipAccessService {
       .pipe(catchError(this.handleError));
   }
 
-  createCredential(dto: CreateCredentialDto): Observable<GymAccessCredential> {
+  createCredential(
+    dto: CreateCredentialDto,
+  ): Observable<CreateCredentialResponse> {
     return this.http
-      .post<ApiResponse<GymAccessCredential>>(
+      .post<ApiResponse<CreateCredentialResponse>>(
         `${this.apiUrl}${this.basePath}/credentials`,
         dto,
       )

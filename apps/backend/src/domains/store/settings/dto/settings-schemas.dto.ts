@@ -678,6 +678,73 @@ export class RestaurantSettingsDto {
   enable_table_checkout?: boolean;
 }
 
+export class FingerprintDeviceConfigDto {
+  @ApiProperty({
+    example: 'id_wrapper',
+    required: false,
+    enum: ['id_wrapper', 'template_sdk'],
+    description:
+      "Reader integration mode. `id_wrapper` (default, Tipo A): reader emits an opaque ID. `template_sdk` (Tipo B, plan only): reader ships a template to a configured SDK provider.",
+  })
+  @IsOptional()
+  @IsIn(['id_wrapper', 'template_sdk'])
+  reader_type?: 'id_wrapper' | 'template_sdk';
+
+  @ApiProperty({
+    example: 'zkteco',
+    required: false,
+    enum: ['zkteco', 'digitalpersona', 'generic_http'],
+    description: 'SDK provider for `template_sdk` mode.',
+  })
+  @IsOptional()
+  @IsIn(['zkteco', 'digitalpersona', 'generic_http'])
+  sdk_provider?: 'zkteco' | 'digitalpersona' | 'generic_http';
+
+  @ApiProperty({
+    example: 'https://fingerprint-adapter.example.com/identify',
+    required: false,
+    description:
+      'URL of the SDK adapter for `template_sdk` mode. Not used in `id_wrapper` mode.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  endpoint?: string;
+
+  @ApiProperty({
+    example: 'fp-sdk-prod',
+    required: false,
+    description:
+      'Reference (NOT the key) to the API key used to authenticate against the SDK endpoint.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  api_key_ref?: string;
+
+  @ApiProperty({
+    example: 5000,
+    required: false,
+    description: 'Request timeout in milliseconds when calling the SDK.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  timeout_ms?: number;
+
+  @ApiProperty({
+    example: 2000,
+    required: false,
+    description: 'Per-verification timeout in milliseconds (latency cap).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  verify_timeout_ms?: number;
+}
+
 export class MembershipSettingsDto {
   @ApiProperty({
     example: false,
@@ -740,6 +807,17 @@ export class MembershipSettingsDto {
   @IsInt()
   @IsIn([1, 2])
   auto_leveling_interval_hours?: number;
+
+  @ApiProperty({
+    type: FingerprintDeviceConfigDto,
+    required: false,
+    description:
+      'Fingerprint reader device configuration. Default reader_type is `id_wrapper` (current behavior: reader emits an opaque ID, Vendix never sees the template).',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FingerprintDeviceConfigDto)
+  fingerprint_device?: FingerprintDeviceConfigDto;
 }
 
 export class PanelUISettingsDto {

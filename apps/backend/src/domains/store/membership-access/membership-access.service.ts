@@ -1,6 +1,8 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { randomBytes, randomInt } from 'crypto';
 import * as crypto from 'crypto';
 import Redis from 'ioredis';
+import * as QRCode from 'qrcode';
 import {
   Prisma,
   membership_access_result_enum,
@@ -15,6 +17,9 @@ import { MenuAvailabilityCheckerService } from '../menus/menu-availability-check
 import { NotificationsSseService } from '../notifications/notifications-sse.service';
 import { SseNotificationPayload } from '../notifications/interfaces/notification-events.interface';
 import { mergeStoreSettingsWithDefaults } from '../settings/defaults/default-store-settings';
+import { EmailService } from '../../../email/email.service';
+import { EmailBrandingService } from '../../../email/services/email-branding.service';
+import { MembershipAccessEmailTemplates } from '../../../email/templates/membership-access-emails';
 import {
   ValidateAccessDto,
   CreateCredentialDto,
@@ -126,6 +131,8 @@ export class MembershipAccessService {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly availabilityChecker: MenuAvailabilityCheckerService,
     private readonly sseService: NotificationsSseService,
+    private readonly emailService: EmailService,
+    private readonly emailBrandingService: EmailBrandingService,
   ) {}
 
   // ------------------------------------------------------------------ Helpers
@@ -144,6 +151,47 @@ export class MembershipAccessService {
 
   private get accessLogs() {
     return this.prisma.withoutScope().membership_access_logs;
+  }
+
+  /**
+   * Attach a `customer` snapshot to each row. Membership access models use
+   * SCALAR fks (no Prisma relations), so we batch-fetch the referenced users
+   * manually — mirrors `memberships.service.ts::attachRelations`. Rows whose
+   * `customer_id` is null or unknown resolve to `customer: null`.
+   */
+  private async attachCustomer<T extends { customer_id: number | null }>(
+    rows: T[],
+  ): Promise<Array<T & { customer: { id: number; first_name: string | null; last_name: string | null; email: string | null } | null }>> {
+    if (rows.length === 0) return rows as Array<T & { customer: null }>;
+
+    const customerIds = [
+      ...new Set(
+        rows
+          .map((r) => r.customer_id)
+          .filter((id): id is number => id !== null && id !== undefined),
+      ),
+    ];
+
+    if (customerIds.length === 0) {
+      return rows.map((r) => ({ ...r, customer: null }));
+    }
+
+    const customers = await this.prisma.users.findMany({
+      where: { id: { in: customerIds } },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+      },
+    });
+
+    const customerMap = new Map(customers.map((c) => [c.id, c]));
+
+    return rows.map((r) => ({
+      ...r,
+      customer: r.customer_id != null ? customerMap.get(r.customer_id) ?? null : null,
+    }));
   }
 
   private get memberships() {
@@ -506,12 +554,164 @@ export class MembershipAccessService {
 
   // ------------------------------------------------------------ Credentials
 
+  /**
+   * Auto-generate a unique credential value for `qr` or `pin`. The total
+   * space is huge (16 bytes hex = 2^128 for QR, 10^6 for PIN) so a collision
+   * is statistically unlikely — we still cap the loop at `MAX_ATTEMPTS` to
+   * guarantee termination and surface an `InternalServerErrorException` if
+   * the store somehow already has 5 active credentials sharing the value.
+   *
+   * `external_ref` is NEVER auto-generated (the operator supplies the device
+   * reference) — the caller short-circuits before reaching this helper.
+   */
+  private static readonly MAX_GEN_ATTEMPTS = 5;
+
+  private async generateCredentialValue(
+    storeId: number,
+    type: 'qr' | 'pin',
+  ): Promise<string> {
+    for (let attempt = 0; attempt < MembershipAccessService.MAX_GEN_ATTEMPTS; attempt++) {
+      const value =
+        type === 'qr'
+          ? randomBytes(16).toString('hex') // 32 chars
+          : randomInt(0, 1_000_000).toString().padStart(6, '0'); // 6 digits
+
+      const existing = await this.credentials.findFirst({
+        where: {
+          store_id: storeId,
+          credential_type: type,
+          credential_value: value,
+          is_active: true,
+        },
+        select: { id: true },
+      });
+      if (!existing) return value;
+    }
+    throw new InternalServerErrorException(
+      'No se pudo generar un valor único de credencial tras 5 intentos',
+    );
+  }
+
+  /**
+   * Send the credential to the member. NEVER blocks creation: any error is
+   * logged and the function returns `false`. Returns `false` (without trying)
+   * when the customer has no email on file.
+   *
+   * The biometric (`external_ref`) email NEVER includes the device reference —
+   * the template is an enrollment notice only, in compliance with Ley 1581.
+   */
+  private async sendCredentialEmail(args: {
+    storeId: number;
+    customer: { id: number; first_name: string | null; last_name: string | null; email: string | null };
+    credentialType: 'qr' | 'pin' | 'external_ref';
+    credentialValue: string;
+  }): Promise<boolean> {
+    const { storeId, customer, credentialType, credentialValue } = args;
+    const to = customer.email?.trim();
+    if (!to) {
+      this.logger.warn(
+        `membership-access: no email for customer_id=${customer.id} (store=${storeId}); skipping credential email`,
+      );
+      return false;
+    }
+
+    const { storeName, organizationName } =
+      await this.emailBrandingService.getNames(undefined, storeId);
+    const customerName = [customer.first_name, customer.last_name]
+      .filter((p): p is string => !!p && p.trim().length > 0)
+      .join(' ')
+      .trim();
+    const storeLabel = storeName ?? organizationName ?? 'tu tienda';
+
+    try {
+      if (credentialType === 'qr') {
+        const qrCid = 'credencial-qr@vendix';
+        const buffer = await QRCode.toBuffer(credentialValue, {
+          type: 'png',
+          width: 300,
+          errorCorrectionLevel: 'M',
+        });
+        const { subject, html, text } =
+          MembershipAccessEmailTemplates.credentialQrCreated({
+            customerName,
+            storeName: storeLabel,
+            qrCid,
+          });
+        const result = await this.emailService.sendEmailWithAttachments(
+          to,
+          subject,
+          html,
+          [
+            {
+              filename: 'credencial-qr.png',
+              content: buffer,
+              contentType: 'image/png',
+              cid: qrCid,
+            },
+          ],
+          text,
+        );
+        return result.success;
+      }
+
+      if (credentialType === 'pin') {
+        const { subject, html, text } =
+          MembershipAccessEmailTemplates.credentialPinCreated({
+            customerName,
+            storeName: storeLabel,
+            pin: credentialValue,
+          });
+        const result = await this.emailService.sendEmail(to, subject, html, text);
+        return result.success;
+      }
+
+      // external_ref (fingerprint) — enrollment notice ONLY. No value leaked.
+      const { subject, html, text } =
+        MembershipAccessEmailTemplates.credentialFingerprintEnrolled({
+          customerName,
+          storeName: storeLabel,
+        });
+      const result = await this.emailService.sendEmail(to, subject, html, text);
+      return result.success;
+    } catch (err) {
+      this.logger.warn(
+        `membership-access: credential email failed (store=${storeId}, customer=${customer.id}, type=${credentialType}): ${(err as Error).message}`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Create a credential for a member. Generation policy (Anotación 2b):
+   *   - `qr`         → auto-generate 32-char hex; uniqueness checked against
+   *     the active-credential partial index (`membership_access_cred_active_uq`).
+   *   - `pin`        → auto-generate 6-digit zero-padded numeric PIN.
+   *   - `external_ref` → operator-supplied reference; REQUIRED.
+   *
+   * The active-credential uniqueness is enforced with an explicit pre-check so
+   * the error is a friendly 409 with a clear message instead of a Prisma
+   * `P2002` race. The DB index is the authoritative guard under concurrency.
+   *
+   * After a successful insert we send the credential by email to the member.
+   * Email delivery is best-effort (logged + skipped on error) — a member
+   * without email or a transient provider failure MUST NOT block creation.
+   *
+   * The response includes the raw `credential_value` (one-shot, so the
+   * frontend can surface the PIN / confirm the QR) and `email_sent: boolean`
+   * so the operator gets immediate feedback when the email did not go out.
+   */
   async createCredential(dto: CreateCredentialDto) {
     const storeId = this.requireStoreId();
 
-    const customer = await this.prisma.users.findFirst({
+    // 1. Validate member exists — expand the select so we can send the email.
+    const customer = await this.prisma.users.findUnique({
       where: { id: dto.customer_id },
-      select: { id: true },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+      },
     });
     if (!customer) {
       throw new VendixHttpException(
@@ -520,29 +720,53 @@ export class MembershipAccessService {
       );
     }
 
-    // Unique (store_id, credential_type, credential_value).
-    const dup = await this.credentials.findFirst({
-      where: {
-        store_id: storeId,
-        credential_type: dto.credential_type,
-        credential_value: dto.credential_value,
-      },
-      select: { id: true },
-    });
-    if (dup) {
-      throw new VendixHttpException(
-        ErrorCodes.SYS_CONFLICT_001,
-        'Ya existe una credencial con ese valor y tipo en esta tienda',
+    // 2. Resolve / generate the credential value.
+    let credentialValue: string;
+    if (dto.credential_type === membership_credential_type_enum.external_ref) {
+      // Required for external_ref (also enforced by the DTO's @ValidateIf).
+      const supplied = dto.credential_value?.trim();
+      if (!supplied) {
+        throw new VendixHttpException(
+          ErrorCodes.SYS_VALIDATION_001,
+          'Para una credencial de tipo huella (external_ref) debes ingresar el identificador del dispositivo',
+        );
+      }
+      credentialValue = supplied;
+    } else {
+      credentialValue = await this.generateCredentialValue(
+        storeId,
+        dto.credential_type as 'qr' | 'pin',
       );
     }
 
+    // 3. Active-uniqueness pre-check (the partial unique index is the
+    //    authoritative guard under concurrency; this is the friendly 409).
+    const activeDup = await this.credentials.findFirst({
+      where: {
+        store_id: storeId,
+        customer_id: dto.customer_id,
+        credential_type: dto.credential_type,
+        is_active: true,
+      },
+      select: { id: true },
+    });
+    if (activeDup) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_CONFLICT_001,
+        'Ya existe una credencial activa de este tipo para este socio',
+      );
+    }
+
+    // 4. Persist. Catch Prisma P2002 to translate race-condition duplicates
+    //    (two concurrent creates) into a clean 409.
+    let created;
     try {
-      return await this.credentials.create({
+      created = await this.credentials.create({
         data: {
           store_id: storeId,
           customer_id: dto.customer_id,
           credential_type: dto.credential_type,
-          credential_value: dto.credential_value,
+          credential_value: credentialValue,
           is_active: dto.is_active ?? true,
         },
       });
@@ -553,11 +777,30 @@ export class MembershipAccessService {
       ) {
         throw new VendixHttpException(
           ErrorCodes.SYS_CONFLICT_001,
-          'Ya existe una credencial con ese valor y tipo en esta tienda',
+          'Ya existe una credencial activa de este tipo para este socio',
         );
       }
       throw error;
     }
+
+    // 5. Best-effort email. The credential is ALREADY created; if email
+    //    fails, the operator still sees the returned `email_sent: false`
+    //    and can re-share the value manually (it is the only time it is
+    //    exposed in clear text).
+    const emailSent = await this.sendCredentialEmail({
+      storeId,
+      customer,
+      credentialType: dto.credential_type as 'qr' | 'pin' | 'external_ref',
+      credentialValue,
+    });
+
+    return {
+      ...created,
+      // The raw value is one-shot — the list endpoint masks it. Frontend
+      // uses it to confirm/display the generated QR/PIN or the fingerprint
+      // reference on the same screen.
+      email_sent: emailSent,
+    };
   }
 
   async listCredentials(query: CredentialQueryDto) {
@@ -584,7 +827,12 @@ export class MembershipAccessService {
     // Privacy: NEVER expose the raw credential value on read. Strip it out and
     // surface only a masked fingerprint (`credential_value_masked`). The raw
     // value is still matched by exact equality inside `validate()`.
-    const data = rows.map(({ credential_value, ...rest }) => ({
+    // Order matters: clone the row, attach `customer` (batch-fetch), then
+    // strip `credential_value` — so the masked value lands on a row that
+    // already carries the `customer` snapshot.
+    const data = (
+      await this.attachCustomer(rows)
+    ).map(({ credential_value, ...rest }) => ({
       ...rest,
       credential_value_masked: this.maskCredentialValue(
         rest.credential_type,
@@ -692,8 +940,10 @@ export class MembershipAccessService {
       this.accessLogs.count({ where }),
     ]);
 
+    const dataWithCustomer = await this.attachCustomer(data);
+
     return {
-      data,
+      data: dataWithCustomer,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
     };
   }

@@ -55,7 +55,7 @@ import type {
   StoreSettings,
 } from '../../../../../../../core/models/store-settings.interface';
 
-type AccessTab = 'aforo' | 'logs' | 'credentials';
+type AccessTab = 'aforo' | 'logs' | 'credentials' | 'configuracion';
 
 @Component({
   selector: 'app-membership-access-page',
@@ -161,6 +161,14 @@ export class MembershipAccessPageComponent implements OnInit {
   readonly cfgLevelingEnabled = signal(false);
   readonly cfgLevelingInterval = signal<1 | 2>(2);
 
+  // ─── Access config (fingerprint device) ────────────────────────────────────
+  readonly savingAccessConfig = signal(false);
+  readonly cfgFingerprintReaderType = signal<'id_wrapper' | 'template_sdk'>('id_wrapper');
+  readonly cfgFingerprintSdkProvider = signal<'zkteco' | 'digitalpersona' | 'generic_http' | null>(null);
+  readonly cfgFingerprintEndpoint = signal<string>('');
+  readonly cfgFingerprintApiKeyRef = signal<string>('');
+  readonly cfgFingerprintTimeout = signal<number | null>(null);
+
   /** Turnstile ⊕ auto-leveling: the turnstile controls entries/exits itself. */
   readonly levelingDisabled = computed(() => this.cfgTurnstile());
 
@@ -188,6 +196,7 @@ export class MembershipAccessPageComponent implements OnInit {
     { id: 'aforo', label: 'Aforo', icon: 'users' },
     { id: 'logs', label: 'Bitácora', icon: 'history' },
     { id: 'credentials', label: 'Credenciales', icon: 'key-round' },
+    { id: 'configuracion', label: 'Configuración', icon: 'settings' },
   ];
 
   readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
@@ -214,6 +223,17 @@ export class MembershipAccessPageComponent implements OnInit {
           label: 'Refrescar',
           icon: 'refresh-cw',
           variant: 'ghost',
+        },
+      ];
+    }
+    if (this.activeTab() === 'configuracion') {
+      return [
+        {
+          id: 'save-access-config',
+          label: 'Guardar',
+          icon: 'save',
+          variant: 'primary',
+          loading: this.savingAccessConfig(),
         },
       ];
     }
@@ -282,8 +302,14 @@ export class MembershipAccessPageComponent implements OnInit {
       label: 'Socio',
       sortable: false,
       priority: 3,
-      transform: (value: number | null) =>
-        value == null ? '—' : `Socio #${value}`,
+      transform: (_: number | null, row: GymAccessLog) => {
+        // Logs may carry `customer_id = null` for denied events where the
+        // credential was never resolved. The customer relation is the
+        // preferred label; we still have to fall back to the FK for cases
+        // where the backend did not attach a relation.
+        if (row.customer) return this.customerName(row);
+        return row.customer_id == null ? '—' : `Socio #${row.customer_id}`;
+      },
     },
     {
       key: 'device_id',
@@ -327,7 +353,7 @@ export class MembershipAccessPageComponent implements OnInit {
       label: 'Socio',
       sortable: false,
       priority: 1,
-      transform: (value: number) => `Socio #${value}`,
+      transform: (_: number, row: GymAccessCredential) => this.customerName(row),
     },
     {
       key: 'credential_type',
@@ -392,7 +418,7 @@ export class MembershipAccessPageComponent implements OnInit {
         key: 'customer_id',
         label: 'Socio',
         icon: 'user',
-        transform: (v: number) => `Socio #${v}`,
+        transform: (_: number, row: GymAccessCredential) => this.customerName(row),
       },
     ],
   };
@@ -417,6 +443,23 @@ export class MembershipAccessPageComponent implements OnInit {
     }
   }
 
+  /**
+   * Render the customer relation attached by the backend's `attachCustomer`
+   * helper. Falls back to "—" if neither the relation nor the FK is available,
+   * otherwise `name || email || Socio #${id}` — matching the `members-list`
+   * pattern. Pure derivation: no `inject()` / state read, safe to call from
+   * `TableColumn.transform` / `ItemListDetailField.transform`.
+   */
+  customerName(row: GymAccessCredential | GymAccessLog): string {
+    const c = row.customer;
+    if (!c) return '—';
+    const name = [c.first_name, c.last_name]
+      .filter((part): part is string => !!part && part.trim().length > 0)
+      .join(' ')
+      .trim();
+    return name || c.email || `Socio #${c.id}`;
+  }
+
   onTabChanged(tabId: string): void {
     this.activeTab.set(tabId as AccessTab);
     if (tabId === 'aforo') {
@@ -427,6 +470,9 @@ export class MembershipAccessPageComponent implements OnInit {
       this.credentialsLoaded = true;
       this.loadCredentials();
     }
+    if (tabId === 'configuracion') {
+      this.hydrateConfigFromSettings();
+    }
   }
 
   onHeaderAction(actionId: string): void {
@@ -434,6 +480,7 @@ export class MembershipAccessPageComponent implements OnInit {
     else if (actionId === 'new-credential') this.newCredential();
     else if (actionId === 'refresh-aforo') this.loadOccupancy();
     else if (actionId === 'config-aforo') this.toggleConfig();
+    else if (actionId === 'save-access-config') this.saveAccessConfig();
   }
 
   // ─── Aforo: occupancy ───────────────────────────────────────────────────────
@@ -554,6 +601,14 @@ export class MembershipAccessPageComponent implements OnInit {
     this.cfgTurnstile.set(m?.turnstile_mode ?? false);
     this.cfgLevelingEnabled.set(m?.auto_leveling_enabled ?? false);
     this.cfgLevelingInterval.set(m?.auto_leveling_interval_hours === 1 ? 1 : 2);
+
+    // Fingerprint device config (anot 3b).
+    const fd = m?.fingerprint_device;
+    this.cfgFingerprintReaderType.set(fd?.reader_type ?? 'id_wrapper');
+    this.cfgFingerprintSdkProvider.set(fd?.sdk_provider ?? null);
+    this.cfgFingerprintEndpoint.set(fd?.endpoint ?? '');
+    this.cfgFingerprintApiKeyRef.set(fd?.api_key_ref ?? '');
+    this.cfgFingerprintTimeout.set(fd?.timeout_ms ?? null);
   }
 
   onCapacityControlToggle(enabled: boolean): void {
@@ -573,6 +628,18 @@ export class MembershipAccessPageComponent implements OnInit {
 
   onMaxCapacityChange(value: number): void {
     this.cfgMaxCapacity.set(Math.max(0, Math.round(value)));
+  }
+
+  onFingerprintEndpointInput(value: string): void {
+    this.cfgFingerprintEndpoint.set(value);
+  }
+
+  onFingerprintApiKeyRefInput(value: string): void {
+    this.cfgFingerprintApiKeyRef.set(value);
+  }
+
+  onFingerprintTimeoutInput(value: string): void {
+    this.cfgFingerprintTimeout.set(value === '' ? null : Number(value));
   }
 
   setLevelingInterval(hours: 1 | 2): void {
@@ -608,6 +675,61 @@ export class MembershipAccessPageComponent implements OnInit {
         },
         error: (err: unknown) => {
           this.savingConfig.set(false);
+          this.toastService.error(
+            err instanceof Error ? err.message : 'Error al guardar la configuración',
+          );
+        },
+      });
+  }
+
+  /**
+   * Persist the fingerprint device configuration (anot 3b).
+   * Reads current signal values, merges with existing membership settings to
+   * preserve unrelated keys (ambient_access_enabled, aforo, etc.), and writes
+   * via `StoreSettingsService.saveSettingsNow`.
+   */
+  saveAccessConfig(): void {
+    this.savingAccessConfig.set(true);
+    const current = this.membershipSettings;
+    const readerType = this.cfgFingerprintReaderType();
+    const fingerprint_device = {
+      reader_type: readerType,
+      // Only persist SDK-specific fields when relevant; otherwise leave them
+      // empty so the backend defaults take over.
+      sdk_provider:
+        readerType === 'template_sdk'
+          ? (this.cfgFingerprintSdkProvider() ?? 'generic_http')
+          : undefined,
+      endpoint:
+        readerType === 'template_sdk' && this.cfgFingerprintEndpoint().trim()
+          ? this.cfgFingerprintEndpoint().trim()
+          : undefined,
+      api_key_ref:
+        readerType === 'template_sdk' && this.cfgFingerprintApiKeyRef().trim()
+          ? this.cfgFingerprintApiKeyRef().trim()
+          : undefined,
+      timeout_ms:
+        readerType === 'template_sdk' && this.cfgFingerprintTimeout() != null
+          ? Number(this.cfgFingerprintTimeout())
+          : undefined,
+    };
+
+    const membership: MembershipSettings = {
+      ...current,
+      ambient_access_enabled: current?.ambient_access_enabled ?? false,
+      fingerprint_device: fingerprint_device as MembershipSettings['fingerprint_device'],
+    };
+
+    this.storeSettingsService
+      .saveSettingsNow({ membership })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.savingAccessConfig.set(false);
+          this.toastService.success('Configuración guardada');
+        },
+        error: (err: unknown) => {
+          this.savingAccessConfig.set(false);
           this.toastService.error(
             err instanceof Error ? err.message : 'Error al guardar la configuración',
           );

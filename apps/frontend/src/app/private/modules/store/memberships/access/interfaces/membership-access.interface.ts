@@ -26,6 +26,17 @@ export interface GymAccessCredential {
   id: number;
   store_id: number;
   customer_id: number;
+  /**
+   * Optional customer relation attached by the backend's `attachCustomer` helper
+   * (see `membership-access.service.ts`). Null when the customer record could
+   * not be resolved (deleted user, FK drift, etc).
+   */
+  customer?: {
+    id: number;
+    first_name: string | null;
+    last_name: string | null;
+    email: string | null;
+  } | null;
   credential_type: GymCredentialType;
   /**
    * Masked reference of the credential value (e.g. `'****1234'` for qr /
@@ -41,8 +52,24 @@ export interface GymAccessCredential {
 export interface CreateCredentialDto {
   customer_id: number;
   credential_type: GymCredentialType;
-  credential_value: string;
+  /**
+   * Raw credential value. Optional because the backend auto-generates QR/PIN
+   * server-side (one-shot value, never re-exposed on read). Only required for
+   * `external_ref`, where the operator supplies the device identifier.
+   */
+  credential_value?: string;
   is_active?: boolean;
+}
+
+/**
+ * Response shape for the create-credential endpoint. Differs from
+ * `GymAccessCredential` because it intentionally exposes the RAW
+ * `credential_value` (one-shot — never returned again) and the email delivery
+ * outcome so the operator can surface both immediately to the user.
+ */
+export interface CreateCredentialResponse extends GymAccessCredential {
+  credential_value: string;
+  email_sent: boolean;
 }
 
 export interface UpdateCredentialDto {
@@ -61,6 +88,17 @@ export interface GymAccessLog {
   id: number;
   store_id: number;
   customer_id?: number | null;
+  /**
+   * Optional customer relation attached by the backend's `attachCustomer` helper
+   * (see `membership-access.service.ts`). Null when the customer record could
+   * not be resolved (deleted user, FK drift, etc).
+   */
+  customer?: {
+    id: number;
+    first_name: string | null;
+    last_name: string | null;
+    email: string | null;
+  } | null;
   membership_id?: number | null;
   credential_id?: number | null;
   result: GymAccessResult;
