@@ -39,7 +39,7 @@ function buildQuery(params?: ListParams): string {
  * blew up at runtime when the consumer expected e.g. an array.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function unwrap<T>(payload: any): T {
+function unwrap<T>(payload: any): T {
   if (payload && typeof payload === 'object' && 'success' in payload) {
     if (payload.success === false) {
       const message =

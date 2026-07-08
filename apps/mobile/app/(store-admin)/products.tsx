@@ -18,8 +18,8 @@ import {
   Fab,
   EmptyState,
   Badge,
+  Modal,
   Button,
-  ConfirmDialog,
 } from '@/shared/components';
 import { Icon } from '@/shared/components/icon/icon';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
@@ -28,8 +28,6 @@ import { useTenantStore } from '@/core/store/tenant.store';
 import { useCan } from '@/core/auth/use-permissions';
 import { BulkUploadModal } from '@/features/store/components/bulk-upload-modal';
 import { BulkImageUploadModal } from '@/features/store/components/bulk-image-upload-modal';
-import { LightboxImageTap } from '@/features/store/components/image-lightbox';
-import { OptionsDropdown } from '@/shared/components/options-dropdown/options-dropdown';
 import { ProductQuickCreateModal } from '@/features/store/components/product-quick-create-modal';
 import { downloadCurrentProducts } from '@/features/store/utils/xlsx';
 import type {
@@ -222,17 +220,44 @@ export default function ProductsListScreen() {
             >
               <Icon name="plus" size={20} color={colors.primary} />
             </Pressable>
-            <OptionsDropdown
-              compact
-              triggerIcon="plus"
-              actions={[
-                { label: 'Nuevo producto', icon: 'plus', onPress: () => { setActionsOpen(false); setQuickCreateOpen(true); } },
-                { label: 'Carga masiva', icon: 'upload', onPress: () => { setActionsOpen(false); setBulkUploadOpen(true); } },
-                { label: 'Carga de imágenes', icon: 'image', onPress: () => { setActionsOpen(false); setBulkImageOpen(true); } },
-                { label: 'Descargar plantilla de productos actuales', icon: 'file-spreadsheet', onPress: () => { setActionsOpen(false); downloadCurrentProductsTemplate(); } },
-              ]}
-              style={{ marginLeft: spacing[2] }}
-            />
+            {/* Popover anclado debajo del + (mismo nivel que el botón) */}
+            {actionsOpen && (
+              <>
+                <Pressable
+                  style={styles.popoverBackdrop}
+                  onPress={() => setActionsOpen(false)}
+                />
+                <View style={styles.actionsPopoverAnchor}>
+                  <View style={styles.popover}>
+                    <View style={styles.popoverHeader}>
+                      <Text style={styles.popoverTitle}>Acciones</Text>
+                    </View>
+                    <ActionItem
+                      icon="plus"
+                      label="Nuevo producto"
+                      primary
+                      onPress={() => { setActionsOpen(false); setQuickCreateOpen(true); }}
+                    />
+                    <ActionItem
+                      icon="upload"
+                      label="Carga masiva"
+                      onPress={() => { setActionsOpen(false); setBulkUploadOpen(true); }}
+                    />
+                    <ActionItem
+                      icon="image"
+                      label="Carga de imágenes"
+                      onPress={() => { setActionsOpen(false); setBulkImageOpen(true); }}
+                    />
+                    <ActionItem
+                      icon="file-spreadsheet"
+                      label="Descargar plantilla de productos actuales"
+                      onPress={() => { setActionsOpen(false); downloadCurrentProductsTemplate(); }}
+                      isLast
+                    />
+                  </View>
+                </View>
+              </>
+            )}
           </View>
           {/* Filtros — popover anclado al botón (estilo transfers.tsx) */}
           <View style={styles.filtersBtnContainer}>
@@ -395,23 +420,43 @@ export default function ProductsListScreen() {
         <Fab icon="plus" accessibilityLabel="Nuevo producto" onPress={() => setQuickCreateOpen(true)} />
       )}
 
-      {/* "..." → ConfirmDialog alineado al Web Visual Pattern
-          (centered card, título centrado, mensaje, footer con botones). */}
-      <ConfirmDialog
+      {/* "..." → Confirm delete modal (only Eliminar option) */}
+      <Modal
         visible={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
         title="Eliminar Producto"
-        message={
-          deleteTarget
-            ? `¿Eliminar "${deleteTarget.name}"? Esta acción no se puede deshacer.`
-            : ''
-        }
-        confirmLabel="Eliminar"
-        cancelLabel="Cancelar"
-        destructive
-        loading={deleteMutation.isPending}
-      />
+        showCloseButton
+      >
+        <View style={{ padding: spacing[4], gap: spacing[4] }}>
+          {deleteTarget && (
+            <>
+              <Text style={{ fontSize: typography.fontSize.base, color: colors.text.secondary }}>
+                ¿Eliminar "{deleteTarget.name}"? Esta acción no se puede deshacer.
+              </Text>
+              <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    title="Cancelar"
+                    variant="outline"
+                    onPress={() => setDeleteTarget(null)}
+                    fullWidth
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Button
+                    title="Eliminar"
+                    variant="primary"
+                    leftIcon={<Icon name="trash-2" size={16} color={colors.background} />}
+                    onPress={() => deleteMutation.mutate(deleteTarget)}
+                    loading={deleteMutation.isPending}
+                    fullWidth
+                  />
+                </View>
+              </View>
+            </>
+          )}
+        </View>
+      </Modal>
 
       {/* Actions popover — único, renderizado dentro del actionsBtnContainer (línea ~222) */}
 
@@ -475,14 +520,25 @@ function ProductCard({ product, onPress, onEdit, onToggle, onMore, isToggling, c
           padding: spacing[3],
         }}
       >
-        {/* Image — 80x80 (tap abre lightbox si tiene imagen) */}
-        <LightboxImageTap
-          uri={product.image_url}
-          alt={product.name}
-          size={80}
-          borderRadius={borderRadius.md}
-          style={{ flexShrink: 0 }}
-        />
+        {/* Image — 80x80 */}
+        <View
+          style={{
+            width: 80,
+            height: 80,
+            borderRadius: borderRadius.md,
+            backgroundColor: colorScales.gray[100],
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+            flexShrink: 0,
+          }}
+        >
+          {product.image_url ? (
+            <Image source={{ uri: product.image_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+          ) : (
+            <Icon name="package" size={30} color={colors.text.muted} />
+          )}
+        </View>
 
         {/* Content top: title + state badge + SKU */}
         <View style={{ flex: 1, justifyContent: 'flex-start' }}>

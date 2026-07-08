@@ -1,11 +1,8 @@
 import { useState, useMemo } from 'react';
-import { View, Text, ScrollView, Pressable, StyleSheet, TextInput } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, TextInput, Switch } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CustomerService } from '@/features/store/services/customer.service';
-import { CustomerHistoryService } from '@/features/store/services/customer-history.service';
-import { MetadataService } from '@/features/store/services/metadata.service';
-import { MembershipService } from '@/features/store/services/membership.service';
 import type { CustomerWithWallet, CustomerState } from '@/features/store/types';
 import { formatCurrency } from '@/shared/utils/currency';
 import { formatRelative, formatDate } from '@/shared/utils/date';
@@ -93,7 +90,7 @@ export default function CustomerDetailScreen() {
 
   const topupMutation = useMutation({
     mutationFn: (payload: { amount: number; description: string; payment_method: string }) =>
-      CustomerService.topup(id!, payload.amount, payload.description, payload.payment_method),
+      CustomerService.topup(id!, payload.amount),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['customer', id] });
       setTopupAmount('');
@@ -105,21 +102,6 @@ export default function CustomerDetailScreen() {
     onError: () => toastError('Error al recargar la billetera'),
   });
 
-  const adjustMutation = useMutation({
-    mutationFn: (payload: { type: 'credit' | 'debit'; amount: number; reason: string; reference?: string }) =>
-      CustomerService.adjust(id!, payload.type, payload.amount, payload.reason, payload.reference),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['customer', id] });
-      setAdjustAmount('');
-      setAdjustReason('');
-      setAdjustReference('');
-      setAdjustType('credit');
-      setShowAdjustForm(false);
-      toastSuccess('Ajuste realizado correctamente');
-    },
-    onError: () => toastError('Error al realizar el ajuste'),
-  });
-
   const handleTopup = () => {
     const amount = parseFloat(topupAmount);
     if (isNaN(amount) || amount <= 0) {
@@ -128,40 +110,6 @@ export default function CustomerDetailScreen() {
     }
     topupMutation.mutate({ amount, description: topupDescription, payment_method: topupPaymentMethod });
   };
-
-  const handleAdjust = () => {
-    const amount = parseFloat(adjustAmount);
-    if (isNaN(amount) || amount <= 0) {
-      toastError('Ingresa un monto válido');
-      return;
-    }
-    if (!adjustReason.trim()) {
-      toastError('La razón es obligatoria');
-      return;
-    }
-    adjustMutation.mutate({ type: adjustType, amount, reason: adjustReason.trim(), reference: adjustReference.trim() || undefined });
-  };
-
-  // History (consultation timeline)
-  const { data: historyContext } = useQuery({
-    queryKey: ['customer-history', id],
-    queryFn: () => CustomerHistoryService.getContext(id!),
-    enabled: !!id,
-  });
-
-  // Membership profile
-  const { data: membershipProfile } = useQuery({
-    queryKey: ['customer-membership', id],
-    queryFn: () => MembershipService.getProfile(id!),
-    enabled: !!id,
-  });
-
-  // Metadata values for this customer
-  const { data: metadataValues } = useQuery({
-    queryKey: ['customer-metadata', id],
-    queryFn: () => MetadataService.getValues('customer', id!),
-    enabled: !!id,
-  });
 
   if (isLoading || !customer) {
     return (
@@ -172,7 +120,6 @@ export default function CustomerDetailScreen() {
   }
 
   const fullName = `${customer.first_name} ${customer.last_name}`;
-  const hasWallet = customer.wallet_balance !== undefined;
   const walletBalance = customer.wallet_balance ?? 0;
   const walletHeld = customer.wallet_held ?? 0;
   const walletAvailable = walletBalance - walletHeld;
@@ -264,97 +211,34 @@ export default function CustomerDetailScreen() {
           </View>
         </View>
 
-        {/* Consultation History — booking timeline */}
-        {(historyContext?.recent_bookings?.length ?? 0) > 0 && (
-          <View style={styles.historyCard}>
-            <View style={styles.historyHeader}>
-              <Icon name="clipboard-list" size={18} color={colors.primary} />
-              <Text style={styles.historyTitle}>Historial de Consultas</Text>
-            </View>
-            {historyContext?.recent_bookings?.slice(0, 5).map((booking) => (
-              <View key={booking.id} style={styles.historyItem}>
-                <View style={styles.historyItemLeft}>
-                  <Badge
-                    label={booking.state === 'finished' ? 'Completada' : booking.state === 'cancelled' ? 'Cancelada' : booking.state}
-                    variant={booking.state === 'finished' ? 'success' : booking.state === 'cancelled' ? 'error' : 'neutral'}
-                    size="xsm"
-                  />
-                  {booking.intake_submission_status && (
-                    <Badge label="Formulario" variant="info" size="xsm" />
-                  )}
-                  {booking.has_snapshot && (
-                    <Badge label="Prediagnóstico" variant="warning" size="xsm" />
-                  )}
-                  {(booking.notes_count ?? 0) > 0 && (
-                    <Badge label={`${booking.notes_count} nota${booking.notes_count === 1 ? '' : 's'}`} variant="neutral" size="xsm" />
-                  )}
-                </View>
-                <Text style={styles.historyItemDate}>
-                  {formatDate(booking.created_at)}
-                </Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Metadata / Ficha del Cliente */}
-        {(metadataValues?.length ?? 0) > 0 && (
-          <View style={styles.metadataCard}>
-            <View style={styles.metadataHeader}>
-              <Icon name="database" size={18} color={colors.primary} />
-              <Text style={styles.metadataTitle}>Ficha del Cliente</Text>
-            </View>
-            <View style={styles.metadataGrid}>
-              {metadataValues?.map((field) => (
-                <View key={field.field_id} style={styles.metadataItem}>
-                  <Text style={styles.metadataLabel}>{field.field_label}</Text>
-                  <Text style={styles.metadataValue}>{field.value}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        )}
-
         <View style={styles.walletCard}>
           <View style={styles.walletHeader}>
             <View style={styles.walletHeaderLeft}>
               <Icon name="wallet" size={20} color={colors.primary} />
               <Text style={styles.walletTitle}>Wallet</Text>
             </View>
-            {hasWallet && (
-              <View style={styles.walletActions}>
-                <Button
-                  title={showAdjustForm ? 'Cancelar' : 'Ajustar'}
-                  variant="outline"
-                  size="sm"
-                  onPress={() => {
-                    setShowAdjustForm(!showAdjustForm);
-                    setShowTopupForm(false);
-                  }}
-                />
-                <Button
-                  title={showTopupForm ? 'Cancelar' : 'Recargar'}
-                  variant="primary"
-                  size="sm"
-                  onPress={() => {
-                    setShowTopupForm(!showTopupForm);
-                    setShowAdjustForm(false);
-                  }}
-                />
-              </View>
-            )}
+            <View style={styles.walletActions}>
+              <Button
+                title={showAdjustForm ? 'Cancelar' : 'Ajustar'}
+                variant="outline"
+                size="sm"
+                onPress={() => {
+                  setShowAdjustForm(!showAdjustForm);
+                  setShowTopupForm(false);
+                }}
+              />
+              <Button
+                title={showTopupForm ? 'Cancelar' : 'Recargar'}
+                variant="primary"
+                size="sm"
+                onPress={() => {
+                  setShowTopupForm(!showTopupForm);
+                  setShowAdjustForm(false);
+                }}
+              />
+            </View>
           </View>
 
-          {!hasWallet ? (
-            <View style={styles.emptyWallet}>
-              <Icon name="wallet" size={40} color={colorScales.gray[300]} />
-              <Text style={styles.emptyWalletText}>Este cliente aún no tiene billetera.</Text>
-              <Text style={styles.emptyWalletHint}>
-                La billetera se creará automáticamente al realizar la primera recarga.
-              </Text>
-            </View>
-          ) : (
-          <>
           <View style={styles.balanceGrid}>
             <View style={styles.balanceBox}>
               <Text style={styles.balanceLabel}>Saldo disponible</Text>
@@ -502,8 +386,7 @@ export default function CustomerDetailScreen() {
                   variant={adjustType === 'debit' ? 'destructive' : 'primary'}
                   size="sm"
                   title={adjustType === 'debit' ? 'Debitar' : 'Acreditar'}
-                  onPress={handleAdjust}
-                  loading={adjustMutation.isPending}
+                  onPress={() => {}}
                   disabled={!adjustAmount || !adjustReason}
                 />
               </View>
@@ -589,26 +472,10 @@ export default function CustomerDetailScreen() {
               );
             })}
           </View>
-          </>
-          )}
         </View>
       </ScrollView>
 
       <View style={styles.footer}>
-        {membershipProfile && (
-          <Button
-            title="Perfil de socio"
-            onPress={() => router.push(`/(store-admin)/customers/${id}/membership`)}
-            variant="outline"
-            fullWidth
-          />
-        )}
-        <Button
-          title="Ver reseñas"
-          onPress={() => router.push({ pathname: '/(store-admin)/customers/reviews', params: { user_id: id } })}
-          variant="outline"
-          fullWidth
-        />
         <View style={styles.footerRow}>
           <Button
             title="Editar"
@@ -979,95 +846,6 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     color: colorScales.gray[400],
     marginTop: 2,
-  },
-  emptyWallet: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing[8],
-    gap: spacing[2],
-  },
-  emptyWalletText: {
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[500],
-    fontWeight: typography.fontWeight.medium as any,
-  },
-  emptyWalletHint: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[400],
-    textAlign: 'center',
-    paddingHorizontal: spacing[4],
-  },
-  /* Consultation History */
-  historyCard: {
-    backgroundColor: colors.background,
-    padding: spacing[4],
-    marginBottom: spacing[1],
-  },
-  historyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    marginBottom: spacing[3],
-  },
-  historyTitle: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.semibold as any,
-    color: colorScales.gray[900],
-  },
-  historyItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: spacing[2],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
-  },
-  historyItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[1.5],
-    flex: 1,
-    flexWrap: 'wrap',
-  },
-  historyItemDate: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[400],
-  },
-  /* Metadata / Ficha del Cliente */
-  metadataCard: {
-    backgroundColor: colors.background,
-    padding: spacing[4],
-    marginBottom: spacing[1],
-  },
-  metadataHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    marginBottom: spacing[3],
-  },
-  metadataTitle: {
-    fontSize: typography.fontSize.base,
-    fontWeight: typography.fontWeight.semibold as any,
-    color: colorScales.gray[900],
-  },
-  metadataGrid: {
-    gap: spacing[2],
-  },
-  metadataItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: spacing[2],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
-  },
-  metadataLabel: {
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[500],
-  },
-  metadataValue: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium as any,
-    color: colorScales.gray[900],
   },
   footer: {
     padding: spacing[4],

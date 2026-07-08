@@ -1,36 +1,26 @@
 import {
-  Modal as RNModal,
   View,
   Text,
-  Pressable,
   StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
+  Modal,
+  Pressable,
+  useWindowDimensions,
+  ActivityIndicator,
 } from 'react-native';
-import { spacing, typography, colorScales, colors, borderRadius } from '@/shared/theme';
+import { spacing, typography, colorScales, colors, interFonts } from '@/shared/theme';
+import { Icon } from '@/shared/components/icon/icon';
 
 interface ConfirmDialogProps {
   visible: boolean;
   onClose: () => void;
   onConfirm: () => void;
-  /** Título del modal. Centrado en el header del modal (sin background/color). */
   title: string;
-  /** Cuerpo del mensaje. Se muestra debajo del header. */
   message: string;
-  /** Texto del botón de confirmar. Default: 'Confirmar'. */
   confirmLabel?: string;
-  /** Texto del botón de cancelar. Default: 'Cancelar'. */
   cancelLabel?: string;
-  /**
-   * Si es true, el botón de confirmar usa estilo destructivo (rojo).
-   * Si es false, usa primario (verde). Default: false.
-   */
   destructive?: boolean;
-  /** Muestra spinner en el botón de confirmar mientras la acción está en curso. */
   loading?: boolean;
 }
-
-const CARD_MAX_WIDTH = 480;
 
 export function ConfirmDialog({
   visible,
@@ -43,194 +33,222 @@ export function ConfirmDialog({
   destructive = false,
   loading = false,
 }: ConfirmDialogProps) {
+  const { width } = useWindowDimensions();
+  const dialogWidth = Math.min(width * 0.92, 448);
+
+  const headerBg = destructive
+    ? { backgroundColor: '#ef4444' }
+    : null; // green gradient handled via inline style
+
   return (
-    <RNModal
+    <Modal
       visible={visible}
       transparent
       animationType="fade"
       onRequestClose={onClose}
+      statusBarTranslucent
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.root}
-      >
-        {/* Backdrop — tap cierra el diálogo. */}
-        <Pressable style={styles.backdrop} onPress={onClose} />
-
-        {/* Card centrado — mirror del app-modal web [size]="'sm'" para confirm dialogs. */}
-        <View style={styles.cardWrapper}>
-          <View style={styles.card}>
-            {/* Header — título grande centrado, sin background/color/ícono.
-                Coincide con la estructura del web confirmation modal. */}
-            <View style={styles.header}>
+      {/* Backdrop — matches web .modal-backdrop-blur */}
+      <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable
+          style={[styles.dialog, { width: dialogWidth }]}
+          onPress={(e) => e.stopPropagation()}
+        >
+          {/* ── Header — mirrors web .store-switch-modal .modal-header gradient ── */}
+          <View
+            style={[
+              styles.header,
+              destructive ? styles.headerDestructive : styles.headerPrimary,
+            ]}
+          >
+            <View style={styles.headerInner}>
+              {/* Icon */}
+              <View style={styles.headerIconWrap}>
+                <Icon
+                  name={destructive ? 'alert-triangle' : 'store'}
+                  size={22}
+                  color="#fff"
+                />
+              </View>
+              {/* Title */}
               <Text style={styles.headerTitle}>{title}</Text>
             </View>
-
-            {/* Body — mensaje centrado. */}
-            <View style={styles.body}>
-              <Text style={styles.message}>{message}</Text>
-            </View>
-
-            {/* Footer — border-top + botones right-aligned.
-                Cancelar usa outlinePrimary (verde, parity con el web).
-                Confirmar usa destructive (rojo) o primary (verde). */}
-            <View style={styles.footer}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.btnOutline,
-                  pressed && !loading && styles.btnOutlinePressed,
-                  loading && styles.btnDisabled,
-                ]}
-                onPress={onClose}
-                disabled={loading}
-              >
-                <Text style={styles.btnOutlineText}>{cancelLabel}</Text>
-              </Pressable>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.btnConfirm,
-                  destructive ? styles.btnDestructive : styles.btnPrimary,
-                  (pressed || loading) && styles.btnConfirmPressed,
-                ]}
-                onPress={onConfirm}
-                disabled={loading}
-              >
-                {loading ? (
-                  <Text style={styles.btnConfirmText}>{confirmLabel}…</Text>
-                ) : (
-                  <Text style={styles.btnConfirmText}>{confirmLabel}</Text>
-                )}
-              </Pressable>
-            </View>
           </View>
-        </View>
-      </KeyboardAvoidingView>
-    </RNModal>
+
+          {/* ── Body — mirrors web .modal-body ── */}
+          <View style={styles.body}>
+            <Text style={styles.message}>{message}</Text>
+          </View>
+
+          {/* ── Footer — mirrors web .modal-footer ── */}
+          <View style={styles.footer}>
+            {/* Cancel button */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.btn,
+                styles.btnOutline,
+                pressed && styles.btnOutlinePressed,
+              ]}
+              onPress={onClose}
+              disabled={loading}
+            >
+              <Text style={styles.btnOutlineText}>{cancelLabel}</Text>
+            </Pressable>
+
+            {/* Confirm button */}
+            <Pressable
+              style={({ pressed }) => [
+                styles.btn,
+                destructive ? styles.btnDestructive : styles.btnPrimary,
+                (pressed || loading) && { opacity: 0.85 },
+              ]}
+              onPress={onConfirm}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.btnPrimaryText}>{confirmLabel}</Text>
+              )}
+            </Pressable>
+          </View>
+        </Pressable>
+      </Pressable>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: spacing[4],
-  },
+  // ── Backdrop — rgba(0,0,0,0.4) + subtle blur feel ──
   backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing[4],
   },
-  cardWrapper: {
-    width: '100%',
-    maxWidth: CARD_MAX_WIDTH,
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
+
+  // ── Dialog card — matches web .modal-content border-radius 12px ──
+  dialog: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
     overflow: 'hidden',
+    // Shadow — iOS (matches web box-shadow)
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.1,
-    shadowRadius: 25,
-    elevation: 12,
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    // Shadow — Android
+    elevation: 16,
   },
-  // Header: título grande centrado — sin background, sin ícono,
-  // sin border-bottom. Coincide con el header del modal del web.
+
+  // ── Header — mirrors web .store-switch-modal .modal-header gradient ──
   header: {
-    alignItems: 'center',
     paddingHorizontal: spacing[5],
-    paddingTop: spacing[5],
-    paddingBottom: spacing[3],
-    backgroundColor: colors.card,
+    paddingVertical: spacing[4],
   },
+  headerPrimary: {
+    backgroundColor: colors.primary,
+  },
+  headerDestructive: {
+    backgroundColor: '#dc2626',
+  },
+
+  headerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+  },
+  headerIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // .modal-title: font-size xl, font-weight semibold, color white
   headerTitle: {
-    fontSize: typography.fontSize.xl,
-    fontFamily: typography.fontFamily,
-    fontWeight: typography.fontWeight.semibold,
-    color: colors.text.primary,
-    textAlign: 'center',
+    flex: 1,
+    fontSize: typography.fontSize.lg,
+    fontFamily: interFonts.semibold,
+    color: '#fff',
+    lineHeight: typography.fontSize.lg * 1.3,
   },
-  // Body: mensaje centrado debajo del header.
+
+  // ── Body ──
   body: {
     paddingHorizontal: spacing[5],
-    paddingBottom: spacing[4],
-    backgroundColor: colors.card,
+    paddingVertical: spacing[4],
+    backgroundColor: '#fff',
   },
+  // .modal-body p: color text-secondary, line-height 1.6
   message: {
     fontSize: typography.fontSize.base,
-    fontFamily: typography.fontFamily,
-    color: colorScales.gray[600],
-    textAlign: 'center',
+    fontFamily: interFonts.regular,
+    color: '#64748b', // Slate-500 / text-secondary
     lineHeight: typography.fontSize.base * 1.6,
   },
-  // Footer: border-top, botones right-aligned.
+
+  // ── Footer — mirrors web .modal-footer ──
   footer: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
     gap: spacing[3],
     paddingHorizontal: spacing[5],
-    paddingTop: spacing[4],
-    paddingBottom: spacing[4],
+    paddingVertical: spacing[4],
     borderTopWidth: 1,
-    borderTopColor: colorScales.gray[200],
-    backgroundColor: colors.card,
+    borderTopColor: colorScales.gray[100],
+    backgroundColor: colorScales.gray[50],
   },
-  // Cancelar: outlinePrimary (verde, parity con el web).
-  btnOutline: {
+
+  // Shared button base — min-width 100px, radius md
+  btn: {
+    minWidth: 100,
     paddingHorizontal: spacing[4],
     paddingVertical: spacing[2] + 2,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colorScales.green[600],
-    backgroundColor: 'transparent',
-    minWidth: 90,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+  },
+
+  // Outline / cancel — matches web .btn-secondary
+  btnOutline: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
   },
   btnOutlinePressed: {
-    backgroundColor: colorScales.green[50],
-    borderColor: colorScales.green[700],
+    backgroundColor: colorScales.gray[50],
   },
   btnOutlineText: {
     fontSize: typography.fontSize.sm,
-    fontFamily: typography.fontFamily,
-    fontWeight: '500',
-    color: colorScales.green[600],
+    fontFamily: interFonts.medium,
+    color: colorScales.gray[700],
   },
-  btnDisabled: {
-    opacity: 0.6,
-  },
-  // Confirmar: primary (verde) o destructive (rojo).
-  btnConfirm: {
-    paddingHorizontal: spacing[4],
-    paddingVertical: spacing[2] + 2,
-    borderRadius: borderRadius.md,
-    minWidth: 90,
-    alignItems: 'center',
-    justifyContent: 'center',
+
+  // Primary — matches web .btn-primary gradient
+  btnPrimary: {
+    backgroundColor: colors.primary,
+    shadowColor: 'rgba(34,197,94,0.4)',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
     shadowRadius: 8,
     elevation: 3,
   },
-  btnConfirmPressed: {
-    opacity: 0.85,
-  },
-  btnPrimary: {
-    backgroundColor: colorScales.green[600],
-    shadowColor: 'rgba(34,197,94,0.4)',
-  },
+  // Destructive — red variant
   btnDestructive: {
-    backgroundColor: colorScales.red[600],
+    backgroundColor: '#dc2626',
     shadowColor: 'rgba(220,38,38,0.4)',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 8,
+    elevation: 3,
   },
-  btnConfirmText: {
+  btnPrimaryText: {
     fontSize: typography.fontSize.sm,
-    fontFamily: typography.fontFamily,
-    fontWeight: '600',
+    fontFamily: interFonts.semibold,
     color: '#fff',
   },
 });

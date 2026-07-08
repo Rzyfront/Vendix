@@ -77,7 +77,7 @@ export function ProductQuickCreateModal({ visible, onClose, onCreated }: Product
         state: 'active',
       }),
     onSuccess: (product) => {
-      toastSuccess('Producto creado exitosamente');
+      toastSuccess('Producto creado');
       onCreated?.(product.id);
       reset();
       onClose();

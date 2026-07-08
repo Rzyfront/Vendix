@@ -1,21 +1,11 @@
 import { useState } from 'react';
-import {
-  Modal as RNModal,
-  View,
-  Text,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  KeyboardAvoidingView,
-  Platform,
-} from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Input, Textarea, Button } from '@/shared/components';
-import { Icon } from '@/shared/components/icon/icon';
+import { Modal, Input, Textarea, Toggle, Button } from '@/shared/components';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { CategoryService } from '@/features/store/services/category.service';
 import type { ProductCategory } from '@/features/store/types';
-import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
+import { colors, spacing } from '@/shared/theme';
 
 interface CategoryQuickCreateProps {
   visible: boolean;
@@ -23,33 +13,22 @@ interface CategoryQuickCreateProps {
   onCreated: (category: ProductCategory) => void;
 }
 
-const NAME_MIN_LENGTH = 2;
-const NAME_MAX_LENGTH = 255;
-const DESCRIPTION_MAX_LENGTH = 1000;
-const CARD_MAX_WIDTH = 480;
-
 export function CategoryQuickCreate({ visible, onClose, onCreated }: CategoryQuickCreateProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  // Errores por campo (mirror del `getErrorMessage` web). Sólo se
-  // muestran después de `touched` para no asustar al usuario antes
-  // de que haya interactuado con el input.
-  const [touched, setTouched] = useState<{ name?: boolean }>({});
+  const [isFeatured, setIsFeatured] = useState(false);
 
   const mutation = useMutation({
     mutationFn: () =>
-      // Espejo exacto del web: envía sólo `name` y `description`. El
-      // backend acepta `state`, `image_url`, `is_featured` opcionales
-      // pero no los exponemos en este modal (mirror de
-      // `app-category-quick-create` web — el web también tiene un quick
-      // create minimal de sólo nombre + descripción).
       CategoryService.create({
         name: name.trim(),
         description: description.trim() || undefined,
+        is_featured: isFeatured,
+        state: 'active',
       }),
     onSuccess: (category) => {
-      toastSuccess('Categoría creada exitosamente');
+      toastSuccess('Categoría creada');
       queryClient.invalidateQueries({ queryKey: ['product-categories'] });
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       queryClient.invalidateQueries({ queryKey: ['categories-stats'] });
@@ -58,220 +37,56 @@ export function CategoryQuickCreate({ visible, onClose, onCreated }: CategoryQui
       onClose();
     },
     onError: (err: any) => {
-      // El backend de NestJS puede devolver `message` como string o como
-      // array de constraints de class-validator. Lo normalizamos para
-      // mostrarlo siempre como texto legible. Mirror del patrón que usa
-      // product-upsert-form.tsx.
-      const data = err?.response?.data;
-      const detail = Array.isArray(data?.message)
-        ? data.message.join(' • ')
-        : data?.message;
-      toastError(detail || data?.error || 'Error al crear la categoría');
+      toastError(err?.response?.data?.message || 'No se pudo crear la categoría');
     },
   });
 
   function reset() {
     setName('');
     setDescription('');
-    setTouched({});
-  }
-
-  function validate(): string | null {
-    const trimmed = name.trim();
-    if (!trimmed) return 'Este campo es obligatorio';
-    if (trimmed.length < NAME_MIN_LENGTH) return `Mínimo ${NAME_MIN_LENGTH} caracteres requeridos`;
-    if (trimmed.length > NAME_MAX_LENGTH) return `Máximo ${NAME_MAX_LENGTH} caracteres permitidos`;
-    return null;
+    setIsFeatured(false);
   }
 
   function handleSubmit() {
-    // Marcamos todos como touched para que el error sea visible si
-    // el usuario pulsa Crear sin tocar el input.
-    setTouched({ name: true });
-    const nameError = validate();
-    if (nameError) {
-      toastError(nameError);
+    if (!name.trim()) {
+      toastError('El nombre es obligatorio');
       return;
     }
     mutation.mutate();
   }
 
-  function handleClose() {
-    if (mutation.isPending) return;
-    reset();
-    onClose();
-  }
-
-  // Sólo mostramos el error después de que el usuario haya tocado el
-  // campo (mirror del patrón `field.touched` del web).
-  const nameError = touched.name ? validate() : null;
-
   return (
-    <RNModal
+    <Modal
       visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={handleClose}
+      onClose={onClose}
+      title="Nueva Categoría"
+      showCloseButton
     >
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.root}
-      >
-        {/* Backdrop — tap fuera del card cierra el modal. */}
-        <Pressable style={styles.backdrop} onPress={handleClose} />
-
-        {/* Card centrado con max-width 480px (mirror web `[size]="'md'"`). */}
-        <View style={styles.cardWrapper}>
-          <View style={styles.card}>
-            {/* Header — título a la izquierda, X close a la derecha.
-                Sin border-bottom (la separación viene del border-top
-                del footer). */}
-            <View style={styles.header}>
-              <View style={styles.headerTitleWrap}>
-                <Text style={styles.headerTitle} numberOfLines={1}>
-                  Crear Nueva Categoría
-                </Text>
-              </View>
-              <Pressable
-                onPress={handleClose}
-                hitSlop={8}
-                style={({ pressed }) => [
-                  styles.closeButton,
-                  pressed && { backgroundColor: colorScales.gray[100] },
-                ]}
-                accessibilityLabel="Cerrar modal"
-              >
-                <Icon name="x" size={20} color={colors.text.secondary} />
-              </Pressable>
-            </View>
-
-            {/* Body — ScrollView con padding y gap para los inputs. */}
-            <ScrollView
-              style={styles.body}
-              contentContainerStyle={styles.bodyContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
-              {/* Nombre — mirror del web: required + minLength 2 +
-                  maxLength 255 (backend), con error inline. */}
-              <Input
-                label="Nombre de Categoría"
-                value={name}
-                onChangeText={setName}
-                onBlur={() => setTouched((current) => ({ ...current, name: true }))}
-                placeholder="Ingresa el nombre de la categoría"
-                required
-                maxLength={NAME_MAX_LENGTH}
-                error={nameError ?? undefined}
-                editable={!mutation.isPending}
-              />
-              {/* Descripción — mirror del web. */}
-              <Textarea
-                label="Descripción"
-                value={description}
-                onChangeText={setDescription}
-                placeholder="Ingresa una descripción (opcional)"
-                rows={3}
-                maxLength={DESCRIPTION_MAX_LENGTH}
-                editable={!mutation.isPending}
-              />
-            </ScrollView>
-
-            {/* Footer — border-top separador + botones alineados a la
-                derecha. Cancelar usa `outlinePrimary` (verde, mirror
-                del web) en vez del `outline` genérico (gris). */}
-            <View style={styles.footer}>
-              <Button
-                title="Cancelar"
-                variant="outlinePrimary"
-                onPress={handleClose}
-                disabled={mutation.isPending}
-              />
-              <Button
-                title={mutation.isPending ? 'Creando…' : 'Crear Categoría'}
-                variant="primary"
-                onPress={handleSubmit}
-                loading={mutation.isPending}
-              />
-            </View>
+      <ScrollView contentContainerStyle={{ padding: spacing[4], gap: spacing[3] }} keyboardShouldPersistTaps="handled">
+        <Input
+          label="Nombre *"
+          value={name}
+          onChangeText={setName}
+          placeholder="Ej: Electrónica"
+          maxLength={255}
+        />
+        <Textarea
+          label="Descripción"
+          value={description}
+          onChangeText={setDescription}
+          rows={3}
+          maxLength={1000}
+        />
+        <Toggle value={isFeatured} onChange={setIsFeatured} label="Destacada" />
+        <View style={{ flexDirection: 'row', gap: spacing[2], marginTop: spacing[2] }}>
+          <View style={{ flex: 1 }}>
+            <Button title="Cancelar" variant="outline" onPress={() => { reset(); onClose(); }} fullWidth />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Button title="Crear" variant="primary" onPress={handleSubmit} loading={mutation.isPending} fullWidth />
           </View>
         </View>
-      </KeyboardAvoidingView>
-    </RNModal>
+      </ScrollView>
+    </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: spacing[4],
-  },
-  backdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(15, 23, 42, 0.45)',
-  },
-  cardWrapper: {
-    width: '100%',
-    maxWidth: CARD_MAX_WIDTH,
-    maxHeight: '90%',
-  },
-  card: {
-    backgroundColor: colors.card,
-    borderRadius: borderRadius.lg,
-    borderWidth: 1,
-    borderColor: colorScales.gray[200],
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 20 },
-    shadowOpacity: 0.1,
-    shadowRadius: 25,
-    elevation: 12,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[4],
-    paddingBottom: spacing[3],
-    backgroundColor: colors.card,
-  },
-  headerTitleWrap: {
-    flex: 1,
-    marginRight: spacing[2],
-  },
-  headerTitle: {
-    fontSize: typography.fontSize.lg,
-    fontFamily: typography.fontFamily,
-    fontWeight: typography.fontWeight.semibold,
-    color: colors.text.primary,
-  },
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  body: {
-    flexGrow: 0,
-    flexShrink: 1,
-  },
-  bodyContent: {
-    padding: spacing[4],
-    gap: spacing[4],
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    gap: spacing[3],
-    paddingHorizontal: spacing[4],
-    paddingTop: spacing[4],
-    paddingBottom: spacing[4],
-    borderTopWidth: 1,
-    borderTopColor: colorScales.gray[200],
-    backgroundColor: colors.card,
-  },
-});

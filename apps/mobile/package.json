@@ -6,7 +6,7 @@
     "start": "node --env-file=.env.web scripts/expo-dev.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "node --env-file=.env.web scripts/expo-dev.js --web",
+    "web": "expo start --web",
     "prebuild": "expo prebuild",
     "build:preview": "expo export",
     "lint": "expo lint"

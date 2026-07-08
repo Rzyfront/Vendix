@@ -82,5 +82,4 @@ export interface ReviewFilters {
   rating?: number;
   sort_by?: string;
   sort_order?: 'asc' | 'desc';
-  user_id?: number;
 }

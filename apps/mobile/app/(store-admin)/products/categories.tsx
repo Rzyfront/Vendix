@@ -37,7 +37,6 @@ export default function CategoriesListScreen() {
   const [stateFilter, setStateFilter] = useState<CategoryState | undefined>(undefined);
   const [featuredFilter, setFeaturedFilter] = useState<boolean | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<ProductCategory | null>(null);
-  const [forceConfirm, setForceConfirm] = useState<{ category: ProductCategory; productCount: number } | null>(null);
 
   const query: CategoryQuery = {
     page,
@@ -61,41 +60,17 @@ export default function CategoriesListScreen() {
   const total = data?.pagination?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const deleteMutation = useMutation<void, Error, { id: number; force?: boolean }>({
-    mutationFn: ({ id, force = false }) =>
-      CategoryService.delete(id, force),
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => CategoryService.delete(id, true),
     onSuccess: () => {
       toastSuccess('Categoría eliminada');
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       queryClient.invalidateQueries({ queryKey: ['categories-stats'] });
       queryClient.invalidateQueries({ queryKey: ['product-categories'] });
       setDeleteTarget(null);
-      setForceConfirm(null);
-    },
-    onError: (err, vars) => {
-      const errData = (err as any)?.response?.data;
-      const code = errData?.error?.code;
-      if (code === 'CAT_DELETE_HAS_PRODUCTS' && !vars?.force && deleteTarget) {
-        const productCount = errData?.error?.details?.product_count ?? 0;
-        setForceConfirm({ category: deleteTarget, productCount });
-        setDeleteTarget(null);
-        return;
-      }
-      toastError('No se pudo eliminar la categoría');
-      setForceConfirm(null);
-    },
-  });
-
-  const toggleFeaturedMutation = useMutation<ProductCategory, Error, { id: number; is_featured: boolean }>({
-    mutationFn: ({ id, is_featured }) =>
-      CategoryService.update(id, { is_featured }),
-    onSuccess: (_data, vars) => {
-      toastSuccess(vars.is_featured ? 'Categoría destacada' : 'Categoría quitada de destacados');
-      queryClient.invalidateQueries({ queryKey: ['categories'] });
-      queryClient.invalidateQueries({ queryKey: ['categories-stats'] });
     },
     onError: () => {
-      toastError('No se pudo cambiar el destaque');
+      toastError('No se pudo eliminar la categoría');
     },
   });
 
@@ -136,34 +111,44 @@ export default function CategoriesListScreen() {
           <OptionsDropdown
             filters={[
               {
+                key: 'state',
                 label: 'Estado',
+                type: 'select',
                 options: [
-                  { label: 'Todas', value: 'all' },
-                  { label: 'Activas', value: 'active' },
-                  { label: 'Inactivas', value: 'inactive' },
+                  { value: 'all', label: 'Todas' },
+                  { value: 'active', label: 'Activas' },
+                  { value: 'inactive', label: 'Inactivas' },
                 ],
-                onSelect: (value) => {
-                  setStateFilter(
-                    !value || value === 'all' ? undefined : (value as CategoryState),
-                  );
-                  setPage(1);
-                },
               },
               {
+                key: 'featured',
                 label: 'Destacadas',
+                type: 'select',
                 options: [
-                  { label: 'Todas', value: 'all' },
-                  { label: 'Destacadas', value: 'true' },
-                  { label: 'No destacadas', value: 'false' },
+                  { value: 'all', label: 'Todas' },
+                  { value: 'true', label: 'Destacadas' },
+                  { value: 'false', label: 'No destacadas' },
                 ],
-                onSelect: (value) => {
-                  setFeaturedFilter(
-                    !value || value === 'all' ? undefined : value === 'true',
-                  );
-                  setPage(1);
-                },
               },
             ]}
+            filterValues={{
+              state: stateFilter ?? 'all',
+              featured:
+                featuredFilter === undefined ? 'all' : featuredFilter ? 'true' : 'false',
+            }}
+            onFilterChange={(values) => {
+              const stateVal = values.state;
+              const featuredVal = values.featured;
+              setStateFilter(
+                !stateVal || stateVal === 'all' ? undefined : (stateVal as CategoryState),
+              );
+              setFeaturedFilter(
+                !featuredVal || featuredVal === 'all'
+                  ? undefined
+                  : featuredVal === 'true',
+              );
+              setPage(1);
+            }}
             actions={canCreate ? [
               {
                 label: 'Nueva Categoría',
@@ -224,16 +209,6 @@ export default function CategoriesListScreen() {
               category={item}
               onPress={() => router.push(`/(store-admin)/products/categories/${item.id}`)}
               onLongPress={canDelete ? () => setDeleteTarget(item) : undefined}
-              onToggleFeatured={() =>
-                toggleFeaturedMutation.mutate({
-                  id: item.id,
-                  is_featured: !item.is_featured,
-                })
-              }
-              isTogglingFeatured={
-                toggleFeaturedMutation.isPending &&
-                toggleFeaturedMutation.variables?.id === item.id
-              }
             />
           )}
           ListFooterComponent={
@@ -256,36 +231,12 @@ export default function CategoriesListScreen() {
       <ConfirmDialog
         visible={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() =>
-          deleteTarget &&
-          deleteMutation.mutate({ id: deleteTarget.id, force: false })
-        }
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
         title="Eliminar Categoría"
         message={`¿Eliminar "${deleteTarget?.name}"? Los productos que la usen quedarán sin categoría asignada.`}
         confirmLabel="Eliminar"
         destructive
         loading={deleteMutation.isPending}
-      />
-
-      <ConfirmDialog
-        visible={!!forceConfirm}
-        onClose={() => setForceConfirm(null)}
-        onConfirm={() =>
-          forceConfirm &&
-          deleteMutation.mutate({
-            id: forceConfirm.category.id,
-            force: true,
-          })
-        }
-        title="Categoría con productos asignados"
-        message={
-          forceConfirm
-            ? `"${forceConfirm.category.name}" tiene ${forceConfirm.productCount} producto(s) asociado(s). Al forzar la eliminación, esos productos quedarán sin categoría asignada. ¿Continuar?`
-            : ''
-        }
-        confirmLabel="Forzar eliminación"
-        destructive
-        loading={deleteMutation?.isPending}
       />
     </View>
   );
@@ -295,14 +246,10 @@ function CategoryCard({
   category,
   onPress,
   onLongPress,
-  onToggleFeatured,
-  isTogglingFeatured,
 }: {
   category: ProductCategory;
   onPress: () => void;
   onLongPress?: () => void;
-  onToggleFeatured?: () => void;
-  isTogglingFeatured?: boolean;
 }) {
   const stateVariant = category.state === 'active' ? 'success' : 'default';
   const stateLabel = category.state === 'active' ? 'Activa' : 'Inactiva';
@@ -371,34 +318,6 @@ function CategoryCard({
           </Text>
         )}
       </View>
-      {onToggleFeatured ? (
-        <Pressable
-          onPress={(e) => {
-            e.stopPropagation?.();
-            onToggleFeatured();
-          }}
-          hitSlop={8}
-          disabled={isTogglingFeatured}
-          style={({ pressed }) => [
-            {
-              width: 36,
-              height: 36,
-              borderRadius: 18,
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: category.is_featured ? '#FEF3C7' : 'transparent',
-            },
-            pressed && { opacity: 0.6 },
-          ]}
-          accessibilityLabel={category.is_featured ? 'Quitar destaque' : 'Destacar'}
-        >
-          <Icon
-            name="star"
-            size={18}
-            color={category.is_featured ? colors.warning : colors.text.muted}
-          />
-        </Pressable>
-      ) : null}
       <Icon name="chevron-right" size={18} color={colors.text.muted} />
     </Pressable>
   );

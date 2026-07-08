@@ -12,7 +12,6 @@ import {
   View,
 } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
-import { useLocalSearchParams } from 'expo-router';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
@@ -61,7 +60,6 @@ function starRating(rating: number): string {
 }
 
 export default function ReviewsScreen() {
-  const { user_id } = useLocalSearchParams<{ user_id?: string }>();
   const [search, setSearch] = useState('');
   const [stateFilter, setStateFilter] = useState<ReviewState | undefined>();
   const [ratingFilter, setRatingFilter] = useState<number | undefined>();
@@ -94,7 +92,7 @@ export default function ReviewsScreen() {
 
   const { data: reviewsData, isLoading, isError, refetch, isRefetching } = useQuery({
     queryKey: ['reviews', search, stateFilter, ratingFilter],
-    queryFn: () => ReviewService.list({ search: search || undefined, state: stateFilter, rating: ratingFilter, user_id: user_id ? Number(user_id) : undefined }),
+    queryFn: () => ReviewService.list({ search: search || undefined, state: stateFilter, rating: ratingFilter }),
   });
 
   const { data: reviewDetail, refetch: refetchDetail } = useQuery({
