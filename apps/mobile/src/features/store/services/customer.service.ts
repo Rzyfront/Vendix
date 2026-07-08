@@ -79,9 +79,61 @@ export const CustomerService = {
     return unwrapPaginated<Customer>(res, { page: 1, limit });
   },
 
-  async topup(id: string, amount: number): Promise<CustomerWithWallet> {
+  async topup(
+    id: string,
+    amount: number,
+    description?: string,
+    payment_method?: string,
+  ): Promise<CustomerWithWallet> {
     const endpoint = Endpoints.STORE.CUSTOMERS.TOPUP.replace(':id', id);
-    const res = await apiClient.post(endpoint, { amount });
+    const res = await apiClient.post(endpoint, { amount, description, payment_method });
     return unwrap<CustomerWithWallet>(res);
+  },
+
+  async adjust(
+    id: string,
+    type: 'credit' | 'debit',
+    amount: number,
+    reason: string,
+    reference?: string,
+  ): Promise<CustomerWithWallet> {
+    const endpoint = Endpoints.STORE.CUSTOMERS.ADJUST.replace(':id', id);
+    const res = await apiClient.post(endpoint, { type, amount, reason, reference });
+    return unwrap<CustomerWithWallet>(res);
+  },
+
+  async getBulkUploadTemplate(): Promise<Blob> {
+    const res = await apiClient.get(
+      `${Endpoints.STORE.CUSTOMERS.LIST}/bulk/template/download`,
+      { responseType: 'blob' },
+    );
+    return res.data as Blob;
+  },
+
+  async uploadBulkCustomers(
+    customers: Array<{
+      email?: string;
+      first_name: string;
+      last_name: string;
+      phone?: string;
+      document_type?: string;
+      document_number?: string;
+    }>,
+  ): Promise<{
+    success: boolean;
+    total_processed: number;
+    successful: number;
+    failed: number;
+    results: Array<{
+      status: 'success' | 'error';
+      message?: string;
+      row_number?: number;
+      customer?: { id: string };
+    }>;
+  }> {
+    const res = await apiClient.post(`${Endpoints.STORE.CUSTOMERS.LIST}/bulk/upload`, {
+      customers,
+    });
+    return unwrap<any>(res);
   },
 };

@@ -92,6 +92,10 @@ export const Endpoints = {
       STATS: '/store/customers/stats/store/:storeId',
       TOPUP: '/store/customers/:id/topup',
       ADJUST: '/store/customers/:id/adjust',
+      HISTORY: '/store/customers/:customerId/history',
+      HISTORY_CONTEXT: '/store/customers/:customerId/history/context',
+      METADATA_VALUES: '/store/metadata-values/:entityType/:entityId',
+      MEMBERSHIP_PROFILE: '/store/memberships/member-profiles/:customerId',
     },
     CATEGORIES: {
       LIST: '/store/categories',

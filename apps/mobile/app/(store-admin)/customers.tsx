@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CustomerService } from '@/features/store/services/customer.service';
+import { CustomerBulkUploadModal } from '@/features/store/components/customer-bulk-upload-modal';
 import { useTenantStore } from '@/core/store/tenant.store';
 import type { Customer, CustomerState, CustomerStats, UpdateCustomerDto, CreateCustomerDto } from '@/features/store/types';
 import { Avatar } from '@/shared/components/avatar/avatar';
@@ -189,17 +190,29 @@ export default function CustomersScreen() {
   const [stateFilter, setStateFilter] = useState<CustomerState | undefined>();
   const [page, setPage] = useState(1);
   const storeId = useTenantStore((s) => s.storeId);
+
+  // Sort state
+  type SortField = 'first_name' | 'email' | 'total_orders' | 'last_purchase_at' | 'created_at';
+  type SortDir = 'asc' | 'desc';
+  const [sortField, setSortField] = useState<SortField>('first_name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [showSortPopup, setShowSortPopup] = useState(false);
+
+  const SORT_OPTIONS: { label: string; field: SortField }[] = [
+    { label: 'Cliente', field: 'first_name' },
+    { label: 'Correo', field: 'email' },
+    { label: 'Pedidos', field: 'total_orders' },
+    { label: 'Última compra', field: 'last_purchase_at' },
+    { label: 'Registrado', field: 'created_at' },
+  ];
   const screenW = Dimensions.get('window').width;
   const insets = useSafeAreaInsets();
 
-  // Popups de Acciones (+) y Filtros — estilo web (options-dropdown)
-  const [showActions, setShowActions] = useState(false);
-  const [showFilters, setShowFilters] = useState(false);
+  // Popup unificado de opciones (filtro + acciones) — estilo web
+  const [showOptions, setShowOptions] = useState(false);
   const [showFilterTypeList, setShowFilterTypeList] = useState(false);
-  const actionsBtnRef = useRef<View>(null);
-  const filterBtnRef = useRef<View>(null);
-  const [actionsPos, setActionsPos] = useState({ top: 0, right: 0 });
-  const [filterPos, setFilterPos] = useState({ top: 0, right: 0 });
+  const optionsBtnRef = useRef<View>(null);
+  const [optionsPos, setOptionsPos] = useState({ top: 0, right: 0 });
 
   // Estado del popup "más opciones" por card (Eliminar)
   const [cardMoreAnchor, setCardMoreAnchor] = useState<{ top: number; right: number; item: Customer } | null>(null);
@@ -212,6 +225,9 @@ export default function CustomersScreen() {
 
   // Estado del modal Editar (popup pencil) + form
   const [editTarget, setEditTarget] = useState<Customer | null>(null);
+
+  // Estado del modal de carga masiva
+  const [showBulkUpload, setShowBulkUpload] = useState(false);
   const [editFirstName, setEditFirstName] = useState('');
   const [editLastName, setEditLastName] = useState('');
   const [editEmail, setEditEmail] = useState('');
@@ -220,6 +236,11 @@ export default function CustomersScreen() {
   const [editDocument, setEditDocument] = useState('');
   const [showEditDocTypeDropdown, setShowEditDocTypeDropdown] = useState(false);
   const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [editTaxRegime, setEditTaxRegime] = useState<string>('');
+  const [showEditTaxRegimeDropdown, setShowEditTaxRegimeDropdown] = useState(false);
+  const [editPersonType, setEditPersonType] = useState<string>('');
+  const [showEditPersonTypeDropdown, setShowEditPersonTypeDropdown] = useState(false);
+  const [editIsWithholdingAgent, setEditIsWithholdingAgent] = useState(false);
 
   // Estado del modal Nuevo Cliente (popup) + form
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -231,6 +252,11 @@ export default function CustomersScreen() {
   const [createDocumentNumber, setCreateDocumentNumber] = useState('');
   const [showCreateDocTypeDropdown, setShowCreateDocTypeDropdown] = useState(false);
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
+  const [createTaxRegime, setCreateTaxRegime] = useState<string>('');
+  const [showCreateTaxRegimeDropdown, setShowCreateTaxRegimeDropdown] = useState(false);
+  const [createPersonType, setCreatePersonType] = useState<string>('');
+  const [showCreatePersonTypeDropdown, setShowCreatePersonTypeDropdown] = useState(false);
+  const [createIsWithholdingAgent, setCreateIsWithholdingAgent] = useState(false);
 
   // Tipos de documento (alineado con customer-modal web)
   const CREATE_DOCUMENT_TYPES = [
@@ -239,6 +265,17 @@ export default function CustomersScreen() {
     { value: 'NIT', label: 'NIT' },
     { value: 'PAS', label: 'Pasaporte' },
     { value: 'TI', label: 'Tarjeta de Identidad' },
+  ];
+
+  const TAX_REGIME_OPTIONS = [
+    { value: 'COMUN', label: 'Régimen Común' },
+    { value: 'SIMPLIFICADO', label: 'Régimen Simple' },
+    { value: 'GRAN_CONTRIBUYENTE', label: 'Gran Contribuyente' },
+  ];
+
+  const PERSON_TYPE_OPTIONS = [
+    { value: 'NATURAL', label: 'Persona Natural' },
+    { value: 'JURIDICA', label: 'Persona Jurídica' },
   ];
 
   const { data: stats } = useQuery({
@@ -309,7 +346,37 @@ export default function CustomersScreen() {
     },
   });
 
-  const customers = pageData?.data ?? [];
+  const customers = (pageData?.data ?? []).slice().sort((a, b) => {
+    let aVal: string | number = '';
+    let bVal: string | number = '';
+
+    switch (sortField) {
+      case 'first_name':
+        aVal = `${a.first_name || ''} ${a.last_name || ''}`.toLowerCase();
+        bVal = `${b.first_name || ''} ${b.last_name || ''}`.toLowerCase();
+        break;
+      case 'email':
+        aVal = (a.email || '').toLowerCase();
+        bVal = (b.email || '').toLowerCase();
+        break;
+      case 'total_orders':
+        aVal = Number(a.total_orders ?? 0);
+        bVal = Number(b.total_orders ?? 0);
+        break;
+      case 'last_purchase_at':
+        aVal = a.last_purchase_at || '';
+        bVal = b.last_purchase_at || '';
+        break;
+      case 'created_at':
+        aVal = a.created_at || '';
+        bVal = b.created_at || '';
+        break;
+    }
+
+    if (aVal < bVal) return sortDir === 'asc' ? -1 : 1;
+    if (aVal > bVal) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
   const pagination = pageData?.pagination;
   const totalPages = pagination?.totalPages ?? 1;
 
@@ -342,42 +409,37 @@ export default function CustomersScreen() {
     deleteMutation.mutate(id);
   }, [deleteTarget, deleteMutation]);
 
-  // Abrir popup de Acciones del botón (+) — mide posición
-  const openActions = useCallback(() => {
-    actionsBtnRef.current?.measureInWindow((x, y, w, h) => {
-      setActionsPos({ top: y + h + 6, right: screenW - x - w });
-      setShowActions(true);
-    });
-  }, [screenW]);
-
-  // Abrir popup de Filtros del botón filtro — mide posición
-  const openFilters = useCallback(() => {
-    filterBtnRef.current?.measureInWindow((x, y, w, h) => {
-      setFilterPos({ top: y + h + 6, right: screenW - x - w });
-      setShowFilters(true);
+  // Abrir popup unificado — mide posición del botón sliders
+  const openOptions = useCallback(() => {
+    optionsBtnRef.current?.measureInWindow((x, y, w, h) => {
+      setOptionsPos({ top: y + h + 6, right: screenW - x - w });
+      setShowOptions(true);
       setShowFilterTypeList(false);
     });
   }, [screenW]);
 
-  // Acción: Carga Masiva — mismo `action: 'bulk-upload'` de la web (pendiente para mobile)
+  // Acción: Carga Masiva — abre el wizard de carga masiva
   const handleBulkUpload = useCallback(() => {
-    setShowActions(false);
-    setShowFilters(false);
-    toastError('Carga masiva próximamente disponible');
+    setShowOptions(false);
+    setShowBulkUpload(true);
   }, []);
 
   // Acción: Nuevo Cliente — abre popup modal con el form de creación
   const openCreateModal = useCallback(() => {
-    setShowActions(false);
-    setShowFilters(false);
+    setShowOptions(false);
     setCreateFirstName('');
     setCreateLastName('');
     setCreateEmail('');
     setCreatePhone('');
     setCreateDocumentType('');
     setCreateDocumentNumber('');
+    setCreateTaxRegime('');
+    setCreatePersonType('');
+    setCreateIsWithholdingAgent(false);
     setCreateErrors({});
     setShowCreateDocTypeDropdown(false);
+    setShowCreateTaxRegimeDropdown(false);
+    setShowCreatePersonTypeDropdown(false);
     setCreateModalOpen(true);
   }, []);
 
@@ -420,6 +482,9 @@ export default function CustomersScreen() {
       phone: createPhone.trim() || undefined,
       document_type: createDocumentType || undefined,
       document_number: createDocumentNumber.trim() || undefined,
+      tax_regime: createTaxRegime || undefined,
+      person_type: createPersonType || undefined,
+      is_withholding_agent: createIsWithholdingAgent,
     };
     createMutation.mutate(dto);
   }, [createFirstName, createLastName, createEmail, createPhone, createDocumentType, createDocumentNumber, createMutation]);
@@ -567,20 +632,12 @@ export default function CustomersScreen() {
                 )}
               </View>
               <Pressable
-                ref={actionsBtnRef}
-                onPress={openActions}
+                ref={optionsBtnRef}
+                onPress={openOptions}
                 style={styles.iconBtn}
                 hitSlop={6}
               >
-                <Icon name="plus" size={20} color={colors.primary} />
-              </Pressable>
-              <Pressable
-                ref={filterBtnRef}
-                onPress={openFilters}
-                style={styles.iconBtn}
-                hitSlop={6}
-              >
-                <Icon name="filter" size={18} color={colors.primary} />
+                <Icon name="sliders" size={18} color={colors.primary} />
               </Pressable>
             </View>
           </View>
@@ -633,42 +690,19 @@ export default function CustomersScreen() {
         contentContainerStyle={[styles.listContent, { paddingBottom: insets.bottom + spacing[6] }]}
       />
 
-      {/* Popup de Acciones (botón +) — dropdownActions web: Carga Masiva + Nuevo Cliente */}
-      <Modal visible={showActions} transparent animationType="fade" onRequestClose={() => setShowActions(false)}>
-        <Pressable style={styles.dropdownBackdrop} onPress={() => setShowActions(false)} />
-        <View style={[styles.dropdownPositioner, { top: actionsPos.top, right: actionsPos.right }]}>
-          <View style={[styles.dropdownArrow, { marginRight: 14 }]} />
-          <View style={styles.dropdown}>
-            <Pressable style={styles.dropdownItem} onPress={handleBulkUpload}>
-              <View style={styles.dropdownIconWrap}>
-                <Ionicons name="cloud-upload-outline" size={18} color={colorScales.gray[500]} />
-              </View>
-              <Text style={styles.dropdownItemText}>Carga Masiva</Text>
-            </Pressable>
-            <View style={styles.dropdownDivider} />
-            <Pressable style={styles.dropdownItem} onPress={openCreateModal}>
-              <View style={[styles.dropdownIconWrap, { backgroundColor: colorScales.green[50] }]}>
-                <Ionicons name="add-outline" size={18} color={colors.primary} />
-              </View>
-              <Text style={styles.dropdownItemPrimary}>Nuevo Cliente</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-
-      {/* Popup de Filtros (botón filtro) — options-dropdown web: Filtros (Estado) + Acciones */}
+      {/* Popup unificado (botón sliders) — Filtros + Carga Masiva + Nuevo Cliente */}
       <Modal
-        visible={showFilters}
+        visible={showOptions}
         transparent
         animationType="fade"
-        onRequestClose={() => { setShowFilters(false); setShowFilterTypeList(false); }}
+        onRequestClose={() => { setShowOptions(false); setShowFilterTypeList(false); }}
       >
         <Pressable
           style={styles.dropdownBackdrop}
-          onPress={() => { setShowFilters(false); setShowFilterTypeList(false); }}
+          onPress={() => { setShowOptions(false); setShowFilterTypeList(false); }}
         />
-        <View style={[styles.dropdownPositioner, { top: filterPos.top, right: filterPos.right }]}>
-          <View style={[styles.dropdownArrow, { marginRight: Math.max(filterPos.right, 14) }]} />
+        <View style={[styles.dropdownPositioner, { top: optionsPos.top, right: optionsPos.right }]}>
+          <View style={[styles.dropdownArrow, { marginRight: Math.max(optionsPos.right, 14) }]} />
           <View style={styles.filterPopup}>
             {/* Header: Filtros */}
             <View style={styles.filterPopupHeader}>
@@ -703,7 +737,7 @@ export default function CustomersScreen() {
                         setStateFilter(opt.value);
                         setPage(1);
                         setShowFilterTypeList(false);
-                        setShowFilters(false);
+                        setShowOptions(false);
                       }}
                     >
                       <Text
@@ -1177,6 +1211,124 @@ export default function CustomersScreen() {
                   />
                 </View>
               </View>
+
+              {/* Régimen tributario + Tipo de persona (row) */}
+              <View style={styles.editRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.createFormLabel}>RÉGIMEN TRIBUTARIO</Text>
+                  <Pressable
+                    style={[styles.createInput, styles.createSelectTrigger]}
+                    onPress={() => setShowCreateTaxRegimeDropdown((v) => !v)}
+                  >
+                    <Text style={[
+                      styles.createSelectText,
+                      !createTaxRegime && styles.createSelectPlaceholder,
+                    ]}>
+                      {TAX_REGIME_OPTIONS.find((d) => d.value === createTaxRegime)?.label
+                        || 'Seleccionar'}
+                    </Text>
+                    <Ionicons
+                      name={showCreateTaxRegimeDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colorScales.gray[500]}
+                    />
+                  </Pressable>
+                  {showCreateTaxRegimeDropdown && (
+                    <View style={styles.createSelectDropdown}>
+                      {TAX_REGIME_OPTIONS.map((d) => (
+                        <Pressable
+                          key={d.value}
+                          onPress={() => {
+                            setCreateTaxRegime(d.value);
+                            setShowCreateTaxRegimeDropdown(false);
+                          }}
+                          style={[
+                            styles.createSelectOption,
+                            createTaxRegime === d.value && styles.editStateChipActive,
+                          ]}
+                        >
+                          <Text style={[
+                            styles.createSelectOptionText,
+                            createTaxRegime === d.value && styles.editStateChipTextActive,
+                          ]}>
+                            {d.label}
+                          </Text>
+                          {createTaxRegime === d.value && (
+                            <Ionicons name="checkmark" size={16} color={colors.primary} />
+                          )}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.createFormLabel}>TIPO DE PERSONA</Text>
+                  <Pressable
+                    style={[styles.createInput, styles.createSelectTrigger]}
+                    onPress={() => setShowCreatePersonTypeDropdown((v) => !v)}
+                  >
+                    <Text style={[
+                      styles.createSelectText,
+                      !createPersonType && styles.createSelectPlaceholder,
+                    ]}>
+                      {PERSON_TYPE_OPTIONS.find((d) => d.value === createPersonType)?.label
+                        || 'Seleccionar'}
+                    </Text>
+                    <Ionicons
+                      name={showCreatePersonTypeDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colorScales.gray[500]}
+                    />
+                  </Pressable>
+                  {showCreatePersonTypeDropdown && (
+                    <View style={styles.createSelectDropdown}>
+                      {PERSON_TYPE_OPTIONS.map((d) => (
+                        <Pressable
+                          key={d.value}
+                          onPress={() => {
+                            setCreatePersonType(d.value);
+                            setShowCreatePersonTypeDropdown(false);
+                          }}
+                          style={[
+                            styles.createSelectOption,
+                            createPersonType === d.value && styles.editStateChipActive,
+                          ]}
+                        >
+                          <Text style={[
+                            styles.createSelectOptionText,
+                            createPersonType === d.value && styles.editStateChipTextActive,
+                          ]}>
+                            {d.label}
+                          </Text>
+                          {createPersonType === d.value && (
+                            <Ionicons name="checkmark" size={16} color={colors.primary} />
+                          )}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* Agente de retención */}
+              <Pressable
+                style={styles.toggleRow}
+                onPress={() => setCreateIsWithholdingAgent((v) => !v)}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.createFormLabel}>AGENTE DE RETENCIÓN</Text>
+                  <Text style={styles.toggleHint}>Responsable de retener impuestos en compras</Text>
+                </View>
+                <View style={[
+                  styles.toggle,
+                  createIsWithholdingAgent && styles.toggleActive,
+                ]}>
+                  <View style={[
+                    styles.toggleThumb,
+                    createIsWithholdingAgent && styles.toggleThumbActive,
+                  ]} />
+                </View>
+              </Pressable>
             </ScrollView>
 
             {/* Footer: Cancelar + Crear — estilo web */}
@@ -1198,6 +1350,16 @@ export default function CustomersScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal Carga Masiva de Clientes — wizard 3 pasos */}
+      <CustomerBulkUploadModal
+        visible={showBulkUpload}
+        onClose={() => setShowBulkUpload(false)}
+        onUploadComplete={() => {
+          queryClient.invalidateQueries({ queryKey: ['customers'] });
+          queryClient.invalidateQueries({ queryKey: ['customer-stats'] });
+        }}
+      />
     </View>
   );
 }
@@ -1217,12 +1379,14 @@ const styles = StyleSheet.create({
     backgroundColor: colorScales.gray[50],
   },
   title: {
-    fontSize: typography.fontSize.base,
+    fontSize: 13,
     fontWeight: typography.fontWeight.bold as any,
-    color: colorScales.gray[900],
+    color: colorScales.gray[600],
     marginTop: spacing[3],
     marginBottom: spacing[2],
     paddingHorizontal: spacing[4],
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   searchRow: {
     flexDirection: 'row',
@@ -1942,5 +2106,39 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold as any,
     color: colorScales.red[600],
+  },
+
+  /* Toggle (agente de retención) */
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    paddingVertical: spacing[2],
+  },
+  toggleHint: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  toggle: {
+    width: 48,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colorScales.gray[300],
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleActive: {
+    backgroundColor: colors.primary,
+  },
+  toggleThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.background,
+    alignSelf: 'flex-start',
+  },
+  toggleThumbActive: {
+    alignSelf: 'flex-end',
   },
 });
