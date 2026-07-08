@@ -328,9 +328,13 @@ export class ProviderAvailabilityService {
   }
 
   private getDatesInRange(from: string, to: string): Date[] {
+    // Guard: date_to must be >= date_from. The frontend clamps user input,
+    // but direct API calls (integrations, scripts) could send inverted
+    // ranges and silently get []. Clamp to surface a meaningful result.
+    const effectiveTo = to < from ? from : to;
     const dates: Date[] = [];
     const cur = new Date(from);
-    const end = new Date(to);
+    const end = new Date(effectiveTo);
     while (cur <= end) {
       dates.push(new Date(cur));
       cur.setUTCDate(cur.getUTCDate() + 1);
