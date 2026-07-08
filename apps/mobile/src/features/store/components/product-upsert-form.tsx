@@ -14,6 +14,8 @@ import {
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { InventoryService, ProductService, PromotionsService } from '@/features/store/services';
+import { SerialNumbersService } from '@/features/store/services/serial-numbers.service';
+import { SerialNumbersManagerModal } from '@/features/store/components/serial-numbers-manager-modal';
 import type {
   Brand,
   CreateProductDto,
@@ -407,6 +409,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const [localTaxes, setLocalTaxes] = useState<TaxCategory[]>([]);
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
   const [imageEditorUri, setImageEditorUri] = useState<string | null>(null);
+  const [serialModalOpen, setSerialModalOpen] = useState(false);
   // Breakpoint para UoM grid (1 col en mobile, 1fr_auto_1fr en md+).
   const { width: screenW } = useWindowDimensions();
   const isMdUp = screenW >= 768;
@@ -426,6 +429,15 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     queryKey: ['product', productId],
     queryFn: () => ProductService.getById(Number(productId)),
     enabled: mode === 'edit' && !!productId,
+  });
+
+  // Resumen del pool de seriales del producto (totales por estado).
+  // Sólo se carga cuando requires_serial_numbers está activo y el
+  // producto ya existe (modo edit). En create, el pool nace vacío.
+  const { data: serialSummary } = useQuery({
+    queryKey: ['serial-numbers-summary', productId],
+    queryFn: () => SerialNumbersService.summary(Number(productId)),
+    enabled: mode === 'edit' && !!productId && !!form.requires_serial_numbers,
   });
 
   const { data: categories = [] } = useQuery({
@@ -490,14 +502,16 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
 
   const locations = locationsResponse?.data ?? [];
 
-  // Stock consolidado del producto — sólo se carga al abrir el popup
-  // 'Detalle de Inventario' (lazy) para no penalizar el render del form.
+  // Stock consolidado del producto — se carga al abrir el form de edit
+  // para alimentar las 4 stats (En inv/Disponible/Reservado/Ubicaciones).
+  // Re-fetcheo automático al cerrar el modal de detalle (staleTime: 0).
   const consolidatedStockQuery = useQuery({
     queryKey: ['consolidated-stock', productId],
     queryFn: () => InventoryService.getConsolidatedStock(Number(productId)),
-    enabled: mode === 'edit' && !!productId && showStockDetailModal,
-    staleTime: 0,
+    enabled: mode === 'edit' && !!productId,
+    staleTime: 30_000,
   });
+  const consolidatedStock = consolidatedStockQuery.data;
 
   useEffect(() => {
     if (!product) return;
@@ -2090,6 +2104,15 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
             }}
           />
 
+          {mode === 'edit' && productId ? (
+            <SerialNumbersManagerModal
+              visible={serialModalOpen}
+              onClose={() => setSerialModalOpen(false)}
+              productId={productId}
+              productName={form.name}
+            />
+          ) : null}
+
           {/* Modal: Configurar producto (espejo web pop-product-config-modal)
               - Se abre desde el botón 'Inventario' del modal Stock
               - Header: "Configurar producto" + subtítulo con nombre
@@ -2248,13 +2271,33 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           <Section title="Inventario / Stock" icon="archive">
             <View style={styles.inventoryStatsGrid}>
               <View style={styles.inventoryStatCard}>
-                <Text style={styles.inventoryStatLabel}>Físico</Text>
-                <Text style={styles.inventoryStatValue}>{totalStock.toLocaleString('es-CO')}</Text>
+                <Text style={styles.inventoryStatLabel}>En inv.</Text>
+                <Text style={styles.inventoryStatValue}>
+                  {consolidatedStock
+                    ? consolidatedStock.totalOnHand.toLocaleString('es-CO')
+                    : totalStock.toLocaleString('es-CO')}
+                </Text>
               </View>
               <View style={styles.inventoryStatCard}>
                 <Text style={styles.inventoryStatLabel}>Disponible</Text>
                 <Text style={[styles.inventoryStatValue, styles.inventoryStatValuePrimary]}>
-                  {availableStock.toLocaleString('es-CO')}
+                  {consolidatedStock
+                    ? consolidatedStock.totalAvailable.toLocaleString('es-CO')
+                    : availableStock.toLocaleString('es-CO')}
+                </Text>
+              </View>
+              <View style={styles.inventoryStatCard}>
+                <Text style={styles.inventoryStatLabel}>Reservado</Text>
+                <Text style={[styles.inventoryStatValue, styles.inventoryStatValueAmber]}>
+                  {(consolidatedStock?.totalReserved ?? 0).toLocaleString('es-CO')}
+                </Text>
+              </View>
+              <View style={styles.inventoryStatCard}>
+                <Text style={styles.inventoryStatLabel}>Ubicaciones</Text>
+                <Text style={styles.inventoryStatValue}>
+                  {consolidatedStock
+                    ? consolidatedStock.stockByLocation.filter((l) => l.onHand > 0).length
+                    : Object.values(form.stock_by_location).filter((v) => Number(v) > 0).length}
                 </Text>
               </View>
             </View>
@@ -2355,9 +2398,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                     <Icon name="settings" size={16} color={colors.background} />
                   }
                   disabled={!(mode === 'edit' && !!productId)}
-                  onPress={() =>
-                    toastSuccess('Gestionar seriales próximamente')
-                  }
+                  onPress={() => setSerialModalOpen(true)}
                 />
               </View>
 
@@ -2365,19 +2406,27 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 <View style={styles.serialStatsGrid}>
                   <View style={[styles.serialStatCell, isMdUp && styles.serialStatCellMd]}>
                     <Text style={styles.serialStatLabel}>Total</Text>
-                    <Text style={styles.serialStatValuePrimary}>0</Text>
+                    <Text style={styles.serialStatValuePrimary}>
+                      {serialSummary?.total ?? 0}
+                    </Text>
                   </View>
                   <View style={[styles.serialStatCell, isMdUp && styles.serialStatCellMd]}>
                     <Text style={styles.serialStatLabel}>En stock</Text>
-                    <Text style={styles.serialStatValuePrimary700}>0</Text>
+                    <Text style={styles.serialStatValuePrimary700}>
+                      {serialSummary?.in_stock ?? 0}
+                    </Text>
                   </View>
                   <View style={[styles.serialStatCell, isMdUp && styles.serialStatCellMd]}>
                     <Text style={styles.serialStatLabel}>Vendidos</Text>
-                    <Text style={styles.serialStatValuePrimary}>0</Text>
+                    <Text style={styles.serialStatValuePrimary}>
+                      {serialSummary?.sold ?? 0}
+                    </Text>
                   </View>
                   <View style={[styles.serialStatCell, isMdUp && styles.serialStatCellMd]}>
                     <Text style={styles.serialStatLabel}>Garantía por vencer</Text>
-                    <Text style={styles.serialStatValueMuted}>0</Text>
+                    <Text style={styles.serialStatValueMuted}>
+                      {serialSummary?.warranty_expiring_soon ?? 0}
+                    </Text>
                   </View>
                 </View>
               ) : null}
@@ -4416,6 +4465,7 @@ const styles = StyleSheet.create({
   // ── Inventario / Stock (espejo web lg:hidden) ────────────────────────────
   inventoryStatsGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: spacing[2],
   },
   inventoryStatCard: {
@@ -4442,6 +4492,9 @@ const styles = StyleSheet.create({
   },
   inventoryStatValuePrimary: {
     color: colors.primary,
+  },
+  inventoryStatValueAmber: {
+    color: colorScales.amber[700],
   },
   inventoryActionButton: {
     flex: 1,
