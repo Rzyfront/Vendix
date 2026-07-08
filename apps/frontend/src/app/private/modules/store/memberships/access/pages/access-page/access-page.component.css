@@ -291,3 +291,44 @@
   border-top: 1px solid var(--color-border, #eceef1);
   padding-top: 14px;
 }
+
+/* ─── Anot 4: polish fingerprint config shell ───────────────────────────── */
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 20px;
+  margin-top: 4px;
+}
+@media (max-width: 720px) {
+  .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+.form-grid-2 app-input {
+  min-width: 0;
+}
+/* Invalid styling for the shared <app-input> wrapper. */
+app-input ::ng-deep input.is-invalid {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+}
+.aforo-field-hint--err {
+  display: block;
+  margin: -8px 0 4px;
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 500;
+}
+.aforo-dirty-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(217, 119, 6, 0.10);
+  color: #b45309;
+  font-size: 13px;
+  font-weight: 500;
+  width: max-content;
+}

@@ -417,7 +417,10 @@
         </div>
 
         @if (cfgFingerprintReaderType() === 'template_sdk') {
-          <label class="aforo-field-label">Proveedor SDK</label>
+          <label class="aforo-field-label">
+            <app-icon name="dns" [size]="16"></app-icon>
+            Proveedor SDK
+          </label>
           <div class="aforo-interval">
             <button
               type="button"
@@ -444,38 +447,95 @@
               Genérico HTTP
             </button>
           </div>
+          <p class="aforo-field-hint">
+            Define el formato del request/response del adapter.
+          </p>
 
-          <label class="aforo-field-label">Endpoint del adapter</label>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="https://adapter.example.com/identify"
-            [value]="cfgFingerprintEndpoint()"
-            (input)="onFingerprintEndpointInput($any($event.target).value)"
-          />
+          <div class="form-grid form-grid-2">
+            <app-input
+              [formControl]="fcFingerprintEndpoint"
+              label="Endpoint del adapter"
+              type="url"
+              inputmode="url"
+              autocomplete="off"
+              spellcheck="false"
+              [placeholder]="cfgEndpointPlaceholder()"
+              [helperText]="cfgEndpointHint()"
+              [customInputClass]="cfgFingerprintEndpoint().trim() && cfgEndpointValid() === false ? 'is-invalid' : ''"
+              [tooltipText]="cfgEndpointPlaceholder()"
+              (inputChange)="onFingerprintEndpointInput($event)"
+            >
+              <app-icon slot="prefix-icon" name="external-link" [size]="16"></app-icon>
+            </app-input>
+            @if (cfgFingerprintEndpoint().trim() && cfgEndpointValid() === false) {
+              <p class="aforo-field-hint--err">URL debe incluir http(s) y un host válido.</p>
+            }
 
-          <label class="aforo-field-label">Referencia de API key</label>
-          <input
-            class="form-input"
-            type="text"
-            placeholder="adapter_api_key_ref"
-            [value]="cfgFingerprintApiKeyRef()"
-            (input)="onFingerprintApiKeyRefInput($any($event.target).value)"
-          />
+            <app-input
+              [formControl]="fcFingerprintApiKeyRef"
+              label="Referencia de API key"
+              [type]="cfgFingerprintApiKeyVisible() ? 'text' : 'password'"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="adapter_api_key_ref"
+              helperText="Referencia (no la key en sí). La key real vive en el secreto del adapter."
+              [suffixIcon]="true"
+              [suffixClickable]="true"
+              (suffixClick)="toggleApiKeyVisibility()"
+              (inputChange)="onFingerprintApiKeyRefInput($event)"
+            >
+              <app-icon slot="prefix-icon" name="key-round" [size]="16"></app-icon>
+              <app-icon
+                slot="suffix-icon"
+                [name]="cfgFingerprintApiKeyVisible() ? 'eye-off' : 'eye'"
+                [size]="16"
+              ></app-icon>
+            </app-input>
 
-          <label class="aforo-field-label">Timeout (ms)</label>
-          <input
-            class="form-input"
-            type="number"
-            min="0"
-            placeholder="5000"
-            [value]="cfgFingerprintTimeout() ?? ''"
-            (input)="onFingerprintTimeoutInput($any($event.target).value)"
-          />
+            <app-input
+              [formControl]="fcFingerprintTimeout"
+              label="Timeout (ms)"
+              type="number"
+              [min]="100"
+              [max]="60000"
+              step="100"
+              placeholder="5000"
+              helperText="Rango válido: 100–60000 ms. Default recomendado: 5000 ms."
+              [customInputClass]="cfgFingerprintTimeout() != null && !cfgTimeoutValid() ? 'is-invalid' : ''"
+              (inputChange)="onFingerprintTimeoutInput($event)"
+            >
+              <app-icon slot="prefix-icon" name="timer" [size]="16"></app-icon>
+            </app-input>
+            @if (cfgFingerprintTimeout() != null && !cfgTimeoutValid()) {
+              <p class="aforo-field-hint--err">Fuera de rango (100–60000).</p>
+            }
+
+            <app-input
+              [formControl]="fcFingerprintVerifyTimeout"
+              label="Timeout de verificación (ms)"
+              type="number"
+              [min]="100"
+              [max]="30000"
+              step="100"
+              placeholder="2000"
+              helperText="Tiempo máximo para confirmar identidad post-match. Rango: 100–30000 ms."
+              [customInputClass]="cfgFingerprintVerifyTimeout() != null && !cfgVerifyTimeoutValid() ? 'is-invalid' : ''"
+              (inputChange)="onFingerprintVerifyTimeoutInput($event)"
+            >
+              <app-icon slot="prefix-icon" name="shield-check" [size]="16"></app-icon>
+            </app-input>
+          </div>
         } @else {
           <p class="text-text-secondary">
             El lector emite un ID directamente. No se requiere configuración
             adicional.
+          </p>
+        }
+
+        @if (cfgConfigDirty()) {
+          <p class="aforo-dirty-badge" role="status">
+            <app-icon name="alert-circle" [size]="14"></app-icon>
+            Tienes cambios sin guardar.
           </p>
         }
       </div>
