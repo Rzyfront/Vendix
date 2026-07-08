@@ -317,9 +317,6 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     marginBottom: spacing[3],
   },
-  container: {
-    flex: 1,
-  },
   chartWrapper: {
     paddingTop: spacing[2],
   },
