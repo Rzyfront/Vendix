@@ -98,6 +98,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Binding form controls in Angular templates | `vendix-angular-forms` |
 | Bootstrapping local Linear credentials for Vendix | `linear-connect` |
 | Branching off or rebasing onto origin/dev before work | `git-workflow` |
+| Bringing a mobile modal/screen to 'look exactly like' the web | `mobile-parity-audit` |
 | Building a granular functional inventory of a web module for mobile replication | `mobile-parity-audit` |
 | Building an HTML slide-deck of bugs found and tickets validated in a sprint window | `qa-report` |
 | Business analysis for changes that directly affect the app economic activity | `vendix-business-analysis` |
@@ -114,6 +115,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Choosing between viable architectural approaches | `how-to-plan` |
 | Choosing test credentials from seeds or asking the user | `how-to-test` |
 | Code changes, feature work, fixes, refactors, or development execution | `how-to-dev` |
+| Comparing visual parity (look-and-feel) between web and mobile | `mobile-parity-audit` |
 | Complex plans requiring delegated agent work | `agent-teams` |
 | Computing partner margin, fixed surcharge, or effective price | `vendix-saas-billing` |
 | Configuring AI providers or applications | `vendix-ai-engine` |
@@ -228,6 +230,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Mapping PILA novelties ING/RET/VSP/LMA/IGE/VAC/IRL | `vendix-pila-flatfile` |
 | Mapping store_subscription_state_enum to allow/warn/block | `vendix-subscription-gate` |
 | Migrating legacy Angular patterns (BehaviorSubject, take(1).subscribe) to Signals | `vendix-zoneless-signals` |
+| Mirroring the web's visual style on mobile | `mobile-parity-audit` |
 | Modifying StockLevelManager service | `vendix-inventory-stock` |
 | Modifying auto-entry event handlers | `vendix-auto-entries` |
 | Modifying package.json | `vendix-monorepo-workspaces` |

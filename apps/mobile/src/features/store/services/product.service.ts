@@ -65,14 +65,6 @@ export const ProductService = {
       include_inactive: query?.include_inactive,
       pos_optimized: query?.pos_optimized,
       include_variants: query?.include_variants,
-      // Paridad web `pos-product-search.component` (min/max price, sort,
-      // in-stock). Backend actual puede ignorarlos (DTO no los declara);
-      // el cliente aplica fallback local en `pos/index.tsx`.
-      min_price: query?.min_price,
-      max_price: query?.max_price,
-      in_stock: query?.in_stock,
-      sort_by: query?.sort_by,
-      sort_order: query?.sort_order,
     };
     const res = await apiClient.get(`${Endpoints.STORE.PRODUCTS.LIST}${buildQuery(params)}`);
     return unwrapPaginated<Product>(res, { page: query?.page ?? 1, limit: query?.limit ?? 20 });
@@ -430,6 +422,19 @@ export const ProductService = {
       { session_id: sessionId },
     );
     return unwrap<BulkImageUploadResult>(res);
+  },
+
+  /**
+   * Cancela una sesión de análisis bulk-images sin ejecutar el upload.
+   * Llamado en cleanup si el usuario cierra el wizard a mitad de flujo.
+   */
+  async cancelBulkImageSession(sessionId: string): Promise<void> {
+    await apiClient.delete(
+      Endpoints.STORE.PRODUCTS.BULK_IMAGES_CANCEL_SESSION.replace(
+        ':sessionId',
+        sessionId,
+      ),
+    );
   },
 };
 

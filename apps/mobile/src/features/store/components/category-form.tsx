@@ -18,6 +18,7 @@ import {
   Toggle,
 } from '@/shared/components';
 import { Icon } from '@/shared/components/icon/icon';
+import { LightboxImageTap } from '@/features/store/components/image-lightbox';
 import {
   ImageSourceModal,
   type UploadedImage,
@@ -128,7 +129,7 @@ export function CategoryForm({ mode, categoryId, onClose }: CategoryFormProps) {
       return CategoryService.create(payload as CreateCategoryDto);
     },
     onSuccess: () => {
-      toastSuccess(isEdit ? 'Categoría actualizada' : 'Categoría creada');
+      toastSuccess(isEdit ? 'Categoría actualizada exitosamente' : 'Categoría creada exitosamente');
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       queryClient.invalidateQueries({ queryKey: ['categories-stats'] });
       queryClient.invalidateQueries({ queryKey: ['product-categories'] });
