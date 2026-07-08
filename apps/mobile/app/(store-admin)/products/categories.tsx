@@ -61,7 +61,7 @@ export default function CategoriesListScreen() {
   const total = data?.pagination?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useMutation<void, Error, { id: number; force?: boolean }>({
     mutationFn: ({ id, force = false }) =>
       CategoryService.delete(id, force),
     onSuccess: () => {
@@ -73,10 +73,10 @@ export default function CategoriesListScreen() {
       setForceConfirm(null);
     },
     onError: (err, vars) => {
-      const data = err?.response?.data;
-      const code = data?.error?.code ?? data?.code;
-      if (code === 'CAT_DELETE_HAS_PRODUCTS' && !vars.force && deleteTarget) {
-        const productCount = data?.error?.details?.product_count ?? data?.details?.product_count ?? 0;
+      const errData = (err as any)?.response?.data;
+      const code = errData?.error?.code;
+      if (code === 'CAT_DELETE_HAS_PRODUCTS' && !vars?.force && deleteTarget) {
+        const productCount = errData?.error?.details?.product_count ?? 0;
         setForceConfirm({ category: deleteTarget, productCount });
         setDeleteTarget(null);
         return;
@@ -86,7 +86,7 @@ export default function CategoriesListScreen() {
     },
   });
 
-  const toggleFeaturedMutation = useMutation({
+  const toggleFeaturedMutation = useMutation<ProductCategory, Error, { id: number; is_featured: boolean }>({
     mutationFn: ({ id, is_featured }) =>
       CategoryService.update(id, { is_featured }),
     onSuccess: (_data, vars) => {
@@ -134,46 +134,36 @@ export default function CategoriesListScreen() {
             />
           </View>
           <OptionsDropdown
-            filters={[
+            filterSections={[
               {
-                key: 'state',
                 label: 'Estado',
-                type: 'select',
                 options: [
-                  { value: 'all', label: 'Todas' },
-                  { value: 'active', label: 'Activas' },
-                  { value: 'inactive', label: 'Inactivas' },
+                  { label: 'Todas', value: 'all' },
+                  { label: 'Activas', value: 'active' },
+                  { label: 'Inactivas', value: 'inactive' },
                 ],
+                onSelect: (value) => {
+                  setStateFilter(
+                    !value || value === 'all' ? undefined : (value as CategoryState),
+                  );
+                  setPage(1);
+                },
               },
               {
-                key: 'featured',
                 label: 'Destacadas',
-                type: 'select',
                 options: [
-                  { value: 'all', label: 'Todas' },
-                  { value: 'true', label: 'Destacadas' },
-                  { value: 'false', label: 'No destacadas' },
+                  { label: 'Todas', value: 'all' },
+                  { label: 'Destacadas', value: 'true' },
+                  { label: 'No destacadas', value: 'false' },
                 ],
+                onSelect: (value) => {
+                  setFeaturedFilter(
+                    !value || value === 'all' ? undefined : value === 'true',
+                  );
+                  setPage(1);
+                },
               },
             ]}
-            filterValues={{
-              state: stateFilter ?? 'all',
-              featured:
-                featuredFilter === undefined ? 'all' : featuredFilter ? 'true' : 'false',
-            }}
-            onFilterChange={(values) => {
-              const stateVal = values.state;
-              const featuredVal = values.featured;
-              setStateFilter(
-                !stateVal || stateVal === 'all' ? undefined : (stateVal as CategoryState),
-              );
-              setFeaturedFilter(
-                !featuredVal || featuredVal === 'all'
-                  ? undefined
-                  : featuredVal === 'true',
-              );
-              setPage(1);
-            }}
             actions={canCreate ? [
               {
                 label: 'Nueva Categoría',
@@ -406,7 +396,6 @@ function CategoryCard({
             name="star"
             size={18}
             color={category.is_featured ? colors.warning : colors.text.muted}
-            fill={category.is_featured ? colors.warning : 'transparent'}
           />
         </Pressable>
       ) : null}
