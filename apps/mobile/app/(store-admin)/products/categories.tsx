@@ -276,7 +276,6 @@ export default function CategoriesListScreen() {
         destructive
         loading={deleteMutation.isPending}
       />
-    </
 
       <ConfirmDialog
         visible={!!forceConfirm}
