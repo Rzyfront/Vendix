@@ -6,7 +6,7 @@ import {
   OnInit,
   signal,
 } from '@angular/core';
-import { FormsModule } from '@angular/forms';
+import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -47,6 +47,7 @@ import { MembershipAccessService } from '../../services';
 import { MembershipCredentialFormModalComponent } from '../../components/credential-form-modal/credential-form-modal.component';
 import { AforoGaugeComponent } from '../../components/aforo-gauge/aforo-gauge.component';
 import { AforoCheckinPanelComponent } from '../../components/aforo-checkin-panel/aforo-checkin-panel.component';
+import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { MembershipAmbientAccessService } from '../../../../../../../core/services/membership-ambient-access.service';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsService } from '../../../../settings/general/services/store-settings.service';
@@ -62,6 +63,7 @@ type AccessTab = 'aforo' | 'logs' | 'credentials' | 'configuracion';
   standalone: true,
   imports: [
     FormsModule,
+    ReactiveFormsModule,
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
@@ -75,6 +77,7 @@ type AccessTab = 'aforo' | 'logs' | 'credentials' | 'configuracion';
     MembershipCredentialFormModalComponent,
     AforoGaugeComponent,
     AforoCheckinPanelComponent,
+    InputComponent,
   ],
   templateUrl: './access-page.component.html',
   styleUrl: './access-page.component.css',
@@ -168,6 +171,81 @@ export class MembershipAccessPageComponent implements OnInit {
   readonly cfgFingerprintEndpoint = signal<string>('');
   readonly cfgFingerprintApiKeyRef = signal<string>('');
   readonly cfgFingerprintTimeout = signal<number | null>(null);
+  readonly cfgFingerprintVerifyTimeout = signal<number | null>(null);
+  readonly cfgFingerprintApiKeyVisible = signal(false);
+  /** FormControls wired to `<app-input>` (CVA) — sync'd with the signals above. */
+  readonly fcFingerprintEndpoint = new FormControl<string>('', { nonNullable: true });
+  readonly fcFingerprintApiKeyRef = new FormControl<string>('', { nonNullable: true });
+  readonly fcFingerprintTimeout = new FormControl<number | null>(null);
+  readonly fcFingerprintVerifyTimeout = new FormControl<number | null>(null);
+  /** Snapshot of persisted config so the shell can show "cambios sin guardar". */
+  private cfgFingerprintPersisted = signal<{
+    reader_type: 'id_wrapper' | 'template_sdk';
+    sdk_provider: 'zkteco' | 'digitalpersona' | 'generic_http' | null;
+    endpoint: string;
+    api_key_ref: string;
+    timeout_ms: number | null;
+    verify_timeout_ms: number | null;
+  } | null>(null);
+
+  /** URL must be http(s) and look like a real endpoint (host + path or domain). */
+  readonly cfgEndpointValid = computed(() => {
+    const v = this.cfgFingerprintEndpoint().trim();
+    if (!v) return null;
+    return /^https?:\/\/[\w.-]+(?::\d+)?(\/[\w./?=&%-]*)?$/i.test(v);
+  });
+  readonly cfgTimeoutValid = computed(() => {
+    const t = this.cfgFingerprintTimeout();
+    return t == null || (Number.isFinite(t) && t >= 100 && t <= 60_000);
+  });
+  readonly cfgVerifyTimeoutValid = computed(() => {
+    const t = this.cfgFingerprintVerifyTimeout();
+    return t == null || (Number.isFinite(t) && t >= 100 && t <= 30_000);
+  });
+  readonly cfgConfigDirty = computed(() => {
+    const p = this.cfgFingerprintPersisted();
+    if (!p) return this.cfgFingerprintReaderType() !== 'id_wrapper';
+    return (
+      p.reader_type !== this.cfgFingerprintReaderType() ||
+      p.sdk_provider !== this.cfgFingerprintSdkProvider() ||
+      p.endpoint !== this.cfgFingerprintEndpoint().trim() ||
+      p.api_key_ref !== this.cfgFingerprintApiKeyRef().trim() ||
+      p.timeout_ms !== this.cfgFingerprintTimeout() ||
+      p.verify_timeout_ms !== this.cfgFingerprintVerifyTimeout()
+    );
+  });
+  readonly cfgCanSave = computed(() => {
+    if (this.savingAccessConfig()) return false;
+    if (!this.cfgConfigDirty()) return false;
+    if (this.cfgFingerprintReaderType() !== 'template_sdk') return true;
+    return (
+      !!this.cfgFingerprintSdkProvider() &&
+      this.cfgEndpointValid() === true &&
+      this.cfgTimeoutValid() &&
+      this.cfgVerifyTimeoutValid()
+    );
+  });
+  /** Per-SDK hint shown below the endpoint input. */
+  readonly cfgEndpointHint = computed(() => {
+    const p = this.cfgFingerprintSdkProvider();
+    switch (p) {
+      case 'zkteco':
+        return 'URL del servicio de identificación ZKTeco (puerto 8080 típico).';
+      case 'digitalpersona':
+        return 'URL del endpoint del DigitalPersona SDK adapter.';
+      case 'generic_http':
+        return 'POST multipart con campo "template" + recibe { id, confidence }.';
+      default:
+        return 'URL del adapter o SDK.';
+    }
+  });
+  /** Effective placeholder for endpoint, contextual to SDK. */
+  readonly cfgEndpointPlaceholder = computed(() => {
+    const p = this.cfgFingerprintSdkProvider();
+    if (p === 'zkteco') return 'http://192.168.1.50:8080/identify';
+    if (p === 'digitalpersona') return 'https://adapter.example.com/dp/identify';
+    return 'https://adapter.example.com/identify';
+  });
 
   /** Turnstile ⊕ auto-leveling: the turnstile controls entries/exits itself. */
   readonly levelingDisabled = computed(() => this.cfgTurnstile());
@@ -234,6 +312,7 @@ export class MembershipAccessPageComponent implements OnInit {
           icon: 'save',
           variant: 'primary',
           loading: this.savingAccessConfig(),
+          disabled: !this.cfgCanSave(),
         },
       ];
     }
@@ -604,11 +683,30 @@ export class MembershipAccessPageComponent implements OnInit {
 
     // Fingerprint device config (anot 3b).
     const fd = m?.fingerprint_device;
+    const endpoint = fd?.endpoint ?? '';
+    const apiKeyRef = fd?.api_key_ref ?? '';
+    const timeoutMs = fd?.timeout_ms ?? null;
+    const verifyTimeoutMs = fd?.verify_timeout_ms ?? null;
     this.cfgFingerprintReaderType.set(fd?.reader_type ?? 'id_wrapper');
     this.cfgFingerprintSdkProvider.set(fd?.sdk_provider ?? null);
-    this.cfgFingerprintEndpoint.set(fd?.endpoint ?? '');
-    this.cfgFingerprintApiKeyRef.set(fd?.api_key_ref ?? '');
-    this.cfgFingerprintTimeout.set(fd?.timeout_ms ?? null);
+    this.cfgFingerprintEndpoint.set(endpoint);
+    this.cfgFingerprintApiKeyRef.set(apiKeyRef);
+    this.cfgFingerprintTimeout.set(timeoutMs);
+    this.cfgFingerprintVerifyTimeout.set(verifyTimeoutMs);
+    // Mirror into FormControls (no emitEvent → no infinite loop).
+    this.fcFingerprintEndpoint.setValue(endpoint, { emitEvent: false });
+    this.fcFingerprintApiKeyRef.setValue(apiKeyRef, { emitEvent: false });
+    this.fcFingerprintTimeout.setValue(timeoutMs, { emitEvent: false });
+    this.fcFingerprintVerifyTimeout.setValue(verifyTimeoutMs, { emitEvent: false });
+    // Snapshot for dirty-state diff.
+    this.cfgFingerprintPersisted.set({
+      reader_type: fd?.reader_type ?? 'id_wrapper',
+      sdk_provider: fd?.sdk_provider ?? null,
+      endpoint,
+      api_key_ref: apiKeyRef,
+      timeout_ms: timeoutMs,
+      verify_timeout_ms: verifyTimeoutMs,
+    });
   }
 
   onCapacityControlToggle(enabled: boolean): void {
@@ -632,14 +730,28 @@ export class MembershipAccessPageComponent implements OnInit {
 
   onFingerprintEndpointInput(value: string): void {
     this.cfgFingerprintEndpoint.set(value);
+    this.fcFingerprintEndpoint.setValue(value, { emitEvent: false });
   }
 
   onFingerprintApiKeyRefInput(value: string): void {
     this.cfgFingerprintApiKeyRef.set(value);
+    this.fcFingerprintApiKeyRef.setValue(value, { emitEvent: false });
   }
 
-  onFingerprintTimeoutInput(value: string): void {
-    this.cfgFingerprintTimeout.set(value === '' ? null : Number(value));
+  onFingerprintTimeoutInput(value: string | number | null): void {
+    const v = value === '' || value == null ? null : Number(value);
+    this.cfgFingerprintTimeout.set(v);
+    this.fcFingerprintTimeout.setValue(v, { emitEvent: false });
+  }
+
+  onFingerprintVerifyTimeoutInput(value: string | number | null): void {
+    const v = value === '' || value == null ? null : Number(value);
+    this.cfgFingerprintVerifyTimeout.set(v);
+    this.fcFingerprintVerifyTimeout.setValue(v, { emitEvent: false });
+  }
+
+  toggleApiKeyVisibility(): void {
+    this.cfgFingerprintApiKeyVisible.update((v) => !v);
   }
 
   setLevelingInterval(hours: 1 | 2): void {
@@ -689,6 +801,7 @@ export class MembershipAccessPageComponent implements OnInit {
    * via `StoreSettingsService.saveSettingsNow`.
    */
   saveAccessConfig(): void {
+    if (!this.cfgCanSave()) return;
     this.savingAccessConfig.set(true);
     const current = this.membershipSettings;
     const readerType = this.cfgFingerprintReaderType();
@@ -712,6 +825,10 @@ export class MembershipAccessPageComponent implements OnInit {
         readerType === 'template_sdk' && this.cfgFingerprintTimeout() != null
           ? Number(this.cfgFingerprintTimeout())
           : undefined,
+      verify_timeout_ms:
+        readerType === 'template_sdk' && this.cfgFingerprintVerifyTimeout() != null
+          ? Number(this.cfgFingerprintVerifyTimeout())
+          : undefined,
     };
 
     const membership: MembershipSettings = {
@@ -726,6 +843,15 @@ export class MembershipAccessPageComponent implements OnInit {
       .subscribe({
         next: () => {
           this.savingAccessConfig.set(false);
+          // Refresh persisted snapshot so dirty state resets.
+          this.cfgFingerprintPersisted.set({
+            reader_type: fingerprint_device.reader_type as 'id_wrapper' | 'template_sdk',
+            sdk_provider: fingerprint_device.sdk_provider ?? null,
+            endpoint: fingerprint_device.endpoint ?? '',
+            api_key_ref: fingerprint_device.api_key_ref ?? '',
+            timeout_ms: fingerprint_device.timeout_ms ?? null,
+            verify_timeout_ms: fingerprint_device.verify_timeout_ms ?? null,
+          });
           this.toastService.success('Configuración guardada');
         },
         error: (err: unknown) => {
