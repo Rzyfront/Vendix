@@ -11,7 +11,11 @@ export type Permission =
   | 'store:categories:create'
   | 'store:categories:update'
   | 'store:categories:delete'
-  | 'store:promotions:read';
+  | 'store:promotions:read'
+  | 'store:promotions:create'
+  | 'store:promotions:update'
+  | 'store:promotions:cancel'
+  | 'store:promotions:delete';
 
 export function usePermissions() {
   const permissions = useAuthStore((s) => s.permissions);

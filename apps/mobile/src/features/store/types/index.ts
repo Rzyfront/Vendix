@@ -12,3 +12,4 @@ export * from './accounting.types';
 export * from './settings.types';
 export * from './review.types';
 export * from './data-collection.types';
+export * from './promotions.types';

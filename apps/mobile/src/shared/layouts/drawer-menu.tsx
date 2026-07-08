@@ -205,7 +205,7 @@ const storeMenuItems: MenuItem[] = [
     ],
   },
   { label: 'Tienda en línea', icon: 'shopping-bag', href: '/(store-admin)/online-store' },
-  { label: 'Marketing', icon: 'megaphone', href: '/(store-admin)/marketing' },
+  { label: 'Marketing', icon: 'megaphone', href: '/(store-admin)/marketing/promotions' },
   { label: 'Analíticas', icon: 'chart-line', href: '/(store-admin)/analytics' },
   { label: 'Gastos', icon: 'wallet', href: '/(store-admin)/expenses' },
   { label: 'Facturación', icon: 'file-text', href: '/(store-admin)/invoicing', alwaysVisible: true, requiredFiscalScope: 'STORE', requiresFiscalArea: 'invoicing' },
