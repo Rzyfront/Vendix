@@ -1,7 +1,8 @@
 import { apiClient, Endpoints } from '@/core/api';
+import { unwrapPaginated } from '@/core/api/pagination';
+import type { PaginatedResponse } from '@/features/store/types/api.types';
 import type {
   CreatePromotionDto,
-  PaginatedPromotionResponse,
   Promotion,
   PromotionApiResponse,
   PromotionQuery,
@@ -58,8 +59,12 @@ export const PromotionsService = {
    * Lista paginada de promociones (admin). Acepta search, page, limit,
    * sort_by, sort_order, state, type, scope, rule_type.
    * Consume `GET /store/promotions` con `QueryPromotionsDto`.
+   *
+   * Devuelve el shape canónico `PaginatedResponse<Promotion>` de
+   * `core/api/pagination.ts` con `pagination` (NO `meta`) para que
+   * encaje con `getNextPageParam` del repo.
    */
-  async list(query: PromotionQuery = {}): Promise<PaginatedPromotionResponse> {
+  async list(query: PromotionQuery = {}): Promise<PaginatedResponse<Promotion>> {
     const params: Record<string, string | number> = {};
     if (query.search) params.search = query.search;
     if (query.page) params.page = query.page;
@@ -72,11 +77,10 @@ export const PromotionsService = {
     if (query.rule_type) params.rule_type = query.rule_type;
 
     const res = await apiClient.get(Endpoints.STORE.PROMOTIONS.LIST, { params });
-    const body = unwrap<PaginatedPromotionResponse | { data: Promotion[]; meta: PaginatedPromotionResponse['meta'] }>(res);
-    if (Array.isArray((body as { data: Promotion[] }).data)) {
-      return body as PaginatedPromotionResponse;
-    }
-    return body as PaginatedPromotionResponse;
+    return unwrapPaginated<Promotion>(res as { data: unknown }, {
+      page: query.page ?? 1,
+      limit: query.limit ?? 20,
+    });
   },
 
   /**

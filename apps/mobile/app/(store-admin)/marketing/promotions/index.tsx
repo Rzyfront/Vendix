@@ -74,14 +74,15 @@ export default function PromotionsListScreen() {
         type: filters.type,
         scope: filters.scope,
       }),
-    getNextPageParam: (last) => last.meta?.total_pages > last.meta?.page ? last.meta.page + 1 : undefined,
+    getNextPageParam,
     initialPageParam: 1,
   });
 
   const promotions = data?.pages.flatMap((p) => p.data) ?? [];
-  const totalMeta = data?.pages[0]?.meta;
-  const total = totalMeta?.total ?? 0;
-  const totalPages = totalMeta?.total_pages ?? 1;
+  const firstPage = data?.pages[0];
+  const pagination = firstPage?.pagination;
+  const total = pagination?.total ?? 0;
+  const totalPages = pagination?.totalPages ?? 1;
 
   // ── Mutations ─────────────────────────────────────────────────────────
   const invalidate = () => {
