@@ -171,13 +171,16 @@ const CustomerCard = ({ customer, onView, onEdit, onMoreActions }: CustomerCardP
   );
 };
 
+// Paridad con customers.component.html (Total clientes / Clientes activos / Nuevos este mes / Ingresos totales).
+// Growth rates "+X% vs el mes pasado" son los mismos valores hardcodeados del web (mientras el backend
+// no exponga growth_rates en /customers/stats). Ver bloque stats en customers.component.html líneas 32-66.
 const CustomerStatsGrid = ({ stats }: { stats: CustomerStats | undefined }) => (
   <StatsGrid
     items={[
-      { label: 'Total Clientes', value: String(stats?.total_customers ?? 0), icon: 'users', trend: { value: 12, positive: true } },
-      { label: 'Activos', value: String(stats?.active_customers ?? 0), icon: 'user-check', trend: { value: 5, positive: true } },
-      { label: 'Nuevos (este mes)', value: String(stats?.new_customers_this_month ?? 0), icon: 'user-plus', trend: { value: 8, positive: true } },
-      { label: 'Ingresos', value: formatCurrency(stats?.total_revenue ?? 0), icon: 'dollar-sign', trend: { value: 15, positive: true } },
+      { label: 'Total clientes', value: String(stats?.total_customers ?? 0), icon: 'users', iconBg: colors.primaryLight, iconColor: colors.primary, trend: { value: 12, positive: true } },
+      { label: 'Clientes activos', value: String(stats?.active_customers ?? 0), icon: 'user-check', iconBg: colorScales.green[100], iconColor: colorScales.green[600], trend: { value: 5, positive: true } },
+      { label: 'Nuevos este mes', value: String(stats?.new_customers_this_month ?? 0), icon: 'user-plus', iconBg: colorScales.blue[100], iconColor: colorScales.blue[600], trend: { value: 8, positive: true } },
+      { label: 'Ingresos totales', value: formatCurrency(stats?.total_revenue ?? 0), icon: 'dollar-sign', iconBg: colorScales.purple[100], iconColor: colorScales.purple[600], trend: { value: 15, positive: true } },
     ]}
   />
 );
@@ -571,6 +574,8 @@ export default function CustomersScreen() {
                 onPress={openActions}
                 style={styles.iconBtn}
                 hitSlop={6}
+                accessibilityLabel="Acciones"
+                accessibilityRole="button"
               >
                 <Icon name="plus" size={20} color={colors.primary} />
               </Pressable>
@@ -579,6 +584,8 @@ export default function CustomersScreen() {
                 onPress={openFilters}
                 style={styles.iconBtn}
                 hitSlop={6}
+                accessibilityLabel="Filtros"
+                accessibilityRole="button"
               >
                 <Icon name="filter" size={18} color={colors.primary} />
               </Pressable>
