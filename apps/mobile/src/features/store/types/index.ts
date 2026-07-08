@@ -13,3 +13,5 @@ export * from './settings.types';
 export * from './review.types';
 export * from './data-collection.types';
 export * from './promotions.types';
+export * from './coupon.types';
+export * from './social-sales.types';
