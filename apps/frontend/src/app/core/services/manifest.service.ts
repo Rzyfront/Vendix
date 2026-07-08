@@ -41,7 +41,9 @@ export class ManifestService {
   /**
    * Construye el manifest desde el `DomainConfig` y lo inyecta como Blob URL.
    * Además actualiza en runtime el `<link rel="apple-touch-icon">` (iOS ignora los
-   * iconos del manifest) y el `<meta name="theme-color">`.
+   * iconos del manifest), el `<meta name="theme-color">` y el
+   * `<meta name="apple-mobile-web-app-title">` (iOS ignora name/short_name del
+   * manifest, y más aún si se sirve por Blob URL).
    */
   applyManifest(config: DomainConfig | null | undefined): void {
     // SSR / defensivo: sin DOM ni window no hay nada que inyectar.
@@ -73,6 +75,9 @@ export class ManifestService {
       // iOS ignora los iconos del manifest: sincronizamos apple-touch-icon aparte.
       this.updateAppleTouchIcon(icons[0]?.src);
       this.updateThemeColorMeta(themeColor);
+      // iOS ignora name/short_name del manifest (y no lee un Blob URL): el nombre
+      // de la app instalada en pantalla de inicio viene de apple-mobile-web-app-title.
+      this.updateAppleWebAppTitle(appName);
     } catch (error) {
       console.error('[ManifestService] Failed to apply manifest:', error);
     }
@@ -180,6 +185,25 @@ export class ManifestService {
     }
 
     link.href = iconUrl;
+  }
+
+  /**
+   * Actualiza (o crea) el `<meta name="apple-mobile-web-app-title">` con el nombre
+   * del tenant. iOS no usa `name`/`short_name` del manifest para la app instalada
+   * (y menos si se sirve por Blob URL); sin este meta tomaría el `<title>` de SEO.
+   */
+  private updateAppleWebAppTitle(appName: string): void {
+    let meta = this.document.querySelector(
+      'meta[name="apple-mobile-web-app-title"]',
+    ) as HTMLMetaElement | null;
+
+    if (!meta) {
+      meta = this.document.createElement('meta');
+      meta.name = 'apple-mobile-web-app-title';
+      this.document.head.appendChild(meta);
+    }
+
+    meta.content = appName;
   }
 
   /**
