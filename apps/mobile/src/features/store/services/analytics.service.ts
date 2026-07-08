@@ -2,9 +2,10 @@ import { apiClient, Endpoints } from '@/core/api';
 import type {
   ApiResponse,
   OverviewSummary,
-  FinancialAnalytics,
+  SalesAnalytics,
   SalesSummary,
-  InventorySummary,
+  InventoryAnalytics,
+  FinancialAnalytics,
   DateRange,
 } from '../types';
 
@@ -25,25 +26,26 @@ function dateParams(range?: DateRange): Record<string, string> {
 
 /**
  * Analytics detail service — consume los endpoints `/store/analytics/*`
- * que el backend de producción tiene hoy (200 OK):
+ * del backend de producción. Las firmas de los métodos reflejan el shape
+ * esperado por los consumers (analytics/{overview,sales,inventory,financial}.tsx);
+ * los tipos `SalesAnalytics`/`InventoryAnalytics` prometen los campos ricos
+ * (`top_products`, `top_movers`, `trends`, etc.) que los screens consumen.
  *
- *   GET /store/analytics/sales/summary      → SalesSummary
- *   GET /store/analytics/inventory/summary  → InventorySummary
+ * Estado real del backend hoy (sub-PR #4 verificado contra
+ * apps/backend/src/domains/store/analytics/analytics.controller.ts):
+ *   - `/store/analytics/sales/summary` y `/store/analytics/inventory/summary`
+ *     → 200 OK, devuelven `SalesSummary` / `InventorySummary` (shape reducido).
+ *   - `/store/analytics/{sales,inventory,financial,overview}` (sin sufijo)
+ *     → 404 (no implementados). Los screens correspondientes muestran
+ *     empty state hasta que backend exponga los shapes "ricos".
+ *   - `/store/analytics/products/*` → 404 (no existe). `getProductsAnalytics`
+ *     reusa `/sales/summary` como fuente agregada.
  *
- * Los endpoints `/store/analytics/{sales,inventory,financial,overview}`
- * (sin sufijo) devuelven 404 en producción y se reservan para cuando
- * backend exponga los shapes "ricos" (con `top_products`, `top_movers`,
- * `profit_loss_trends`, etc.) que las pantallas históricas consumen.
- *
- * Mientras tanto:
- *   - `getSalesAnalytics` / `getInventoryAnalytics` → usan los /summary
- *     que sí existen (devuelven SalesSummary / InventorySummary).
- *   - `getProductsAnalytics` → reusa sales/summary (no hay endpoint
- *     dedicado de productos; total_units_sold / total_orders sirven
- *     para "Total Productos Vendidos" / "Órdenes con Productos").
- *   - `getFinancialAnalytics` / `getOverviewSummary` → siguen apuntando a
- *     los endpoints que devuelven 404. Las pantallas correspondientes
- *     muestran empty state hasta que backend agregue esos endpoints.
+ * Los consumers usan optional chaining (`data?.top_movers?.length > 0`) por
+ * lo que la falta de los campos ricos a runtime NO rompe la UI — solo
+ * mantiene las tarjetas de "Productos Más Movidos" / "Alertas de Stock Bajo"
+ * ocultas cuando el backend devuelve el shape reducido. Cuando backend
+ * exponga los shapes ricos, basta cambiar los endpoints en este archivo.
  */
 export const AnalyticsDetailService = {
   async getOverviewSummary(range?: DateRange): Promise<OverviewSummary> {
@@ -53,25 +55,18 @@ export const AnalyticsDetailService = {
     return unwrap<OverviewSummary>(res);
   },
 
-  async getSalesAnalytics(range?: DateRange): Promise<SalesSummary> {
+  async getSalesAnalytics(range?: DateRange): Promise<SalesAnalytics> {
     const params = dateParams(range);
     const qs = new URLSearchParams(params).toString();
-    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES_SUMMARY}${qs ? `?${qs}` : ''}`);
-    return unwrap<SalesSummary>(res);
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES}${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesAnalytics>(res);
   },
 
-  async getProductsAnalytics(range?: DateRange): Promise<SalesSummary> {
-    // No hay endpoint dedicado de products analytics en backend (404).
-    // Reusamos sales/summary: total_units_sold = "Total Productos Vendidos",
-    // total_orders = "Órdenes con Productos". Cuando backend exponga
-    // /store/analytics/products (con top_products), cambiar aquí.
-    return this.getSalesAnalytics(range);
-  },
-
-  async getInventoryAnalytics(range?: DateRange): Promise<InventorySummary> {
-    // InventorySummary no acepta rango de fechas en backend hoy.
-    const res = await apiClient.get(Endpoints.STORE.ANALYTICS.INVENTORY_SUMMARY);
-    return unwrap<InventorySummary>(res);
+  async getInventoryAnalytics(range?: DateRange): Promise<InventoryAnalytics> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.INVENTORY}${qs ? `?${qs}` : ''}`);
+    return unwrap<InventoryAnalytics>(res);
   },
 
   async getFinancialAnalytics(range?: DateRange): Promise<FinancialAnalytics> {
@@ -79,5 +74,25 @@ export const AnalyticsDetailService = {
     const qs = new URLSearchParams(params).toString();
     const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.FINANCIAL}${qs ? `?${qs}` : ''}`);
     return unwrap<FinancialAnalytics>(res);
+  },
+
+  /**
+   * Resumen de productos vendidos en el período. Backend NO expone
+   * todavía `/store/analytics/products/top-sellers` (404) — mientras
+   * tanto, reusamos `SALES_SUMMARY` como fuente de datos agregados
+   * (total_units_sold, total_revenue, etc.) y derivamos el resto en UI.
+   *
+   * Paridad con apps/frontend `top-sellers.component.ts`:
+   *   totalUnits   = data.total_units_sold
+   *   totalRevenue = data.total_revenue
+   *   totalProducts / topProduct se dejan como "—" hasta que el
+   *   backend exponga el endpoint real — ver comentario en
+   *   `app/(store-admin)/analytics/products.tsx` (línea ~219).
+   */
+  async getProductsAnalytics(range?: DateRange): Promise<SalesSummary> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES_SUMMARY}${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesSummary>(res);
   },
 };

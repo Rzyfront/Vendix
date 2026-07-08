@@ -184,7 +184,7 @@ const SalesByCategoryScreen = () => {
                   {
                     label: 'Total Categorías',
                     value: categoriesData.length.toString(),
-                    icon: <Icon name="folder" size={14} color={colorScales.blue[600]} />,
+                    icon: <Icon name="tag" size={14} color={colorScales.blue[600]} />,
                     iconBg: colorScales.blue[100],
                     iconColor: colorScales.blue[600],
                     description: 'categorías',
