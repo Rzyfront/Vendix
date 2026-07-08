@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { FlatList, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, KeyboardAvoidingView, Platform } from 'react-native';
+import { Selector } from '@/shared/components/selector/selector';
 import { useQuery } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/shared/components/icon/icon';
@@ -360,39 +361,23 @@ export default function FieldsScreen() {
               />
             </View>
 
-            {/* Entity type */}
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Tipo de Entidad</Text>
-              <View style={styles.chipRow}>
-                {ENTITY_OPTIONS.map((type) => (
-                  <Pressable
-                    key={type}
-                    onPress={() => setFormEntityType(type)}
-                    style={[styles.chip, formEntityType === type && styles.chipActive]}
-                  >
-                    <Text style={[styles.chipText, formEntityType === type && styles.chipTextActive]}>
-                      {ENTITY_LABELS[type]}
-                    </Text>
-                  </Pressable>
-                ))}
+            {/* Entity type + Field type — 2-col grid (web parity) */}
+            <View style={styles.formRow}>
+              <View style={styles.formCol}>
+                <Selector
+                  label="Tipo de Entidad *"
+                  value={formEntityType}
+                  onChange={(v) => setFormEntityType(v as EntityType)}
+                  options={ENTITY_OPTIONS.map((e) => ({ label: ENTITY_LABELS[e], value: e }))}
+                />
               </View>
-            </View>
-
-            {/* Field type */}
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Tipo de Campo</Text>
-              <View style={styles.chipRowWrapped}>
-                {FIELD_TYPES.map((ft) => (
-                  <Pressable
-                    key={ft.value}
-                    onPress={() => setFormFieldType(ft.value)}
-                    style={[styles.chip, formFieldType === ft.value && styles.chipActive]}
-                  >
-                    <Text style={[styles.chipText, formFieldType === ft.value && styles.chipTextActive]}>
-                      {ft.label}
-                    </Text>
-                  </Pressable>
-                ))}
+              <View style={styles.formCol}>
+                <Selector
+                  label="Tipo de Campo *"
+                  value={formFieldType}
+                  onChange={(v) => setFormFieldType(v as FieldType)}
+                  options={FIELD_TYPES.map((ft) => ({ label: ft.label, value: ft.value }))}
+                />
               </View>
             </View>
 
@@ -404,26 +389,28 @@ export default function FieldsScreen() {
                 onChangeText={setFormDescription}
                 placeholder="Descripción opcional..."
                 placeholderTextColor={colorScales.gray[400]}
-                style={styles.formTextarea}
+                style={[styles.formTextarea, { minHeight: 70 }]}
                 multiline
               />
             </View>
 
-            {/* Display mode */}
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Modo de Display</Text>
-              <View style={styles.chipRow}>
-                {DISPLAY_MODES.map((dm) => (
-                  <Pressable
-                    key={dm.value}
-                    onPress={() => setFormDisplayMode(dm.value)}
-                    style={[styles.chip, formDisplayMode === dm.value && styles.chipActive]}
-                  >
-                    <Text style={[styles.chipText, formDisplayMode === dm.value && styles.chipTextActive]}>
-                      {dm.label}
-                    </Text>
-                  </Pressable>
-                ))}
+            {/* Display mode + Obligatorio — 2-col grid (web parity) */}
+            <View style={styles.formRow}>
+              <View style={styles.formCol}>
+                <Selector
+                  label="Modo de Display"
+                  value={formDisplayMode}
+                  onChange={(v) => setFormDisplayMode(v as DisplayMode)}
+                  options={DISPLAY_MODES.map((dm) => ({ label: dm.label, value: dm.value }))}
+                />
+              </View>
+              <View style={[styles.formCol, styles.formColToggle]}>
+                <Text style={styles.formLabel}>Obligatorio</Text>
+                <Pressable onPress={() => setFormRequired((v) => !v)} style={styles.toggleRow}>
+                  <View style={[styles.toggle, formRequired && styles.toggleActive]}>
+                    <View style={[styles.toggleThumb, formRequired && styles.toggleThumbActive]} />
+                  </View>
+                </Pressable>
               </View>
             </View>
 
@@ -591,6 +578,9 @@ const styles = StyleSheet.create({
   modalTitle: { fontSize: typography.fontSize.lg, fontWeight: '700', color: colorScales.gray[900] },
   // Form
   formGroup: { marginBottom: spacing[3] },
+  formRow: { flexDirection: 'row', gap: spacing[3], marginBottom: spacing[3] },
+  formCol: { flex: 1 },
+  formColToggle: { justifyContent: 'flex-end' },
   formLabel: { fontSize: typography.fontSize.xs, fontWeight: '600', color: colorScales.gray[500], marginBottom: spacing[1], textTransform: 'uppercase', letterSpacing: 0.5 },
   formInput: {
     backgroundColor: colorScales.gray[50],
@@ -615,6 +605,23 @@ const styles = StyleSheet.create({
     minHeight: 60,
     textAlignVertical: 'top',
   },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingVertical: spacing[2],
+  },
+  toggle: {
+    width: 44,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: colorScales.gray[200],
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleActive: { backgroundColor: colors.primary },
+  toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.background },
+  toggleThumbActive: { transform: [{ translateX: 18 }] },
   chipRow: { flexDirection: 'row', gap: spacing[2] },
   chipRowWrapped: { flexDirection: 'row', gap: spacing[2], flexWrap: 'wrap' },
   chip: {
