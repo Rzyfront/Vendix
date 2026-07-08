@@ -56,7 +56,15 @@ export function BrandQuickCreate({ visible, onClose, onCreated }: BrandQuickCrea
       onClose();
     },
     onError: (err: any) => {
-      toastError(err?.response?.data?.message || 'Error al crear la marca');
+      // El backend de NestJS puede devolver `message` como string o como
+      // array de constraints de class-validator. Lo normalizamos para
+      // mostrarlo siempre como texto legible. Mirror del patrón que usa
+      // product-upsert-form.tsx.
+      const data = err?.response?.data;
+      const detail = Array.isArray(data?.message)
+        ? data.message.join(' • ')
+        : data?.message;
+      toastError(detail || data?.error || 'Error al crear la marca');
     },
   });
 
@@ -179,7 +187,7 @@ export function BrandQuickCreate({ visible, onClose, onCreated }: BrandQuickCrea
             <View style={styles.footer}>
               <Button
                 title="Cancelar"
-                variant="outline"
+                variant="outlinePrimary"
                 onPress={handleClose}
                 disabled={mutation.isPending}
               />

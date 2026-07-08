@@ -1,7 +1,7 @@
 import { ActivityIndicator, Text, Pressable, View, StyleSheet, type ViewStyle, type TextStyle } from 'react-native';
 import { colorScales, spacing, borderRadius, typography, colors } from '@/shared/theme';
 
-type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'destructive';
+type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'outlinePrimary' | 'ghost' | 'destructive';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps {
@@ -69,6 +69,25 @@ const variantStyles = StyleSheet.create({
   outlineText: {
     color: colorScales.gray[700],
   } as TextStyle,
+  /**
+   * `outlinePrimary` — outline transparente con border + texto del color
+   * primario (verde en Vendix). Espejo del botón `outline` con
+   * `tone="primary"` que usa el web para acciones cancelables que NO son
+   * destructivas (e.g. "Cancelar" en un modal). Mantiene la jerarquía con
+   * el `primary` filled sin usar gris neutral.
+   */
+  outlinePrimary: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colorScales.green[600],
+  } as ViewStyle,
+  outlinePrimaryPressed: {
+    backgroundColor: colorScales.green[50],
+    borderColor: colorScales.green[700],
+  } as ViewStyle,
+  outlinePrimaryText: {
+    color: colorScales.green[600],
+  } as TextStyle,
   ghost: {
     backgroundColor: 'transparent',
   } as ViewStyle,
@@ -117,6 +136,7 @@ const spinnerColors: Record<ButtonVariant, string> = {
   primary: colors.background,
   secondary: colorScales.gray[700],
   outline: colorScales.gray[700],
+  outlinePrimary: colorScales.green[600],
   ghost: colorScales.gray[700],
   destructive: colors.background,
 };
