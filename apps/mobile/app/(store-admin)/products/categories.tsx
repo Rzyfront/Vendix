@@ -62,16 +62,40 @@ export default function CategoriesListScreen() {
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => CategoryService.delete(id, true),
+    mutationFn: ({ id, force = false }) =>
+      CategoryService.delete(id, force),
     onSuccess: () => {
       toastSuccess('Categoría eliminada');
       queryClient.invalidateQueries({ queryKey: ['categories'] });
       queryClient.invalidateQueries({ queryKey: ['categories-stats'] });
       queryClient.invalidateQueries({ queryKey: ['product-categories'] });
       setDeleteTarget(null);
+      setForceConfirm(null);
+    },
+    onError: (err, vars) => {
+      const data = err?.response?.data;
+      const code = data?.error?.code ?? data?.code;
+      if (code === 'CAT_DELETE_HAS_PRODUCTS' && !vars.force && deleteTarget) {
+        const productCount = data?.error?.details?.product_count ?? data?.details?.product_count ?? 0;
+        setForceConfirm({ category: deleteTarget, productCount });
+        setDeleteTarget(null);
+        return;
+      }
+      toastError('No se pudo eliminar la categoría');
+      setForceConfirm(null);
+    },
+  });
+
+  const toggleFeaturedMutation = useMutation({
+    mutationFn: ({ id, is_featured }) =>
+      CategoryService.update(id, { is_featured }),
+    onSuccess: (_data, vars) => {
+      toastSuccess(vars.is_featured ? 'Categoría destacada' : 'Categoría quitada de destacados');
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+      queryClient.invalidateQueries({ queryKey: ['categories-stats'] });
     },
     onError: () => {
-      toastError('No se pudo eliminar la categoría');
+      toastError('No se pudo cambiar el destaque');
     },
   });
 
@@ -210,6 +234,16 @@ export default function CategoriesListScreen() {
               category={item}
               onPress={() => router.push(`/(store-admin)/products/categories/${item.id}`)}
               onLongPress={canDelete ? () => setDeleteTarget(item) : undefined}
+              onToggleFeatured={() =>
+                toggleFeaturedMutation.mutate({
+                  id: item.id,
+                  is_featured: !item.is_featured,
+                })
+              }
+              isTogglingFeatured={
+                toggleFeaturedMutation.isPending &&
+                toggleFeaturedMutation.variables?.id === item.id
+              }
             />
           )}
           ListFooterComponent={
@@ -232,12 +266,37 @@ export default function CategoriesListScreen() {
       <ConfirmDialog
         visible={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        onConfirm={() =>
+          deleteTarget &&
+          deleteMutation.mutate({ id: deleteTarget.id, force: false })
+        }
         title="Eliminar Categoría"
         message={`¿Eliminar "${deleteTarget?.name}"? Los productos que la usen quedarán sin categoría asignada.`}
         confirmLabel="Eliminar"
         destructive
         loading={deleteMutation.isPending}
+      />
+    </
+
+      <ConfirmDialog
+        visible={!!forceConfirm}
+        onClose={() => setForceConfirm(null)}
+        onConfirm={() =>
+          forceConfirm &&
+          deleteMutation.mutate({
+            id: forceConfirm.category.id,
+            force: true,
+          })
+        }
+        title="Categoría con productos asignados"
+        message={
+          forceConfirm
+            ? `"${forceConfirm.category.name}" tiene ${forceConfirm.productCount} producto(s) asociado(s). Al forzar la eliminación, esos productos quedarán sin categoría asignada. ¿Continuar?`
+            : ''
+        }
+        confirmLabel="Forzar eliminación"
+        destructive
+        loading={deleteMutation?.isPending}
       />
     </View>
   );
@@ -247,10 +306,14 @@ function CategoryCard({
   category,
   onPress,
   onLongPress,
+  onToggleFeatured,
+  isTogglingFeatured,
 }: {
   category: ProductCategory;
   onPress: () => void;
   onLongPress?: () => void;
+  onToggleFeatured?: () => void;
+  isTogglingFeatured?: boolean;
 }) {
   const stateVariant = category.state === 'active' ? 'success' : 'default';
   const stateLabel = category.state === 'active' ? 'Activa' : 'Inactiva';
