@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { StaffProvisioningService } from '../../../common/services/staff-provisioning.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   CreateStoreUserDto,
@@ -23,6 +24,7 @@ export class StoreUserManagementService {
   constructor(
     private prisma: StorePrismaService,
     private defaultPanelUIService: DefaultPanelUIService,
+    private staffProvisioning: StaffProvisioningService,
   ) {}
 
   async create(dto: CreateStoreUserDto) {
@@ -34,7 +36,13 @@ export class StoreUserManagementService {
       throw new BadRequestException('Store and organization context required');
     }
 
-    // Check if user with this email already exists
+    // A1 (hard check): a staff/owner account must have a globally-unique email.
+    // Throws VendixHttpException ORG_USER_002 (409) if a non-customer account
+    // already uses this email anywhere in Vendix.
+    await this.staffProvisioning.assertEmailAvailableForStaff(dto.email);
+
+    // UX-only guard: also reject if a user with this email is already linked to
+    // this store (friendlier message than the generic uniqueness error).
     const existing_user = await this.prisma.users.findFirst({
       where: { email: dto.email },
     });
@@ -62,49 +70,44 @@ export class StoreUserManagementService {
       dto.username ||
       `${formatted_first_name.toLowerCase()}_${formatted_last_name.toLowerCase()}_${Date.now()}`;
 
-    // Create user record
-    const user = await this.prisma.users.create({
-      data: {
-        first_name: formatted_first_name,
-        last_name: formatted_last_name,
-        email: dto.email,
-        username,
-        password: hashed_password,
-        organization_id,
-        state: 'active',
-        updated_at: new Date(),
-      },
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        username: true,
-        email: true,
-        state: true,
-        created_at: true,
-      },
-    });
+    // Create the user and provision its staff membership atomically. The
+    // StaffProvisioningService handles store_users + user_roles + user_settings
+    // (default panel_ui) + users.main_store_id, satisfying CD7 (role +
+    // main_store_id were previously missing here).
+    return this.prisma.withoutScope().$transaction(async (tx) => {
+      const user = await tx.users.create({
+        data: {
+          first_name: formatted_first_name,
+          last_name: formatted_last_name,
+          email: dto.email,
+          username,
+          password: hashed_password,
+          organization_id,
+          state: 'active',
+          updated_at: new Date(),
+        },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          username: true,
+          email: true,
+          state: true,
+          created_at: true,
+        },
+      });
 
-    // Generate panel UI settings
-    const config =
-      await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
-    await this.prisma.user_settings.create({
-      data: {
-        user_id: user.id,
-        app_type: 'STORE_ADMIN',
-        config,
-      },
-    });
+      await this.staffProvisioning.provisionStaffMembership(tx, {
+        userId: user.id,
+        storeId: store_id,
+        organizationId: organization_id,
+        roleName: 'employee',
+        appType: 'STORE_ADMIN',
+        setMainStore: true,
+      });
 
-    // Create store_users junction record
-    await this.prisma.store_users.create({
-      data: {
-        store_id,
-        user_id: user.id,
-      },
+      return user;
     });
-
-    return user;
   }
 
   async findAll(query: QueryStoreUsersDto) {

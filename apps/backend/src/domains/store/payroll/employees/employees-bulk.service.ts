@@ -7,6 +7,7 @@ import { EmployeesService } from './employees.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '@common/responses/response.service';
 import { DefaultPanelUIService } from '../../../../common/services/default-panel-ui.service';
+import { StaffProvisioningService } from '../../../../common/services/staff-provisioning.service';
 import { S3Service } from '@common/services/s3.service';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import {
@@ -104,6 +105,7 @@ export class EmployeesBulkService {
     private readonly responseService: ResponseService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly s3Service: S3Service,
+    private readonly staffProvisioning: StaffProvisioningService,
   ) {}
 
   generateExcelTemplate(): Buffer {
@@ -867,6 +869,16 @@ export class EmployeesBulkService {
             },
           });
 
+          // A1 (hard check): a staff/owner account must have a globally-unique
+          // email. For an EXISTING user (matched by document) we exclude its own
+          // id so it does not collide with itself; a NEW user (existingUser ==
+          // null) requires the email to be entirely free. Any ORG_USER_002 here
+          // is captured per-row by the surrounding try/catch as a failed row.
+          await this.staffProvisioning.assertEmailAvailableForStaff(
+            empData.email,
+            { excludeUserId: existingUser?.id },
+          );
+
           if (existingUser) {
             // Check user isn't already linked to another employee
             const linkedEmployee = await unscopedUpload.employees.findFirst({
@@ -933,27 +945,52 @@ export class EmployeesBulkService {
               },
             });
 
-            // Create user_settings with default panel UI
-            const config =
-              await this.defaultPanelUIService.generatePanelUI('STORE_ADMIN');
-            await this.prisma.user_settings.create({
-              data: {
-                user_id: newUser.id,
-                app_type: 'STORE_ADMIN',
-                config,
-              },
-            });
-
-            // Create store_users junction
-            await this.prisma.store_users.create({
-              data: {
-                store_id: storeId,
-                user_id: newUser.id,
-              },
-            });
-
             userId = newUser.id;
             userCreated = true;
+          }
+
+          // Unified staff-membership provisioning (store_users + role +
+          // user_settings with default panel_ui + main_store_id) for BOTH new
+          // and existing users. Centralizes CD7 — the bulk path previously
+          // created neither the role nor main_store_id.
+          if (userId) {
+            const uid = userId;
+
+            // For an EXISTING high-privilege account (owner/admin/super_admin)
+            // do NOT degrade its app_type and only set main_store_id if empty.
+            let highPrivilege = false;
+            if (userLinked) {
+              const roleRows = await unscopedUpload.user_roles.findMany({
+                where: { user_id: uid },
+                select: { roles: { select: { name: true } } },
+              });
+              const roleNames: string[] = roleRows
+                .map((r: any) => r.roles?.name)
+                .filter(Boolean);
+              highPrivilege =
+                StaffProvisioningService.hasHighPrivilege(roleNames);
+            }
+
+            await this.prisma.withoutScope().$transaction(async (tx) => {
+              if (highPrivilege) {
+                await this.staffProvisioning.provisionStaffMembership(tx, {
+                  userId: uid,
+                  storeId,
+                  organizationId,
+                  setAppType: false,
+                  setMainStore: 'if-empty',
+                });
+              } else {
+                await this.staffProvisioning.provisionStaffMembership(tx, {
+                  userId: uid,
+                  storeId,
+                  organizationId,
+                  roleName: 'employee',
+                  appType: 'STORE_ADMIN',
+                  setMainStore: true,
+                });
+              }
+            });
           }
         }
 

@@ -209,7 +209,7 @@ export class AuthService {
     const normalizedEmail = email.toLowerCase().trim();
 
     // 1. Find ALL accounts with this email (excluding suspended/archived)
-    const accounts = await this.prismaService.users.findMany({
+    const allAccounts = await this.prismaService.users.findMany({
       where: {
         email: normalizedEmail,
         state: { notIn: ['suspended', 'archived'] },
@@ -254,6 +254,16 @@ export class AuthService {
         },
       },
     });
+
+    // A1: conservar SOLO cuentas staff/owner (al menos un rol != 'customer').
+    // Las cuentas puramente customer usan /auth/login-customer y pueden
+    // repetir email entre orgs sin colisionar con el staff. Un email queda
+    // así con a lo sumo UNA cuenta staff → login email-only determinista.
+    const accounts = allAccounts.filter((a: any) =>
+      a.user_roles?.some(
+        (ur: any) => ur.roles?.name && ur.roles.name !== 'customer',
+      ),
+    );
 
     // 2. No accounts found → not_found
     if (accounts.length === 0) {
@@ -1525,12 +1535,9 @@ export class AuthService {
   ) {
     const { email, password, organization_slug, store_slug } = loginDto;
 
-    // Validar que se proporcione al menos uno de los dos slugs (obligatorio)
-    // IMPORTANT: Must validate BEFORE account lookup to avoid exposing account existence
-    if (!organization_slug && !store_slug) {
-      throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
-    }
-
+    // CD1/CD2: los slugs son OPCIONALES. Sin slug, la tienda de arranque se
+    // resuelve por main_store_id (más abajo). Solo se rechaza enviar AMBOS a
+    // la vez (ambiguo: org y tienda concretas simultáneas).
     if (organization_slug && store_slug) {
       throw new VendixHttpException(ErrorCodes.AUTH_VALIDATE_001);
     }
@@ -1658,8 +1665,23 @@ export class AuthService {
       }
     }
 
-    // 1. Lógica para STORE_ADMIN intentando login con Organization Slug
-    if (organization_slug && user_app_type === 'STORE_ADMIN') {
+    // 1. Resolución de tienda de arranque (CD3).
+    //    Corre para CUALQUIER usuario acotado a tienda sin objetivo explícito —
+    //    incluido el login email-only (sin slug). main_store_id es el driver
+    //    (Estrategia 1); Estrategias 2/3 son fallback.
+    //    A4 (invariante CD7): la puerta NO se ancla a `app_type` (valor que puede
+    //    estar stale, p.ej. VENDIX_LANDING pre-backfill), sino al ROL. Todo
+    //    no-customer no-privilegiado debe quedar acotado a una tienda; si su
+    //    app_type no es un scope admin reconocido, igual entra aquí para que el
+    //    bloqueo A4 dispare y no obtenga un token huérfano.
+    const isRecognizedAdminScope =
+      user_app_type === 'STORE_ADMIN' ||
+      user_app_type === 'ORG_ADMIN' ||
+      user_app_type === 'VENDIX_ADMIN';
+    const needsStoreScope =
+      user_app_type === 'STORE_ADMIN' ||
+      (!hasHighPrivilege && !isRecognizedAdminScope);
+    if (needsStoreScope) {
       // hasHighPrivilege ya calculado arriba
 
       // Intentar encontrar una tienda para este usuario si no ha especificado una
@@ -1742,6 +1764,16 @@ export class AuthService {
             });
           }
         }
+      }
+
+      // A4: usuario no-privilegiado sin ninguna tienda resoluble es un huérfano
+      // (main_store NULL y sin membresías), sin importar su app_type. Se bloquea
+      // el login con error claro en vez de emitir un token con store_id nulo que
+      // luego produce 403 en /api/store/*. El backfill (paso 5) deja limpios los
+      // datos; a partir de ahí este camino no debería dispararse.
+      if (!effective_store_slug && !hasHighPrivilege) {
+        await this.logLoginAttempt(user.id, false);
+        throw new VendixHttpException(ErrorCodes.AUTH_PERM_001);
       }
     }
 
@@ -1930,11 +1962,31 @@ export class AuthService {
       });
     }
 
+    // CD6: si no se resolvió un target explícito (p.ej. ORG_ADMIN sin slug),
+    // el token arranca en la organización del usuario.
+    if (target_organization_id == null) {
+      target_organization_id = user.organization_id;
+    }
+
+    // CD4: cada login STORE_ADMIN persiste su tienda de arranque como
+    // main_store_id (driver único de la resolución futura). Así el próximo
+    // login sin slug cae determinista en la misma tienda.
+    if (
+      user_app_type === 'STORE_ADMIN' &&
+      target_store_id &&
+      user.main_store_id !== target_store_id
+    ) {
+      await this.prismaService.users.update({
+        where: { id: user.id },
+        data: { main_store_id: target_store_id },
+      });
+    }
+
     // Generar tokens (con usuario sin permisos para payload optimizado)
     // app_type sale de user_settings (fuente única de verdad léxica) si existe;
     // si no, generateTokens hace fallback por scope (store_id ⇒ STORE_ADMIN).
     const tokens = await this.generateTokens(user, {
-      organization_id: target_organization_id!,
+      organization_id: target_organization_id,
       store_id: target_store_id,
       app_type: (userSettings?.app_type as any) || undefined,
     });
@@ -2853,7 +2905,7 @@ export class AuthService {
   private async generateTokens(
     user: any,
     scope: {
-      organization_id: number;
+      organization_id: number | null;
       store_id?: number | null;
       app_type?:
         | 'VENDIX_LANDING'

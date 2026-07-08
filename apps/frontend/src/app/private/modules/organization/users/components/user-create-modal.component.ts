@@ -16,6 +16,10 @@ import {
 } from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, UserState } from '../interfaces/user.interface';
+import { OrgRolesService } from '../../roles/services/org-roles.service';
+import { OrganizationStoresService } from '../../stores/services/organization-stores.service';
+import { Role } from '../../roles/interfaces/role.interface';
+import { StoreListItem } from '../../stores/interfaces/store.interface';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { ImageUploadService } from '../../../../../shared/services/image-upload.service';
 import { dataUrlToFile } from '../../../../../shared/utils/data-url.util';
@@ -145,22 +149,49 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
             </select>
           </div>
 
-          <div class="col-span-2 space-y-2">
+          <div class="space-y-2">
+            <label class="block text-sm font-medium text-[var(--color-text-primary)]">
+              Rol *
+            </label>
+            <select
+              formControlName="role_id"
+              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
+              [disabled]="isCreating() || isLoadingRoles()"
+            >
+              <option [ngValue]="null" disabled>
+                {{ isLoadingRoles() ? 'Cargando roles...' : 'Seleccionar rol' }}
+              </option>
+              @for (role of roles(); track role.id) {
+                <option [ngValue]="role.id">{{ role.name }}</option>
+              }
+            </select>
+            <p class="text-xs text-gray-500">
+              Define los permisos y el entorno del usuario (obligatorio)
+            </p>
+          </div>
+
+          <div class="space-y-2">
             <label class="block text-sm font-medium text-[var(--color-text-primary)]">
               Tienda Principal
+              @if (!isHighPrivilegeRole(userForm.get('role_id')?.value)) {
+                <span>*</span>
+              }
             </label>
             <select
               formControlName="main_store_id"
               class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-              [disabled]="isCreating()"
+              [disabled]="isCreating() || isLoadingStores()"
             >
-              <option [ngValue]="null">Sin tienda principal</option>
+              <option [ngValue]="null">
+                {{ isLoadingStores() ? 'Cargando tiendas...' : 'Sin tienda principal' }}
+              </option>
               @for (store of stores(); track store.id) {
-                <option [value]="store.id">{{ store.name }}</option>
+                <option [ngValue]="store.id">{{ store.name }}</option>
               }
             </select>
             <p class="text-xs text-gray-500">
-              Selecciona la tienda principal del usuario (opcional)
+              La tienda donde arranca el usuario. Obligatoria para roles de
+              tienda; opcional solo para owner/admin.
             </p>
           </div>
 
@@ -255,19 +286,34 @@ export class UserCreateModalComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private usersService = inject(UsersService);
+  private rolesService = inject(OrgRolesService);
+  private storesService = inject(OrganizationStoresService);
   private toastService = inject(ToastService);
   private imageUploadService = inject(ImageUploadService);
+
+  /** Roles de privilegio alto: espejo del backend
+   * (StaffProvisioningService.HIGH_PRIVILEGE_ROLES). Para estos la tienda
+   * es opcional (ORG_ADMIN); para el resto es obligatoria (CD5/CD7). */
+  private static readonly HIGH_PRIVILEGE_ROLES = [
+    'owner',
+    'admin',
+    'super_admin',
+  ];
 
   readonly isOpen = input<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly onUserCreated = output<void>();
-  readonly stores = input<Array<{ id: number; name: string }>>([]);
 
   userForm!: FormGroup;
   readonly isCreating = signal(false);
   readonly avatarPreview = signal<string | null>(null);
   readonly uploadingAvatar = signal(false);
   readonly avatarModalOpen = signal(false);
+  // El modal se autoabastece de roles y tiendas (el padre no los inyecta).
+  readonly roles = signal<Role[]>([]);
+  readonly stores = signal<StoreListItem[]>([]);
+  readonly isLoadingRoles = signal(false);
+  readonly isLoadingStores = signal(false);
   UserState = UserState;
 
   ngOnInit(): void {
@@ -301,9 +347,76 @@ export class UserCreateModalComponent implements OnInit {
         ],
       ],
       state: [UserState.PENDING_VERIFICATION],
+      role_id: [null, [Validators.required]],
       main_store_id: [null],
       avatar_url: [''],
     });
+
+    this.loadRoles();
+    this.loadStores();
+
+    // CD5/CD7: la tienda es obligatoria salvo para roles de privilegio alto
+    // (owner/admin → ORG_ADMIN). Ajusta el validador al cambiar el rol.
+    this.userForm
+      .get('role_id')
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((roleId) => this.applyStoreRequirement(roleId));
+  }
+
+  /** ¿El rol seleccionado es de privilegio alto (tienda opcional)?
+   * Público: se consume desde la plantilla (strictTemplates). */
+  isHighPrivilegeRole(roleId: number | null): boolean {
+    if (!roleId) return false;
+    const role = this.roles().find((r) => r.id === roleId);
+    return (
+      !!role &&
+      UserCreateModalComponent.HIGH_PRIVILEGE_ROLES.includes(role.name)
+    );
+  }
+
+  private applyStoreRequirement(roleId: number | null): void {
+    const control = this.userForm.get('main_store_id');
+    if (!control) return;
+    if (this.isHighPrivilegeRole(roleId)) {
+      control.clearValidators();
+    } else {
+      control.setValidators([Validators.required]);
+    }
+    control.updateValueAndValidity({ emitEvent: false });
+  }
+
+  private loadRoles(): void {
+    this.isLoadingRoles.set(true);
+    this.rolesService
+      .getRoles({ limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.roles.set(response.data);
+          this.isLoadingRoles.set(false);
+        },
+        error: () => {
+          this.isLoadingRoles.set(false);
+          this.toastService.error('Error cargando roles');
+        },
+      });
+  }
+
+  private loadStores(): void {
+    this.isLoadingStores.set(true);
+    this.storesService
+      .getStores({ limit: 100 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.stores.set(response.data?.flat() || []);
+          this.isLoadingStores.set(false);
+        },
+        error: () => {
+          this.isLoadingStores.set(false);
+          this.toastService.error('Error cargando tiendas');
+        },
+      });
   }
 
   openAvatarModal(): void {
@@ -391,6 +504,7 @@ export class UserCreateModalComponent implements OnInit {
       document_number: '',
       password: '',
       state: UserState.PENDING_VERIFICATION,
+      role_id: null,
       main_store_id: null,
       avatar_url: '',
     });

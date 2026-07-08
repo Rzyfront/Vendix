@@ -26,6 +26,7 @@ import {
 } from '../../../common/audit/audit.service';
 import { S3Service } from '@common/services/s3.service';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 import { toTitleCase } from '@common/utils/format.util';
 
 @Injectable()
@@ -36,6 +37,7 @@ export class UsersService {
     private auditService: AuditService,
     private s3Service: S3Service,
     private defaultPanelUIService: DefaultPanelUIService,
+    private staffProvisioning: StaffProvisioningService,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
@@ -43,7 +45,11 @@ export class UsersService {
       organization_id,
       email,
       password,
-      app = 'VENDIX_LANDING',
+      role_id,
+      main_store_id,
+      // `app` ya no dirige el app_type (se deriva del rol, CD5). Se
+      // desestructura solo para excluirlo del spread a `users.create`.
+      app: _app,
       ...rest
     } = createUserDto;
 
@@ -55,14 +61,39 @@ export class UsersService {
       throw new BadRequestException('Organization context is required');
     }
 
-    const existing_user = await this.prisma.users.findFirst({
-      where: {
-        email,
-      },
-    });
-    if (existing_user) {
-      throw new ConflictException(
-        'User with this email already exists in this organization',
+    // CD5/CD7: toda creación exige rol; el app_type se deriva del rol
+    // (nunca VENDIX_LANDING). Regla de negocio: cliente creado en tienda →
+    // STORE_ECOMMERCE; owner/admin/super_admin → ORG_ADMIN (tienda opcional);
+    // el resto (manager/supervisor/employee/staff) → STORE_ADMIN. Las cuentas
+    // scoped a tienda (STORE_ADMIN/STORE_ECOMMERCE) exigen tienda para no
+    // dejar huérfanos.
+    if (!role_id) {
+      throw new BadRequestException(
+        'Debe indicar el rol del usuario (role_id)',
+      );
+    }
+    const role = await this.prisma.roles.findFirst({ where: { id: role_id } });
+    if (!role) {
+      throw new VendixHttpException(ErrorCodes.AUTH_ROLE_001);
+    }
+    const isCustomer = role.name?.toLowerCase() === 'customer';
+
+    // A1: unicidad de email SOLO para cuentas no-customer (staff/owner). Un
+    // customer con el mismo correo en otra org/tienda no bloquea.
+    if (!isCustomer) {
+      await this.staffProvisioning.assertEmailAvailableForStaff(email);
+    }
+
+    const isOrgLevel = StaffProvisioningService.hasHighPrivilege([role.name]);
+    const appType = isCustomer
+      ? 'STORE_ECOMMERCE'
+      : isOrgLevel
+        ? 'ORG_ADMIN'
+        : 'STORE_ADMIN';
+
+    if (appType !== 'ORG_ADMIN' && !main_store_id) {
+      throw new BadRequestException(
+        'Debe seleccionar una tienda para este rol',
       );
     }
 
@@ -72,48 +103,94 @@ export class UsersService {
     const formatted_first_name = toTitleCase(rest.first_name || '');
     const formatted_last_name = toTitleCase(rest.last_name || '');
 
-    const user = await this.prisma.users.create({
-      data: {
-        ...rest,
-        first_name: formatted_first_name,
-        last_name: formatted_last_name,
-        email,
-        password: hashed_password,
-        ...(target_organization_id && {
-          organizations: { connect: { id: target_organization_id } },
-        }),
-        updated_at: new Date(),
-      },
-      select: {
-        id: true,
-        first_name: true,
-        last_name: true,
-        username: true,
-        email: true,
-        state: true,
-      },
-    });
-
-    // Crear user_settings con el app indicado usando el servicio centralizado
-    const config = await this.defaultPanelUIService.generatePanelUI(app);
-    await this.prisma.user_settings.create({
-      data: {
-        user_id: user.id,
-        app_type: app, // Campo directo
-        config: config,
-      },
-    });
-
     // Generate email verification token
     const token = crypto.randomBytes(32).toString('hex');
     const expires_at = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-    await this.prisma.email_verification_tokens.create({
-      data: {
-        user_id: user.id,
-        token,
-        expires_at: expires_at,
-      },
+    // Todo dentro de una sola transacción (usuario + membresía + rol +
+    // user_settings + main_store + token) para que la invariante CD7 se
+    // cumpla atómicamente: no existe un usuario a medio provisionar.
+    const user = await this.prisma.withoutScope().$transaction(async (tx) => {
+      // `db: any` para las operaciones crudas (convención del repo); `tx`
+      // tipado se pasa al helper que exige `Prisma.TransactionClient`.
+      const db: any = tx;
+      const created = await db.users.create({
+        data: {
+          ...rest,
+          first_name: formatted_first_name,
+          last_name: formatted_last_name,
+          email,
+          password: hashed_password,
+          ...(target_organization_id && {
+            organizations: { connect: { id: target_organization_id } },
+          }),
+          updated_at: new Date(),
+        },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          username: true,
+          email: true,
+          state: true,
+          organization_id: true,
+        },
+      });
+
+      if (appType === 'STORE_ADMIN' || appType === 'STORE_ECOMMERCE') {
+        // Cuenta scoped a tienda: store_users + user_roles + user_settings.
+        // STORE_ADMIN (staff) fija main_store_id como tienda de arranque del
+        // panel; STORE_ECOMMERCE (cliente) NO usa main_store_id (igual que el
+        // camino real de cliente en customers.service), solo la membresía.
+        await this.staffProvisioning.provisionStaffMembership(tx, {
+          userId: created.id,
+          storeId: main_store_id!,
+          organizationId: target_organization_id!,
+          roleName: role.name,
+          appType,
+          setMainStore: appType === 'STORE_ADMIN',
+        });
+      } else if (main_store_id) {
+        // Rol org-level pero con tienda indicada (owner/admin multi-tienda):
+        // provisiona la membresía sin degradar un main_store existente.
+        await this.staffProvisioning.provisionStaffMembership(tx, {
+          userId: created.id,
+          storeId: main_store_id,
+          organizationId: target_organization_id!,
+          roleName: role.name,
+          appType: 'ORG_ADMIN',
+          setMainStore: 'if-empty',
+        });
+      } else {
+        // Rol org-level sin tienda: rol + user_settings(ORG_ADMIN) directos
+        // (provisionStaffMembership requiere una tienda).
+        await db.user_roles.upsert({
+          where: {
+            user_id_role_id: { user_id: created.id, role_id: role.id },
+          },
+          update: {},
+          create: { user_id: created.id, role_id: role.id },
+        });
+        const orgConfig =
+          await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
+        await db.user_settings.create({
+          data: {
+            user_id: created.id,
+            app_type: 'ORG_ADMIN' as any,
+            config: orgConfig as any,
+          },
+        });
+      }
+
+      await db.email_verification_tokens.create({
+        data: {
+          user_id: created.id,
+          token,
+          expires_at: expires_at,
+        },
+      });
+
+      return created;
     });
 
     // Obtener el slug de la organización para el vLink
@@ -133,7 +210,7 @@ export class UsersService {
     // Send verification email after user creation
     const full_name = `${user.first_name} ${user.last_name}`.trim();
     await this.emailService.sendVerificationEmail(
-      user.email,
+      email,
       token,
       full_name,
       organization_slug,
@@ -568,8 +645,35 @@ export class UsersService {
         }
       }
 
-      // 3. Update Stores
+      // 3. Update Stores (A3: staff no-privilegiado = exactamente 1 tienda)
       if (store_ids) {
+        // Resolver los roles efectivos (nuevos si vienen, si no los actuales)
+        // para decidir si es privilegio alto (owner/admin/super_admin).
+        const effectiveRoleIds =
+          roles ??
+          (
+            await tx.user_roles.findMany({
+              where: { user_id: id },
+              select: { role_id: true },
+            })
+          ).map((ur) => ur.role_id);
+        const roleRows = await tx.roles.findMany({
+          where: { id: { in: effectiveRoleIds } },
+          select: { name: true },
+        });
+        const isHighPriv = StaffProvisioningService.hasHighPrivilege(
+          roleRows.map((r) => r.name),
+        );
+
+        // A3: un usuario de tienda debe tener EXACTAMENTE una tienda. Los
+        // privilegios altos (owner/admin) pueden ser multi-tienda.
+        if (!isHighPriv && store_ids.length !== 1) {
+          throw new BadRequestException(
+            'Un usuario de tienda debe tener exactamente una tienda asignada. ' +
+              'Solo propietarios/administradores pueden pertenecer a varias.',
+          );
+        }
+
         // Remove stores not in the new list
         await tx.store_users.deleteMany({
           where: {
@@ -592,6 +696,29 @@ export class UsersService {
             });
           }
         }
+
+        // main_store_id como driver (CD4/CD7): staff de tienda apunta a su
+        // única tienda; privilegio alto solo se fija si está vacío (no pisa
+        // el arranque de un owner multi-tienda).
+        if (store_ids.length > 0) {
+          if (!isHighPriv) {
+            await tx.users.update({
+              where: { id },
+              data: { main_store_id: store_ids[0] },
+            });
+          } else {
+            const current = await tx.users.findUnique({
+              where: { id },
+              select: { main_store_id: true },
+            });
+            if (current?.main_store_id == null) {
+              await tx.users.update({
+                where: { id },
+                data: { main_store_id: store_ids[0] },
+              });
+            }
+          }
+        }
       }
 
       return this.findConfiguration(id);
@@ -608,12 +735,11 @@ export class UsersService {
       throw new VendixHttpException(ErrorCodes.ORG_CONTEXT_001);
     }
 
-    const existing_user = await this.prisma.users.findFirst({
-      where: { email },
-    });
-    if (existing_user) {
-      throw new VendixHttpException(ErrorCodes.ORG_USER_002);
-    }
+    // A1: solo bloquea si el correo ya pertenece a una cuenta staff/owner.
+    // El usuario invitado nace sin rol/tienda (pending_verification): queda
+    // como "requiere segundo paso" — el login huérfano lo bloquea A4 hasta
+    // que se le asigne rol + tienda vía updateConfiguration/store-users.
+    await this.staffProvisioning.assertEmailAvailableForStaff(email);
 
     const formatted_first_name = toTitleCase(first_name || '');
     const formatted_last_name = toTitleCase(last_name || '');

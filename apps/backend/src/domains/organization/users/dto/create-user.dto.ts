@@ -102,4 +102,13 @@ export class CreateUserDto {
   @IsOptional()
   @IsInt()
   main_store_id?: number;
+
+  @ApiProperty({
+    example: 3,
+    description:
+      'ID del rol del usuario (obligatorio). Deriva el app_type y, si es rol ' +
+      'de tienda, exige main_store_id (CD5/CD7).',
+  })
+  @IsInt()
+  role_id: number;
 }
