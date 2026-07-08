@@ -45,6 +45,8 @@ import {
 } from '../../interfaces';
 import { MembershipAccessService } from '../../services';
 import { MembershipCredentialFormModalComponent } from '../../components/credential-form-modal/credential-form-modal.component';
+import { AforoGaugeComponent } from '../../components/aforo-gauge/aforo-gauge.component';
+import { AforoCheckinPanelComponent } from '../../components/aforo-checkin-panel/aforo-checkin-panel.component';
 import { MembershipAmbientAccessService } from '../../../../../../../core/services/membership-ambient-access.service';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
 import { StoreSettingsService } from '../../../../settings/general/services/store-settings.service';
@@ -71,6 +73,8 @@ type AccessTab = 'aforo' | 'logs' | 'credentials';
     PaginationComponent,
     EmptyStateComponent,
     MembershipCredentialFormModalComponent,
+    AforoGaugeComponent,
+    AforoCheckinPanelComponent,
   ],
   templateUrl: './access-page.component.html',
   styleUrl: './access-page.component.css',
@@ -140,14 +144,13 @@ export class MembershipAccessPageComponent implements OnInit {
     return '#16a34a'; // green — comfortable
   });
 
-  // ─── Manual check-in ────────────────────────────────────────────────────────
-  readonly checkinType = signal<GymCredentialType>('qr');
-  readonly checkinValue = signal('');
+  // ─── Manual check-in (result shared with the check-in panel) ────────────────
+  /** QR/PIN validation result rendered by `app-aforo-checkin-panel`. */
   readonly lastCheckin = signal<AccessValidationResult | null>(null);
-  readonly credentialTypeOptions: { value: GymCredentialType; label: string }[] =
-    (Object.keys(GYM_CREDENTIAL_TYPE_LABELS) as GymCredentialType[]).map(
-      (value) => ({ value, label: GYM_CREDENTIAL_TYPE_LABELS[value] }),
-    );
+  /** SSE connection state → drives the "EN VIVO" badge in the gauge hero. */
+  readonly liveConnected = computed(
+    () => this.ambient.connectionState() === 'open',
+  );
 
   // ─── Aforo config (persisted in store_settings.settings.membership) ─────────
   readonly showConfig = signal(false);
@@ -454,22 +457,32 @@ export class MembershipAccessPageComponent implements OnInit {
       });
   }
 
-  checkIn(): void {
-    const value = this.checkinValue().trim();
+  /**
+   * Validate a credential emitted by `app-aforo-checkin-panel` (QR / PIN). The
+   * fingerprint path resolves inside the panel via the ambient SSE stream and
+   * does NOT route through here. Reuses the same validation flow as before.
+   */
+  onCheckin(payload: {
+    credential_type: GymCredentialType;
+    credential_value: string;
+  }): void {
+    const value = payload.credential_value?.trim();
     if (!value) {
       this.toastService.warning('Ingresa el valor de la credencial');
       return;
     }
     this.actionInFlight.set(true);
     this.accessService
-      .validate({ credential_type: this.checkinType(), credential_value: value })
+      .validate({
+        credential_type: payload.credential_type,
+        credential_value: value,
+      })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.lastCheckin.set(res);
           if (res.granted) {
             this.toastService.success('Ingreso concedido');
-            this.checkinValue.set('');
           } else {
             this.toastService.warning(
               GYM_ACCESS_RESULT_LABELS[res.result] ?? 'Acceso denegado',
@@ -526,14 +539,6 @@ export class MembershipAccessPageComponent implements OnInit {
           );
         },
       });
-  }
-
-  checkinLabel(result: GymAccessResult): string {
-    return GYM_ACCESS_RESULT_LABELS[result] ?? result;
-  }
-
-  checkinColor(result: GymAccessResult): string {
-    return GYM_ACCESS_RESULT_COLORS[result] ?? '#6b7280';
   }
 
   // ─── Aforo: config ────────────────────────────────────────────────────────

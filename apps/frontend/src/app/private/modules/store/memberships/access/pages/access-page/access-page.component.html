@@ -45,169 +45,77 @@
   <!-- ══════════════════ Aforo ══════════════════ -->
   @if (activeTab() === 'aforo') {
     <div class="aforo-wrap">
-      <!-- ─── Contador en vivo ─── -->
-      <section class="aforo-hero" [class.is-full]="isFull()">
-        <div
-          class="aforo-gauge"
-          [style.--ring]="occupancyColor()"
-          [style.--pct]="occupancyPct()"
-        >
-          <div class="aforo-gauge-inner">
-            <span class="aforo-count">{{ occupancy()?.current_count ?? 0 }}</span>
-            <span class="aforo-count-label">adentro ahora</span>
-            @if (
-              occupancy()?.capacity_control_enabled &&
-              (occupancy()?.max_capacity ?? 0) > 0
-            ) {
-              <span class="aforo-cap">Capacidad {{ occupancy()?.max_capacity }}</span>
-            }
-          </div>
-        </div>
+      <!-- ─── Hero: contador en vivo (SVG gauge) ─── -->
+      <app-aforo-gauge
+        [count]="occupancy()?.current_count ?? 0"
+        [maxCapacity]="occupancy()?.max_capacity ?? 0"
+        [pct]="occupancyPct()"
+        [color]="occupancyColor()"
+        [availableSpots]="availableSpots()"
+        [grantedToday]="grantedToday()"
+        [capacityControlEnabled]="occupancy()?.capacity_control_enabled ?? false"
+        [isFull]="isFull()"
+        [live]="liveConnected()"
+        [syncing]="occupancyLoading()"
+      />
 
-        <div class="aforo-meta">
-          <div class="aforo-meta-head">
-            <span
-              class="aforo-state-dot"
-              [style.background]="occupancyColor()"
-            ></span>
-            @if (occupancy()?.capacity_control_enabled) {
-              @if (isFull()) {
-                <span class="aforo-state-label full">Aforo lleno</span>
-              } @else {
-                <span class="aforo-state-label">
-                  {{ availableSpots() }} cupos disponibles
-                </span>
-              }
-            } @else {
-              <span class="aforo-state-label muted">Control de aforo desactivado</span>
-            }
-            @if (occupancyLoading()) {
-              <span class="aforo-syncing">actualizando…</span>
-            }
-          </div>
+      <!-- ─── Ingreso + Salida/Ajuste ─── -->
+      <div class="aforo-grid">
+        <!-- Ingreso (valida credencial → +1) -->
+        <app-aforo-checkin-panel
+          [actionInFlight]="actionInFlight()"
+          [lastResult]="lastCheckin()"
+          (validate)="onCheckin($event)"
+        />
 
-          @if (
-            occupancy()?.capacity_control_enabled &&
-            (occupancy()?.max_capacity ?? 0) > 0
-          ) {
-            <div class="aforo-bar">
-              <div
-                class="aforo-bar-fill"
-                [style.width.%]="occupancyPct()"
-                [style.background]="occupancyColor()"
-              ></div>
-            </div>
-            <div class="aforo-bar-legend">
-              <span>{{ occupancyPct() }}% ocupado</span>
-              <span>Concedidos hoy: {{ grantedToday() }}</span>
-            </div>
-          } @else {
-            <p class="aforo-hint">
-              Activa el control de aforo en la configuración para fijar una
-              capacidad máxima y que el sistema cuente los ingresos.
-            </p>
-          }
-        </div>
-      </section>
-
-      <!-- ─── Acciones ─── -->
-      <app-card [responsive]="true">
-        <div class="aforo-actions">
-          <!-- Ingreso manual (valida credencial → +1) -->
-          <div class="aforo-block">
-            <div class="aforo-block-title">
-              <app-icon name="log-in" />
-              <span>Ingreso manual</span>
-            </div>
-            <p class="aforo-block-desc">
-              Valida una credencial (QR, PIN o huella) para registrar el ingreso.
-            </p>
-            <div class="aforo-checkin">
-              <select
-                class="aforo-select"
-                [ngModel]="checkinType()"
-                (ngModelChange)="checkinType.set($event)"
-                [disabled]="actionInFlight()"
-              >
-                @for (opt of credentialTypeOptions; track opt.value) {
-                  <option [value]="opt.value">{{ opt.label }}</option>
-                }
-              </select>
-              <input
-                class="aforo-input"
-                type="text"
-                placeholder="Valor de la credencial"
-                [ngModel]="checkinValue()"
-                (ngModelChange)="checkinValue.set($event)"
-                (keyup.enter)="checkIn()"
-                [disabled]="actionInFlight()"
-              />
-              <button
-                type="button"
-                class="aforo-btn primary"
-                [disabled]="actionInFlight() || !checkinValue().trim()"
-                (click)="checkIn()"
-              >
-                <app-icon name="user-check" />
-                <span>Registrar</span>
-              </button>
-            </div>
-
-            @if (lastCheckin(); as res) {
-              <div
-                class="aforo-checkin-result"
-                [style.border-color]="checkinColor(res.result)"
-              >
-                <span
-                  class="aforo-result-badge"
-                  [style.background]="checkinColor(res.result)"
-                >
-                  {{ checkinLabel(res.result) }}
-                </span>
-                <span class="aforo-result-reason">
-                  {{ res.reason ?? (res.granted ? 'Ingreso permitido' : '—') }}
-                </span>
-              </div>
-            }
-          </div>
-
+        <div class="aforo-side">
           <!-- Salida (−1) -->
-          <div class="aforo-block">
-            <div class="aforo-block-title">
-              <app-icon name="log-out" />
-              <span>Salida</span>
+          <app-card [shadow]="'sm'" [responsivePadding]="true" [showHeader]="true">
+            <div slot="header" class="aforo-panel-header">
+              <span class="aforo-panel-icon">
+                <app-icon name="log-out" [size]="18" />
+              </span>
+              <div class="aforo-panel-text">
+                <h3>Salida</h3>
+                <p>Registra la salida de un miembro</p>
+              </div>
               @if (occupancy()?.turnstile_mode) {
                 <span class="aforo-tag">Modo torniquete</span>
               }
             </div>
-            <p class="aforo-block-desc">
+
+            <p class="aforo-panel-hint">
               @if (occupancy()?.turnstile_mode) {
-                El torniquete controla entradas y salidas. Usa esto para registrar
-                una salida manual.
+                El torniquete controla entradas y salidas. Usa esto para
+                registrar una salida manual.
               } @else {
-                Registra la salida de un miembro para descontar el aforo.
+                Descuenta una persona del aforo actual.
               }
             </p>
+
             <button
               type="button"
-              class="aforo-btn outline full-width"
+              class="aforo-btn outline full-width lg"
               [disabled]="actionInFlight() || (occupancy()?.current_count ?? 0) <= 0"
               (click)="registerExit()"
             >
-              <app-icon name="log-out" />
+              <app-icon name="log-out" [size]="18" />
               <span>Registrar salida (−1)</span>
             </button>
-          </div>
+          </app-card>
 
           <!-- Ajuste manual +/− -->
-          <div class="aforo-block">
-            <div class="aforo-block-title">
-              <app-icon name="arrow-up-down" />
-              <span>Ajuste manual</span>
+          <app-card [shadow]="'sm'" [responsivePadding]="true" [showHeader]="true">
+            <div slot="header" class="aforo-panel-header">
+              <span class="aforo-panel-icon">
+                <app-icon name="arrow-up-down" [size]="18" />
+              </span>
+              <div class="aforo-panel-text">
+                <h3>Ajuste manual</h3>
+                <p>Corrige el conteo sin validar credencial</p>
+              </div>
             </div>
-            <p class="aforo-block-desc">
-              Corrige el conteo sin validar credencial (nivelación manual).
-            </p>
+
             <div class="aforo-adjust">
               <button
                 type="button"
@@ -216,9 +124,11 @@
                 (click)="adjust(-1)"
                 aria-label="Restar uno"
               >
-                <app-icon name="arrow-down" />
+                <app-icon name="arrow-down" [size]="20" />
               </button>
-              <span class="aforo-adjust-value">{{ occupancy()?.current_count ?? 0 }}</span>
+              <span class="aforo-adjust-value">
+                {{ occupancy()?.current_count ?? 0 }}
+              </span>
               <button
                 type="button"
                 class="aforo-step"
@@ -226,12 +136,12 @@
                 (click)="adjust(1)"
                 aria-label="Sumar uno"
               >
-                <app-icon name="arrow-up" />
+                <app-icon name="arrow-up" [size]="20" />
               </button>
             </div>
-          </div>
+          </app-card>
         </div>
-      </app-card>
+      </div>
 
       <!-- ─── Configuración de aforo (inline) ─── -->
       @if (showConfig()) {
