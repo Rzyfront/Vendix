@@ -603,6 +603,12 @@ export default function CustomerDetailScreen() {
             fullWidth
           />
         )}
+        <Button
+          title="Ver reseñas"
+          onPress={() => router.push({ pathname: '/(store-admin)/customers/reviews', params: { user_id: id } })}
+          variant="outline"
+          fullWidth
+        />
         <View style={styles.footerRow}>
           <Button
             title="Editar"
