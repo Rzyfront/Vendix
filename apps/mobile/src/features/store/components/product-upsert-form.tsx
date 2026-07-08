@@ -183,7 +183,14 @@ interface ProductFormState {
   service_modality?: string;
   service_pricing_type?: string;
   requires_booking?: boolean;
+  booking_mode?: string;
   is_recurring?: boolean;
+  is_consultation?: boolean;
+  send_preconsultation?: boolean;
+  consultation_template_id?: number | null;
+  preconsultation_template_id?: number | null;
+  service_instructions?: string;
+  buffer_minutes?: string;
   // Compra online (solo edit)
   online_purchase_url?: string;
 }
@@ -279,7 +286,14 @@ const initialForm: ProductFormState = {
   service_modality: '',
   service_pricing_type: '',
   requires_booking: false,
+  booking_mode: '',
   is_recurring: false,
+  is_consultation: false,
+  send_preconsultation: false,
+  consultation_template_id: null,
+  preconsultation_template_id: null,
+  service_instructions: '',
+  buffer_minutes: '',
   online_purchase_url: '',
 };
 
@@ -549,6 +563,26 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       generatedVariants: hydrateVariantsFromProduct(product.product_variants),
       removedVariantKeys: [],
       stock_by_location: stockByLocation,
+      // Servicio (mirror web fields)
+      service_duration_minutes:
+        (product as any).service_duration_minutes != null
+          ? String((product as any).service_duration_minutes)
+          : '',
+      service_modality: (product as any).service_modality ?? '',
+      service_pricing_type: (product as any).service_pricing_type ?? '',
+      requires_booking: !!(product as any).requires_booking,
+      booking_mode: (product as any).booking_mode ?? '',
+      buffer_minutes:
+        (product as any).buffer_minutes != null
+          ? String((product as any).buffer_minutes)
+          : '',
+      is_recurring: !!(product as any).is_recurring,
+      is_consultation: !!(product as any).is_consultation,
+      send_preconsultation: !!(product as any).send_preconsultation,
+      consultation_template_id: (product as any).consultation_template_id ?? null,
+      preconsultation_template_id:
+        (product as any).preconsultation_template_id ?? null,
+      service_instructions: (product as any).service_instructions ?? '',
     });
 
     // Cargar imágenes existentes del producto (si las hay).
@@ -1167,8 +1201,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
       enabled_price_tier_ids:
         form.has_multiple_price_tiers && (form.enabled_price_tier_ids?.length ?? 0) > 0
           ? form.enabled_price_tier_ids
-          : undefined,
-      // Los overrides por tarifa NO se envían en el DTO del producto.
+          : undefined,      // Los overrides por tarifa NO se envían en el DTO del producto.
       // El backend los gestiona por endpoints separados:
       //   PUT    /store/price-tiers/products/:productId/overrides/:tierId
       //   DELETE /store/price-tiers/products/:productId/overrides/:tierId
@@ -1208,6 +1241,27 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
     const preparationTime = toNumber(form.preparation_time_minutes);
     if (preparationTime !== undefined) {
       (base as any).preparation_time_minutes = preparationTime;
+    }
+
+    // Servicio: sólo si el product_type es 'service' (mirror web).
+    if (form.product_type === 'service') {
+      const numDuration = toNumber(form.service_duration_minutes);
+      const numBuffer = toNumber(form.buffer_minutes);
+      (base as any).service_duration_minutes = numDuration;
+      (base as any).buffer_minutes = numBuffer;
+      (base as any).service_modality = form.service_modality || undefined;
+      (base as any).service_pricing_type = form.service_pricing_type || undefined;
+      (base as any).requires_booking = form.requires_booking;
+      (base as any).booking_mode = form.booking_mode || undefined;
+      (base as any).is_recurring = form.is_recurring;
+      (base as any).is_consultation = form.is_consultation;
+      (base as any).send_preconsultation = form.send_preconsultation;
+      (base as any).consultation_template_id =
+        form.consultation_template_id ?? undefined;
+      (base as any).preconsultation_template_id =
+        form.preconsultation_template_id ?? undefined;
+      (base as any).service_instructions =
+        form.service_instructions.trim() || undefined;
     }
 
     // Create-only fields: sólo válidos en UpdateProductDto. NO los enviamos
@@ -2725,13 +2779,103 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                 description="El cliente debe reservar un turno antes de recibir el servicio."
               />
               {form.requires_booking && (
-                <Toggle
-                  value={form.is_recurring ?? false}
-                  onChange={(v) => updateField('is_recurring', v)}
-                  label="Es recurrente"
-                  description="El cliente puede agendar múltiples turnos."
-                />
+                <>
+                  <View style={{ flexDirection: 'row', gap: spacing[2] }}>
+                    <View style={{ flex: 1 }}>
+                      <Selector
+                        label="Modo de reserva"
+                        value={form.booking_mode}
+                        onChange={(v) => updateField('booking_mode', v as string)}
+                        placeholder="Seleccionar modo"
+                        options={[
+                          {
+                            label: 'Requiere proveedor',
+                            value: 'provider_required',
+                          },
+                          { label: 'Reserva libre', value: 'free_booking' },
+                        ]}
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Input
+                        label="Buffer (min)"
+                        value={form.buffer_minutes}
+                        onChangeText={(v) => updateField('buffer_minutes', v)}
+                        placeholder="0"
+                        keyboardType="number-pad"
+                      />
+                    </View>
+                  </View>
+                  <Toggle
+                    value={form.is_consultation ?? false}
+                    onChange={(v) => updateField('is_consultation', v)}
+                    label="Es consulta médica/estética"
+                    description="Activa plantillas de consulta y seguimiento del paciente."
+                  />
+                  {form.is_consultation && (
+                    <Card style={styles.subSettingsCard}>
+                      <Card.Body style={{ gap: spacing[3] }}>
+                        <Selector
+                          label="Plantilla de Consulta *"
+                          value={
+                            form.consultation_template_id != null
+                              ? String(form.consultation_template_id)
+                              : ''
+                          }
+                          onChange={(v) =>
+                            updateField(
+                              'consultation_template_id',
+                              v ? Number(v) : null,
+                            )
+                          }
+                          placeholder="Seleccionar plantilla"
+                          options={[
+                            { label: '— Sin plantilla —', value: '' },
+                          ]}
+                          helperText="Formulario que el profesional llenará durante la consulta."
+                        />
+                        <Toggle
+                          value={form.send_preconsultation ?? false}
+                          onChange={(v) =>
+                            updateField('send_preconsultation', v)
+                          }
+                          label="Enviar preconsulta al cliente"
+                          description="Al confirmar la reserva se enviará automáticamente un formulario de preconsulta al paciente por email."
+                        />
+                        {form.send_preconsultation && (
+                          <Selector
+                            label="Plantilla de Preconsulta *"
+                            value={
+                              form.preconsultation_template_id != null
+                                ? String(form.preconsultation_template_id)
+                                : ''
+                            }
+                            onChange={(v) =>
+                              updateField(
+                                'preconsultation_template_id',
+                                v ? Number(v) : null,
+                              )
+                            }
+                            placeholder="Seleccionar plantilla"
+                            options={[
+                              { label: '— Sin plantilla —', value: '' },
+                            ]}
+                            helperText="Formulario que el paciente llenará antes de la cita."
+                          />
+                        )}
+                      </Card.Body>
+                    </Card>
+                  )}
+                </>
               )}
+              <Textarea
+                label="Instrucciones post-compra"
+                value={form.service_instructions}
+                onChangeText={(v) => updateField('service_instructions', v)}
+                placeholder="Instrucciones que recibirá el cliente después de comprar este servicio..."
+                rows={4}
+                maxLength={2000}
+              />
             </Section>
           )}
 
@@ -3229,6 +3373,13 @@ const styles = StyleSheet.create({
   sectionHeaderRight: { marginLeft: 'auto' },
   sectionBody: { padding: spacing[5], gap: spacing[4] },
   chipBlock: { gap: spacing[2] },
+  subSettingsCard: {
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[100],
+    overflow: 'hidden',
+  },
   blockLabel: { fontSize: typography.fontSize.xs, fontWeight: '700' as any, color: colorScales.gray[500], textTransform: 'uppercase', letterSpacing: 1 },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing[2] },
   toggleRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1, borderColor: colorScales.gray[100], borderRadius: borderRadius.lg, paddingHorizontal: spacing[3], backgroundColor: colorScales.gray[50] },

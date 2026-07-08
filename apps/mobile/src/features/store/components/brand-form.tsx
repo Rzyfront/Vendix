@@ -1,19 +1,52 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import {
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Input, Textarea, Toggle, Card, StickyHeader } from '@/shared/components';
+import {
+  Button,
+  Card,
+  Input,
+  StickyHeader,
+  Textarea,
+  Toggle,
+} from '@/shared/components';
+import { Icon } from '@/shared/components/icon/icon';
+import {
+  ImageSourceModal,
+  type UploadedImage,
+} from '@/features/store/components/image-source-modal';
+import {
+  ImageEditModal,
+  type ImageEditResult,
+} from '@/features/store/components/image-edit-modal';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { BrandService } from '@/features/store/services/brand.service';
 import type { Brand, CreateBrandDto, UpdateBrandDto } from '@/features/store/types';
-import { colors, spacing } from '@/shared/theme';
+import {
+  borderRadius,
+  colors,
+  colorScales,
+  spacing,
+} from '@/shared/theme';
 
 interface BrandFormProps {
   mode: 'create' | 'edit';
   brandId?: number;
+  /**
+   * Si se pasa, el botón X del header llama `onClose` en lugar de
+   * `router.back()`. Usado cuando el form se renderiza dentro de un
+   * <Modal> (espejo del popup web 'Nueva Marca' / 'Editar Marca').
+   */
+  onClose?: () => void;
 }
 
-export function BrandForm({ mode, brandId }: BrandFormProps) {
+export function BrandForm({ mode, brandId, onClose }: BrandFormProps) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const isEdit = mode === 'edit';
@@ -32,9 +65,9 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
   const [isFeatured, setIsFeatured] = useState(false);
   const [initialized, setInitialized] = useState(false);
 
-  // Hydrate form when loading existing brand. Done in useEffect to avoid
-  // calling state setters during render — that triggers an infinite
-  // re-render loop that kills the React Native runtime on the device.
+  const [imageSourceOpen, setImageSourceOpen] = useState(false);
+  const [imageEditUri, setImageEditUri] = useState<string | null>(null);
+
   useEffect(() => {
     if (!isEdit || !existing || initialized) return;
     setName(existing.name);
@@ -59,7 +92,11 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
       queryClient.invalidateQueries({ queryKey: ['brands-stats'] });
       queryClient.invalidateQueries({ queryKey: ['product-brands'] });
       if (brandId) queryClient.invalidateQueries({ queryKey: ['brand', brandId] });
-      router.back();
+      if (onClose) {
+        onClose();
+      } else {
+        router.back();
+      }
     },
     onError: (err: any) => {
       const msg = err?.response?.data?.message || 'No se pudo guardar la marca';
@@ -83,20 +120,30 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
     mutation.mutate(payload);
   }
 
+  const hasImage = logoUrl.trim().length > 0;
+
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <View style={styles.container}>
       <StickyHeader
         title={isEdit ? 'Editar Marca' : 'Nueva Marca'}
         subtitle={isEdit ? existing?.name : 'Creá una nueva marca de producto'}
-        backHref={isEdit ? `/(store-admin)/products/brands/${brandId}` : '/(store-admin)/products/brands'}
+        backHref={
+          onClose
+            ? undefined
+            : isEdit
+              ? `/(store-admin)/products/brands/${brandId}`
+              : '/(store-admin)/products/brands'
+        }
         actions={[
           {
-            label: 'Cancelar',
+            label: '',
+            icon: 'x',
             variant: 'outline',
-            onPress: () => router.back(),
+            onPress: onClose ?? (() => router.back()),
           },
           {
-            label: isEdit ? 'Guardar' : 'Crear',
+            label: isEdit ? 'Guardar Cambios' : 'Crear Marca',
+            icon: 'check',
             variant: 'primary',
             loading: mutation.isPending,
             onPress: handleSubmit,
@@ -104,8 +151,9 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
         ]}
       />
       <ScrollView
-        contentContainerStyle={{ padding: spacing[4], gap: spacing[3], paddingBottom: spacing[8] }}
+        contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         {isEdit && isLoading ? null : (
           <>
@@ -137,31 +185,152 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
               </Card.Body>
             </Card>
 
-            <Card>
-              <Card.Header title="Imagen" />
-              <Card.Body style={{ gap: spacing[3] }}>
-                <Input
-                  label="URL del logo"
-                  value={logoUrl}
-                  onChangeText={setLogoUrl}
-                  placeholder="https://..."
-                  maxLength={500}
-                  helperText="Pegá la URL del logo o subilo desde la versión web."
-                />
+            <Card style={styles.card}>
+              <Card.Body style={styles.imageCardBody}>
+                <View style={styles.imagePreview}>
+                  {hasImage ? (
+                    <Image
+                      source={{ uri: logoUrl }}
+                      style={styles.imagePreviewImg}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Text style={styles.imagePlaceholderText}>Logo</Text>
+                  )}
+                </View>
+                <View style={styles.imageTexts}>
+                  <Text style={styles.imageTitle}>
+                    Logo de la marca
+                  </Text>
+                  <Text style={styles.imageSubtitle}>
+                    Se usará en el inicio y en los filtros visuales de marcas.
+                  </Text>
+                </View>
+                <View style={styles.imageActions}>
+                  <Button
+                    title={hasImage ? 'Cambiar' : 'Agregar'}
+                    variant="outline"
+                    size="sm"
+                    leftIcon={
+                      <Icon name="image" size={14} color={colors.primary} />
+                    }
+                    onPress={() => setImageSourceOpen(true)}
+                  />
+                  {hasImage ? (
+                    <Button
+                      title="Quitar"
+                      variant="ghost"
+                      size="sm"
+                      onPress={() => {
+                        setLogoUrl('');
+                        toastSuccess('Logo quitado');
+                      }}
+                    />
+                  ) : null}
+                </View>
               </Card.Body>
             </Card>
 
             <Card>
               <Card.Header title="Visibilidad" />
               <Card.Body>
-                <Toggle value={isActive} onChange={setIsActive} label="Marca activa" description="Las marcas inactivas no aparecen en filtros ni en nuevos productos." />
+                <Toggle
+                  value={isActive}
+                  onChange={setIsActive}
+                  label="Marca activa"
+                  description="Las marcas inactivas no aparecen en filtros ni en nuevos productos."
+                />
                 <View style={{ height: spacing[2] }} />
-                <Toggle value={isFeatured} onChange={setIsFeatured} label="Marca destacada" description="Se muestra con prioridad en la tienda online." />
+                <Toggle
+                  value={isFeatured}
+                  onChange={setIsFeatured}
+                  label="Marca destacada"
+                  description="Se muestra con prioridad en la tienda online."
+                />
               </Card.Body>
             </Card>
           </>
         )}
       </ScrollView>
+
+      <ImageSourceModal
+        visible={imageSourceOpen}
+        onClose={() => setImageSourceOpen(false)}
+        remainingSlots={1}
+        onConfirm={(image: UploadedImage) => {
+          setImageSourceOpen(false);
+          setImageEditUri(image.uri);
+          toastSuccess('Imagen seleccionada — ajusta antes de guardar');
+        }}
+      />
+
+      <ImageEditModal
+        visible={imageEditUri !== null}
+        imageUri={imageEditUri}
+        onClose={() => setImageEditUri(null)}
+        onApply={(result: ImageEditResult) => {
+          setLogoUrl(result.uri);
+          setImageEditUri(null);
+          toastSuccess('Logo recortado y guardado');
+        }}
+      />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  content: {
+    padding: spacing[4],
+    gap: spacing[3],
+    paddingBottom: spacing[8],
+  },
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+  },
+  imageCardBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    padding: spacing[3],
+  },
+  imagePreview: {
+    width: 64,
+    height: 64,
+    flexShrink: 0,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imagePreviewImg: { width: '100%', height: '100%' },
+  imagePlaceholderText: {
+    fontSize: 11,
+    color: colorScales.gray[500],
+  },
+  imageTexts: { flex: 1, minWidth: 0 },
+  imageTitle: {
+    fontSize: 13,
+    fontWeight: '600' as any,
+    color: colors.text.primary,
+  },
+  imageSubtitle: {
+    fontSize: 11,
+    color: colorScales.gray[500],
+    marginTop: 2,
+    lineHeight: 14,
+  },
+  imageActions: {
+    flexDirection: 'column',
+    gap: spacing[2],
+    flexShrink: 0,
+    alignItems: 'stretch',
+  },
+});

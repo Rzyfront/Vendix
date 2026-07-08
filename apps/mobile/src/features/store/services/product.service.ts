@@ -423,6 +423,19 @@ export const ProductService = {
     );
     return unwrap<BulkImageUploadResult>(res);
   },
+
+  /**
+   * Cancela una sesión de análisis bulk-images sin ejecutar el upload.
+   * Llamado en cleanup si el usuario cierra el wizard a mitad de flujo.
+   */
+  async cancelBulkImageSession(sessionId: string): Promise<void> {
+    await apiClient.delete(
+      Endpoints.STORE.PRODUCTS.BULK_IMAGES_CANCEL_SESSION.replace(
+        ':sessionId',
+        sessionId,
+      ),
+    );
+  },
 };
 
 export interface BulkImageAnalysisResult {

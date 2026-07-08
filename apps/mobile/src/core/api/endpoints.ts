@@ -42,6 +42,7 @@ export const Endpoints = {
       BULK_IMAGES_TEMPLATE: '/store/products/bulk-images/template/download',
       BULK_IMAGES_ANALYZE: '/store/products/bulk-images/analyze',
       BULK_IMAGES_UPLOAD_SESSION: '/store/products/bulk-images/upload-session',
+      BULK_IMAGES_CANCEL_SESSION: '/store/products/bulk-images/session/:sessionId',
       BULK_TEMPLATE_DOWNLOAD: '/store/products/bulk/template/download',
       BULK_EXPORT: '/store/products/bulk/export',
       BULK_ANALYZE: '/store/products/bulk/analyze',
