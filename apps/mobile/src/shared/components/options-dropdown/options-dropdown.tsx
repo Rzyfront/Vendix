@@ -1,8 +1,9 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
   Pressable,
+  ActivityIndicator,
   Modal,
   StyleSheet,
   Dimensions,
@@ -157,9 +158,17 @@ export function OptionsDropdown({
   const filtersTriggerRef = useRef<ViewType>(null);
 
   // ── Sync external filterValues → local state ─────────────────────────
-  useMemo(() => {
+  // useEffect (no useMemo): setState durante render es anti-pattern y puede
+  // ser omitido si React decide que el memoized value no cambió por referencia.
+  useEffect(() => {
     setLocalValues(filterValues);
   }, [filterValues]);
+
+  // Cierra cualquier dropdown abierto cuando isLoading pasa a true para que
+  // el usuario no quede en un menú no-interactivo.
+  useEffect(() => {
+    if (isLoading && openMenu) setOpenMenu(null);
+  }, [isLoading, openMenu]);
 
   // ── Active filters count ─────────────────────────────────────────────
   const activeFiltersCount = useMemo(() => {
@@ -233,12 +242,16 @@ export function OptionsDropdown({
 
   // ── Filter change with debounce ───────────────────────────────────────
   const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref espejo de `localValues` para que el setTimeout del debounce siempre
+  // emita el estado más reciente, no un snapshot del render anterior.
+  const localValuesRef = useRef<FilterValues>(localValues);
+  localValuesRef.current = localValues;
 
   const handleFilterChange = (key: string, value: string | string[] | null) => {
     setLocalValues((prev) => ({ ...prev, [key]: value }));
     if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
     debounceTimerRef.current = setTimeout(() => {
-      onFilterChange?.({ ...localValues, [key]: value });
+      onFilterChange?.({ ...localValuesRef.current, [key]: value });
     }, debounceMs);
   };
 
@@ -246,7 +259,7 @@ export function OptionsDropdown({
     const cfg = filters.find((f) => f.key === key);
     const cleared = cfg?.type === 'multi-select' ? [] : null;
     setLocalValues((prev) => ({ ...prev, [key]: cleared }));
-    onFilterChange?.({ ...localValues, [key]: cleared });
+    onFilterChange?.({ ...localValuesRef.current, [key]: cleared });
   };
 
   const handleClearAll = () => {
@@ -267,13 +280,19 @@ export function OptionsDropdown({
           onPress={handleOpenActions}
           hitSlop={8}
           accessibilityLabel="Acciones"
+          disabled={isLoading}
           style={({ pressed }) => [
             styles.trigger,
             openMenu === 'actions' && styles.triggerActive,
             pressed && styles.triggerPressed,
+            isLoading && styles.triggerDisabled,
           ]}
         >
-          <Icon name="plus" size={iconSizeFor(actions.length)} color={colors.primary} />
+          {isLoading ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : (
+            <Icon name="plus" size={iconSizeFor(actions.length)} color={colors.primary} />
+          )}
         </Pressable>
       )}
 
@@ -284,10 +303,12 @@ export function OptionsDropdown({
           onPress={handleOpenFilters}
           hitSlop={8}
           accessibilityLabel="Filtros"
+          disabled={isLoading}
           style={({ pressed }) => [
             styles.trigger,
             openMenu === 'filters' && styles.triggerActive,
             pressed && styles.triggerPressed,
+            isLoading && styles.triggerDisabled,
           ]}
         >
           <Icon name="filter" size={18} color={colors.primary} />
@@ -473,6 +494,9 @@ const styles = StyleSheet.create({
   },
   triggerPressed: {
     transform: [{ scale: 0.98 }],
+  },
+  triggerDisabled: {
+    opacity: 0.5,
   },
 
   // ── Badge — paridad con `.filter-count-badge` web ──
