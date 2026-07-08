@@ -177,7 +177,7 @@ const CustomerCard = ({ customer, onView, onEdit, onMoreActions }: CustomerCardP
 const CustomerStatsGrid = ({ stats }: { stats: CustomerStats | undefined }) => (
   <StatsGrid
     items={[
-      { label: 'Total clientes', value: String(stats?.total_customers ?? 0), icon: 'users', iconBg: '#dbeafe', iconColor: '#2563eb', trend: { value: 12, positive: true } },
+      { label: 'Total clientes', value: String(stats?.total_customers ?? 0), icon: 'users', iconBg: colors.primaryLight, iconColor: colors.primary, trend: { value: 12, positive: true } },
       { label: 'Clientes activos', value: String(stats?.active_customers ?? 0), icon: 'user-check', iconBg: colorScales.green[100], iconColor: colorScales.green[600], trend: { value: 5, positive: true } },
       { label: 'Nuevos este mes', value: String(stats?.new_customers_this_month ?? 0), icon: 'user-plus', iconBg: colorScales.blue[100], iconColor: colorScales.blue[600], trend: { value: 8, positive: true } },
       { label: 'Ingresos totales', value: formatCurrency(stats?.total_revenue ?? 0), icon: 'dollar-sign', iconBg: colorScales.purple[100], iconColor: colorScales.purple[600], trend: { value: 15, positive: true } },

@@ -1,5 +1,11 @@
 // Verificación visual del estado actual de Clientes (mobile parity)
 // vs la versión web (customers.component.ts + customer-list.component.html).
+//
+// REQUIRES env vars: VERIFY_DEMO_EMAIL + VERIFY_DEMO_PASSWORD
+//   export VERIFY_DEMO_EMAIL=...
+//   export VERIFY_DEMO_PASSWORD=...
+//   node verify-customers-parity.mjs
+//
 import { chromium } from 'playwright';
 
 const SCREENSHOTS_DIR = '/tmp/verify-customers-parity';
@@ -7,10 +13,19 @@ const BASE_URL = 'http://localhost:8081';
 const PROD_API = 'https://api.vendix.online/api';
 
 const CREDS = {
-  email: 'vendix.demo@gmail.com',
-  password: 'vendixDEMO#$%1',
-  organization_slug: 'vendix',
+  email: process.env.VERIFY_DEMO_EMAIL,
+  password: process.env.VERIFY_DEMO_PASSWORD,
+  organization_slug: process.env.VERIFY_DEMO_ORG_SLUG || 'vendix',
 };
+
+if (!CREDS.email || !CREDS.password) {
+  console.error('❌ Faltan env vars: VERIFY_DEMO_EMAIL y VERIFY_DEMO_PASSWORD');
+  console.error('   Setea con:');
+  console.error('     export VERIFY_DEMO_EMAIL=tu@correo.com');
+  console.error('     export VERIFY_DEMO_PASSWORD=tu_password');
+  console.error('   Y vuelve a correr: node verify-customers-parity.mjs');
+  process.exit(1);
+}
 
 async function loginAndSwitchToStoreAdmin(page) {
   return await page.evaluate(async ({ api, creds }) => {
