@@ -36,7 +36,8 @@ const expoBin = path.join(
   isWindows ? 'expo.cmd' : 'expo',
 );
 
-const child = spawn(expoBin, ['start'], {
+const args = process.argv.slice(2);
+const child = spawn(expoBin, ['start', ...args], {
   stdio: 'inherit',
   env: process.env,
   shell: isWindows,
