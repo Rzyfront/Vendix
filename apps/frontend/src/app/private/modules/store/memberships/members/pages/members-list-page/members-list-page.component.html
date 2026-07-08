@@ -122,3 +122,10 @@
     }
   </app-card>
 </div>
+
+<!-- Bloque 3 del plan: modal wizard de carga masiva de socios por IA. -->
+<app-member-bulk-scanner-modal
+  [isOpen]="showBulkScanner()"
+  (close)="showBulkScanner.set(false)"
+  (confirmed)="onBulkCommit($event)"
+></app-member-bulk-scanner-modal>
