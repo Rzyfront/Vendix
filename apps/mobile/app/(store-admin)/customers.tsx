@@ -503,9 +503,9 @@ export default function CustomersScreen() {
     setEditPhone(item.phone || '');
     setEditDocumentType(item.document_type || '');
     setEditDocument(item.document_number || '');
-    setEditTaxRegime((item as any).tax_regime ?? '');
-    setEditPersonType((item as any).person_type ?? '');
-    setEditIsWithholdingAgent((item as any).is_withholding_agent ?? false);
+    setEditTaxRegime(item.tax_regime ?? '');
+    setEditPersonType(item.person_type ?? '');
+    setEditIsWithholdingAgent(item.is_withholding_agent ?? false);
     setShowEditDocTypeDropdown(false);
     setShowEditTaxRegimeDropdown(false);
     setShowEditPersonTypeDropdown(false);
@@ -555,8 +555,8 @@ export default function CustomersScreen() {
       phone: editPhone.trim() || undefined,
       document_type: editDocumentType || undefined,
       document_number: editDocument.trim() || undefined,
-      tax_regime: (editTaxRegime || undefined) as any,
-      person_type: (editPersonType || undefined) as any,
+      tax_regime: editTaxRegime || undefined,
+      person_type: editPersonType || undefined,
       is_withholding_agent: editIsWithholdingAgent,
     };
     updateMutation.mutate({ id: editTarget.id, data: dto });

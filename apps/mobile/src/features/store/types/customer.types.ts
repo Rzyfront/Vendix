@@ -14,6 +14,21 @@ export interface Customer {
   phone?: string;
   document_type?: string;
   document_number?: string;
+  /**
+   * Clasificación fiscal del cliente (espejo web TaxRegime).
+   * El backend lo devuelve opcional; el form de edición lo persiste.
+   */
+  tax_regime?: TaxRegime | string | null;
+  /**
+   * Tipo de persona del cliente (espejo web PersonType).
+   * El backend lo devuelve opcional; el form de edición lo persiste.
+   */
+  person_type?: PersonType | string | null;
+  /**
+   * Si el cliente es responsable de practicar retenciones (espejo web
+   * customer-modal.component.ts: `is_withholding_agent`).
+   */
+  is_withholding_agent?: boolean;
   state: CustomerState;
   created_at: string;
   total_orders?: number;
