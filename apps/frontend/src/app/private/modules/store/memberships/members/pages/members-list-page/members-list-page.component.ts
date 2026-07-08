@@ -34,7 +34,10 @@ import {
   GYM_MEMBERSHIP_STATUS_COLORS,
   GYM_MEMBERSHIP_STATUS_LABELS,
 } from '../../interfaces';
+import { MemberBulkScannerService } from '../../services/member-bulk-scanner.service';
+import { CommitMemberRosterDto } from '../../interfaces/member-bulk-scanner.interface';
 import { MembershipsService } from '../../services';
+import { MemberBulkScannerModalComponent } from '../../components/member-bulk-scanner/member-bulk-scanner-modal.component';
 
 interface MembersStats {
   total: number;
@@ -54,11 +57,13 @@ interface MembersStats {
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
+    MemberBulkScannerModalComponent,
   ],
   templateUrl: './members-list-page.component.html',
 })
 export class MembershipMembersListPageComponent implements OnInit {
   private readonly membershipsService = inject(MembershipsService);
+  private readonly bulkScanner = inject(MemberBulkScannerService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -71,6 +76,10 @@ export class MembershipMembersListPageComponent implements OnInit {
   readonly isLoading = signal(false);
 
   readonly statusFilter = signal<GymMembershipStatus | 'all'>('all');
+  /** Drives the bulk-import modal visibility. Server-side permission
+   *  (`store:memberships:bulk_import`) is the real gate; we surface the
+   *  trigger to any user with `store:memberships:read`. */
+  readonly showBulkScanner = signal(false);
   filterValues: FilterValues = {};
 
   readonly totalPages = computed(
@@ -96,6 +105,11 @@ export class MembershipMembersListPageComponent implements OnInit {
 
   readonly dropdownActions = computed<DropdownAction[]>(() => [
     { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
+    {
+      label: 'Carga masiva (IA)',
+      icon: 'scan-line',
+      action: 'bulk_scan',
+    },
     {
       label: 'Asignar Membresía',
       icon: 'plus',
@@ -250,10 +264,71 @@ export class MembershipMembersListPageComponent implements OnInit {
   onActionClick(action: string): void {
     if (action === 'create') this.assignMembership();
     else if (action === 'refresh') this.loadMemberships();
+    else if (action === 'bulk_scan') this.showBulkScanner.set(true);
   }
 
   assignMembership(): void {
     this.router.navigate(['/admin/memberships/members/new']);
+  }
+
+  /**
+   * Modal emits the validated DTO; we hand it off to the scanner service,
+   * surface a toast with the per-row counters, and refresh the list so the
+   * new (and reused) memberships appear. The modal stays mounted and self-
+   * resets via its own `(close)` listener; we just close on success.
+   */
+  onBulkCommit(dto: CommitMemberRosterDto): void {
+    this.bulkScanner
+      .commitRoster(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const data = response?.data;
+          if (!data) {
+            this.toastService.error('Respuesta inesperada del servidor');
+            return;
+          }
+
+          // Plan creation is atomic on the backend: if any plan failed, NO
+          // member row was persisted. Report and let the user retry.
+          if (data.plan_errors?.length) {
+            this.toastService.error(
+              `No se creó nada: ${data.plan_errors.length} plan(es) con error. Corrige los planes e intenta de nuevo.`,
+              'Carga masiva',
+            );
+            return;
+          }
+
+          const succeeded = data.succeeded ?? 0;
+          const failed = data.failed ?? 0;
+          const plansCreated = dto.plans.filter(
+            (p) => p.status === 'new',
+          ).length;
+
+          if (failed === 0) {
+            this.toastService.success(
+              `Importación completa: ${succeeded} socios creados` +
+                (plansCreated ? `, ${plansCreated} planes nuevos.` : '.'),
+              'Carga masiva',
+            );
+          } else {
+            this.toastService.warning(
+              `Importación parcial: ${succeeded} ok, ${failed} con error. Revisa los detalles.`,
+              'Carga masiva',
+            );
+          }
+
+          this.showBulkScanner.set(false);
+          this.loadMemberships();
+        },
+        error: (error: unknown) => {
+          const message =
+            typeof error === 'string'
+              ? error
+              : 'Error al confirmar la carga masiva';
+          this.toastService.error(message);
+        },
+      });
   }
 
   openDetail(membership: GymMembership): void {

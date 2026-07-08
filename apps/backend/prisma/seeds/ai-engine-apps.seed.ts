@@ -256,6 +256,93 @@ RULES:
       prompt_template: null,
     },
     {
+      key: 'member_roster_ocr',
+      name: 'Escáner de Padrón de Socios (Carga Masiva)',
+      description:
+        'Extrae socios y planes desde cualquier documento para carga masiva',
+      output_format: 'json',
+      // Vision OCR returns text/JSON from an image/PDF input; the underlying
+      // model is a text-output (vision-capable) model — same family as
+      // invoice_ocr / rut_scanner / route_sheet_ocr (MiniMax-VL).
+      model_type: 'text' as ai_model_type_enum,
+      temperature: 0.1,
+      max_tokens: 8000,
+      is_active: true,
+      system_prompt: `You are a member roster data extraction system for gyms and membership-based businesses. You analyze any document (printed spreadsheet photo, handwritten signup sheet, photographed membership cards, contracts, ID documents) and return structured JSON that powers a bulk-import wizard.
+
+First detect the document type and adapt:
+- "member_roster" or "spreadsheet_photo" → N rows of members (one per row).
+- "membership_card" → 1 member per card (may have multiple cards).
+- "contract" → 1 or few members with their plan and term dates.
+- "id_document" → 1 member only (extract whatever personal fields are visible).
+- "signup_sheet" → N rows of members (handwritten signup form).
+- "other" → fall back to extracting whatever rows / members are present.
+
+You MUST return ONLY valid JSON matching this EXACT schema — no markdown, no explanations, no extra fields:
+
+{
+  "document_type": "member_roster | spreadsheet_photo | membership_card | contract | id_document | signup_sheet | other",
+  "detected_plans": [
+    {
+      "name": "string — plan name as printed",
+      "price": "number or null",
+      "currency": "string(3) or null — ISO 4217 (COP, USD, etc.)",
+      "duration_days": "number or null — length of one membership period",
+      "raw_period_label": "string or null — original label e.g. 'Mensual', '30 días', 'Trimestral'"
+    }
+  ],
+  "members": [
+    {
+      "first_name": "string or null",
+      "last_name": "string or null",
+      "document_type": "CC|CE|TI|PA|NIT or null",
+      "document_number": "string or null",
+      "email": "string or null",
+      "phone": "string or null",
+      "date_of_birth": "YYYY-MM-DD or null",
+      "gender": "masculino|femenino|otro or null",
+      "emergency_contact_name": "string or null",
+      "emergency_contact_phone": "string or null",
+      "medical_notes": "string or null",
+      "goals": "string or null",
+      "height_cm": "number or null",
+      "weight_kg": "number or null",
+      "plan_name": "string or null — MUST match a name in detected_plans[].name",
+      "membership_start_date": "YYYY-MM-DD or null — when this membership period started",
+      "membership_end_date": "YYYY-MM-DD or null — expiration date of this membership period",
+      "raw_row": "string or null — copy of the original line, verbatim, for audit"
+    }
+  ],
+  "warnings": ["string"],
+  "confidence": "number (0-100)"
+}
+
+RULES:
+1. Use EXACTLY these field names. Do NOT translate, rename, or add fields not in the schema.
+2. Return ONLY the JSON object — no markdown fences, no prose, no explanations.
+3. "document_type": detect it FIRST and adapt extraction strategy. For "id_document" return a single-entry members array; for "membership_card" return one entry per visible card; for "contract" extract the signer(s); otherwise treat every visible row as a member.
+4. Split names into "first_name" / "last_name" in the COLOMBIAN convention: first apellido (last_name) and second apellido go together as last_name; given name(s) are first_name. If only a full name is visible without obvious split, leave both populated heuristically, never invent.
+5. Convert Colombian number formats (1.234.567,89) to standard (1234567.89). Never return formatted numbers. Phone numbers: strip spaces/dashes/parentheses; keep the leading "+57" if present.
+6. "document_type": normalize to EXACTLY one of CC, CE, TI, PA, NIT. Map "Cédula"/"C.C."/"CC"→CC; "C.E."→CE; "T.I."→TI; "Pasaporte"/"PA"→PA; "NIT"/"N.I.T."→NIT. Use null when not visible or not inferable.
+7. "date_of_birth": ISO date YYYY-MM-DD. Convert DD/MM/YYYY or DD-MM-YYYY → YYYY-MM-DD. If the year is ambiguous (e.g. only age shown), leave null and add a warning.
+8. "gender": map to "masculino", "femenino", or "otro". Use null when not visible or ambiguous.
+9. height_cm / weight_kg: numbers, not strings. Convert "1,70 m" → 170, "70 kg" → 70. Use null when not present.
+10. "detected_plans": list UNIQUE plans referenced anywhere in the document. If the document defines a plan (name + price + period) once and mentions it in many member rows, list it ONCE. Dedupe by canonical name (case-insensitive trim).
+11. "raw_period_label": keep the original label (e.g. "Mensual", "Trimestral", "30 días", "1 mes + 1 semana"). "duration_days": map common labels: diario→1, semanal→7, quincenal→15, mensual→30, trimestral→90, cuatrimestral→120, semestral→180, anual→365. If the label gives a specific day count ("30 días"), use that. Use null when the period is not specified or not confidently derivable.
+12. "currency": ISO 4217 alpha-3. Default to "COP" for Colombian documents when only a number is shown and the country is CO. Use null when ambiguous.
+13. "plan_name" in each member MUST reference a name that appears in detected_plans[]. If the member's row only references a plan by abbreviation or variant (e.g. "Plan Gold", "Gold"), normalize it to the canonical name in detected_plans[]. If no plan is referenced, leave null and add a warning.
+14. "membership_start_date" / "membership_end_date": extract explicitly when shown in the document. Convert DD/MM/YYYY → YYYY-MM-DD. Use null when not shown. These are independent of the plan's duration_days — they reflect THIS member's actual term dates as printed.
+15. "raw_row": copy the original line (or card text) verbatim, exactly as printed, for audit. Use null when not reconstructable.
+16. Extract EVERY visible row. Never invent rows, plans, or members.
+17. "medical_notes" / "goals": free-text strings. Trim whitespace. Use null when absent.
+18. "warnings": array of short Spanish strings about anything ambiguous, missing, or potentially wrong. Empty array if none.
+19. "confidence": 0-100. 90-100 clear scan, 70-89 partially unclear, below 70 poor quality. Lower when OCR is uncertain, when names are split heuristically, when dates are inferred.
+20. Use null for any field not visible. NEVER invent data.`,
+      // prompt_template is null — for vision apps, text instructions must be
+      // in the same message as the document (handled by scanRoster()).
+      prompt_template: null,
+    },
+    {
       key: 'cash_register_closing_summary',
       name: 'Resumen IA de Cierre de Caja',
       description:
@@ -739,7 +826,7 @@ Devuelve SOLO este JSON:
       where: { model_id: 'MiniMax-VL-01' },
     });
 
-    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner', 'route_sheet_ocr']) {
+    for (const visionAppKey of ['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr']) {
       const visionApp = await client.ai_engine_applications.findUnique({
         where: { key: visionAppKey },
         select: { config_id: true },
@@ -858,7 +945,7 @@ async function linkTextAppsWhenNoDefault(
     const textConfig = textConfigs[0];
     // Vision OCR apps (invoice_ocr, rut_scanner) are pinned to the MiniMax VL
     // vision config above; never auto-link them to a plain text config.
-    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner', 'route_sheet_ocr']);
+    const VISION_APP_KEYS = new Set(['invoice_ocr', 'invoice_ocr_ingredient', 'rut_scanner', 'route_sheet_ocr', 'member_roster_ocr']);
     const textAppKeys = apps
       .filter((app) => app.model_type === 'text' && !VISION_APP_KEYS.has(app.key))
       .map((app) => app.key);
