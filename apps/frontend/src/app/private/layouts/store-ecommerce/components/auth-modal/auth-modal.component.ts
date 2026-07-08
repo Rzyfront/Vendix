@@ -26,6 +26,7 @@ import { InputComponent } from '../../../../../shared/components/input/input.com
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
   LegalService,
   PendingDocument,
@@ -381,7 +382,7 @@ export class AuthModalComponent {
         if (this.lastShownError() === rawMessage) return;
         this.lastShownError.set(rawMessage);
         untracked(() => {
-          const { title, message } = this.mapErrorToUserFriendly(rawMessage);
+          const { title, message } = this.mapErrorToUserFriendly(error, rawMessage);
           this.errorTitle.set(title);
           this.errorMessage.set(message);
           // Recovery CTA is rendered inline in the modal's amber banner
@@ -455,11 +456,26 @@ export class AuthModalComponent {
   /**
    * Maps backend error messages to user-friendly messages
    */
-  private mapErrorToUserFriendly(error: string): {
+  private mapErrorToUserFriendly(error: any, fallbackMessage: string): {
     title: string;
     message: string;
   } {
-    const errorLower = error.toLowerCase();
+    // Check structured error_code FIRST — robust against backend copy changes.
+    // The customer-claimable CTA was previously dead because the string-based
+    // check ran against the userMessage (already a generic fallback when
+    // AUTH_CUSTOMER_CLAIMABLE_001 is not in ERROR_MESSAGES). Matching on
+    // errorCode bypasses that chain.
+    const parsed = parseApiError(error);
+    if (parsed.errorCode === 'AUTH_CUSTOMER_CLAIMABLE_001') {
+      this.claimableEmail.set(this.authForm.get('email')?.value ?? null);
+      return {
+        title: 'Ya tienes cuenta con este correo',
+        message:
+          'Detectamos que este correo ya está registrado como cliente. Te enviaremos un link para que actives tu contraseña.',
+      };
+    }
+
+    const errorLower = fallbackMessage.toLowerCase();
 
     // Invalid credentials
     if (
