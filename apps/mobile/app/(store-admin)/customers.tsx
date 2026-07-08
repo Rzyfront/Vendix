@@ -503,7 +503,12 @@ export default function CustomersScreen() {
     setEditPhone(item.phone || '');
     setEditDocumentType(item.document_type || '');
     setEditDocument(item.document_number || '');
+    setEditTaxRegime((item as any).tax_regime ?? '');
+    setEditPersonType((item as any).person_type ?? '');
+    setEditIsWithholdingAgent((item as any).is_withholding_agent ?? false);
     setShowEditDocTypeDropdown(false);
+    setShowEditTaxRegimeDropdown(false);
+    setShowEditPersonTypeDropdown(false);
     setEditErrors({});
   }, []);
 
@@ -511,6 +516,8 @@ export default function CustomersScreen() {
     setEditTarget(null);
     setEditErrors({});
     setShowEditDocTypeDropdown(false);
+    setShowEditTaxRegimeDropdown(false);
+    setShowEditPersonTypeDropdown(false);
   }, []);
 
   const handleSaveEdit = useCallback(() => {
@@ -548,9 +555,12 @@ export default function CustomersScreen() {
       phone: editPhone.trim() || undefined,
       document_type: editDocumentType || undefined,
       document_number: editDocument.trim() || undefined,
+      tax_regime: (editTaxRegime || undefined) as any,
+      person_type: (editPersonType || undefined) as any,
+      is_withholding_agent: editIsWithholdingAgent,
     };
     updateMutation.mutate({ id: editTarget.id, data: dto });
-  }, [editTarget, editFirstName, editLastName, editEmail, editPhone, editDocumentType, editDocument, updateMutation]);
+  }, [editTarget, editFirstName, editLastName, editEmail, editPhone, editDocumentType, editDocument, editTaxRegime, editPersonType, editIsWithholdingAgent, updateMutation]);
 
   const renderCustomer = useCallback(
     ({ item }: { item: Customer }) => (
@@ -1057,6 +1067,124 @@ export default function CustomersScreen() {
                   />
                 </View>
               </View>
+
+              {/* Régimen tributario + Tipo de persona (row) — espejo web */}
+              <View style={styles.editRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editFormLabel}>RÉGIMEN TRIBUTARIO</Text>
+                  <Pressable
+                    style={[styles.editInput, styles.createSelectTrigger]}
+                    onPress={() => setShowEditTaxRegimeDropdown((v) => !v)}
+                  >
+                    <Text style={[
+                      styles.createSelectText,
+                      !editTaxRegime && styles.createSelectPlaceholder,
+                    ]}>
+                      {TAX_REGIME_OPTIONS.find((d) => d.value === editTaxRegime)?.label
+                        || 'Seleccionar'}
+                    </Text>
+                    <Ionicons
+                      name={showEditTaxRegimeDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colorScales.gray[500]}
+                    />
+                  </Pressable>
+                  {showEditTaxRegimeDropdown && (
+                    <View style={styles.createSelectDropdown}>
+                      {TAX_REGIME_OPTIONS.map((d) => (
+                        <Pressable
+                          key={d.value}
+                          onPress={() => {
+                            setEditTaxRegime(d.value);
+                            setShowEditTaxRegimeDropdown(false);
+                          }}
+                          style={[
+                            styles.createSelectOption,
+                            editTaxRegime === d.value && styles.editStateChipActive,
+                          ]}
+                        >
+                          <Text style={[
+                            styles.createSelectOptionText,
+                            editTaxRegime === d.value && styles.editStateChipTextActive,
+                          ]}>
+                            {d.label}
+                          </Text>
+                          {editTaxRegime === d.value && (
+                            <Ionicons name="checkmark" size={16} color={colors.primary} />
+                          )}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editFormLabel}>TIPO DE PERSONA</Text>
+                  <Pressable
+                    style={[styles.editInput, styles.createSelectTrigger]}
+                    onPress={() => setShowEditPersonTypeDropdown((v) => !v)}
+                  >
+                    <Text style={[
+                      styles.createSelectText,
+                      !editPersonType && styles.createSelectPlaceholder,
+                    ]}>
+                      {PERSON_TYPE_OPTIONS.find((d) => d.value === editPersonType)?.label
+                        || 'Seleccionar'}
+                    </Text>
+                    <Ionicons
+                      name={showEditPersonTypeDropdown ? 'chevron-up' : 'chevron-down'}
+                      size={16}
+                      color={colorScales.gray[500]}
+                    />
+                  </Pressable>
+                  {showEditPersonTypeDropdown && (
+                    <View style={styles.createSelectDropdown}>
+                      {PERSON_TYPE_OPTIONS.map((d) => (
+                        <Pressable
+                          key={d.value}
+                          onPress={() => {
+                            setEditPersonType(d.value);
+                            setShowEditPersonTypeDropdown(false);
+                          }}
+                          style={[
+                            styles.createSelectOption,
+                            editPersonType === d.value && styles.editStateChipActive,
+                          ]}
+                        >
+                          <Text style={[
+                            styles.createSelectOptionText,
+                            editPersonType === d.value && styles.editStateChipTextActive,
+                          ]}>
+                            {d.label}
+                          </Text>
+                          {editPersonType === d.value && (
+                            <Ionicons name="checkmark" size={16} color={colors.primary} />
+                          )}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* Agente de retención — espejo web toggle */}
+              <Pressable
+                style={styles.toggleRow}
+                onPress={() => setEditIsWithholdingAgent((v) => !v)}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.editFormLabel}>AGENTE DE RETENCIÓN</Text>
+                  <Text style={styles.toggleHint}>Responsable de retener impuestos en compras</Text>
+                </View>
+                <View style={[
+                  styles.toggle,
+                  editIsWithholdingAgent && styles.toggleActive,
+                ]}>
+                  <View style={[
+                    styles.toggleThumb,
+                    editIsWithholdingAgent && styles.toggleThumbActive,
+                  ]} />
+                </View>
+              </Pressable>
             </ScrollView>
 
             {/* Footer: Cancelar (oscuro) + Actualizar (primary verde) — estilo web */}
