@@ -612,6 +612,12 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'store:memberships:bulk_import',
+      description: 'Carga masiva de socios por escaneo IA de documentos',
+      path: '/api/store/memberships/bulk-scan',
+      method: 'POST',
+    },
+    {
       name: 'store:memberships:update',
       description: 'Actualizar membresías',
       path: '/api/store/memberships/:id',
