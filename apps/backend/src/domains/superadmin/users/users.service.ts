@@ -10,9 +10,10 @@ import {
   UpdateUserDto,
   UserQueryDto,
 } from '../../organization/users/dto';
-import { user_state_enum } from '@prisma/client';
+import { user_state_enum, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { StaffProvisioningService } from '../../../common/services/staff-provisioning.service';
 import { toTitleCase } from '@common/utils/format.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { SyncPanelUiDto } from './dto/sync-panel-ui.dto';
@@ -27,21 +28,24 @@ export class UsersService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly defaultPanelUIService: DefaultPanelUIService,
+    private readonly staffProvisioning: StaffProvisioningService,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
-    // Check if email already exists
-    const existingUser = await this.prisma.users.findFirst({
-      where: { email: createUserDto.email },
-    });
-
-    if (existingUser) {
-      throw new ConflictException('Email already exists');
-    }
+    // A1: unicidad de email para cuentas staff/owner (no-customer).
+    await this.staffProvisioning.assertEmailAvailableForStaff(
+      createUserDto.email,
+    );
 
     if (!createUserDto.organization_id) {
       throw new BadRequestException('organization_id is required');
     }
+
+    // Capturamos en consts locales para preservar el narrowing dentro del
+    // callback de $transaction (una property de createUserDto se re-ensancha
+    // a `| undefined` al cruzar la frontera de la closure).
+    const organizationId = createUserDto.organization_id;
+    const mainStoreId = createUserDto.main_store_id;
 
     // Hash password
     const hashedPassword = await bcrypt.hash(createUserDto.password, 10);
@@ -50,40 +54,58 @@ export class UsersService {
     const formatted_first_name = toTitleCase(createUserDto.first_name || '');
     const formatted_last_name = toTitleCase(createUserDto.last_name || '');
 
-    const user = await this.prisma.users.create({
-      data: {
-        email: createUserDto.email,
-        first_name: formatted_first_name,
-        last_name: formatted_last_name,
-        username: createUserDto.username,
-        password: hashedPassword,
-        organization_id: createUserDto.organization_id,
-        state: createUserDto.state,
-      },
-      include: {
-        organizations: true,
-        user_roles: {
-          include: {
-            roles: true,
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const user = await tx.users.create({
+        data: {
+          email: createUserDto.email,
+          first_name: formatted_first_name,
+          last_name: formatted_last_name,
+          username: createUserDto.username,
+          password: hashedPassword,
+          organization_id: organizationId,
+          state: createUserDto.state,
+        },
+        include: {
+          organizations: true,
+          user_roles: {
+            include: {
+              roles: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    // Create user_settings with default ORG_ADMIN configuration
-    const adminConfig =
-      await this.defaultPanelUIService.generatePanelUI('ORG_ADMIN');
-    await this.prisma.user_settings.create({
-      data: {
-        user_id: user.id,
-        app_type: 'ORG_ADMIN', // Campo directo
-        config: adminConfig,
-      },
-    });
+      if (mainStoreId) {
+        // CASO A: usuario CON tienda — provisión atómica de la membresía.
+        // El helper crea store_users + user_settings (panel_ui default) +
+        // users.main_store_id. NO pasamos roleName: el rol se asigna aparte
+        // vía assignRole (que a su vez re-provisiona el vínculo de tienda).
+        await this.staffProvisioning.provisionStaffMembership(tx, {
+          userId: user.id,
+          storeId: mainStoreId,
+          organizationId,
+          appType: createUserDto.app ?? 'STORE_ADMIN',
+          setMainStore: true,
+        });
+      } else {
+        // CD7: usuario sin tienda (p.ej. super_admin) — requiere segundo paso
+        // (assignRole + vínculo de tienda). No forzamos store_users.
+        const adminConfig = await this.defaultPanelUIService.generatePanelUI(
+          createUserDto.app ?? 'ORG_ADMIN',
+        );
+        await tx.user_settings.create({
+          data: {
+            user_id: user.id,
+            app_type: (createUserDto.app ?? 'ORG_ADMIN') as any,
+            config: adminConfig,
+          },
+        });
+      }
 
-    // Remove password from response
-    const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+      // Remove password from response
+      const { password, ...userWithoutPassword } = user;
+      return userWithoutPassword;
+    });
   }
 
   async findAll(query: UserQueryDto) {
@@ -357,14 +379,53 @@ export class UsersService {
       throw new ConflictException('Role already assigned to user');
     }
 
-    await this.prisma.user_roles.create({
-      data: {
-        user_id: userId,
-        role_id: roleId,
-      },
-    });
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.user_roles.create({
+        data: {
+          user_id: userId,
+          role_id: roleId,
+        },
+      });
 
-    return { message: 'Role assigned successfully' };
+      // CD7: si el rol es de staff/owner y el usuario pertenece a una org,
+      // aseguramos su vínculo de tienda (store_users + main_store_id 'if-empty')
+      // para no dejarlo huérfano. NO tocamos app_type (setAppType:false) para no
+      // degradar un ORG_ADMIN. Const local `organizationId` para preservar el
+      // narrowing dentro de la closure.
+      const organizationId = user.organization_id;
+      if (
+        role.name !== 'customer' &&
+        role.name !== 'super_admin' &&
+        organizationId
+      ) {
+        const store = await this.staffProvisioning.resolveStoreForStoreAdmin(
+          {
+            id: user.id,
+            organization_id: organizationId,
+            main_store_id: user.main_store_id,
+          },
+          StaffProvisioningService.hasHighPrivilege([role.name]),
+          tx,
+        );
+
+        if (store) {
+          await this.staffProvisioning.provisionStaffMembership(tx, {
+            userId: user.id,
+            storeId: store.id,
+            organizationId,
+            setAppType: false,
+            setMainStore: 'if-empty',
+          });
+        }
+        // CD7 (excepción documentada): si NO hay tienda elegible (store === null)
+        // el usuario queda sin vínculo automático — se resolverá en un segundo
+        // paso manual. No forzamos store_users.
+      }
+      // CD7 (excepción documentada): super_admin (y customer) NO se vinculan a
+      // tienda; su acceso es cross-tenant / no-staff.
+
+      return { message: 'Role assigned successfully' };
+    });
   }
 
   async removeRole(userId: number, roleId: number) {

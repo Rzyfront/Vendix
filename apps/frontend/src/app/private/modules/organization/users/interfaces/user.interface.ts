@@ -59,6 +59,9 @@ export interface CreateUserDto {
   document_number?: string;
   avatar_url?: string;
   main_store_id?: number;
+  /** Rol obligatorio (CD5/CD7): deriva el app_type y, si es rol de tienda,
+   * exige main_store_id. */
+  role_id: number;
 }
 
 export interface UpdateUserDto {

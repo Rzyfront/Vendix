@@ -31,6 +31,7 @@ import { PerformanceModule } from './domains/superadmin/monitoring/performance.m
 import { PerformanceInterceptor } from './domains/superadmin/monitoring/interceptors/performance.interceptor';
 import { SecretsModule } from './common/config/secrets.module';
 import { DefaultPanelUIModule } from './common/services/default-panel-ui.module';
+import { StaffProvisioningModule } from './common/services/staff-provisioning.module';
 import { HelpersModule } from './common/helpers/helpers.module';
 import { DomainResolverMiddleware } from './common/middleware/domain-resolver.middleware';
 import { DomainCacheInvalidatorListener } from './common/middleware/domain-cache-invalidator.listener';
@@ -66,6 +67,7 @@ import { InventoryCostingModule } from './domains/store/inventory/shared/invento
     StorageModule,
     AuditModule,
     DefaultPanelUIModule,
+    StaffProvisioningModule,
     HelpersModule,
     JobsModule,
     RedisModule,

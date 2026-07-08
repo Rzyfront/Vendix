@@ -1,6 +1,5 @@
 import {
   Component,
-  OnInit,
   inject,
   signal,
   computed,
@@ -145,24 +144,6 @@ export interface OrganizationCandidate {
             class="space-y-4 sm:space-y-6"
           >
             <div class="space-y-4">
-              <!-- Vlink Field (only for Vendix context) -->
-              @if (contextType() === 'vendix') {
-                <div class="vlink-field">
-                  <app-input
-                    label="V-link"
-                    formControlName="vlink"
-                    [control]="loginForm.get('vlink')"
-                    type="text"
-                    size="md"
-                    placeholder="Nombre o ID de tu organización"
-                    tooltipText="Puedes usar el nombre de tu organización o su identificador único (V-link)"
-                    tooltipPosition="right"
-                    [tooltipVisible]="showVlinkTooltip() ? true : undefined"
-                  >
-                  </app-input>
-                </div>
-              }
-
               <!-- Email Field -->
               <app-input
                 [label]="emailLabel"
@@ -184,6 +165,8 @@ export interface OrganizationCandidate {
                 placeholder="••••••••"
               >
               </app-input>
+
+              <!-- Commerce selector (Vendix context, optional) -->
             </div>
 
             <!-- Error Display -->
@@ -233,6 +216,52 @@ export interface OrganizationCandidate {
                 Iniciar Sesión
               }
             </app-button>
+
+            <!-- Commerce selector (Vendix context, optional) -->
+            @if (contextType() === 'vendix') {
+              <div class="flex justify-center">
+                @if (selectedCommerceSlug(); as sel) {
+                  <div
+                    class="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-primary)]/5 px-3 py-2"
+                  >
+                    <div class="flex items-center gap-2 min-w-0">
+                      <app-icon
+                        name="building"
+                        [size]="16"
+                        color="var(--color-primary)"
+                      ></app-icon>
+                      <span
+                        class="text-sm text-[var(--color-text-primary)] truncate"
+                      >
+                        {{
+                          sel.type === 'store' ? 'Comercio' : 'Organización'
+                        }}: {{ sel.slug }}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      (click)="openCommerceSelector()"
+                      class="text-xs font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)] shrink-0 cursor-pointer"
+                    >
+                      Cambiar
+                    </button>
+                  </div>
+                } @else {
+                  <button
+                    type="button"
+                    (click)="openCommerceSelector()"
+                    class="inline-flex items-center gap-1.5 text-sm font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)] cursor-pointer"
+                  >
+                    <app-icon
+                      name="building"
+                      [size]="16"
+                      color="var(--color-primary)"
+                    ></app-icon>
+                    Seleccionar comercio (opcional)
+                  </button>
+                }
+              </div>
+            }
 
             <!-- Actions -->
             <div class="flex justify-center mt-4">
@@ -400,12 +429,145 @@ export interface OrganizationCandidate {
         </div>
       </div>
     }
+
+    <!-- Commerce Selector Modal (Vendix context) -->
+    @if (showCommerceSelectorModal()) {
+      <div
+        class="fixed inset-0 z-50 overflow-y-auto"
+        role="dialog"
+        aria-modal="true"
+      >
+        <!-- Backdrop -->
+        <div
+          class="fixed inset-0 bg-black/50 transition-opacity"
+          (click)="closeCommerceSelector()"
+        ></div>
+
+        <!-- Modal -->
+        <div class="flex min-h-full items-center justify-center p-4">
+          <div
+            class="relative transform overflow-hidden rounded-2xl bg-[var(--color-surface)] shadow-xl transition-all w-full max-w-md"
+          >
+            <!-- Header -->
+            <div class="p-6 pb-4 border-b border-[var(--color-border)]">
+              <div class="flex items-center gap-3">
+                <div
+                  class="w-10 h-10 rounded-full bg-[var(--color-primary)]/10 flex items-center justify-center"
+                >
+                  <app-icon
+                    name="building"
+                    [size]="20"
+                    color="var(--color-primary)"
+                  ></app-icon>
+                </div>
+                <div>
+                  <h3
+                    class="text-lg font-semibold text-[var(--color-text-primary)]"
+                  >
+                    Seleccionar comercio
+                  </h3>
+                  <p class="text-sm text-[var(--color-text-secondary)]">
+                    Elige a qué comercio u organización deseas ingresar
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Body -->
+            <div class="p-6 space-y-4" [formGroup]="loginForm">
+              <!-- Scope selector -->
+              <div class="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  (click)="commerceScopeType.set('store')"
+                  [class]="
+                    'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all cursor-pointer ' +
+                    (commerceScopeType() === 'store'
+                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5 text-[var(--color-primary)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-secondary)]')
+                  "
+                >
+                  <app-icon
+                    name="cart"
+                    [size]="16"
+                    [color]="
+                      commerceScopeType() === 'store'
+                        ? 'var(--color-primary)'
+                        : 'var(--color-text-muted)'
+                    "
+                  ></app-icon>
+                  Comercio
+                </button>
+                <button
+                  type="button"
+                  (click)="commerceScopeType.set('organization')"
+                  [class]="
+                    'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all cursor-pointer ' +
+                    (commerceScopeType() === 'organization'
+                      ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5 text-[var(--color-primary)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-secondary)]')
+                  "
+                >
+                  <app-icon
+                    name="building"
+                    [size]="16"
+                    [color]="
+                      commerceScopeType() === 'organization'
+                        ? 'var(--color-primary)'
+                        : 'var(--color-text-muted)'
+                    "
+                  ></app-icon>
+                  Organización
+                </button>
+              </div>
+
+              <!-- Vlink input -->
+              <app-input
+                label="V-link"
+                formControlName="vlink"
+                [control]="loginForm.get('vlink')"
+                type="text"
+                size="md"
+                [placeholder]="
+                  commerceScopeType() === 'store'
+                    ? 'Nombre o ID del comercio'
+                    : 'Nombre o ID de la organización'
+                "
+              >
+              </app-input>
+            </div>
+
+            <!-- Footer -->
+            <div
+              class="p-4 pt-2 border-t border-[var(--color-border)] flex gap-2"
+            >
+              <button
+                type="button"
+                (click)="closeCommerceSelector()"
+                class="flex-1 py-2.5 text-sm font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <app-button
+                type="button"
+                variant="primary"
+                size="md"
+                (click)="confirmCommerceSelection()"
+                class="flex-1"
+              >
+                Confirmar
+              </app-button>
+            </div>
+          </div>
+        </div>
+      </div>
+    }
   `,
   styles: [
     `
     `,
   ]})
-export class ContextualLoginComponent implements OnInit {
+export class ContextualLoginComponent {
   loginForm: FormGroup;
   private readonly formStatus;
 
@@ -418,10 +580,17 @@ export class ContextualLoginComponent implements OnInit {
   readonly displayName = signal<string>('');
   readonly contextSlug = signal<string>('');
   readonly logoUrl = signal<string>('');
-  readonly showVlinkTooltip = signal(true);
 
   readonly showDisambiguationModal = signal(false);
   readonly disambiguationCandidates = signal<OrganizationCandidate[]>([]);
+
+  // CD8 — Vendix context: optional explicit commerce/organization selection.
+  readonly showCommerceSelectorModal = signal(false);
+  readonly commerceScopeType = signal<'store' | 'organization'>('store');
+  readonly selectedCommerceSlug = signal<{
+    type: 'store' | 'organization';
+    slug: string;
+  } | null>(null);
 
   private toast = inject(ToastService);
   private appConfigFacade = inject(ConfigFacade);
@@ -477,12 +646,6 @@ export class ContextualLoginComponent implements OnInit {
     });
   }
 
-  ngOnInit(): void {
-    setTimeout(() => {
-      this.showVlinkTooltip.set(false);
-    }, 3000);
-  }
-
   private applyAuthContext(appConfig: any): void {
     const allowedEnvs = ['VENDIX_LANDING', 'ORG_LANDING', 'STORE_LANDING'];
     const domainConfig = appConfig.domainConfig;
@@ -497,7 +660,8 @@ export class ContextualLoginComponent implements OnInit {
       this.contextType.set('vendix');
       this.displayName.set('Vendix Platform');
       this.contextSlug.set('');
-      this.loginForm.get('vlink')?.setValidators([Validators.required]);
+      // CD8: vlink is optional; commerce/org is chosen explicitly via modal.
+      this.loginForm.get('vlink')?.clearValidators();
     } else if (env === 'ORG_ADMIN' || env === 'ORG_LANDING') {
       this.contextType.set('organization');
       this.contextSlug.set(domainConfig.organization_slug || '');
@@ -593,13 +757,22 @@ export class ContextualLoginComponent implements OnInit {
     if (this.loginForm.valid && this.loginState() !== 'loading') {
       this.apiErrorMessage.set(null);
       this.loginError.set(null);
-      const { vlink, email, password } = this.loginForm.value;
+      const { email, password } = this.loginForm.value;
       let store_slug: string | undefined;
       let organization_slug: string | undefined;
 
       const ctx = this.contextType();
       if (ctx === 'vendix') {
-        organization_slug = vlink;
+        // CD8: no slug ⇒ backend resolves the starting store from main_store_id.
+        // A selection from the modal narrows login to that commerce/org.
+        const selection = this.selectedCommerceSlug();
+        if (selection?.slug) {
+          if (selection.type === 'store') {
+            store_slug = selection.slug;
+          } else {
+            organization_slug = selection.slug;
+          }
+        }
       } else if (ctx === 'organization') {
         organization_slug = this.contextSlug();
       } else if (ctx === 'store') {
@@ -629,6 +802,28 @@ export class ContextualLoginComponent implements OnInit {
     this.disambiguationCandidates.set([]);
     this.loginState.set('idle');
     this.authFacade.setAuthError(null);
+  }
+
+  openCommerceSelector(): void {
+    const current = this.selectedCommerceSlug();
+    if (current) {
+      this.commerceScopeType.set(current.type);
+      this.loginForm.get('vlink')?.setValue(current.slug);
+    }
+    this.showCommerceSelectorModal.set(true);
+  }
+
+  confirmCommerceSelection(): void {
+    const slug = (this.loginForm.get('vlink')?.value || '').trim();
+    // Empty ⇒ clear selection (login falls back to email-only / main_store_id).
+    this.selectedCommerceSlug.set(
+      slug ? { type: this.commerceScopeType(), slug } : null,
+    );
+    this.showCommerceSelectorModal.set(false);
+  }
+
+  closeCommerceSelector(): void {
+    this.showCommerceSelectorModal.set(false);
   }
 
   navigateToForgotPassword(): void {

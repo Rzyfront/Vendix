@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { OrganizationPrismaService } from '../../../prisma/services/organization-prisma.service';
 import {
@@ -25,15 +26,19 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StoreSettings } from '../../store/settings/interfaces/store-settings.interface';
 import { StoreBootstrapHelper } from '@common/helpers/store-bootstrap.helper';
 import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
+import { StaffProvisioningService } from '@common/services/staff-provisioning.service';
 
 @Injectable()
 export class StoresService {
+  private readonly logger = new Logger(StoresService.name);
+
   constructor(
     private prisma: OrganizationPrismaService,
     private domainGeneratorHelper: DomainGeneratorHelper,
     private brandingGeneratorHelper: BrandingGeneratorHelper,
     private storeBootstrapHelper: StoreBootstrapHelper,
     private readonly subscriptionTrialService: SubscriptionTrialService,
+    private readonly staffProvisioning: StaffProvisioningService,
   ) {}
 
   // ... (lines 27-465 remain unchanged, I will use MultiReplace to target specific blocks)
@@ -118,6 +123,57 @@ export class StoresService {
             },
             tx,
           );
+
+        // 1.b) CD7 — si se asignó un manager, garantizar su MEMBRESÍA en la
+        //      tienda. Hasta ahora solo se escribía el puntero
+        //      `stores.manager_user_id` (arriba, en store_data) sin crear la
+        //      relación `store_users`, dejando al manager sin acceso real
+        //      (violación de CD7). Se provisiona DENTRO de la misma tx para
+        //      que sea atómico con la creación de la tienda.
+        if (storeData.manager_user_id != null) {
+          const manager = await tx.users.findUnique({
+            where: { id: storeData.manager_user_id },
+            include: { user_roles: { include: { roles: true } } },
+          });
+
+          if (!manager || manager.organization_id !== organization_id) {
+            // Evita membresía cross-tenant: si el manager no existe o
+            // pertenece a otra organización, NO provisionamos (el puntero
+            // stores.manager_user_id ya quedó escrito como hoy).
+            this.logger.warn(
+              `create(): manager_user_id=${storeData.manager_user_id} no existe o no pertenece a la organización ${organization_id}; se omite la provisión de membresía.`,
+            );
+          } else {
+            const roleNames = manager.user_roles
+              .map((ur) => ur.roles?.name)
+              .filter(Boolean) as string[];
+            const high =
+              StaffProvisioningService.hasHighPrivilege(roleNames);
+
+            if (high) {
+              // Alto privilegio (owner/admin/super_admin): solo aseguramos la
+              // membresía; NO degradamos su rol/app_type ni pisamos su
+              // main_store existente.
+              await this.staffProvisioning.provisionStaffMembership(tx, {
+                userId: manager.id,
+                storeId: store.id,
+                organizationId: organization_id,
+                setAppType: false,
+                setMainStore: 'if-empty',
+              });
+            } else {
+              // Usuario estándar: se convierte en manager de esta tienda.
+              await this.staffProvisioning.provisionStaffMembership(tx, {
+                userId: manager.id,
+                storeId: store.id,
+                organizationId: organization_id,
+                roleName: 'manager',
+                appType: 'STORE_ADMIN',
+                setMainStore: true,
+              });
+            }
+          }
+        }
 
         // 2) domain_settings (STORE_ADMIN: {slug}-store.vendix.com)
         await this.createStoreDomain(store.id, store.slug, tx);

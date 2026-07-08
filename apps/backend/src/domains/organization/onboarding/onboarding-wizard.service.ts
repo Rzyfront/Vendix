@@ -15,6 +15,7 @@ import { SetupAppConfigWizardDto } from './dto/setup-app-config-wizard.dto';
 import { SelectAppTypeDto } from './dto/select-app-type.dto';
 import { DomainConfigService } from '@common/config/domain.config';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { StaffProvisioningService } from '../../../common/services/staff-provisioning.service';
 import {
   DomainGeneratorHelper,
   DomainContext,
@@ -52,6 +53,7 @@ export class OnboardingWizardService {
     private readonly orgLocationsService: OrgLocationsService,
     private readonly settingsService: SettingsService,
     private readonly orgSettingsService: OrgSettingsService,
+    private readonly staffProvisioning: StaffProvisioningService,
   ) {}
 
   /**
@@ -649,6 +651,21 @@ export class OnboardingWizardService {
         // Store already created in a previous wizard step — do NOT re-trigger
         // trial bootstrap (it was already attempted when this store was first
         // created, and trial is one-shot per organization anyway).
+        // CD7: garantiza el vínculo owner↔tienda también en RE-ENTRADAS del
+        //      wizard (la tienda ya existía). Fuera de la tx atómica de creación
+        //      ⇒ usamos el cliente global sin scope como `tx`. Idempotente, así
+        //      que re-ejecutarlo es seguro. `roleName` omitido (mismo motivo que
+        //      en la creación).
+        await this.staffProvisioning.provisionStaffMembership(
+          this.globalPrisma.withoutScope(),
+          {
+            userId,
+            storeId: existingStore.id,
+            organizationId: organization_id,
+            setAppType: false,
+            setMainStore: true,
+          },
+        );
         return { ...existingStore, already_completed: true };
       }
 
@@ -687,6 +704,20 @@ export class OnboardingWizardService {
           });
         }
       }
+
+      // CD7: mismo vínculo owner↔tienda en la rama "nombre cambiado". Fuera de
+      //      tx (cliente global sin scope como `tx`). Idempotente. `roleName`
+      //      omitido a propósito (el owner ya trae su rol desde el registro).
+      await this.staffProvisioning.provisionStaffMembership(
+        this.globalPrisma.withoutScope(),
+        {
+          userId,
+          storeId: existingStore.id,
+          organizationId: organization_id,
+          setAppType: false,
+          setMainStore: true,
+        },
+      );
 
       return { ...updatedStore, updated: true };
     }
@@ -745,6 +776,23 @@ export class OnboardingWizardService {
             },
             tx,
           );
+
+        // 1.5) Vincula al OWNER a su PRIMERA tienda (CD7). Sin esto el wizard
+        //      deja al owner sin `store_users` ni `main_store_id`. Corre DENTRO
+        //      de la tx para que el vínculo commitee atómicamente con la tienda.
+        //      OMITIMOS `roleName` a propósito: el owner ya tiene su rol 'owner'
+        //      desde el registro, y un `roles.findUnique` fallido lanzaría
+        //      AUTH_ROLE_001 haciendo rollback de la creación de la PRIMERA
+        //      tienda. `setAppType:false` para no pelear con setupAppConfig/
+        //      selectAppType (dueños del app_type). `setMainStore:true` porque
+        //      es su única tienda (CD3).
+        await this.staffProvisioning.provisionStaffMembership(tx, {
+          userId,
+          storeId: store.id,
+          organizationId: organization_id,
+          setAppType: false,
+          setMainStore: true,
+        });
 
         // 2) store_settings — currency/timezone come from wizard input.
         //    Use upsert in case a previous partial run left a row behind.

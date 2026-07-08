@@ -102,4 +102,17 @@ export class CreateUserDto {
   @IsOptional()
   @IsInt()
   main_store_id?: number;
+
+  @ApiPropertyOptional({
+    example: 3,
+    description:
+      'ID del rol del usuario. En el camino de organización es obligatorio ' +
+      '(lo exige el servicio en runtime): deriva el app_type y, si es rol de ' +
+      'tienda, exige main_store_id (CD5/CD7). Opcional a nivel de DTO porque ' +
+      'el mismo DTO lo comparte el endpoint de superadmin, que asigna el rol ' +
+      'en un segundo paso.',
+  })
+  @IsOptional()
+  @IsInt()
+  role_id?: number;
 }
