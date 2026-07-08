@@ -726,6 +726,18 @@ export class MemberBulkScannerService {
     }
 
     const target = this.normalizeForMatch(extracted.name);
+    // A name that folds to empty (all punctuation/whitespace) has nothing to
+    // match on. Bail out as `new`: otherwise Tier 2's `candidate.includes('')`
+    // is always true and every plan would over-match at score 65.
+    if (!target) {
+      return {
+        ref_index,
+        status: 'new',
+        matched_plan_id: null,
+        confidence: 0,
+        candidates: [],
+      };
+    }
     const scored: Array<{ id: number; name: string; code: string; score: number }> = [];
 
     // Tier 1: exact.
