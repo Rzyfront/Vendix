@@ -91,6 +91,7 @@ export const Endpoints = {
       SEARCH: '/store/customers',
       STATS: '/store/customers/stats/store/:storeId',
       TOPUP: '/store/customers/:id/topup',
+      ADJUST: '/store/customers/:id/adjust',
     },
     CATEGORIES: {
       LIST: '/store/categories',

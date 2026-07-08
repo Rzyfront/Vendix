@@ -17,6 +17,7 @@ import {
   Toggle,
 } from '@/shared/components';
 import { Icon } from '@/shared/components/icon/icon';
+import { LightboxImageTap } from '@/features/store/components/image-lightbox';
 import {
   ImageSourceModal,
   type UploadedImage,
@@ -87,7 +88,7 @@ export function BrandForm({ mode, brandId, onClose }: BrandFormProps) {
       return BrandService.create(data as CreateBrandDto);
     },
     onSuccess: () => {
-      toastSuccess(isEdit ? 'Marca actualizada' : 'Marca creada');
+      toastSuccess(isEdit ? 'Marca actualizada exitosamente' : 'Marca creada exitosamente');
       queryClient.invalidateQueries({ queryKey: ['brands'] });
       queryClient.invalidateQueries({ queryKey: ['brands-stats'] });
       queryClient.invalidateQueries({ queryKey: ['product-brands'] });

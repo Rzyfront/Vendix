@@ -37,6 +37,7 @@ export default function CategoriesListScreen() {
   const [stateFilter, setStateFilter] = useState<CategoryState | undefined>(undefined);
   const [featuredFilter, setFeaturedFilter] = useState<boolean | undefined>(undefined);
   const [deleteTarget, setDeleteTarget] = useState<ProductCategory | null>(null);
+  const [forceConfirm, setForceConfirm] = useState<{ category: ProductCategory; productCount: number } | null>(null);
 
   const query: CategoryQuery = {
     page,
@@ -318,6 +319,35 @@ function CategoryCard({
           </Text>
         )}
       </View>
+      {onToggleFeatured ? (
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation?.();
+            onToggleFeatured();
+          }}
+          hitSlop={8}
+          disabled={isTogglingFeatured}
+          style={({ pressed }) => [
+            {
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: category.is_featured ? '#FEF3C7' : 'transparent',
+            },
+            pressed && { opacity: 0.6 },
+          ]}
+          accessibilityLabel={category.is_featured ? 'Quitar destaque' : 'Destacar'}
+        >
+          <Icon
+            name="star"
+            size={18}
+            color={category.is_featured ? colors.warning : colors.text.muted}
+            fill={category.is_featured ? colors.warning : 'transparent'}
+          />
+        </Pressable>
+      ) : null}
       <Icon name="chevron-right" size={18} color={colors.text.muted} />
     </Pressable>
   );

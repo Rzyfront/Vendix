@@ -28,6 +28,8 @@ import { useTenantStore } from '@/core/store/tenant.store';
 import { useCan } from '@/core/auth/use-permissions';
 import { BulkUploadModal } from '@/features/store/components/bulk-upload-modal';
 import { BulkImageUploadModal } from '@/features/store/components/bulk-image-upload-modal';
+import { LightboxImageTap } from '@/features/store/components/image-lightbox';
+import { OptionsDropdown } from '@/shared/components/options-dropdown/options-dropdown';
 import { ProductQuickCreateModal } from '@/features/store/components/product-quick-create-modal';
 import { downloadCurrentProducts } from '@/features/store/utils/xlsx';
 import type {
@@ -220,44 +222,17 @@ export default function ProductsListScreen() {
             >
               <Icon name="plus" size={20} color={colors.primary} />
             </Pressable>
-            {/* Popover anclado debajo del + (mismo nivel que el botón) */}
-            {actionsOpen && (
-              <>
-                <Pressable
-                  style={styles.popoverBackdrop}
-                  onPress={() => setActionsOpen(false)}
-                />
-                <View style={styles.actionsPopoverAnchor}>
-                  <View style={styles.popover}>
-                    <View style={styles.popoverHeader}>
-                      <Text style={styles.popoverTitle}>Acciones</Text>
-                    </View>
-                    <ActionItem
-                      icon="plus"
-                      label="Nuevo producto"
-                      primary
-                      onPress={() => { setActionsOpen(false); setQuickCreateOpen(true); }}
-                    />
-                    <ActionItem
-                      icon="upload"
-                      label="Carga masiva"
-                      onPress={() => { setActionsOpen(false); setBulkUploadOpen(true); }}
-                    />
-                    <ActionItem
-                      icon="image"
-                      label="Carga de imágenes"
-                      onPress={() => { setActionsOpen(false); setBulkImageOpen(true); }}
-                    />
-                    <ActionItem
-                      icon="file-spreadsheet"
-                      label="Descargar plantilla de productos actuales"
-                      onPress={() => { setActionsOpen(false); downloadCurrentProductsTemplate(); }}
-                      isLast
-                    />
-                  </View>
-                </View>
-              </>
-            )}
+            <OptionsDropdown
+              compact
+              triggerIcon="plus"
+              actions={[
+                { label: 'Nuevo producto', icon: 'plus', onPress: () => { setActionsOpen(false); setQuickCreateOpen(true); } },
+                { label: 'Carga masiva', icon: 'upload', onPress: () => { setActionsOpen(false); setBulkUploadOpen(true); } },
+                { label: 'Carga de imágenes', icon: 'image', onPress: () => { setActionsOpen(false); setBulkImageOpen(true); } },
+                { label: 'Descargar plantilla de productos actuales', icon: 'file-spreadsheet', onPress: () => { setActionsOpen(false); downloadCurrentProductsTemplate(); } },
+              ]}
+              style={{ marginLeft: spacing[2] }}
+            />
           </View>
           {/* Filtros — popover anclado al botón (estilo transfers.tsx) */}
           <View style={styles.filtersBtnContainer}>
@@ -500,25 +475,14 @@ function ProductCard({ product, onPress, onEdit, onToggle, onMore, isToggling, c
           padding: spacing[3],
         }}
       >
-        {/* Image — 80x80 */}
-        <View
-          style={{
-            width: 80,
-            height: 80,
-            borderRadius: borderRadius.md,
-            backgroundColor: colorScales.gray[100],
-            alignItems: 'center',
-            justifyContent: 'center',
-            overflow: 'hidden',
-            flexShrink: 0,
-          }}
-        >
-          {product.image_url ? (
-            <Image source={{ uri: product.image_url }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
-          ) : (
-            <Icon name="package" size={30} color={colors.text.muted} />
-          )}
-        </View>
+        {/* Image — 80x80 (tap abre lightbox si tiene imagen) */}
+        <LightboxImageTap
+          uri={product.image_url}
+          alt={product.name}
+          size={80}
+          borderRadius={borderRadius.md}
+          style={{ flexShrink: 0 }}
+        />
 
         {/* Content top: title + state badge + SKU */}
         <View style={{ flex: 1, justifyContent: 'flex-start' }}>

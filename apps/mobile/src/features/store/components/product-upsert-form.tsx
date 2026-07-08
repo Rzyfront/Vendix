@@ -1340,7 +1340,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           queryKey: ['product-price-tier-overrides', productId],
         });
       }
-      toastSuccess(mode === 'edit' ? 'Producto actualizado' : 'Producto creado');
+      toastSuccess(mode === 'edit' ? 'Producto actualizado exitosamente' : 'Producto creado exitosamente');
       router.back();
     },
     onError: (error: any) => {

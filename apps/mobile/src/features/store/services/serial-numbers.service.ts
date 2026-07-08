@@ -1,5 +1,5 @@
 import { apiClient, Endpoints } from '@/core/api';
-import { unwrap } from '@/core/api/unwrap';
+import { unwrap } from '@/core/api/http';
 
 export type SerialStatus =
   | 'in_stock'
