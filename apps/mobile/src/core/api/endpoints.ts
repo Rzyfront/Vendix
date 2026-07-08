@@ -203,6 +203,15 @@ export const Endpoints = {
         LIST: '/store/inventory/suppliers',
         CREATE: '/store/inventory/suppliers',
         UPDATE: '/store/inventory/suppliers/:id',
+      },
+      SERIAL_NUMBERS: {
+        LIST: '/store/inventory/serial-numbers',
+        GET: '/store/inventory/serial-numbers/:id',
+        SUMMARY: '/store/inventory/serial-numbers/summary',
+        CREATE: '/store/inventory/serial-numbers',
+        BULK: '/store/inventory/serial-numbers/bulk',
+        UPDATE_STATUS: '/store/inventory/serial-numbers/:id/status',
+        UPDATE: '/store/inventory/serial-numbers/:id',
         DELETE: '/store/inventory/suppliers/:id',
       },
       LOCATIONS: {
