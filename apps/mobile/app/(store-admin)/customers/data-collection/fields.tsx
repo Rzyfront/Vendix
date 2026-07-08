@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, KeyboardAvoidingView, Platform } from 'react-native';
 import { useQuery } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/shared/components/icon/icon';
@@ -313,17 +313,27 @@ export default function FieldsScreen() {
         keyboardShouldPersistTaps="handled"
       />
 
-      {/* Create/Edit Modal */}
+      {/* Create/Edit Modal — centered card pattern (Web Visual Pattern) */}
       {showModal && (
-        <View style={styles.modalOverlay}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setShowModal(false)} />
-          <ScrollView style={styles.modalSheet} keyboardShouldPersistTaps="handled">
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{editingField ? 'Editar Campo' : 'Nuevo Campo'}</Text>
-              <Pressable onPress={() => setShowModal(false)}>
-                <Icon name="x" size={20} color={colorScales.gray[500]} />
-              </Pressable>
-            </View>
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowModal(false)}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setShowModal(false)}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.centeredCardRoot}
+            >
+              <View style={styles.centeredCard}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>{editingField ? 'Editar Campo' : 'Nuevo Campo'}</Text>
+                  <Pressable onPress={() => setShowModal(false)}>
+                    <Icon name="x" size={20} color={colorScales.gray[500]} />
+                  </Pressable>
+                </View>
+                <ScrollView
+                  style={styles.modalScroll}
+                  contentContainerStyle={styles.modalScrollContent}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
 
             {/* Label */}
             <View style={styles.formGroup}>
@@ -457,8 +467,11 @@ export default function FieldsScreen() {
                 </Text>
               </Pressable>
             </View>
-          </ScrollView>
-        </View>
+                </ScrollView>
+              </View>
+            </KeyboardAvoidingView>
+          </Pressable>
+        </Modal>
       )}
 
       <ConfirmDialog
@@ -569,10 +582,12 @@ const styles = StyleSheet.create({
   cardActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing[2], borderTopWidth: 1, borderTopColor: colorScales.gray[100], paddingTop: spacing[2] },
   actionBtn: { padding: spacing[1] },
   // Modal
-  modalOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', zIndex: 100 },
-  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
-  modalSheet: { maxHeight: '90%', backgroundColor: colors.background, borderTopLeftRadius: borderRadius.xl, borderTopRightRadius: borderRadius.xl, padding: spacing[4] },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing[4] },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.45)', justifyContent: 'center', alignItems: 'center' },
+  centeredCardRoot: { flex: 1, justifyContent: 'center', alignItems: 'center', width: '100%' },
+  centeredCard: { width: '100%', maxWidth: 480, maxHeight: '85%', backgroundColor: colors.card, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200], overflow: 'hidden', marginHorizontal: spacing[4] },
+  modalScroll: { maxHeight: '85%' },
+  modalScrollContent: { paddingHorizontal: spacing[4], paddingVertical: spacing[4], gap: spacing[3] },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing[4], paddingTop: spacing[4], paddingBottom: spacing[3] },
   modalTitle: { fontSize: typography.fontSize.lg, fontWeight: '700', color: colorScales.gray[900] },
   // Form
   formGroup: { marginBottom: spacing[3] },
