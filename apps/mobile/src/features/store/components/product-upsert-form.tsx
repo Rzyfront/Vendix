@@ -46,6 +46,8 @@ import { Toggle } from '@/shared/components/toggle/toggle';
 import PopConfigModal from '@/features/pop/components/pop-config-modal';
 import StockAdjustmentModal from '@/features/store/components/stock-adjustment-location-modal';
 import InventoryDetailModal from '@/features/store/components/inventory-detail-modal';
+import { BrandQuickCreate } from '@/features/store/components/brand-quick-create';
+import { CategoryQuickCreate } from '@/features/store/components/category-quick-create';
 import type { ConsolidatedStock } from '@/features/store/types';
 import {
   cartesian,
@@ -383,6 +385,11 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
   const [form, setForm] = useState<ProductFormState>(initialForm);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [taxModalOpen, setTaxModalOpen] = useState(false);
+  // Modales de quick-create para Marca y Categoría — se abren al pulsar el
+  // botón `+` al lado de los MultiSelectors de Marca/Categorías. El callback
+  // `onCreated` auto-selecciona la entidad recién creada en el form.
+  const [brandModalOpen, setBrandModalOpen] = useState(false);
+  const [categoryModalOpen, setCategoryModalOpen] = useState(false);
   const [localTaxes, setLocalTaxes] = useState<TaxCategory[]>([]);
   const [imageSourceOpen, setImageSourceOpen] = useState(false);
   const [imageEditorUri, setImageEditorUri] = useState<string | null>(null);
@@ -2581,7 +2588,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   />
                 </View>
                 <Pressable
-                  onPress={() => toastSuccess('Próximamente: crear marca')}
+                  onPress={() => setBrandModalOpen(true)}
                   hitSlop={6}
                   style={styles.addIconButton}
                   accessibilityLabel="Crear nueva marca"
@@ -2601,7 +2608,7 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
                   />
                 </View>
                 <Pressable
-                  onPress={() => toastSuccess('Próximamente: crear categoría')}
+                  onPress={() => setCategoryModalOpen(true)}
                   hitSlop={6}
                   style={styles.addIconButton}
                   accessibilityLabel="Crear nueva categoría"
@@ -3099,6 +3106,38 @@ export function ProductUpsertForm({ mode, productId }: ProductUpsertFormProps) {
           if (tax?.id) {
             setForm((current) => ({ ...current, tax_category_ids: [...current.tax_category_ids, tax.id] }));
             setLocalTaxes((current) => [...current, tax]);
+          }
+        }}
+      />
+
+      {/* Modal: Crear nueva marca (botón `+` junto al MultiSelector de Marca).
+          Al crear, auto-selecciona la marca recién creada en `brand_ids`.
+          El query de `['product-brands']` lo invalida el propio modal. */}
+      <BrandQuickCreate
+        visible={brandModalOpen}
+        onClose={() => setBrandModalOpen(false)}
+        onCreated={(brand) => {
+          if (brand?.id != null) {
+            // `brand_ids` es un array en el form pero el backend persiste
+            // sólo el primer elemento como `brand_id`. Reemplazamos para
+            // que el nuevo quede activo inmediatamente.
+            setForm((current) => ({ ...current, brand_ids: [brand.id] }));
+          }
+        }}
+      />
+
+      {/* Modal: Crear nueva categoría (botón `+` junto al MultiSelector de Categorías).
+          Al crear, agrega el id a `category_ids` para que quede seleccionada.
+          El query de `['product-categories']` lo invalida el propio modal. */}
+      <CategoryQuickCreate
+        visible={categoryModalOpen}
+        onClose={() => setCategoryModalOpen(false)}
+        onCreated={(category) => {
+          if (category?.id != null) {
+            setForm((current) => ({
+              ...current,
+              category_ids: [...current.category_ids, category.id],
+            }));
           }
         }}
       />
