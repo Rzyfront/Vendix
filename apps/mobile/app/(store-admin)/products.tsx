@@ -18,8 +18,8 @@ import {
   Fab,
   EmptyState,
   Badge,
-  Modal,
   Button,
+  ConfirmDialog,
 } from '@/shared/components';
 import { Icon } from '@/shared/components/icon/icon';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
@@ -420,43 +420,23 @@ export default function ProductsListScreen() {
         <Fab icon="plus" accessibilityLabel="Nuevo producto" onPress={() => setQuickCreateOpen(true)} />
       )}
 
-      {/* "..." → Confirm delete modal (only Eliminar option) */}
-      <Modal
+      {/* "..." → ConfirmDialog alineado al Web Visual Pattern
+          (centered card, título centrado, mensaje, footer con botones). */}
+      <ConfirmDialog
         visible={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget)}
         title="Eliminar Producto"
-        showCloseButton
-      >
-        <View style={{ padding: spacing[4], gap: spacing[4] }}>
-          {deleteTarget && (
-            <>
-              <Text style={{ fontSize: typography.fontSize.base, color: colors.text.secondary }}>
-                ¿Eliminar "{deleteTarget.name}"? Esta acción no se puede deshacer.
-              </Text>
-              <View style={{ flexDirection: 'row', gap: spacing[2] }}>
-                <View style={{ flex: 1 }}>
-                  <Button
-                    title="Cancelar"
-                    variant="outline"
-                    onPress={() => setDeleteTarget(null)}
-                    fullWidth
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Button
-                    title="Eliminar"
-                    variant="primary"
-                    leftIcon={<Icon name="trash-2" size={16} color={colors.background} />}
-                    onPress={() => deleteMutation.mutate(deleteTarget)}
-                    loading={deleteMutation.isPending}
-                    fullWidth
-                  />
-                </View>
-              </View>
-            </>
-          )}
-        </View>
-      </Modal>
+        message={
+          deleteTarget
+            ? `¿Eliminar "${deleteTarget.name}"? Esta acción no se puede deshacer.`
+            : ''
+        }
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        destructive
+        loading={deleteMutation.isPending}
+      />
 
       {/* Actions popover — único, renderizado dentro del actionsBtnContainer (línea ~222) */}
 
