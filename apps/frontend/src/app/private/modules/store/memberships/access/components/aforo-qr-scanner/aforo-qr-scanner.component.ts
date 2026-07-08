@@ -28,7 +28,7 @@ import type { BrowserQRCodeReader, IScannerControls } from '@zxing/browser';
  * camera via `IScannerControls.stop()` so no track is ever left hanging.
  *
  * Zoneless + signals (Angular 20): `input`, `output`, `signal`, `effect`,
- * `viewChild`. No decorators, no NgZone, no manual change detection.
+ * `viewChild`. No decorators, no zone.js, no manual change detection.
  */
 @Component({
   selector: 'app-aforo-qr-scanner',
