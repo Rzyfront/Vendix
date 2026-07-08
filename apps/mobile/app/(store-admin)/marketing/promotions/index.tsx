@@ -185,7 +185,7 @@ export default function PromotionsListScreen() {
     <View style={styles.container}>
       <FlatList
         data={promotions}
-        keyExtractor={(item) => String(item.id)}
+        keyExtractor={(item, index) => item ? String(item.id) : `promotion-${index}`}
         renderItem={renderItem}
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.3}
