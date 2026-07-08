@@ -3,16 +3,43 @@ import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CustomerService } from '@/features/store/services/customer.service';
-import type { CustomerState, CreateCustomerDto, Customer } from '@/features/store/types';
+import type {
+  CustomerState,
+  CreateCustomerDto,
+  PersonType,
+  TaxRegime,
+} from '@/features/store/types';
+import {
+  DOCUMENT_TYPES,
+  findDocumentType,
+} from '@/shared/constants/document-types';
 import { Input } from '@/shared/components/input/input';
 import { Button } from '@/shared/components/button/button';
 import { Spinner } from '@/shared/components/spinner/spinner';
+import { Selector } from '@/shared/components/selector/selector';
+import { Toggle } from '@/shared/components/toggle/toggle';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { spacing, borderRadius, typography, colorScales, colors } from '@/shared/theme';
 
 const STATE_OPTIONS: { label: string; value: CustomerState }[] = [
   { label: 'Activo', value: 'active' },
   { label: 'Inactivo', value: 'inactive' },
+];
+
+const TAX_REGIME_OPTIONS: { label: string; value: TaxRegime }[] = [
+  { label: 'Régimen común', value: 'COMUN' },
+  { label: 'Régimen simplificado', value: 'SIMPLIFICADO' },
+  { label: 'Gran contribuyente', value: 'GRAN_CONTRIBUYENTE' },
+];
+
+const PERSON_TYPE_OPTIONS: { label: string; value: PersonType }[] = [
+  { label: 'Persona natural', value: 'NATURAL' },
+  { label: 'Persona jurídica', value: 'JURIDICA' },
+];
+
+const DOCUMENT_TYPE_SELECTOR_OPTIONS = [
+  { label: 'Sin clasificar', value: '' },
+  ...DOCUMENT_TYPES.map((d) => ({ label: d.label, value: d.code })),
 ];
 
 export default function CreateCustomerScreen() {
@@ -25,7 +52,11 @@ export default function CreateCustomerScreen() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [documentType, setDocumentType] = useState<string>('');
   const [documentNumber, setDocumentNumber] = useState('');
+  const [taxRegime, setTaxRegime] = useState<string>('');
+  const [personType, setPersonType] = useState<string>('');
+  const [isWithholdingAgent, setIsWithholdingAgent] = useState(false);
   const [state, setState] = useState<CustomerState>('active');
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -41,7 +72,11 @@ export default function CreateCustomerScreen() {
       setLastName(existingCustomer.last_name);
       setEmail(existingCustomer.email);
       setPhone(existingCustomer.phone || '');
+      setDocumentType(existingCustomer.document_type || '');
       setDocumentNumber(existingCustomer.document_number || '');
+      setTaxRegime((existingCustomer as any).tax_regime ?? '');
+      setPersonType((existingCustomer as any).person_type ?? '');
+      setIsWithholdingAgent((existingCustomer as any).is_withholding_agent ?? false);
       setState(existingCustomer.state);
     }
   }, [existingCustomer]);
@@ -68,15 +103,35 @@ export default function CreateCustomerScreen() {
     onError: () => toastError('Error al actualizar el cliente'),
   });
 
+  const validateDocumentNumber = (value: string): string | null => {
+    if (!documentType) return null;
+    const type = findDocumentType(documentType);
+    if (!type) return null;
+    if (value.length > type.maxLength) {
+      return `Máximo ${type.maxLength} caracteres`;
+    }
+    if (value.length > 0 && !type.regex.test(value)) {
+      return `Número de documento inválido para ${type.label}`;
+    }
+    return null;
+  };
+
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
-    if (!firstName.trim()) newErrors.firstName = 'El nombre es requerido';
-    if (!lastName.trim()) newErrors.lastName = 'El apellido es requerido';
+    if (!firstName.trim()) newErrors.firstName = 'El nombre es obligatorio';
+    if (!lastName.trim()) newErrors.lastName = 'El apellido es obligatorio';
     if (!email.trim()) {
-      newErrors.email = 'El email es requerido';
+      newErrors.email = 'El correo es obligatorio';
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      newErrors.email = 'Ingresa un email válido';
+      newErrors.email = 'Ingresa un correo válido';
     }
+    if (!phone.trim()) {
+      newErrors.phone = 'El teléfono es obligatorio';
+    } else if (phone.trim().length < 7) {
+      newErrors.phone = 'El teléfono debe tener al menos 7 caracteres';
+    }
+    const docNumError = validateDocumentNumber(documentNumber);
+    if (docNumError) newErrors.documentNumber = docNumError;
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -88,7 +143,11 @@ export default function CreateCustomerScreen() {
       last_name: lastName.trim(),
       email: email.trim(),
       phone: phone.trim() || undefined,
+      document_type: documentType || undefined,
       document_number: documentNumber.trim() || undefined,
+      tax_regime: (taxRegime || undefined) as TaxRegime | undefined,
+      person_type: (personType || undefined) as PersonType | undefined,
+      is_withholding_agent: isWithholdingAgent,
       state,
     };
     if (isEditing) {
@@ -97,6 +156,9 @@ export default function CreateCustomerScreen() {
       createMutation.mutate(dto);
     }
   };
+
+  const documentNumberPlaceholder = findDocumentType(documentType)?.placeholder
+    ?? 'Selecciona primero el tipo';
 
   if (isEditing && loadingCustomer) {
     return (
@@ -113,6 +175,16 @@ export default function CreateCustomerScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.formContent}>
+          <Input
+            label="Correo electrónico"
+            value={email}
+            onChangeText={setEmail}
+            error={errors.email}
+            placeholder="cliente@ejemplo.com"
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
+
           <View style={styles.row}>
             <View style={styles.flex1}>
               <Input
@@ -120,7 +192,7 @@ export default function CreateCustomerScreen() {
                 value={firstName}
                 onChangeText={setFirstName}
                 error={errors.firstName}
-                placeholder="Nombre"
+                placeholder="Ej. María"
               />
             </View>
             <View style={styles.flex1}>
@@ -129,35 +201,74 @@ export default function CreateCustomerScreen() {
                 value={lastName}
                 onChangeText={setLastName}
                 error={errors.lastName}
-                placeholder="Apellido"
+                placeholder="Ej. Rodríguez"
               />
             </View>
           </View>
 
           <Input
-            label="Email *"
-            value={email}
-            onChangeText={setEmail}
-            error={errors.email}
-            placeholder="email@ejemplo.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
-
-          <Input
-            label="Teléfono"
+            label="Teléfono *"
             value={phone}
             onChangeText={setPhone}
-            placeholder="+57 300 123 4567"
+            error={errors.phone}
+            placeholder="+57 300 000 0000"
             keyboardType="phone-pad"
           />
 
-          <Input
-            label="Número de documento"
-            value={documentNumber}
-            onChangeText={setDocumentNumber}
-            placeholder="12345678"
-          />
+          <View style={styles.row}>
+            <View style={styles.flex1}>
+              <Selector
+                label="Tipo de documento"
+                value={documentType}
+                onChange={(v) => setDocumentType(v as string)}
+                options={DOCUMENT_TYPE_SELECTOR_OPTIONS}
+                placeholder="Selecciona un tipo"
+              />
+            </View>
+            <View style={styles.flex1}>
+              <Input
+                label="Número de documento"
+                value={documentNumber}
+                onChangeText={setDocumentNumber}
+                error={errors.documentNumber}
+                placeholder={documentNumberPlaceholder}
+                autoCapitalize="characters"
+                editable={!!documentType}
+              />
+            </View>
+          </View>
+
+          <View style={styles.fiscalSection}>
+            <Text style={styles.fiscalHeader}>Información fiscal</Text>
+
+            <View style={styles.row}>
+              <View style={styles.flex1}>
+                <Selector
+                  label="Régimen tributario"
+                  value={taxRegime}
+                  onChange={(v) => setTaxRegime(v as string)}
+                  options={TAX_REGIME_OPTIONS}
+                  placeholder="Selecciona un régimen"
+                />
+              </View>
+              <View style={styles.flex1}>
+                <Selector
+                  label="Tipo de persona"
+                  value={personType}
+                  onChange={(v) => setPersonType(v as string)}
+                  options={PERSON_TYPE_OPTIONS}
+                  placeholder="Selecciona un tipo"
+                />
+              </View>
+            </View>
+
+            <Toggle
+              value={isWithholdingAgent}
+              onChange={setIsWithholdingAgent}
+              label="¿Es agente retenedor?"
+              description="Marca si el cliente es responsable de practicar retenciones en la fuente."
+            />
+          </View>
 
           <View style={styles.sectionGap}>
             <Text style={styles.sectionLabel}>Estado</Text>
@@ -203,30 +314,12 @@ export default function CreateCustomerScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.background,
-  },
-  formContent: {
-    padding: spacing[4],
-    gap: spacing[4],
-  },
-  row: {
-    flexDirection: 'row',
-    gap: spacing[3],
-  },
-  flex1: {
-    flex: 1,
-  },
-  sectionGap: {
-    gap: spacing[2],
-  },
+  container: { flex: 1, backgroundColor: colors.background },
+  loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.background },
+  formContent: { padding: spacing[4], gap: spacing[4] },
+  row: { flexDirection: 'row', gap: spacing[3] },
+  flex1: { flex: 1 },
+  sectionGap: { gap: spacing[2] },
   sectionLabel: {
     fontSize: typography.fontSize.xs,
     fontWeight: typography.fontWeight.semibold,
@@ -234,10 +327,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1.2,
   },
-  rowGap2: {
-    flexDirection: 'row',
-    gap: spacing[2],
-  },
+  rowGap2: { flexDirection: 'row', gap: spacing[2] },
   stateButton: {
     flex: 1,
     paddingHorizontal: spacing[4],
@@ -245,25 +335,21 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.lg,
     alignItems: 'center',
   },
-  stateButtonActive: {
-    backgroundColor: colors.primary,
-  },
-  stateButtonInactive: {
-    backgroundColor: colorScales.gray[100],
-  },
-  stateButtonText: {
-    fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium,
-  },
-  stateTextActive: {
-    color: colors.background,
-  },
-  stateTextInactive: {
-    color: colorScales.gray[700],
-  },
-  footer: {
-    padding: spacing[4],
+  stateButtonActive: { backgroundColor: colors.primary },
+  stateButtonInactive: { backgroundColor: colorScales.gray[100] },
+  stateButtonText: { fontSize: typography.fontSize.sm, fontWeight: typography.fontWeight.medium },
+  stateTextActive: { color: colors.background },
+  stateTextInactive: { color: colorScales.gray[700] },
+  fiscalSection: {
+    gap: spacing[4],
+    paddingTop: spacing[3],
     borderTopWidth: 1,
     borderTopColor: colorScales.gray[200],
   },
+  fiscalHeader: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  footer: { padding: spacing[4], borderTopWidth: 1, borderTopColor: colorScales.gray[200] },
 });
