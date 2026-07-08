@@ -2194,6 +2194,38 @@ export const ErrorCodes = {
     devMessage: 'Invalid file type — only images and PDFs are accepted',
   },
 
+  // Member Roster Scanner (bulk member import via AI)
+  MEMBER_SCAN_NO_FILE: {
+    code: 'MEMBER_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No roster file provided',
+  },
+  MEMBER_SCAN_INVALID_FILE: {
+    code: 'MEMBER_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
+  MEMBER_SCAN_AI_FAIL: {
+    code: 'MEMBER_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI member roster processing failed',
+  },
+  MEMBER_SCAN_PARSE_FAIL: {
+    code: 'MEMBER_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI member roster response as valid JSON',
+  },
+  MEMBER_BULK_EMPTY: {
+    code: 'MEMBER_BULK_EMPTY',
+    httpStatus: 400,
+    devMessage: 'No members detected in the roster document',
+  },
+  MEMBER_BULK_TOO_MANY: {
+    code: 'MEMBER_BULK_TOO_MANY',
+    httpStatus: 400,
+    devMessage: 'Too many members; maximum 200 per upload',
+  },
+
   // Route Sheet Scanner (planilla de ruta extraction)
   RTSCAN_AI_FAIL: {
     code: 'RTSCAN_AI_FAIL',

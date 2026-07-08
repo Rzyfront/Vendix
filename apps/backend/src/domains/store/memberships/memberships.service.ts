@@ -12,6 +12,7 @@ import { MembershipPlansService } from '../membership-plans/membership-plans.ser
 import { OrderFlowService } from '../orders/order-flow/order-flow.service';
 import {
   CreateMembershipDto,
+  CreateMembershipFromImportDto,
   UpdateMembershipDto,
   MembershipQueryDto,
   RenewMembershipDto,
@@ -130,6 +131,59 @@ export class MembershipsService {
         status: membership_status_enum.pending_payment,
         period_start: periodStart,
         period_end: null,
+        auto_renew: dto.auto_renew ?? false,
+        notes: dto.notes ?? null,
+      },
+    });
+  }
+
+  /**
+   * Bulk-import sibling of `create`. Used by the member roster scanner
+   * (`MemberBulkScannerService.commitRoster`) to seed historical data —
+   * memberships with explicit `status` / `period_start` / `period_end` that
+   * originated from a paper/spreadsheet roster rather than a real charge.
+   *
+   * Why this method exists: `create()` enforces the H3 payment invariant
+   * (`pending_payment` + null `period_end`) so it cannot represent imported
+   * `active` / `expired` rows. This method preserves the same validation
+   * (customer exists, plan exists in this store) but accepts the caller-
+   * supplied status and dates verbatim.
+   *
+   * Imported `active` rows intentionally skip `source_order_id` — there is
+   * no real charge to back them. Accounting events are NOT emitted here;
+   * historical data does not move money.
+   */
+  async createFromImport(dto: CreateMembershipFromImportDto) {
+    const storeId = this.requireStoreId();
+
+    // 1. Customer must exist.
+    const customer = await this.prisma.users.findFirst({
+      where: { id: dto.customer_id },
+      select: { id: true },
+    });
+    if (!customer) {
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'El cliente (socio) no existe',
+      );
+    }
+
+    // 2. Plan must exist in this store (findOne enforces store scope + throws).
+    await this.membershipPlansService.findOne(dto.plan_id);
+
+    const kind = dto.kind ?? (await this.resolveDefaultKind(storeId));
+    const periodStart = dto.period_start ? new Date(dto.period_start) : null;
+    const periodEnd = dto.period_end ? new Date(dto.period_end) : null;
+
+    return this.memberships.create({
+      data: {
+        store_id: storeId,
+        customer_id: dto.customer_id,
+        plan_id: dto.plan_id,
+        kind,
+        status: dto.status,
+        period_start: periodStart,
+        period_end: periodEnd,
         auto_renew: dto.auto_renew ?? false,
         notes: dto.notes ?? null,
       },
