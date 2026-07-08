@@ -432,16 +432,6 @@ export default function FieldsScreen() {
               </View>
             )}
 
-            {/* Required toggle */}
-            <View style={styles.formGroup}>
-              <Pressable onPress={() => setFormRequired((v) => !v)} style={styles.toggleRow}>
-                <Text style={styles.formLabel}>Obligatorio</Text>
-                <View style={[styles.toggle, formRequired && styles.toggleActive]}>
-                  <View style={[styles.toggleThumb, formRequired && styles.toggleThumbActive]} />
-                </View>
-              </Pressable>
-            </View>
-
             {/* Actions */}
             <View style={styles.formActions}>
               <Pressable onPress={() => setShowModal(false)} style={styles.cancelBtn}>
