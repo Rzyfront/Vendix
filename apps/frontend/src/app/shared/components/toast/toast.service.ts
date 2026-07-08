@@ -16,7 +16,6 @@ export interface Toast {
   duration: number; // ms
   leaving: boolean; // UI state for exit animation
   action?: ToastAction;
-  persistent?: boolean; // when true, ignore duration (stays until user acts or dismisses)
 }
 
 @Injectable({ providedIn: 'root' })
@@ -31,7 +30,6 @@ export class ToastService {
       variant?: ToastVariant;
       duration?: number;
       action?: ToastAction;
-      persistent?: boolean;
     },
   ) {
     const toast: Toast = {
@@ -42,10 +40,9 @@ export class ToastService {
       duration: input.duration ?? 1750,
       leaving: false,
       action: input.action,
-      persistent: input.persistent,
     };
     this.toastsSig.update((arr) => [toast, ...arr]);
-    if (toast.duration > 0 && !toast.persistent) {
+    if (toast.duration > 0) {
       setTimeout(() => this.dismiss(toast.id), toast.duration);
     }
   }
@@ -87,29 +84,5 @@ export class ToastService {
   }
   info(msg: string, title?: string, duration = 1500) {
     this.show({ title, description: msg, variant: 'info', duration });
-  }
-
-  /**
-   * Show a persistent toast with an inline action button. Stays visible
-   * until the user acts (callback fires + dismiss) or explicitly dismisses.
-   * Useful for "account already exists — recover" flows where the toast
-   * is the only entry point to the recovery action.
-   */
-  withAction(
-    input: {
-      title?: string;
-      description?: string;
-      action: ToastAction;
-      variant?: ToastVariant;
-    },
-  ) {
-    this.show({
-      title: input.title,
-      description: input.description,
-      variant: input.variant ?? 'info',
-      action: input.action,
-      persistent: true,
-      duration: 0,
-    });
   }
 }
