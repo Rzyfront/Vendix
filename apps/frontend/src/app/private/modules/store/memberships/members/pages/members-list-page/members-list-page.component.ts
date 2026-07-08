@@ -288,13 +288,27 @@ export class MembershipMembersListPageComponent implements OnInit {
             this.toastService.error('Respuesta inesperada del servidor');
             return;
           }
+
+          // Plan creation is atomic on the backend: if any plan failed, NO
+          // member row was persisted. Report and let the user retry.
+          if (data.plan_errors?.length) {
+            this.toastService.error(
+              `No se creó nada: ${data.plan_errors.length} plan(es) con error. Corrige los planes e intenta de nuevo.`,
+              'Carga masiva',
+            );
+            return;
+          }
+
           const succeeded = data.succeeded ?? 0;
           const failed = data.failed ?? 0;
-          const planCount = data.counters?.plans_created ?? 0;
+          const plansCreated = dto.plans.filter(
+            (p) => p.status === 'new',
+          ).length;
 
           if (failed === 0) {
             this.toastService.success(
-              `Importación completa: ${succeeded} socios creados, ${planCount} planes nuevos.`,
+              `Importación completa: ${succeeded} socios creados` +
+                (plansCreated ? `, ${plansCreated} planes nuevos.` : '.'),
               'Carga masiva',
             );
           } else {

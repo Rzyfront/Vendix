@@ -21,7 +21,6 @@ import {
   IconComponent,
   InputComponent,
   ModalComponent,
-  ResponsiveDataViewComponent,
   SpinnerComponent,
   StepsLineComponent,
   ToastService,
@@ -59,26 +58,6 @@ const ACCEPTED_MIMETYPES = [
   'application/pdf',
 ];
 
-/**
- * Plan status → Spanish label. Used in the templates AND exported via
- * `labelForPlanStatus` so the table RDV can map the value too.
- */
-function labelForPlanStatus(status: PlanMatch['status']): string {
-  if (status === 'existing') return 'Existente';
-  if (status === 'partial') return 'Parcial';
-  return 'Nuevo';
-}
-
-/**
- * Row status → Spanish label. Used both in the RDV columns and in the
- * "Estado" badge transforms.
- */
-function labelForRowStatus(status: AnalyzedMemberStatus): string {
-  if (status === 'ready') return 'OK';
-  if (status === 'warning') return 'Revisar';
-  return 'Error';
-}
-
 // ============================================================================
 // Component
 // ============================================================================
@@ -115,7 +94,6 @@ function labelForRowStatus(status: AnalyzedMemberStatus): string {
     InputComponent,
     SpinnerComponent,
     StepsLineComponent,
-    ResponsiveDataViewComponent,
     CurrencyPipe,
   ],
   template: `
@@ -292,13 +270,13 @@ function labelForRowStatus(status: AnalyzedMemberStatus): string {
       @if (currentStep() === 3 && analysis()) {
         <div class="space-y-5 max-h-[60vh] overflow-y-auto pr-1">
           <!-- Global banner: low confidence / top warnings -->
-          @if (analysis()!.warnings.length > 0) {
+          @if (analysis()!.global_warnings.length > 0) {
             <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-1">
               <p class="text-xs font-semibold text-amber-800 flex items-center gap-2">
                 <app-icon name="alert-triangle" [size]="14"></app-icon>
-                Advertencias globales ({{ analysis()!.warnings.length }})
+                Advertencias globales ({{ analysis()!.global_warnings.length }})
               </p>
-              @for (warn of analysis()!.warnings; track warn) {
+              @for (warn of analysis()!.global_warnings; track warn) {
                 <p class="text-xs text-amber-700">• {{ warn }}</p>
               }
             </div>
@@ -316,16 +294,16 @@ function labelForRowStatus(status: AnalyzedMemberStatus): string {
           <!-- Counters strip -->
           <div class="flex flex-wrap gap-2 text-xs">
             <app-badge variant="success" size="xsm">
-              {{ analysis()!.counters.ready }} listos
+              {{ analysis()!.ready_count }} listos
             </app-badge>
             <app-badge variant="warning" size="xsm">
-              {{ analysis()!.counters.with_warnings }} por revisar
+              {{ analysis()!.with_warnings_count }} por revisar
             </app-badge>
             <app-badge variant="error" size="xsm">
-              {{ analysis()!.counters.with_errors }} con error
+              {{ analysis()!.with_errors_count }} con error
             </app-badge>
             <app-badge variant="neutral" size="xsm">
-              {{ analysis()!.counters.total }} total
+              {{ includedCount() }} de {{ editableMembers().length }} a crear
             </app-badge>
           </div>
 
@@ -419,20 +397,146 @@ function labelForRowStatus(status: AnalyzedMemberStatus): string {
             </div>
           </section>
 
-          <!-- (b) Members detected -->
+          <!-- (b) Members detected — editable per-row cards -->
           <section>
             <h4 class="text-sm font-semibold text-text-primary mb-2">
               Socios detectados ({{ editableMembers().length }})
             </h4>
 
-            <app-responsive-data-view
-              [data]="editableMembers()"
-              [columns]="memberColumns"
-              [cardConfig]="memberCardConfig"
-              [loading]="false"
-              emptyMessage="No se detectaron socios en el documento."
-              emptyIcon="users"
-            ></app-responsive-data-view>
+            @if (editableMembers().length === 0) {
+              <div class="text-sm text-text-secondary p-4 border border-dashed border-border rounded-lg text-center">
+                No se detectaron socios en el documento.
+              </div>
+            }
+
+            <div class="space-y-3">
+              @for (m of editableMembers(); track m.row_number) {
+                <app-card [responsive]="true">
+                  <div class="space-y-3" [class.opacity-50]="m.excluded">
+                    <!-- Row header: name summary + status + exclude -->
+                    <div class="flex items-start justify-between gap-2">
+                      <div class="min-w-0">
+                        <p class="text-sm font-medium text-text-primary truncate">
+                          {{ memberName(m) }}
+                        </p>
+                        <p class="text-xs text-text-secondary truncate">
+                          @if (m.document_number) {
+                            {{ m.document_type || '?' }} {{ m.document_number }}
+                          } @else {
+                            Sin documento
+                          }
+                          @if (m.email) { · {{ m.email }} }
+                        </p>
+                      </div>
+                      <div class="flex items-center gap-2 flex-shrink-0">
+                        <app-badge
+                          [variant]="m.status === 'ready' ? 'success' : (m.status === 'warning' ? 'warning' : 'error')"
+                          size="xsm"
+                        >
+                          {{ m.status === 'ready' ? 'OK' : (m.status === 'warning' ? 'Revisar' : 'Error') }}
+                        </app-badge>
+                        <label class="flex items-center gap-1 text-xs text-text-secondary cursor-pointer">
+                          <input
+                            type="checkbox"
+                            [checked]="m.excluded"
+                            (change)="onMemberExcludeToggle(m, $any($event.target).checked)"
+                          />
+                          Excluir
+                        </label>
+                      </div>
+                    </div>
+
+                    @if (!m.excluded) {
+                      <!-- Editable name -->
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <app-input
+                          label="Nombres"
+                          [ngModel]="m.first_name"
+                          (ngModelChange)="updateMemberName(m, 'first_name', $event)"
+                          [name]="'m_first_' + m.row_number"
+                          placeholder="Nombres"
+                        ></app-input>
+                        <app-input
+                          label="Apellidos"
+                          [ngModel]="m.last_name"
+                          (ngModelChange)="updateMemberName(m, 'last_name', $event)"
+                          [name]="'m_last_' + m.row_number"
+                          placeholder="Apellidos"
+                        ></app-input>
+                      </div>
+
+                      <!-- Plan / status / dates -->
+                      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label class="block text-xs font-medium text-text-secondary mb-1">Plan</label>
+                          <select
+                            class="w-full text-xs border border-border rounded px-2 py-2 bg-surface"
+                            [ngModel]="m.plan_ref ?? ''"
+                            (ngModelChange)="onMemberPlanRefChange(m, $event)"
+                            [name]="'m_plan_' + m.row_number"
+                          >
+                            <option value="">— Sin plan —</option>
+                            @for (p of editablePlans(); track p.ref_index) {
+                              <option [value]="p.ref_index">
+                                {{ p.name || p.matched_plan_name || ('Plan #' + p.ref_index) }}
+                              </option>
+                            }
+                          </select>
+                        </div>
+
+                        <div>
+                          <label class="block text-xs font-medium text-text-secondary mb-1">Estado</label>
+                          <select
+                            class="w-full text-xs border border-border rounded px-2 py-2 bg-surface"
+                            [ngModel]="m.resolved_status"
+                            (ngModelChange)="onMemberStatusChange(m, $event)"
+                            [name]="'m_status_' + m.row_number"
+                          >
+                            <option value="active">Activa</option>
+                            <option value="expired">Vencida</option>
+                            <option value="pending_payment">Pendiente de pago</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label class="block text-xs font-medium text-text-secondary mb-1">Inicio</label>
+                          <input
+                            type="date"
+                            class="w-full text-xs border border-border rounded px-2 py-2 bg-surface"
+                            [ngModel]="m.period_start"
+                            (ngModelChange)="onMemberPeriodStartChange(m, $event)"
+                            [name]="'m_start_' + m.row_number"
+                          />
+                        </div>
+
+                        <div>
+                          <label class="block text-xs font-medium text-text-secondary mb-1">Fin</label>
+                          <input
+                            type="date"
+                            class="w-full text-xs border border-border rounded px-2 py-2 bg-surface"
+                            [ngModel]="m.period_end"
+                            (ngModelChange)="onMemberPeriodEndChange(m, $event)"
+                            [name]="'m_end_' + m.row_number"
+                          />
+                        </div>
+                      </div>
+
+                      <!-- Per-row warnings / errors -->
+                      @if (m.errors.length > 0 || m.warnings.length > 0) {
+                        <div class="space-y-1">
+                          @for (e of m.errors; track e) {
+                            <p class="text-xs text-red-600">• {{ e }}</p>
+                          }
+                          @for (w of m.warnings; track w) {
+                            <p class="text-xs text-amber-600">• {{ w }}</p>
+                          }
+                        </div>
+                      }
+                    }
+                  </div>
+                </app-card>
+              }
+            </div>
           </section>
         </div>
       }
@@ -527,11 +631,20 @@ export class MemberBulkScannerModalComponent {
     return file?.type?.startsWith('image/') ?? false;
   });
 
-  /** Disable the Confirmar button if any included row has an error. */
+  /** Rows that will actually be sent to the backend (not excluded). */
+  readonly includedCount = computed(
+    () => this.editableMembers().filter((m) => !m.excluded).length,
+  );
+
+  /**
+   * Enable Confirmar only when there is at least one non-excluded row AND
+   * none of the included rows is in `error`. Excluded rows are ignored — the
+   * user can drop bad rows via the "Excluir" toggle and still commit the rest.
+   */
   readonly canCommit = computed(() => {
-    const members = this.editableMembers();
-    if (members.length === 0) return false;
-    return members.every((m) => m.excluded || m.status !== 'error');
+    const included = this.editableMembers().filter((m) => !m.excluded);
+    if (included.length === 0) return false;
+    return included.every((m) => m.status !== 'error');
   });
 
   /**
@@ -545,84 +658,6 @@ export class MemberBulkScannerModalComponent {
     if (status === 'partial') return 'warning';
     return 'primary';
   }
-
-  // ------------------------------------------------------------------------
-  // Table column defs for the members ResponsiveDataView
-  // ------------------------------------------------------------------------
-  readonly memberColumns = [
-    {
-      key: 'name',
-      label: 'Nombre',
-      sortable: false,
-      priority: 1 as const,
-      transform: (_: unknown, row: EditableMember) => this.memberName(row),
-    },
-    {
-      key: 'document',
-      label: 'Documento',
-      sortable: false,
-      priority: 2 as const,
-      transform: (_: unknown, row: EditableMember) =>
-        row.document_number
-          ? `${row.document_type ?? '?'} ${row.document_number}`
-          : '—',
-    },
-    {
-      key: 'plan',
-      label: 'Plan',
-      sortable: false,
-      priority: 2 as const,
-      transform: (_: unknown, row: EditableMember) =>
-        this.planLabelForRow(row),
-    },
-    {
-      key: 'status',
-      label: 'Estado',
-      priority: 1 as const,
-      transform: (val: AnalyzedMemberStatus) => labelForRowStatus(val),
-      badge: true,
-      badgeConfig: {
-        type: 'custom' as const,
-        colorMap: {
-          ready: '#16a34a',
-          warning: '#d97706',
-          error: '#dc2626',
-        },
-      },
-    },
-  ];
-
-  readonly memberCardConfig = {
-    titleKey: 'name',
-    titleTransform: (row: EditableMember) => this.memberName(row),
-    subtitleKey: 'document',
-    subtitleTransform: (row: EditableMember) =>
-      row.document_number
-        ? `${row.document_type ?? '?'} ${row.document_number}`
-        : 'Sin documento',
-    avatarFallbackIcon: 'user',
-    avatarShape: 'circle' as const,
-    badgeKey: 'status',
-    badgeConfig: {
-      type: 'custom' as const,
-      size: 'sm' as const,
-      colorMap: {
-        ready: '#16a34a',
-        warning: '#d97706',
-        error: '#dc2626',
-      },
-    },
-    badgeTransform: (val: AnalyzedMemberStatus) => labelForRowStatus(val),
-    detailKeys: [
-      {
-        key: 'plan',
-        label: 'Plan',
-        icon: 'tag',
-        transform: (_: string, row?: EditableMember) =>
-          row ? this.planLabelForRow(row) : '',
-      },
-    ],
-  };
 
   // ------------------------------------------------------------------------
   // Lifecycle
@@ -1025,34 +1060,38 @@ export class MemberBulkScannerModalComponent {
             },
       );
 
-    const commitMembers: CommitMemberDto[] = members.map((m) => ({
-      row_number: m.row_number,
-      plan_ref_index: m.plan_ref ?? null,
-      existing_customer_id: m.existing_customer_id,
-      first_name: m.first_name,
-      last_name: m.last_name,
-      document_type: m.document_type,
-      document_number: m.document_number,
-      email: m.email,
-      phone: m.phone,
-      date_of_birth: m.date_of_birth,
-      gender: m.gender,
-      emergency_contact_name: m.emergency_contact_name,
-      emergency_contact_phone: m.emergency_contact_phone,
-      medical_notes: m.medical_notes,
-      goals: m.goals,
-      height_cm: m.height_cm,
-      weight_kg:
-        typeof m.weight_kg === 'number'
-          ? m.weight_kg
-          : m.weight_kg != null && m.weight_kg !== ''
-            ? Number(m.weight_kg)
-            : null,
-      status: m.resolved_status,
-      period_start: m.period_start ?? null,
-      period_end: m.period_end ?? null,
-      excluded: m.excluded,
-    }));
+    // Excluded rows are dropped here (the backend has no `excluded` field —
+    // sending it would trip forbidNonWhitelisted). Filtering client-side is
+    // the contract: only the rows we send get created.
+    const commitMembers: CommitMemberDto[] = members
+      .filter((m) => !m.excluded)
+      .map((m) => ({
+        row_number: m.row_number,
+        plan_ref_index: m.plan_ref ?? null,
+        existing_customer_id: m.existing_customer_id,
+        first_name: m.first_name,
+        last_name: m.last_name,
+        document_type: m.document_type,
+        document_number: m.document_number,
+        email: m.email,
+        phone: m.phone,
+        date_of_birth: m.date_of_birth,
+        gender: m.gender,
+        emergency_contact_name: m.emergency_contact_name,
+        emergency_contact_phone: m.emergency_contact_phone,
+        medical_notes: m.medical_notes,
+        goals: m.goals,
+        height_cm: m.height_cm,
+        weight_kg:
+          typeof m.weight_kg === 'number'
+            ? m.weight_kg
+            : m.weight_kg != null && m.weight_kg !== ''
+              ? Number(m.weight_kg)
+              : null,
+        status: m.resolved_status,
+        period_start: m.period_start ?? null,
+        period_end: m.period_end ?? null,
+      }));
 
     this.confirmed.emit({ plans: commitPlans, members: commitMembers });
     this.closeAfterCommit();
@@ -1134,7 +1173,7 @@ interface EditableMember {
   medical_notes: string | null;
   goals: string | null;
   height_cm: number | null;
-  weight_kg: number | number | string | null;
+  weight_kg: number | string | null;
   resolved_status: GymMembershipStatus;
   /** Original resolved value (for reference; user edits go into `period_*`). */
   resolved_period_start: string | null;

@@ -151,23 +151,20 @@ export interface AnalyzedMember extends ExtractedMember {
   excluded?: boolean;
 }
 
-export interface MemberRosterAnalysisCounters {
-  total: number;
-  ready: number;
-  with_warnings: number;
-  with_errors: number;
-  excluded: number;
-}
-
 export interface MemberRosterAnalysis {
   plans: PlanMatch[];
   members: AnalyzedMember[];
-  counters: MemberRosterAnalysisCounters;
+  /** Rows safe to commit (name/doc present + a resolved plan). */
+  ready_count: number;
+  /** Rows needing user attention (unassigned plan, ambiguous match, duplicate). */
+  with_warnings_count: number;
+  /** Invalid rows (missing both name AND document); skipped on commit. */
+  with_errors_count: number;
   /**
-   * Global warnings emitted by the analyzer (e.g. low OCR confidence,
-   * unassigned plans, document type that may need review).
+   * Warnings the AI itself emitted in `RosterScanResult.warnings[]` (e.g. low
+   * OCR confidence, illegible columns, document type that may need review).
    */
-  warnings: string[];
+  global_warnings: string[];
 }
 
 // ============================================================================
@@ -224,8 +221,6 @@ export interface CommitMemberDto {
   period_start: string | null;
   /** `null` for `pending_payment` memberships without expiry. */
   period_end: string | null;
-  /** When `true` the backend skips this row entirely (default false). */
-  excluded?: boolean;
 }
 
 /** Top-level commit payload. */
@@ -235,30 +230,24 @@ export interface CommitMemberRosterDto {
 }
 
 /** Per-member commit outcome — echoed back so the UI can report failures. */
-export interface CommitMemberRosterResultRow {
+export interface CommitMemberResult {
   row_number: number;
-  ok: boolean;
+  status: 'success' | 'error' | 'skipped';
   customer_id?: number;
   membership_id?: number;
+  /** Human-readable error message; surfaced in the toast summary. */
   error?: string;
 }
 
-export interface CommitMemberRosterResultCounters {
-  /** Number of new plans actually created. */
-  plans_created: number;
-  /** Members successfully created/linked + membership created. */
-  members_succeeded: number;
-  /** Members the backend tried and rolled back / skipped. */
-  members_failed: number;
-  /** Members the user marked excluded (informational). */
-  members_excluded: number;
-}
-
 export interface CommitMemberRosterResult {
-  /** Flat counters for the success toast. */
+  /** Total member rows the backend received. */
+  ready: number;
   succeeded: number;
   failed: number;
-  /** Detailed counters (kept for parity with backend response shape). */
-  counters: CommitMemberRosterResultCounters;
-  results: CommitMemberRosterResultRow[];
+  results: CommitMemberResult[];
+  /**
+   * Plans that failed to create on the first (atomic) phase abort the whole
+   * commit — when this array is non-empty, NO member rows were persisted.
+   */
+  plan_errors: Array<{ ref_index: number; error: string }>;
 }
