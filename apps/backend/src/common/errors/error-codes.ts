@@ -215,7 +215,7 @@ export const ErrorCodes = {
     code: 'AUTH_CUSTOMER_CLAIMABLE_001',
     httpStatus: 409,
     devMessage:
-      'A customer account already exists with this email — recoverable via password reset',
+      'Ya existe una cuenta de cliente con este correo — puedes recuperarla restableciendo tu contraseña.',
   },
   AUTH_PERM_001: {
     code: 'AUTH_PERM_001',
