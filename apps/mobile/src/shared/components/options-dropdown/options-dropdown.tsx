@@ -23,159 +23,199 @@ export interface OptionsDropdownAction {
 }
 
 interface OptionsDropdownProps {
-  filterSections?: OptionsDropdownSection[];
+  /** Filter sections for the Filtros dropdown — mirrors web filters API */
+  filters?: OptionsDropdownSection[];
+  /** Actions for the Acciones dropdown — mirrors web actions API */
   actions?: OptionsDropdownAction[];
-  triggerLabel?: string;
-  triggerIcon?: string;
+  /** Show the Acciones trigger (default true) */
+  showActions?: boolean;
   /**
-   * Espejo web `max-width: 1023px` — el trigger colapsa a un botón
-   * cuadrado (sólo icono, sin label ni chevron). Usado por Categorías,
-   * Productos, Marcas y otras listas en mobile.
+   * Compact mode mirrors web `max-width: 1023px` — both triggers collapse
+   * to icon-only square buttons. Used by Categorías, Productos, Marcas.
    */
   compact?: boolean;
   style?: ViewStyle;
 }
 
 export function OptionsDropdown({
-  filterSections = [],
+  filters = [],
   actions = [],
-  triggerLabel = 'Filtros y acciones',
-  triggerIcon = 'sliders-horizontal',
+  showActions = true,
   compact = false,
   style,
 }: OptionsDropdownProps) {
-  const [open, setOpen] = useState(false);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [dropPos, setDropPos] = useState({ top: 0, right: 0 });
-  const triggerRef = React.useRef<View>(null);
+  const actionsTriggerRef = React.useRef<View>(null);
+  const filtersTriggerRef = React.useRef<View>(null);
   const screenW = Dimensions.get('window').width;
 
-  const hasFilters = filterSections.length > 0;
-  const hasActions = actions.length > 0;
-  const activeCount = filterSections.reduce(
+  const hasFilters = filters.length > 0;
+  const hasActions = showActions && actions.length > 0;
+  const activeFiltersCount = filters.reduce(
     (sum, s) => sum + s.options.filter((o) => o.active).length,
     0,
   );
 
-  const openDropdown = () => {
-    triggerRef.current?.measureInWindow((x, y, w, h) => {
-      // Espejo web `.options-dropdown-content` — absolute, top 100% + gap,
-      // right-aligned (filters-dropdown). En mobile (compact): el ancho
-      // del dropdown se ancla al botón trigger y aparece debajo.
-      setDropPos({
-        top: y + h + 4,
-        right: Math.max(0, screenW - (x + w)),
-      });
-      setOpen(true);
+  const measureTrigger = (
+    ref: React.RefObject<View | null>,
+    setOpenDropdown: React.Dispatch<React.SetStateAction<boolean>>,
+  ) => {
+    ref.current?.measureInWindow((x, y, w, h) => {
+      setDropPos({ top: y + h + 4, right: Math.max(0, screenW - (x + w)) });
+      setOpenDropdown(true);
     });
+  };
+
+  const closeAll = () => {
+    setActionsOpen(false);
+    setFiltersOpen(false);
   };
 
   return (
     <>
-      <Pressable
-        ref={triggerRef}
-        onPress={openDropdown}
-        style={({ pressed }) => [
-          styles.trigger,
-          compact && styles.triggerCompact,
-          pressed && styles.triggerPressed,
-          style,
-        ]}
-      >
-        <Icon
-          name={triggerIcon}
-          size={compact ? 18 : 16}
-          color={compact ? colors.primary : colors.text.primary}
-        />
-        {!compact && (
-          <Text style={styles.triggerLabel}>{triggerLabel}</Text>
+      {/* ── Two separate trigger buttons (mirrors web .options-dropdown-container) ── */}
+      <View style={[styles.triggerContainer, style]}>
+        {/* Acciones trigger (left) */}
+        {hasActions && (
+          <Pressable
+            ref={actionsTriggerRef}
+            onPress={() => {
+              if (filtersOpen) setFiltersOpen(false);
+              measureTrigger(actionsTriggerRef, setActionsOpen);
+            }}
+            style={({ pressed }) => [
+              styles.trigger,
+              compact && styles.triggerCompact,
+              pressed && styles.triggerPressed,
+            ]}
+          >
+            <Icon
+              name="sliders-horizontal"
+              size={compact ? 18 : 16}
+              color={compact ? colors.primary : colors.text.primary}
+            />
+            {!compact && <Text style={styles.triggerLabel}>Acciones</Text>}
+            {!compact && (
+              <Icon name="chevron-down" size={14} color={colors.text.muted} />
+            )}
+          </Pressable>
         )}
-        {!compact && activeCount > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{activeCount}</Text>
-          </View>
-        )}
-      </Pressable>
 
-      {/* Dropdown anclado al trigger (espejo web .options-dropdown-content) */}
-      <Modal
-        visible={open}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
-      >
-        {/* Overlay transparente cierra el dropdown al tap fuera */}
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={() => setOpen(false)}
-        >
-          <View style={[styles.dropdown, { top: dropPos.top, right: dropPos.right }]}>
-            {/* Header — espejo .dropdown-header web (border-bottom + título) */}
-            {hasFilters && (
-              <View style={styles.dropdownHeader}>
-                <Text style={styles.dropdownTitle}>Filtros</Text>
+        {/* Filtros trigger (right) */}
+        {hasFilters && (
+          <Pressable
+            ref={filtersTriggerRef}
+            onPress={() => {
+              if (actionsOpen) setActionsOpen(false);
+              measureTrigger(filtersTriggerRef, setFiltersOpen);
+            }}
+            style={({ pressed }) => [
+              styles.trigger,
+              compact && styles.triggerCompact,
+              pressed && styles.triggerPressed,
+              hasActions && styles.triggerWithSibling,
+            ]}
+          >
+            <Icon
+              name="filter"
+              size={compact ? 18 : 16}
+              color={compact ? colors.primary : colors.text.primary}
+            />
+            {!compact && <Text style={styles.triggerLabel}>Filtros</Text>}
+            {activeFiltersCount > 0 && (
+              <View style={styles.badge}>
+                <Text style={styles.badgeText}>{activeFiltersCount}</Text>
               </View>
             )}
+            {!compact && (
+              <Icon name="chevron-down" size={14} color={colors.text.muted} />
+            )}
+          </Pressable>
+        )}
+      </View>
 
-            {/* Body scrolleable — espejo .filters-body web */}
+      {/* ── Acciones dropdown panel ── */}
+      <Modal
+        visible={actionsOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAll}
+      >
+        <Pressable style={StyleSheet.absoluteFill} onPress={closeAll}>
+          <View style={[styles.dropdown, styles.actionsDropdown, { top: dropPos.top, right: dropPos.right }]}>
             <ScrollView
               style={styles.dropdownScroll}
               contentContainerStyle={styles.dropdownContent}
               showsVerticalScrollIndicator={false}
             >
-              {hasFilters && (
-                <View style={styles.section}>
-                  {filterSections.map((section) => (
-                    <FilterSelectField
-                      key={section.label}
-                      label={section.label}
-                      options={section.options}
-                      onSelect={(value) => {
-                        section.onSelect(value);
-                        // No cerramos el dropdown principal — el usuario
-                        // puede querer ajustar varios filtros antes de
-                        // cerrar manualmente. Coincide con la UX web
-                        // donde el popover queda abierto hasta tap fuera.
-                      }}
-                    />
-                  ))}
-                </View>
-              )}
-
-              {hasActions && (
-                <View style={[styles.section, hasFilters && styles.sectionDivider]}>
-                  <Text style={styles.sectionTitle}>Acciones</Text>
-                  {actions.map((a, i) => (
-                    <Pressable
-                      key={`${a.label}-${i}`}
-                      onPress={() => {
-                        setOpen(false);
-                        a.onPress();
-                      }}
-                      style={({ pressed }) => [
-                        styles.action,
-                        a.variant === 'destructive' && styles.actionDestructive,
-                        pressed && styles.actionPressed,
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Acciones</Text>
+                {actions.map((a, i) => (
+                  <Pressable
+                    key={`${a.label}-${i}`}
+                    onPress={() => {
+                      closeAll();
+                      a.onPress();
+                    }}
+                    style={({ pressed }) => [
+                      styles.action,
+                      a.variant === 'destructive' && styles.actionDestructive,
+                      pressed && styles.actionPressed,
+                    ]}
+                  >
+                    {a.icon && (
+                      <Icon
+                        name={a.icon}
+                        size={18}
+                        color={a.variant === 'destructive' ? colors.error : colors.text.primary}
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.actionLabel,
+                        a.variant === 'destructive' && styles.actionLabelDestructive,
                       ]}
                     >
-                      {a.icon && (
-                        <Icon
-                          name={a.icon}
-                          size={18}
-                          color={a.variant === 'destructive' ? colors.error : colors.text.primary}
-                        />
-                      )}
-                      <Text
-                        style={[
-                          styles.actionLabel,
-                          a.variant === 'destructive' && styles.actionLabelDestructive,
-                        ]}
-                      >
-                        {a.label}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
+                      {a.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Filtros dropdown panel ── */}
+      <Modal
+        visible={filtersOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={closeAll}
+      >
+        <Pressable style={StyleSheet.absoluteFill} onPress={closeAll}>
+          <View style={[styles.dropdown, styles.filtersDropdown, { top: dropPos.top, right: dropPos.right }]}>
+            {/* Header */}
+            <View style={styles.dropdownHeader}>
+              <Text style={styles.dropdownTitle}>Filtros</Text>
+            </View>
+            <ScrollView
+              style={styles.dropdownScroll}
+              contentContainerStyle={styles.dropdownContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.section}>
+                {filters.map((section) => (
+                  <FilterSelectField
+                    key={section.label}
+                    label={section.label}
+                    options={section.options}
+                    onSelect={section.onSelect}
+                  />
+                ))}
+              </View>
             </ScrollView>
           </View>
         </Pressable>
@@ -185,22 +225,9 @@ export function OptionsDropdown({
 }
 
 /**
- * FilterSelectField — espejo del `<app-selector size="sm">` web.
- *
- * Renderiza un campo select desplegable (no chips):
- *   · Cabecera: Pressable con label de la sección + valor actual +
- *     chevron-down a la derecha (h-8 rounded-xl border-border w-full).
- *     Mismo styling que la web CSS de `.inputsearch-wrapper`/select:
- *     bg #f4f4f4, border 1px #e6edf3, pl-3 pr-10, radius 0.75rem.
- *   · Cuerpo desplegable: lista vertical de opciones con la activa
- *     marcada (check + color primario). `bg #ffffff`, padding 16.
- *   · Mismo patrón que `<select>` HTML del web — pero sin opciones
- *     nativas (`<option>`) — sólo items-tap-internos.
- *
- * Props:
- *   label    — título de la sección ("Estado", "Destacado", etc.)
- *   options  — items disponibles con `value` y `label`, marca active
- *   onSelect — callback al elegir una opción
+ * FilterSelectField — mirrors web `<app-selector size="sm">`.
+ * Compact select dropdown with label, current value, chevron, and
+ * a dropdown list of options.
  */
 function FilterSelectField({
   label,
@@ -219,10 +246,6 @@ function FilterSelectField({
   return (
     <View style={styles.subsection}>
       <Text style={styles.subsectionLabel}>{label}</Text>
-
-      {/* Cabecera del select — estilo web:
-          bg #f4f4f4, pl-3 pr-10, rounded-xl (.75rem), h-8 (mobile)
-          hover border-primary, focus border-primary + ring */}
       <Pressable
         onPress={() => setOpen((v) => !v)}
         style={({ pressed }) => [
@@ -246,8 +269,6 @@ function FilterSelectField({
           style={[styles.selectFieldChevron, open && styles.selectFieldChevronOpen]}
         />
       </Pressable>
-
-      {/* Lista desplegable — espejo del `<select>` HTML expandido */}
       {open && (
         <View style={styles.selectOptions}>
           {options.map((opt, idx) => (
@@ -281,6 +302,10 @@ function FilterSelectField({
 }
 
 const styles = StyleSheet.create({
+  triggerContainer: {
+    flexDirection: 'row',
+    gap: spacing[2],
+  },
   trigger: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -292,21 +317,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.inputBg,
     gap: spacing[2],
   },
+  triggerWithSibling: {
+    // Extra gap when both triggers are shown
+  },
   triggerPressed: {
     backgroundColor: colorScales.gray[50],
   },
-  // Espejo web `.options-dropdown-trigger` cuando max-width: 1023px.
-  // El trigger se vuelve un cuadrado 2.5rem con borde verde primario —
-  // sólo contiene el icono. Border 1px #2ecc71, color #2ecc71, radius
-  // .75rem. Aplica a Categorías, Productos, Marcas, etc. en mobile.
+  // Compact mirrors web `max-width: 1023px` — icon-only square button
   triggerCompact: {
     width: 40,
     height: 40,
     borderRadius: 12,
     paddingHorizontal: 0,
     paddingVertical: 0,
-    backgroundColor: colors.inputBg, // #ffffff (bg-surface)
-    borderColor: colors.primary,    // #2ecc71
+    backgroundColor: colors.inputBg,
+    borderColor: colors.primary,
     justifyContent: 'center',
   },
   triggerLabel: {
@@ -328,25 +353,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.background,
   },
-  // ── Dropdown anclado al trigger (espejo web .options-dropdown-content)
-  // Web:
-  //   position: absolute; top: 100%; margin-top: 0.5rem;
-  //   width: 20rem; max-width: 90vw; max-height: 80vh;
-  //   background-color: #ffffff;
-  //   border: 1px solid #e6edf3;
-  //   border-radius: .5rem;
-  //   box-shadow: rgba(0,0,0,.1) 0 10px 15px -3px,
-  //              rgba(0,0,0,.05) 0 4px 6px -2px;
-  //   z-index: 99999;
+  // ── Dropdown panel ──
   dropdown: {
     position: 'absolute',
     backgroundColor: '#FFFFFF',
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#E6EDF3',
-    width: 240,                       // ≈ 20rem
-    maxWidth: '90%' as any,           // RN no acepta 'vw' directo
-    maxHeight: '70%' as any,          // RN no acepta 'vh' directo
+    width: 240,
+    maxWidth: '90%',
+    maxHeight: '70%',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.1,
@@ -355,7 +371,12 @@ const styles = StyleSheet.create({
     zIndex: 9999,
     overflow: 'hidden',
   },
-  // Header web: padding .75rem 1rem, border-bottom 1px #e6edf3, bg #ffffff
+  actionsDropdown: {
+    // Actions dropdown aligns right from trigger
+  },
+  filtersDropdown: {
+    // Filters dropdown also aligns right — mirrors web filters-dropdown
+  },
   dropdownHeader: {
     paddingHorizontal: 16,
     paddingVertical: 12,
@@ -363,13 +384,11 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E6EDF3',
     backgroundColor: '#FFFFFF',
   },
-  // .dropdown-title web: .875rem / 600 / #0f172a
   dropdownTitle: {
     fontSize: 14,
     fontWeight: '600',
     color: '#0F172A',
   },
-  // .filters-body web: padding .75rem 1rem, gap .75rem, max-height 40vh
   dropdownScroll: {
     flexGrow: 0,
     flexShrink: 1,
@@ -382,11 +401,6 @@ const styles = StyleSheet.create({
   section: {
     gap: spacing[2],
   },
-  sectionDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: colorScales.gray[200],
-    paddingTop: spacing[3],
-  },
   sectionTitle: {
     fontSize: typography.fontSize.xs,
     fontWeight: '700',
@@ -395,8 +409,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: spacing[2],
   },
-  // ── Espejo .filter-section + .filter-label web (filter-section column
-  // gap .5rem, label .875rem/500/#0f172a)
   subsection: {
     gap: spacing[2],
   },
@@ -405,21 +417,17 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#0F172A',
   },
-
-  // ── Espejo <app-selector size="sm"> web (select desplegable) ──
-  // CSS base: bg #f4f4f4, border 1px #e6edf3, h-8 (mobile) / h-9 (md+),
-  // pl-3 pr-10, rounded-xl (.75rem), color #0f172a, fs .875rem.
-  // hover border-primary, focus border-primary + shadow ring.
+  // ── Select field (mirrors web app-selector size="sm") ──
   selectField: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 32,                   // h-8 mobile (sm:h-9 = 36 sería md+)
-    paddingHorizontal: 12,       // pl-3
-    paddingRight: 40,           // pr-10 (espacio para chevron-right)
-    borderRadius: 12,            // .75rem
+    height: 32,
+    paddingHorizontal: 12,
+    paddingRight: 40,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E6EDF3',      // border-border web
-    backgroundColor: '#F4F4F4',  // bg #f4f4f4 (!bg-background web)
+    borderColor: '#E6EDF3',
+    backgroundColor: '#F4F4F4',
   },
   selectFieldOpen: {
     borderColor: '#2ECC71',
@@ -431,7 +439,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   selectFieldPressed: {
-    borderColor: '#2ECC71',     // hover state
+    borderColor: '#2ECC71',
   },
   selectFieldText: {
     flex: 1,
@@ -439,18 +447,16 @@ const styles = StyleSheet.create({
     color: '#0F172A',
   },
   selectFieldPlaceholder: {
-    color: '#94A3B8',            // text-text-muted web (Seleccionar)
+    color: '#94A3B8',
   },
-  // Chevron-down absoluto web: right-3 top-1/2
   selectFieldChevron: {
     position: 'absolute',
     right: 12,
-    transform: [{ rotate: '0deg' }, { translateY: -7 }], // -translate-y-1/2 (mitad del icono 14px)
+    transform: [{ rotate: '0deg' }, { translateY: -7 }],
   },
   selectFieldChevronOpen: {
     transform: [{ rotate: '180deg' }, { translateY: -7 }],
   },
-  // Lista desplegable — items con padding 12/10, hover bg, active verde
   selectOptions: {
     marginTop: spacing[1],
     borderRadius: 12,

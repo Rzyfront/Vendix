@@ -25,13 +25,20 @@
     "docker:up": "docker compose up -d",
     "docker:rebuild": "docker compose up --build -d",
     "docker:down": "docker compose down",
-    "docker:down-v": "docker compose down --volumes"
+    "docker:down-v": "docker compose down --volumes",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "devDependencies": {
     "babel-plugin-module-resolver": "^5.0.3",
     "prettier": "^3.4.2"
   },
   "dependencies": {
-    "@shopify/react-native-skia": "^2.6.2"
-  }
+    "@shopify/react-native-skia": "^2.6.2",
+    "expo": "~54.0.35",
+    "react": "19.1.0",
+    "react-native": "0.81.5"
+  },
+  "name": "Vendix",
+  "version": "1.0.0"
 }

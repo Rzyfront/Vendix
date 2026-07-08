@@ -134,7 +134,7 @@ export default function CategoriesListScreen() {
             />
           </View>
           <OptionsDropdown
-            filterSections={[
+            filters={[
               {
                 label: 'Estado',
                 options: [

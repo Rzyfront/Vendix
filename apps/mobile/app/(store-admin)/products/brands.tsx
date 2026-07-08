@@ -124,44 +124,34 @@ export default function BrandsListScreen() {
           <OptionsDropdown
             filters={[
               {
-                key: 'state',
                 label: 'Estado',
-                type: 'select',
                 options: [
-                  { value: 'all', label: 'Todas' },
-                  { value: 'active', label: 'Activas' },
-                  { value: 'inactive', label: 'Inactivas' },
+                  { label: 'Todas', value: 'all' },
+                  { label: 'Activas', value: 'active' },
+                  { label: 'Inactivas', value: 'inactive' },
                 ],
+                onSelect: (value) => {
+                  setStateFilter(
+                    !value || value === 'all' ? undefined : (value as BrandState),
+                  );
+                  setPage(1);
+                },
               },
               {
-                key: 'featured',
                 label: 'Destacadas',
-                type: 'select',
                 options: [
-                  { value: 'all', label: 'Todas' },
-                  { value: 'true', label: 'Destacadas' },
-                  { value: 'false', label: 'No destacadas' },
+                  { label: 'Todas', value: 'all' },
+                  { label: 'Destacadas', value: 'true' },
+                  { label: 'No destacadas', value: 'false' },
                 ],
+                onSelect: (value) => {
+                  setFeaturedFilter(
+                    !value || value === 'all' ? undefined : value === 'true',
+                  );
+                  setPage(1);
+                },
               },
             ]}
-            filterValues={{
-              state: stateFilter ?? 'all',
-              featured:
-                featuredFilter === undefined ? 'all' : featuredFilter ? 'true' : 'false',
-            }}
-            onFilterChange={(values) => {
-              const stateVal = values.state;
-              const featuredVal = values.featured;
-              setStateFilter(
-                !stateVal || stateVal === 'all' ? undefined : (stateVal as BrandState),
-              );
-              setFeaturedFilter(
-                !featuredVal || featuredVal === 'all'
-                  ? undefined
-                  : featuredVal === 'true',
-              );
-              setPage(1);
-            }}
             actions={canCreate ? [
               {
                 label: 'Nueva Marca',
@@ -259,10 +249,14 @@ function BrandCard({
   brand,
   onPress,
   onLongPress,
+  onToggleFeatured,
+  isTogglingFeatured,
 }: {
   brand: Brand;
   onPress: () => void;
   onLongPress?: () => void;
+  onToggleFeatured?: () => void;
+  isTogglingFeatured?: boolean;
 }) {
   const stateVariant = brand.state === 'active' ? 'success' : brand.state === 'inactive' ? 'default' : 'warning';
   const stateLabel = brand.state === 'active' ? 'Activa' : brand.state === 'inactive' ? 'Inactiva' : 'Archivada';
@@ -353,10 +347,9 @@ function BrandCard({
           accessibilityLabel={brand.is_featured ? 'Quitar destaque' : 'Destacar'}
         >
           <Icon
-            name={brand.is_featured ? 'star' : 'star'}
+            name="star"
             size={18}
             color={brand.is_featured ? colors.warning : colors.text.muted}
-            fill={brand.is_featured ? colors.warning : 'transparent'}
           />
         </Pressable>
       ) : null}

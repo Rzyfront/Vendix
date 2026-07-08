@@ -32,6 +32,7 @@ export const ReviewService = {
       rating: filters?.rating,
       sort_by: filters?.sort_by,
       sort_order: filters?.sort_order,
+      user_id: filters?.user_id,
     };
     const res = await apiClient.get(`${BASE}${buildQuery(params)}`);
     return unwrapPaginated<Review>(res, { page: filters?.page ?? 1, limit: filters?.limit ?? 20 });
