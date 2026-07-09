@@ -1,21 +1,34 @@
 import {
   Component,
-  forwardRef,
-  HostListener,
+  DestroyRef,
   ElementRef,
+  forwardRef,
   inject,
+  OnDestroy,
+  output,
   signal,
+  TemplateRef,
+  ViewContainerRef,
+  viewChild,
   computed,
   input,
-  output,
 } from '@angular/core';
 
 import {
   ControlValueAccessor,
-  NG_VALUE_ACCESSOR,
   FormsModule,
+  NG_VALUE_ACCESSOR,
   ReactiveFormsModule,
 } from '@angular/forms';
+import {
+  ConnectedPosition,
+  Overlay,
+  OverlayRef,
+} from '@angular/cdk/overlay';
+import { TemplatePortal } from '@angular/cdk/portal';
+import { ESCAPE } from '@angular/cdk/keycodes';
+import { fromEvent } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../icon/icon.component';
 import { TooltipComponent } from '../tooltip/tooltip.component';
 import { FormStyleVariant } from '../../types/form.types';
@@ -62,10 +75,11 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
           }
         </label>
       }
-    
+
       <div class="relative">
         <!-- Trigger Button -->
         <button
+          #trigger
           type="button"
           [disabled]="disabled()"
           (click)="toggleDropdown()"
@@ -73,7 +87,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
           [class.border-border]="!errorText()"
           [class.border-destructive]="errorText()"
           >
-          <div class="flex flex-wrap gap-1.5 items-center">
+          <div class="flex flex-wrap gap-1.5 items-center pr-6">
             <!-- Selected chips -->
             @for (value of selectedValues(); track value) {
               <span
@@ -91,7 +105,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
                 </button>
               </span>
             }
-    
+
             <!-- Placeholder -->
             @if (selectedValues().length === 0) {
               <span
@@ -101,83 +115,14 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
               </span>
             }
           </div>
-    
+
           <!-- Chevron -->
           <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--color-text-secondary)]">
             <app-icon [name]="isOpen() ? 'chevron-up' : 'chevron-down'" [size]="16"></app-icon>
           </div>
         </button>
-    
-        <!-- Dropdown -->
-        @if (isOpen()) {
-          <div
-            class="absolute z-[10000] w-full mt-1 bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto"
-            style="border-radius: var(--radius-sm);"
-            >
-            <!-- Search input -->
-            <div class="p-2 border-b border-border sticky top-0 bg-[var(--color-surface)]">
-              <input
-                type="text"
-                [ngModel]="searchTerm()"
-                (ngModelChange)="onSearch($event)"
-              class="w-full px-3 py-1.5 text-sm border border-border
-                     hover:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-primary)]
-                     bg-[var(--color-surface)] text-[var(--color-text-primary)]"
-                style="border-radius: var(--radius-sm);"
-                placeholder="Buscar..."
-                />
-            </div>
-            <!-- Options -->
-            <div class="py-1">
-              @for (option of filteredOptions(); track option.value) {
-                <button
-                  type="button"
-                  [disabled]="option.disabled"
-                  (click)="toggleOption(option)"
-              class="w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors
-                     hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
-                  [class.bg-primary-50]="isSelected(option.value)"
-                  [class.font-semibold]="isSelected(option.value)"
-                  >
-                  <!-- Checkbox indicator -->
-                  <div
-                    class="w-4 h-4 border flex items-center justify-center transition-colors shadow-sm"
-                    [class.border-primary-600]="isSelected(option.value)"
-                    [class.bg-primary-600]="isSelected(option.value)"
-                    [class.border-gray-300]="!isSelected(option.value)"
-                    style="border-radius: var(--radius-sm);"
-                    >
-                    @if (isSelected(option.value)) {
-                      <app-icon
-                        name="check"
-                        [size]="12"
-                        class="text-white"
-                      ></app-icon>
-                    }
-                  </div>
-                  <span class="flex-1 min-w-0 text-[var(--color-text-primary)] truncate" [class.text-primary-700]="isSelected(option.value)">{{ option.label }}</span>
-                  @if (option.description) {
-                    <span
-                      class="text-xs text-[var(--color-text-secondary)] truncate whitespace-nowrap overflow-hidden max-w-[40%] shrink-0"
-                      [title]="option.description"
-                    >
-                      {{ option.description }}
-                    </span>
-                  }
-                </button>
-              }
-              @if (filteredOptions().length === 0) {
-                <div
-                  class="px-3 py-4 text-center text-sm text-[var(--color-text-secondary)]"
-                  >
-                  No se encontraron opciones
-                </div>
-              }
-            </div>
-          </div>
-        }
       </div>
-    
+
       <!-- Help/Error text -->
       @if (helpText() || errorText()) {
         <div class="mt-1 text-sm">
@@ -195,6 +140,61 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
         </div>
       }
     </div>
+
+    <!-- Dropdown menu portal (lives outside Angular view encapsulation via CDK overlay) -->
+    <ng-template #menuTpl>
+      <div class="multi-selector-menu">
+        <!-- Search input -->
+        <div class="multi-selector-menu__search">
+          <input
+            type="text"
+            [ngModel]="searchTerm()"
+            (ngModelChange)="onSearch($event)"
+            class="multi-selector-menu__search-input"
+            placeholder="Buscar..."
+            autocomplete="off"
+          />
+        </div>
+        <!-- Options -->
+        <div class="multi-selector-menu__options">
+          @for (option of filteredOptions(); track option.value) {
+            <button
+              type="button"
+              [disabled]="option.disabled"
+              (click)="toggleOption(option)"
+              class="multi-selector-menu__option"
+              [class.multi-selector-menu__option--selected]="isSelected(option.value)"
+              >
+              <div
+                class="multi-selector-menu__option-checkbox"
+                [class.multi-selector-menu__option-checkbox--checked]="isSelected(option.value)"
+                >
+                @if (isSelected(option.value)) {
+                  <app-icon name="check" [size]="12" class="text-white"></app-icon>
+                }
+              </div>
+              <span
+                class="multi-selector-menu__option-label"
+                [class.text-primary-700]="isSelected(option.value)"
+              >{{ option.label }}</span>
+              @if (option.description) {
+                <span
+                  class="multi-selector-menu__option-description"
+                  [title]="option.description"
+                >
+                  {{ option.description }}
+                </span>
+              }
+            </button>
+          }
+          @if (filteredOptions().length === 0) {
+            <div class="multi-selector-menu__empty">
+              No se encontraron opciones
+            </div>
+          }
+        </div>
+      </div>
+    </ng-template>
     `,
   styles: [`
     :host {
@@ -220,9 +220,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
     }
   `],
 })
-export class MultiSelectorComponent implements ControlValueAccessor {
-  private elementRef = inject(ElementRef);
-
+export class MultiSelectorComponent implements ControlValueAccessor, OnDestroy {
   readonly label = input<string>('');
   readonly placeholder = input<string>('Seleccionar...');
   readonly helpText = input<string>('');
@@ -240,28 +238,26 @@ export class MultiSelectorComponent implements ControlValueAccessor {
   readonly isOpen = signal<boolean>(false);
   readonly searchTerm = signal<string>('');
 
+  readonly trigger = viewChild<ElementRef<HTMLButtonElement>>('trigger');
+  readonly menuTpl = viewChild<TemplateRef<unknown>>('menuTpl');
+
   readonly filteredOptions = computed(() => {
     const term = this.searchTerm().toLowerCase();
     if (!term) return this.options();
     return this.options().filter(
-      o => o.label.toLowerCase().includes(term) ||
-        (o.description && o.description.toLowerCase().includes(term))
+      (o) =>
+        o.label.toLowerCase().includes(term) ||
+        (o.description && o.description.toLowerCase().includes(term)),
     );
   });
 
-  private onChange: (value: (string | number)[]) => void = () => { };
-  private onTouched: () => void = () => { };
+  private readonly overlay = inject(Overlay);
+  private readonly vcr = inject(ViewContainerRef);
+  private readonly destroyRef = inject(DestroyRef);
+  private overlayRef: OverlayRef | null = null;
 
-  @HostListener('document:click', ['$event'])
-  onDocumentClick(event: MouseEvent): void {
-    const target = event.target as Node | null;
-    if (!target) return;
-    const path = event.composedPath();
-    const isInside = path.some((node) => node === this.elementRef.nativeElement);
-    if (!isInside) {
-      this.isOpen.set(false);
-    }
-  }
+  private onChange: (value: (string | number)[]) => void = () => {};
+  private onTouched: () => void = () => {};
 
   // ControlValueAccessor
   writeValue(value: (string | number)[] | null): void {
@@ -283,21 +279,23 @@ export class MultiSelectorComponent implements ControlValueAccessor {
   // UI Methods
   toggleDropdown(): void {
     if (this.disabled()) return;
-    if (!this.isOpen()) {
+    if (this.isOpen()) {
+      this.close();
+    } else {
       this.searchTerm.set('');
+      this.open();
     }
-    this.isOpen.update(v => !v);
   }
 
   toggleOption(option: MultiSelectorOption): void {
     if (option.disabled) return;
 
     const current = this.selectedValues();
-    const index = current.findIndex(v => v == option.value);
+    const index = current.findIndex((v) => v == option.value);
     if (index === -1) {
       this.selectedValues.set([...current, option.value]);
     } else {
-      this.selectedValues.set(current.filter(v => v != option.value));
+      this.selectedValues.set(current.filter((v) => v != option.value));
     }
 
     this.emitChange();
@@ -305,21 +303,85 @@ export class MultiSelectorComponent implements ControlValueAccessor {
 
   removeValue(value: string | number, event: MouseEvent): void {
     event.stopPropagation();
-    this.selectedValues.update(current => current.filter(v => v != value));
+    this.selectedValues.update((current) => current.filter((v) => v != value));
     this.emitChange();
   }
 
   isSelected(value: string | number): boolean {
-    return this.selectedValues().some(v => v == value);
+    return this.selectedValues().some((v) => v == value);
   }
 
   getOptionLabel(value: string | number): string {
-    const option = this.options().find(o => o.value === value);
+    const option = this.options().find((o) => o.value === value);
     return option?.label || String(value);
   }
 
   onSearch(term: string): void {
     this.searchTerm.set(term);
+  }
+
+  private open(): void {
+    const btn = this.trigger()?.nativeElement;
+    const tpl = this.menuTpl();
+    if (!btn || !tpl) return;
+
+    const positions: ConnectedPosition[] = [
+      // Preferred: below the trigger, aligned to start
+      { originX: 'start', originY: 'bottom', overlayX: 'start', overlayY: 'top', offsetY: 4 },
+      // Fallback above: trigger top → menu bottom
+      { originX: 'start', originY: 'top', overlayX: 'start', overlayY: 'bottom', offsetY: -4 },
+    ];
+
+    const positionStrategy = this.overlay
+      .position()
+      .flexibleConnectedTo(btn)
+      .withPositions(positions)
+      .withPush(true)
+      .withFlexibleDimensions(false)
+      .withViewportMargin(8);
+
+    // Match panel width to trigger width so layout matches the inline behavior
+    const triggerWidth = btn.offsetWidth;
+
+    this.overlayRef = this.overlay.create({
+      positionStrategy,
+      scrollStrategy: this.overlay.scrollStrategies.reposition(),
+      hasBackdrop: true,
+      backdropClass: 'cdk-overlay-transparent-backdrop',
+      panelClass: 'multi-selector-panel',
+      width: triggerWidth,
+      maxHeight: 240,
+    });
+
+    this.overlayRef.attach(new TemplatePortal(tpl, this.vcr));
+    this.isOpen.set(true);
+
+    this.overlayRef
+      .backdropClick()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.close());
+
+    this.overlayRef
+      .keydownEvents()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((ev) => {
+        if (ev.keyCode === ESCAPE) this.close();
+      });
+
+    fromEvent(window, 'resize')
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.close());
+  }
+
+  private close(): void {
+    this.overlayRef?.detach();
+    this.overlayRef?.dispose();
+    this.overlayRef = null;
+    this.isOpen.set(false);
+  }
+
+  ngOnDestroy(): void {
+    this.close();
   }
 
   private emitChange(): void {
@@ -367,9 +429,6 @@ export class MultiSelectorComponent implements ControlValueAccessor {
     ];
 
     // Unified height system (matches Button, Input, Selector)
-    // sm: 32px mobile → 36px desktop
-    // md: 40px mobile → 44px desktop
-    // lg: 48px mobile → 52px desktop
     const sizeClasses = {
       sm: ['min-h-8', 'sm:min-h-9'],
       md: ['min-h-10', 'sm:min-h-11'],
@@ -387,7 +446,6 @@ export class MultiSelectorComponent implements ControlValueAccessor {
       ].join(' ');
     }
 
-    // Classic: with ring focus
     return [
       ...baseClasses,
       ...sizeClasses[this.size()],
