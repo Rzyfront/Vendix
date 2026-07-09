@@ -766,6 +766,14 @@ footer {
   font-weight: 600;
 }
 
+/* CDK Overlay container must sit ABOVE app-modal (z-[9999]).
+   Without this, every CDK overlay (multi-selector dropdown, tier-menu, etc.)
+   renders at the default z-index: 1000 — BELOW the modal — and the dropdown
+   is only visible past the modal's bottom edge. */
+.cdk-overlay-container {
+  z-index: 10000;
+}
+
 /* Multi-selector menu (CDK overlay portal — lives outside Angular view encapsulation) */
 .cdk-overlay-pane.multi-selector-panel {
   background: var(--color-surface);
