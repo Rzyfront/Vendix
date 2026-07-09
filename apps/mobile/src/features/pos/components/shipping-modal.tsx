@@ -1,11 +1,11 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { View, Text, Pressable, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, Pressable, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, Modal } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery } from '@tanstack/react-query';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
-import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
 import { formatCurrency } from '@/shared/utils/currency';
 import { ShippingService, OrderService } from '@/features/store/services';
 import { useAuthStore } from '@/core/store/auth.store';
@@ -13,6 +13,7 @@ import { useTenantStore } from '@/core/store/tenant.store';
 import { useCartStore } from '@/features/store/pos/store/cart.store';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import type { CreatePosPaymentDto, PaymentMethod, PosCustomer } from '@/features/store/types';
+import { CheckoutStepIndicator } from './checkout-step-indicator';
 
 function getPaymentMethodType(method?: PaymentMethod | null): string {
   return method?.system_payment_method?.type || method?.type || '';
@@ -43,6 +44,7 @@ interface ShippingModalProps {
 }
 
 export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }: ShippingModalProps) {
+  const insets = useSafeAreaInsets();
   const items = useCartStore((s) => s.items);
   const summary = useCartStore((s) => s.summary);
   const customer = useCartStore((s) => s.customer);
@@ -166,17 +168,32 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
   };
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} snapPoint="full">
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.container}
+        style={styles.root}
       >
+        <Pressable style={styles.backdrop} onPress={onClose}>
+          <Pressable
+            style={[styles.container, { paddingBottom: 0 }]}
+            onPress={(e) => e.stopPropagation()}
+          >
         <View style={styles.header}>
           <Text style={styles.title}>Pedido con envío</Text>
           <Pressable onPress={onClose} style={styles.closeBtn}>
             <Icon name="x" size={24} color={colorScales.gray[500]} />
           </Pressable>
         </View>
+
+        {/* Step indicator — UX: el usuario siempre sabe en qué paso está. */}
+        <CheckoutStepIndicator currentStep="shipping" />
+        <View style={styles.stepDivider} />
 
         <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
           {/* Customer Section */}
@@ -452,7 +469,7 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
           </View>
         </ScrollView>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: insets.bottom + spacing[3] }]}>
           <Pressable style={styles.cancelBtn} onPress={onClose}>
             <Text style={styles.cancelText}>Cancelar</Text>
           </Pressable>
@@ -471,13 +488,39 @@ export function ShippingModal({ visible, onClose, onSuccess, onSelectCustomer }:
             )}
           </Pressable>
         </View>
+          </Pressable>
+        </Pressable>
       </KeyboardAvoidingView>
-    </BottomSheet>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  root: {
+    flex: 1,
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing[4],
+  },
+  container: {
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '90%',
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
+  },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: spacing[4], paddingVertical: spacing[3],
@@ -488,6 +531,10 @@ const styles = StyleSheet.create({
     fontFamily: typography.fontFamily, color: colorScales.gray[900],
   },
   closeBtn: { padding: spacing[1] },
+  stepDivider: {
+    height: 1,
+    backgroundColor: colorScales.gray[200],
+  },
   body: { flex: 1 },
   bodyContent: { padding: spacing[4], gap: spacing[5], paddingBottom: spacing[10] },
   section: { gap: spacing[3] },

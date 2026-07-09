@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Keyboard } from 'react-native';
+import { View, Text, Pressable, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator, Keyboard, Modal } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
-import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
 import { useQuery } from '@tanstack/react-query';
 import { ProductService } from '@/features/store/services';
 import type { TaxCategory } from '@/features/store/types';
@@ -23,6 +23,7 @@ function formatRate(rate: number): string {
 }
 
 export function PosCustomItemModal({ visible, onClose, onAdd }: PosCustomItemModalProps) {
+  const insets = useSafeAreaInsets();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [quantity, setQuantity] = useState('1');
@@ -72,11 +73,22 @@ export function PosCustomItemModal({ visible, onClose, onAdd }: PosCustomItemMod
   };
 
   return (
-    <BottomSheet visible={visible} onClose={handleClose} snapPoint="full">
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={handleClose}
+      statusBarTranslucent
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.container}
+        style={styles.root}
       >
+        <Pressable style={styles.backdrop} onPress={handleClose}>
+          <Pressable
+            style={[styles.container, { paddingBottom: 0 }]}
+            onPress={(e) => e.stopPropagation()}
+          >
         <View style={styles.header}>
           <View style={styles.headerLeft}>
             <View style={styles.headerIcon}>
@@ -237,7 +249,7 @@ export function PosCustomItemModal({ visible, onClose, onAdd }: PosCustomItemMod
           )}
         </ScrollView>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: insets.bottom + spacing[3] }]}>
           <Pressable style={styles.cancelBtn} onPress={handleClose}>
             <Text style={styles.cancelText}>Cancelar</Text>
           </Pressable>
@@ -250,14 +262,38 @@ export function PosCustomItemModal({ visible, onClose, onAdd }: PosCustomItemMod
             <Text style={styles.addText}>Agregar</Text>
           </Pressable>
         </View>
+          </Pressable>
+        </Pressable>
       </KeyboardAvoidingView>
-    </BottomSheet>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing[4],
+  },
+  container: {
+    width: '100%',
+    maxWidth: 520,
+    maxHeight: '90%',
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
   },
   header: {
     flexDirection: 'row',
