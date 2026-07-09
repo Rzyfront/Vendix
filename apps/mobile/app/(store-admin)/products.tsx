@@ -109,8 +109,8 @@ export default function ProductsListScreen() {
 
   function handleSearch(value: string) {
     setSearch(value);
+    setDebouncedSearch(value);
     setPage(1);
-    setTimeout(() => setDebouncedSearch(value), 400);
   }
 
   const filtersActive =
@@ -232,28 +232,32 @@ export default function ProductsListScreen() {
                     <View style={styles.popoverHeader}>
                       <Text style={styles.popoverTitle}>Acciones</Text>
                     </View>
-                    <ActionItem
-                      icon="plus"
-                      label="Nuevo producto"
-                      primary
-                      onPress={() => { setActionsOpen(false); setQuickCreateOpen(true); }}
-                    />
-                    <ActionItem
-                      icon="upload"
-                      label="Carga masiva"
-                      onPress={() => { setActionsOpen(false); setBulkUploadOpen(true); }}
-                    />
-                    <ActionItem
-                      icon="image"
-                      label="Carga de imágenes"
-                      onPress={() => { setActionsOpen(false); setBulkImageOpen(true); }}
-                    />
-                    <ActionItem
-                      icon="file-spreadsheet"
-                      label="Descargar plantilla de productos actuales"
-                      onPress={() => { setActionsOpen(false); downloadCurrentProductsTemplate(); }}
-                      isLast
-                    />
+                    {canCreate && (
+                      <>
+                        <ActionItem
+                          icon="plus"
+                          label="Nuevo producto"
+                          primary
+                          onPress={() => { setActionsOpen(false); setQuickCreateOpen(true); }}
+                        />
+                        <ActionItem
+                          icon="upload"
+                          label="Carga masiva"
+                          onPress={() => { setActionsOpen(false); setBulkUploadOpen(true); }}
+                        />
+                        <ActionItem
+                          icon="image"
+                          label="Carga de imágenes"
+                          onPress={() => { setActionsOpen(false); setBulkImageOpen(true); }}
+                        />
+                        <ActionItem
+                          icon="file-spreadsheet"
+                          label="Descargar plantilla de productos actuales"
+                          onPress={() => { setActionsOpen(false); downloadCurrentProductsTemplate(); }}
+                          isLast
+                        />
+                      </>
+                    )}
                   </View>
                 </View>
               </>
@@ -357,7 +361,7 @@ export default function ProductsListScreen() {
           <EmptyState
             icon="alert-triangle"
             title="Error al cargar productos"
-            description="No pudimos obtener los producto. Verifica tu conexión."
+            description="No pudimos obtener los productos. Verifica tu conexión."
             actionLabel="Reintentar"
             onAction={() => refetch()}
           />
@@ -495,7 +499,7 @@ interface ProductCardProps {
 
 function ProductCard({ product, onPress, onEdit, onToggle, onMore, isToggling, canUpdate, canDelete }: ProductCardProps) {
   const stateVariant: any = product.state === 'active' ? 'success' : product.state === 'archived' ? 'warning' : 'neutral';
-  const stateLabel = product.state === 'active' ? 'active' : product.state === 'archived' ? 'archivado' : 'inactive';
+  const stateLabel = product.state === 'active' ? 'Activo' : product.state === 'archived' ? 'Archivado' : 'Inactivo';
 
   return (
     <Pressable

@@ -76,8 +76,8 @@ export default function BrandsListScreen() {
 
   function handleSearch(value: string) {
     setSearch(value);
+    setDebouncedSearch(value);
     setPage(1);
-    setTimeout(() => setDebouncedSearch(value), 400);
   }
 
   const filtersActive = (stateFilter ? 1 : 0) + (featuredFilter !== undefined ? 1 : 0);

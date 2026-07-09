@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityIndicator, View, FlatList, Text, RefreshControl, Pressable } from 'react-native';
+import { ActivityIndicator, View, FlatList, Text, RefreshControl, Pressable, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import {
@@ -76,8 +76,8 @@ export default function CategoriesListScreen() {
 
   function handleSearch(value: string) {
     setSearch(value);
+    setDebouncedSearch(value);
     setPage(1);
-    setTimeout(() => setDebouncedSearch(value), 400);
   }
 
   const filtersActive = (stateFilter ? 1 : 0) + (featuredFilter !== undefined ? 1 : 0);
@@ -284,7 +284,11 @@ function CategoryCard({
         }}
       >
         {category.image_url ? (
-          <Text style={{ fontSize: 24 }}>📚</Text>
+          <Image
+            source={{ uri: category.image_url }}
+            style={{ width: 48, height: 48, borderRadius: borderRadius.md }}
+            resizeMode="cover"
+          />
         ) : (
           <Icon name="layers" size={22} color={colors.text.muted} />
         )}
