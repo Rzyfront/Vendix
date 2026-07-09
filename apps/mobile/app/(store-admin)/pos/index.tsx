@@ -19,6 +19,8 @@ import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { CustomerService, OrderService, ProductService, ShippingService } from '@/features/store/services';
 import { useCartStore } from '@/features/store/pos/store/cart.store';
+import { CashRegisterService } from '@/features/pos/services/cash-register.service';
+import { useCashRegisterStore } from '@/features/pos/store/cash-register.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { colors, colorScales, spacing, borderRadius, shadows, typography } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
@@ -47,8 +49,6 @@ import {
 } from '@/features/pos/components';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import { useResponsive } from '@/shared/hooks';
-import { CashRegisterService } from '@/features/pos/services/cash-register.service';
-import { useCashRegisterStore } from '@/features/pos/store/cash-register.store';
 import type {
   CreatePosPaymentDto,
   PaymentMethod,
@@ -2312,15 +2312,22 @@ const PosScreen = () => {
   // Aparece antes de persistir el borrador (paridad del annotation 5 del POS).
   const [showOrderCreateModal, setShowOrderCreateModal] = useState(false);
 
-  // Sesión de caja activa — hidratada vía GET /sessions/active y sincronizada
-  // al store global `useCashRegisterStore` para que los 4 modales
-  // PosCash* (open/close/movement/detail) y el header lean del mismo valor.
+  // Sesión de caja activa — suscrita al store global `useCashRegisterStore`
+  // para que el header y los 4 modales PosCash* reflejen cambios síncronos
+  // tras open/close sin esperar un refetch. Se hidrata en mount desde
+  // `GET /store/cash-registers/sessions/active` y se reconcilia solo si
+  // diverge del valor actual (evita pisar un open reciente con un valor
+  // stale del backend).
   const cashSession = useCashRegisterStore((s) => s.activeSession);
+
   const { data: activeSessionData } = useQuery({
     queryKey: ['cash-session-active'],
     queryFn: () => CashRegisterService.getActiveSession(),
     staleTime: 30_000,
   });
+
+  // Hidratar el store cuando el query responda, pero solo si difiere para
+  // evitar pisar un open reciente con un valor stale del backend.
   useEffect(() => {
     if (activeSessionData === undefined) return;
     const current = useCashRegisterStore.getState().activeSession;

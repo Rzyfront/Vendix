@@ -16,6 +16,7 @@ export const Endpoints = {
   },
   STORE: {
     DASHBOARD_STATS: '/store/stores/dashboard/stats',
+    UOM: '/store/uom',
     PRODUCTS: {
       LIST: '/store/products',
       GET: '/store/products/:id',
