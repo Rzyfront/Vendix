@@ -26,6 +26,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Linking,
+  Image,
 } from 'react-native';
 
 import { Button } from '@/shared/components/button/button';
@@ -166,15 +167,11 @@ export function AnuncioPreviewModal({
                 {/* Image stage */}
                 <View style={styles.imageStage}>
                   {hasImage && anuncio.image_url ? (
-                    <View style={styles.imagePlaceholder}>
-                      <Icon name="image" size={48} color={colorScales.gray[400]} />
-                      <Text style={styles.imageAltText} numberOfLines={3}>
-                        {anuncio.title}
-                      </Text>
-                      <Text style={styles.imageProxyHint}>
-                        (Imagen se renderiza via `expo-image`; placeholder visual por ahora)
-                      </Text>
-                    </View>
+                    <Image
+                      source={{ uri: anuncio.image_url }}
+                      style={styles.previewImage}
+                      resizeMode="contain"
+                    />
                   ) : (
                     <View style={styles.noImage}>
                       <Icon name="image-off" size={36} color={colorScales.gray[400]} />
@@ -340,19 +337,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: spacing[4],
   },
-  imagePlaceholder: {
-    alignItems: 'center',
-    gap: spacing[2],
-  },
-  imageAltText: {
-    fontSize: typography.fontSize.sm,
-    color: colorScales.gray[700],
-    textAlign: 'center',
-  },
-  imageProxyHint: {
-    fontSize: typography.fontSize.xs,
-    color: colorScales.gray[500],
-    textAlign: 'center',
+  previewImage: {
+    width: '100%',
+    height: 280,
+    borderRadius: borderRadius.md,
   },
   noImage: {
     alignItems: 'center',
