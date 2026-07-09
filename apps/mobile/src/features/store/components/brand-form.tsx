@@ -1,12 +1,40 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import {
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Input, Textarea, Toggle, Card, StickyHeader } from '@/shared/components';
+import {
+  Button,
+  Card,
+  Input,
+  StickyHeader,
+  Textarea,
+  Toggle,
+} from '@/shared/components';
+import { Icon } from '@/shared/components/icon/icon';
+import {
+  ImageSourceModal,
+  type UploadedImage,
+} from '@/features/store/components/image-source-modal';
+import {
+  ImageEditModal,
+  type ImageEditResult,
+} from '@/features/store/components/image-edit-modal';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { BrandService } from '@/features/store/services/brand.service';
 import type { Brand, CreateBrandDto, UpdateBrandDto } from '@/features/store/types';
-import { colors, spacing } from '@/shared/theme';
+import {
+  borderRadius,
+  colors,
+  colorScales,
+  spacing,
+} from '@/shared/theme';
 
 interface BrandFormProps {
   mode: 'create' | 'edit';
@@ -31,6 +59,11 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
   const [isActive, setIsActive] = useState(true);
   const [isFeatured, setIsFeatured] = useState(false);
   const [initialized, setInitialized] = useState(false);
+
+  // Modal flow: ImageSourceModal → ImageEditModal — mismo flujo que
+  // category-form (espejo del web image picker para brands).
+  const [imageSourceOpen, setImageSourceOpen] = useState(false);
+  const [imageEditUri, setImageEditUri] = useState<string | null>(null);
 
   // Hydrate form when loading existing brand. Done in useEffect to avoid
   // calling state setters during render — that triggers an infinite
@@ -82,6 +115,11 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
     };
     mutation.mutate(payload);
   }
+
+  // Espejo web: usado para mostrar/ocultar el botón "Quitar" + cambiar
+  // el label del CTA entre "Cambiar" (imagen existente) y "Agregar"
+  // (slot vacío).
+  const hasImage = logoUrl.trim().length > 0;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -139,15 +177,52 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
 
             <Card>
               <Card.Header title="Imagen" />
-              <Card.Body style={{ gap: spacing[3] }}>
-                <Input
-                  label="URL del logo"
-                  value={logoUrl}
-                  onChangeText={setLogoUrl}
-                  placeholder="https://..."
-                  maxLength={500}
-                  helperText="Pegá la URL del logo o subilo desde la versión web."
-                />
+              <Card.Body style={styles.imageCardBody}>
+                {/* Preview 64×64 — espejo web exacto (.rounded-lg + border-gray-100
+                    + bg-white + 1px border + overflow-hidden). Si la marca no
+                    tiene imagen cargada, muestra placeholder de texto. */}
+                <View style={styles.imagePreview}>
+                  {hasImage ? (
+                    <Image
+                      source={{ uri: logoUrl }}
+                      style={styles.imagePreviewImg}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Text style={styles.imagePlaceholderText}>Logo</Text>
+                  )}
+                </View>
+                <View style={styles.imageTexts}>
+                  <Text style={styles.imageTitle}>Logo de la marca</Text>
+                  <Text style={styles.imageSubtitle}>
+                    Aparece en la ficha del producto y en los filtros visuales.
+                  </Text>
+                </View>
+                {/* Columna de acciones — outline Cambiar/Agregar + ghost Quitar
+                    (Quitar sólo aparece cuando hay imagen, mismo patrón que
+                    category-form). */}
+                <View style={styles.imageActions}>
+                  <Button
+                    title={hasImage ? 'Cambiar' : 'Agregar'}
+                    variant="outline"
+                    size="sm"
+                    leftIcon={
+                      <Icon name="image" size={14} color={colors.primary} />
+                    }
+                    onPress={() => setImageSourceOpen(true)}
+                  />
+                  {hasImage ? (
+                    <Button
+                      title="Quitar"
+                      variant="ghost"
+                      size="sm"
+                      onPress={() => {
+                        setLogoUrl('');
+                        toastSuccess('Logo quitado');
+                      }}
+                    />
+                  ) : null}
+                </View>
               </Card.Body>
             </Card>
 
@@ -162,6 +237,81 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
           </>
         )}
       </ScrollView>
+
+      {/* Modal reutilizable para tomar/elegir logo. Mismo componente
+          usado en product-upsert-form y category-form. Después del picker
+          se pasa por ImageEditModal (recorte/rotar) antes de guardar el
+          URI final en el form. */}
+      <ImageSourceModal
+        visible={imageSourceOpen}
+        onClose={() => setImageSourceOpen(false)}
+        remainingSlots={1}
+        onConfirm={(image: UploadedImage) => {
+          setImageSourceOpen(false);
+          setImageEditUri(image.uri);
+          toastSuccess('Logo seleccionado — ajusta antes de guardar');
+        }}
+      />
+
+      {/* Modal de edición/recorte tras ImageSourceModal. Al pulsar
+          "Guardar ajuste" el URI se persiste en `logoUrl`. */}
+      <ImageEditModal
+        visible={imageEditUri !== null}
+        imageUri={imageEditUri}
+        onClose={() => setImageEditUri(null)}
+        onApply={(result: ImageEditResult) => {
+          setLogoUrl(result.uri);
+          setImageEditUri(null);
+          toastSuccess('Logo recortado y guardado');
+        }}
+      />
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  // ── Imagen card (espejo web: row, padding-3, gap-3, bg-gray-50) ──
+  imageCardBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    padding: spacing[3],
+  },
+  imagePreview: {
+    width: 64,
+    height: 64,
+    flexShrink: 0,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imagePreviewImg: { width: '100%', height: '100%' },
+  imagePlaceholderText: {
+    fontSize: 11,
+    color: colorScales.gray[500],
+  },
+  imageTexts: { flex: 1, minWidth: 0 },
+  imageTitle: {
+    fontSize: 13,
+    fontWeight: '600' as any,
+    color: colors.text.primary,
+  },
+  imageSubtitle: {
+    fontSize: 11,
+    color: colorScales.gray[500],
+    marginTop: 2,
+    lineHeight: 14,
+  },
+  // .image-actions: column apilada (acción primaria Cambiar arriba,
+  // secundaria Quitar debajo) para jerarquía clara.
+  imageActions: {
+    flexDirection: 'column',
+    gap: spacing[2],
+    flexShrink: 0,
+    alignItems: 'stretch',
+  },
+});

@@ -136,26 +136,30 @@ export default function ProductsListScreen() {
       return ProductService.update(product.id, { state: next });
     },
     onSuccess: (_data, product) => {
-      toastSuccess(product.state === 'active' ? 'Producto desactivado' : 'Producto activado');
+      // Verbatim web parity — toast pattern 'Producto ${verb} correctamente'
+      // (apps/frontend/src/app/private/modules/store/products/products.component.ts).
+      toastSuccess(product.state === 'active' ? 'Producto desactivado correctamente' : 'Producto activado correctamente');
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['product-stats'] });
       queryClient.invalidateQueries({ queryKey: ['product', product.id] });
     },
     onError: () => {
-      toastError('No se pudo cambiar el estado');
+      toastError('Error al cambiar el estado del producto');
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (product: Product) => ProductService.delete(product.id),
     onSuccess: (_data, product) => {
-      toastSuccess('Producto eliminado');
+      // Verbatim web parity — backend response.message: 'Producto eliminado
+      // exitosamente' (coupons.service / products.service delete pattern).
+      toastSuccess('Producto eliminado exitosamente');
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['product-stats'] });
       setDeleteTarget(null);
     },
     onError: () => {
-      toastError('No se pudo eliminar el producto');
+      toastError('Error al eliminar el producto');
     },
   });
 
@@ -398,7 +402,11 @@ export default function ProductsListScreen() {
           renderItem={({ item }) => (
             <ProductCard
               product={item}
-              onPress={() => router.push({ pathname: '/(store-admin)/products/edit', params: { id: String(item.id) } })}
+              // Mobile-first UX: card tap opens the read-only detail screen
+              // (apps/mobile/.../products/[id].tsx) — el usuario ve precio, stock,
+              // descripción, categorías, marca y variantes sin entrar a modo
+              // edición. El botón editar del card va directo a /edit.
+              onPress={() => router.push({ pathname: '/(store-admin)/products/[id]', params: { id: String(item.id) } })}
               onEdit={() => router.push({ pathname: '/(store-admin)/products/edit', params: { id: String(item.id) } })}
               onToggle={() => toggleStateMutation.mutate(item)}
               onMore={() => setDeleteTarget(item)}

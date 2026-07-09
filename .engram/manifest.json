@@ -520,6 +520,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "385431d4",
+      "created_by": "atecno",
+      "created_at": "2026-07-09T14:13:41Z",
+      "sessions": 0,
+      "memories": 6,
+      "prompts": 0
     }
   ]
 }
