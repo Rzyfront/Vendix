@@ -15,7 +15,7 @@ import { type DateRangeFilterValue } from '@/shared/components/date-range-filter
 import { toastError, toastSuccess } from '@/shared/components/toast/toast.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { AnalyticsService } from '@/features/store/services';
-import { TopProductsBarChart } from '@/features/store/components/top-products-bar-chart';
+import { CategorySalesBarChart } from '@/features/store/components/category-sales-bar-chart';
 import { SALES_VIEWS, getQuickLinks } from '@/features/store/data/sales-views';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 
@@ -51,8 +51,7 @@ const styles = StyleSheet.create({
     color: colorScales.gray[900],
     lineHeight: 22,
   },
-  // Wrapper inferior para que el border-bottom visual se mantenga al migrar
-  // a ScrollableTabs (que ya no incluye border inferior en su layout base).
+  // Wrapper inferior para mantener el border-bottom visual al migrar a ScrollableTabs.
   tabsWrapper: {
     marginBottom: spacing[4],
     borderBottomWidth: 1,
@@ -68,7 +67,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: spacing[12],
   },
-  productsCard: {
+  chartCard: {
     marginBottom: spacing[6],
   },
 });
@@ -83,16 +82,13 @@ function defaultDateRange(): DateRangeFilterValue {
   return { start_date: start, end_date: today, preset: 'thisMonth' };
 }
 
-// Tabs del menú horizontal — incluye la vista actual como tab activo
-// (no como link). Componente compartido ScrollableTabs tiene auto-scroll
-// al tab activo (paridad con web scroll-snap-align: center).
 const SALES_TABS: ScrollableTab[] = SALES_VIEWS.map((v) => ({
   id: v.key,
   label: v.title,
   icon: v.icon,
 }));
 
-const SalesByProductScreen = () => {
+const SalesByCategoryScreen = () => {
   const router = useRouter();
   const [dateRange, setDateRange] = useState<DateRangeFilterValue>(defaultDateRange);
   const [refreshing, setRefreshing] = useState(false);
@@ -104,13 +100,13 @@ const SalesByProductScreen = () => {
   }), [dateRange]);
 
   const {
-    data: productsData = [],
+    data: categoriesData = [],
     isLoading,
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['analytics-sales-by-product', apiRange],
-    queryFn: () => AnalyticsService.getSalesByProduct(apiRange),
+    queryKey: ['analytics-sales-by-category', apiRange],
+    queryFn: () => AnalyticsService.getSalesByCategory(apiRange),
   });
 
   const onRefresh = useCallback(async () => {
@@ -120,30 +116,28 @@ const SalesByProductScreen = () => {
   }, [refetch]);
 
   useEffect(() => {
-    if (isError) toastError('Error cargando ventas por producto');
+    if (isError) toastError('Error cargando ventas por categoría');
   }, [isError]);
 
   const handleExport = useCallback(() => {
     toastSuccess('Exportación iniciada — Recibirás el reporte en tu correo');
   }, []);
 
-  const totalUnits = useMemo(() => {
-    return productsData.reduce((sum, p) => sum + (p.units_sold || 0), 0);
-  }, [productsData]);
+  // Stats (paridad con web: getCategoryCount, getTotalRevenue, getTopCategoryName, getAvgRevenue).
+  const totalRevenue = useMemo(
+    () => categoriesData.reduce((sum, c) => sum + (c.revenue || 0), 0),
+    [categoriesData],
+  );
 
-  const totalRevenue = useMemo(() => {
-    return productsData.reduce((sum, p) => sum + (p.revenue || 0), 0);
-  }, [productsData]);
-
-  const topProductName = useMemo(() => {
-    if (productsData.length === 0) return '-';
-    const sorted = [...productsData].sort((a, b) => (b.units_sold || 0) - (a.units_sold || 0));
+  const topCategoryName = useMemo(() => {
+    if (categoriesData.length === 0) return '-';
+    const sorted = [...categoriesData].sort((a, b) => b.revenue - a.revenue);
     const top = sorted[0];
     if (!top) return '-';
-    return top.product_name.length > 15
-      ? top.product_name.substring(0, 15) + '...'
-      : top.product_name;
-  }, [productsData]);
+    return top.category_name.length > 15
+      ? top.category_name.substring(0, 15) + '...'
+      : top.category_name;
+  }, [categoriesData]);
 
   return (
     <View style={styles.root}>
@@ -153,25 +147,24 @@ const SalesByProductScreen = () => {
           <View style={styles.header}>
             <View style={styles.headerTextWrap}>
               <Text style={styles.headerBreadcrumb}>
-                Ventas  /  Por Producto
+                Ventas  /  Por Categoría
               </Text>
               <Text style={styles.headerTitle} numberOfLines={1}>
-                Ventas por Producto
+                Ventas por Categoría
               </Text>
             </View>
           </View>
 
-          {/* Menú horizontal de pestañas (Tabs) — componente compartido
-              ScrollableTabs con auto-scroll al tab activo y pill indicator
-              inferior con el color de acento. */}
+          {/* Tabs — paridad web. Componente compartido ScrollableTabs con
+              auto-scroll al tab activo (paridad con web scroll-snap-align: center). */}
           <View style={styles.tabsWrapper}>
             <ScrollableTabs
               tabs={SALES_TABS}
-              activeTab="sales_by_product"
-              accentColor={colorScales.blue[600]}
+              activeTab="sales_by_category"
+              accentColor={colorScales.purple[600]}
               onTabChange={(key) => {
                 const view = SALES_VIEWS.find((v) => v.key === key);
-                if (!view || view.key === 'sales_by_product') return;
+                if (!view || view.key === 'sales_by_category') return;
                 if (view.available) router.push(view.route as any);
                 else toastError('Próximamente: esta vista estará disponible');
               }}
@@ -184,30 +177,21 @@ const SalesByProductScreen = () => {
             </View>
           ) : (
             <>
-              {/* 4 Stats Cards */}
+              {/* 4 Stats — paridad exacta con web sales-by-category.component.ts */}
               <StatsGrid
                 style={styles.statsGridOverride}
                 items={[
                   {
-                    label: 'Total Productos',
-                    value: productsData.length.toString(),
-                    icon: <Icon name="package" size={14} color={colorScales.blue[600]} />,
+                    label: 'Total Categorías',
+                    value: categoriesData.length.toString(),
+                    icon: <Icon name="tag" size={14} color={colorScales.blue[600]} />,
                     iconBg: colorScales.blue[100],
                     iconColor: colorScales.blue[600],
-                    description: 'productos en el período',
+                    description: 'categorías',
                     descriptionColor: colorScales.green[600],
                   },
                   {
-                    label: 'Unidades Vendidas',
-                    value: totalUnits.toLocaleString(),
-                    icon: <Icon name="boxes" size={14} color={colorScales.purple[600]} />,
-                    iconBg: colorScales.purple[100],
-                    iconColor: colorScales.purple[600],
-                    description: 'totales',
-                    descriptionColor: colorScales.green[600],
-                  },
-                  {
-                    label: 'Ingresos Totales',
+                    label: 'Total Ingresos',
                     value: formatCurrency(totalRevenue).replace('$ ', '$'),
                     icon: <Icon name="dollar-sign" size={14} color={colorScales.green[600]} />,
                     iconBg: colorScales.green[100],
@@ -216,12 +200,24 @@ const SalesByProductScreen = () => {
                     descriptionColor: colorScales.green[600],
                   },
                   {
-                    label: 'Producto Más Vendido',
-                    value: topProductName,
-                    icon: <Icon name="award" size={14} color={colorScales.amber[600]} />,
+                    label: 'Categoría Top',
+                    value: topCategoryName,
+                    icon: <Icon name="trophy" size={14} color={colorScales.amber[600]} />,
                     iconBg: colorScales.amber[100],
                     iconColor: colorScales.amber[600],
-                    description: 'más vendido',
+                    description: 'mayor revenue',
+                    descriptionColor: colorScales.green[600],
+                  },
+                  {
+                    label: 'Ingreso Promedio',
+                    value:
+                      categoriesData.length > 0
+                        ? formatCurrency(totalRevenue / categoriesData.length).replace('$ ', '$')
+                        : '-',
+                    icon: <Icon name="bar-chart-2" size={14} color={colorScales.purple[600]} />,
+                    iconBg: colorScales.purple[100],
+                    iconColor: colorScales.purple[600],
+                    description: 'por categoría',
                     descriptionColor: colorScales.green[600],
                   },
                 ]}
@@ -237,23 +233,23 @@ const SalesByProductScreen = () => {
                 onExport={handleExport}
               />
 
-              {/* Gráfico de Productos Vendidos — paridad exacta con web (echarts bar chart) */}
-              <Card style={styles.productsCard}>
+              {/* Gráfico dual-bar — paridad exacta con web echarts */}
+              <Card style={styles.chartCard}>
                 <Card.Header
-                  title="Productos Vendidos"
-                  subtitle={`${productsData.length} productos en el período`}
+                  title="Distribución por Categoría"
+                  subtitle={`${categoriesData.length} categorías en el período`}
                 />
                 <Card.Body>
-                  {productsData.length === 0 ? (
-                    <EmptyState title="Sin ventas" description="No hay productos vendidos en este período" />
+                  {categoriesData.length === 0 ? (
+                    <EmptyState title="Sin datos" description="No hay datos para el período seleccionado" />
                   ) : (
-                    <TopProductsBarChart products={productsData} />
+                    <CategorySalesBarChart categories={categoriesData} />
                   )}
                 </Card.Body>
               </Card>
 
               {/* Vistas de Ventas — paridad web. Componente compartido responsive. */}
-              <AnalyticsViewsCard views={getQuickLinks('sales_by_product')} />
+              <AnalyticsViewsCard views={getQuickLinks('sales_by_category')} />
             </>
           )}
         </ScrollView>
@@ -262,4 +258,4 @@ const SalesByProductScreen = () => {
   );
 };
 
-export default SalesByProductScreen;
+export default SalesByCategoryScreen;
