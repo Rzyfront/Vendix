@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, Modal, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform, Keyboard } from 'react-native';
+import { View, Text, Pressable, StyleSheet, Modal, ScrollView, TextInput, Alert, KeyboardAvoidingView, Platform, Keyboard, Dimensions } from 'react-native';
 import { colors, colorScales, spacing, typography, borderRadius } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -178,17 +178,23 @@ export function PosCustomerModal({ visible, onClose, onSelectCustomer }: PosCust
   return (
     <Modal
       visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
+      transparent
+      animationType="fade"
       onRequestClose={handleClose}
+      statusBarTranslucent
     >
       <KeyboardAvoidingView
-        style={styles.container}
+        style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        {/* Header */}
-        <View style={styles.header}>
+        <Pressable style={styles.backdrop} onPress={handleClose}>
+          <Pressable
+            style={styles.container}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <View style={styles.surface}>
+            {/* Header */}
+            <View style={styles.header}>
           <View style={styles.headerLeft}>
             <View style={styles.headerIcon}>
               <Icon name="user" size={20} color={colors.primary} />
@@ -531,15 +537,42 @@ export function PosCustomerModal({ visible, onClose, onSelectCustomer }: PosCust
             </Pressable>
           </View>
         )}
+            </View>
+          </Pressable>
+        </Pressable>
       </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+  },
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: spacing[4],
+  },
   container: {
+    width: '100%',
+    maxWidth: 500,
+    maxHeight: '85%',
+  },
+  surface: {
     flex: 1,
     backgroundColor: colors.background,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 8,
   },
   header: {
     flexDirection: 'row',

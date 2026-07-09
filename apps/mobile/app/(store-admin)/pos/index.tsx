@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,8 +6,8 @@ import {
   Pressable,
   KeyboardAvoidingView,
   Platform,
-  StyleSheet,
   Image,
+  StyleSheet,
   Animated,
   Dimensions,
 } from 'react-native';
@@ -31,6 +31,7 @@ import { Button } from '@/shared/components/button/button';
 import { Input } from '@/shared/components/input/input';
 import {
   PosSearchBar,
+  PosScreenHeader,
   PosMobileFooter,
   PosCartModal,
   PosFilterDropdown,
@@ -38,15 +39,23 @@ import {
   ShippingModal,
   PosCustomItemModal,
   PosPaymentModal,
+  PosOrderCreateModal,
+  PosCashOpenModal,
+  PosCashCloseModal,
+  PosCashMovementModal,
+  PosCashDetailModal,
 } from '@/features/pos/components';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
+import { useResponsive } from '@/shared/hooks';
 import type {
   CreatePosPaymentDto,
   PaymentMethod,
   PosPaymentResponse,
+  PosMode,
   Product,
   ProductVariant,
   PosCustomer,
+  CashRegisterSession,
 } from '@/features/store/types';
 
 const GRID_HORIZONTAL_PADDING = spacing[3];
@@ -66,17 +75,25 @@ const productCardStyles = StyleSheet.create({
     ...shadows.sm,
     overflow: 'hidden',
   },
+  // Estado presionado: borde primary (paridad web `hover:border-primary` +
+  // `active:scale-[0.97]`). Se controla vía prop `pressed`.
+  cardPressed: {
+    borderColor: colors.primary,
+  },
   imageArea: {
     width: '100%',
     aspectRatio: 1,
     borderRadius: borderRadius.lg,
     marginBottom: spacing[2],
     overflow: 'hidden',
+    // Gradient bg approximate — paridad web `bg-gradient-to-br from-surface
+    // to-muted/30`. RN no soporta linear-gradient cross-platform sin expo,
+    // así que usamos una capa overlay semitransparente encima de gray[100].
     backgroundColor: colorScales.gray[100],
   },
   imageGradient: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: colorScales.gray[100],
+    backgroundColor: 'rgba(255, 255, 255, 0.55)', // top-light layer sobre gray[100]
   },
   productImage: {
     width: '100%',
@@ -86,6 +103,8 @@ const productCardStyles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colorScales.gray[50],
+    borderRadius: borderRadius.lg,
   },
   badgesContainer: {
     ...StyleSheet.absoluteFillObject,
@@ -116,35 +135,67 @@ const productCardStyles = StyleSheet.create({
     fontFamily: typography.fontFamily,
     color: '#FFFFFF',
   },
+  nameContainer: {
+    height: 38,
+    marginTop: spacing[1.5],
+    justifyContent: 'flex-start',
+  },
+  // Nombre — paridad web `text-xs sm:text-sm font-medium line-clamp-2`.
   name: {
     fontSize: typography.fontSize.sm,
-    fontWeight: typography.fontWeight.medium as any,
+    fontWeight: typography.fontWeight.semibold as any,
     fontFamily: typography.fontFamily,
-    color: colorScales.gray[900],
+    color: colorScales.gray[800],
     lineHeight: 18,
   },
+  namePressed: {
+    color: colors.primary, // paridad web `group-hover:text-primary`
+  },
+  // Descripción — paridad web `hidden sm:block text-xs text-text-secondary
+  // line-clamp-1`. En mobile NO se renderiza (sólo en sm+).
   description: {
     fontSize: typography.fontSize.xs,
     fontFamily: typography.fontFamily,
-    color: colorScales.gray[500],
-    lineHeight: 16,
+    color: colorScales.gray[50],
+    lineHeight: 14,
     marginTop: 2,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: spacing[1],
+    marginTop: spacing[2],
+    height: 38,
   },
   priceContainer: {
     flexDirection: 'column',
+    flexShrink: 1,
   },
+  priceRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: spacing[1],
+    flexWrap: 'wrap',
+  },
+  // Precio — paridad web `text-xs sm:text-sm font-bold text-text-primary`.
   price: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.bold as any,
     fontFamily: typography.fontFamily,
     color: colorScales.gray[900],
     marginTop: spacing[0.5],
+  },
+  // Precio en promoción — paridad web `text-success` (verde).
+  priceOnSale: {
+    color: colors.primary, // success color
+  },
+  // Precio compare-at tachado — paridad web `text-text-muted line-through`.
+  priceCompareAt: {
+    fontSize: 10,
+    fontWeight: typography.fontWeight.normal as any,
+    fontFamily: typography.fontFamily,
+    color: colorScales.gray[400],
+    textDecorationLine: 'line-through',
   },
   priceWeightUnit: {
     fontSize: 10,
@@ -158,36 +209,47 @@ const productCardStyles = StyleSheet.create({
     lineHeight: 14,
     marginTop: 1,
   },
-  bottomSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginTop: spacing[2],
-    paddingTop: spacing[2],
-    borderTopWidth: 1,
-    borderTopColor: colorScales.gray[100],
-  },
-  bottomLeft: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing[2],
-    minWidth: 0,
-  },
-  skuText: {
-    fontSize: typography.fontSize.xs,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    color: colorScales.gray[400],
-    maxWidth: 80,
-  },
-  addButton: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+  addToCartBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    flexShrink: 0,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  addToCartBtnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.92 }],
+  },
+  addToCartBtnDisabled: {
+    backgroundColor: colorScales.gray[200],
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  cartIconContainer: {
+    position: 'relative',
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  plusBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 6,
+    width: 12,
+    height: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary,
   },
 });
 
@@ -218,6 +280,69 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Spinner + texto — paridad web `inline-block animate-spin rounded-full
+  // h-8 w-8 border-b-2 border-primary` + `<p>Cargando productos...</p>`.
+  loadingSpinner: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderTopColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: colors.primary,
+    borderLeftColor: 'transparent',
+  },
+  loadingText: {
+    marginTop: spacing[3],
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    fontWeight: typography.fontWeight.medium as any,
+  },
+  // Empty state POS — paridad web `flex flex-col items-center justify-center h-64 text-center p-8`.
+  emptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[16],
+    gap: spacing[3],
+  },
+  emptyTile: {
+    width: 80,
+    height: 80,
+    borderRadius: 16,
+    backgroundColor: 'rgba(34, 197, 94, 0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[2],
+  },
+  emptyTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: colorScales.gray[900],
+    textAlign: 'center',
+  },
+  emptyDescription: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    textAlign: 'center',
+    maxWidth: 280,
+    lineHeight: 20,
+  },
+  emptyAction: {
+    marginTop: spacing[2],
+    paddingHorizontal: spacing[5],
+    paddingVertical: spacing[3],
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[300],
+    backgroundColor: colors.background,
+  },
+  emptyActionText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: colorScales.gray[700],
+  },
   containerPad: {
     paddingHorizontal: spacing[4],
     paddingTop: spacing[2],
@@ -243,10 +368,13 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: spacing[3],
     paddingVertical: spacing[3],
-    paddingHorizontal: spacing[2],
-    borderBottomWidth: 1,
-    borderBottomColor: colorScales.gray[100],
+    paddingHorizontal: spacing[3],
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    borderRadius: borderRadius.lg, // rounded-xl web
+    marginBottom: spacing[2], // gap-2 web
   },
   flex1: { flex: 1 },
   variantName: {
@@ -685,6 +813,93 @@ const s = StyleSheet.create({
   discountSection: {
     marginTop: spacing[4],
   },
+  // ─── VariantPicker — Modal centrado (paridad web) ────────────────────────
+  // Reemplaza el BottomSheet anterior. Layout replica `fixed inset-0 z-50
+  // flex items-center justify-center` de apps/frontend pos-variant-selector.
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing[4],
+  },
+  modalBackdropLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 448, // web max-w-md (28rem = 448px)
+    maxHeight: '80%',
+    backgroundColor: colors.card,
+    borderRadius: 16, // rounded-2xl web
+    borderWidth: 1,
+    borderColor: colors.cardBorder,
+    overflow: 'hidden',
+    // shadow-2xl web (~25px blur, 10% black)
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    paddingHorizontal: spacing[5],
+    paddingVertical: spacing[4],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.cardBorder,
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  variantListContent: {
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[3],
+  },
+  variantRowPressed: {
+    backgroundColor: colorScales.gray[50],
+    borderColor: colors.primary,
+  },
+  variantRowDisabled: {
+    opacity: 0.5,
+  },
+  // Thumbnail 56×56 (paridad web `w-14 h-14 rounded-lg bg-muted/50`).
+  variantThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+    flexShrink: 0,
+  },
+  variantThumbImg: {
+    width: '100%',
+    height: '100%',
+  },
+  // Precio compareAt (line-through) — paridad web `text-[10px] text-text-muted line-through`.
+  variantComparePrice: {
+    fontSize: 10,
+    color: colorScales.gray[400],
+    textDecorationLine: 'line-through',
+  },
 });
 
 async function searchCustomers(query: string): Promise<PosCustomer[]> {
@@ -728,14 +943,28 @@ function buildPosCustomerPayload(customer: {
   };
 }
 
+/**
+ * Escape user-controlled values before interpolating into receipt HTML.
+ * expo-print renders the string in a WebView; without escaping, a customer
+ * name like `</td><script>...</script>` would break the layout or inject markup.
+ */
+function escapeReceiptHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary: any; customer?: PosCustomer | null; paymentMethod: string }): string {
   const date = new Date().toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const itemsHtml = order.items.map((item: any) => `
     <tr>
-      <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.product?.name || ''} ${item.variant_display_name ? `(${item.variant_display_name})` : ''}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${item.unitPrice.toLocaleString('es-CO')}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${item.totalPrice.toLocaleString('es-CO')}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee;">${escapeReceiptHtml(item.product?.name || '')}${item.variant_display_name ? ` (${escapeReceiptHtml(item.variant_display_name)})` : ''}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${Number(item.quantity) || 0}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.unitPrice).toLocaleString('es-CO')}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.totalPrice).toLocaleString('es-CO')}</td>
     </tr>
   `).join('');
 
@@ -760,9 +989,9 @@ function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary
     <body>
       <div class="header">
         <h1>Vendix</h1>
-        <div class="order-info">Orden #${order.orderNumber}<br>${date}</div>
+        <div class="order-info">Orden #${escapeReceiptHtml(order.orderNumber)}<br>${date}</div>
       </div>
-      ${order.customer ? `<p><strong>Cliente:</strong> ${order.customer.first_name} ${order.customer.last_name}</p>` : ''}
+      ${order.customer ? `<p><strong>Cliente:</strong> ${escapeReceiptHtml(order.customer.first_name)} ${escapeReceiptHtml(order.customer.last_name)}</p>` : ''}
       <table>
         <thead>
           <tr>
@@ -779,7 +1008,7 @@ function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary
         <div class="row"><span>IVA:</span><span>$${order.summary.taxAmount.toLocaleString('es-CO')}</span></div>
         ${order.summary.discountAmount > 0 ? `<div class="row" style="color: green;"><span>Descuento:</span><span>-$${order.summary.discountAmount.toLocaleString('es-CO')}</span></div>` : ''}
         <div class="row total-row"><span>Total:</span><span>$${order.summary.total.toLocaleString('es-CO')}</span></div>
-        <div class="row" style="margin-top: 10px; font-size: 12px;"><span>Método:</span><span>${order.paymentMethod}</span></div>
+        <div class="row" style="margin-top: 10px; font-size: 12px;"><span>Método:</span><span>${escapeReceiptHtml(order.paymentMethod)}</span></div>
       </div>
       <div class="footer">¡Gracias por su compra!</div>
     </body>
@@ -790,11 +1019,14 @@ function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary
 const ProductCard = ({
   product,
   onPress,
+  width,
 }: {
   product: Product;
   onPress: (product: Product) => void;
+  width: number;
 }) => {
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const [pressed, setPressed] = useState(false);
   const hasVariants = (product.product_variants?.length ?? 0) > 0;
   const tracksInventory = product.track_inventory !== false;
   const stockQty = product.stock_quantity ?? 0;
@@ -808,10 +1040,20 @@ const ProductCard = ({
   const isLowStock = tracksInventory && variantStockTotal > 0 && variantStockTotal <= 5;
   const isUnavailable = variantStockTotal === 0;
 
+  // Sale/promo logic — paridad web `hasActivePromoOrSale()`:
+  //   is_on_sale === true AND sale_price > 0 AND sale_price < base_price
+  // (active_promotion del backend todavía no está mapeada en el Product type
+  // mobile — pendiente de Fase 4 cuando el payload `pos_optimized` lo incluya).
+  const isOnSale =
+    product.is_on_sale === true &&
+    typeof product.sale_price === 'number' &&
+    product.sale_price > 0 &&
+    product.sale_price < (product.base_price ?? Infinity);
+  const salePrice = isOnSale ? product.sale_price : null;
+
   const getStockText = () => {
-    if (!tracksInventory) return 'Disponible';
+    if (!tracksInventory) return null; // Web: oculta el inline label
     if (variantStockTotal === 0) return 'Sin stock';
-    if (variantStockTotal <= 5) return `${variantStockTotal} en stock`;
     return `${variantStockTotal} en stock`;
   };
 
@@ -819,20 +1061,21 @@ const ProductCard = ({
     if (!tracksInventory) return colorScales.blue[600];
     if (variantStockTotal === 0) return colors.error;
     if (variantStockTotal <= 5) return colors.warning;
-    return colorScales.blue[600];
+    return colorScales.gray[500]; // Web: text-text-muted
   };
 
   const getStockBadge = () => {
     if (tracksInventory) {
-      if (variantStockTotal === 0) return { label: 'Agotado', variant: 'error' as const };
+      if (variantStockTotal === 0) return { label: 'AGOTADO', variant: 'error' as const }; // Web: uppercase
       if (variantStockTotal <= 5) return { label: `Últimas ${variantStockTotal}`, variant: 'warning' as const };
-      return { label: `${variantStockTotal} en stock`, variant: 'info' as const };
+      return null; // Web: no muestra badge cuando hay stock normal
     } else {
       return { label: 'Disponible', variant: 'info' as const };
     }
   };
 
   const handlePressIn = () => {
+    setPressed(true);
     Animated.spring(scaleAnim, {
       toValue: 0.97,
       useNativeDriver: true,
@@ -842,6 +1085,7 @@ const ProductCard = ({
   };
 
   const handlePressOut = () => {
+    setPressed(false);
     Animated.spring(scaleAnim, {
       toValue: 1,
       useNativeDriver: true,
@@ -853,6 +1097,9 @@ const ProductCard = ({
   const stockBadge = getStockBadge();
   const stockText = getStockText();
   const stockTextColor = getStockTextColor();
+  // Web: para productos con variantes NO muestra el inline stock label
+  // (el stock se valida al abrir el variant selector).
+  const showInlineStock = stockText && !hasVariants;
 
   return (
     <Animated.View style={[{ transform: [{ scale: scaleAnim }] }]}>
@@ -862,6 +1109,8 @@ const ProductCard = ({
         onPressOut={isUnavailable ? undefined : handlePressOut}
         style={[
           productCardStyles.card,
+          { width, height: width + 92 },
+          pressed && productCardStyles.cardPressed,
           isUnavailable && { opacity: 0.6 },
         ]}
       >
@@ -877,13 +1126,12 @@ const ProductCard = ({
             />
           ) : (
             <View style={productCardStyles.imageFallback}>
-              <Icon name="image" size={32} color={colorScales.gray[400]} />
+              <Icon name="image" size={28} color="rgba(34, 197, 94, 0.6)" />
             </View>
           )}
 
           {/* Badges overlaid on image */}
           <View style={productCardStyles.badgesContainer} pointerEvents="none">
-            {/* Stock badge - top center */}
             {stockBadge && (
               <View style={productCardStyles.stockBadge}>
                 <Badge
@@ -894,7 +1142,6 @@ const ProductCard = ({
               </View>
             )}
 
-            {/* Variants badge - top left */}
             {hasVariants && (
               <View style={productCardStyles.variantsBadge}>
                 <Icon name="layers" size={12} color="#FFFFFF" />
@@ -906,55 +1153,72 @@ const ProductCard = ({
           </View>
         </View>
 
-        {/* Product Name */}
-        <Text style={productCardStyles.name} numberOfLines={1} ellipsizeMode="tail">
-          {product.name}
-        </Text>
+        {/* Product Name — 2 líneas con line-clamp-2 (paridad web) */}
+        <View style={productCardStyles.nameContainer}>
+          <Text
+            style={[productCardStyles.name, pressed && productCardStyles.namePressed]}
+            numberOfLines={2}
+            ellipsizeMode="tail"
+          >
+            {product.name}
+          </Text>
+        </View>
 
-        {/* Description — siempre renderizada para mantener altura uniforme */}
-        <Text style={productCardStyles.description} numberOfLines={1} ellipsizeMode="tail">
-          {product.description || ' '}
-        </Text>
+        {/* Description — oculta en mobile (paridad web `hidden sm:block`) */}
 
         {/* Price + Stock row */}
         <View style={productCardStyles.row}>
           <View style={productCardStyles.priceContainer}>
-            <Text style={productCardStyles.price}>
-              {formatCurrency(product.final_price)}
-              {product.pricing_type === 'weight' && (
-                <Text style={productCardStyles.priceWeightUnit}>
-                  {' /kg'}
+            <View style={productCardStyles.priceRow}>
+              <Text
+                style={[
+                  productCardStyles.price,
+                  isOnSale && productCardStyles.priceOnSale,
+                ]}
+              >
+                {formatCurrency(salePrice ?? product.final_price)}
+                {product.pricing_type === 'weight' && (
+                  <Text style={productCardStyles.priceWeightUnit}>
+                    {' /kg'}
+                  </Text>
+                )}
+              </Text>
+              {isOnSale && (
+                <Text style={productCardStyles.priceCompareAt}>
+                  {formatCurrency(product.base_price ?? product.final_price)}
                 </Text>
               )}
-            </Text>
-            {stockText && (
+            </View>
+            {showInlineStock && (
               <Text style={[productCardStyles.stockText, { color: stockTextColor }]}>
                 {stockText}
               </Text>
             )}
           </View>
-        </View>
 
-        {/* Bottom section: SKU + Add button */}
-        <View style={productCardStyles.bottomSection}>
-          <View style={productCardStyles.bottomLeft}>
-            {product.sku ? (
-              <Text style={productCardStyles.skuText} numberOfLines={1}>
-                {product.sku}
-              </Text>
-            ) : null}
-          </View>
+          {/* Dynamic round add-to-cart button */}
           <Pressable
-            onPress={(e) => {
-              e.stopPropagation?.();
-              if (!isUnavailable) onPress(product);
-            }}
-            style={productCardStyles.addButton}
-            disabled={isUnavailable}
+            style={({ pressed: btnPressed }) => [
+              productCardStyles.addToCartBtn,
+              btnPressed && productCardStyles.addToCartBtnPressed,
+              isUnavailable && productCardStyles.addToCartBtnDisabled,
+            ]}
+            onPress={isUnavailable ? undefined : () => onPress(product)}
           >
-            <Icon name="plus" size={14} color="#FFFFFF" />
+            <View style={productCardStyles.cartIconContainer}>
+              <Icon name="shopping-cart" size={13} color={isUnavailable ? colorScales.gray[400] : '#FFFFFF'} />
+              {!isUnavailable && (
+                <View style={productCardStyles.plusBadge}>
+                  <Icon name="plus" size={8} color={colors.primary} />
+                </View>
+              )}
+            </View>
           </Pressable>
         </View>
+
+        {/* Bottom row (SKU + + button) — ELIMINADO en mobile.
+            Web: `hidden sm:flex` (toda la card es tap target). Mobile-first
+            replica el comportamiento ocultándolo siempre. */}
       </Pressable>
     </Animated.View>
   );
@@ -971,17 +1235,42 @@ const VariantPicker = ({
   onSelect: (variant: ProductVariant) => void;
   onClose: () => void;
 }) => {
-  if (!product) return null;
+  if (!product || !visible) return null;
 
+  // Paridad web (pos-variant-selector.component.ts):
+  //   <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+  //     <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+  //     <div class="relative bg-surface rounded-2xl shadow-2xl border w-full max-w-md max-h-[80vh]">
+  //       <header> + <variant-list>
+  // Mobile replica con position absolute (RN Web soporta fixed/absolute vía styles).
   return (
-    <BottomSheet visible={visible} onClose={onClose} snapPoint="partial" scrollable={false}>
-      <View style={[s.containerPad, s.sheetFlex]}>
-        <Text style={s.sectionTitle}>Seleccionar Variante</Text>
-        <Text style={s.sectionSubtitle}>{product.name}</Text>
+    <View style={s.modalBackdrop} pointerEvents="auto">
+      {/* Backdrop clickeable cierra modal (parity web `(click)="onBackdropClick"`). */}
+      <Pressable style={s.modalBackdropLayer} onPress={onClose} />
+      {/* Contenido del modal — stopPropagation evita cierre al click interno. */}
+      <View style={s.modalContent}>
+        {/* Header */}
+        <View style={s.modalHeader}>
+          <View style={s.flex1}>
+            <Text style={s.sectionTitle}>Seleccionar variante</Text>
+            <Text style={s.sectionSubtitle} numberOfLines={1}>{product.name}</Text>
+          </View>
+          <Pressable
+            onPress={onClose}
+            style={({ pressed }) => [s.modalCloseBtn, pressed && { opacity: 0.7 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Cerrar selector de variante"
+          >
+            <Icon name="x" size={18} color={colorScales.gray[500]} />
+          </Pressable>
+        </View>
+
+        {/* Variant List — parity web `@for (variant of variants())`. */}
         <FlatList
           data={product.product_variants || []}
           keyExtractor={(item) => item.id.toString()}
           style={s.sheetFlex}
+          contentContainerStyle={s.variantListContent}
           renderItem={({ item }) => {
             const hasSale = item.is_on_sale === true && item.sale_price != null;
             const displayPrice = hasSale ? item.sale_price! : (item.price_override != null ? item.price_override : product.final_price);
@@ -992,14 +1281,46 @@ const VariantPicker = ({
             return (
               <Pressable
                 onPress={() => onSelect(item)}
+                disabled={isUnavailable}
                 style={({ pressed }) => [
                   s.variantRow,
-                  pressed ? { backgroundColor: colorScales.gray[50] } : undefined,
+                  pressed && !isUnavailable ? s.variantRowPressed : undefined,
+                  isUnavailable ? s.variantRowDisabled : undefined,
                 ]}
               >
+                {/* Thumbnail 56×56 — paridad web `w-14 h-14 rounded-lg bg-muted/50`.
+                    El backend POS devuelve `variant.image_url` plano (NO `image.url`),
+                    así que ese campo es la fuente de verdad. Si está ausente,
+                    fallback al join `variant.image?.url` (forma legacy), luego al
+                    producto padre, y por último ícono package. */}
+                <View style={s.variantThumb}>
+                  {item.image_url ? (
+                    <Image
+                      source={{ uri: item.image_url }}
+                      style={s.variantThumbImg}
+                      resizeMode="cover"
+                    />
+                  ) : item.image?.image_url ? (
+                    <Image
+                      source={{ uri: item.image.image_url }}
+                      style={s.variantThumbImg}
+                      resizeMode="cover"
+                    />
+                  ) : product.image_url ? (
+                    <Image
+                      source={{ uri: product.image_url }}
+                      style={s.variantThumbImg}
+                      resizeMode="cover"
+                    />
+                  ) : (
+                    <Icon name="package" size={20} color={colorScales.gray[400]} />
+                  )}
+                </View>
+
+                {/* Variant Info */}
                 <View style={s.flex1}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={s.variantName}>
+                    <Text style={s.variantName} numberOfLines={1}>
                       {item.name || item.attributes || item.sku}
                     </Text>
                     {hasSale && (
@@ -1008,13 +1329,15 @@ const VariantPicker = ({
                   </View>
                   <Text style={s.skuText}>SKU: {item.sku}</Text>
                 </View>
+
+                {/* Price & Stock */}
                 <View style={s.itemsEnd}>
                   {hasSale && comparePrice != null ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                       <Text style={[s.variantPrice, { color: colors.error }]}>
                         {formatCurrency(displayPrice)}
                       </Text>
-                      <Text style={{ fontSize: 10, color: colorScales.gray[400], textDecorationLine: 'line-through' }}>
+                      <Text style={s.variantComparePrice}>
                         {formatCurrency(comparePrice)}
                       </Text>
                     </View>
@@ -1026,7 +1349,9 @@ const VariantPicker = ({
                   {isUnavailable ? (
                     <Text style={[s.outOfStockText, { color: colors.error }]}>Agotado</Text>
                   ) : (
-                    <Text style={[s.stockText, { color: colorScales.gray[500] }]}>Stock: {item.stock_quantity}</Text>
+                    <Text style={[s.stockText, { color: colorScales.gray[500] }]}>
+                      Stock: {item.stock_quantity}
+                    </Text>
                   )}
                 </View>
               </Pressable>
@@ -1035,7 +1360,7 @@ const VariantPicker = ({
           ItemSeparatorComponent={() => <View style={s.separator} />}
         />
       </View>
-    </BottomSheet>
+    </View>
   );
 };
 
@@ -1699,16 +2024,16 @@ const PaymentSheet = ({
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['inventory-stats'] });
       if (result.fallbackReason) {
-        toastWarning(`Venta cerrada sin pago: ${result.fallbackReason}`, 6500);
+        toastWarning(`Venta cerrada sin pago: ${result.fallbackReason}`, 3500);
       } else {
-        toastSuccess('Venta finalizada');
+        toastSuccess(`Venta registrada: ${formatCurrency(summary.total)}`);
       }
       onSuccess(orderNumber, receiptData);
     },
     onError: (error) => {
       const parsed = parsePosCheckoutError(error);
       setSaleError({ message: parsed.message, details: parsed.details });
-      toastError(parsed.message, 7000);
+      toastError(parsed.message, 3500);
     },
   });
 
@@ -1920,8 +2245,51 @@ const SuccessModal = ({
   );
 };
 
+/**
+ * Spinner rotatorio — paridad web `animate-spin` del bloque de loading del
+ * `pos-product-selection.component`. Reemplaza al `<Spinner>` genérico.
+ *
+ * Usa `Animated.loop` con `rotate` interpolado 0° → 360° en 800ms (lineal
+ * implícito para mantener el giro constante — `animate-spin` de Tailwind
+ * también es lineal 1s).
+ */
+const PosLoaderSpinner = () => {
+  const spin = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin]);
+  const rotate = spin.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+  return <Animated.View style={[s.loadingSpinner, { transform: [{ rotate }] }]} />;
+};
+
 const PosScreen = () => {
+  const { width: windowWidth } = useResponsive();
   const [search, setSearch] = useState('');
+
+  const numColumns = useMemo(() => {
+    if (windowWidth < 640) return 2;
+    if (windowWidth < 768) return 3;
+    if (windowWidth < 1024) return 4;
+    if (windowWidth < 1280) return 5;
+    return 6;
+  }, [windowWidth]);
+
+  const cardWidth = useMemo(() => {
+    const totalGaps = (numColumns - 1) * GRID_COLUMN_GAP;
+    const padding = GRID_HORIZONTAL_PADDING * 2;
+    return (windowWidth - padding - totalGaps) / numColumns;
+  }, [windowWidth, numColumns]);
   const [showVariants, setShowVariants] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showCart, setShowCart] = useState(false);
@@ -1934,10 +2302,64 @@ const PosScreen = () => {
   const [showCustomItemModal, setShowCustomItemModal] = useState(false);
   const [showShippingModal, setShowShippingModal] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
-  const [activeFilters, setActiveFilters] = useState({
+  // Cash register modals (paridad web `pos-header-dropdown.component`).
+  const [showCashOpenModal, setShowCashOpenModal] = useState(false);
+  const [showCashCloseModal, setShowCashCloseModal] = useState(false);
+  const [showCashMovementModal, setShowCashMovementModal] = useState(false);
+  const [showCashDetailModal, setShowCashDetailModal] = useState(false);
+  // Modal-resumen "Crear orden" — paridad web `pos-order-create-modal`.
+  // Aparece antes de persistir el borrador (paridad del annotation 5 del POS).
+  const [showOrderCreateModal, setShowOrderCreateModal] = useState(false);
+
+  // TODO(cash-register): reemplazar `null` por el resultado del query
+  // contra el servicio de cash-register cuando se integre el flujo de
+  // apertura/cierre de caja. Hasta entonces, los 4 modales PosCash*
+  // permanecen en estado stub y abrir uno no muestra UI.
+  const cashSession: CashRegisterSession | null = null;
+
+  // Cierra TODOS los modales del checkout flow. Útil cuando el usuario
+  // presiona X en cualquier paso del flujo y quiere volver limpio a la
+  // pantalla de selección de productos sin quedar atrapado en un modal.
+  const closeCheckoutModals = useCallback(() => {
+    setShowCartModal(false);
+    setShowPaymentModal(false);
+    setShowShippingModal(false);
+    setShowCustomItemModal(false);
+    setShowCustomerModal(false);
+    setShowOrderCreateModal(false);
+  }, []);
+  const [activeFilters, setActiveFilters] = useState<{
+    category_id: string;
+    brand_id: string;
+    min_price: string;
+    max_price: string;
+    in_stock: boolean;
+    sort_by: '' | 'name' | 'price' | 'stock' | 'createdAt';
+    sort_order: 'asc' | 'desc';
+  }>({
     category_id: '',
     brand_id: '',
+    min_price: '',
+    max_price: '',
+    in_stock: false,
+    sort_by: '',
+    sort_order: 'asc',
   });
+
+  /**
+   * Número de filtros activos para pintar la badge sobre el botón filter.
+   * Paridad web `activeFiltersCount` getter en `pos-product-search.component.ts`.
+   */
+  const activeFilterCount = useMemo(() => {
+    let n = 0;
+    if (activeFilters.category_id) n++;
+    if (activeFilters.brand_id) n++;
+    if (activeFilters.min_price) n++;
+    if (activeFilters.max_price) n++;
+    if (activeFilters.in_stock) n++;
+    if (activeFilters.sort_by) n++;
+    return n;
+  }, [activeFilters]);
   const [orderNumber, setOrderNumber] = useState('');
   const [receiptData, setReceiptData] = useState<{
     items: any[];
@@ -1948,6 +2370,11 @@ const PosScreen = () => {
 
   const summary = useCartStore((s) => s.summary);
   const addItem = useCartStore((s) => s.addItem);
+  const customer = useCartStore((s) => s.customer);
+  const mode = useCartStore((s) => s.mode ?? 'sale');
+  const cartItems = useCartStore((s) => s.items);
+  const setMode = useCartStore((s) => s.setMode);
+  const setCustomer = useCartStore((s) => s.setCustomer);
 
   const { data: products, isLoading } = useQuery({
     queryKey: ['pos-products', search, activeFilters],
@@ -1957,6 +2384,14 @@ const PosScreen = () => {
         limit: 50,
         state: 'active',
         include_variants: true,
+        // Paridad web `pos-product-search.component` — el backend actual
+        // puede ignorar min_price/max_price/in_stock/sort_by (DTO no los
+        // declara); la app aplica fallback local en `productList` abajo.
+        min_price: activeFilters.min_price ? Number(activeFilters.min_price) : undefined,
+        max_price: activeFilters.max_price ? Number(activeFilters.max_price) : undefined,
+        in_stock: activeFilters.in_stock || undefined,
+        sort_by: activeFilters.sort_by || undefined,
+        sort_order: activeFilters.sort_by ? activeFilters.sort_order : undefined,
       };
 
       if (search) {
@@ -1977,10 +2412,78 @@ const PosScreen = () => {
     },
   });
 
+  /**
+   * Fallback cliente para los filtros que el backend actual no aplica:
+   * - inStock
+   * - minPrice / maxPrice
+   * - sortBy + sortOrder
+   *
+   * El día que el backend respete estos params, este bloque se mantiene
+   * inerte (no rompe nada). Paridad 1:1 con el comportamiento web.
+   */
   const productList = useMemo(() => {
     if (!products) return [];
-    return Array.isArray(products) ? products : (products as any).data || [];
-  }, [products]);
+    const raw = Array.isArray(products) ? products : (products as any).data || [];
+    let list = raw;
+
+    // Stock filter — backend puede no aplicar.
+    if (activeFilters.in_stock) {
+      list = list.filter((p: Product) => {
+        if (p.product_variants?.length) {
+          return p.product_variants.some((v) => (v.stock_quantity ?? 0) > 0);
+        }
+        return (p.stock_quantity ?? 0) > 0;
+      });
+    }
+
+    // Price range filter — backend puede no aplicar.
+    const minP = activeFilters.min_price ? Number(activeFilters.min_price) : undefined;
+    const maxP = activeFilters.max_price ? Number(activeFilters.max_price) : undefined;
+    if (minP !== undefined || maxP !== undefined) {
+      list = list.filter((p: Product) => {
+        const price = Number(p.final_price ?? p.base_price ?? 0);
+        if (minP !== undefined && price < minP) return false;
+        if (maxP !== undefined && price > maxP) return false;
+        return true;
+      });
+    }
+
+    // Sort.
+    if (activeFilters.sort_by) {
+      const dir = activeFilters.sort_order === 'desc' ? -1 : 1;
+      const sorted = [...list].sort((a: Product, b: Product) => {
+        switch (activeFilters.sort_by) {
+          case 'name':
+            return dir * (a.name || '').localeCompare(b.name || '');
+          case 'price':
+            return (
+              dir *
+              (Number(a.final_price ?? a.base_price ?? 0) -
+                Number(b.final_price ?? b.base_price ?? 0))
+            );
+          case 'stock': {
+            const stockA = a.product_variants?.length
+              ? Math.max(...a.product_variants.map((v) => v.stock_quantity ?? 0))
+              : (a.stock_quantity ?? 0);
+            const stockB = b.product_variants?.length
+              ? Math.max(...b.product_variants.map((v) => v.stock_quantity ?? 0))
+              : (b.stock_quantity ?? 0);
+            return dir * (stockA - stockB);
+          }
+          case 'createdAt':
+            return (
+              dir *
+              (new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+            );
+          default:
+            return 0;
+        }
+      });
+      list = sorted;
+    }
+
+    return list;
+  }, [products, activeFilters]);
 
   const handleProductPress = useCallback(
     (product: Product) => {
@@ -2122,32 +2625,134 @@ const PosScreen = () => {
     useCartStore.getState().addCustomItem(data);
   }, []);
 
+  // "Crear" — paridad web: abre `pos-order-create-modal` (resumen + cliente).
+  // El modal dispara el POST contra `OrderService.processPosPayment` con
+  // `requires_payment: false` (mismo path que el "Guardar" del payment modal).
+  const handleCreate = useCallback(() => {
+    if (summary.totalItems === 0) {
+      toastWarning('El carrito está vacío');
+      return;
+    }
+    setShowOrderCreateModal(true);
+  }, [summary.totalItems]);
+
+  // CTA primario del footer — despacha según el modo activo.
+  // - `sale`     → abre modal de pago
+  // - `quotation`→ crea cotización (Fase 4 — sólo placeholder)
+  // - `layaway`  → abre layaway-config-modal (Fase 4 — sólo placeholder)
+  const handlePrimaryCta = useCallback(() => {
+    if (summary.totalItems === 0) {
+      toastWarning('El carrito está vacío');
+      return;
+    }
+    switch (mode) {
+      case 'sale':
+        setShowPaymentModal(true);
+        return;
+      case 'quotation':
+        toastWarning('Próximamente: Crear cotización');
+        return;
+      case 'layaway':
+        if (!customer) {
+          toastWarning('Debes asignar un cliente para crear un plan separé');
+          setShowCustomerModal(true);
+          return;
+        }
+        toastWarning('Próximamente: Configurar plan separé');
+        return;
+    }
+  }, [mode, customer, summary.totalItems]);
+
+  // Cambia el modo del POS (POS / Cotizar / Separé). En paridad con el web
+  // `pos.component.ts` (`setQuotationMode` / `setLayawayMode`), los handlers
+  // reales (crear cotización / plan separé con sus servicios) viven en una
+  // fase posterior — por ahora solo actualizamos el modo y dejamos que el
+  // footer + header reflejen el cambio visualmente.
+  const handleChangeMode = useCallback((next: PosMode) => {
+    if (next === 'layaway' && !customer) {
+      // Web: `if (!this.selectedCustomer()) { toast warning + open customer modal }`
+      toastWarning('Debes asignar un cliente para crear un plan separé');
+      setShowCustomerModal(true);
+      return;
+    }
+    setMode(next);
+  }, [customer, setMode]);
+
+  // Limpia el cliente seleccionado desde el chip del header.
+  const handleClearCustomer = useCallback(() => {
+    setCustomer(null);
+  }, [setCustomer]);
+
   return (
     <View style={[s.posRoot]}>
+      {/* Header POS — paridad con el bloque inline del web pos.component.ts
+          (logo + título + badge + customer chip + mode switcher). */}
+      <PosScreenHeader
+        mode={mode}
+        customer={customer}
+        onOpenCustomer={() => setShowCustomerModal(true)}
+        onClearCustomer={handleClearCustomer}
+        onChangeMode={handleChangeMode}
+        cashSession={cashSession ?? null}
+        // TODO: leer de store_settings (feature flag `cash_register_enabled`).
+        // Mientras tanto asumimos habilitado — paridad con `cashRegisterEnabled()` web.
+        showCashOpenButton
+        onOpenCashRegister={() => setShowCashOpenModal(true)}
+        onOpenCashDetail={() => setShowCashDetailModal(true)}
+        onOpenCashMovement={() => setShowCashMovementModal(true)}
+        onOpenCashClose={() => setShowCashCloseModal(true)}
+      />
+
       {/* Search Bar - Con filtros y cliente como web */}
       <PosSearchBar
         onSearch={setSearch}
         onOpenFilters={() => setShowFilters(true)}
         onOpenAdd={() => setShowCustomerModal(true)}
-        selectedCustomer={null}
+        selectedCustomer={customer}
+        activeFiltersCount={activeFilterCount}
+        filtersOpen={showFilters}
       />
 
-      {/* Product Grid - Cards exactamente igual que antes */}
+      {/* Product Grid - paridad web pos-product-selection.component */}
       {isLoading ? (
         <View style={s.centerContent}>
-          <Spinner />
+          {/* Spinner + texto — paridad web `animate-spin h-8 w-8 border-b-2 border-primary` + `Cargando productos...` */}
+          <PosLoaderSpinner />
+          <Text style={s.loadingText}>Cargando productos...</Text>
         </View>
       ) : productList.length === 0 ? (
-        <EmptyState
-          title="Sin productos"
-          description={search ? 'No se encontraron resultados' : 'No hay productos disponibles'}
-          icon="package"
-        />
+        /* Empty state POS-específico — paridad web:
+           - Tile 80×80 `rounded-2xl` con `package-open` icon
+           - Título dinámico según haya search o no
+           - Descripción
+           - Botón "Limpiar búsqueda" condicional */
+        <View style={s.emptyState}>
+          <View style={s.emptyTile}>
+            <Icon name="package-open" size={36} color={colors.primary} />
+          </View>
+          <Text style={s.emptyTitle}>
+            {search ? 'No se encontraron productos' : 'No hay productos disponibles'}
+          </Text>
+          <Text style={s.emptyDescription}>
+            {search
+              ? 'Intenta buscar con otros términos o cambia la categoría.'
+              : 'Los productos aparecerán aquí cuando estén disponibles.'}
+          </Text>
+          {search ? (
+            <Pressable
+              style={({ pressed }) => [s.emptyAction, pressed && { opacity: 0.7 }]}
+              onPress={() => setSearch('')}
+            >
+              <Text style={s.emptyActionText}>Limpiar búsqueda</Text>
+            </Pressable>
+          ) : null}
+        </View>
       ) : (
         <FlatList
+          key={`products-grid-${numColumns}`}
           data={productList}
           keyExtractor={(item) => item.id.toString()}
-          numColumns={2}
+          numColumns={numColumns}
           columnWrapperStyle={{ gap: GRID_COLUMN_GAP }}
           contentContainerStyle={{
             paddingTop: spacing[3],
@@ -2156,31 +2761,30 @@ const PosScreen = () => {
           }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
-            <ProductCard product={item} onPress={handleProductPress} />
+            <ProductCard product={item} onPress={handleProductPress} width={cardWidth} />
           )}
         />
       )}
 
-      {/* Mobile Footer - 3 filas como web */}
+      {/* Mobile Footer - 3 filas como web, mode-aware primary CTA */}
       <PosMobileFooter
         itemCount={summary.totalItems}
         total={summary.total}
         taxAmount={summary.taxAmount}
+        mode={mode}
         onViewCart={() => setShowCartModal(true)}
         onCustomItem={handleCustomItem}
-        onSaveDraft={handleSaveDraft}
+        onCreate={handleCreate}
         onShipping={handleShipping}
-        onCheckout={() => {
-          setShowPaymentModal(true);
-        }}
+        onPrimaryCta={handlePrimaryCta}
         canCreateCustomItems
       />
 
-      {/* Cart Modal */}
+      {/* Cart Modal — bottom sheet con slide-up (paridad web). */}
       <PosCartModal
         visible={showCartModal}
-        onClose={() => setShowCartModal(false)}
-        items={useCartStore.getState().items}
+        onClose={() => closeCheckoutModals()}
+        items={cartItems}
         subtotal={summary.subtotal}
         taxAmount={summary.taxAmount}
         total={summary.total}
@@ -2194,12 +2798,23 @@ const PosScreen = () => {
         }}
         onRemoveItem={(id) => useCartStore.getState().removeItem(id)}
         onClearCart={() => useCartStore.getState().clearCart()}
-        onViewDetail={() => setShowCart(true)}
-        onSaveDraft={handleSaveDraft}
+        onCustomItem={() => {
+          setShowCartModal(false);
+          setShowCustomItemModal(true);
+        }}
+        onCreate={() => {
+          setShowCartModal(false);
+          setShowOrderCreateModal(true);
+        }}
+        onShipping={() => {
+          setShowCartModal(false);
+          setShowShippingModal(true);
+        }}
         onCheckout={() => {
           setShowCartModal(false);
           setShowPaymentModal(true);
         }}
+        canCreateCustomItems
       />
 
       {/* Variant Picker */}
@@ -2223,15 +2838,22 @@ const PosScreen = () => {
         }}
       />
 
-      {/* Payment Modal */}
+      {/* Payment Modal — cierre seguro: limpia TODO el checkout flow. */}
       <PosPaymentModal
         visible={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
+        onClose={() => closeCheckoutModals()}
         onSuccess={(orderNumber) => {
-          setShowPaymentModal(false);
+          closeCheckoutModals();
           setOrderNumber(orderNumber);
           setShowSuccess(true);
         }}
+      />
+
+      {/* Order Create Modal — modal-resumen antes de persistir el borrador.
+          Paridad web: apps/frontend/.../pos-order-create-modal.component.ts */}
+      <PosOrderCreateModal
+        visible={showOrderCreateModal}
+        onClose={() => setShowOrderCreateModal(false)}
       />
 
       {/* Success Modal */}
@@ -2246,7 +2868,7 @@ const PosScreen = () => {
       <PosFilterDropdown
         visible={showFilters}
         onClose={() => setShowFilters(false)}
-        onApplyFilters={(filters: any) => setActiveFilters(filters)}
+        onApplyFilters={(filters) => setActiveFilters(filters)}
         currentFilters={activeFilters}
       />
 
@@ -2261,10 +2883,10 @@ const PosScreen = () => {
         }}
       />
 
-      {/* Shipping Modal */}
+      {/* Shipping Modal — cierre seguro: limpia TODO el checkout flow. */}
       <ShippingModal
         visible={showShippingModal}
-        onClose={() => setShowShippingModal(false)}
+        onClose={() => closeCheckoutModals()}
         onSuccess={handleShippingSuccess}
         onSelectCustomer={() => {
           setShowShippingModal(false);
@@ -2275,16 +2897,38 @@ const PosScreen = () => {
       {/* Custom Item Modal */}
       <PosCustomItemModal
         visible={showCustomItemModal}
-        onClose={() => setShowCustomItemModal(false)}
+        onClose={() => {
+          setShowCustomItemModal(false);
+          // Re-abre el cart modal para que el usuario siga editando.
+          if (useCartStore.getState().items.length > 0) {
+            setShowCartModal(true);
+          }
+        }}
         onAdd={handleAddCustomItem}
       />
 
-      {/* Filter Dropdown */}
-      <PosFilterDropdown
-        visible={showFilters}
-        onClose={() => setShowFilters(false)}
-        onApplyFilters={(filters: any) => setActiveFilters(filters)}
-        currentFilters={activeFilters}
+      {/* Cash Register Modals — paridad con `pos-header-dropdown.component.ts` web.
+          Los 4 modales leen/escriben del `useCashRegisterStore` y revalidan
+          `['cash-session-active']` al cerrarse para que el badge del header
+          refleje el nuevo estado de la sesión. */}
+      <PosCashOpenModal
+        visible={showCashOpenModal}
+        onClose={() => setShowCashOpenModal(false)}
+      />
+      <PosCashDetailModal
+        visible={showCashDetailModal}
+        onClose={() => setShowCashDetailModal(false)}
+        session={cashSession ?? null}
+      />
+      <PosCashMovementModal
+        visible={showCashMovementModal}
+        onClose={() => setShowCashMovementModal(false)}
+        session={cashSession ?? null}
+      />
+      <PosCashCloseModal
+        visible={showCashCloseModal}
+        onClose={() => setShowCashCloseModal(false)}
+        session={cashSession ?? null}
       />
     </View>
   );
