@@ -16,6 +16,7 @@ export const Endpoints = {
   },
   STORE: {
     DASHBOARD_STATS: '/store/stores/dashboard/stats',
+    UOM: '/store/uom',
     PRODUCTS: {
       LIST: '/store/products',
       GET: '/store/products/:id',
@@ -170,6 +171,13 @@ export const Endpoints = {
     CASH_REGISTERS: {
       LIST: '/store/cash-registers',
       SESSIONS: '/store/cash-registers/sessions',
+      SESSION_ACTIVE: '/store/cash-registers/sessions/active',
+      SESSION_OPEN: '/store/cash-registers/sessions/open',
+      SESSION_DETAIL: '/store/cash-registers/sessions/:id',
+      SESSION_CLOSE: '/store/cash-registers/sessions/:id/close',
+      SESSION_SUSPEND: '/store/cash-registers/sessions/:id/suspend',
+      SESSION_REPORT: '/store/cash-registers/sessions/:id/report',
+      SESSION_MOVEMENTS: '/store/cash-registers/sessions/:id/movements',
     },
     QUOTATIONS: {
       LIST: '/store/quotations',

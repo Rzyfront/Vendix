@@ -19,6 +19,8 @@ import { useAuthStore } from '@/core/store/auth.store';
 import { useTenantStore } from '@/core/store/tenant.store';
 import { CustomerService, OrderService, ProductService, ShippingService } from '@/features/store/services';
 import { useCartStore } from '@/features/store/pos/store/cart.store';
+import { CashRegisterService } from '@/features/pos/services/cash-register.service';
+import { useCashRegisterStore } from '@/features/pos/store/cash-register.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { colors, colorScales, spacing, borderRadius, shadows, typography } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
@@ -55,7 +57,6 @@ import type {
   Product,
   ProductVariant,
   PosCustomer,
-  CashRegisterSession,
 } from '@/features/store/types';
 
 const GRID_HORIZONTAL_PADDING = spacing[3];
@@ -2311,11 +2312,29 @@ const PosScreen = () => {
   // Aparece antes de persistir el borrador (paridad del annotation 5 del POS).
   const [showOrderCreateModal, setShowOrderCreateModal] = useState(false);
 
-  // TODO(cash-register): reemplazar `null` por el resultado del query
-  // contra el servicio de cash-register cuando se integre el flujo de
-  // apertura/cierre de caja. Hasta entonces, los 4 modales PosCash*
-  // permanecen en estado stub y abrir uno no muestra UI.
-  const cashSession: CashRegisterSession | null = null;
+  // Sesión de caja activa — suscrita al store global `useCashRegisterStore`
+  // para que el header y los 4 modales PosCash* reflejen cambios síncronos
+  // tras open/close sin esperar un refetch. Se hidrata en mount desde
+  // `GET /store/cash-registers/sessions/active` y se reconcilia solo si
+  // diverge del valor actual (evita pisar un open reciente con un valor
+  // stale del backend).
+  const cashSession = useCashRegisterStore((s) => s.activeSession);
+
+  const { data: activeSessionData } = useQuery({
+    queryKey: ['cash-session-active'],
+    queryFn: () => CashRegisterService.getActiveSession(),
+    staleTime: 30_000,
+  });
+
+  // Hidratar el store cuando el query responda, pero solo si difiere para
+  // evitar pisar un open reciente con un valor stale del backend.
+  useEffect(() => {
+    if (activeSessionData === undefined) return;
+    const current = useCashRegisterStore.getState().activeSession;
+    if (current?.id !== activeSessionData?.id) {
+      useCashRegisterStore.getState().setActiveSession(activeSessionData);
+    }
+  }, [activeSessionData]);
 
   // Cierra TODOS los modales del checkout flow. Útil cuando el usuario
   // presiona X en cualquier paso del flujo y quiere volver limpio a la
