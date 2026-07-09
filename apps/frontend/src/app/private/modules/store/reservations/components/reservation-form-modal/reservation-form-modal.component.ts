@@ -148,6 +148,19 @@ export class ReservationFormModalComponent {
   readonly customerStep = computed(() => this.isFreeBooking() ? 2 : 3);
   readonly confirmStep = computed(() => this.isFreeBooking() ? 3 : 4);
 
+  /**
+   * Total free slots across the visible week. Used by the
+   * template to render the empty-state message when no slots
+   * are available — without this, the calendar shows an empty
+   * grid and the user has no idea why.
+   */
+  readonly freeSlotsCount = computed(() =>
+    Object.values(this.freeSlotsByDate()).reduce(
+      (sum, slots) => sum + slots.length,
+      0,
+    ),
+  );
+
   readonly canGoNext = computed(() => {
     const step = this.currentStep();
     // Step 0: Service + Date required
@@ -271,10 +284,22 @@ export class ReservationFormModalComponent {
       return;
     }
 
-    if (step === this.slotStep() && this.isFreeBooking()) {
-      // For free booking, try loading slots if not already loaded
-      if (this.availableSlots().length === 0 && !this.loadingSlots()) {
-        this.loadAvailableSlots();
+    if (step === this.slotStep()) {
+      // Block advancing when the picked start time is already in the past.
+      if (
+        this.startTime() &&
+        this.isPastTime(this.selectedDate(), this.startTime())
+      ) {
+        this.toastService.warning(
+          `Horario fuera del servicio`,
+        );
+        return;
+      }
+      if (this.isFreeBooking()) {
+        // For free booking, try loading slots if not already loaded
+        if (this.availableSlots().length === 0 && !this.loadingSlots()) {
+          this.loadAvailableSlots();
+        }
       }
       this.currentStep.set(step + 1);
       return;
@@ -404,6 +429,25 @@ export class ReservationFormModalComponent {
    * `AvailabilitySlot`-like object so `selectSlot()` keeps working unchanged.
    */
   onCalendarSlotPicked(event: { date: string; time: string }): void {
+    // Bug fix: the date is owned by step 1 — the calendar's `slotClicked`
+    // event must NOT be allowed to silently overwrite it. Clicks on any day
+    // other than the locked date are rejected with a toast so the user
+    // knows they need to go back to step 1 to change the date.
+    if (event.date !== this.selectedDate()) {
+      this.toastService.warning(
+        `Para cambiar la fecha del agendamiento, volvé al paso Servicio. La fecha se mantiene en ${this.formatDate(this.selectedDate())}.`,
+      );
+      return;
+    }
+
+    // Block if the picked slot is already in the past.
+    if (this.isPastTime(event.date, event.time)) {
+      this.toastService.warning(
+        `Horario fuera del servicio`,
+      );
+      return;
+    }
+
     // Compute the service-aware end time so the next-step guard passes.
     const startMinutes = (() => {
       const [h, m] = event.time.split(':').map(Number);
@@ -415,8 +459,6 @@ export class ReservationFormModalComponent {
     const endM = endMin % 60;
     const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
 
-    // Update the date signal too so the right-side preview reflects the pick.
-    this.selectedDate.set(event.date);
     this.startTime.set(event.time);
     this.endTime.set(endTime);
 
@@ -428,6 +470,33 @@ export class ReservationFormModalComponent {
       total_available: 1,
     } as AvailabilitySlot;
     this.selectedSlot.set(synthetic);
+  }
+
+  /**
+   * Manual time-input handler. Mirrors what `onCalendarSlotPicked` does for
+   * the past-time check, but skips the date-change check (the date stays in
+   * sync with step 1's `<input type="date">` and isn't editable here).
+   */
+  onStartTimeChange(time: string): void {
+    if (!time || !this.selectedDate()) return;
+    if (this.isPastTime(this.selectedDate(), time)) {
+      this.toastService.warning(
+        `Horario fuera del servicio`,
+      );
+      return;
+    }
+    this.startTime.set(time);
+  }
+
+  /**
+   * Returns true when `date` (YYYY-MM-DD) + `time` (HH:mm or HH:mm:ss) is
+   * strictly in the past relative to `new Date()`.
+   */
+  isPastTime(date: string, time: string): boolean {
+    if (!date || !time) return false;
+    const now = new Date();
+    const selected = new Date(`${date}T${time.length > 5 ? time : time + ':00'}`);
+    return selected.getTime() < now.getTime();
   }
 
   onCustomerSearch(query: string): void {

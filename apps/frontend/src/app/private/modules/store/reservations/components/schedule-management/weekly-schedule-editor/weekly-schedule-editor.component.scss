@@ -152,7 +152,11 @@
 }
 
 .time-input {
-  width: 70px;
+  // Width sized to fit 'HH:MM AM' in 12h locales (12px font,
+  // ~70px for the value + ~30px for the AM/PM browser chrome).
+  // The previous 70px clipped the indicator and forced the
+  // hour to render partially.
+  width: 100px;
   padding: 2px 4px;
   border: 1px solid var(--color-primary);
   border-radius: 4px;
@@ -161,6 +165,7 @@
   background: var(--color-surface);
   color: var(--color-text-primary);
   outline: none;
+  font-variant-numeric: tabular-nums;
 }
 
 .edit-separator {

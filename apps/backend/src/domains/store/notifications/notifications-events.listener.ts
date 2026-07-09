@@ -634,10 +634,9 @@ export class NotificationsEventsListener {
    * linked (e.g. the employee record was created without a login) — better
    * to over-notify the bell than to silently swallow.
    *
-   * Uses the existing `booking_check_in` enum value plus `data.kind =
-   * 'provider_turn'` so the frontend can play a distinctive sound and route
-   * to the booking detail page. (Booking check-in is the closest existing
-   * enum that semantically matches "attend-now" without a DB migration.)
+   * Uses the `booking_attending` enum value so the frontend can apply a
+   * distinctive sound + auto-route to the booking detail page via the
+   * "attending" data kind.
    */
   @OnEvent('booking.started')
   async handleBookingStarted(event: {
@@ -674,7 +673,7 @@ export class NotificationsEventsListener {
     const data = {
       booking_id: event.booking_id,
       booking_number: event.booking_number,
-      kind: 'provider_turn',
+      kind: 'attending',
       start_time: event.start_time,
     };
 
@@ -682,7 +681,7 @@ export class NotificationsEventsListener {
       await this.notifications_service.sendToUser(
         event.store_id,
         provider_user_id,
-        'booking_check_in',
+        'booking_attending',
         title,
         body,
         data,
@@ -691,7 +690,7 @@ export class NotificationsEventsListener {
       // Fallback: broadcast to the store (provider mapping missing).
       await this.notifications_service.createAndBroadcast(
         event.store_id,
-        'booking_check_in',
+        'booking_attending',
         title,
         body,
         data,
@@ -948,13 +947,17 @@ export class NotificationsEventsListener {
   }) {
     await this.notifications_service.createAndBroadcast(
       event.store_id,
-      'booking_check_in',
-      'Check-in Registrado',
+      'booking_arrival',
+      'Cliente llegó',
       `${event.customer_name} llegó para ${event.service_name} (${event.booking_number})`,
       {
         booking_id: event.booking_id,
+        booking_number: event.booking_number,
+        customer_name: event.customer_name,
+        service_name: event.service_name,
         provider_id: event.provider_id,
         source: event.source,
+        kind: 'arrival',
       },
     );
   }

@@ -72,13 +72,227 @@
     size="sm"
   >
     <div class="space-y-4">
-      <app-selector
-        label="Empleado"
-        placeholder="Seleccionar empleado..."
-        [options]="employeeOptions()"
-        (valueChange)="selectedEmployeeId.set($event)"
-        size="sm"
-      />
+      @if (availableEmployees().length === 0 && !showEmployeeForm()) {
+        <!-- Empty state: no candidates left to assign as provider for
+             THIS service. The copy is now context-aware: it shows
+             the names of providers already assigned (so the
+             operator understands why the dropdown is empty) and
+             distinguishes the 'no employees at all' case from the
+             'all employees already linked' case. -->
+        <div class="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div class="flex flex-col items-center text-center mb-3">
+            <app-icon name="user-plus" [size]="28" class="text-amber-600 mb-2"></app-icon>
+            <p class="text-sm font-medium text-amber-900 mb-1">
+              No hay empleados disponibles para asignar
+            </p>
+          </div>
+          @if (providers().length > 0) {
+            <!-- All employees are already linked to this service.
+                 Enumerate them so the operator sees WHO is already
+                 assigned — this is the typical case for stores that
+                 just added their first provider via quick-create. -->
+            <p class="text-xs text-amber-700 mb-2 text-left">
+              Tu servicio ya tiene
+              <span class="font-semibold">{{ providers().length }}</span>
+              proveedor{{ providers().length === 1 ? '' : 'es' }}
+              asignado{{ providers().length === 1 ? '' : 's' }}:
+            </p>
+            <ul class="text-xs text-amber-800 mb-3 text-left list-disc list-inside">
+              @for (p of providers(); track p.id) {
+                <li>{{ p.display_name || ('#' + p.employee_id) }}</li>
+              }
+            </ul>
+            <p class="text-xs text-amber-700 mb-3 text-left">
+              Si necesitás sumar otro proveedor, creá uno nuevo:
+            </p>
+          } @else {
+            <p class="text-xs text-amber-700 mb-3 text-left">
+              Aún no hay empleados registrados en tu tienda. Creá el primero:
+            </p>
+          }
+          <!-- Center the CTA so it visually anchors the empty state.
+               The wrapping div uses flex justify-center because the
+               outer parent has text-left for the bullet list above;
+               without an explicit centering rule, the button would
+               inherit the parent's left-alignment. -->
+          <div class="flex justify-center">
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="toggleEmployeeForm()"
+            >
+              <app-icon name="plus" [size]="14" slot="icon" />
+              Crear empleado
+            </app-button>
+          </div>
+        </div>
+      } @else {
+        <app-selector
+          label="Empleado"
+          placeholder="Seleccionar empleado..."
+          [options]="employeeOptions()"
+          (valueChange)="selectedEmployeeId.set($event)"
+          size="sm"
+        />
+
+        <div class="pt-2">
+          @if (!showEmployeeForm()) {
+            <!-- "Crear nuevo empleado" as a dashed ghost button — replaces
+                 the previous small blue text-link that was easy to miss.
+                 Layout: full-width, dashed border, primary text on hover.
+                 Reuses the existing toggleEmployeeForm() so no TS
+                 changes are needed. -->
+            <button
+              type="button"
+              class="w-full flex items-center justify-center gap-1.5 rounded-md border border-dashed border-gray-300 bg-white px-3 py-2 text-xs font-medium text-gray-600 hover:bg-gray-50 hover:border-primary hover:text-primary transition-colors"
+              (click)="toggleEmployeeForm()"
+              title="Crear un empleado nuevo desde este modal"
+            >
+              <app-icon name="plus" [size]="14"></app-icon>
+              Crear nuevo empleado
+            </button>
+          } @else {
+            <div class="space-y-3 pt-2">
+              <div class="flex items-center justify-between">
+                <p class="text-xs font-semibold text-gray-700">
+                  Datos del nuevo empleado
+                </p>
+                <button
+                  type="button"
+                  class="text-xs text-gray-500 hover:text-gray-700"
+                  (click)="resetNewEmployee()"
+                  aria-label="Limpiar formulario de empleado"
+                >
+                  Limpiar
+                </button>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Nombre *</label>
+                  <input
+                    type="text"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Carlos"
+                    [ngModel]="newEmployee().first_name"
+                    (ngModelChange)="patchNewEmployee('first_name', $event)"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Apellido *</label>
+                  <input
+                    type="text"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Pérez"
+                    [ngModel]="newEmployee().last_name"
+                    (ngModelChange)="patchNewEmployee('last_name', $event)"
+                  />
+                </div>
+              </div>
+
+              <!--
+                Document type + Document number on first row, Cargo +
+                Hire date on second row — matches the 2-col rhythm of
+                Nombre/Apellido above (grid-cols-2 throughout). Document
+                type was previously hidden as a hardcoded 'CC' default
+                — exposing it lets the operator choose NIT, CE, PA,
+                etc. without editing JSON.
+              -->
+              <div class="grid grid-cols-2 gap-2">
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Tipo de documento *</label>
+                  <select
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                    [ngModel]="newEmployee().document_type"
+                    (ngModelChange)="patchNewEmployee('document_type', $event)"
+                  >
+                    <option value="CC">CC - Cédula</option>
+                    <option value="CE">CE - Cédula de Extranjería</option>
+                    <option value="NIT">NIT</option>
+                    <option value="PA">PA - Pasaporte</option>
+                    <option value="TI">TI - Tarjeta de Identidad</option>
+                    <option value="RC">RC - Registro Civil</option>
+                  </select>
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Número *</label>
+                  <input
+                    type="text"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="1234567890"
+                    [ngModel]="newEmployee().document_number"
+                    (ngModelChange)="patchNewEmployee('document_number', $event)"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Cargo</label>
+                  <input
+                    type="text"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="Barbero, Estilista..."
+                    [ngModel]="newEmployee().position"
+                    (ngModelChange)="patchNewEmployee('position', $event)"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Fecha de inicio *</label>
+                  <input
+                    type="date"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    [ngModel]="newEmployee().hire_date"
+                    (ngModelChange)="patchNewEmployee('hire_date', $event)"
+                  />
+                </div>
+              </div>
+
+              <!--
+                Contact channels — 4th row of the 2-col grid (matches
+                the symmetry of the rows above). Email validated
+                client-side via type="email"; phone is freeform
+                international format (+57 300 000 0000, etc.). Both
+                fields are optional at the backend (@IsOptional) but
+                rendered here so the operator can capture them
+                inline instead of routing through the full Payroll
+                module later.
+              -->
+              <div class="grid grid-cols-2 gap-2">
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Correo *</label>
+                  <input
+                    type="email"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="email@empresa.com"
+                    [ngModel]="newEmployee().email"
+                    (ngModelChange)="patchNewEmployee('email', $event)"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[11px] text-gray-500 font-medium">Teléfono *</label>
+                  <input
+                    type="tel"
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    placeholder="+57 300 000 0000"
+                    [ngModel]="newEmployee().phone"
+                    (ngModelChange)="patchNewEmployee('phone', $event)"
+                  />
+                </div>
+              </div>
+
+              <app-button
+                variant="primary"
+                size="sm"
+                customClasses="w-full"
+                [disabled]="!newEmployeeValid() || creatingEmployee()"
+                [loading]="creatingEmployee()"
+                (clicked)="submitNewEmployee()"
+              >
+                <app-icon name="check" [size]="14" slot="icon" />
+                Crear empleado
+              </app-button>
+            </div>
+          }
+        </div>
+      }
     </div>
 
     <div slot="footer">

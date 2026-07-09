@@ -36,6 +36,7 @@ import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/
 import { WeeklyReportSnapshot } from '../../modules/store/weekly-report/interfaces/weekly-report.interface';
 import { WeeklyReportService } from '../../modules/store/weekly-report/services/weekly-report.service';
 import { PqrAdminService } from '../../modules/store/pqr/services/pqr-admin.service';
+import { ArrivalBannerComponent } from '../components/arrival-banner/arrival-banner.component';
 import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 import { MembershipAmbientAccessService } from '../../../core/services/membership-ambient-access.service';
 import type { StoreSettings } from '../../../core/models/store-settings.interface';
@@ -57,6 +58,7 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     FiscalGateOutletComponent,
     WeeklyReportBannerComponent,
     WeeklyReportStoriesComponent,
+    ArrivalBannerComponent,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -166,6 +168,9 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
 
         <app-subscription-banner />
         <app-fiscal-obligation-banner />
+
+        <!-- Customer arrival banner (booking check-in alerts) -->
+        <app-arrival-banner />
 
         <!-- Weekly Report banner (Tu Semana en Vendix) -->
         @if (currentStoreId()) {

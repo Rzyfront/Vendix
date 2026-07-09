@@ -653,6 +653,29 @@ export class OperationsSettingsDto {
   ticket_closing_hour?: number;
 }
 
+export class AvailabilitySettingsDto {
+  /**
+   * Days of the week (0=Sunday … 6=Saturday) on which the store wants
+   * generic slot generation to produce slots. Mirrors
+   * `AvailabilitySettings.working_days` in the store-settings interface.
+   */
+  @ApiProperty({
+    type: [Number],
+    example: [1, 2, 3, 4, 5],
+    required: true,
+    description:
+      'Days of the week (0=Sun, 1=Mon, …, 6=Sat) the store is open. ' +
+      'Used by AvailabilityService.generateGenericSlots as a fallback when ' +
+      'no provider_schedules row covers the date. Default: Mon-Fri.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(6, { each: true })
+  working_days: number[];
+}
+
 export class DispatchSettingsDto {
   @ApiProperty({
     enum: ['live', 'on_close'],

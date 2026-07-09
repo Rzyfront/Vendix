@@ -323,6 +323,9 @@ export interface StoreSettings {
   // Reservations - Booking reminders, confirmation, and check-in
   reservations?: ReservationsSettings;
 
+  // Availability - Slot generation behavior for fallback schedule
+  availability?: AvailabilitySettings;
+
   // Operations - Preparation and delivery defaults
   operations?: OperationsSettings;
 
@@ -505,6 +508,25 @@ export interface ReservationsSettings {
   reminders: BookingReminderRule[];
   confirmation: BookingConfirmationSettings;
   check_in: BookingCheckInSettings;
+}
+
+// ============================================================================
+// AVAILABILITY - Slot generation behavior when no provider schedule exists
+// ============================================================================
+export interface AvailabilitySettings {
+  /**
+   * Days of the week on which the store wants generic slot generation to
+   * produce slots. ISO-ish: 0=Sunday, 1=Monday, ..., 6=Saturday. Default
+   * is Mon-Fri (1-5) — matches the historic hardcoded behavior in
+   * `AvailabilityService.generateGenericSlots` (which used to skip both
+   * Saturday and Sunday). Stores that open on weekends should add `0`
+   * and/or `6` to override.
+   *
+   * Used only as a fallback by `generateGenericSlots` when no
+   * `provider_schedules` row covers the date. Per-provider schedules
+   * remain the source of truth when they exist.
+   */
+  working_days: number[];
 }
 
 export interface OperationsSettings {

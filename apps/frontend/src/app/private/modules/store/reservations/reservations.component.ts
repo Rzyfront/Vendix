@@ -1,7 +1,7 @@
 import { Component, inject, signal, DestroyRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
-import { Router } from '@angular/router';
+import { Router, RouterLink } from '@angular/router';
 import { finalize } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ReservationListComponent } from './components/reservation-list/reservation-list.component';
@@ -50,6 +50,7 @@ type ReservationView = 'calendar' | 'list';
     TooltipComponent,
     InputButtonsComponent,
     FormsModule,
+    RouterLink,
   ],
   templateUrl: './reservations.component.html',
   styleUrls: ['./reservations.component.scss'],
