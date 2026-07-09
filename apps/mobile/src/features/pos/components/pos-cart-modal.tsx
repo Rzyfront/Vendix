@@ -120,15 +120,19 @@ export function PosCartModal({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <Pressable style={styles.backdrop} onPress={onClose}>
+      {/* Sibling layout: backdrop is absolute and tappable, sheet is a sibling
+          that catches its own gestures. Nesting Pressables + stopPropagation
+          does NOT work in React Native — outer Pressable still receives the
+          responder first, dismissing the modal on inner taps. */}
+      <View style={styles.root}>
+        <Pressable style={styles.backdrop} onPress={onClose} />
         <Animated.View
           style={[
             styles.sheet,
             { transform: [{ translateY: sheetTranslate }] },
           ]}
         >
-          {/* Inner Pressable swallows taps so they don't dismiss the modal */}
-          <Pressable onPress={(e) => e.stopPropagation()} style={styles.sheetInner}>
+          <View style={styles.sheetInner}>
             {/* ── Header ── */}
             <View style={styles.header}>
               <View style={styles.headerLeft}>
@@ -344,19 +348,25 @@ export function PosCartModal({
                 </View>
               </>
             ) : null}
-          </Pressable>
+          </View>
         </Animated.View>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   // ── Bottom sheet container (paridad web `.modal-overlay` + `.modal-content`) ──
-  backdrop: {
+  root: {
     flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.5)',
     justifyContent: 'flex-end',
+  },
+  backdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+  },
+  sheetWrap: {
+    maxHeight: SHEET_MAX_HEIGHT,
   },
   sheet: {
     maxHeight: SHEET_MAX_HEIGHT,

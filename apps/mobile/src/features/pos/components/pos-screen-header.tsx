@@ -14,10 +14,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/shared/components/icon/icon';
 import { colors, colorScales, spacing, typography, borderRadius, shadows } from '@/shared/theme';
 import type { PosCustomer, PosMode, CashRegisterSession } from '@/features/store/types';
-// Sub-PR #5 (data layer): CashRegisterSession type-only stub lives in
-// pos.types.ts so pos-screen-header.tsx compiles standalone without
-// importing the cash-register.service.ts (5d territory). Sub-PR #6 (5d)
-// will own the canonical interface in the service file.
+// `CashRegisterSession` es un type-only stub declarado en pos.types.ts para
+// que este header compile standalone; el shape canónico vivirá en el
+// servicio de cash-register cuando se integre.
 
 interface PosScreenHeaderProps {
   /** Modo actual del POS — controla título + badge. */
@@ -92,12 +91,13 @@ const BADGE_COLORS = {
 
 // Brand light green — paridad con Tailwind `bg-primary/20` del web.
 // En el web `bg-primary/20` resuelve a `rgba(126, 215, 165, 0.2)` porque
-// `primary.500 = #7ED7A5`. En mobile lo representamos con `primaryDark`.
-const BRAND_LIGHT_GREEN = '#7ED7A5';
-const BRAND_LIGHT_GREEN_22 = 'rgba(126, 215, 165, 0.22)'; // bg avatar primary/20
-const BRAND_LIGHT_GREEN_18 = 'rgba(126, 215, 165, 0.18)'; // pressed state
-const BRAND_LIGHT_GREEN_10 = 'rgba(126, 215, 165, 0.10)'; // gradient layer izq
-const BRAND_LIGHT_GREEN_04 = 'rgba(126, 215, 165, 0.04)'; // gradient base
+// `primary.500 = #7ED7A5` — alias `colors.primaryDark` (theme token).
+// Las variantes con alpha se derivan del mismo `#7ED7A5 = rgb(126,215,165)` y
+// sólo viven aquí porque el theme aún no expone overlays precomputados.
+const primaryDarkAlpha22 = 'rgba(126, 215, 165, 0.22)'; // bg avatar primary/20
+const primaryDarkAlpha18 = 'rgba(126, 215, 165, 0.18)'; // pressed state
+const primaryDarkAlpha10 = 'rgba(126, 215, 165, 0.10)'; // gradient layer izq
+const primaryDarkAlpha04 = 'rgba(126, 215, 165, 0.04)'; // gradient base
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const SCREEN_MARGIN = 12;
@@ -316,6 +316,16 @@ export function PosScreenHeader({
   const [triggerPos, setTriggerPos] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const triggerRef = useRef<ViewType>(null);
 
+  // Track pending mode-change timer so we can cancel it if the header
+  // unmounts (deep link, parent unmount) before the 120ms delay elapses —
+  // otherwise onChangeMode fires against a stale store reference.
+  const modeChangeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (modeChangeTimerRef.current) clearTimeout(modeChangeTimerRef.current);
+    };
+  }, []);
+
   const meta = MODE_META[mode];
   const badgeColors = BADGE_COLORS[meta.badgeVariant];
 
@@ -334,7 +344,11 @@ export function PosScreenHeader({
 
   const handleSelectMode = (next: PosMode) => {
     setDropdownOpen(false);
-    setTimeout(() => onChangeMode(next), 120);
+    if (modeChangeTimerRef.current) clearTimeout(modeChangeTimerRef.current);
+    modeChangeTimerRef.current = setTimeout(() => {
+      modeChangeTimerRef.current = null;
+      onChangeMode(next);
+    }, 120);
   };
 
   // Dropdown position (right-aligned, mirrors RowActionsMenu pattern)
@@ -718,7 +732,7 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 12,
     // Paridad web `bg-primary/20` = brand light green con 20% alpha.
-    backgroundColor: BRAND_LIGHT_GREEN_22,
+    backgroundColor: primaryDarkAlpha22,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -743,7 +757,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     // Sombra premium — paridad con Tailwind `shadow-lg`:
     // `0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)`
-    shadowColor: '#0F172A',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.12,
     shadowRadius: 16,
@@ -756,7 +770,7 @@ const styles = StyleSheet.create({
     padding: spacing[3],
     // Gradient del web `from-primary-light/50 to-primary-light/30`:
     // usa el brand light green con alpha BAJA (sutil).
-    backgroundColor: BRAND_LIGHT_GREEN_04,
+    backgroundColor: primaryDarkAlpha04,
     overflow: 'hidden',
     borderBottomWidth: 1,
     borderBottomColor: colorScales.gray[100],
@@ -768,10 +782,10 @@ const styles = StyleSheet.create({
     left: 0,
     bottom: 0,
     width: '85%',
-    backgroundColor: BRAND_LIGHT_GREEN_10,
+    backgroundColor: primaryDarkAlpha10,
   },
   customerInfoPressed: {
-    backgroundColor: BRAND_LIGHT_GREEN_18,
+    backgroundColor: primaryDarkAlpha18,
   },
   customerClearBtnPressed: {
     backgroundColor: colorScales.gray[100],
@@ -791,7 +805,7 @@ const styles = StyleSheet.create({
     height: 32,
     borderRadius: 16,
     // Paridad web `bg-primary/20` = brand light green con 20% alpha.
-    backgroundColor: BRAND_LIGHT_GREEN_22,
+    backgroundColor: primaryDarkAlpha22,
     alignItems: 'center',
     justifyContent: 'center',
   },

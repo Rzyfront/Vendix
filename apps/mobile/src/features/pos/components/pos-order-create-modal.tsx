@@ -188,11 +188,11 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.root}
       >
-        <Pressable style={styles.backdrop} onPress={handleClose}>
-          <Pressable
-            style={[styles.container, { paddingBottom: 0 }]}
-            onPress={(e) => e.stopPropagation()}
-          >
+        {/* Sibling layout: backdrop tappable, modal container catches its own gestures.
+            Nesting Pressables + stopPropagation does NOT work in RN. */}
+        <Pressable style={styles.backdrop} onPress={handleClose} />
+        <View style={styles.centerWrap}>
+        <View style={[styles.container, { paddingBottom: 0 }]}>
             {/* Header */}
             <View style={styles.header}>
               <View style={styles.headerIcon}>
@@ -385,8 +385,8 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
                 </Text>
               </Pressable>
             </View>
-          </Pressable>
-        </Pressable>
+        </View>
+        </View>
       </KeyboardAvoidingView>
 
       {/* Selector de cliente inline (re-usa PosCustomerModal ya implementado). */}
@@ -408,8 +408,11 @@ export function PosOrderCreateModal({ visible, onClose, onCreated }: PosOrderCre
 const styles = StyleSheet.create({
   root: { flex: 1 },
   backdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(15, 23, 42, 0.45)',
+  },
+  centerWrap: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: spacing[4],

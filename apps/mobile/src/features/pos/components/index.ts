@@ -10,9 +10,9 @@ export { ShippingModal } from './shipping-modal';
 export { PosCustomItemModal } from './pos-custom-item-modal';
 export { PosPaymentModal } from './pos-payment-modal';
 export { PosOrderCreateModal } from './pos-order-create-modal';
-// Sub-PR #5: los 4 cash-register modals son stubs vacíos que permiten a
-// pos/index.tsx compilar standalone. Sub-PR #6 (5d) los reemplazará con
-// la implementación real (open/close/movement/detail de sesiones de caja).
+// Modales de caja registradora — implementación pendiente; aceptan las props
+// que el consumidor (`pos/index.tsx`) ya pasa hoy para permitir la integración
+// con el servicio de cash-register cuando esté listo.
 export { PosCashOpenModal } from './pos-cash-open-modal';
 export { PosCashCloseModal } from './pos-cash-close-modal';
 export { PosCashMovementModal } from './pos-cash-movement-modal';

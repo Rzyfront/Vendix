@@ -45,9 +45,6 @@ import {
   PosCashMovementModal,
   PosCashDetailModal,
 } from '@/features/pos/components';
-// Sub-PR #5 (Option B): cash-register service/store son 5d territory.
-// Stubs de los 4 modals PosCash* permiten que este screen compile sin
-// la integración real, que llega en sub-PR #6 (chunk 5d).
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import { useResponsive } from '@/shared/hooks';
 import type {
@@ -946,14 +943,28 @@ function buildPosCustomerPayload(customer: {
   };
 }
 
+/**
+ * Escape user-controlled values before interpolating into receipt HTML.
+ * expo-print renders the string in a WebView; without escaping, a customer
+ * name like `</td><script>...</script>` would break the layout or inject markup.
+ */
+function escapeReceiptHtml(value: unknown): string {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary: any; customer?: PosCustomer | null; paymentMethod: string }): string {
   const date = new Date().toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const itemsHtml = order.items.map((item: any) => `
     <tr>
-      <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.product?.name || ''} ${item.variant_display_name ? `(${item.variant_display_name})` : ''}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${item.unitPrice.toLocaleString('es-CO')}</td>
-      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${item.totalPrice.toLocaleString('es-CO')}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee;">${escapeReceiptHtml(item.product?.name || '')}${item.variant_display_name ? ` (${escapeReceiptHtml(item.variant_display_name)})` : ''}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${Number(item.quantity) || 0}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.unitPrice).toLocaleString('es-CO')}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${Number(item.totalPrice).toLocaleString('es-CO')}</td>
     </tr>
   `).join('');
 
@@ -978,9 +989,9 @@ function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary
     <body>
       <div class="header">
         <h1>Vendix</h1>
-        <div class="order-info">Orden #${order.orderNumber}<br>${date}</div>
+        <div class="order-info">Orden #${escapeReceiptHtml(order.orderNumber)}<br>${date}</div>
       </div>
-      ${order.customer ? `<p><strong>Cliente:</strong> ${order.customer.first_name} ${order.customer.last_name}</p>` : ''}
+      ${order.customer ? `<p><strong>Cliente:</strong> ${escapeReceiptHtml(order.customer.first_name)} ${escapeReceiptHtml(order.customer.last_name)}</p>` : ''}
       <table>
         <thead>
           <tr>
@@ -997,7 +1008,7 @@ function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary
         <div class="row"><span>IVA:</span><span>$${order.summary.taxAmount.toLocaleString('es-CO')}</span></div>
         ${order.summary.discountAmount > 0 ? `<div class="row" style="color: green;"><span>Descuento:</span><span>-$${order.summary.discountAmount.toLocaleString('es-CO')}</span></div>` : ''}
         <div class="row total-row"><span>Total:</span><span>$${order.summary.total.toLocaleString('es-CO')}</span></div>
-        <div class="row" style="margin-top: 10px; font-size: 12px;"><span>Método:</span><span>${order.paymentMethod}</span></div>
+        <div class="row" style="margin-top: 10px; font-size: 12px;"><span>Método:</span><span>${escapeReceiptHtml(order.paymentMethod)}</span></div>
       </div>
       <div class="footer">¡Gracias por su compra!</div>
     </body>
@@ -2300,10 +2311,10 @@ const PosScreen = () => {
   // Aparece antes de persistir el borrador (paridad del annotation 5 del POS).
   const [showOrderCreateModal, setShowOrderCreateModal] = useState(false);
 
-  // Sub-PR #5 (Option B): cashSession queda estático en `null` hasta que
-  // sub-PR #6 (5d) implemente la integración real de caja registradora
-  // (query + CashRegisterService + useCashRegisterStore). Los 4 modals
-  // PosCash* son stubs que retornan null — abrirlos no hace nada hasta 5d.
+  // TODO(cash-register): reemplazar `null` por el resultado del query
+  // contra el servicio de cash-register cuando se integre el flujo de
+  // apertura/cierre de caja. Hasta entonces, los 4 modales PosCash*
+  // permanecen en estado stub y abrir uno no muestra UI.
   const cashSession: CashRegisterSession | null = null;
 
   // Cierra TODOS los modales del checkout flow. Útil cuando el usuario
@@ -2361,6 +2372,7 @@ const PosScreen = () => {
   const addItem = useCartStore((s) => s.addItem);
   const customer = useCartStore((s) => s.customer);
   const mode = useCartStore((s) => s.mode ?? 'sale');
+  const cartItems = useCartStore((s) => s.items);
   const setMode = useCartStore((s) => s.setMode);
   const setCustomer = useCartStore((s) => s.setCustomer);
 
@@ -2772,7 +2784,7 @@ const PosScreen = () => {
       <PosCartModal
         visible={showCartModal}
         onClose={() => closeCheckoutModals()}
-        items={useCartStore.getState().items}
+        items={cartItems}
         subtotal={summary.subtotal}
         taxAmount={summary.taxAmount}
         total={summary.total}
@@ -2881,9 +2893,6 @@ const PosScreen = () => {
           setShowCustomerModal(true);
         }}
       />
-
-      {/* Order Create Modal — placeholder hasta que se implemente el componente. */}
-      {/* TODO: integrar PosOrderCreateModal cuando esté disponible. */}
 
       {/* Custom Item Modal */}
       <PosCustomItemModal

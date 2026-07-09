@@ -1,14 +1,9 @@
 /**
- * STUB — sub-PR #5 (5b+5c)
+ * Modal para registrar movimientos manuales de caja (cash_in / cash_out).
  *
- * Modal para registrar movimientos de caja (cash_in/cash_out). La
- * implementación real pertenece a sub-PR #6 (chunk 5d: cash-register).
- *
- * Este stub existe para que `pos/index.tsx` compile standalone con la
- * referencia `<PosCashMovementModal visible={...} onClose={...} session={...} />`.
- * Cuando sub-PR #6 reemplace este archivo, el cambio será drop-in.
- *
- * Ver plan `/tmp/sub-pr-5-pos-screen-cart.md` §Approach Chosen (Option B).
+ * Implementación pendiente — el flujo de movimientos vive en el servicio de
+ * cash-register. Cuando se integre, el modal acepta `visible`, `onClose`
+ * y la `session` activa, y emite `onRecorded(movement)` al confirmar.
  */
 import React from 'react';
 import type { CashRegisterSession } from '@/features/store/types';

@@ -148,11 +148,11 @@ export interface PaymentResult {
 export type PosMode = 'sale' | 'quotation' | 'layaway';
 
 /**
- * Type-only stub de `CashRegisterSession` — declarado aquí (no en
- * `cash-register.service.ts`) para que `pos-screen-header.tsx` compile
- * standalone sin importar el service de 5d. Cuando sub-PR #6 (5d) traiga
- * el service real, el shape debe coincidir exactamente — la fuente de
- * verdad canónica será el service; ver plan §Knowledge Gaps.
+ * Type-only stub de `CashRegisterSession` — declarado aquí (en lugar del
+ * servicio de cash-register) para que `pos-screen-header.tsx` compile
+ * standalone sin acoplar la pantalla POS al módulo de caja. Cuando el
+ * servicio de cash-register se integre, su shape debe coincidir
+ * exactamente con este; la fuente de verdad canónica será el service.
  */
 export type CashSessionStatus = 'open' | 'closed' | 'suspended';
 
