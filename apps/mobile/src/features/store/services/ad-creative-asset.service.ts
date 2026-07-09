@@ -2,7 +2,7 @@
  * AdCreativeAssetService — download / share / copy para imágenes generadas.
  *
  * Mirror RN-friendly del web service
- * (`apps/frontend/.../anuncios/services/ad-creative-asset.service.ts`):
+ * (`apps\frontend\...\anuncios\services\ad-creative-asset.service.ts`):
  *
  * - Web `navigator.share({files})`     → RN `Sharing.shareAsync(uri)`
  * - Web `<a download href=blob:URL>`  → RN `FileSystem.writeAsStringAsync(uri, base64)`
@@ -78,6 +78,7 @@ async function persistBase64ToCache(
   fileName: string,
 ): Promise<string> {
   const base64 = bufferUri.split(',')[1] ?? '';
+  if (!base64) throw new Error('Imagen vacía');
   const targetUri = genCacheUri(fileName);
   await FileSystem.writeAsStringAsync(targetUri, base64, {
     encoding: FileSystem.EncodingType.Base64,
@@ -85,58 +86,70 @@ async function persistBase64ToCache(
   return targetUri;
 }
 
-async function shareOrFallback(
+/**
+ * Comparte la imagen vía share sheet nativo.
+ * Si Sharing no está disponible o falla, cae a copiar el texto al clipboard.
+ */
+async function shareImageOnDevice(
   fileUri: string,
-  creative: MarketingAdCreative,
   text: string,
 ): Promise<AssetOpResult> {
-  const canShare = await Sharing.isAvailableAsync();
-  if (canShare) {
+  const available = await Sharing.isAvailableAsync();
+  if (!available) {
+    await Clipboard.setStringAsync(text);
+    return { ok: true, message: ANUNCIO_LABELS.toastLinkCopiedForShare };
+  }
+  try {
+    await Sharing.shareAsync(fileUri, { mimeType: undefined, dialogTitle: undefined, UTI: undefined });
+    return { ok: true, message: '' };
+  } catch (err) {
+    const name = (err as { name?: string }).name;
+    // AbortError = usuario canceló el share sheet → no mostrar error ni toast
+    if (name === 'AbortError') return { ok: false, message: '' };
+    // Otro error → fallback a clipboard
     try {
-      await Sharing.shareAsync(fileUri, {
-        mimeType: undefined, // expo infiere del extension
-        dialogTitle: creative.title,
-        UTI: undefined,
-      });
-      return { ok: true, message: '' };
+      await Clipboard.setStringAsync(text);
+      return { ok: true, message: ANUNCIO_LABELS.toastLinkCopiedForShare };
     } catch {
-      // user cancelled or platform-specific error — caemos al fallback de clipboard
+      return { ok: false, message: ANUNCIO_LABELS.toastErrShare };
     }
   }
-  // Fallback: copiar texto al clipboard (web hace `clipboard.writeText`).
-  await Clipboard.setStringAsync(text);
-  toastSuccess(ANUNCIO_LABELS.toastLinkCopiedForShare);
-  return { ok: true, message: ANUNCIO_LABELS.toastLinkCopiedForShare };
 }
 
 export const AdCreativeAssetService = {
   /**
-   * Descarga la imagen al cache local del dispositivo. En mobile esto
-   * equivale al web `<a download>` con `URL.createObjectURL`.
-   *
-   * El archivo queda en `FileSystem.cacheDirectory` y se limpia via
-   * `Sharing.shareAsync` o manualmente por la siguiente generación.
+   * Descarga la imagen al cache local del dispositivo y abre el share sheet.
+   * Equivale al web `<a download>` con `URL.createObjectURL`.
+   * En mobile el "download" es indistinguible de "share" — ambos usan
+   * `Sharing.shareAsync` para que el usuario elige destino (Guardar, WhatsApp, etc.).
    */
   async download(creative: MarketingAdCreative): Promise<AssetOpResult> {
     if (!hasImage(creative)) {
+      toastError(ANUNCIO_LABELS.toastErrDownload);
       return { ok: false, message: ANUNCIO_LABELS.toastErrDownload };
     }
     try {
       const { bufferUri, contentType } = await fetchImageBuffer(creative);
       const fileName = buildFileName(creative, contentType);
       const fileUri = await persistBase64ToCache(bufferUri, fileName);
-      // Disparar share sheet para que el usuario decida destino (Galería, Drive, etc.)
-      // coincide con el web "Compartir" y permite guardado compartido.
-      const shared = await shareOrFallback(
-        fileUri,
-        creative,
-        creative.image_url ?? creative.post_copy ?? creative.title,
-      );
-      if (shared.ok && !shared.message) {
+
+      // Verificar que el archivo existe y tiene contenido antes de compartir
+      const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      if (!fileInfo.exists || (fileInfo.exists && fileInfo.size === 0)) {
+        throw new Error('Archivo de imagen vacío');
+      }
+
+      const text = creative.image_url ?? creative.post_copy ?? creative.title;
+      const result = await shareImageOnDevice(fileUri, text);
+
+      if (result.ok && !result.message) {
         toastSuccess(ANUNCIO_LABELS.toastImageDownloaded);
         return { ok: true, message: ANUNCIO_LABELS.toastImageDownloaded };
       }
-      return shared;
+      if (result.ok && result.message) {
+        toastSuccess(result.message);
+      }
+      return result;
     } catch (err) {
       const msg =
         (err as { response?: { data?: { message?: string } }; message?: string })
@@ -154,29 +167,41 @@ export const AdCreativeAssetService = {
    */
   async share(creative: MarketingAdCreative): Promise<AssetOpResult> {
     if (!hasImage(creative)) {
+      toastError(ANUNCIO_LABELS.toastErrShare);
       return { ok: false, message: ANUNCIO_LABELS.toastErrShare };
     }
     try {
       const { bufferUri, contentType } = await fetchImageBuffer(creative);
       const fileName = buildFileName(creative, contentType);
       const fileUri = await persistBase64ToCache(bufferUri, fileName);
+
+      // Verificar que el archivo existe y tiene contenido
+      const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      if (!fileInfo.exists || (fileInfo.exists && fileInfo.size === 0)) {
+        throw new Error('Archivo de imagen vacío');
+      }
+
       const text = creative.post_copy ?? creative.title;
-      const result = await shareOrFallback(fileUri, creative, text);
+      const result = await shareImageOnDevice(fileUri, text);
+
       if (result.ok && !result.message) {
-        // Sin toast explícito — el share sheet es feedback nativo.
+        // Share sheet abierto OK — sin toast (feedback nativo)
         return { ok: true, message: '' };
+      }
+      if (result.ok && result.message) {
+        toastSuccess(result.message);
       }
       return result;
     } catch (err) {
+      const name = (err as { name?: string }).name;
+      if (name === 'AbortError') {
+        return { ok: false, message: '' };
+      }
       const msg =
         (err as { response?: { data?: { message?: string } }; message?: string })
           ?.response?.data?.message ??
         (err as { message?: string }).message ??
         ANUNCIO_LABELS.toastErrShare;
-      // ignora abort del usuario (compartir cancelado)
-      if ((err as { name?: string })?.name === 'AbortError') {
-        return { ok: false, message: '' };
-      }
       toastError(msg);
       return { ok: false, message: msg };
     }
@@ -184,7 +209,7 @@ export const AdCreativeAssetService = {
 
   /**
    * Copia el texto del post al clipboard. Replica el
-   * `navigator.clipboard.writeText(post_copy)` de la wizard.
+   * `navigator.clipboard.writeText(post_copy)` del web.
    * Llamado desde el `Result stage` y el `preview modal sidebar`.
    */
   async copyPostCopy(creative: MarketingAdCreative): Promise<AssetOpResult> {
@@ -210,15 +235,21 @@ export const AdCreativeAssetService = {
    */
   async copyImage(creative: MarketingAdCreative): Promise<AssetOpResult> {
     if (!hasImage(creative)) {
+      toastError(ANUNCIO_LABELS.toastErrCopy);
       return { ok: false, message: ANUNCIO_LABELS.toastErrCopy };
     }
     try {
       const { bufferUri, contentType } = await fetchImageBuffer(creative);
       const base64 = bufferUri.split(',')[1] ?? '';
-      const fileUri = await persistBase64ToCache(
-        bufferUri,
-        buildFileName(creative, contentType),
-      );
+      const fileName = buildFileName(creative, contentType);
+      const fileUri = await persistBase64ToCache(bufferUri, fileName);
+
+      // Verificar que el archivo existe y tiene contenido
+      const fileInfo = await FileSystem.getInfoAsync(fileUri);
+      if (!fileInfo.exists || (fileInfo.exists && fileInfo.size === 0)) {
+        throw new Error('Archivo de imagen vacío');
+      }
+
       // Algunas plataformas no soportan image clipboard. Intentamos
       // `setImageAsync` si existe (expo-clipboard 5+), sino caemos al share URL.
       try {
@@ -237,7 +268,7 @@ export const AdCreativeAssetService = {
         creative.image_url ?? creative.post_copy ?? creative.title;
       await Clipboard.setStringAsync(fallbackText);
       // Determinamos qué mensaje mostrar: si el buffer está intacto,
-      // fue image-cliboard; si no, "Enlace copiado."
+      // fue image-clipboard; si no, "Enlace copiado."
       const imageClipboardOk = base64.length > 0;
       toastSuccess(
         imageClipboardOk
