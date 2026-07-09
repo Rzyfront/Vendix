@@ -520,6 +520,14 @@
       "sessions": 0,
       "memories": 1,
       "prompts": 0
+    },
+    {
+      "id": "8bf4ae42",
+      "created_by": "yoner",
+      "created_at": "2026-07-09T21:50:42Z",
+      "sessions": 2,
+      "memories": 5,
+      "prompts": 0
     }
   ]
 }
