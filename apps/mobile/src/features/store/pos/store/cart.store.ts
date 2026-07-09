@@ -5,6 +5,7 @@ import type {
   CartSummary,
   CartState,
   PosCustomer,
+  PosMode,
   Product,
   ProductVariant,
 } from '@/features/store/types';
@@ -24,6 +25,7 @@ interface CartActions {
   updateQuantity: (itemId: string, quantity: number) => void;
   setCustomer: (customer: PosCustomer | null) => void;
   setNotes: (notes: string) => void;
+  setMode: (mode: PosMode) => void;
   applyDiscount: (type: 'percentage' | 'fixed', value: number, description: string) => void;
   removeDiscount: (discountId: string) => void;
   clearCart: () => void;
@@ -36,6 +38,7 @@ const initialState: CartState = {
   notes: '',
   discounts: [],
   summary: { subtotal: 0, taxAmount: 0, discountAmount: 0, total: 0, itemCount: 0, totalItems: 0 },
+  mode: 'sale',
 };
 
 function generateItemId(): string {
@@ -200,6 +203,8 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
   setCustomer: (customer) => set({ customer }),
 
   setNotes: (notes) => set({ notes }),
+
+  setMode: (mode) => set({ mode }),
 
   applyDiscount: (type, value, description) => {
     const { items, discounts } = get();
