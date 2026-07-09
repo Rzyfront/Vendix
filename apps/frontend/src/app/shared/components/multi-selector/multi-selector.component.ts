@@ -193,6 +193,22 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
             </div>
           }
         </div>
+        <!-- Footer with explicit close — keeps the dropdown from covering
+             primary action buttons in compact containers (e.g. modal footers). -->
+        <div class="multi-selector-menu__footer">
+          <button
+            type="button"
+            (click)="close()"
+            class="multi-selector-menu__done"
+          >
+            Listo
+            @if (selectedValues().length > 0) {
+              <span class="multi-selector-menu__done-count">
+                ({{ selectedValues().length }})
+              </span>
+            }
+          </button>
+        </div>
       </div>
     </ng-template>
     `,
@@ -373,7 +389,7 @@ export class MultiSelectorComponent implements ControlValueAccessor, OnDestroy {
       .subscribe(() => this.close());
   }
 
-  private close(): void {
+  close(): void {
     this.overlayRef?.detach();
     this.overlayRef?.dispose();
     this.overlayRef = null;

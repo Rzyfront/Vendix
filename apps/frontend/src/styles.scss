@@ -884,3 +884,36 @@ footer {
   font-size: 13px;
   color: var(--color-text-secondary);
 }
+
+/* Dropdown footer with explicit "Listo" button. Without this, the dropdown
+   covers primary action buttons in compact containers (e.g. modal footers)
+   and the user has no clear close affordance other than ESC or backdrop click. */
+.cdk-overlay-pane.multi-selector-panel .multi-selector-menu__footer {
+  border-top: 1px solid var(--color-border);
+  padding: 6px;
+  background: var(--color-surface);
+  flex-shrink: 0;
+}
+.cdk-overlay-pane.multi-selector-panel .multi-selector-menu__done {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-primary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+.cdk-overlay-pane.multi-selector-panel .multi-selector-menu__done:hover {
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+}
+.cdk-overlay-pane.multi-selector-panel .multi-selector-menu__done-count {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
