@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import {
   Image,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -42,6 +45,10 @@ interface BrandFormProps {
 }
 
 export function BrandForm({ mode, brandId }: BrandFormProps) {
+  // Safe area bottom: en dispositivos con gesture bar / home indicator,
+  // el paddingBottom del ScrollView debe sumar el inset para que el último
+  // campo del form no quede tapado al hacer scroll hasta el final.
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
   const isEdit = mode === 'edit';
@@ -141,8 +148,16 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
           },
         ]}
       />
+      {/* KeyboardAvoidingView envuelve el ScrollView: cuando el usuario
+          toca un Input y se abre el teclado, la vista se ajusta para que
+          el campo activo quede visible (iOS usa 'padding', Android ajusta
+          el layout nativo via windowSoftInputMode en el manifest). */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.kav}
+      >
       <ScrollView
-        contentContainerStyle={{ padding: spacing[4], gap: spacing[3], paddingBottom: spacing[8] }}
+        contentContainerStyle={{ padding: spacing[4], gap: spacing[3], paddingBottom: insets.bottom + spacing[8] }}
         keyboardShouldPersistTaps="handled"
       >
         {isEdit && isLoading ? null : (
@@ -237,6 +252,7 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
           </>
         )}
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Modal reutilizable para tomar/elegir logo. Mismo componente
           usado en product-upsert-form y category-form. Después del picker
@@ -270,6 +286,9 @@ export function BrandForm({ mode, brandId }: BrandFormProps) {
 }
 
 const styles = StyleSheet.create({
+  // KeyboardAvoidingView wrapper: full-flex para que el ScrollView ocupe
+  // todo el espacio disponible debajo del StickyHeader.
+  kav: { flex: 1 },
   // ── Imagen card (espejo web: row, padding-3, gap-3, bg-gray-50) ──
   imageCardBody: {
     flexDirection: 'row',

@@ -9,6 +9,7 @@ import {
   View,
   Text,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -44,6 +45,10 @@ import { colors, colorScales, spacing, borderRadius, typography } from '@/shared
 const PAGE_SIZE = 20;
 
 export default function ProductsListScreen() {
+  // Safe area bottom: el FlatList debe tener paddingBottom suficiente
+  // para que el último item no quede tapado por el FAB + gesture bar.
+  // FAB ocupa ~56px + spacing[5] (20px) + insets.bottom (gesture bar).
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
   const storeId = useTenantStore((s) => s.storeId);
@@ -394,7 +399,7 @@ export default function ProductsListScreen() {
 
           data={products}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: 96 }}
+          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: insets.bottom + 96 }}
           ItemSeparatorComponent={() => <View style={{ height: spacing[2] }} />}
           refreshControl={
             <RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />

@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, View, FlatList, Text, RefreshControl, Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import {
@@ -27,6 +28,9 @@ import { colors, colorScales, spacing, borderRadius, typography } from '@/shared
 const PAGE_SIZE = 20;
 
 export default function BrandsListScreen() {
+  // Safe area bottom: el FlatList debe tener paddingBottom suficiente
+  // para que el último item no quede tapado por el FAB + gesture bar.
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
   const canCreate = useCan('store:brands:create');
@@ -202,7 +206,7 @@ export default function BrandsListScreen() {
         <FlatList
           data={brands}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: 96 }}
+          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: insets.bottom + 96 }}
           ItemSeparatorComponent={() => <View style={{ height: spacing[2] }} />}
           refreshControl={
             <RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />

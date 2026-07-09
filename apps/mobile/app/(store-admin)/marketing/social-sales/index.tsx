@@ -20,7 +20,7 @@
  *   readiness.whatsapp_config_id. Esa implementación de OAuth nativo es P1; la pantalla
  *   con el estado y los botones de Conectar/Desconectar se habilita desde P0.
  */
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, Pressable } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { SocialSalesService } from '@/features/store/services/social-sales.service';
@@ -29,7 +29,13 @@ import { Card } from '@/shared/components/card/card';
 import { Icon } from '@/shared/components/icon/icon';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import { colors, colorScales, spacing, borderRadius } from '@/shared/theme';
-import type { MetaReadiness } from '@/features/store/types/social-sales.types';
+import type { MetaReadiness, CompleteWhatsappEmbeddedSignupRequest } from '@/features/store/types/social-sales.types';
+import {
+  buildMetaOAuthUrl,
+  openMetaLogin,
+  captureOAuthCallback,
+  addOAuthListener,
+} from '@/features/store/services/meta-oauth.service';
 // MetaReadiness tipa el `data` de readinessQuery.
 // WhatsappChannel se infiere del servicio.
 
@@ -40,17 +46,24 @@ const LABELS = {
   subtitle: 'Conecta WhatsApp para iniciar ventas conversacionales.',
   actualizarLabel: 'Actualizar',
   whatsappBusiness: 'WhatsApp Business',
+  // Card 1 description — mirrors web verbatim (same both states)
+  card1Desc: 'Canal base para recibir mensajes, conectar inbox e iniciar flujos de venta asistidos por IA.',
   disponibilidad: 'Disponibilidad de WhatsApp',
+  // Card 2 description — mirrors web verbatim
+  card2Desc: 'La conexión de WhatsApp se habilitará cuando esté lista para tu tienda.',
   canalConectado: 'Canal conectado',
+  // Card 3 info — mirrors web verbatim
+  card3Info: 'Esta información pertenece a la tienda actual.',
   // Card 3 empty
   canalEmptyTitle: 'WhatsApp todavía no está conectado.',
-  canalEmptyDesc: 'Conecta tu número de WhatsApp Business para comenzar a vender por chat.',
+  canalEmptyDesc: 'Cuando esté disponible, podrás iniciar la conexión desde esta pantalla.',
   // CTAs
   conectarWhatsapp: 'Conectar WhatsApp',
   desconectar: 'Desconectar',
   // Status badges
   connected: 'Conectado',
-  disconnected: 'Desconectado',
+  disconnected: 'No conectado',
+  errorStatus: 'Error',
   // Card 3 tiles
   tileCuenta: 'Cuenta',
   tileEstado: 'Estado',
@@ -85,6 +98,7 @@ function formatDate(iso: string | null | undefined): string {
 
 function getChannelStatusLabel(status: string, connected: boolean): string {
   if (connected) return LABELS.connected;
+  if (status === 'error') return LABELS.errorStatus;
   if (status === 'disconnected') return LABELS.disconnected;
   return status;
 }
@@ -205,15 +219,15 @@ export default function SocialSalesScreen() {
   // ── mutations ─────────────────────────────────────────────────────────────
 
   /**
-   * P1 (expo-auth-session): esta mutación sewireá el code del OAuth de Meta
-   * una vez esté implementado el flujo de ASWebAuthenticationSession / Chrome Custom Tab.
-   * Por ahora handleConectar() solo lanza toastWarning como guard.
+   * Completa el flujo OAuth de Meta: recibe el code del deep link y lo envía
+   * al backend. El backend intercambia el code por access_token y persiste el canal.
    */
   const connectMutation = useMutation({
-    mutationFn: (_dto: { code: string; waba_id: string; phone_number_id: string }) =>
+    mutationFn: (_dto: CompleteWhatsappEmbeddedSignupRequest) =>
       SocialSalesService.completeWhatsappEmbeddedSignup(_dto),
     onSuccess: () => {
       toastSuccess(LABELS.toastConnected);
+      queryClient.invalidateQueries({ queryKey: ['social-sales-meta-readiness'] });
       queryClient.invalidateQueries({ queryKey: ['social-sales-whatsapp-channel'] });
     },
     onError: (err: any) => {
@@ -229,6 +243,7 @@ export default function SocialSalesScreen() {
     mutationFn: () => SocialSalesService.disconnectWhatsapp(),
     onSuccess: () => {
       toastSuccess(LABELS.toastDisconnected);
+      queryClient.invalidateQueries({ queryKey: ['social-sales-meta-readiness'] });
       queryClient.invalidateQueries({ queryKey: ['social-sales-whatsapp-channel'] });
     },
     onError: (err: any) => {
@@ -240,6 +255,33 @@ export default function SocialSalesScreen() {
     },
   });
 
+  // ── OAuth listener (P1) ────────────────────────────────────────────────
+  // Escucha el redirect de Meta cuando el usuario vuelve del navegador.
+  // Se registra una vez al montar el screen y se limpia al desmontar.
+  const pendingOAuthRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!readiness?.can_start_signup) return;
+
+    // Listener async que procesa el redirect de Meta
+    const unsubscribe = addOAuthListener(async (result) => {
+      if (!readiness) return;
+      // Ya tenemos readiness del screen; disparamos la mutación
+      connectMutation.mutate({
+        code: result.code,
+        waba_id: result.waba_id,
+        phone_number_id: result.phone_number_id,
+        display_phone_number: result.display_phone_number,
+      });
+    });
+
+    pendingOAuthRef.current = unsubscribe;
+    return () => {
+      unsubscribe();
+      pendingOAuthRef.current = null;
+    };
+  }, [readiness, connectMutation]);
+
   // ── handlers ─────────────────────────────────────────────────────────────
 
   const handleActualizar = useCallback(() => {
@@ -247,14 +289,17 @@ export default function SocialSalesScreen() {
     queryClient.invalidateQueries({ queryKey: ['social-sales-whatsapp-channel'] });
   }, [queryClient]);
 
-  const handleConectar = useCallback(() => {
-    if (readiness && !readiness.can_start_signup) {
+  const handleConectar = useCallback(async () => {
+    if (!readiness || !readiness.can_start_signup) {
       toastWarning(LABELS.toastUnavailable);
       return;
     }
-    // P0: el flujo OAuth de Meta (expo-auth-session) se implementa en P1.
-    // Por ahora, botón "Conectar" muestra warning hasta que P1 esté listo.
-    toastWarning(LABELS.toastUnavailable);
+    const url = buildMetaOAuthUrl(readiness);
+    const ok = await openMetaLogin(url);
+    if (!ok) {
+      toastError('No se pudo abrir el navegador. Verifica que la app pueda abrir enlaces externos.');
+    }
+    // El redirect se procesa en el useEffect listener cuando el usuario vuelve a la app
   }, [readiness]);
 
   const handleDesconectar = useCallback(() => {
@@ -287,12 +332,8 @@ export default function SocialSalesScreen() {
             <StatusBadge connected={isConnected} />
           </View>
 
-          {/* Helper text */}
-          <Text style={styles.cardBodyText}>
-            {isConnected
-              ? 'Tu canal de WhatsApp está activo y conectado.'
-              : 'Conecta tu WhatsApp Business para recibir pedidos y chatear con clientes.'}
-          </Text>
+          {/* Helper text — mirrors web verbatim */}
+          <Text style={styles.cardBodyText}>{LABELS.card1Desc}</Text>
 
           {/* CTA */}
           <View style={styles.cardActions}>
@@ -348,6 +389,7 @@ export default function SocialSalesScreen() {
       <Card style={styles.card}>
         <Card.Body>
           <Text style={styles.cardTitle}>{LABELS.disponibilidad}</Text>
+          <Text style={styles.cardBodyText}>{LABELS.card2Desc}</Text>
           {readiness.can_start_signup ? (
             <AlertBanner
               variant="success"
@@ -358,7 +400,7 @@ export default function SocialSalesScreen() {
             <AlertBanner
               variant="warning"
               message={LABELS.availFail}
-              icon="alert-triangle"
+              icon="lock"
             />
           )}
         </Card.Body>
@@ -399,6 +441,7 @@ export default function SocialSalesScreen() {
       <Card style={styles.card}>
         <Card.Body>
           <Text style={styles.cardTitle}>{LABELS.canalConectado}</Text>
+          <Text style={styles.cardBodyText}>{LABELS.card3Info}</Text>
           <View style={styles.metricsGrid}>
             <MetricTile label={LABELS.tileCuenta} value={channel.waba_id ?? '—'} />
             <MetricTile
