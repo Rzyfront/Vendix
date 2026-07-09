@@ -9,6 +9,7 @@ import {
   View,
   Text,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -44,6 +45,10 @@ import { colors, colorScales, spacing, borderRadius, typography } from '@/shared
 const PAGE_SIZE = 20;
 
 export default function ProductsListScreen() {
+  // Safe area bottom: el FlatList debe tener paddingBottom suficiente
+  // para que el último item no quede tapado por el FAB + gesture bar.
+  // FAB ocupa ~56px + spacing[5] (20px) + insets.bottom (gesture bar).
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
   const storeId = useTenantStore((s) => s.storeId);
@@ -109,8 +114,8 @@ export default function ProductsListScreen() {
 
   function handleSearch(value: string) {
     setSearch(value);
+    setDebouncedSearch(value);
     setPage(1);
-    setTimeout(() => setDebouncedSearch(value), 400);
   }
 
   const filtersActive =
@@ -136,26 +141,30 @@ export default function ProductsListScreen() {
       return ProductService.update(product.id, { state: next });
     },
     onSuccess: (_data, product) => {
-      toastSuccess(product.state === 'active' ? 'Producto desactivado' : 'Producto activado');
+      // Verbatim web parity — toast pattern 'Producto ${verb} correctamente'
+      // (apps/frontend/src/app/private/modules/store/products/products.component.ts).
+      toastSuccess(product.state === 'active' ? 'Producto desactivado correctamente' : 'Producto activado correctamente');
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['product-stats'] });
       queryClient.invalidateQueries({ queryKey: ['product', product.id] });
     },
     onError: () => {
-      toastError('No se pudo cambiar el estado');
+      toastError('Error al cambiar el estado del producto');
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (product: Product) => ProductService.delete(product.id),
     onSuccess: (_data, product) => {
-      toastSuccess('Producto eliminado');
+      // Verbatim web parity — backend response.message: 'Producto eliminado
+      // exitosamente' (coupons.service / products.service delete pattern).
+      toastSuccess('Producto eliminado exitosamente');
       queryClient.invalidateQueries({ queryKey: ['products'] });
       queryClient.invalidateQueries({ queryKey: ['product-stats'] });
       setDeleteTarget(null);
     },
     onError: () => {
-      toastError('No se pudo eliminar el producto');
+      toastError('Error al eliminar el producto');
     },
   });
 
@@ -232,28 +241,32 @@ export default function ProductsListScreen() {
                     <View style={styles.popoverHeader}>
                       <Text style={styles.popoverTitle}>Acciones</Text>
                     </View>
-                    <ActionItem
-                      icon="plus"
-                      label="Nuevo producto"
-                      primary
-                      onPress={() => { setActionsOpen(false); setQuickCreateOpen(true); }}
-                    />
-                    <ActionItem
-                      icon="upload"
-                      label="Carga masiva"
-                      onPress={() => { setActionsOpen(false); setBulkUploadOpen(true); }}
-                    />
-                    <ActionItem
-                      icon="image"
-                      label="Carga de imágenes"
-                      onPress={() => { setActionsOpen(false); setBulkImageOpen(true); }}
-                    />
-                    <ActionItem
-                      icon="file-spreadsheet"
-                      label="Descargar plantilla de productos actuales"
-                      onPress={() => { setActionsOpen(false); downloadCurrentProductsTemplate(); }}
-                      isLast
-                    />
+                    {canCreate && (
+                      <>
+                        <ActionItem
+                          icon="plus"
+                          label="Nuevo producto"
+                          primary
+                          onPress={() => { setActionsOpen(false); setQuickCreateOpen(true); }}
+                        />
+                        <ActionItem
+                          icon="upload"
+                          label="Carga masiva"
+                          onPress={() => { setActionsOpen(false); setBulkUploadOpen(true); }}
+                        />
+                        <ActionItem
+                          icon="image"
+                          label="Carga de imágenes"
+                          onPress={() => { setActionsOpen(false); setBulkImageOpen(true); }}
+                        />
+                        <ActionItem
+                          icon="file-spreadsheet"
+                          label="Descargar plantilla de productos actuales"
+                          onPress={() => { setActionsOpen(false); downloadCurrentProductsTemplate(); }}
+                          isLast
+                        />
+                      </>
+                    )}
                   </View>
                 </View>
               </>
@@ -357,7 +370,7 @@ export default function ProductsListScreen() {
           <EmptyState
             icon="alert-triangle"
             title="Error al cargar productos"
-            description="No pudimos obtener los producto. Verifica tu conexión."
+            description="No pudimos obtener los productos. Verifica tu conexión."
             actionLabel="Reintentar"
             onAction={() => refetch()}
           />
@@ -386,7 +399,7 @@ export default function ProductsListScreen() {
 
           data={products}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: 96 }}
+          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: insets.bottom + 96 }}
           ItemSeparatorComponent={() => <View style={{ height: spacing[2] }} />}
           refreshControl={
             <RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />
@@ -394,7 +407,11 @@ export default function ProductsListScreen() {
           renderItem={({ item }) => (
             <ProductCard
               product={item}
-              onPress={() => router.push({ pathname: '/(store-admin)/products/edit', params: { id: String(item.id) } })}
+              // Mobile-first UX: card tap opens the read-only detail screen
+              // (apps/mobile/.../products/[id].tsx) — el usuario ve precio, stock,
+              // descripción, categorías, marca y variantes sin entrar a modo
+              // edición. El botón editar del card va directo a /edit.
+              onPress={() => router.push({ pathname: '/(store-admin)/products/[id]', params: { id: String(item.id) } })}
               onEdit={() => router.push({ pathname: '/(store-admin)/products/edit', params: { id: String(item.id) } })}
               onToggle={() => toggleStateMutation.mutate(item)}
               onMore={() => setDeleteTarget(item)}
@@ -495,7 +512,7 @@ interface ProductCardProps {
 
 function ProductCard({ product, onPress, onEdit, onToggle, onMore, isToggling, canUpdate, canDelete }: ProductCardProps) {
   const stateVariant: any = product.state === 'active' ? 'success' : product.state === 'archived' ? 'warning' : 'neutral';
-  const stateLabel = product.state === 'active' ? 'active' : product.state === 'archived' ? 'archivado' : 'inactive';
+  const stateLabel = product.state === 'active' ? 'Activo' : product.state === 'archived' ? 'Archivado' : 'Inactivo';
 
   return (
     <Pressable

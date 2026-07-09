@@ -26,6 +26,7 @@ const routeTitles: Record<string, string> = {
   settings: 'Configuración',
   online_store: 'Tienda en línea',
   marketing: 'Marketing',
+  marketing_promotions: 'Promociones',
   help: 'Ayuda',
 };
 
@@ -50,6 +51,7 @@ const routeBreadcrumbCategory: Record<string, string> = {
   analytics: 'Tienda',
   online_store: 'Tienda',
   marketing: 'Tienda',
+  marketing_promotions: 'Marketing',
   settings: 'Tienda',
   help: 'Tienda',
 };

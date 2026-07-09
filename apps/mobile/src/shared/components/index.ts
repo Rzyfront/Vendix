@@ -52,3 +52,5 @@ export { AnimatedPressable } from './animated-pressable/animated-pressable';
 export type { AnimatedPressableProps } from './animated-pressable/animated-pressable';
 export { RowActionsMenu } from './row-actions-menu/row-actions-menu';
 export type { RowAction } from './row-actions-menu/row-actions-menu';
+export { DatePicker } from './date-picker/date-picker';
+export type { DatePickerProps } from './date-picker/date-picker';

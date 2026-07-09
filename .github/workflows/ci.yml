@@ -49,7 +49,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+      # NOTA: `cache:` se omite intencionalmente. Pasar `false` o string
+      # vacío rompe el action con 'Caching for false is not supported'.
+      # Ver docs/setup-node@v4 — omitir el parámetro es la forma soportada
+      # de desactivar npm caching.
       - run: npm ci
       - run: chmod +x scripts/zoneless-audit.sh
       - run: ./scripts/zoneless-audit.sh
@@ -77,7 +80,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+      # NOTA: `cache:` se omite intencionalmente. Pasar `false` o string
+      # vacío rompe el action con 'Caching for false is not supported'. Sin
+      # este parámetro el action funciona correctamente y desactiva cache
+      # por defecto. Ver docs/setup-node@v4.
       - run: npm ci
       - run: npx tsc --noEmit
         working-directory: apps/mobile

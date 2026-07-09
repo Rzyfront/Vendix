@@ -61,7 +61,11 @@ export function StickyHeader({
     <View
       style={[
         styles.wrapper,
-        { paddingTop: spacing[2] },
+        // Safe area top: el notch/status bar del dispositivo debe quedar
+        // por encima del contenido del header. Sin este inset, en
+        // dispositivos con notch (iPhone X+, Pixel 3+, etc.) el título
+        // del header queda tapado por el reloj/batería.
+        { paddingTop: insets.top + spacing[2] },
         isGlass && styles.wrapperGlass,
         style,
       ]}

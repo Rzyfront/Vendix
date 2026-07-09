@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, type ViewProps, type ViewStyle } from 'react-native';
+import { View, Text, StyleSheet, type ViewProps, type ViewStyle, type TextStyle } from 'react-native';
 import { colorScales, borderRadius, spacing, typography, colors } from '@/shared/theme';
 
 type BadgeVariant =
@@ -21,6 +21,13 @@ interface BadgeProps extends ViewProps {
   size?: BadgeSize;
   badgeStyle?: BadgeStyle;
   style?: ViewStyle;
+  /**
+   * Style override para el `<Text>` interno (color, fontSize, fontWeight,
+   * textTransform, letterSpacing). Útil para badges "custom colorMap" que
+   * necesitan reproducir paleta exacta de otro sistema (web Anuncios /
+   * Coupons / módulo externo).
+   */
+  labelStyle?: TextStyle;
 }
 
 // Solid backgrounds per variant
@@ -100,6 +107,7 @@ export function Badge({
   size = 'md',
   badgeStyle = 'solid',
   style,
+  labelStyle,
   ...props
 }: BadgeProps) {
   const bg = badgeStyle === 'outline' ? variantBgOutline[variant] : variantBgSolid[variant];
@@ -124,6 +132,7 @@ export function Badge({
             fontFamily: typography.fontFamily,
           },
           sizeTextStyles[size],
+          labelStyle,
         ]}
       >
         {label}

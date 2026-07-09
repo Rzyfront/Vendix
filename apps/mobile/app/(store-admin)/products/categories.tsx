@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ActivityIndicator, View, FlatList, Text, RefreshControl, Pressable } from 'react-native';
+import { ActivityIndicator, View, FlatList, Text, RefreshControl, Pressable, Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import {
@@ -27,6 +28,9 @@ import { colors, colorScales, spacing, borderRadius, typography } from '@/shared
 const PAGE_SIZE = 20;
 
 export default function CategoriesListScreen() {
+  // Safe area bottom: el FlatList debe tener paddingBottom suficiente
+  // para que el último item no quede tapado por el FAB + gesture bar.
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
   const canCreate = useCan('store:categories:create');
@@ -76,8 +80,8 @@ export default function CategoriesListScreen() {
 
   function handleSearch(value: string) {
     setSearch(value);
+    setDebouncedSearch(value);
     setPage(1);
-    setTimeout(() => setDebouncedSearch(value), 400);
   }
 
   const filtersActive = (stateFilter ? 1 : 0) + (featuredFilter !== undefined ? 1 : 0);
@@ -136,7 +140,7 @@ export default function CategoriesListScreen() {
               featured:
                 featuredFilter === undefined ? 'all' : featuredFilter ? 'true' : 'false',
             }}
-            onFilterChange={(values) => {
+            onFilterChange={(values: { state?: string; featured?: string }) => {
               const stateVal = values.state;
               const featuredVal = values.featured;
               setStateFilter(
@@ -199,7 +203,7 @@ export default function CategoriesListScreen() {
         <FlatList
           data={categories}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: 96 }}
+          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: insets.bottom + 96 }}
           ItemSeparatorComponent={() => <View style={{ height: spacing[2] }} />}
           refreshControl={
             <RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />
@@ -284,7 +288,11 @@ function CategoryCard({
         }}
       >
         {category.image_url ? (
-          <Text style={{ fontSize: 24 }}>📚</Text>
+          <Image
+            source={{ uri: category.image_url }}
+            style={{ width: 48, height: 48, borderRadius: borderRadius.md }}
+            resizeMode="cover"
+          />
         ) : (
           <Icon name="layers" size={22} color={colors.text.muted} />
         )}
