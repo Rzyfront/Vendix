@@ -6,6 +6,9 @@ import type {
   SalesTrend,
   SalesByChannel,
   SalesByProduct,
+  SalesByCategory,
+  SalesByCustomer,
+  SalesByPaymentMethod,
   InventorySummary,
   DateRange,
 } from '../types';
@@ -66,6 +69,48 @@ export const AnalyticsService = {
     const qs = new URLSearchParams(params).toString();
     const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES_BY_PRODUCT}${qs ? `?${qs}` : ''}`);
     return unwrap<SalesByProduct[]>(res);
+  },
+
+  /**
+   * Ventas por categoría (analytics/sales/by-category). Paridad con
+   * apps/frontend `sales-by-category.component.ts`. Backend agrega
+   * order_items por product_id, mapea a categorías vía product_categories,
+   * y reparte revenue/units cuando un producto tiene varias categorías.
+   * Productos sin categoría se consolidan como `category_id: 0`,
+   * `category_name: "Sin categoría"`.
+   */
+  async getSalesByCategory(range?: DateRange): Promise<SalesByCategory[]> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES_BY_CATEGORY}${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesByCategory[]>(res);
+  },
+
+  /**
+   * Top clientes por gasto (analytics/sales/by-customer). Paridad con
+   * apps/frontend `sales-by-customer.component.ts`. Backend hace
+   * `prisma.orders.groupBy({ by: ['customer_id'] })` con `_sum.grand_total`
+   * y cruza con `users` para nombre/email. Sin rango = mes actual.
+   */
+  async getSalesByCustomer(range?: DateRange): Promise<SalesByCustomer[]> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES_BY_CUSTOMER}${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesByCustomer[]>(res);
+  },
+
+  /**
+   * Distribución de pagos por método (analytics/sales/by-payment-method).
+   * Paridad con apps/frontend `sales-by-payment-method.component.ts`.
+   * Backend agrega `payments.state = 'succeeded'` agrupados por
+   * `store_payment_method.system_payment_method.name`. `display_name`
+   * viene del merchant (configuración local) con fallback al catálogo.
+   */
+  async getSalesByPaymentMethod(range?: DateRange): Promise<SalesByPaymentMethod[]> {
+    const params = dateParams(range);
+    const qs = new URLSearchParams(params).toString();
+    const res = await apiClient.get(`${Endpoints.STORE.ANALYTICS.SALES_BY_PAYMENT_METHOD}${qs ? `?${qs}` : ''}`);
+    return unwrap<SalesByPaymentMethod[]>(res);
   },
 
   async getInventorySummary(): Promise<InventorySummary> {
