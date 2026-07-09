@@ -2808,6 +2808,7 @@ enum notification_type_enum {
   booking_arrival
   booking_attending
   booking_check_in
+  booking_pending_attention
   booking_confirmation_request
   booking_auto_cancelled
   invoice_data_request_submitted
