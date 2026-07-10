@@ -47,6 +47,8 @@ import {
 } from '@/features/pos/components';
 import { toastSuccess, toastError, toastWarning } from '@/shared/components/toast/toast.store';
 import { useResponsive } from '@/shared/hooks';
+import { CashRegisterService } from '@/features/pos/services/cash-register.service';
+import { useCashRegisterStore } from '@/features/pos/store/cash-register.store';
 import type {
   CreatePosPaymentDto,
   PaymentMethod,
@@ -55,7 +57,6 @@ import type {
   Product,
   ProductVariant,
   PosCustomer,
-  CashRegisterSession,
 } from '@/features/store/types';
 
 const GRID_HORIZONTAL_PADDING = spacing[3];
@@ -2311,11 +2312,22 @@ const PosScreen = () => {
   // Aparece antes de persistir el borrador (paridad del annotation 5 del POS).
   const [showOrderCreateModal, setShowOrderCreateModal] = useState(false);
 
-  // TODO(cash-register): reemplazar `null` por el resultado del query
-  // contra el servicio de cash-register cuando se integre el flujo de
-  // apertura/cierre de caja. Hasta entonces, los 4 modales PosCash*
-  // permanecen en estado stub y abrir uno no muestra UI.
-  const cashSession: CashRegisterSession | null = null;
+  // Sesión de caja activa — hidratada vía GET /sessions/active y sincronizada
+  // al store global `useCashRegisterStore` para que los 4 modales
+  // PosCash* (open/close/movement/detail) y el header lean del mismo valor.
+  const cashSession = useCashRegisterStore((s) => s.activeSession);
+  const { data: activeSessionData } = useQuery({
+    queryKey: ['cash-session-active'],
+    queryFn: () => CashRegisterService.getActiveSession(),
+    staleTime: 30_000,
+  });
+  useEffect(() => {
+    if (activeSessionData === undefined) return;
+    const current = useCashRegisterStore.getState().activeSession;
+    if (current?.id !== activeSessionData?.id) {
+      useCashRegisterStore.getState().setActiveSession(activeSessionData);
+    }
+  }, [activeSessionData]);
 
   // Cierra TODOS los modales del checkout flow. Útil cuando el usuario
   // presiona X en cualquier paso del flujo y quiere volver limpio a la
