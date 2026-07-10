@@ -11,6 +11,7 @@ import { FormsModule } from '@angular/forms';
 
 import { CarteraService } from '../../services/cartera.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 import {
   AccountReceivable,
   ArQueryParams,
@@ -128,7 +129,7 @@ private carteraService = inject(CarteraService);
       sortable: true,
       align: 'center',
       priority: 2,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '—')},
+      transform: (val: any) => (val ? formatDateOnlyUTC(val) : '—')},
     {
       key: 'days_overdue',
       label: 'Dias Vencido',
@@ -172,7 +173,7 @@ private carteraService = inject(CarteraService);
         label: 'Vencimiento',
         icon: 'calendar',
         transform: (val: any) =>
-          val ? new Date(val).toLocaleDateString() : '—'},
+          val ? formatDateOnlyUTC(val) : '—'},
       {
         key: 'days_overdue',
         label: 'Dias Vencido',
