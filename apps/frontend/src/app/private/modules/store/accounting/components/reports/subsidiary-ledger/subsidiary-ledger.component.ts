@@ -205,7 +205,7 @@ type LedgerMode = 'account' | 'third_party';
         <!-- Content -->
         <div class="relative p-2 md:p-4">
           @if (loading()) {
-            <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
+            <div class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center">
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
             </div>
           }
@@ -222,7 +222,7 @@ type LedgerMode = 'account' | 'third_party';
             </div>
             <div class="space-y-4">
               @for (group of report.accounts; track group.account_id) {
-                <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
+                <div class="bg-[var(--color-surface)] rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
                   <div
                     class="px-4 py-3 bg-[var(--color-surface-secondary)] border-b border-border cursor-pointer"
                     (click)="toggleGroup(group.account_id)"

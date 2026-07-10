@@ -2,7 +2,7 @@
 <div class="w-full">
   <!-- Header Bar -->
   <div
-    class="bg-surface border-b border-border px-3 py-3 md:px-6 md:py-4 mb-4 md:mb-6 rounded-t-xl"
+    class="bg-[var(--color-surface)] border-b border-border px-3 py-3 md:px-6 md:py-4 mb-4 md:mb-6 rounded-t-xl"
   >
     <div
       class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
@@ -381,7 +381,7 @@
         <div class="relative p-2 md:p-4 min-h-[300px]">
           @if (report_loading()) {
             <div
-              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+              class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center"
             >
               <div
                 class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"

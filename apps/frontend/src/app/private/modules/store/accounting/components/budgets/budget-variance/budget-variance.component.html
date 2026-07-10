@@ -67,10 +67,10 @@
     }
 
     <!-- Variance Table -->
-    <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
+    <div class="bg-[var(--color-surface)] rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
       <div class="overflow-x-auto relative">
         @if (loading()) {
-          <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
+          <div class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center">
             <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-primary)]"></div>
           </div>
         }
@@ -107,7 +107,7 @@
               >
                 <td class="sticky left-0 z-10 px-3 py-2.5 font-medium"
                     [class.bg-error-light]="isOverThreshold(row)"
-                    [class.bg-surface]="!isOverThreshold(row)">
+                    [class.bg-[var(--color-surface)]]="!isOverThreshold(row)">
                   <span class="text-text-secondary text-xs">{{ row.account_code }}</span>
                   <span class="ml-1 text-text-primary">{{ row.account_name }}</span>
                 </td>

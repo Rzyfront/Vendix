@@ -42,7 +42,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
         </div>
       } @else if (reconciliation()) {
         <!-- Header -->
-        <div class="bg-surface border-b border-border px-3 py-3 md:px-6 md:py-4 sticky top-0 z-20">
+        <div class="bg-[var(--color-surface)] border-b border-border px-3 py-3 md:px-6 md:py-4 sticky top-0 z-20">
           <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div class="flex items-center gap-2">
               <button (click)="goBack()" class="p-1.5 hover:bg-[var(--color-surface-secondary)] rounded text-text-secondary">
@@ -122,9 +122,9 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
 
           <!-- Left Panel: Bank Transactions -->
           <div class="w-full md:w-1/2" [class.hidden]="activeTab() !== 'bank'" [class.md:block]="true">
-            <div class="bg-surface rounded-xl border border-border overflow-hidden">
+            <div class="bg-[var(--color-surface)] rounded-xl border border-border overflow-hidden">
               <div class="px-3 py-2 border-b border-border bg-[var(--color-surface-secondary)] flex items-center justify-between">
-                <h3 class="text-sm font-bold text-gray-700">
+                <h3 class="text-sm font-bold text-text-primary">
                   <app-icon name="building" [size]="14" class="mr-1 inline"></app-icon>
                   Transacciones Bancarias
                 </h3>
@@ -179,9 +179,9 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
 
           <!-- Right Panel: Accounting Entries -->
           <div class="w-full md:w-1/2 mt-3 md:mt-0" [class.hidden]="activeTab() !== 'accounting'" [class.md:block]="true">
-            <div class="bg-surface rounded-xl border border-border overflow-hidden">
+            <div class="bg-[var(--color-surface)] rounded-xl border border-border overflow-hidden">
               <div class="px-3 py-2 border-b border-border bg-[var(--color-surface-secondary)] flex items-center justify-between">
-                <h3 class="text-sm font-bold text-gray-700">
+                <h3 class="text-sm font-bold text-text-primary">
                   <app-icon name="book-open" [size]="14" class="mr-1 inline"></app-icon>
                   Asientos Contables
                 </h3>
@@ -240,9 +240,9 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
         <!-- Matches Section -->
         @if (matches().length > 0) {
           <div class="px-2 md:px-4 pb-4">
-            <div class="bg-surface rounded-xl border border-border overflow-hidden">
+            <div class="bg-[var(--color-surface)] rounded-xl border border-border overflow-hidden">
               <div class="px-3 py-2 border-b border-border bg-[var(--color-surface-secondary)]">
-                <h3 class="text-sm font-bold text-gray-700">
+                <h3 class="text-sm font-bold text-text-primary">
                   <app-icon name="link" [size]="14" class="mr-1 inline"></app-icon>
                   Partidas Conciliadas ({{ matches().length }})
                 </h3>
@@ -252,9 +252,9 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
                   <div class="px-3 py-2 flex items-center justify-between">
                     <div class="min-w-0 flex-1">
                       <div class="flex items-center gap-2 text-sm">
-                        <span class="text-gray-700 truncate">{{ match.bank_transaction?.description || 'Tx #' + match.bank_transaction_id }}</span>
+                        <span class="text-text-primary truncate">{{ match.bank_transaction?.description || 'Tx #' + match.bank_transaction_id }}</span>
                         <app-icon name="arrow-right" [size]="12" class="text-text-secondary shrink-0"></app-icon>
-                        <span class="text-gray-700 truncate">{{ match.accounting_entry?.entry_number || 'Asiento #' + match.accounting_entry_id }}</span>
+                        <span class="text-text-primary truncate">{{ match.accounting_entry?.entry_number || 'Asiento #' + match.accounting_entry_id }}</span>
                       </div>
                       <div class="flex items-center gap-2 mt-0.5">
                         <span class="text-[10px] px-1.5 py-0.5 rounded font-bold"

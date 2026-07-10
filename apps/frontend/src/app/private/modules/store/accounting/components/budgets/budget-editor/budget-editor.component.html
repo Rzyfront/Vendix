@@ -105,7 +105,7 @@
     }
 
     <!-- Grid Table -->
-    <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
+    <div class="bg-[var(--color-surface)] rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full min-w-[900px] text-sm">
           <thead>
@@ -129,7 +129,7 @@
           <tbody>
             @for (line of lines(); track trackByIndex($index); let idx = $index) {
               <tr class="border-b border-border/50 hover:bg-[var(--color-surface-secondary)] transition-colors">
-                <td class="sticky left-0 z-10 bg-surface px-3 py-2 font-medium text-text-primary">
+                <td class="sticky left-0 z-10 bg-[var(--color-surface)] px-3 py-2 font-medium text-text-primary">
                   <div class="truncate max-w-[170px]" [title]="line.account_code + ' - ' + line.account_name">
                     <span class="text-text-secondary text-xs">{{ line.account_code }}</span>
                     <span class="ml-1">{{ line.account_name }}</span>

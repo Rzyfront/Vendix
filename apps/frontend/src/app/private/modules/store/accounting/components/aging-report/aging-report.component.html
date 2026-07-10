@@ -84,7 +84,7 @@
           <!-- Mobile Cards -->
           <div class="md:hidden space-y-2">
             @for (row of current_report.breakdown; track row.id) {
-              <div class="bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] p-3">
+              <div class="bg-[var(--color-surface)] rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] p-3">
                 <div class="flex items-center justify-between mb-2">
                   <span class="text-[15px] font-bold text-text-primary">{{ row.name }}</span>
                   <span class="text-sm font-bold text-text-primary">{{ formatCurrency(row.total) }}</span>

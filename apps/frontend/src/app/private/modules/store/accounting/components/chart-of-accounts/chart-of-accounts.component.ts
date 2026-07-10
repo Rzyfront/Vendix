@@ -123,7 +123,7 @@ interface AccountStats {
         <div class="relative p-2 md:p-4">
           @if (loading()) {
             <div
-              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+              class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center"
             >
               <div
                 class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
@@ -188,7 +188,7 @@ interface AccountStats {
     <ng-template #accountRow let-account let-depth="depth">
       <!-- Mobile Card -->
       <div
-        class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
+        class="md:hidden p-3 mx-2 my-1 bg-[var(--color-surface)] rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
         [style.margin-left.px]="depth * 16 + 8"
       >
         <div class="flex items-center justify-between">

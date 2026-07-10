@@ -170,7 +170,7 @@ interface ApiResponse<T> {
         <!-- Content -->
         <div class="relative p-2 md:p-4">
           @if (loading()) {
-            <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
+            <div class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center">
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
             </div>
           }
@@ -183,12 +183,12 @@ interface ApiResponse<T> {
           } @else if (report(); as r) {
             <!-- Summary cards -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-              <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border p-4">
+              <div class="bg-[var(--color-surface)] rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border p-4">
                 <p class="text-xs text-text-secondary mb-1">Según snapshots de inventario</p>
                 <p class="text-lg font-bold font-mono">{{ r.inventory_side.total_value | number: '1.2-2' }}</p>
                 <p class="text-[11px] text-text-secondary mt-1">{{ r.inventory_side.snapshot_count }} combinación(es) bodega/producto</p>
               </div>
-              <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border p-4">
+              <div class="bg-[var(--color-surface)] rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border p-4">
                 <p class="text-xs text-text-secondary mb-1">Según cuenta 1435 (mayor)</p>
                 <p class="text-lg font-bold font-mono">{{ r.accounting_side.total_balance | number: '1.2-2' }}</p>
                 <p class="text-[11px] text-text-secondary mt-1">{{ r.accounting_side.accounts.length }} cuenta(s)</p>

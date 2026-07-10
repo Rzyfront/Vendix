@@ -155,7 +155,7 @@ interface AssetStats {
         <div class="relative p-2 md:p-4">
           @if (is_loading()) {
             <div
-              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+              class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center"
             >
               <div
                 class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
@@ -197,7 +197,7 @@ interface AssetStats {
               @for (asset of filtered_assets(); track asset.id) {
                 <!-- Mobile Card -->
                 <div
-                  class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
+                  class="md:hidden p-3 mx-2 my-1 bg-[var(--color-surface)] rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
                   (click)="openDetailModal(asset)"
                 >
                   <div class="flex items-center justify-between">
@@ -307,7 +307,7 @@ interface AssetStats {
           (click)="show_depreciation_dialog = false"
         >
           <div
-            class="bg-surface rounded-xl shadow-xl p-6 w-full max-w-sm mx-4"
+            class="bg-[var(--color-surface)] rounded-xl shadow-xl p-6 w-full max-w-sm mx-4"
             (click)="$event.stopPropagation()"
           >
             <h3 class="text-lg font-semibold text-text-primary mb-4">
@@ -324,7 +324,7 @@ interface AssetStats {
                 >
                 <select
                   [(ngModel)]="depreciation_year"
-                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface"
+                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-[var(--color-surface)]"
                 >
                   @for (y of available_years; track y) {
                     <option [value]="y">{{ y }}</option>
@@ -337,7 +337,7 @@ interface AssetStats {
                 >
                 <select
                   [(ngModel)]="depreciation_month"
-                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface"
+                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-[var(--color-surface)]"
                 >
                   @for (m of months; track m.value) {
                     <option [value]="m.value">{{ m.label }}</option>

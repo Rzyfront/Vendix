@@ -45,7 +45,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
         <div class="space-y-6">
           <!-- Seleccionar cuenta bancaria -->
           <div>
-            <h4 class="text-sm font-medium text-gray-700 mb-3">1. Selecciona la cuenta bancaria</h4>
+            <h4 class="text-sm font-medium text-text-primary mb-3">1. Selecciona la cuenta bancaria</h4>
             <app-selector
               placeholder="Seleccionar cuenta bancaria..."
               [options]="bankAccountOptions()"
@@ -55,7 +55,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
 
           <!-- Subir archivo -->
           <div>
-            <h4 class="text-sm font-medium text-gray-700 mb-3">2. Sube el extracto bancario</h4>
+            <h4 class="text-sm font-medium text-text-primary mb-3">2. Sube el extracto bancario</h4>
             <app-file-upload-dropzone
               #dropzone
               label="Arrastra tu extracto aqui"
@@ -103,7 +103,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
                   @for (row of previewRows().slice(0, 5); track $index) {
                     <tr>
                       @for (header of previewHeaders(); track header) {
-                        <td class="px-3 py-2 text-gray-700 whitespace-nowrap text-xs">{{ row[header] || '-' }}</td>
+                        <td class="px-3 py-2 text-text-primary whitespace-nowrap text-xs">{{ row[header] || '-' }}</td>
                       }
                     </tr>
                   }
@@ -177,7 +177,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
             <!-- Results -->
             <div class="bg-[var(--color-surface)] border rounded-lg overflow-hidden">
               <div class="bg-[var(--color-surface-secondary)] p-4 border-b">
-                <h4 class="font-medium text-gray-900">Resumen de Importacion</h4>
+                <h4 class="font-medium text-text-primary">Resumen de Importacion</h4>
               </div>
               <div class="p-4 grid grid-cols-2 md:grid-cols-3 gap-4">
                 <div class="bg-success-light p-3 rounded border border-success">

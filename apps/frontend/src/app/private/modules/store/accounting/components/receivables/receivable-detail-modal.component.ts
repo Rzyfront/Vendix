@@ -95,7 +95,7 @@ import {
             <div>
               <p class="text-xs text-text-secondary">Vencimiento</p>
               <p class="text-sm font-medium">
-                {{ d.due_date | date: 'dd/MM/yyyy' }}
+                {{ d.due_date | date: 'dd/MM/yyyy':'UTC' }}
               </p>
             </div>
           </div>
@@ -105,7 +105,7 @@ import {
             <div>
               <p class="text-xs text-text-secondary">Fecha Emision</p>
               <p class="text-sm">
-                {{ d.issue_date | date: 'dd/MM/yyyy' }}
+                {{ d.issue_date | date: 'dd/MM/yyyy':'UTC' }}
               </p>
             </div>
             <div>
@@ -113,7 +113,7 @@ import {
               <p class="text-sm">
                 {{
                   d.last_payment_date
-                    ? (d.last_payment_date | date: 'dd/MM/yyyy')
+                    ? (d.last_payment_date | date: 'dd/MM/yyyy':'UTC')
                     : '—'
                 }}
               </p>
@@ -155,7 +155,7 @@ import {
                           {{ formatCurrency(payment.amount) }}
                         </p>
                         <p class="text-xs text-text-secondary">
-                          {{ payment.payment_date | date: 'dd/MM/yyyy' }}
+                          {{ payment.payment_date | date: 'dd/MM/yyyy':'UTC' }}
                           @if (payment.payment_method) {
                             ·
                             {{ getPaymentMethodLabel(payment.payment_method) }}
@@ -253,7 +253,7 @@ import {
                           >
                             <span>
                               Cuota {{ installment.installment_number }} ·
-                              {{ installment.due_date | date: 'dd/MM/yyyy' }}
+                              {{ installment.due_date | date: 'dd/MM/yyyy':'UTC' }}
                             </span>
                             <div class="flex items-center gap-2">
                               <span class="font-mono">
