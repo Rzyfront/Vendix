@@ -25,6 +25,7 @@ import {
   ArQueryParams,
   CarteraDashboard,
 } from '../../../../store/accounting/interfaces/cartera.interface';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 import {
   CardComponent,
   StatsComponent,
@@ -191,19 +192,19 @@ import type {
           <div class="p-4 space-y-6 max-h-[70vh] overflow-y-auto">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <p class="text-xs text-gray-500">Cliente</p>
+                <p class="text-xs text-text-secondary">Cliente</p>
                 <p class="text-sm font-semibold">{{ d.customer?.name || '—' }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Email</p>
+                <p class="text-xs text-text-secondary">Email</p>
                 <p class="text-sm">{{ d.customer?.email || '—' }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Telefono</p>
+                <p class="text-xs text-text-secondary">Telefono</p>
                 <p class="text-sm">{{ d.customer?.phone || '—' }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Origen</p>
+                <p class="text-xs text-text-secondary">Origen</p>
                 <p class="text-sm">{{ d.source_type }} #{{ d.source_id }}</p>
               </div>
             </div>
@@ -213,26 +214,26 @@ import type {
                 {{ getStatusLabel(d.status) }}
               </span>
               @if (d.days_overdue > 0) {
-                <span class="text-xs text-red-500 font-medium">{{ d.days_overdue }} dias vencido</span>
+                <span class="text-xs text-error font-medium">{{ d.days_overdue }} dias vencido</span>
               }
             </div>
 
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-[var(--color-surface-secondary)] rounded-lg">
               <div>
-                <p class="text-xs text-gray-500">Monto Original</p>
+                <p class="text-xs text-text-secondary">Monto Original</p>
                 <p class="text-sm font-semibold font-mono">{{ format(d.original_amount) }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Cobrado</p>
-                <p class="text-sm font-semibold font-mono text-emerald-600">{{ format(d.paid_amount) }}</p>
+                <p class="text-xs text-text-secondary">Cobrado</p>
+                <p class="text-sm font-semibold font-mono text-success">{{ format(d.paid_amount) }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Saldo</p>
+                <p class="text-xs text-text-secondary">Saldo</p>
                 <p class="text-sm font-bold font-mono text-primary">{{ format(d.balance) }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Vencimiento</p>
-                <p class="text-sm font-medium">{{ d.due_date | date: 'dd/MM/yyyy' }}</p>
+                <p class="text-xs text-text-secondary">Vencimiento</p>
+                <p class="text-sm font-medium">{{ d.due_date | date: 'dd/MM/yyyy':'UTC' }}</p>
               </div>
             </div>
 
@@ -244,15 +245,15 @@ import type {
               @if (d.ar_payments && d.ar_payments.length > 0) {
                 <div class="space-y-2">
                   @for (payment of d.ar_payments; track payment.id) {
-                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center justify-between p-3 bg-[var(--color-surface-secondary)] rounded-lg">
                       <div class="flex items-center gap-3 min-w-0">
-                        <div class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                          <app-icon name="banknote" [size]="14" class="text-emerald-600"></app-icon>
+                        <div class="w-8 h-8 rounded-full bg-success-light flex items-center justify-center shrink-0">
+                          <app-icon name="banknote" [size]="14" class="text-success"></app-icon>
                         </div>
                         <div class="min-w-0">
                           <p class="text-sm font-medium">{{ format(payment.amount) }}</p>
-                          <p class="text-xs text-gray-500">
-                            {{ payment.payment_date | date: 'dd/MM/yyyy' }}
+                          <p class="text-xs text-text-secondary">
+                            {{ payment.payment_date | date: 'dd/MM/yyyy':'UTC' }}
                             @if (payment.payment_method) { · {{ getPaymentMethodLabel(payment.payment_method) }} }
                             @if (payment.reference) { · Ref: {{ payment.reference }} }
                           </p>
@@ -262,7 +263,7 @@ import type {
                   }
                 </div>
               } @else {
-                <p class="text-sm text-gray-400 text-center py-4">No hay cobros registrados</p>
+                <p class="text-sm text-text-secondary text-center py-4">No hay cobros registrados</p>
               }
             </div>
 
@@ -280,7 +281,7 @@ import type {
             }
           </div>
         } @else {
-          <div class="p-8 text-center text-gray-400">
+          <div class="p-8 text-center text-text-secondary">
             <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             <p class="mt-2">Cargando detalle...</p>
           </div>
@@ -299,17 +300,17 @@ import type {
       >
         @if (selected_receivable(); as receivableData) {
           <div class="p-4 space-y-4">
-            <div class="p-3 bg-gray-50 rounded-lg space-y-1">
+            <div class="p-3 bg-[var(--color-surface-secondary)] rounded-lg space-y-1">
               <div class="flex justify-between text-sm">
-                <span class="text-gray-500">Cliente</span>
+                <span class="text-text-secondary">Cliente</span>
                 <span class="font-medium">{{ receivableData.customer?.name || '—' }}</span>
               </div>
               <div class="flex justify-between text-sm">
-                <span class="text-gray-500">Documento</span>
+                <span class="text-text-secondary">Documento</span>
                 <span class="font-mono">{{ receivableData.document_number || '—' }}</span>
               </div>
               <div class="flex justify-between text-sm">
-                <span class="text-gray-500">Saldo Pendiente</span>
+                <span class="text-text-secondary">Saldo Pendiente</span>
                 <span class="font-semibold text-primary font-mono">{{ format(receivableData.balance) }}</span>
               </div>
             </div>
@@ -443,7 +444,7 @@ export class OrgReceivablesComponent {
     { key: 'customer_name', label: 'Cliente', priority: 1, transform: (_val: any, row: any) => row?.customer?.name || '—' },
     { key: 'original_amount', label: 'Monto Original', sortable: true, align: 'right', priority: 2, transform: (val: any) => this.currencyService.format(Number(val) || 0) },
     { key: 'balance', label: 'Saldo', sortable: true, align: 'right', priority: 1, transform: (val: any) => this.currencyService.format(Number(val) || 0) },
-    { key: 'due_date', label: 'Vencimiento', sortable: true, align: 'center', priority: 2, transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '—') },
+    { key: 'due_date', label: 'Vencimiento', sortable: true, align: 'center', priority: 2, transform: (val: any) => (val ? formatDateOnlyUTC(val) : '—') },
     { key: 'days_overdue', label: 'Dias Vencido', align: 'center', priority: 2, transform: (val: any) => (Number(val) > 0 ? `${val} dias` : '—') },
     {
       key: 'status',
@@ -469,7 +470,7 @@ export class OrgReceivablesComponent {
     },
     badgeTransform: (val: string) => this.getStatusLabel(val),
     detailKeys: [
-      { key: 'due_date', label: 'Vencimiento', icon: 'calendar', transform: (val: any) => (val ? new Date(val).toLocaleDateString() : '—') },
+      { key: 'due_date', label: 'Vencimiento', icon: 'calendar', transform: (val: any) => (val ? formatDateOnlyUTC(val) : '—') },
       { key: 'days_overdue', label: 'Dias Vencido', icon: 'alert-triangle', transform: (val: any) => (Number(val) > 0 ? `${val} dias` : 'Al dia') },
     ],
     footerKey: 'balance',
@@ -681,13 +682,13 @@ export class OrgReceivablesComponent {
 
   getStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      open: 'bg-blue-50 text-blue-600',
-      partial: 'bg-amber-50 text-amber-600',
-      overdue: 'bg-red-50 text-red-600',
-      paid: 'bg-emerald-50 text-emerald-600',
-      written_off: 'bg-gray-100 text-gray-500',
+      open: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      partial: 'bg-warning-light text-warning',
+      overdue: 'bg-error-light text-error',
+      paid: 'bg-success-light text-success',
+      written_off: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 
   getPaymentMethodLabel(method: string): string {

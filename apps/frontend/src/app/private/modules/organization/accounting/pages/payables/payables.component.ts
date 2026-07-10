@@ -192,19 +192,19 @@ import type {
           <div class="p-4 space-y-6 max-h-[70vh] overflow-y-auto">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div>
-                <p class="text-xs text-gray-500">Proveedor</p>
+                <p class="text-xs text-text-secondary">Proveedor</p>
                 <p class="text-sm font-semibold">{{ d.supplier?.name || '—' }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Email</p>
+                <p class="text-xs text-text-secondary">Email</p>
                 <p class="text-sm">{{ d.supplier?.email || '—' }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Telefono</p>
+                <p class="text-xs text-text-secondary">Telefono</p>
                 <p class="text-sm">{{ d.supplier?.phone || '—' }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Origen</p>
+                <p class="text-xs text-text-secondary">Origen</p>
                 <p class="text-sm">{{ d.source_type }} #{{ d.source_id }}</p>
               </div>
             </div>
@@ -217,26 +217,26 @@ import type {
                 {{ getPriorityLabel(d.priority) }}
               </span>
               @if (d.days_overdue > 0) {
-                <span class="text-xs text-red-500 font-medium">{{ d.days_overdue }} dias vencido</span>
+                <span class="text-xs text-error font-medium">{{ d.days_overdue }} dias vencido</span>
               }
             </div>
 
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-[var(--color-surface-secondary)] rounded-lg">
               <div>
-                <p class="text-xs text-gray-500">Monto Original</p>
+                <p class="text-xs text-text-secondary">Monto Original</p>
                 <p class="text-sm font-semibold font-mono">{{ format(d.original_amount) }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Pagado</p>
-                <p class="text-sm font-semibold font-mono text-emerald-600">{{ format(d.paid_amount) }}</p>
+                <p class="text-xs text-text-secondary">Pagado</p>
+                <p class="text-sm font-semibold font-mono text-success">{{ format(d.paid_amount) }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Saldo</p>
+                <p class="text-xs text-text-secondary">Saldo</p>
                 <p class="text-sm font-bold font-mono text-primary">{{ format(d.balance) }}</p>
               </div>
               <div>
-                <p class="text-xs text-gray-500">Vencimiento</p>
-                <p class="text-sm font-medium">{{ d.due_date | date: 'dd/MM/yyyy' }}</p>
+                <p class="text-xs text-text-secondary">Vencimiento</p>
+                <p class="text-sm font-medium">{{ d.due_date | date: 'dd/MM/yyyy':'UTC' }}</p>
               </div>
             </div>
 
@@ -248,28 +248,28 @@ import type {
               @if (d.ap_payments && d.ap_payments.length > 0) {
                 <div class="space-y-2">
                   @for (payment of d.ap_payments; track payment.id) {
-                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center justify-between p-3 bg-[var(--color-surface-secondary)] rounded-lg">
                       <div class="flex items-center gap-3 min-w-0">
-                        <div class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-                          <app-icon name="banknote" [size]="14" class="text-emerald-600"></app-icon>
+                        <div class="w-8 h-8 rounded-full bg-success-light flex items-center justify-center shrink-0">
+                          <app-icon name="banknote" [size]="14" class="text-success"></app-icon>
                         </div>
                         <div class="min-w-0">
                           <p class="text-sm font-medium">{{ format(payment.amount) }}</p>
-                          <p class="text-xs text-gray-500">
-                            {{ payment.payment_date | date: 'dd/MM/yyyy' }}
+                          <p class="text-xs text-text-secondary">
+                            {{ payment.payment_date | date: 'dd/MM/yyyy':'UTC' }}
                             @if (payment.payment_method) { · {{ getPaymentMethodLabel(payment.payment_method) }} }
                             @if (payment.reference) { · Ref: {{ payment.reference }} }
                           </p>
                         </div>
                       </div>
                       @if (payment.bank_export_ref) {
-                        <span class="text-xs text-gray-400 font-mono">{{ payment.bank_export_ref }}</span>
+                        <span class="text-xs text-text-secondary font-mono">{{ payment.bank_export_ref }}</span>
                       }
                     </div>
                   }
                 </div>
               } @else {
-                <p class="text-sm text-gray-400 text-center py-4">No hay pagos registrados</p>
+                <p class="text-sm text-text-secondary text-center py-4">No hay pagos registrados</p>
               }
             </div>
 
@@ -281,15 +281,15 @@ import type {
               @if (d.ap_payment_schedules && d.ap_payment_schedules.length > 0) {
                 <div class="space-y-2">
                   @for (schedule of d.ap_payment_schedules; track schedule.id) {
-                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center justify-between p-3 bg-[var(--color-surface-secondary)] rounded-lg">
                       <div class="flex items-center gap-3">
                         <div class="w-8 h-8 rounded-full flex items-center justify-center shrink-0" [class]="getScheduleIconClass(schedule.status)">
                           <app-icon [name]="getScheduleIcon(schedule.status)" [size]="14"></app-icon>
                         </div>
                         <div>
                           <p class="text-sm font-medium">{{ format(schedule.amount) }}</p>
-                          <p class="text-xs text-gray-500">
-                            Programado: {{ schedule.scheduled_date | date: 'dd/MM/yyyy' }}
+                          <p class="text-xs text-text-secondary">
+                            Programado: {{ schedule.scheduled_date | date: 'dd/MM/yyyy':'UTC' }}
                             @if (schedule.processed_at) { · Procesado: {{ schedule.processed_at | date: 'dd/MM/yyyy' }} }
                           </p>
                         </div>
@@ -308,7 +308,7 @@ import type {
                   }
                 </div>
               } @else {
-                <p class="text-sm text-gray-400 text-center py-4">No hay pagos programados</p>
+                <p class="text-sm text-text-secondary text-center py-4">No hay pagos programados</p>
               }
             </div>
 
@@ -326,7 +326,7 @@ import type {
             }
           </div>
         } @else {
-          <div class="p-8 text-center text-gray-400">
+          <div class="p-8 text-center text-text-secondary">
             <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             <p class="mt-2">Cargando detalle...</p>
           </div>
@@ -345,17 +345,17 @@ import type {
       >
         @if (selected_payable(); as payableData) {
           <div class="p-4 space-y-4">
-            <div class="p-3 bg-gray-50 rounded-lg space-y-1">
+            <div class="p-3 bg-[var(--color-surface-secondary)] rounded-lg space-y-1">
               <div class="flex justify-between text-sm">
-                <span class="text-gray-500">Proveedor</span>
+                <span class="text-text-secondary">Proveedor</span>
                 <span class="font-medium">{{ payableData.supplier?.name || '—' }}</span>
               </div>
               <div class="flex justify-between text-sm">
-                <span class="text-gray-500">Documento</span>
+                <span class="text-text-secondary">Documento</span>
                 <span class="font-mono">{{ payableData.document_number || '—' }}</span>
               </div>
               <div class="flex justify-between text-sm">
-                <span class="text-gray-500">Saldo Pendiente</span>
+                <span class="text-text-secondary">Saldo Pendiente</span>
                 <span class="font-semibold text-primary font-mono">{{ format(payableData.balance) }}</span>
               </div>
             </div>
@@ -774,13 +774,13 @@ export class OrgPayablesComponent {
 
   getStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      open: 'bg-blue-50 text-blue-600',
-      partial: 'bg-amber-50 text-amber-600',
-      overdue: 'bg-red-50 text-red-600',
-      paid: 'bg-emerald-50 text-emerald-600',
-      written_off: 'bg-gray-100 text-gray-500',
+      open: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      partial: 'bg-warning-light text-warning',
+      overdue: 'bg-error-light text-error',
+      paid: 'bg-success-light text-success',
+      written_off: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 
   getPriorityLabel(priority: string): string {
@@ -795,12 +795,12 @@ export class OrgPayablesComponent {
 
   getPriorityClass(priority: string): string {
     const classes: Record<string, string> = {
-      urgent: 'bg-red-50 text-red-600',
-      high: 'bg-orange-50 text-orange-600',
-      normal: 'bg-blue-50 text-blue-600',
-      low: 'bg-gray-100 text-gray-500',
+      urgent: 'bg-error-light text-error',
+      high: 'bg-warning-light text-warning',
+      normal: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      low: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[priority] || 'bg-gray-100 text-gray-500';
+    return classes[priority] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 
   getPaymentMethodLabel(method: string): string {
@@ -823,11 +823,11 @@ export class OrgPayablesComponent {
 
   getScheduleStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      scheduled: 'bg-blue-50 text-blue-600',
-      processed: 'bg-emerald-50 text-emerald-600',
-      cancelled: 'bg-gray-100 text-gray-500',
+      scheduled: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      processed: 'bg-success-light text-success',
+      cancelled: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 
   getScheduleIcon(status: string): string {
@@ -841,10 +841,10 @@ export class OrgPayablesComponent {
 
   getScheduleIconClass(status: string): string {
     const classes: Record<string, string> = {
-      scheduled: 'bg-blue-100 text-blue-600',
-      processed: 'bg-emerald-100 text-emerald-600',
-      cancelled: 'bg-gray-100 text-gray-500',
+      scheduled: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      processed: 'bg-success-light text-success',
+      cancelled: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 }
