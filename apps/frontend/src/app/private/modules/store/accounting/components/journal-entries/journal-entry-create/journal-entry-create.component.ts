@@ -93,8 +93,8 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             </div>
 
             <!-- Lines Table Header -->
-            <div class="hidden md:grid md:grid-cols-12 gap-2 px-3 py-2 bg-gray-50 rounded-t-lg
-                        text-xs font-semibold text-gray-500 uppercase border border-border">
+            <div class="hidden md:grid md:grid-cols-12 gap-2 px-3 py-2 bg-[var(--color-surface-secondary)] rounded-t-lg
+                        text-xs font-semibold text-text-secondary uppercase border border-border">
               <div class="col-span-4">Cuenta</div>
               <div class="col-span-3">Descripción</div>
               <div class="col-span-2 text-right">Débito</div>
@@ -107,7 +107,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
               @for (line of lines.controls; track $index; let i = $index) {
                 <div [formGroupName]="i" class="grid grid-cols-1 md:grid-cols-12 gap-2 p-3 items-start">
                   <!-- Mobile labels -->
-                  <div class="md:hidden text-xs font-medium text-gray-500 mb-1">Cuenta *</div>
+                  <div class="md:hidden text-xs font-medium text-text-secondary mb-1">Cuenta *</div>
                   <div class="col-span-1 md:col-span-4">
                     <app-selector
                       formControlName="account_id"
@@ -117,7 +117,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                     ></app-selector>
                   </div>
 
-                  <div class="md:hidden text-xs font-medium text-gray-500 mb-1 mt-2">Descripción</div>
+                  <div class="md:hidden text-xs font-medium text-text-secondary mb-1 mt-2">Descripción</div>
                   <div class="col-span-1 md:col-span-3">
                     <app-input
                       formControlName="description"
@@ -128,7 +128,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
                   <div class="grid grid-cols-2 gap-2 md:contents">
                     <div class="md:col-span-2">
-                      <div class="md:hidden text-xs font-medium text-gray-500 mb-1">Débito</div>
+                      <div class="md:hidden text-xs font-medium text-text-secondary mb-1">Débito</div>
                       <app-input
                         [currency]="true"
                         formControlName="debit_amount"
@@ -138,7 +138,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                       ></app-input>
                     </div>
                     <div class="md:col-span-2">
-                      <div class="md:hidden text-xs font-medium text-gray-500 mb-1">Crédito</div>
+                      <div class="md:hidden text-xs font-medium text-text-secondary mb-1">Crédito</div>
                       <app-input
                         [currency]="true"
                         formControlName="credit_amount"
@@ -152,7 +152,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                   <div class="col-span-1 flex items-center justify-end md:justify-center pt-1">
                     @if (lines.length > 2) {
                       <button type="button" (click)="removeLine(i)"
-                              class="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500">
+                              class="p-1.5 hover:bg-error-light rounded text-text-secondary hover:text-error">
                         <app-icon name="trash-2" [size]="14"></app-icon>
                       </button>
                     }
@@ -162,19 +162,19 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             </div>
 
             <!-- Totals Row -->
-            <div class="grid grid-cols-1 md:grid-cols-12 gap-2 px-3 py-3 bg-gray-50 rounded-lg mt-2
+            <div class="grid grid-cols-1 md:grid-cols-12 gap-2 px-3 py-3 bg-[var(--color-surface-secondary)] rounded-lg mt-2
                         border border-border">
               <div class="col-span-7 text-sm font-semibold text-text-primary">
                 Totales
               </div>
               <div class="col-span-2 text-right font-mono text-sm font-bold"
-                   [class.text-emerald-600]="is_balanced"
-                   [class.text-red-600]="!is_balanced">
+                   [class.text-success]="is_balanced"
+                   [class.text-error]="!is_balanced">
                 {{ total_debit | number:'1.2-2' }}
               </div>
               <div class="col-span-2 text-right font-mono text-sm font-bold"
-                   [class.text-emerald-600]="is_balanced"
-                   [class.text-red-600]="!is_balanced">
+                   [class.text-success]="is_balanced"
+                   [class.text-error]="!is_balanced">
                 {{ total_credit | number:'1.2-2' }}
               </div>
               <div class="col-span-1"></div>
@@ -182,14 +182,14 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
             <!-- Balance Warning -->
             @if (!is_balanced && lines.length >= 2) {
-              <div class="mt-2 flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 rounded-lg text-sm">
+              <div class="mt-2 flex items-center gap-2 px-3 py-2 bg-error-light text-error rounded-lg text-sm">
                 <app-icon name="alert-circle" [size]="16"></app-icon>
                 <span>El asiento no está balanceado. El débito total debe ser igual al crédito total (diferencia: {{ difference | number:'1.2-2' }}).</span>
               </div>
             }
 
             @if (is_balanced && lines.length >= 2) {
-              <div class="mt-2 flex items-center gap-2 px-3 py-2 bg-emerald-50 text-emerald-700 rounded-lg text-sm">
+              <div class="mt-2 flex items-center gap-2 px-3 py-2 bg-success-light text-success rounded-lg text-sm">
                 <app-icon name="check-circle" [size]="16"></app-icon>
                 <span>El asiento está balanceado.</span>
               </div>
@@ -199,7 +199,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
       </div>
 
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border">
           <app-button variant="outline" (clicked)="onClose()">Cancelar</app-button>
           <app-button
             variant="primary"
