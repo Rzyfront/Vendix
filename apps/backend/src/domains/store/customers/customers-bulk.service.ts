@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import * as crypto from 'crypto';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CustomersService } from './customers.service';
 import { RequestContextService } from '@common/context/request-context.service';
@@ -247,14 +246,10 @@ export class CustomersBulkService {
           );
         }
 
-        // Generar placeholder email si no hay email
-        const email =
-          customerData.email?.toLowerCase().trim() ||
-          `noemail-${crypto.randomUUID()}@placeholder.vendix`;
-
-        // Crear el cliente usando el servicio existente
+        // Crear el cliente usando el servicio existente.
+        // Sin email -> create() lo normaliza a null (resolveCustomerEmail).
         const createdCustomer = await this.customersService.create(storeId, {
-          email,
+          email: customerData.email?.trim() || null,
           first_name: customerData.first_name?.trim() || '',
           last_name: customerData.last_name?.trim() || '',
           document_number: customerData.document_number?.trim() || '',

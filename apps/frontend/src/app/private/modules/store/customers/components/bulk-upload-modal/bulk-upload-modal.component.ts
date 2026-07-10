@@ -1,4 +1,4 @@
-import {Component, inject, input, output, signal, DestroyRef} from '@angular/core';
+import {Component, inject, input, output, signal, computed, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import * as XLSX from 'xlsx';
 import { CustomersService } from '../../services/customers.service';
@@ -202,7 +202,7 @@ import {
           }
 
           <!-- Results -->
-          @if (!isUploading() && uploadResults()) {
+          @if (!isUploading() && hasBulkResults()) {
             <div class="space-y-5">
               <div class="bg-white border rounded-lg overflow-hidden">
                 <div class="bg-gray-50 p-4 border-b flex justify-between items-center">
@@ -255,6 +255,23 @@ import {
                   </div>
                 </div>
               }
+            </div>
+          }
+
+          <!-- Validation / generic error (no renderable results, e.g. 400) -->
+          @if (!isUploading() && !hasBulkResults() && stepErrorMessages().length > 0) {
+            <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm">
+              <div class="font-medium flex items-center mb-1">
+                <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
+                Error en la carga
+              </div>
+              <div class="mt-2">
+                <ul class="list-disc list-inside space-y-1 max-h-60 overflow-y-auto">
+                  @for (msg of stepErrorMessages(); track msg) {
+                    <li>{{ msg }}</li>
+                  }
+                </ul>
+              </div>
             </div>
           }
         </div>
@@ -324,6 +341,36 @@ export class CustomerBulkUploadModalComponent {
   parsedData = signal<any[] | null>(null);
   uploadResults = signal<any>(null);
   warnings = signal<string[]>([]);
+
+  // ¿La respuesta tiene forma de resultado de carga masiva (con conteos o results[])?
+  // Distingue una respuesta real (éxito total o parcial) de un payload de error de
+  // validación 400 (`{ validationErrors: [...] }`) que NO debe pintar el resumen 0/0/0.
+  readonly hasBulkResults = computed<boolean>(() => {
+    const r = this.uploadResults();
+    if (!r) return false;
+    return (
+      Array.isArray(r.results) ||
+      typeof r.total_processed === 'number' ||
+      typeof r.successful === 'number' ||
+      typeof r.failed === 'number'
+    );
+  });
+
+  // Mensajes de error legibles para el paso Resultados cuando NO hay results[]:
+  // prioriza los validationErrors del backend, si no cae al mensaje de uploadError.
+  readonly stepErrorMessages = computed<string[]>(() => {
+    const r = this.uploadResults();
+    const ve = r?.validationErrors;
+    if (Array.isArray(ve) && ve.length > 0) {
+      return ve.map((e: any) =>
+        typeof e === 'string' ? e : (e?.message ?? JSON.stringify(e)),
+      );
+    }
+    const err = this.uploadError();
+    if (Array.isArray(err)) return err.map((e: any) => String(e));
+    if (err) return [String(err)];
+    return [];
+  });
 
   private customersService = inject(CustomersService);
   private toastService = inject(ToastService);
@@ -533,7 +580,22 @@ export class CustomerBulkUploadModalComponent {
     this.isUploading.set(true);
     this.uploadError.set(null);
 
-    this.customersService.uploadBulkCustomersJson(this.parsedData()!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    // Sanear payload: las filas sin correo no deben enviar `email: ""`.
+    // El backend valida el formato de email y `""` dispara un 400. Producimos
+    // copias saneadas (no mutamos el signal `parsedData`): si el email está
+    // vacío/espacios se elimina la clave; si tiene valor se recorta.
+    const sanitizedData = this.parsedData()!.map((item) => {
+      const sanitized: Record<string, any> = { ...item };
+      const email = sanitized['email'];
+      if (email == null || String(email).trim() === '') {
+        delete sanitized['email'];
+      } else {
+        sanitized['email'] = String(email).trim();
+      }
+      return sanitized;
+    });
+
+    this.customersService.uploadBulkCustomersJson(sanitizedData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response: any) => {
         this.isUploading.set(false);
         const data = response.data || response;

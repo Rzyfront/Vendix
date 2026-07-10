@@ -2,32 +2,34 @@ import {
   IsArray,
   IsEmail,
   IsIn,
-  IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
   ValidateNested,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { DOCUMENT_TYPE_CODES } from '../../../../common/constants/document-types';
 import { DocumentNumberMatchesType } from '../../../../common/validators/document-number.validator';
 
 export class BulkCustomerItemDto {
   @ApiPropertyOptional({ example: 'maria.garcia@email.com' })
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() === '' ? undefined : value,
+  )
   @IsOptional()
   @IsEmail()
   email?: string;
 
-  @ApiProperty({ example: 'Maria' })
+  @ApiPropertyOptional({ example: 'Maria' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  first_name: string;
+  first_name?: string;
 
-  @ApiProperty({ example: 'Garcia' })
+  @ApiPropertyOptional({ example: 'Garcia' })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  last_name: string;
+  last_name?: string;
 
   @ApiPropertyOptional({ example: '12345678' })
   @IsOptional()
