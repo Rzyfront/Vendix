@@ -561,6 +561,9 @@ import {
                                         <app-empty-state
                                           icon="inbox"
                                           message="Sin movimientos en la billetera"
+                                          actionButtonText="Recargar saldo"
+                                          actionButtonIcon="plus"
+                                          (actionClick)="showTopUpForm.set(true); showAdjustForm.set(false)"
                                         ></app-empty-state>
                                       }
                                       @if (walletHistory().length > 0) {

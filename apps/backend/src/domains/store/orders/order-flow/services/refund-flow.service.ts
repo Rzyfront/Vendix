@@ -22,6 +22,8 @@ import { SessionsService } from '../../../cash-registers/sessions/sessions.servi
 import { MovementsService } from '../../../cash-registers/movements/movements.service';
 import { SerialNumberEnforcementService } from '../../../inventory/serial-numbers/serial-number-enforcement.service';
 import { InventorySerialNumbersService } from '../../../inventory/serial-numbers/inventory-serial-numbers.service';
+import { WalletService } from '../../../wallet/wallet.service';
+import { WalletBalanceService } from '../../../wallet/services/wallet-balance.service';
 
 const REFUNDABLE_STATES = ['delivered', 'finished'];
 
@@ -40,6 +42,10 @@ export class RefundFlowService {
     // QUI-431 — serial pool + enforcement (no-op for non-serialized products).
     private readonly serialEnforcement: SerialNumberEnforcementService,
     private readonly serialNumbers: InventorySerialNumbersService,
+    // FIX/Wallet refund: acreditar el saldo del cliente dentro del mismo
+    // $transaction del refund para garantizar atomicidad.
+    private readonly walletService: WalletService,
+    private readonly walletBalanceService: WalletBalanceService,
   ) {}
 
   async previewRefund(
@@ -256,6 +262,55 @@ export class RefundFlowService {
             },
           },
         });
+
+        // 6.5 Credit wallet if refund_method === 'wallet' — atomic con el refund.
+        // Antes del fix, refund_method='wallet' no estaba ni en el DTO y el flujo
+        // nunca tocaba el subsistema de wallet, así que el cliente veía "éxito"
+        // pero el saldo quedaba en $0.
+        if (dto.refund_method === 'wallet') {
+          if (!order.customer_id) {
+            throw new BadRequestException(
+              'No se puede reembolsar a wallet: la orden no tiene un cliente asociado.',
+            );
+          }
+
+          const wallet = await this.walletService.getOrCreateWallet(
+            order.customer_id,
+          );
+
+          // Prisma en este contexto es el StorePrismaService; para operar
+          // dentro de la tx externa usamos tx.wallets (mismo modelo del cliente
+          // base) en lugar de delegar a WalletBalanceService.credit que abre
+          // su propia transacción — eso preserva atomicidad.
+          const w = await tx.wallets.findUnique({ where: { id: wallet.id } });
+          if (!w || !w.is_active) {
+            throw new BadRequestException(
+              'Wallet del cliente no encontrada o inactiva.',
+            );
+          }
+          const balance_before = Number(w.balance);
+          const balance_after = balance_before + Number(refund.amount);
+
+          await tx.wallets.update({
+            where: { id: wallet.id },
+            data: { balance: balance_after, updated_at: new Date() },
+          });
+
+          await tx.wallet_transactions.create({
+            data: {
+              wallet_id: wallet.id,
+              type: 'credit',
+              state: 'completed',
+              amount: Number(refund.amount),
+              balance_before,
+              balance_after,
+              reference_type: 'refund',
+              reference_id: refund.id,
+              description: `Reembolso de orden #${order.order_number}`,
+              created_by: userId,
+            },
+          });
+        }
 
         return completedRefund;
       })

@@ -40,7 +40,7 @@ export class CreateRefundDto {
   @IsBoolean()
   include_shipping: boolean;
 
-  @IsIn(['original_payment', 'cash', 'bank_transfer', 'store_credit'])
+  @IsIn(['original_payment', 'cash', 'bank_transfer', 'store_credit', 'wallet'])
   refund_method: string;
 
   @IsString()

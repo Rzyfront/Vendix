@@ -19,6 +19,7 @@ import { KitchenOrderDeliveryRevertedListener } from './listeners/kitchen-order-
 import { PaymentFromDispatchRouteListener } from './listeners/payment-from-dispatch-route.listener';
 import { InventorySerialNumbersModule } from '../../inventory/serial-numbers/inventory-serial-numbers.module';
 import { OrderStockCommitModule } from '../../inventory/shared/order-stock-commit.module';
+import { WalletModule } from '../../wallet/wallet.module';
 
 @Module({
   imports: [
@@ -28,6 +29,10 @@ import { OrderStockCommitModule } from '../../inventory/shared/order-stock-commi
     SettingsModule,
     InventorySerialNumbersModule,
     OrderStockCommitModule,
+    // FIX/Wallet refund: RefundFlowService inyecta WalletService y
+    // WalletBalanceService para acreditar el saldo del cliente cuando
+    // refund_method='wallet'.
+    WalletModule,
   ],
   controllers: [OrderFlowController, OrderRefundsController],
   providers: [

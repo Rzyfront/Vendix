@@ -1,4 +1,5 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 
 @Injectable()
@@ -7,7 +8,10 @@ export class WalletBalanceService {
 
   /**
    * Credit: Adds funds to wallet. Used for topups, refunds, adjustments.
-   * ATOMIC: Uses $transaction to ensure balance consistency.
+   * ATOMIC: Uses $transaction to ensure balance consistency. Si se pasa
+   * `tx` como último argumento, se reutiliza la transacción externa (útil
+   * para callers que necesitan atomicidad跨 operaciones, p.ej. RefundFlow
+   * que acredita la wallet dentro del mismo $transaction que crea el refund).
    */
   async credit(
     walletId: number,
@@ -18,10 +22,11 @@ export class WalletBalanceService {
       description?: string;
       created_by?: number;
     },
+    tx?: Prisma.TransactionClient,
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    const execute = async (client: Prisma.TransactionClient) => {
       // 1. Lock and read current wallet
-      const wallet = await tx.wallets.findUnique({
+      const wallet = await client.wallets.findUnique({
         where: { id: walletId },
       });
       if (!wallet) throw new BadRequestException('Wallet not found');
@@ -32,13 +37,13 @@ export class WalletBalanceService {
       const balance_after = balance_before + amount;
 
       // 2. Update wallet balance
-      await tx.wallets.update({
+      await client.wallets.update({
         where: { id: walletId },
         data: { balance: balance_after, updated_at: new Date() },
       });
 
       // 3. Create transaction record
-      const transaction = await tx.wallet_transactions.create({
+      const transaction = await client.wallet_transactions.create({
         data: {
           wallet_id: walletId,
           type: 'credit',
@@ -54,12 +59,16 @@ export class WalletBalanceService {
       });
 
       return { transaction, balance_after };
-    });
+    };
+
+    if (tx) return execute(tx);
+    return this.prisma.$transaction(execute);
   }
 
   /**
    * Debit: Removes funds from wallet. Used for payments, adjustments.
    * Validates sufficient balance before debiting.
+   * Acepta `tx` opcional para integrarse en transacciones externas.
    */
   async debit(
     walletId: number,
@@ -70,9 +79,10 @@ export class WalletBalanceService {
       description?: string;
       created_by?: number;
     },
+    tx?: Prisma.TransactionClient,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      const wallet = await tx.wallets.findUnique({
+    const execute = async (client: Prisma.TransactionClient) => {
+      const wallet = await client.wallets.findUnique({
         where: { id: walletId },
       });
       if (!wallet) throw new BadRequestException('Wallet not found');
@@ -90,12 +100,12 @@ export class WalletBalanceService {
 
       const balance_after = balance_before - amount;
 
-      await tx.wallets.update({
+      await client.wallets.update({
         where: { id: walletId },
         data: { balance: balance_after, updated_at: new Date() },
       });
 
-      const transaction = await tx.wallet_transactions.create({
+      const transaction = await client.wallet_transactions.create({
         data: {
           wallet_id: walletId,
           type: 'debit',
@@ -111,7 +121,10 @@ export class WalletBalanceService {
       });
 
       return { transaction, balance_after };
-    });
+    };
+
+    if (tx) return execute(tx);
+    return this.prisma.$transaction(execute);
   }
 
   /**
