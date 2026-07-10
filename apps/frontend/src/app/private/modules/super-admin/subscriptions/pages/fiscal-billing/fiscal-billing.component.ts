@@ -731,12 +731,12 @@ export class FiscalBillingComponent {
 
   statusBadgeClasses(status?: string | null): string {
     if (status === 'accepted') {
-      return 'bg-green-50 text-green-700 border-green-200';
+      return 'bg-success-light text-success border-success';
     }
     if (status === 'rejected' || status === 'error') {
-      return 'bg-red-50 text-red-700 border-red-200';
+      return 'bg-error-light text-error border-error';
     }
-    return 'bg-amber-50 text-amber-700 border-amber-200';
+    return 'bg-warning-light text-warning border-warning';
   }
 
   asNumber(value: string | number | null | undefined): number {
