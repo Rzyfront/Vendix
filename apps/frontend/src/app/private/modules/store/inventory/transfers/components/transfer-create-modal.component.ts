@@ -1,4 +1,14 @@
-import {Component, inject, input, output, effect, viewChild, DestroyRef} from '@angular/core';
+import {
+  Component,
+  inject,
+  input,
+  output,
+  signal,
+  computed,
+  viewChild,
+  DestroyRef,
+  OnInit,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -45,7 +55,7 @@ interface TransferItem {
   template: `
     <app-modal
       [isOpen]="isOpen()"
-      [title]="modalTitle"
+      [title]="modalTitle()"
       size="md"
       (closed)="onCancel()"
       (isOpenChange)="isOpenChange.emit($event)"
@@ -53,8 +63,8 @@ interface TransferItem {
     >
       <!-- Steps -->
       <app-steps-line
-        [steps]="steps"
-        [currentStep]="currentStep - 1"
+        [steps]="steps()"
+        [currentStep]="currentStep() - 1"
         size="md"
         primaryColor="var(--color-primary)"
         secondaryColor="var(--color-secondary)"
@@ -62,13 +72,13 @@ interface TransferItem {
       ></app-steps-line>
 
       <!-- STEP 1: Locations -->
-      @if (currentStep === 1) {
+      @if (currentStep() === 1) {
         <div class="space-y-6">
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-2">Ubicacion Origen *</label>
             <app-selector
-              [options]="locationOptions"
-              [ngModel]="selectedFromLocation"
+              [options]="locationOptions()"
+              [ngModel]="selectedFromLocation()"
               placeholder="Seleccionar origen"
               (ngModelChange)="onFromLocationChange($event)"
             ></app-selector>
@@ -77,14 +87,14 @@ interface TransferItem {
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-2">Ubicacion Destino *</label>
             <app-selector
-              [options]="filteredToLocations"
-              [ngModel]="selectedToLocation"
+              [options]="filteredToLocations()"
+              [ngModel]="selectedToLocation()"
               placeholder="Seleccionar destino"
               (ngModelChange)="onToLocationChange($event)"
             ></app-selector>
           </div>
 
-          @if (selectedFromLocation && selectedToLocation && selectedFromLocation === selectedToLocation) {
+          @if (selectedFromLocation() && selectedToLocation() && selectedFromLocation() === selectedToLocation()) {
             <div class="p-3 bg-error/10 rounded-xl border border-error/30 text-sm text-error flex items-center gap-2">
               <app-icon name="alert-circle" [size]="16"></app-icon>
               Las ubicaciones de origen y destino deben ser diferentes
@@ -95,13 +105,15 @@ interface TransferItem {
             <label class="block text-sm font-medium text-text-secondary mb-2">Fecha Esperada</label>
             <app-input
               type="date"
-              [(ngModel)]="expectedDate"
+              [ngModel]="expectedDate()"
+              (ngModelChange)="expectedDate.set($event)"
             ></app-input>
           </div>
 
           <app-textarea
             label="Notas"
-            [(ngModel)]="notes"
+            [ngModel]="notes()"
+            (ngModelChange)="notes.set($event)"
             [rows]="3"
             placeholder="Notas opcionales sobre la transferencia..."
           ></app-textarea>
@@ -109,17 +121,17 @@ interface TransferItem {
       }
 
       <!-- STEP 2: Products -->
-      @if (currentStep === 2) {
+      @if (currentStep() === 2) {
         <div class="space-y-4">
           <!-- Location Summary -->
           <div class="p-3 bg-surface-secondary rounded-xl border border-border flex items-center gap-3">
             <app-icon name="map-pin" [size]="18" class="text-primary"></app-icon>
             <span class="text-sm font-medium text-text-primary">
-              {{ getLocationName(selectedFromLocation) }}
+              {{ getLocationName(selectedFromLocation()) }}
             </span>
             <app-icon name="arrow-right" [size]="16" class="text-text-secondary"></app-icon>
             <span class="text-sm font-medium text-text-primary">
-              {{ getLocationName(selectedToLocation) }}
+              {{ getLocationName(selectedToLocation()) }}
             </span>
             <button type="button" (click)="goToStep(1)" class="ml-auto text-sm text-primary hover:underline">Cambiar</button>
           </div>
@@ -137,9 +149,9 @@ interface TransferItem {
           </div>
 
           <!-- Search Results -->
-          @if (productSearchResults.length > 0) {
+          @if (productSearchResults().length > 0) {
             <div class="max-h-48 overflow-y-auto border border-border rounded-xl divide-y divide-border">
-              @for (product of productSearchResults; track product.id) {
+              @for (product of productSearchResults(); track product.id) {
                 <button
                   type="button"
                   class="w-full p-3 text-left hover:bg-primary/5 transition-colors"
@@ -168,17 +180,17 @@ interface TransferItem {
           <!-- Added Items -->
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-2">
-              Productos a Transferir ({{ transferItems.length }})
+              Productos a Transferir ({{ transferItems().length }})
             </label>
 
-            @if (transferItems.length === 0) {
+            @if (transferItems().length === 0) {
               <div class="p-6 text-center border border-dashed border-border rounded-xl">
                 <app-icon name="package" [size]="32" class="mx-auto mb-2 text-gray-300"></app-icon>
                 <p class="text-sm text-text-secondary">Busca y agrega productos para transferir</p>
               </div>
             }
 
-            @for (item of transferItems; track item.product_id; let i = $index) {
+            @for (item of transferItems(); track item.product_id; let i = $index) {
               <div class="p-3 bg-surface rounded-xl border border-border mb-2">
                 <div class="flex items-center justify-between mb-2">
                   <div>
@@ -218,7 +230,7 @@ interface TransferItem {
       }
 
       <!-- STEP 3: Summary with Inventory Projection -->
-      @if (currentStep === 3) {
+      @if (currentStep() === 3) {
         <div class="space-y-4">
           <!-- Location & meta info -->
           <div class="p-4 bg-surface-secondary rounded-xl border border-border space-y-3">
@@ -226,31 +238,31 @@ interface TransferItem {
               <app-icon name="map-pin" [size]="18" class="text-info"></app-icon>
               <div>
                 <p class="text-xs text-text-secondary">Origen</p>
-                <p class="text-sm font-medium text-text-primary">{{ getLocationName(selectedFromLocation) }}</p>
+                <p class="text-sm font-medium text-text-primary">{{ getLocationName(selectedFromLocation()) }}</p>
               </div>
             </div>
             <div class="flex items-center gap-3">
               <app-icon name="map-pin" [size]="18" class="text-success"></app-icon>
               <div>
                 <p class="text-xs text-text-secondary">Destino</p>
-                <p class="text-sm font-medium text-text-primary">{{ getLocationName(selectedToLocation) }}</p>
+                <p class="text-sm font-medium text-text-primary">{{ getLocationName(selectedToLocation()) }}</p>
               </div>
             </div>
-            @if (expectedDate) {
+            @if (expectedDate()) {
               <div class="flex items-center gap-3">
                 <app-icon name="calendar" [size]="18" class="text-warning"></app-icon>
                 <div>
                   <p class="text-xs text-text-secondary">Fecha Esperada</p>
-                  <p class="text-sm font-medium text-text-primary">{{ expectedDate }}</p>
+                  <p class="text-sm font-medium text-text-primary">{{ expectedDate() }}</p>
                 </div>
               </div>
             }
-            @if (notes) {
+            @if (notes()) {
               <div class="flex items-center gap-3">
                 <app-icon name="file-text" [size]="18" class="text-text-secondary"></app-icon>
                 <div>
                   <p class="text-xs text-text-secondary">Notas</p>
-                  <p class="text-sm text-text-primary">{{ notes }}</p>
+                  <p class="text-sm text-text-primary">{{ notes() }}</p>
                 </div>
               </div>
             }
@@ -259,7 +271,7 @@ interface TransferItem {
           <!-- Inventory Projection Table -->
           <div>
             <h4 class="text-sm font-medium text-text-secondary mb-2">
-              Proyeccion de Inventario ({{ transferItems.length }})
+              Proyeccion de Inventario ({{ transferItems().length }})
             </h4>
             <div class="border border-border rounded-xl overflow-hidden">
               <!-- Table Header -->
@@ -270,7 +282,7 @@ interface TransferItem {
                 <div class="px-3 py-2 text-center">Destino</div>
               </div>
               <!-- Table Body -->
-              @for (item of transferItems; track item.product_id) {
+              @for (item of transferItems(); track item.product_id) {
                 <div class="grid grid-cols-[1fr_60px_1fr_1fr] gap-0 border-b border-border last:border-b-0 items-center">
                   <!-- Product -->
                   <div class="px-3 py-2.5">
@@ -327,7 +339,8 @@ interface TransferItem {
           <label class="flex items-start gap-3 p-3 bg-warning/5 rounded-xl border border-warning/20 cursor-pointer select-none">
             <input
               type="checkbox"
-              [(ngModel)]="confirmCreate"
+              [ngModel]="confirmCreate()"
+              (ngModelChange)="confirmCreate.set($event)"
               class="mt-0.5 w-4 h-4 rounded border-border text-primary focus:ring-primary"
             />
             <div>
@@ -347,8 +360,8 @@ interface TransferItem {
         class="flex justify-between gap-3 px-6 py-4 bg-gray-50 rounded-b-xl"
       >
         <div>
-          @if (currentStep > 1) {
-            <app-button variant="outline" type="button" (clicked)="goToStep(currentStep - 1)" customClasses="!rounded-xl">
+          @if (currentStep() > 1) {
+            <app-button variant="outline" type="button" (clicked)="goToStep(currentStep() - 1)" customClasses="!rounded-xl">
               <app-icon name="arrow-left" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
               Atras
             </app-button>
@@ -358,11 +371,11 @@ interface TransferItem {
           <app-button variant="outline" type="button" (clicked)="onCancel()" customClasses="!rounded-xl font-bold !text-error !border-error hover:!bg-error/5">
             Cancelar
           </app-button>
-          @if (currentStep < 3) {
+          @if (currentStep() < 3) {
             <app-button
               variant="primary"
               type="button"
-              (clicked)="goToStep(currentStep + 1)"
+              (clicked)="goToStep(currentStep() + 1)"
               [disabled]="!canAdvance()"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
             >
@@ -386,7 +399,7 @@ interface TransferItem {
               type="button"
               (clicked)="onSubmitAndComplete()"
               [loading]="isSubmitting()"
-              [disabled]="isSubmitting() || hasNegativeProjection() || !confirmCreate"
+              [disabled]="isSubmitting() || hasNegativeProjection() || !confirmCreate()"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
             >
               <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon" ></app-icon>
@@ -398,7 +411,7 @@ interface TransferItem {
     </app-modal>
   `,
 })
-export class TransferCreateModalComponent {
+export class TransferCreateModalComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private transfersService = inject(TransfersService);
 
@@ -406,90 +419,109 @@ export class TransferCreateModalComponent {
   readonly isSubmitting = input(false);
   readonly locations = input<SelectorOption[]>([]);
 
+  // Re-emitimos isOpenChange al padre para que pueda sincronizar su signal
+  // showCreateModal cuando el usuario cierra el modal via backdrop, escape o X.
   readonly isOpenChange = output<boolean>();
   readonly cancel = output<void>();
   readonly save = output<CreateTransferRequest>();
   readonly saveAndComplete = output<CreateTransferRequest>();
 
-  currentStep = 1;
-  steps: StepsLineItem[] = [
+  // ─── Wizard state (signals) ────────────────────────────────────────────
+  readonly currentStep = signal(1);
+  readonly steps = signal<StepsLineItem[]>([
     { label: 'UBICACIONES', completed: false },
     { label: 'PRODUCTOS', completed: false },
     { label: 'CONFIRMAR', completed: false },
-  ];
+  ]);
 
   // Step 1
-  selectedFromLocation: number | null = null;
-  selectedToLocation: number | null = null;
-  expectedDate = '';
-  notes = '';
+  readonly selectedFromLocation = signal<number | null>(null);
+  readonly selectedToLocation = signal<number | null>(null);
+  readonly expectedDate = signal('');
+  readonly notes = signal('');
 
   // Step 2
   readonly productSearchRef = viewChild<InputsearchComponent>('productSearch');
-  productSearchResults: TransferableProduct[] = [];
-  confirmCreate = false;
-  transferItems: TransferItem[] = [];
+  readonly productSearchResults = signal<TransferableProduct[]>([]);
+  readonly confirmCreate = signal(false);
+  readonly transferItems = signal<TransferItem[]>([]);
 
-  get locationOptions(): SelectorOption[] {
-    return this.locations();
-  }
+  // ─── Computed (memo + reactive) ────────────────────────────────────────
+  readonly locationOptions = computed<SelectorOption[]>(() => this.locations());
 
-  get filteredToLocations(): SelectorOption[] {
-    if (!this.selectedFromLocation) return this.locations();
-    return this.locations().filter(l => l.value !== this.selectedFromLocation);
-  }
+  readonly filteredToLocations = computed<SelectorOption[]>(() => {
+    const from = this.selectedFromLocation();
+    if (from == null) return this.locations();
+    return this.locations().filter(l => l.value !== from);
+  });
 
-  get modalTitle(): string {
-    if (this.currentStep === 1) return 'Ubicaciones';
-    if (this.currentStep === 2) return 'Agregar Productos';
-    return 'Confirmar Transferencia';
-  }
+  readonly modalTitle = computed<string>(() => {
+    switch (this.currentStep()) {
+      case 1: return 'Ubicaciones';
+      case 2: return 'Agregar Productos';
+      default: return 'Confirmar Transferencia';
+    }
+  });
 
-  constructor() {
-    effect(() => {
-      if (this.isOpen()) {
-        this.resetModal();
-      }
-    });
+  readonly canAdvance = computed<boolean>(() => {
+    if (this.currentStep() === 1) {
+      const from = this.selectedFromLocation();
+      const to = this.selectedToLocation();
+      return !!(from && to && from !== to);
+    }
+    if (this.currentStep() === 2) {
+      const items = this.transferItems();
+      return items.length > 0
+        && items.every(i => i.quantity > 0)
+        && items.every(i => i.quantity <= i.stock_at_origin.quantity_available);
+    }
+    return true;
+  });
+
+  ngOnInit(): void {
+    // Reset inicial una sola vez al montar; ya no usamos effect() reactivo
+    // porque ese patrón disparaba resetModal() en cada fluctuación de isOpen
+    // (por ejemplo, re-mounts del @defer del padre).
+    this.resetModal();
   }
 
   onFromLocationChange(value: any): void {
-    this.selectedFromLocation = value ? +value : null;
-    this.transferItems = [];
-    this.productSearchResults = [];
+    this.selectedFromLocation.set(value ? +value : null);
+    this.transferItems.set([]);
+    this.productSearchResults.set([]);
   }
 
   onToLocationChange(value: any): void {
-    this.selectedToLocation = value ? +value : null;
-    this.transferItems = [];
-    this.productSearchResults = [];
+    this.selectedToLocation.set(value ? +value : null);
+    this.transferItems.set([]);
+    this.productSearchResults.set([]);
   }
 
   searchProducts(term: string): void {
-    if (!term || term.length < 2 || !this.selectedFromLocation || !this.selectedToLocation) {
-      this.productSearchResults = [];
+    if (!term || term.length < 2 || !this.selectedFromLocation() || !this.selectedToLocation()) {
+      this.productSearchResults.set([]);
       return;
     }
 
     this.transfersService.searchTransferableProducts(
       term,
-      this.selectedFromLocation,
-      this.selectedToLocation,
+      this.selectedFromLocation()!,
+      this.selectedToLocation()!,
     ).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (products) => {
-        this.productSearchResults = products.filter(
-          (p) => !this.transferItems.some(ti => ti.product_id === p.id),
+        this.productSearchResults.set(
+          products.filter((p) => !this.transferItems().some(ti => ti.product_id === p.id)),
         );
       },
-      error: () => { this.productSearchResults = []; },
+      error: () => { this.productSearchResults.set([]); },
     });
   }
 
   addProduct(product: TransferableProduct): void {
-    if (this.transferItems.some(ti => ti.product_id === product.id)) return;
+    if (this.transferItems().some(ti => ti.product_id === product.id)) return;
 
-    this.transferItems = [
-      ...this.transferItems,
+    this.transferItems.update(items => [
+      ...items,
       {
         product_id: product.id,
         product_name: product.name,
@@ -498,19 +530,21 @@ export class TransferCreateModalComponent {
         stock_at_origin: product.stock_at_origin,
         stock_at_destination: product.stock_at_destination,
       },
-    ];
-    this.productSearchResults = [];
+    ]);
+    this.productSearchResults.set([]);
     this.productSearchRef()?.clearInput();
   }
 
   removeItem(index: number): void {
-    this.transferItems = this.transferItems.filter((_, i) => i !== index);
+    this.transferItems.update(items => items.filter((_, i) => i !== index));
   }
 
   updateQuantity(index: number, event: Event): void {
     const value = +(event.target as HTMLInputElement).value;
-    this.transferItems = this.transferItems.map((item, i) =>
-      i === index ? { ...item, quantity: Math.max(1, value) } : item,
+    this.transferItems.update(items =>
+      items.map((item, i) =>
+        i === index ? { ...item, quantity: Math.max(1, value) } : item,
+      ),
     );
   }
 
@@ -520,7 +554,7 @@ export class TransferCreateModalComponent {
   }
 
   getTotalQuantity(): number {
-    return this.transferItems.reduce((sum, item) => sum + item.quantity, 0);
+    return this.transferItems().reduce((sum, item) => sum + item.quantity, 0);
   }
 
   getOriginAfter(item: TransferItem): number {
@@ -532,28 +566,13 @@ export class TransferCreateModalComponent {
   }
 
   hasNegativeProjection(): boolean {
-    return this.transferItems.some(i => i.stock_at_origin.quantity_available - i.quantity < 0);
-  }
-
-  canAdvance(): boolean {
-    if (this.currentStep === 1) {
-      return !!(this.selectedFromLocation && this.selectedToLocation && this.selectedFromLocation !== this.selectedToLocation);
-    }
-    if (this.currentStep === 2) {
-      return this.transferItems.length > 0
-        && this.transferItems.every(i => i.quantity > 0)
-        && this.transferItems.every(i => i.quantity <= i.stock_at_origin.quantity_available);
-    }
-    return true;
+    return this.transferItems().some(i => i.stock_at_origin.quantity_available - i.quantity < 0);
   }
 
   goToStep(step: number): void {
-    if (step > this.currentStep && !this.canAdvance()) return;
-    this.currentStep = step;
-    this.steps = this.steps.map((s, i) => ({
-      ...s,
-      completed: i < step - 1,
-    }));
+    if (step > this.currentStep() && !this.canAdvance()) return;
+    this.currentStep.set(step);
+    this.steps.update(arr => arr.map((s, i) => ({ ...s, completed: i < step - 1 })));
   }
 
   onCancel(): void {
@@ -574,15 +593,17 @@ export class TransferCreateModalComponent {
   }
 
   private buildDto(): CreateTransferRequest | null {
-    if (!this.selectedFromLocation || !this.selectedToLocation || this.transferItems.length === 0) return null;
+    const from = this.selectedFromLocation();
+    const to = this.selectedToLocation();
+    if (!from || !to || this.transferItems().length === 0) return null;
     if (this.hasNegativeProjection()) return null;
 
     return {
-      from_location_id: this.selectedFromLocation,
-      to_location_id: this.selectedToLocation,
-      ...(this.expectedDate && { expected_date: this.expectedDate }),
-      ...(this.notes && { notes: this.notes }),
-      items: this.transferItems.map(item => ({
+      from_location_id: from,
+      to_location_id: to,
+      ...(this.expectedDate() && { expected_date: this.expectedDate() }),
+      ...(this.notes() && { notes: this.notes() }),
+      items: this.transferItems().map(item => ({
         product_id: item.product_id,
         quantity: item.quantity,
       })),
@@ -590,19 +611,19 @@ export class TransferCreateModalComponent {
   }
 
   private resetModal(): void {
-    this.currentStep = 1;
-    this.steps = [
+    this.currentStep.set(1);
+    this.steps.set([
       { label: 'UBICACIONES', completed: false },
       { label: 'PRODUCTOS', completed: false },
       { label: 'CONFIRMAR', completed: false },
-    ];
-    this.selectedFromLocation = null;
-    this.selectedToLocation = null;
-    this.expectedDate = '';
-    this.notes = '';
-    this.productSearchResults = [];
-    this.transferItems = [];
-    this.confirmCreate = false;
+    ]);
+    this.selectedFromLocation.set(null);
+    this.selectedToLocation.set(null);
+    this.expectedDate.set('');
+    this.notes.set('');
+    this.productSearchResults.set([]);
+    this.transferItems.set([]);
+    this.confirmCreate.set(false);
     this.productSearchRef()?.clearInput();
   }
 }
