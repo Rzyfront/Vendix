@@ -17,7 +17,7 @@
       >
         <div class="text-center">
           <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
           ></div>
           <p class="mt-2 text-sm text-text-secondary">
             Cargando configuración fiscal...
@@ -40,7 +40,7 @@
               <app-icon
                 name="info"
                 [size]="18"
-                customClasses="text-primary-600"
+                customClasses="text-[var(--color-primary)]"
               ></app-icon>
               <h2
                 class="text-sm font-semibold text-text-primary uppercase tracking-wide"
@@ -58,19 +58,19 @@
           <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
             <div class="rounded-md border border-border px-3 py-2 text-center">
               <p class="text-xs text-text-secondary">Aceptadas</p>
-              <p class="text-lg font-semibold text-green-700">
+              <p class="text-lg font-semibold text-success">
                 {{ stats().accepted }}
               </p>
             </div>
             <div class="rounded-md border border-border px-3 py-2 text-center">
               <p class="text-xs text-text-secondary">Pendientes</p>
-              <p class="text-lg font-semibold text-amber-700">
+              <p class="text-lg font-semibold text-warning">
                 {{ stats().pending }}
               </p>
             </div>
             <div class="rounded-md border border-border px-3 py-2 text-center">
               <p class="text-xs text-text-secondary">Errores</p>
-              <p class="text-lg font-semibold text-red-700">
+              <p class="text-lg font-semibold text-error">
                 {{ stats().errors }}
               </p>
             </div>
@@ -80,12 +80,12 @@
         @if (lastTest(); as test) {
           <div
             class="rounded-md border px-3 py-2 text-sm"
-            [class.border-green-200]="test.ok"
-            [class.bg-green-50]="test.ok"
-            [class.text-green-800]="test.ok"
-            [class.border-red-200]="!test.ok"
-            [class.bg-red-50]="!test.ok"
-            [class.text-red-800]="!test.ok"
+            [class.border-success]="test.ok"
+            [class.bg-success-light]="test.ok"
+            [class.text-success]="test.ok"
+            [class.border-error]="!test.ok"
+            [class.bg-error-light]="!test.ok"
+            [class.text-error]="!test.ok"
           >
             Último test:
             {{
@@ -261,15 +261,15 @@
 
         @if (selectedEnvironment() === 'production' && isEnabled()) {
           <div
-            class="border border-amber-300 bg-amber-50 rounded-md px-4 py-3 space-y-2"
+            class="border border-warning bg-warning-light rounded-md px-4 py-3 space-y-2"
           >
             <div class="flex items-start gap-2">
               <app-icon
                 name="alert-triangle"
                 [size]="18"
-                customClasses="text-amber-600 mt-0.5"
+                customClasses="text-warning mt-0.5"
               ></app-icon>
-              <div class="text-sm text-amber-900">
+              <div class="text-sm text-warning">
                 <p class="font-semibold">Estás activando producción DIAN.</p>
                 <p>
                   Para guardar producción activa, primero debe existir un test
@@ -278,11 +278,11 @@
               </div>
             </div>
             <label
-              class="flex items-center gap-2 text-sm text-amber-900 pt-1 cursor-pointer"
+              class="flex items-center gap-2 text-sm text-warning pt-1 cursor-pointer"
             >
               <input
                 type="checkbox"
-                class="rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+                class="rounded border-warning text-warning focus:ring-warning"
                 formControlName="confirm_production"
               />
               <span>
@@ -294,7 +294,7 @@
               form.errors?.['confirm_production_required'] &&
               form.controls.confirm_production.touched
             ) {
-              <p class="text-xs text-red-700">
+              <p class="text-xs text-error">
                 Debes confirmar para activar producción.
               </p>
             }
@@ -375,10 +375,10 @@
         </div>
 
         @if (status()?.dian_config?.has_certificate) {
-          <div class="text-sm text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
+          <div class="text-sm text-success bg-success-light border border-success rounded-md px-3 py-2">
             Certificado cargado
             @if (status()?.dian_config?.certificate_expiry) {
-              · vence {{ status()?.dian_config?.certificate_expiry | date: 'mediumDate' }}
+              · vence {{ status()?.dian_config?.certificate_expiry | date: 'mediumDate':'UTC' }}
             }
           </div>
         }
@@ -470,7 +470,7 @@
         @if (loadingTransmissions()) {
           <div class="p-8 text-center">
             <div
-              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
             <p class="mt-2 text-text-secondary">Cargando registro...</p>
           </div>
@@ -507,7 +507,7 @@
                         </div>
                       }
                       @if (row.error_message) {
-                        <div class="text-xs text-red-700 truncate max-w-[260px]">
+                        <div class="text-xs text-error truncate max-w-[260px]">
                           {{ row.error_message }}
                         </div>
                       }
@@ -544,7 +544,7 @@
                       <div class="flex justify-end gap-2">
                         @if (row.pdf_url) {
                           <a
-                            class="inline-flex items-center justify-center rounded-md border border-border px-2 py-1 text-xs text-text-primary hover:bg-gray-50"
+                            class="inline-flex items-center justify-center rounded-md border border-border px-2 py-1 text-xs text-text-primary hover:bg-[var(--color-surface-secondary)]"
                             [href]="row.pdf_url"
                             target="_blank"
                             rel="noopener"
@@ -615,7 +615,7 @@
         @if (loadingResolutions()) {
           <div class="p-6 text-center">
             <div
-              class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"
+              class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
             ></div>
             <p class="mt-2 text-sm text-text-secondary">
               Cargando resoluciones...
@@ -654,13 +654,13 @@
                     </td>
                     <td class="py-2 pr-4 text-text-secondary">
                       @if (row.valid_from) {
-                        {{ row.valid_from | date: 'mediumDate' }}
+                        {{ row.valid_from | date: 'mediumDate':'UTC' }}
                       } @else {
                         —
                       }
                       <span class="px-1">→</span>
                       @if (row.valid_to) {
-                        {{ row.valid_to | date: 'mediumDate' }}
+                        {{ row.valid_to | date: 'mediumDate':'UTC' }}
                       } @else {
                         —
                       }
@@ -673,8 +673,8 @@
                         class="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium"
                         [class]="
                           row.is_active
-                            ? 'bg-green-50 text-green-700 border-green-200'
-                            : 'bg-gray-50 text-gray-600 border-gray-200'
+                            ? 'bg-success-light text-success border-success'
+                            : 'bg-[var(--color-surface-secondary)] text-text-secondary border-border'
                         "
                       >
                         {{ row.is_active ? 'Activa' : 'Inactiva' }}
@@ -717,19 +717,19 @@
             <div class="grid grid-cols-3 gap-2 w-full md:w-auto">
               <div class="rounded-md border border-border px-3 py-2 text-center">
                 <p class="text-xs text-text-secondary">Aceptados</p>
-                <p class="text-lg font-semibold text-green-700">
+                <p class="text-lg font-semibold text-success">
                   {{ cfg.stats.accepted }}
                 </p>
               </div>
               <div class="rounded-md border border-border px-3 py-2 text-center">
                 <p class="text-xs text-text-secondary">Pendientes</p>
-                <p class="text-lg font-semibold text-amber-700">
+                <p class="text-lg font-semibold text-warning">
                   {{ cfg.stats.pending }}
                 </p>
               </div>
               <div class="rounded-md border border-border px-3 py-2 text-center">
                 <p class="text-xs text-text-secondary">Errores</p>
-                <p class="text-lg font-semibold text-red-700">
+                <p class="text-lg font-semibold text-error">
                   {{ cfg.stats.errors }}
                 </p>
               </div>
@@ -740,7 +740,7 @@
         @if (loadingVendorSupport()) {
           <div class="p-6 text-center">
             <div
-              class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"
+              class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
             ></div>
             <p class="mt-2 text-sm text-text-secondary">
               Cargando configuración...
@@ -805,7 +805,7 @@
             @if (loadingVendorSupportTransmissions()) {
               <div class="p-6 text-center">
                 <div
-                  class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"
+                  class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
                 ></div>
               </div>
             } @else if (vendorSupportTransmissions().length === 0) {
@@ -858,7 +858,7 @@
                             —
                           }
                         </td>
-                        <td class="py-2 pr-4 text-xs text-red-700 truncate max-w-[220px]">
+                        <td class="py-2 pr-4 text-xs text-error truncate max-w-[220px]">
                           {{ row.error_message || '' }}
                         </td>
                         <td class="py-2 text-right">
@@ -987,7 +987,7 @@
       </div>
 
       @if (resolutionForm.errors?.['rango_final_invalid']) {
-        <p class="text-xs text-red-700">
+        <p class="text-xs text-error">
           El rango final debe ser mayor que el rango inicial.
         </p>
       }
