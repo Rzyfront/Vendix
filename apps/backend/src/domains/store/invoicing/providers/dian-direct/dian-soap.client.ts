@@ -1,4 +1,6 @@
 import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
 import { Injectable, Logger } from '@nestjs/common';
 import { ExclusiveCanonicalization } from 'xml-crypto';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
@@ -116,18 +118,23 @@ export class DianSoapClient {
   ): Promise<DianSendBillResponse> {
     let last_error: Error | null = null;
 
-    // Debug: write SOAP envelope to file for analysis
-    try {
-      const fs = require('fs');
-      const header_end = soap_body.indexOf('<soap:Body>');
-      if (header_end > 0) {
-        fs.writeFileSync(
-          '/tmp/dian_soap_request.xml',
-          soap_body.substring(0, header_end + 100),
-        );
+    // Debug: optionally persist the SOAP envelope header for offline analysis.
+    // Off by default; enable per-request with DIAN_DEBUG_XML=true. Written to the
+    // OS temp dir instead of a hardcoded /tmp path so it stays portable.
+    if (process.env.DIAN_DEBUG_XML === 'true') {
+      try {
+        const header_end = soap_body.indexOf('<soap:Body>');
+        if (header_end > 0) {
+          const debug_path = `${os.tmpdir()}/dian_soap_request.xml`;
+          fs.writeFileSync(
+            debug_path,
+            soap_body.substring(0, header_end + 100),
+          );
+          this.logger.debug(`DIAN SOAP request written to ${debug_path}`);
+        }
+      } catch {
+        /* ignore debug write failures */
       }
-    } catch {
-      /* ignore */
     }
 
     for (let attempt = 1; attempt <= this.max_retries; attempt++) {
