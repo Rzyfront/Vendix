@@ -89,8 +89,12 @@ export const PosCashMovementModal: React.FC<PosCashMovementModalProps> = ({
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cash-session-active'] });
+      // Invalidate la query-key que usa PR #8 (Detail modal) en dev:
+      //   ['cash-movements', sessionId]
+      // Si en el futuro se canoniciza a ['cash-registers', 'movements', id],
+      // este modal también debe actualizar su invalidación. Ver TODO al final.
       queryClient.invalidateQueries({
-        queryKey: ['cash-registers', 'movements', session!.id],
+        queryKey: ['cash-movements', session!.id],
       });
       const label = type === 'cash_in' ? 'Entrada' : 'Salida';
       toastSuccess(`${label} registrada: ${formatCurrency(amount)}`);
