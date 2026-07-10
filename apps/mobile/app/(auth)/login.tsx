@@ -15,6 +15,7 @@ import { isValidEmail } from '@/core/utils/validators';
 import { colors, spacing, borderRadius, typography, colorScales } from '@/shared/theme';
 import { Input } from '@/shared/components/input/input';
 import { Icon } from '@/shared/components/icon/icon';
+import { toastSuccess } from '@/shared/components/toast/toast.store';
 
 const CREDENTIALS_KEY = 'saved_credentials';
 
@@ -101,6 +102,8 @@ export default function LoginScreen() {
         password,
         ...(vlink ? { organization_slug: vlink } : {}),
       });
+      const firstName = response.user?.first_name?.trim();
+      toastSuccess(firstName ? `Bienvenido, ${firstName}` : 'Bienvenido');
       const appType = response.user_settings?.app_type;
       if (appType === 'VENDIX_ADMIN') {
         router.replace('/(super-admin)/dashboard');

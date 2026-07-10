@@ -5,6 +5,7 @@ import { ThemeProvider } from '@/shared/theme';
 import { useFonts, Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { View, ActivityIndicator } from 'react-native';
 import { getQueryClient } from '@/core/api/query-client';
+import { ToastContainer } from '@/shared/components/toast/toast';
 
 const queryClient = getQueryClient();
 
@@ -29,6 +30,8 @@ export default function RootLayout() {
       <ThemeProvider>
         <QueryClientProvider client={queryClient}>
           <Stack screenOptions={{ headerShown: false }} />
+          {/* Toasts globales — cubren TODA la app (incluyendo (auth), splash, modales). */}
+          <ToastContainer />
         </QueryClientProvider>
       </ThemeProvider>
     </SafeAreaProvider>
