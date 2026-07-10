@@ -69,7 +69,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
 
           <!-- Error -->
           @if (error()) {
-            <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm">
+            <div class="bg-error-light p-4 rounded-lg border border-error text-error text-sm">
               <div class="font-medium flex items-center mb-1">
                 <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
                 Error
@@ -83,7 +83,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
       <!-- Step 1: Mapeo de columnas (solo CSV/TXT) -->
       @if (currentStep() === 1) {
         <div class="space-y-4">
-          <div class="bg-blue-50 p-3 rounded-lg border border-blue-100 text-blue-700 text-sm flex items-center">
+          <div class="bg-[var(--color-info-light)] p-3 rounded-lg border border-[var(--color-info)] text-[var(--color-info)] text-sm flex items-center">
             <app-icon name="info" [size]="16" class="mr-2 shrink-0"></app-icon>
             Asigna cada columna del archivo a su campo correspondiente. Vista previa de las primeras filas.
           </div>
@@ -91,15 +91,15 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
           <!-- Preview Table -->
           @if (previewRows().length > 0) {
             <div class="border rounded-lg overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200 text-sm">
-                <thead class="bg-gray-50">
+              <table class="min-w-full divide-y divide-border text-sm">
+                <thead class="bg-[var(--color-surface-secondary)]">
                   <tr>
                     @for (header of previewHeaders(); track header) {
-                      <th class="px-3 py-2 text-left font-medium text-gray-500 whitespace-nowrap">{{ header }}</th>
+                      <th class="px-3 py-2 text-left font-medium text-text-secondary whitespace-nowrap">{{ header }}</th>
                     }
                   </tr>
                 </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
+                <tbody class="bg-[var(--color-surface)] divide-y divide-border">
                   @for (row of previewRows().slice(0, 5); track $index) {
                     <tr>
                       @for (header of previewHeaders(); track header) {
@@ -169,29 +169,29 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
         <div class="space-y-4">
           @if (importing()) {
             <div class="flex flex-col items-center py-12">
-              <app-icon name="loader" [size]="48" class="text-primary-600 mb-4 animate-spin"></app-icon>
-              <p class="text-sm text-gray-500">Importando transacciones...</p>
-              <p class="text-xs text-gray-400 mt-1">Esto puede tomar unos momentos</p>
+              <app-icon name="loader" [size]="48" class="text-[var(--color-primary)] mb-4 animate-spin"></app-icon>
+              <p class="text-sm text-text-secondary">Importando transacciones...</p>
+              <p class="text-xs text-text-secondary mt-1">Esto puede tomar unos momentos</p>
             </div>
           } @else if (importResult()) {
             <!-- Results -->
-            <div class="bg-white border rounded-lg overflow-hidden">
-              <div class="bg-gray-50 p-4 border-b">
+            <div class="bg-[var(--color-surface)] border rounded-lg overflow-hidden">
+              <div class="bg-[var(--color-surface-secondary)] p-4 border-b">
                 <h4 class="font-medium text-gray-900">Resumen de Importacion</h4>
               </div>
               <div class="p-4 grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div class="bg-green-50 p-3 rounded border border-green-100">
-                  <div class="text-sm text-green-600 font-medium">Importadas</div>
-                  <div class="text-2xl font-bold text-green-700">{{ importResult()!.imported }}</div>
+                <div class="bg-success-light p-3 rounded border border-success">
+                  <div class="text-sm text-success font-medium">Importadas</div>
+                  <div class="text-2xl font-bold text-success">{{ importResult()!.imported }}</div>
                 </div>
-                <div class="bg-amber-50 p-3 rounded border border-amber-100">
-                  <div class="text-sm text-amber-600 font-medium">Duplicados</div>
-                  <div class="text-2xl font-bold text-amber-700">{{ importResult()!.duplicates_skipped }}</div>
+                <div class="bg-warning-light p-3 rounded border border-warning">
+                  <div class="text-sm text-warning font-medium">Duplicados</div>
+                  <div class="text-2xl font-bold text-warning">{{ importResult()!.duplicates_skipped }}</div>
                 </div>
                 @if (importResult()!.errors.length) {
-                  <div class="bg-red-50 p-3 rounded border border-red-100">
-                    <div class="text-sm text-red-600 font-medium">Errores</div>
-                    <div class="text-2xl font-bold text-red-700">{{ importResult()!.errors.length }}</div>
+                  <div class="bg-error-light p-3 rounded border border-error">
+                    <div class="text-sm text-error font-medium">Errores</div>
+                    <div class="text-2xl font-bold text-error">{{ importResult()!.errors.length }}</div>
                   </div>
                 }
               </div>
@@ -199,12 +199,12 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
 
             @if (importResult()!.errors.length) {
               <div class="border rounded-lg overflow-hidden">
-                <div class="bg-red-50 p-3 border-b border-red-100 text-red-800 font-medium text-sm flex items-center">
+                <div class="bg-error-light p-3 border-b border-error text-error font-medium text-sm flex items-center">
                   <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
                   Detalle de Errores
                 </div>
-                <div class="max-h-40 overflow-y-auto bg-white p-3">
-                  <ul class="list-disc list-inside space-y-1 text-sm text-red-600">
+                <div class="max-h-40 overflow-y-auto bg-[var(--color-surface)] p-3">
+                  <ul class="list-disc list-inside space-y-1 text-sm text-error">
                     @for (err of importResult()!.errors; track $index) {
                       <li>{{ err }}</li>
                     }
@@ -214,12 +214,12 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
             }
           } @else {
             <!-- Pre-import preview -->
-            <div class="bg-green-50 p-4 rounded-lg border border-green-100">
+            <div class="bg-success-light p-4 rounded-lg border border-success">
               <div class="flex items-center">
-                <app-icon name="check-circle" [size]="24" class="text-green-500 mr-3"></app-icon>
+                <app-icon name="check-circle" [size]="24" class="text-success mr-3"></app-icon>
                 <div>
-                  <h4 class="text-sm font-medium text-green-900">Archivo listo para importar</h4>
-                  <p class="text-sm text-green-700">
+                  <h4 class="text-sm font-medium text-success">Archivo listo para importar</h4>
+                  <p class="text-sm text-success">
                     Se procesaran las transacciones del extracto bancario.
                   </p>
                 </div>
@@ -230,7 +230,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
       }
 
       <!-- Footer -->
-      <div slot="footer" class="flex justify-end gap-3 pt-4 border-t border-gray-200 mt-4">
+      <div slot="footer" class="flex justify-end gap-3 pt-4 border-t border-border mt-4">
         @if (currentStep() === 0) {
           <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
           <app-button variant="primary" (clicked)="goToStep1()" [disabled]="!canAdvanceStep0()">

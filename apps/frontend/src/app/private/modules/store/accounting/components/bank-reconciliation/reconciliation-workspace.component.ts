@@ -1,6 +1,7 @@
 import {Component, inject, signal, computed, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CurrencyPipe, DatePipe } from '@angular/common';
+import { DatePipe, NgClass } from '@angular/common';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ActivatedRoute, Router } from '@angular/router';
 import {
   ButtonComponent,
@@ -29,6 +30,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
     ButtonComponent,
     IconComponent,
     ScrollableTabsComponent,
+    NgClass,
     CurrencyPipe,
     DatePipe,
   ],
@@ -36,23 +38,23 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
     <div class="w-full">
       @if (loading()) {
         <div class="flex items-center justify-center py-24">
-          <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600"></div>
+          <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-[var(--color-primary)]"></div>
         </div>
       } @else if (reconciliation()) {
         <!-- Header -->
         <div class="bg-surface border-b border-border px-3 py-3 md:px-6 md:py-4 sticky top-0 z-20">
           <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div class="flex items-center gap-2">
-              <button (click)="goBack()" class="p-1.5 hover:bg-gray-100 rounded text-gray-500">
+              <button (click)="goBack()" class="p-1.5 hover:bg-[var(--color-surface-secondary)] rounded text-text-secondary">
                 <app-icon name="arrow-left" [size]="18"></app-icon>
               </button>
               <div>
                 <h1 class="text-base md:text-lg font-bold text-text-primary">
                   {{ reconciliation()!.bank_account?.name || 'Conciliacion' }}
                 </h1>
-                <p class="text-xs text-gray-500">
-                  {{ reconciliation()!.period_start | date:'dd/MM/yyyy' }} -
-                  {{ reconciliation()!.period_end | date:'dd/MM/yyyy' }}
+                <p class="text-xs text-text-secondary">
+                  {{ reconciliation()!.period_start | date:'dd/MM/yyyy':'UTC' }} -
+                  {{ reconciliation()!.period_end | date:'dd/MM/yyyy':'UTC' }}
                   <span class="ml-2 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
                         [class]="getStatusClasses(reconciliation()!.status)">
                     {{ getStatusLabel(reconciliation()!.status) }}
@@ -82,23 +84,23 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
 
           <!-- Summary Bar -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-3">
-            <div class="bg-blue-50 rounded-lg px-3 py-2">
-              <div class="text-[10px] text-blue-600 font-semibold uppercase">Saldo Extracto</div>
-              <div class="text-sm font-bold text-blue-800">{{ reconciliation()!.statement_balance | currency:'COP':'symbol-narrow':'1.0-0' }}</div>
+            <div class="bg-[var(--color-info-light)] rounded-lg px-3 py-2">
+              <div class="text-[10px] text-[var(--color-info)] font-semibold uppercase">Saldo Extracto</div>
+              <div class="text-sm font-bold text-[var(--color-info)]">{{ reconciliation()!.statement_balance | currency:0 }}</div>
             </div>
-            <div class="bg-emerald-50 rounded-lg px-3 py-2">
-              <div class="text-[10px] text-emerald-600 font-semibold uppercase">Conciliado</div>
-              <div class="text-sm font-bold text-emerald-800">{{ reconciliation()!.reconciled_balance | currency:'COP':'symbol-narrow':'1.0-0' }}</div>
+            <div class="bg-success-light rounded-lg px-3 py-2">
+              <div class="text-[10px] text-success font-semibold uppercase">Conciliado</div>
+              <div class="text-sm font-bold text-success">{{ reconciliation()!.reconciled_balance | currency:0 }}</div>
             </div>
-            <div class="rounded-lg px-3 py-2" [class]="reconciliation()!.difference === 0 ? 'bg-emerald-50' : 'bg-red-50'">
-              <div class="text-[10px] font-semibold uppercase" [class]="reconciliation()!.difference === 0 ? 'text-emerald-600' : 'text-red-600'">Diferencia</div>
-              <div class="text-sm font-bold" [class]="reconciliation()!.difference === 0 ? 'text-emerald-800' : 'text-red-800'">
-                {{ reconciliation()!.difference | currency:'COP':'symbol-narrow':'1.0-0' }}
+            <div class="rounded-lg px-3 py-2" [class]="reconciliation()!.difference === 0 ? 'bg-success-light' : 'bg-error-light'">
+              <div class="text-[10px] font-semibold uppercase" [class]="reconciliation()!.difference === 0 ? 'text-success' : 'text-error'">Diferencia</div>
+              <div class="text-sm font-bold" [class]="reconciliation()!.difference === 0 ? 'text-success' : 'text-error'">
+                {{ reconciliation()!.difference | currency:0 }}
               </div>
             </div>
-            <div class="bg-amber-50 rounded-lg px-3 py-2">
-              <div class="text-[10px] text-amber-600 font-semibold uppercase">Pendientes</div>
-              <div class="text-sm font-bold text-amber-800">
+            <div class="bg-warning-light rounded-lg px-3 py-2">
+              <div class="text-[10px] text-warning font-semibold uppercase">Pendientes</div>
+              <div class="text-sm font-bold text-warning">
                 {{ (reconciliation()!.unmatched_bank || 0) + (reconciliation()!.unmatched_accounting || 0) }}
               </div>
             </div>
@@ -121,7 +123,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
           <!-- Left Panel: Bank Transactions -->
           <div class="w-full md:w-1/2" [class.hidden]="activeTab() !== 'bank'" [class.md:block]="true">
             <div class="bg-surface rounded-xl border border-border overflow-hidden">
-              <div class="px-3 py-2 border-b border-border bg-gray-50 flex items-center justify-between">
+              <div class="px-3 py-2 border-b border-border bg-[var(--color-surface-secondary)] flex items-center justify-between">
                 <h3 class="text-sm font-bold text-gray-700">
                   <app-icon name="building" [size]="14" class="mr-1 inline"></app-icon>
                   Transacciones Bancarias
@@ -130,7 +132,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
                   @for (f of bankFilters; track f.id) {
                     <button
                       class="text-[10px] font-bold uppercase px-2 py-1 rounded transition-colors"
-                      [class]="bankFilter() === f.id ? 'bg-primary-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'"
+                      [class]="bankFilter() === f.id ? 'bg-primary text-[var(--color-text-on-primary)]' : 'bg-[var(--color-surface)] text-text-secondary hover:bg-[var(--color-surface-secondary)]'"
                       (click)="bankFilter.set(f.id)">
                       {{ f.label }}
                     </button>
@@ -141,32 +143,32 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
                 @for (tx of filteredBankTxs(); track tx.id) {
                   <div
                     class="px-3 py-2 cursor-pointer transition-colors"
-                    [class.bg-blue-50]="selectedBankTx()?.id === tx.id"
-                    [class.border-l-4]="selectedBankTx()?.id === tx.id"
-                    [class.border-l-blue-500]="selectedBankTx()?.id === tx.id"
-                    [class.opacity-50]="tx.is_reconciled"
+                    [ngClass]="{
+                      'bg-[var(--color-info-light)] border-l-4 border-l-[var(--color-info)]': selectedBankTx()?.id === tx.id,
+                      'opacity-50': tx.is_reconciled
+                    }"
                     (click)="selectBankTx(tx)">
                     <div class="flex items-center justify-between">
                       <div class="min-w-0 flex-1">
                         <div class="text-sm text-text-primary truncate">{{ tx.description }}</div>
                         <div class="flex items-center gap-2 mt-0.5">
-                          <span class="text-[10px] text-gray-400">{{ tx.transaction_date | date:'dd/MM/yyyy' }}</span>
+                          <span class="text-[10px] text-text-secondary">{{ tx.transaction_date | date:'dd/MM/yyyy':'UTC' }}</span>
                           @if (tx.reference) {
-                            <span class="text-[10px] font-mono text-gray-400">Ref: {{ tx.reference }}</span>
+                            <span class="text-[10px] font-mono text-text-secondary">Ref: {{ tx.reference }}</span>
                           }
                           @if (tx.is_reconciled) {
-                            <span class="text-[10px] bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded font-bold">Conciliada</span>
+                            <span class="text-[10px] bg-success-light text-success px-1.5 py-0.5 rounded font-bold">Conciliada</span>
                           }
                         </div>
                       </div>
                       <span class="text-sm font-semibold whitespace-nowrap ml-2"
-                            [class]="tx.type === 'credit' ? 'text-emerald-600' : 'text-red-500'">
-                        {{ tx.type === 'credit' ? '+' : '-' }}{{ tx.amount | currency:'COP':'symbol-narrow':'1.0-0' }}
+                            [class]="tx.type === 'credit' ? 'text-success' : 'text-error'">
+                        {{ tx.type === 'credit' ? '+' : '-' }}{{ tx.amount | currency:0 }}
                       </span>
                     </div>
                   </div>
                 } @empty {
-                  <div class="flex flex-col items-center justify-center py-12 text-gray-400">
+                  <div class="flex flex-col items-center justify-center py-12 text-text-secondary">
                     <app-icon name="inbox" [size]="36"></app-icon>
                     <p class="mt-2 text-sm">Sin transacciones</p>
                   </div>
@@ -178,7 +180,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
           <!-- Right Panel: Accounting Entries -->
           <div class="w-full md:w-1/2 mt-3 md:mt-0" [class.hidden]="activeTab() !== 'accounting'" [class.md:block]="true">
             <div class="bg-surface rounded-xl border border-border overflow-hidden">
-              <div class="px-3 py-2 border-b border-border bg-gray-50 flex items-center justify-between">
+              <div class="px-3 py-2 border-b border-border bg-[var(--color-surface-secondary)] flex items-center justify-between">
                 <h3 class="text-sm font-bold text-gray-700">
                   <app-icon name="book-open" [size]="14" class="mr-1 inline"></app-icon>
                   Asientos Contables
@@ -187,7 +189,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
                   @for (f of accountingFilters; track f.id) {
                     <button
                       class="text-[10px] font-bold uppercase px-2 py-1 rounded transition-colors"
-                      [class]="accountingFilter() === f.id ? 'bg-primary-600 text-white' : 'bg-white text-gray-500 hover:bg-gray-100'"
+                      [class]="accountingFilter() === f.id ? 'bg-primary text-[var(--color-text-on-primary)]' : 'bg-[var(--color-surface)] text-text-secondary hover:bg-[var(--color-surface-secondary)]'"
                       (click)="accountingFilter.set(f.id)">
                       {{ f.label }}
                     </button>
@@ -206,26 +208,26 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
                     <div class="flex items-center justify-between">
                       <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
-                          <span class="text-[10px] font-mono text-gray-400">{{ entry.entry_number }}</span>
+                          <span class="text-[10px] font-mono text-text-secondary">{{ entry.entry_number }}</span>
                           <span class="text-sm text-text-primary truncate">{{ entry.description || 'Sin descripcion' }}</span>
                         </div>
                         <div class="flex items-center gap-2 mt-0.5">
-                          <span class="text-[10px] text-gray-400">{{ entry.entry_date | date:'dd/MM/yyyy' }}</span>
-                          <span class="text-[10px] text-gray-400">{{ entry.entry_type }}</span>
+                          <span class="text-[10px] text-text-secondary">{{ entry.entry_date | date:'dd/MM/yyyy':'UTC' }}</span>
+                          <span class="text-[10px] text-text-secondary">{{ entry.entry_type }}</span>
                           @if (isEntryMatched(entry.id)) {
-                            <span class="text-[10px] bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded font-bold">Conciliado</span>
+                            <span class="text-[10px] bg-success-light text-success px-1.5 py-0.5 rounded font-bold">Conciliado</span>
                           }
                         </div>
                       </div>
                       <div class="text-right ml-2 whitespace-nowrap">
                         <div class="text-sm font-semibold text-text-primary">
-                          {{ entry.total_debit | currency:'COP':'symbol-narrow':'1.0-0' }}
+                          {{ entry.total_debit | currency:0 }}
                         </div>
                       </div>
                     </div>
                   </div>
                 } @empty {
-                  <div class="flex flex-col items-center justify-center py-12 text-gray-400">
+                  <div class="flex flex-col items-center justify-center py-12 text-text-secondary">
                     <app-icon name="inbox" [size]="36"></app-icon>
                     <p class="mt-2 text-sm">Sin asientos contables</p>
                   </div>
@@ -239,7 +241,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
         @if (matches().length > 0) {
           <div class="px-2 md:px-4 pb-4">
             <div class="bg-surface rounded-xl border border-border overflow-hidden">
-              <div class="px-3 py-2 border-b border-border bg-gray-50">
+              <div class="px-3 py-2 border-b border-border bg-[var(--color-surface-secondary)]">
                 <h3 class="text-sm font-bold text-gray-700">
                   <app-icon name="link" [size]="14" class="mr-1 inline"></app-icon>
                   Partidas Conciliadas ({{ matches().length }})
@@ -251,21 +253,21 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
                     <div class="min-w-0 flex-1">
                       <div class="flex items-center gap-2 text-sm">
                         <span class="text-gray-700 truncate">{{ match.bank_transaction?.description || 'Tx #' + match.bank_transaction_id }}</span>
-                        <app-icon name="arrow-right" [size]="12" class="text-gray-400 shrink-0"></app-icon>
+                        <app-icon name="arrow-right" [size]="12" class="text-text-secondary shrink-0"></app-icon>
                         <span class="text-gray-700 truncate">{{ match.accounting_entry?.entry_number || 'Asiento #' + match.accounting_entry_id }}</span>
                       </div>
                       <div class="flex items-center gap-2 mt-0.5">
                         <span class="text-[10px] px-1.5 py-0.5 rounded font-bold"
-                              [class]="match.match_type === 'auto' ? 'bg-blue-100 text-blue-600' : 'bg-purple-100 text-purple-600'">
+                              [class]="match.match_type === 'auto' ? 'bg-[var(--color-info-light)] text-[var(--color-info)]' : 'bg-purple-100 text-purple-600'">
                           {{ match.match_type === 'auto' ? 'Auto' : 'Manual' }}
                         </span>
                         @if (match.confidence_score) {
-                          <span class="text-[10px] text-gray-400">{{ match.confidence_score }}% confianza</span>
+                          <span class="text-[10px] text-text-secondary">{{ match.confidence_score }}% confianza</span>
                         }
                       </div>
                     </div>
                     @if (reconciliation()!.status !== 'completed') {
-                      <button (click)="unmatchItem(match)" class="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500 ml-2">
+                      <button (click)="unmatchItem(match)" class="p-1.5 hover:bg-error-light rounded text-text-secondary hover:text-error ml-2">
                         <app-icon name="x" [size]="14"></app-icon>
                       </button>
                     }
@@ -488,10 +490,10 @@ export class ReconciliationWorkspaceComponent {
 
   getStatusClasses(status: string): string {
     const classes: Record<string, string> = {
-      draft: 'bg-gray-100 text-gray-500',
-      in_progress: 'bg-amber-50 text-amber-600',
-      completed: 'bg-emerald-50 text-emerald-600',
+      draft: 'bg-[var(--color-surface-secondary)] text-text-secondary',
+      in_progress: 'bg-warning-light text-warning',
+      completed: 'bg-success-light text-success',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 }

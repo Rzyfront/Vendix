@@ -1,6 +1,6 @@
 import {Component, inject, signal, computed, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CurrencyPipe } from '@angular/common';
+import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { Router } from '@angular/router';
 import {
   ButtonComponent,
@@ -133,15 +133,15 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
               ></div>
             </div>
           }
 
           <!-- Table Header (desktop) -->
           <div
-            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg
-                      text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1"
+            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-[var(--color-surface-secondary)] rounded-lg
+                      text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1"
           >
             <div class="col-span-3">Nombre</div>
             <div class="col-span-2">Banco</div>
@@ -153,7 +153,7 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
 
           @if (filteredAccounts().length === 0) {
             <div
-              class="flex flex-col items-center justify-center py-16 text-gray-400"
+              class="flex flex-col items-center justify-center py-16 text-text-secondary"
             >
               <app-icon name="landmark" [size]="48"></app-icon>
               <p class="mt-4 text-base">No se encontraron cuentas bancarias</p>
@@ -183,18 +183,18 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                           class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded"
                           [class]="
                             account.status === 'active'
-                              ? 'bg-emerald-50 text-emerald-600'
-                              : 'bg-gray-100 text-gray-400'
+                              ? 'bg-success-light text-success'
+                              : 'bg-[var(--color-surface-secondary)] text-text-secondary'
                           "
                         >
                           {{ getStatusLabel(account.status) }}
                         </span>
                       </div>
                       <div class="flex items-center gap-2 mt-1">
-                        <span class="text-xs text-gray-500">{{
+                        <span class="text-xs text-text-secondary">{{
                           account.bank_name
                         }}</span>
-                        <span class="text-xs font-mono text-gray-400">{{
+                        <span class="text-xs font-mono text-text-secondary">{{
                           account.account_number
                         }}</span>
                       </div>
@@ -203,18 +203,18 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                           class="text-sm font-semibold"
                           [class]="
                             account.current_balance >= 0
-                              ? 'text-emerald-600'
-                              : 'text-red-500'
+                              ? 'text-success'
+                              : 'text-error'
                           "
                         >
                           {{
                             account.current_balance
-                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                              | currency: 0
                           }}
                         </span>
                         @if (account.unreconciled_count) {
                           <span
-                            class="ml-2 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold"
+                            class="ml-2 text-[10px] bg-warning-light text-warning px-1.5 py-0.5 rounded-full font-bold"
                           >
                             {{ account.unreconciled_count }} pendientes
                           </span>
@@ -224,13 +224,13 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                     <div class="flex items-center gap-1 ml-2">
                       <button
                         (click)="editAccount(account)"
-                        class="p-1.5 rounded border border-blue-200 bg-blue-50 text-blue-500 hover:bg-blue-100"
+                        class="p-1.5 rounded border border-[var(--color-info)] bg-[var(--color-info-light)] text-[var(--color-info)] hover:opacity-90"
                       >
                         <app-icon name="edit" [size]="14"></app-icon>
                       </button>
                       <button
                         (click)="onDeleteAccount(account)"
-                        class="p-1.5 rounded border border-red-200 bg-red-50 text-red-400 hover:bg-red-100 hover:text-red-500"
+                        class="p-1.5 rounded border border-error bg-error-light text-error hover:opacity-90"
                       >
                         <app-icon name="trash-2" [size]="14"></app-icon>
                       </button>
@@ -240,7 +240,7 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
 
                 <!-- Desktop Row -->
                 <div
-                  class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors"
+                  class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-[var(--color-surface-secondary)] transition-colors"
                 >
                   <div
                     class="col-span-3 text-sm text-text-primary font-medium truncate"
@@ -250,24 +250,24 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                   <div class="col-span-2 text-sm text-gray-600 truncate">
                     {{ account.bank_name }}
                   </div>
-                  <div class="col-span-2 text-sm font-mono text-gray-500">
+                  <div class="col-span-2 text-sm font-mono text-text-secondary">
                     {{ account.account_number }}
                   </div>
                   <div
                     class="col-span-2 text-sm text-right font-semibold"
                     [class]="
                       account.current_balance >= 0
-                        ? 'text-emerald-600'
-                        : 'text-red-500'
+                        ? 'text-success'
+                        : 'text-error'
                     "
                   >
                     {{
                       account.current_balance
-                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                        | currency: 0
                     }}
                     @if (account.unreconciled_count) {
                       <span
-                        class="ml-1 text-[10px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full font-bold"
+                        class="ml-1 text-[10px] bg-warning-light text-warning px-1.5 py-0.5 rounded-full font-bold"
                       >
                         {{ account.unreconciled_count }}
                       </span>
@@ -278,10 +278,10 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                       class="text-xs px-2 py-0.5 rounded-full"
                       [class]="
                         account.status === 'active'
-                          ? 'bg-emerald-50 text-emerald-600'
+                          ? 'bg-success-light text-success'
                           : account.status === 'closed'
-                            ? 'bg-red-50 text-red-500'
-                            : 'bg-gray-100 text-gray-400'
+                            ? 'bg-error-light text-error'
+                            : 'bg-[var(--color-surface-secondary)] text-text-secondary'
                       "
                     >
                       {{ getStatusLabel(account.status) }}
@@ -290,13 +290,13 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
                   <div class="col-span-2 flex items-center justify-end gap-1">
                     <button
                       (click)="editAccount(account)"
-                      class="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary-600"
+                      class="p-1.5 hover:bg-[var(--color-surface-secondary)] rounded text-text-secondary hover:text-[var(--color-primary)]"
                     >
                       <app-icon name="edit" [size]="14"></app-icon>
                     </button>
                     <button
                       (click)="onDeleteAccount(account)"
-                      class="p-1.5 hover:bg-red-50 rounded text-gray-400 hover:text-red-500"
+                      class="p-1.5 hover:bg-error-light rounded text-text-secondary hover:text-error"
                     >
                       <app-icon name="trash-2" [size]="14"></app-icon>
                     </button>
