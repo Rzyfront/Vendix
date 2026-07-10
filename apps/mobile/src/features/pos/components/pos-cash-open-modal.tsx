@@ -31,10 +31,24 @@ export interface PosCashOpenModalProps {
   onClose: () => void;
 }
 
-const parseAmount = (text: string): number => {
-  const normalized = text.replace(',', '.').replace(/[^0-9.]/g, '');
+/**
+ * Parsea texto de monto de forma estricta.
+ *
+ * Devuelve `null` si el texto no representa un número válido (vacío, contiene
+ * caracteres no numéricos como letras o símbolos, etc.) — antes se coercía
+ * silenciosamente a `0`, lo cual permitía enviar `opening_amount: 0` al backend
+ * con el modal aún marcado como válido.
+ *
+ * Acepta separadores de miles `.` o `,` como punto decimal (es-CO).
+ */
+const parseAmount = (text: string): number | null => {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const normalized = trimmed.replace(',', '.');
+  // Solo dígitos, un único punto decimal opcional y signo negativo opcional
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return null;
   const n = Number(normalized);
-  return Number.isFinite(n) ? n : 0;
+  return Number.isFinite(n) ? n : null;
 };
 
 export const PosCashOpenModal: React.FC<PosCashOpenModalProps> = ({ visible, onClose }) => {
@@ -66,10 +80,14 @@ export const PosCashOpenModal: React.FC<PosCashOpenModalProps> = ({ visible, onC
 
   const selectedRegister = registers.find((r) => r.id === selectedRegisterId) ?? null;
   const amount = parseAmount(amountText);
-  const isValid = selectedRegisterId != null && amountText.trim().length > 0 && amount >= 0;
+  // `amount == null` ⇒ texto inválido o vacío; el botón se mantiene deshabilitado.
+  // `amount >= 0` permite apertura con monto 0 (registros sin default_opening_amount).
+  const isValid =
+    selectedRegisterId != null && amount != null && amount >= 0;
 
   const openMutation = useMutation({
-    mutationFn: () => CashRegisterService.openSession(selectedRegisterId!, amount),
+    // `amount!` es seguro — `isValid` arriba garantiza `amount != null` antes de habilitar el submit.
+    mutationFn: () => CashRegisterService.openSession(selectedRegisterId!, amount!),
     onSuccess: (session) => {
       setActiveSession(session);
       queryClient.invalidateQueries({ queryKey: ['cash-session-active'] });

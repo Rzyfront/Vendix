@@ -36,10 +36,24 @@ export interface PosCashCloseModalProps {
   session: CashRegisterSession | null;
 }
 
-const parseAmount = (text: string): number => {
-  const normalized = text.replace(',', '.').replace(/[^0-9.]/g, '');
+/**
+ * Parsea texto de monto de forma estricta.
+ *
+ * Devuelve `null` si el texto no representa un número válido (vacío, contiene
+ * caracteres no numéricos como letras o símbolos, etc.) — antes se coercía
+ * silenciosamente a `0`, lo cual permitía cerrar una sesión de caja con un
+ * conteo ficticio de 0 sin disparar ninguna validación visible al cashier.
+ *
+ * Acepta separadores de miles `.` o `,` como punto decimal (es-CO).
+ */
+const parseAmount = (text: string): number | null => {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  const normalized = trimmed.replace(',', '.');
+  // Solo dígitos, un único punto decimal opcional y signo negativo opcional
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return null;
   const n = Number(normalized);
-  return Number.isFinite(n) ? n : 0;
+  return Number.isFinite(n) ? n : null;
 };
 
 const formatCurrency = (n: number | null | undefined): string => {
@@ -84,14 +98,17 @@ export const PosCashCloseModal: React.FC<PosCashCloseModalProps> = ({
 
   const actual = parseAmount(actualText);
   const expected = session?.expected_closing_amount ?? null;
-  const difference = expected != null ? actual - expected : null;
-  const isValid = session != null && actualText.trim().length > 0 && actual >= 0;
+  const difference = expected != null && actual != null ? actual - expected : null;
+  // `actual == null` ⇒ texto inválido o vacío; el botón se mantiene deshabilitado.
+  // `actual > 0` exige un conteo real (>= 1) — cerrar con 0 sería un conteo ficticio.
+  const isValid = session != null && actual != null && actual > 0;
 
   const closeMutation = useMutation({
     mutationFn: () =>
+      // `actual!` es seguro — `isValid` arriba garantiza `actual != null` antes de habilitar el submit.
       CashRegisterService.closeSession(
         session!.id,
-        actual,
+        actual!,
         notes.trim() || undefined,
       ),
     onSuccess: () => {
