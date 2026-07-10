@@ -107,9 +107,9 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
       @if (loading()) {
         <!-- Skeleton de carga -->
         <div class="space-y-4 animate-pulse" aria-hidden="true">
-          <div class="h-12 rounded-xl bg-gray-200"></div>
-          <div class="h-72 rounded-xl bg-gray-200"></div>
-          <div class="h-56 rounded-xl bg-gray-200"></div>
+          <div class="h-12 rounded-xl bg-[var(--color-surface-secondary)]"></div>
+          <div class="h-72 rounded-xl bg-[var(--color-surface-secondary)]"></div>
+          <div class="h-56 rounded-xl bg-[var(--color-surface-secondary)]"></div>
         </div>
       } @else if (loadError()) {
         <app-card>
@@ -117,7 +117,7 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
             <app-icon
               name="alert-triangle"
               [size]="32"
-              class="text-amber-500"
+              class="text-warning"
             ></app-icon>
             <p class="text-sm font-medium text-text-primary">
               No pudimos cargar tu identidad fiscal
@@ -208,7 +208,7 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
                     >
                       <span>{{ entry.label }}</span>
                       <span
-                        class="text-[11px] font-semibold text-primary-700 bg-primary-600/10 rounded px-1.5 py-0.5"
+                        class="text-[11px] font-semibold text-[var(--color-primary)] bg-[var(--color-primary-light)] rounded px-1.5 py-0.5"
                       >
                         {{ entry.code }}
                       </span>
@@ -241,7 +241,7 @@ const VALID_VAT_PERIODICITIES: FiscalVatPeriodicity[] = [
                 <!-- Periodicidad de IVA: solo visible con O-48 encendido -->
                 @if (entry.code === vatResponsibleCode && showVatSelector()) {
                   <div
-                    class="mt-3 ml-1 rounded-lg border border-border bg-surface p-3 md:max-w-md"
+                    class="mt-3 ml-1 rounded-lg border border-border bg-[var(--color-surface)] p-3 md:max-w-md"
                   >
                     <div
                       class="flex items-center gap-1.5 text-sm font-medium text-text-primary mb-2"
