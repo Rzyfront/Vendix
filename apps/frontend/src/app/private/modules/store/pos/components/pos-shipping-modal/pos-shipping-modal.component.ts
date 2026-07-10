@@ -6,6 +6,7 @@ import {
   ElementRef,
   inject,
   effect,
+  untracked,
   signal,
   computed,
   DestroyRef } from '@angular/core';
@@ -971,7 +972,20 @@ export class PosShippingModalComponent {
     effect(() => {
       if (this.isOpen() === true) {
         this.resetState();
-        void this.loadAddressesForCartCustomer();
+        // `loadAddressesForCartCustomer` reads `cartState` synchronously at
+        // the top of its body (before the first `await`). If invoked
+        // directly, that synchronous read happens INSIDE this effect's
+        // reactive context — making `cartState` a dependency. Then when the
+        // user picks a customer mid-session, `cartState.customer` changes,
+        // this effect re-fires, and `resetState()` wipes all shipping state
+        // (selectedShippingMethod, payment, address form, etc.).
+        //
+        // Wrap the call in `untracked()` so the synchronous reads inside
+        // don't create dependencies on `cartState`. The effect now only
+        // depends on `isOpen()`.
+        untracked(() => {
+          void this.loadAddressesForCartCustomer();
+        });
       }
     });
   }
