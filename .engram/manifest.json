@@ -528,22 +528,6 @@
       "sessions": 1,
       "memories": 3,
       "prompts": 0
-    },
-    {
-      "id": "136e7657",
-      "created_by": "yoner",
-      "created_at": "2026-07-09T20:29:37Z",
-      "sessions": 1,
-      "memories": 0,
-      "prompts": 0
-    },
-    {
-      "id": "de3341d9",
-      "created_by": "yoner",
-      "created_at": "2026-07-10T15:29:57Z",
-      "sessions": 0,
-      "memories": 3,
-      "prompts": 0
     }
   ]
 }
