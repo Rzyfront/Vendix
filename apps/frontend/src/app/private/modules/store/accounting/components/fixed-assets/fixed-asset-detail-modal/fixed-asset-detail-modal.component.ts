@@ -1,10 +1,11 @@
 import {Component, input, output, inject, effect, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { DatePipe, CurrencyPipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
 import { AccountingService } from '../../../services/accounting.service';
+import { CurrencyPipe } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import {
   FixedAsset,
   DepreciationScheduleEntry,
@@ -44,63 +45,63 @@ import {
           <!-- Asset Info -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p class="text-xs text-gray-500">Numero</p>
+              <p class="text-xs text-text-secondary">Numero</p>
               <p class="text-sm font-mono font-semibold">{{ asset()?.asset_number }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Categoria</p>
+              <p class="text-xs text-text-secondary">Categoria</p>
               <p class="text-sm font-medium">{{ asset()?.category?.name || '—' }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Estado</p>
+              <p class="text-xs text-text-secondary">Estado</p>
               <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
                     [class]="getStatusClass(asset()?.status ?? '')">
                 {{ getStatusLabel(asset()?.status ?? '') }}
               </span>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Metodo</p>
+              <p class="text-xs text-text-secondary">Metodo</p>
               <p class="text-sm">{{ asset()?.depreciation_method === 'straight_line' ? 'Linea Recta' : 'Saldo Decreciente' }}</p>
             </div>
           </div>
 
           <!-- Financial Summary -->
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-[var(--color-surface-secondary)] rounded-lg">
             <div>
-              <p class="text-xs text-gray-500">Costo Adquisicion</p>
-              <p class="text-sm font-semibold font-mono">{{ asset()?.acquisition_cost | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
+              <p class="text-xs text-text-secondary">Costo Adquisicion</p>
+              <p class="text-sm font-semibold font-mono">{{ asset()?.acquisition_cost | currency:0 }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Deprec. Acumulada</p>
-              <p class="text-sm font-semibold font-mono text-red-500">{{ asset()?.accumulated_depreciation | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
+              <p class="text-xs text-text-secondary">Deprec. Acumulada</p>
+              <p class="text-sm font-semibold font-mono text-error">{{ asset()?.accumulated_depreciation | currency:0 }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Valor en Libros</p>
-              <p class="text-sm font-bold font-mono text-primary-600">{{ (asset()?.book_value ?? 0) | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
+              <p class="text-xs text-text-secondary">Valor en Libros</p>
+              <p class="text-sm font-bold font-mono text-[var(--color-primary)]">{{ (asset()?.book_value ?? 0) | currency:0 }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Valor Residual</p>
-              <p class="text-sm font-semibold font-mono">{{ asset()?.salvage_value | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
+              <p class="text-xs text-text-secondary">Valor Residual</p>
+              <p class="text-sm font-semibold font-mono">{{ asset()?.salvage_value | currency:0 }}</p>
             </div>
           </div>
 
           <!-- Dates -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p class="text-xs text-gray-500">Fecha Adquisicion</p>
-              <p class="text-sm">{{ asset()?.acquisition_date | date:'dd/MM/yyyy' }}</p>
+              <p class="text-xs text-text-secondary">Fecha Adquisicion</p>
+              <p class="text-sm">{{ asset()?.acquisition_date | date:'dd/MM/yyyy':'UTC' }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Inicio Depreciacion</p>
-              <p class="text-sm">{{ asset()?.depreciation_start_date ? (asset()?.depreciation_start_date | date:'dd/MM/yyyy') : '—' }}</p>
+              <p class="text-xs text-text-secondary">Inicio Depreciacion</p>
+              <p class="text-sm">{{ asset()?.depreciation_start_date ? (asset()?.depreciation_start_date | date:'dd/MM/yyyy':'UTC') : '—' }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Vida Util</p>
+              <p class="text-xs text-text-secondary">Vida Util</p>
               <p class="text-sm">{{ asset()?.useful_life_months }} meses</p>
             </div>
             @if (asset()?.description) {
               <div>
-                <p class="text-xs text-gray-500">Descripcion</p>
+                <p class="text-xs text-text-secondary">Descripcion</p>
                 <p class="text-sm">{{ asset()?.description }}</p>
               </div>
             }
@@ -108,8 +109,8 @@ import {
 
           @if (asset()?.notes) {
             <div>
-              <p class="text-xs text-gray-500">Notas</p>
-              <p class="text-sm text-gray-700">{{ asset()?.notes }}</p>
+              <p class="text-xs text-text-secondary">Notas</p>
+              <p class="text-sm text-text-primary">{{ asset()?.notes }}</p>
             </div>
           }
 
@@ -118,14 +119,14 @@ import {
             <div class="flex gap-4">
               <button
                 class="py-2 px-1 text-sm font-medium border-b-2 transition-colors"
-                [class]="active_tab === 'schedule' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                [class]="active_tab === 'schedule' ? 'border-[var(--color-primary)] text-[var(--color-primary)]' : 'border-transparent text-text-secondary hover:text-text-primary'"
                 (click)="active_tab = 'schedule'"
               >
                 Depreciacion Proyectada
               </button>
               <button
                 class="py-2 px-1 text-sm font-medium border-b-2 transition-colors"
-                [class]="active_tab === 'history' ? 'border-primary-600 text-primary-600' : 'border-transparent text-gray-500 hover:text-gray-700'"
+                [class]="active_tab === 'history' ? 'border-[var(--color-primary)] text-[var(--color-primary)]' : 'border-transparent text-text-secondary hover:text-text-primary'"
                 (click)="active_tab = 'history'"
               >
                 Historial Ejecutado
@@ -137,15 +138,15 @@ import {
           @if (active_tab === 'schedule') {
             @if (is_loading_schedule) {
               <div class="flex justify-center py-8">
-                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-primary)]"></div>
               </div>
             } @else if (schedule.length === 0) {
-              <p class="text-sm text-gray-400 text-center py-6">No hay cronograma disponible.</p>
+              <p class="text-sm text-text-secondary text-center py-6">No hay cronograma disponible.</p>
             } @else {
               <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                   <thead>
-                    <tr class="text-xs text-gray-500 uppercase bg-gray-50">
+                    <tr class="text-xs text-text-secondary uppercase bg-[var(--color-surface-secondary)]">
                       <th class="px-3 py-2 text-left">Mes</th>
                       <th class="px-3 py-2 text-left">Periodo</th>
                       <th class="px-3 py-2 text-right">Depreciacion</th>
@@ -155,12 +156,12 @@ import {
                   </thead>
                   <tbody class="divide-y divide-border">
                     @for (entry of schedule; track entry.month) {
-                      <tr class="hover:bg-gray-50">
+                      <tr class="hover:bg-[var(--color-surface-secondary)]">
                         <td class="px-3 py-2">{{ entry.month }}</td>
-                        <td class="px-3 py-2">{{ entry.period_date | date:'MM/yyyy' }}</td>
-                        <td class="px-3 py-2 text-right font-mono">{{ entry.depreciation_amount | currency:'COP':'symbol-narrow':'1.0-0' }}</td>
-                        <td class="px-3 py-2 text-right font-mono text-red-500">{{ entry.accumulated_total | currency:'COP':'symbol-narrow':'1.0-0' }}</td>
-                        <td class="px-3 py-2 text-right font-mono font-semibold">{{ entry.book_value | currency:'COP':'symbol-narrow':'1.0-0' }}</td>
+                        <td class="px-3 py-2">{{ entry.period_date | date:'MM/yyyy':'UTC' }}</td>
+                        <td class="px-3 py-2 text-right font-mono">{{ entry.depreciation_amount | currency:0 }}</td>
+                        <td class="px-3 py-2 text-right font-mono text-error">{{ entry.accumulated_total | currency:0 }}</td>
+                        <td class="px-3 py-2 text-right font-mono font-semibold">{{ entry.book_value | currency:0 }}</td>
                       </tr>
                     }
                   </tbody>
@@ -173,15 +174,15 @@ import {
           @if (active_tab === 'history') {
             @if (is_loading_history) {
               <div class="flex justify-center py-8">
-                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-600"></div>
+                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-[var(--color-primary)]"></div>
               </div>
             } @else if (history.length === 0) {
-              <p class="text-sm text-gray-400 text-center py-6">No se han ejecutado depreciaciones aun.</p>
+              <p class="text-sm text-text-secondary text-center py-6">No se han ejecutado depreciaciones aun.</p>
             } @else {
               <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                   <thead>
-                    <tr class="text-xs text-gray-500 uppercase bg-gray-50">
+                    <tr class="text-xs text-text-secondary uppercase bg-[var(--color-surface-secondary)]">
                       <th class="px-3 py-2 text-left">Periodo</th>
                       <th class="px-3 py-2 text-right">Monto</th>
                       <th class="px-3 py-2 text-right">Acumulada</th>
@@ -191,14 +192,14 @@ import {
                   </thead>
                   <tbody class="divide-y divide-border">
                     @for (entry of history; track entry.id) {
-                      <tr class="hover:bg-gray-50">
-                        <td class="px-3 py-2">{{ entry.period_date | date:'MM/yyyy' }}</td>
-                        <td class="px-3 py-2 text-right font-mono">{{ entry.depreciation_amount | currency:'COP':'symbol-narrow':'1.0-0' }}</td>
-                        <td class="px-3 py-2 text-right font-mono text-red-500">{{ entry.accumulated_total | currency:'COP':'symbol-narrow':'1.0-0' }}</td>
-                        <td class="px-3 py-2 text-right font-mono font-semibold">{{ entry.book_value | currency:'COP':'symbol-narrow':'1.0-0' }}</td>
+                      <tr class="hover:bg-[var(--color-surface-secondary)]">
+                        <td class="px-3 py-2">{{ entry.period_date | date:'MM/yyyy':'UTC' }}</td>
+                        <td class="px-3 py-2 text-right font-mono">{{ entry.depreciation_amount | currency:0 }}</td>
+                        <td class="px-3 py-2 text-right font-mono text-error">{{ entry.accumulated_total | currency:0 }}</td>
+                        <td class="px-3 py-2 text-right font-mono font-semibold">{{ entry.book_value | currency:0 }}</td>
                         <td class="px-3 py-2 text-center">
                           <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-                                [class]="entry.status === 'posted' ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'">
+                                [class]="entry.status === 'posted' ? 'bg-success-light text-success' : 'bg-warning-light text-warning'">
                             {{ entry.status === 'posted' ? 'Contabilizado' : 'Pendiente' }}
                           </span>
                         </td>
@@ -213,7 +214,7 @@ import {
           <!-- Actions (only for active assets) -->
           @if (asset()?.status === 'active') {
             <div class="border-t border-border pt-4">
-              <h4 class="text-sm font-semibold text-gray-700 mb-3">Acciones</h4>
+              <h4 class="text-sm font-semibold text-text-primary mb-3">Acciones</h4>
 
               @if (!show_dispose_form) {
                 <div class="flex gap-3">
@@ -228,8 +229,8 @@ import {
                 </div>
               } @else {
                 <!-- Dispose Form -->
-                <form [formGroup]="dispose_form" class="p-4 bg-red-50 rounded-lg space-y-3">
-                  <p class="text-sm font-medium text-red-700">Dar de baja el activo</p>
+                <form [formGroup]="dispose_form" class="p-4 bg-error-light rounded-lg space-y-3">
+                  <p class="text-sm font-medium text-error">Dar de baja el activo</p>
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <app-input
                       label="Fecha de Baja"
@@ -263,7 +264,7 @@ import {
       }
 
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border">
           <app-button variant="outline" (clicked)="onClose()">Cerrar</app-button>
         </div>
       </div>
@@ -386,11 +387,11 @@ export class FixedAssetDetailModalComponent {
 
   getStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      active: 'bg-emerald-50 text-emerald-600',
-      fully_depreciated: 'bg-amber-50 text-amber-600',
-      retired: 'bg-gray-100 text-gray-500',
-      disposed: 'bg-red-50 text-red-500',
+      active: 'bg-success-light text-success',
+      fully_depreciated: 'bg-warning-light text-warning',
+      retired: 'bg-[var(--color-surface-secondary)] text-text-secondary',
+      disposed: 'bg-error-light text-error',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 }
