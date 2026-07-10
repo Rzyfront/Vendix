@@ -34,21 +34,21 @@ import {
           <!-- Customer Info -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p class="text-xs text-gray-500">Cliente</p>
+              <p class="text-xs text-text-secondary">Cliente</p>
               <p class="text-sm font-semibold">
                 {{ d.customer?.name || '—' }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Email</p>
+              <p class="text-xs text-text-secondary">Email</p>
               <p class="text-sm">{{ d.customer?.email || '—' }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Telefono</p>
+              <p class="text-xs text-text-secondary">Telefono</p>
               <p class="text-sm">{{ d.customer?.phone || '—' }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Origen</p>
+              <p class="text-xs text-text-secondary">Origen</p>
               <p class="text-sm">
                 {{ d.source_type }} #{{ d.source_id }}
               </p>
@@ -64,7 +64,7 @@ import {
               {{ getStatusLabel(d.status) }}
             </span>
             @if (d.days_overdue > 0) {
-              <span class="text-xs text-red-500 font-medium">
+              <span class="text-xs text-error font-medium">
                 {{ d.days_overdue }} dias vencido
               </span>
             }
@@ -72,28 +72,28 @@ import {
 
           <!-- Financial Summary -->
           <div
-            class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg"
+            class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-[var(--color-surface-secondary)] rounded-lg"
           >
             <div>
-              <p class="text-xs text-gray-500">Monto Original</p>
+              <p class="text-xs text-text-secondary">Monto Original</p>
               <p class="text-sm font-semibold font-mono">
                 {{ formatCurrency(d.original_amount) }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Cobrado</p>
-              <p class="text-sm font-semibold font-mono text-emerald-600">
+              <p class="text-xs text-text-secondary">Cobrado</p>
+              <p class="text-sm font-semibold font-mono text-success">
                 {{ formatCurrency(d.paid_amount) }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Saldo</p>
-              <p class="text-sm font-bold font-mono text-primary-600">
+              <p class="text-xs text-text-secondary">Saldo</p>
+              <p class="text-sm font-bold font-mono text-[var(--color-primary)]">
                 {{ formatCurrency(d.balance) }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Vencimiento</p>
+              <p class="text-xs text-text-secondary">Vencimiento</p>
               <p class="text-sm font-medium">
                 {{ d.due_date | date: 'dd/MM/yyyy' }}
               </p>
@@ -103,13 +103,13 @@ import {
           <!-- Dates -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p class="text-xs text-gray-500">Fecha Emision</p>
+              <p class="text-xs text-text-secondary">Fecha Emision</p>
               <p class="text-sm">
                 {{ d.issue_date | date: 'dd/MM/yyyy' }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Ultimo Pago</p>
+              <p class="text-xs text-text-secondary">Ultimo Pago</p>
               <p class="text-sm">
                 {{
                   d.last_payment_date
@@ -120,7 +120,7 @@ import {
             </div>
             @if (d.notes) {
               <div class="col-span-2">
-                <p class="text-xs text-gray-500">Notas</p>
+                <p class="text-xs text-text-secondary">Notas</p>
                 <p class="text-sm">{{ d.notes }}</p>
               </div>
             }
@@ -138,23 +138,23 @@ import {
               <div class="space-y-2">
                 @for (payment of d.ar_payments; track payment.id) {
                   <div
-                    class="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    class="flex items-center justify-between p-3 bg-[var(--color-surface-secondary)] rounded-lg"
                   >
                     <div class="flex items-center gap-3 min-w-0">
                       <div
-                        class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0"
+                        class="w-8 h-8 rounded-full bg-success-light flex items-center justify-center shrink-0"
                       >
                         <app-icon
                           name="banknote"
                           [size]="14"
-                          class="text-emerald-600"
+                          class="text-success"
                         ></app-icon>
                       </div>
                       <div class="min-w-0">
                         <p class="text-sm font-medium">
                           {{ formatCurrency(payment.amount) }}
                         </p>
-                        <p class="text-xs text-gray-500">
+                        <p class="text-xs text-text-secondary">
                           {{ payment.payment_date | date: 'dd/MM/yyyy' }}
                           @if (payment.payment_method) {
                             ·
@@ -170,7 +170,7 @@ import {
                 }
               </div>
             } @else {
-              <p class="text-sm text-gray-400 text-center py-4">
+              <p class="text-sm text-text-secondary text-center py-4">
                 No hay cobros registrados
               </p>
             }
@@ -193,7 +193,7 @@ import {
                   agreement of d.payment_agreements;
                   track agreement.id
                 ) {
-                  <div class="p-3 bg-gray-50 rounded-lg space-y-2">
+                  <div class="p-3 bg-[var(--color-surface-secondary)] rounded-lg space-y-2">
                     <div class="flex items-center justify-between">
                       <span class="text-sm font-medium">
                         {{ agreement.agreement_number }}
@@ -202,8 +202,8 @@ import {
                         class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
                         [class]="
                           agreement.state === 'active'
-                            ? 'bg-blue-50 text-blue-600'
-                            : 'bg-emerald-50 text-emerald-600'
+                            ? 'bg-[var(--color-info-light)] text-[var(--color-info)]'
+                            : 'bg-success-light text-success'
                         "
                       >
                         {{
@@ -213,19 +213,19 @@ import {
                     </div>
                     <div class="grid grid-cols-3 gap-2 text-xs">
                       <div>
-                        <span class="text-gray-500">Monto</span>
+                        <span class="text-text-secondary">Monto</span>
                         <p class="font-medium font-mono">
                           {{ formatCurrency(agreement.total_amount) }}
                         </p>
                       </div>
                       <div>
-                        <span class="text-gray-500">Cuotas</span>
+                        <span class="text-text-secondary">Cuotas</span>
                         <p class="font-medium">
                           {{ agreement.num_installments }}
                         </p>
                       </div>
                       <div>
-                        <span class="text-gray-500">Interes</span>
+                        <span class="text-text-secondary">Interes</span>
                         <p class="font-medium">
                           {{ agreement.interest_rate }}%
                         </p>
@@ -245,10 +245,10 @@ import {
                             class="flex items-center justify-between text-xs p-2 rounded"
                             [class]="
                               installment.state === 'paid'
-                                ? 'bg-emerald-50'
+                                ? 'bg-success-light'
                                 : installment.state === 'partial'
-                                  ? 'bg-amber-50'
-                                  : 'bg-white'
+                                  ? 'bg-warning-light'
+                                  : 'bg-[var(--color-surface)]'
                             "
                           >
                             <span>
@@ -278,7 +278,7 @@ import {
                 }
               </div>
             } @else {
-              <p class="text-sm text-gray-400 text-center py-4">
+              <p class="text-sm text-text-secondary text-center py-4">
                 No hay acuerdos de pago
               </p>
             }
@@ -309,9 +309,9 @@ import {
           }
         </div>
       } @else {
-        <div class="p-8 text-center text-gray-400">
+        <div class="p-8 text-center text-text-secondary">
           <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
           ></div>
           <p class="mt-2">Cargando detalle...</p>
         </div>
@@ -379,13 +379,13 @@ export class ReceivableDetailModalComponent {
 
   getStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      open: 'bg-blue-50 text-blue-600',
-      partial: 'bg-amber-50 text-amber-600',
-      overdue: 'bg-red-50 text-red-600',
-      paid: 'bg-emerald-50 text-emerald-600',
-      written_off: 'bg-gray-100 text-gray-500',
+      open: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      partial: 'bg-warning-light text-warning',
+      overdue: 'bg-error-light text-error',
+      paid: 'bg-success-light text-success',
+      written_off: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 
   getPaymentMethodLabel(method: string): string {
@@ -408,10 +408,10 @@ export class ReceivableDetailModalComponent {
 
   getInstallmentStatusClass(state: string): string {
     const classes: Record<string, string> = {
-      pending: 'bg-gray-100 text-gray-500',
-      partial: 'bg-amber-50 text-amber-600',
-      paid: 'bg-emerald-50 text-emerald-600',
+      pending: 'bg-[var(--color-surface-secondary)] text-text-secondary',
+      partial: 'bg-warning-light text-warning',
+      paid: 'bg-success-light text-success',
     };
-    return classes[state] || 'bg-gray-100 text-gray-500';
+    return classes[state] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 }

@@ -37,22 +37,22 @@ import {
       @if (payable(); as payableData) {
         <div class="p-4 space-y-4">
           <!-- Account Info -->
-          <div class="p-3 bg-gray-50 rounded-lg space-y-1">
+          <div class="p-3 bg-[var(--color-surface-secondary)] rounded-lg space-y-1">
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500">Proveedor</span>
+              <span class="text-text-secondary">Proveedor</span>
               <span class="font-medium">{{
                 payableData.supplier?.name || '—'
               }}</span>
             </div>
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500">Documento</span>
+              <span class="text-text-secondary">Documento</span>
               <span class="font-mono">{{
                 payableData.document_number || '—'
               }}</span>
             </div>
             <div class="flex justify-between text-sm">
-              <span class="text-gray-500">Saldo Pendiente</span>
-              <span class="font-semibold text-primary-600 font-mono">{{
+              <span class="text-text-secondary">Saldo Pendiente</span>
+              <span class="font-semibold text-[var(--color-primary)] font-mono">{{
                 formatted_balance
               }}</span>
             </div>
