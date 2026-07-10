@@ -1196,9 +1196,16 @@ export class TaxDeclarationDraftService {
 
   /**
    * Exógena: una sola fuente de cálculo. Delega en ExogenousGeneratorService
-   * (formatos 1001/1003/1005/1007 — pagos y retenciones practicadas,
-   * retenciones sufridas, IVA generado e ingresos de terceros) y materializa
-   * sus agregados como tax_declaration_lines trazables por formato.
+   * (los 8 formatos que expone el generator) y materializa sus agregados como
+   * tax_declaration_lines trazables por formato:
+   *   - 1001: pagos y retenciones practicadas a terceros.
+   *   - 1003: retenciones que le practicaron al tenant (sufridas).
+   *   - 1005: IVA descontable (impuesto a las ventas por pagar).
+   *   - 1006: IVA generado / retenciones en la fuente por IVA.
+   *   - 1007: ingresos recibidos (terceros).
+   *   - 1008: saldo de cuentas por cobrar (deudores) al cierre.
+   *   - 1009: saldo de cuentas por pagar (acreedores) al cierre.
+   *   - 2276: rentas de trabajo y de pensiones (nómina).
    *
    * La información exógena es ANUAL: el generator solo recibe el año, así que
    * el draft usa siempre period_year de la obligación (con period_month null
@@ -1240,9 +1247,45 @@ export class TaxDeclarationDraftService {
           ),
       },
       {
+        code: '1006',
+        generate: () =>
+          this.exogenousGenerator.generateFormat1006(
+            context.organization_id,
+            context.store_id,
+            period.period_year,
+          ),
+      },
+      {
         code: '1007',
         generate: () =>
           this.exogenousGenerator.generateFormat1007(
+            context.organization_id,
+            context.store_id,
+            period.period_year,
+          ),
+      },
+      {
+        code: '1008',
+        generate: () =>
+          this.exogenousGenerator.generateFormat1008(
+            context.organization_id,
+            context.store_id,
+            period.period_year,
+          ),
+      },
+      {
+        code: '1009',
+        generate: () =>
+          this.exogenousGenerator.generateFormat1009(
+            context.organization_id,
+            context.store_id,
+            period.period_year,
+          ),
+      },
+      {
+        code: '2276',
+        generate: () =>
+          this.exogenousGenerator.generateFormat2276(
             context.organization_id,
             context.store_id,
             period.period_year,

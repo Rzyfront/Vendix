@@ -67,7 +67,10 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'Gastos de Personal',
   },
   'payroll.approved.social_security': {
-    code: '5110',
+    // 5105 (Gastos de Personal), NO 5110 (Honorarios). Los aportes patronales
+    // de seguridad social son gasto de personal; 5110 es "Honorarios" —
+    // clasificación errónea (Decreto 2650). Alineado con el seed espejo.
+    code: '5105',
     description: 'Seguridad Social',
   },
   // Cost center: Administrative
@@ -436,24 +439,37 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     description: 'ICA Retenido a Favor (ReteICA sufrida)',
   },
   // Settlement (Liquidación por Terminación)
-  // Settlement ACCRUAL (devengo) — at approval the labor cost is recognized as
-  // expense/provision (DR) against the labor payable 2505 (CR). The payment
-  // event then only drains 2505 (no expense reconocido at payment).
+  // Settlement ACCRUAL (devengo) — al aprobar, la liquidación DRENA las
+  // provisiones prestacionales 25xx acumuladas mes a mes por la causación de
+  // nómina (`payroll.approved.*_payable`: 2510/2515/2520/2525). NO usa las 26xx
+  // obsoletas: debitar 26xx (que nunca se acreditaron) dejaba saldos crédito
+  // huérfanos en 25xx + activo/pasivo fantasma en 26xx. Estas claves apuntan a
+  // los MISMOS PUC que los pasivos de provisión de nómina para que el débito de
+  // liquidación reverse exactamente el bucket que la causación mensual llenó.
+  // Si el monto liquidado excede el saldo provisionado, `onSettlementApproved`
+  // capa el débito 25xx al saldo disponible y lleva el exceso a gasto 5105
+  // (`settlement.approved.provision_shortfall`).
   'settlement.approved.severance': {
-    code: '2610',
-    description: 'Cesantías Consolidadas (causación liquidación)',
+    code: '2510',
+    description: 'Cesantías Consolidadas por Pagar (drenaje liquidación)',
   },
   'settlement.approved.severance_interest': {
-    code: '2615',
-    description: 'Intereses sobre Cesantías (causación liquidación)',
+    code: '2515',
+    description: 'Intereses sobre Cesantías por Pagar (drenaje liquidación)',
   },
   'settlement.approved.bonus': {
-    code: '2620',
-    description: 'Prima de Servicios (causación liquidación)',
+    code: '2520',
+    description: 'Prima de Servicios por Pagar (drenaje liquidación)',
   },
   'settlement.approved.vacation': {
-    code: '2625',
-    description: 'Vacaciones (causación liquidación)',
+    code: '2525',
+    description: 'Vacaciones Consolidadas por Pagar (drenaje liquidación)',
+  },
+  // Exceso de liquidación sobre lo provisionado (bajo-provisión) → GASTO 5105,
+  // para no dejar el pasivo de provisión 25xx en negativo.
+  'settlement.approved.provision_shortfall': {
+    code: '5105',
+    description: 'Gastos de Personal - Exceso Liquidación sobre Provisión',
   },
   'settlement.approved.pending_salary': {
     code: '5105',

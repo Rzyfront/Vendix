@@ -152,6 +152,10 @@ export class SettlementFlowService {
       contract_type: employee.contract_type,
       rules,
       pending_salary_days: dto.pending_salary_days || 0,
+      // Art. 64 CST: la indemnización de contrato a término fijo / obra-labor
+      // necesita la fecha de fin de contrato para liquidar el tiempo faltante.
+      // Sin esto el cálculo devolvía 0 aunque el empleado tuviera la fecha.
+      contract_end_date: employee.contract_end_date ?? undefined,
     });
     const accounting_entity =
       await this.fiscalScope.resolveAccountingEntityForFiscal({
@@ -366,6 +370,9 @@ export class SettlementFlowService {
       contract_type: employee.contract_type,
       rules,
       pending_salary_days,
+      // Art. 64 CST: propagar la fecha de fin de contrato para la
+      // indemnización de término fijo / obra-labor (ver createAndCalculate).
+      contract_end_date: employee.contract_end_date ?? undefined,
     });
 
     const updated = await this.prisma.payroll_settlements.update({

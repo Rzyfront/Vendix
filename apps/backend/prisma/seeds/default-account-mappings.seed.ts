@@ -148,11 +148,16 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   'withholding.suffered.retefuente_receivable': '135510',
   'withholding.suffered.reteiva_receivable': '135515',
   'withholding.suffered.reteica_receivable': '135517',
-  // Settlement ACCRUAL (causación al aprobar) — devengo del costo laboral
-  'settlement.approved.severance': '2610',
-  'settlement.approved.severance_interest': '2615',
-  'settlement.approved.bonus': '2620',
-  'settlement.approved.vacation': '2625',
+  // Settlement ACCRUAL (causación al aprobar) — DRENA las provisiones 25xx
+  // acumuladas por la causación de nómina (payroll.approved.*_payable). Mirrors
+  // DEFAULT_ACCOUNT_MAPPINGS: mismos PUC que los pasivos de provisión
+  // (2510/2515/2520/2525), NO las 26xx obsoletas. El exceso sobre lo
+  // provisionado → 5105 (settlement.approved.provision_shortfall).
+  'settlement.approved.severance': '2510',
+  'settlement.approved.severance_interest': '2515',
+  'settlement.approved.bonus': '2520',
+  'settlement.approved.vacation': '2525',
+  'settlement.approved.provision_shortfall': '5105',
   'settlement.approved.pending_salary': '5105',
   'settlement.approved.indemnification': '5105',
   'settlement.approved.salaries_payable': '2505',

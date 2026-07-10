@@ -3241,20 +3241,118 @@ export class AutoEntryService {
    * CR 1110 Bancos (neto)
    */
   /**
-   * settlement.approved (DEVENGO/causación): reconoce el COSTO laboral de la
-   * liquidación como gasto/provisión contra el pasivo laboral 2505.
+   * Saldo NETO acreedor disponible (crédito − débito, asientos POSTEADOS) de la
+   * cuenta de provisión mapeada por `mapping_key`, a nivel de ENTIDAD contable.
+   * Sirve para capar el drenaje de la liquidación al saldo realmente
+   * provisionado y no dejar el pasivo 25xx en negativo.
    *
-   *   DR 2610 Cesantías
-   *   DR 2615 Intereses sobre Cesantías
-   *   DR 2620 Prima Proporcional
-   *   DR 2625 Vacaciones Proporcionales
-   *   DR 5105 Gastos de Personal (salario pendiente + indemnización)
+   * Limitación conocida (atribución): el saldo es AGREGADO por entidad (suma de
+   * TODOS los empleados), no por empleado — la causación mensual de nómina NO
+   * etiqueta las líneas de provisión (2510/2515/2520/2525) por tercero, así que
+   * no existe un saldo provisionado por empleado en el libro. En una entidad
+   * bien provisionada el pool cubre cualquier liquidación individual; el exceso
+   * a gasto 5105 solo se dispara cuando el pool COMPLETO queda por debajo del
+   * monto liquidado (bajo-provisión real), y es auto-corregible entre corridas.
+   *
+   * Degradación segura: ante cualquier fallo (mapping/cuenta/entidad no
+   * resoluble, error de consulta) retorna +Infinity → se drena el monto
+   * completo a la provisión (comportamiento base, ya repointado a 25xx), sin
+   * romper el asiento ni la transacción de negocio.
+   */
+  private async getProvisionAvailableBalance(
+    org_id: number,
+    mapping_key: string,
+    store_id?: number,
+    accounting_entity_id?: number,
+  ): Promise<number> {
+    try {
+      const mapping = await this.account_mapping_service.getMapping(
+        org_id,
+        mapping_key,
+        store_id,
+      );
+      if (!mapping) return Number.POSITIVE_INFINITY;
+
+      const base = this.prisma.withoutScope();
+
+      const entity = accounting_entity_id
+        ? await base.accounting_entities.findFirst({
+            where: {
+              id: accounting_entity_id,
+              organization_id: org_id,
+              is_active: true,
+            },
+            select: { id: true },
+          })
+        : await this.fiscal_scope_service.resolveAccountingEntityForFiscal({
+            organization_id: org_id,
+            store_id,
+          });
+      if (!entity) return Number.POSITIVE_INFINITY;
+
+      const account = await base.chart_of_accounts.findFirst({
+        where: {
+          organization_id: org_id,
+          code: mapping.account_code,
+          OR: [
+            { accounting_entity_id: entity.id },
+            { accounting_entity_id: null },
+          ],
+        },
+        orderBy: { accounting_entity_id: 'desc' },
+        select: { id: true },
+      });
+      if (!account) return Number.POSITIVE_INFINITY;
+
+      const agg = await base.accounting_entry_lines.aggregate({
+        where: {
+          account_id: account.id,
+          entry: {
+            accounting_entity_id: entity.id,
+            status: 'posted',
+          },
+        },
+        _sum: { credit_amount: true, debit_amount: true },
+      });
+      const credit = Number(agg._sum.credit_amount ?? 0);
+      const debit = Number(agg._sum.debit_amount ?? 0);
+      return credit - debit;
+    } catch (err) {
+      this.logger.warn(
+        `No se pudo leer el saldo de provisión para '${mapping_key}' ` +
+          `(org #${org_id}); se drena el monto completo a la provisión: ` +
+          `${(err as Error).message}`,
+      );
+      return Number.POSITIVE_INFINITY;
+    }
+  }
+
+  /**
+   * settlement.approved (DEVENGO/causación): reconoce el COSTO laboral de la
+   * liquidación DRENANDO las provisiones prestacionales 25xx acumuladas por la
+   * causación mensual de nómina (`onPayrollApproved` acredita 2510/2515/2520/
+   * 2525), contra el pasivo laboral 2505.
+   *
+   *   DR 2510 Cesantías Consolidadas por Pagar       (hasta saldo provisionado)
+   *   DR 2515 Intereses sobre Cesantías por Pagar    (hasta saldo provisionado)
+   *   DR 2520 Prima de Servicios por Pagar           (hasta saldo provisionado)
+   *   DR 2525 Vacaciones Consolidadas por Pagar      (hasta saldo provisionado)
+   *   DR 5105 Gastos de Personal — exceso de liquidación sobre lo provisionado
+   *           (bajo-provisión) + salario pendiente + indemnización
    *   CR 2505 Salarios por Pagar (total devengado = suma de los débitos)
+   *
+   * Manejo del exceso: si el monto liquidado de una prestación EXCEDE el saldo
+   * disponible en su cuenta de provisión, el débito a 25xx se capa al saldo
+   * disponible (para no dejar el pasivo en negativo) y el remanente se lleva a
+   * gasto 5105 (`settlement.approved.provision_shortfall`). El saldo se lee a
+   * nivel de ENTIDAD contable (ver `getProvisionAvailableBalance` — es agregado,
+   * no por empleado).
    *
    * El pago (`onSettlementPaid`) SOLO drena 2505; el gasto NO se vuelve a
    * reconocer. Idempotencia: `createAutoEntry` deduplica por
    * (org, source_type='settlement.approved', source_id, accounting_entity);
-   * un re-emit de settlement.approved no causa un segundo asiento.
+   * un re-emit de settlement.approved no causa un segundo asiento (ni un doble
+   * drenaje de provisión).
    */
   async onSettlementApproved(data: {
     settlement_id: number;
@@ -3275,8 +3373,16 @@ export class AutoEntryService {
     const desc = (concept: string) =>
       `${concept} - ${data.employee_name} (${data.settlement_number})`;
 
-    // DEBIT lines (provisiones + gasto): cada concepto causa su costo.
-    const debit_specs: Array<{ key: string; label: string; amount: number }> = [
+    let total_accrued = 0;
+
+    // ── Provisiones prestacionales: DRENAR el pasivo 25xx hasta el saldo
+    // disponible; el exceso (bajo-provisión) va a gasto 5105 para no dejar el
+    // pasivo de provisión en negativo.
+    const provision_specs: Array<{
+      key: string;
+      label: string;
+      amount: number;
+    }> = [
       {
         key: 'settlement.approved.severance',
         label: 'Cesantías',
@@ -3297,20 +3403,65 @@ export class AutoEntryService {
         label: 'Vacaciones Proporcionales',
         amount: data.vacation,
       },
-      {
-        key: 'settlement.approved.pending_salary',
-        label: 'Salario Pendiente',
-        amount: data.pending_salary,
-      },
-      {
-        key: 'settlement.approved.indemnification',
-        label: 'Indemnización',
-        amount: data.indemnification,
-      },
     ];
 
-    let total_accrued = 0;
-    for (const spec of debit_specs) {
+    for (const spec of provision_specs) {
+      if (!(spec.amount > 0)) continue;
+      total_accrued += spec.amount;
+
+      const available = await this.getProvisionAvailableBalance(
+        data.organization_id,
+        spec.key,
+        data.store_id,
+        data.accounting_entity_id,
+      );
+      // Capa el drenaje al saldo disponible (a centavos, para no generar líneas
+      // de polvo); el remanente es el exceso a gasto 5105. drain+excess===amount.
+      const drain =
+        Math.round(Math.min(spec.amount, Math.max(0, available)) * 100) / 100;
+      const excess = Math.round((spec.amount - drain) * 100) / 100;
+
+      if (drain > 0) {
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id,
+            spec.key,
+            desc(`${spec.label} (drenaje provisión)`),
+            drain,
+            0,
+            data.store_id,
+          ),
+        );
+      }
+      if (excess > 0) {
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id,
+            'settlement.approved.provision_shortfall',
+            desc(`${spec.label} (exceso sobre provisión)`),
+            excess,
+            0,
+            data.store_id,
+          ),
+        );
+      }
+    }
+
+    // ── Gasto directo (NO son provisiones): salario pendiente + indemnización.
+    const expense_specs: Array<{ key: string; label: string; amount: number }> =
+      [
+        {
+          key: 'settlement.approved.pending_salary',
+          label: 'Salario Pendiente',
+          amount: data.pending_salary,
+        },
+        {
+          key: 'settlement.approved.indemnification',
+          label: 'Indemnización',
+          amount: data.indemnification,
+        },
+      ];
+    for (const spec of expense_specs) {
       if (spec.amount > 0) {
         total_accrued += spec.amount;
         lines.push(
@@ -3345,7 +3496,8 @@ export class AutoEntryService {
       source_id: data.settlement_id,
       organization_id: data.organization_id,
       store_id: data.store_id,
-      accounting_entity_id: data.accounting_entity_id,      description: `Liquidación causada ${data.settlement_number} - ${data.employee_name}`,
+      accounting_entity_id: data.accounting_entity_id,
+      description: `Liquidación causada ${data.settlement_number} - ${data.employee_name}`,
       lines,
       user_id: data.user_id,
     });
