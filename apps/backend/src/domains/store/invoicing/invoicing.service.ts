@@ -1,10 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { FiscalScopeService } from '@common/services/fiscal-scope.service';
+import { FiscalGateService } from '@common/services/fiscal-gate.service';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
@@ -80,7 +81,38 @@ export class InvoicingService {
     private readonly event_emitter: EventEmitter2,
     private readonly fiscalScope: FiscalScopeService,
     private readonly retry_queue: InvoiceRetryQueueService,
+    private readonly fiscalGate: FiscalGateService,
   ) {}
+
+  /**
+   * Defensa en profundidad del gate fiscal de FACTURACIÓN a nivel servicio.
+   *
+   * El ModuleFlowGuard bloquea la entrada HTTP y send()/accept() ya validan en
+   * InvoiceFlowService, pero create()/createFromOrder()/createFromSalesOrder()
+   * también son invocados por rutas internas que NO pasan por el controller
+   * (invoice-data-requests, remisiones de despacho, futura auto-emisión POS).
+   * Sin este gate esos callers crearían facturas saltándose el master switch
+   * `fiscal_status.invoicing`. Fail-closed ante área inactiva.
+   *
+   * Usa el MISMO criterio (ACTIVE || LOCKED, vía FiscalGateService.isAreaEnabled)
+   * y el MISMO error que InvoiceFlowService.assertInvoicingAreaActive
+   * (invoice-flow.service.ts) para no divergir del gate de send/accept.
+   */
+  private async assertInvoicingAreaActive(context: {
+    organization_id?: number;
+    store_id?: number;
+  }): Promise<void> {
+    const enabled = await this.fiscalGate.isAreaEnabled(
+      Number(context.organization_id),
+      context.store_id != null ? Number(context.store_id) : null,
+      'invoicing',
+    );
+    if (!enabled) {
+      throw new ForbiddenException(
+        'Fiscal area "invoicing" is inactive for this tenant',
+      );
+    }
+  }
 
   private getContext() {
     const context = RequestContextService.getContext();
@@ -382,6 +414,7 @@ export class InvoicingService {
 
   async create(dto: CreateInvoiceDto) {
     const context = this.getContext();
+    await this.assertInvoicingAreaActive(context);
     const accounting_entity_id =
       await this.resolveAccountingEntityIdForContext(context);
     const issue_date = new Date(dto.issue_date);
@@ -480,6 +513,7 @@ export class InvoicingService {
 
   async createFromOrder(order_id: number) {
     const context = this.getContext();
+    await this.assertInvoicingAreaActive(context);
     const accounting_entity_id =
       await this.resolveAccountingEntityIdForContext(context);
 
@@ -692,6 +726,7 @@ export class InvoicingService {
 
   async createFromSalesOrder(sales_order_id: number) {
     const context = this.getContext();
+    await this.assertInvoicingAreaActive(context);
     const accounting_entity_id =
       await this.resolveAccountingEntityIdForContext(context);
 
