@@ -166,29 +166,29 @@ const PERCENT_FIELDS = new Set<string>(PERCENT_KEYS);
       <!-- Update Banner -->
       @if (available_update()) {
         <div
-          class="mb-4 rounded-xl border border-blue-200 bg-blue-50 overflow-hidden"
+          class="mb-4 rounded-xl border border-[var(--color-info)] bg-[var(--color-info-light)] overflow-hidden"
         >
           <div
             class="flex flex-col sm:flex-row sm:items-start gap-3 px-4 py-3 md:px-5 md:py-4"
           >
             <div
-              class="flex-shrink-0 w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center"
+              class="flex-shrink-0 w-8 h-8 rounded-lg bg-[var(--color-info-light)] flex items-center justify-center"
             >
               <app-icon
                 name="arrow-up-circle"
                 [size]="18"
-                class="text-blue-600"
+                class="text-[var(--color-info)]"
               />
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-semibold text-blue-900">
+              <p class="text-sm font-semibold text-[var(--color-info)]">
                 Parámetros de nómina actualizados disponibles
               </p>
               @if (
                 available_update()!.decree_ref ||
                 available_update()!.published_at
               ) {
-                <p class="text-xs text-blue-700 mt-0.5">
+                <p class="text-xs text-[var(--color-info)] mt-0.5">
                   @if (available_update()!.decree_ref) {
                     {{ available_update()!.decree_ref }}
                   }
@@ -209,7 +209,7 @@ const PERCENT_FIELDS = new Set<string>(PERCENT_KEYS);
               <button
                 type="button"
                 (click)="toggleDiff()"
-                class="text-xs font-medium text-blue-700 hover:text-blue-900 underline underline-offset-2 transition-colors"
+                class="text-xs font-medium text-[var(--color-info)] hover:text-[var(--color-info)] underline underline-offset-2 transition-colors"
               >
                 {{ show_diff() ? 'Ocultar cambios' : 'Ver cambios' }}
               </button>
@@ -217,7 +217,7 @@ const PERCENT_FIELDS = new Set<string>(PERCENT_KEYS);
                 type="button"
                 (click)="applyDefaults()"
                 [disabled]="applying_defaults()"
-                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-[var(--color-info)] hover:bg-[var(--color-info)] disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
               >
                 @if (applying_defaults()) {
                   <span
@@ -235,29 +235,29 @@ const PERCENT_FIELDS = new Set<string>(PERCENT_KEYS);
           <!-- Diff Table -->
           @if (show_diff() && diffEntries().length > 0) {
             <div
-              class="border-t border-blue-200 px-4 pb-3 md:px-5 md:pb-4 pt-3"
+              class="border-t border-[var(--color-info)] px-4 pb-3 md:px-5 md:pb-4 pt-3"
             >
               <p
-                class="text-[10px] font-semibold text-blue-700 uppercase tracking-wider mb-2"
+                class="text-[10px] font-semibold text-[var(--color-info)] uppercase tracking-wider mb-2"
               >
                 Cambios incluidos
               </p>
-              <div class="overflow-x-auto rounded-lg border border-blue-200">
+              <div class="overflow-x-auto rounded-lg border border-[var(--color-info)]">
                 <table class="w-full text-xs">
                   <thead>
-                    <tr class="bg-blue-100/60">
+                    <tr class="bg-[var(--color-info-light)]">
                       <th
-                        class="text-left px-3 py-2 font-semibold text-blue-800"
+                        class="text-left px-3 py-2 font-semibold text-[var(--color-info)]"
                       >
                         Campo
                       </th>
                       <th
-                        class="text-right px-3 py-2 font-semibold text-blue-800"
+                        class="text-right px-3 py-2 font-semibold text-[var(--color-info)]"
                       >
                         Valor actual
                       </th>
                       <th
-                        class="text-right px-3 py-2 font-semibold text-blue-800"
+                        class="text-right px-3 py-2 font-semibold text-[var(--color-info)]"
                       >
                         Valor oficial
                       </th>
@@ -265,15 +265,15 @@ const PERCENT_FIELDS = new Set<string>(PERCENT_KEYS);
                   </thead>
                   <tbody>
                     @for (entry of diffEntries(); track entry.field) {
-                      <tr class="border-t border-blue-100">
+                      <tr class="border-t border-[var(--color-info)]">
                         <td class="px-3 py-2 text-text-primary font-medium">
                           {{ getFieldLabel(entry.field) }}
                         </td>
-                        <td class="px-3 py-2 text-right text-red-500 font-mono">
+                        <td class="px-3 py-2 text-right text-error font-mono">
                           {{ formatValue(entry.field, entry.current) }}
                         </td>
                         <td
-                          class="px-3 py-2 text-right text-green-600 font-mono font-semibold"
+                          class="px-3 py-2 text-right text-success font-mono font-semibold"
                         >
                           {{ formatValue(entry.field, entry.system) }}
                         </td>
@@ -600,8 +600,8 @@ export class PayrollSettingsComponent {
     {
       title: 'Valores Base',
       icon: 'coins',
-      iconBgClass: 'bg-blue-50',
-      iconTextClass: 'text-blue-600',
+      iconBgClass: 'bg-[var(--color-info-light)]',
+      iconTextClass: 'text-[var(--color-info)]',
       subsections: [
         {
           title: 'Valores Anuales',
@@ -680,8 +680,8 @@ export class PayrollSettingsComponent {
     {
       title: 'Seguridad Social',
       icon: 'shield',
-      iconBgClass: 'bg-green-50',
-      iconTextClass: 'text-green-600',
+      iconBgClass: 'bg-success-light',
+      iconTextClass: 'text-success',
       includeArl: true,
       subsections: [
         {
