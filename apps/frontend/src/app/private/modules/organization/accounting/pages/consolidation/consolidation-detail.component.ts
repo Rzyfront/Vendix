@@ -921,12 +921,12 @@ export class OrgConsolidationDetailComponent {
 
   statusClass(status: string): string {
     const classes: Record<string, string> = {
-      draft: 'bg-amber-100 text-amber-700',
-      in_progress: 'bg-blue-100 text-blue-700',
-      completed: 'bg-emerald-100 text-emerald-700',
-      cancelled: 'bg-red-100 text-red-700',
+      draft: 'bg-warning-light text-warning',
+      in_progress: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      completed: 'bg-success-light text-success',
+      cancelled: 'bg-error-light text-error',
     };
-    return classes[status] || 'bg-gray-100 text-gray-700';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-primary';
   }
 
   accountTypeLabel(type: string): string {
