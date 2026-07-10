@@ -7,6 +7,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
 
 
 import { AccountingService } from '../../../services/accounting.service';
@@ -24,6 +25,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
   standalone: true,
   imports: [
     FormsModule,
+    NgClass,
     ButtonComponent,
     SelectorComponent,
     IconComponent
