@@ -74,7 +74,7 @@ import {
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
               ></div>
             </div>
           }
@@ -85,8 +85,8 @@ import {
               <div
                 class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden"
               >
-                <div class="px-4 py-3 bg-blue-50 border-b border-border">
-                  <h3 class="text-sm font-bold text-blue-800 uppercase">
+                <div class="px-4 py-3 bg-[var(--color-info-light)] border-b border-border">
+                  <h3 class="text-sm font-bold text-[var(--color-info)] uppercase">
                     Activos
                   </h3>
                 </div>
@@ -95,7 +95,7 @@ import {
                     @for (row of report.assets.accounts; track row.account_id) {
                       <div class="px-4 py-2 flex justify-between items-center">
                         <div>
-                          <span class="text-xs font-mono text-gray-500 mr-2">{{
+                          <span class="text-xs font-mono text-text-secondary mr-2">{{
                             row.account_code
                           }}</span>
                           <span class="text-sm">{{ row.account_name }}</span>
@@ -108,12 +108,12 @@ import {
                   </div>
                 }
                 <div
-                  class="px-4 py-3 bg-blue-50 border-t border-border flex justify-between"
+                  class="px-4 py-3 bg-[var(--color-info-light)] border-t border-border flex justify-between"
                 >
-                  <span class="text-sm font-bold text-blue-800"
+                  <span class="text-sm font-bold text-[var(--color-info)]"
                     >Total Activos</span
                   >
-                  <span class="text-sm font-mono font-bold text-blue-800">{{
+                  <span class="text-sm font-mono font-bold text-[var(--color-info)]">{{
                     report.total_assets | number: '1.2-2'
                   }}</span>
                 </div>
@@ -125,8 +125,8 @@ import {
                 <div
                   class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden"
                 >
-                  <div class="px-4 py-3 bg-amber-50 border-b border-border">
-                    <h3 class="text-sm font-bold text-amber-800 uppercase">
+                  <div class="px-4 py-3 bg-warning-light border-b border-border">
+                    <h3 class="text-sm font-bold text-warning uppercase">
                       Pasivos
                     </h3>
                   </div>
@@ -141,7 +141,7 @@ import {
                         >
                           <div>
                             <span
-                              class="text-xs font-mono text-gray-500 mr-2"
+                              class="text-xs font-mono text-text-secondary mr-2"
                               >{{ row.account_code }}</span
                             >
                             <span class="text-sm">{{ row.account_name }}</span>
@@ -154,12 +154,12 @@ import {
                     </div>
                   }
                   <div
-                    class="px-4 py-3 bg-amber-50 border-t border-border flex justify-between"
+                    class="px-4 py-3 bg-warning-light border-t border-border flex justify-between"
                   >
-                    <span class="text-sm font-bold text-amber-800"
+                    <span class="text-sm font-bold text-warning"
                       >Total Pasivos</span
                     >
-                    <span class="text-sm font-mono font-bold text-amber-800">{{
+                    <span class="text-sm font-mono font-bold text-warning">{{
                       report.liabilities.total | number: '1.2-2'
                     }}</span>
                   </div>
@@ -185,7 +185,7 @@ import {
                         >
                           <div>
                             <span
-                              class="text-xs font-mono text-gray-500 mr-2"
+                              class="text-xs font-mono text-text-secondary mr-2"
                               >{{ row.account_code }}</span
                             >
                             <span class="text-sm">{{ row.account_name }}</span>
@@ -216,8 +216,8 @@ import {
               class="mt-4 p-4 rounded-lg border"
               [class]="
                 isBalanced(report)
-                  ? 'bg-emerald-50 border-emerald-200'
-                  : 'bg-red-50 border-red-200'
+                  ? 'bg-success-light border-success'
+                  : 'bg-error-light border-error'
               "
             >
               <div class="flex items-center justify-between">
@@ -228,13 +228,13 @@ import {
                     "
                     [size]="20"
                     [class]="
-                      isBalanced(report) ? 'text-emerald-600' : 'text-red-600'
+                      isBalanced(report) ? 'text-success' : 'text-error'
                     "
                   ></app-icon>
                   <span
                     class="text-sm font-medium"
                     [class]="
-                      isBalanced(report) ? 'text-emerald-700' : 'text-red-700'
+                      isBalanced(report) ? 'text-success' : 'text-error'
                     "
                   >
                     {{
@@ -245,7 +245,7 @@ import {
                   </span>
                 </div>
                 <div class="text-right text-sm font-mono">
-                  <span class="text-gray-500">P+P: </span>
+                  <span class="text-text-secondary">P+P: </span>
                   <span class="font-bold">{{
                     report.total_liabilities_equity | number: '1.2-2'
                   }}</span>
@@ -254,7 +254,7 @@ import {
             </div>
           } @else {
             <div
-              class="flex flex-col items-center justify-center py-16 text-gray-400"
+              class="flex flex-col items-center justify-center py-16 text-text-secondary"
             >
               <app-icon name="bar-chart-2" [size]="48"></app-icon>
               <p class="mt-4">Selecciona un periodo para generar el reporte</p>

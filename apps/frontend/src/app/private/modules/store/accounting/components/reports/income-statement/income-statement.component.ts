@@ -74,7 +74,7 @@ import {
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
               ></div>
             </div>
           }
@@ -85,8 +85,8 @@ import {
               <div
                 class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden"
               >
-                <div class="px-4 py-3 bg-emerald-50 border-b border-border">
-                  <h3 class="text-sm font-bold text-emerald-800 uppercase">
+                <div class="px-4 py-3 bg-success-light border-b border-border">
+                  <h3 class="text-sm font-bold text-success uppercase">
                     Ingresos
                   </h3>
                 </div>
@@ -98,13 +98,13 @@ import {
                     ) {
                       <div class="px-4 py-2 flex justify-between items-center">
                         <div>
-                          <span class="text-xs font-mono text-gray-500 mr-2">{{
+                          <span class="text-xs font-mono text-text-secondary mr-2">{{
                             row.account_code
                           }}</span>
                           <span class="text-sm">{{ row.account_name }}</span>
                         </div>
                         <span
-                          class="text-sm font-mono font-medium text-emerald-600"
+                          class="text-sm font-mono font-medium text-success"
                         >
                           {{ row.balance | number: '1.2-2' }}
                         </span>
@@ -113,12 +113,12 @@ import {
                   </div>
                 }
                 <div
-                  class="px-4 py-3 bg-emerald-50 border-t border-border flex justify-between"
+                  class="px-4 py-3 bg-success-light border-t border-border flex justify-between"
                 >
-                  <span class="text-sm font-bold text-emerald-800"
+                  <span class="text-sm font-bold text-success"
                     >Total Ingresos</span
                   >
-                  <span class="text-sm font-mono font-bold text-emerald-800">
+                  <span class="text-sm font-mono font-bold text-success">
                     {{ report.total_revenue | number: '1.2-2' }}
                   </span>
                 </div>
@@ -128,8 +128,8 @@ import {
               <div
                 class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden"
               >
-                <div class="px-4 py-3 bg-red-50 border-b border-border">
-                  <h3 class="text-sm font-bold text-red-800 uppercase">
+                <div class="px-4 py-3 bg-error-light border-b border-border">
+                  <h3 class="text-sm font-bold text-error uppercase">
                     Gastos
                   </h3>
                 </div>
@@ -141,13 +141,13 @@ import {
                     ) {
                       <div class="px-4 py-2 flex justify-between items-center">
                         <div>
-                          <span class="text-xs font-mono text-gray-500 mr-2">{{
+                          <span class="text-xs font-mono text-text-secondary mr-2">{{
                             row.account_code
                           }}</span>
                           <span class="text-sm">{{ row.account_name }}</span>
                         </div>
                         <span
-                          class="text-sm font-mono font-medium text-red-600"
+                          class="text-sm font-mono font-medium text-error"
                         >
                           {{ row.balance | number: '1.2-2' }}
                         </span>
@@ -156,12 +156,12 @@ import {
                   </div>
                 }
                 <div
-                  class="px-4 py-3 bg-red-50 border-t border-border flex justify-between"
+                  class="px-4 py-3 bg-error-light border-t border-border flex justify-between"
                 >
-                  <span class="text-sm font-bold text-red-800"
+                  <span class="text-sm font-bold text-error"
                     >Total Gastos</span
                   >
-                  <span class="text-sm font-mono font-bold text-red-800">
+                  <span class="text-sm font-mono font-bold text-error">
                     {{ report.total_expenses | number: '1.2-2' }}
                   </span>
                 </div>
@@ -172,8 +172,8 @@ import {
                 class="p-4 rounded-xl border-2"
                 [class]="
                   report.net_income >= 0
-                    ? 'bg-emerald-50 border-emerald-300'
-                    : 'bg-red-50 border-red-300'
+                    ? 'bg-success-light border-success'
+                    : 'bg-error-light border-error'
                 "
               >
                 <div class="flex items-center justify-between">
@@ -185,16 +185,16 @@ import {
                       [size]="24"
                       [class]="
                         report.net_income >= 0
-                          ? 'text-emerald-600'
-                          : 'text-red-600'
+                          ? 'text-success'
+                          : 'text-error'
                       "
                     ></app-icon>
                     <span
                       class="text-lg font-bold"
                       [class]="
                         report.net_income >= 0
-                          ? 'text-emerald-800'
-                          : 'text-red-800'
+                          ? 'text-success'
+                          : 'text-error'
                       "
                     >
                       {{
@@ -208,8 +208,8 @@ import {
                     class="text-xl font-mono font-bold"
                     [class]="
                       report.net_income >= 0
-                        ? 'text-emerald-800'
-                        : 'text-red-800'
+                        ? 'text-success'
+                        : 'text-error'
                     "
                   >
                     {{ report.net_income | number: '1.2-2' }}
@@ -219,7 +219,7 @@ import {
             </div>
           } @else {
             <div
-              class="flex flex-col items-center justify-center py-16 text-gray-400"
+              class="flex flex-col items-center justify-center py-16 text-text-secondary"
             >
               <app-icon name="bar-chart-2" [size]="48"></app-icon>
               <p class="mt-4">Selecciona un periodo para generar el reporte</p>
