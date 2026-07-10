@@ -517,6 +517,9 @@ export class StockTransfersService {
         const receivedItem = items.find((i) => i.id === item.id);
         if (receivedItem && receivedItem.quantity_received > 0) {
           // Subtract from source
+          // Solo poblamos from_location_id (source): el backend debe poder
+          // distinguir visualmente la salida (-1) de la entrada (+1) sin
+          // parsear el reason.
           const sourceStockUpdate = await this.stockLevelManager.updateStock(
             {
               product_id: item.product_id,
@@ -528,12 +531,12 @@ export class StockTransfersService {
               user_id: context?.user_id,
               create_movement: true,
               from_location_id: stockTransfer.from_location_id,
-              to_location_id: stockTransfer.to_location_id,
             },
             tx,
           );
 
           // Add to destination
+          // Solo poblamos to_location_id (destination): entrada (+1).
           await this.stockLevelManager.updateStock(
             {
               product_id: item.product_id,
@@ -544,7 +547,6 @@ export class StockTransfersService {
               reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
               user_id: context?.user_id,
               create_movement: true,
-              from_location_id: stockTransfer.from_location_id,
               to_location_id: stockTransfer.to_location_id,
               unit_cost: Number(
                 sourceStockUpdate.cost_snapshot?.unit_cost || 0,

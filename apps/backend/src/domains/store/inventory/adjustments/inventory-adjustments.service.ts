@@ -17,6 +17,7 @@ import {
 } from './interfaces/inventory-adjustment.interface';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../shared/services/stock-level-manager.service';
+import { Prisma } from '@prisma/client';
 
 // Common include object for adjustment queries
 const ADJUSTMENT_INCLUDE = {
@@ -114,6 +115,9 @@ export class InventoryAdjustmentsService {
         : null;
       const batchId = data.batch_id ? Number(data.batch_id) : null;
       const quantityAfter = Number(data.quantity_after);
+
+      // 0. Validate location belongs to user's org (cross-tenant safety)
+      await this.validateLocationScope(prisma, locationId, organizationId);
 
       // 1. Validar que el adjustment_type sea válido
       const validTypes: AdjustmentType[] = [
@@ -223,7 +227,7 @@ export class InventoryAdjustmentsService {
         user_id: userId || undefined,
         create_movement: true,
         validate_availability: false,
-      });
+      }, prisma);
 
       // 5. Transformar respuesta para mapear nombres de relaciones
       return {
@@ -256,6 +260,171 @@ export class InventoryAdjustmentsService {
   }
 
   /**
+   * Valida que una bodega pertenece al organization_id del contexto.
+   * Throws INV_LOCATION_SCOPE_001 (403) si no coincide — previene
+   * cross-tenant stock manipulation.
+   */
+  private async validateLocationScope(
+    prisma: Prisma.TransactionClient,
+    locationId: number,
+    organizationId: number,
+  ): Promise<void> {
+    const location = await prisma.inventory_locations.findUnique({
+      where: { id: locationId },
+      select: { organization_id: true },
+    });
+    if (!location || location.organization_id !== organizationId) {
+      throw new VendixHttpException(ErrorCodes.INV_LOCATION_SCOPE_001);
+    }
+  }
+
+  /**
+   * Crea un ajuste atómico en una bodega (sin abrir transacción propia;
+   * el caller maneja la transacción para soportar batch atómico).
+   * Devuelve el adjustment creado con su quantity_change y cost_amount.
+   */
+  private async createAdjustmentInTx(
+    prisma: Prisma.TransactionClient,
+    params: {
+      location_id: number;
+      product_id: number;
+      product_variant_id?: number;
+      batch_id?: number;
+      type: string;
+      quantity_after: number;
+      reason_code?: string;
+      description?: string;
+      organization_id: number;
+      created_by_user_id: number | null;
+      approved_by_user_id?: number;
+    },
+  ): Promise<{
+    adjustment: InventoryAdjustment;
+    quantity_change: number;
+    cost_amount: number;
+  }> {
+    const productId = Number(params.product_id);
+    const locationId = Number(params.location_id);
+    const variantId = params.product_variant_id
+      ? Number(params.product_variant_id)
+      : null;
+    const batchId = params.batch_id ? Number(params.batch_id) : null;
+    const quantityAfter = Number(params.quantity_after);
+
+    // 0. Validate location belongs to user's org (cross-tenant safety)
+    await this.validateLocationScope(prisma, locationId, params.organization_id);
+
+    // 1. Validar adjustment_type
+    const validTypes: AdjustmentType[] = [
+      'damage',
+      'loss',
+      'theft',
+      'expiration',
+      'count_variance',
+      'manual_correction',
+    ];
+    if (!validTypes.includes(params.type as AdjustmentType)) {
+      throw new BadRequestException(
+        `Invalid adjustment type: ${params.type}`,
+      );
+    }
+
+    let quantityBefore: number;
+    let quantityChange: number;
+
+    if (batchId) {
+      const batch = await prisma.inventory_batches.findUnique({
+        where: { id: batchId },
+      });
+      if (!batch) {
+        throw new VendixHttpException(ErrorCodes.INV_ADJ_001);
+      }
+      if (batch.product_id !== productId) {
+        throw new VendixHttpException(ErrorCodes.INV_VALIDATE_001);
+      }
+      if (batch.location_id !== locationId) {
+        throw new VendixHttpException(ErrorCodes.INV_VALIDATE_001);
+      }
+
+      quantityBefore = batch.quantity - batch.quantity_used;
+      quantityChange = quantityAfter - quantityBefore;
+      const newQuantity = batch.quantity + quantityChange;
+      if (newQuantity < batch.quantity_used) {
+        throw new BadRequestException(
+          'Cannot reduce batch quantity below used amount',
+        );
+      }
+      await prisma.inventory_batches.update({
+        where: { id: batchId },
+        data: { quantity: newQuantity, updated_at: new Date() },
+      });
+    } else {
+      const currentStockLevel = await prisma.stock_levels.findFirst({
+        where: {
+          product_id: productId,
+          product_variant_id: variantId,
+          location_id: locationId,
+        },
+      });
+      if (!currentStockLevel) {
+        throw new VendixHttpException(ErrorCodes.INV_FIND_001);
+      }
+      quantityBefore = currentStockLevel.quantity_on_hand;
+      quantityChange = quantityAfter - quantityBefore;
+    }
+
+    const adjustment = await prisma.inventory_adjustments.create({
+      data: {
+        organization_id: params.organization_id,
+        product_id: productId,
+        product_variant_id: variantId,
+        location_id: locationId,
+        batch_id: batchId,
+        adjustment_type: params.type as any,
+        quantity_before: quantityBefore,
+        quantity_after: quantityAfter,
+        quantity_change: quantityChange,
+        reason_code: params.reason_code || null,
+        description: params.description || null,
+        created_by_user_id: params.created_by_user_id,
+        approved_by_user_id: params.approved_by_user_id
+          ? Number(params.approved_by_user_id)
+          : null,
+        approved_at: params.approved_by_user_id ? new Date() : null,
+        created_at: new Date(),
+      },
+      include: ADJUSTMENT_INCLUDE,
+    });
+
+    const stockUpdate = await this.stockLevelManager.updateStock(
+      {
+        product_id: productId,
+        variant_id: variantId ?? undefined,
+        location_id: locationId,
+        quantity_change: quantityChange,
+        movement_type: 'adjustment',
+        reason: `Adjustment: ${params.type}${batchId ? ` (Batch ID: ${batchId})` : ''} - ${params.description || 'No description'}`,
+        user_id: params.created_by_user_id || undefined,
+        create_movement: true,
+        validate_availability: false,
+        // Poblamos explícitamente solo la ubicación relevante al signo:
+        //   quantityChange > 0 → entrada (to_location_id)
+        //   quantityChange < 0 → salida (from_location_id)
+        // Así el frontend puede distinguir +/- sin parsear el reason.
+        from_location_id: quantityChange < 0 ? locationId : undefined,
+        to_location_id: quantityChange > 0 ? locationId : undefined,
+      },
+      prisma,
+    );
+
+    return {
+      adjustment: this.mapAdjustmentResponse(adjustment),
+      quantity_change: quantityChange,
+      cost_amount: Number(stockUpdate.cost_snapshot?.total_cost || 0),
+    };
+  }
+
+  /**
    * Mapea la respuesta del ajuste para normalizar nombres de relaciones
    */
   private mapAdjustmentResponse(adjustment: any): InventoryAdjustment {
@@ -284,10 +453,15 @@ export class InventoryAdjustmentsService {
   }
 
   /**
-   * Crea múltiples ajustes de inventario en batch (como borrador, sin aprobar)
+   * Crea múltiples ajustes de inventario en batch (como borrador, sin aprobar).
+   * Soporta multi-bodega: si se pasa `locationIds: number[]`, aplica
+   * el mismo set de items a cada bodega en un único `prisma.$transaction`.
+   * Si CUALQUIER par (location, item) falla, TODAS las bodegas hacen
+   * rollback — previene estados parciales donde algunas bodegas quedan
+   * ajustadas y otras no.
    */
   async batchCreateAdjustments(
-    locationId: number,
+    locationIds: number[],
     items: {
       product_id: number;
       product_variant_id?: number;
@@ -298,30 +472,15 @@ export class InventoryAdjustmentsService {
       description?: string;
     }[],
   ): Promise<InventoryAdjustment[]> {
-    const results: InventoryAdjustment[] = [];
-    for (const item of items) {
-      const adjustment = await this.createAdjustment({
-        organization_id: 0, // Resolved from context inside createAdjustment
-        created_by_user_id: 0, // Resolved from context inside createAdjustment
-        product_id: item.product_id,
-        product_variant_id: item.product_variant_id,
-        location_id: locationId,
-        batch_id: item.batch_id,
-        type: item.type as AdjustmentType,
-        quantity_after: item.quantity_after,
-        reason_code: item.reason_code,
-        description: item.description,
-      });
-      results.push(adjustment);
-    }
-    return results;
+    return this.runMultiLocationBatch(locationIds, items, null);
   }
 
   /**
-   * Crea múltiples ajustes y los aprueba inmediatamente
+   * Crea múltiples ajustes y los aprueba inmediatamente.
+   * Misma semántica atómica multi-bodega que `batchCreateAdjustments`.
    */
   async batchCreateAndComplete(
-    locationId: number,
+    locationIds: number[],
     items: {
       product_id: number;
       product_variant_id?: number;
@@ -332,27 +491,68 @@ export class InventoryAdjustmentsService {
       description?: string;
     }[],
   ): Promise<InventoryAdjustment[]> {
-    const results: InventoryAdjustment[] = [];
     const userIdRaw = RequestContextService.getUserId();
     const userId = userIdRaw ? Number(userIdRaw) : null;
+    return this.runMultiLocationBatch(locationIds, items, userId);
+  }
 
-    for (const item of items) {
-      const adjustment = await this.createAdjustment({
-        organization_id: 0, // Resolved from context inside createAdjustment
-        created_by_user_id: 0, // Resolved from context inside createAdjustment
-        product_id: item.product_id,
-        product_variant_id: item.product_variant_id,
-        location_id: locationId,
-        batch_id: item.batch_id,
-        type: item.type as AdjustmentType,
-        quantity_after: item.quantity_after,
-        reason_code: item.reason_code,
-        description: item.description,
-        approved_by_user_id: userId ?? undefined,
-      });
-      results.push(adjustment);
+  /**
+   * Helper interno: ejecuta un batch multi-bodega en un único
+   * `prisma.$transaction`. Si cualquier par (location × item) lanza,
+   * el batch entero hace rollback. Devuelve todos los adjustments
+   * creados.
+   */
+  private async runMultiLocationBatch(
+    locationIds: number[],
+    items: {
+      product_id: number;
+      product_variant_id?: number;
+      batch_id?: number;
+      type: string;
+      quantity_after: number;
+      reason_code?: string;
+      description?: string;
+    }[],
+    approvedByUserId: number | null,
+  ): Promise<InventoryAdjustment[]> {
+    const orgIdRaw = RequestContextService.getOrganizationId();
+    const userIdRaw = RequestContextService.getUserId();
+    if (!orgIdRaw) {
+      throw new VendixHttpException(ErrorCodes.INV_CONTEXT_001);
     }
-    return results;
+    const organizationId = Number(orgIdRaw);
+    const userId = userIdRaw ? Number(userIdRaw) : null;
+
+    if (!Array.isArray(locationIds) || locationIds.length === 0) {
+      throw new BadRequestException(
+        'locationIds must be a non-empty array (multi-warehouse mode)',
+      );
+    }
+
+    return this.prisma.$transaction(async (prisma) => {
+      const results: InventoryAdjustment[] = [];
+
+      for (const locationId of locationIds) {
+        for (const item of items) {
+          const { adjustment } = await this.createAdjustmentInTx(prisma, {
+            location_id: locationId,
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id,
+            batch_id: item.batch_id,
+            type: item.type,
+            quantity_after: item.quantity_after,
+            reason_code: item.reason_code,
+            description: item.description,
+            organization_id: organizationId,
+            created_by_user_id: userId,
+            approved_by_user_id: approvedByUserId ?? undefined,
+          });
+          results.push(adjustment);
+        }
+      }
+
+      return results;
+    });
   }
 
   /**

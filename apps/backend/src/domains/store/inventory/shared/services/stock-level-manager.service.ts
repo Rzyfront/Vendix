@@ -1223,6 +1223,19 @@ export class StockLevelManager {
 
   /**
    * Crea un inventory movement
+   *
+   * Reglas para poblar from_location_id / to_location_id:
+   *  - Si el caller pasa SOLO uno de los dos, se respeta ese (es la dirección
+   *    del movimiento: source→from, destination→to).
+   *  - Si el caller pasa AMBOS (caso legacy de transferencias), se usa el
+   *    signo de quantity_change para poblar solo el lado relevante:
+   *      quantity_change < 0 → source (from_location_id)
+   *      quantity_change > 0 → destination (to_location_id)
+   *  - Si el caller no pasa ninguno, fallback legacy: to_location_id =
+   *    location_id (entrada).
+   *
+   * Esto permite que el frontend distinga visualmente entradas (+) de salidas
+   * (-) sin parsear el campo `reason`.
    */
   private async createInventoryMovement(
     prisma: any,
@@ -1237,13 +1250,28 @@ export class StockLevelManager {
     const movementType =
       params.movement_type === 'initial' ? 'stock_in' : params.movement_type;
 
+    const explicitFrom = params.from_location_id ?? null;
+    const explicitTo = params.to_location_id ?? null;
+    const bothExplicit = explicitFrom != null && explicitTo != null;
+
+    let fromLocationId: number | null;
+    let toLocationId: number | null;
+
+    if (bothExplicit) {
+      fromLocationId = params.quantity_change < 0 ? explicitFrom : null;
+      toLocationId = params.quantity_change > 0 ? explicitTo : null;
+    } else {
+      fromLocationId = explicitFrom;
+      toLocationId = explicitTo ?? params.location_id ?? null;
+    }
+
     await prisma.inventory_movements.create({
       data: {
         organization_id: organization_id,
         product_id: params.product_id,
         product_variant_id: params.variant_id,
-        from_location_id: params.from_location_id,
-        to_location_id: params.to_location_id || params.location_id,
+        from_location_id: fromLocationId,
+        to_location_id: toLocationId,
         quantity: Math.abs(params.quantity_change),
         movement_type: movementType,
         source_module: params.source_module,

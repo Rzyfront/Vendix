@@ -103,13 +103,11 @@ export class MovementListComponent {
       align: 'right',
       priority: 1,
       transform: (value: number, item?: any) =>
-        this.formatQuantity(value, item?.movement_type),
+        this.formatQuantity(value, item),
       cellStyle: (_value: number, item?: any) => {
-        const isInbound =
-          item?.movement_type === 'stock_in' ||
-          item?.movement_type === 'return';
+        const inbound = this.isInbound(item);
         return {
-          color: isInbound
+          color: inbound
             ? 'var(--color-success)'
             : 'var(--color-error, #ef4444)',
           'font-weight': '700',
@@ -165,7 +163,7 @@ export class MovementListComponent {
     footerLabel: 'Cantidad',
     footerStyle: 'prominent',
     footerTransform: (val: number, item?: any) =>
-      this.formatQuantity(val, item?.movement_type),
+      this.formatQuantity(val, item),
     detailKeys: [
       {
         key: 'created_at',
@@ -226,9 +224,36 @@ export class MovementListComponent {
     return labels[type] || type;
   }
 
-  formatQuantity(value: number, type: MovementType): string {
-    const isInbound = type === 'stock_in' || type === 'return';
-    return isInbound ? `+${value}` : `-${value}`;
+  formatQuantity(value: number, item: InventoryMovement): string {
+    return this.isInbound(item) ? `+${value}` : `-${value}`;
+  }
+
+  /**
+   * Determina si un movimiento es de entrada (suma stock) o salida (resta stock).
+   *
+   * Regla preferida (basada en ubicaciones que ya persiste el backend):
+   *  - to_location_id poblado y from_location_id NO poblado  → entrada (+)
+   *  - from_location_id poblado y to_location_id NO poblado  → salida (-)
+   *
+   * Regla legacy (cuando el backend aún no rellenó las ubicaciones, p.ej.
+   * datos creados antes de este fix): heurístico por movement_type.
+   *  - stock_in, return                              → entrada (+)
+   *  - sale, stock_out, damage, expiration           → salida (-)
+   *  - transfer, adjustment                          → salida (-) (default seguro;
+   *    los registros nuevos sí traen la dirección correcta por ubicación)
+   */
+  isInbound(item: InventoryMovement | undefined | null): boolean {
+    if (!item) return false;
+
+    const hasTo = item.to_location_id != null;
+    const hasFrom = item.from_location_id != null;
+
+    if (hasTo && !hasFrom) return true;
+    if (hasFrom && !hasTo) return false;
+
+    const type = item.movement_type;
+    if (type === 'stock_in' || type === 'return') return true;
+    return false;
   }
 
   getEmptyStateTitle(): string {
