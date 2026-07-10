@@ -59,7 +59,7 @@ import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
         <div class="scan-banner">
           <div class="scan-banner__copy">
             <span class="scan-banner__title">
-              <app-icon name="sparkles" [size]="16" class="text-primary-600" />
+              <app-icon name="sparkles" [size]="16" class="text-[var(--color-primary)]" />
               Cargar datos desde el RUT
             </span>
             <span class="scan-banner__text">
@@ -113,9 +113,9 @@ import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
       .step-banner {
         margin: 0;
         font-size: 0.85rem;
-        color: var(--text-secondary, #475569);
-        background: var(--surface-muted, #f8fafc);
-        border: 1px solid var(--border-color, #e5e7eb);
+        color: var(--color-text-secondary);
+        background: var(--color-surface-secondary);
+        border: 1px solid var(--color-border);
         border-radius: 0.5rem;
         padding: 0.75rem 1rem;
       }
@@ -126,13 +126,13 @@ import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
         gap: 1rem;
         flex-wrap: wrap;
         border: 1px solid
-          color-mix(in oklab, var(--color-primary, #2563eb) 30%, transparent);
+          color-mix(in oklab, var(--color-primary) 30%, transparent);
         border-radius: 0.65rem;
         padding: 0.85rem 1rem;
         background: color-mix(
           in oklab,
-          var(--color-primary, #2563eb) 6%,
-          var(--surface-color, #ffffff)
+          var(--color-primary) 6%,
+          var(--color-surface)
         );
       }
       .scan-banner__copy {
@@ -148,17 +148,17 @@ import { focusFirstInvalid } from '../../../../core/utils/focus-first-invalid';
         gap: 0.4rem;
         font-size: 0.9rem;
         font-weight: 700;
-        color: var(--text-primary, #0f172a);
+        color: var(--color-text-primary);
       }
       .scan-banner__text {
         font-size: 0.8rem;
         line-height: 1.25rem;
-        color: var(--text-secondary, #64748b);
+        color: var(--color-text-secondary);
       }
       .step-error {
         margin: 0;
         font-size: 0.85rem;
-        color: var(--color-destructive, #b91c1c);
+        color: var(--color-destructive);
       }
     `,
   ],

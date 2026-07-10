@@ -56,27 +56,27 @@ import { parseApiError } from '../../../../core/utils/parse-api-error';
         gap: 1rem;
       }
       .preview {
-        border: 1px solid var(--border-color, #e5e7eb);
+        border: 1px solid var(--color-border);
         border-radius: 0.5rem;
         padding: 0.75rem 1rem;
-        background: var(--surface-muted, #f8fafc);
+        background: var(--color-surface-secondary);
       }
       .preview h3 {
         margin: 0 0 0.5rem;
         font-size: 0.85rem;
         font-weight: 700;
-        color: var(--text-secondary, #475569);
+        color: var(--color-text-secondary);
       }
       .preview p {
         margin: 0;
         font-size: 0.85rem;
-        color: var(--text-secondary, #475569);
+        color: var(--color-text-secondary);
         line-height: 1.4rem;
       }
       .step-error {
         margin: 0;
         font-size: 0.85rem;
-        color: var(--color-destructive, #b91c1c);
+        color: var(--color-destructive);
       }
     `,
   ],

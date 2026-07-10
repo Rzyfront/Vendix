@@ -121,9 +121,9 @@ interface ValidationRow {
         align-items: flex-start;
         gap: 0.7rem;
         padding: 0.85rem;
-        border: 1px solid var(--border-color, #e5e7eb);
+        border: 1px solid var(--color-border);
         border-radius: 0.5rem;
-        background: var(--surface-color, #ffffff);
+        background: var(--color-surface);
       }
       .validation-row__body {
         display: flex;
@@ -133,7 +133,7 @@ interface ValidationRow {
         min-width: 0;
       }
       .validation-row__reason {
-        color: var(--warning-color, #92400e) !important;
+        color: var(--color-warning) !important;
         font-weight: 600;
       }
       .validation-row__cta {
@@ -143,10 +143,10 @@ interface ValidationRow {
         align-items: center;
         gap: 0.35rem;
         padding: 0.45rem 0.7rem;
-        border: 1px solid var(--border-color, #e5e7eb);
+        border: 1px solid var(--color-border);
         border-radius: 0.45rem;
-        background: var(--surface-color, #ffffff);
-        color: var(--primary-color, #2563eb);
+        background: var(--color-surface);
+        color: var(--color-primary);
         font: inherit;
         font-size: 0.82rem;
         font-weight: 700;
@@ -156,12 +156,12 @@ interface ValidationRow {
       .validation-row__cta:hover {
         background: color-mix(
           in srgb,
-          var(--primary-color, #2563eb) 8%,
+          var(--color-primary) 8%,
           #ffffff
         );
       }
       .validation-row__cta:focus-visible {
-        outline: 2px solid var(--primary-color, #2563eb);
+        outline: 2px solid var(--color-primary);
         outline-offset: 2px;
       }
       .validation-state {
@@ -173,34 +173,34 @@ interface ValidationRow {
         border-radius: 999px;
         background: color-mix(
           in srgb,
-          var(--success-color, #16a34a) 14%,
+          var(--color-success) 14%,
           #ffffff
         );
-        color: var(--success-color, #166534);
+        color: var(--color-success);
       }
       .validation-row--missing .validation-state {
         background: color-mix(
           in srgb,
-          var(--warning-color, #f59e0b) 14%,
+          var(--color-warning) 14%,
           #ffffff
         );
-        color: var(--warning-color, #92400e);
+        color: var(--color-warning);
       }
       .validation-row--flagged {
-        border-color: var(--color-destructive, #b91c1c);
+        border-color: var(--color-destructive);
         background: color-mix(
           in srgb,
-          var(--color-destructive, #b91c1c) 5%,
+          var(--color-destructive) 5%,
           #ffffff
         );
       }
       .validation-row strong {
         display: block;
         font-size: 0.95rem;
-        color: var(--text-primary, #0f172a);
+        color: var(--color-text-primary);
       }
       .validation-row small {
-        color: var(--text-secondary, #64748b);
+        color: var(--color-text-secondary);
         font-size: 0.85rem;
         line-height: 1.25rem;
       }
@@ -213,7 +213,7 @@ interface ValidationRow {
         border: 1px solid #fcd34d;
         border-radius: 0.5rem;
         background: #fffbeb;
-        color: var(--warning-color, #92400e);
+        color: var(--color-warning);
       }
       .step-warning__body {
         display: flex;
@@ -223,7 +223,7 @@ interface ValidationRow {
       .step-warning__body strong {
         display: block;
         font-size: 0.9rem;
-        color: var(--warning-color, #92400e);
+        color: var(--color-warning);
       }
       .step-warning__body small {
         display: block;
@@ -233,12 +233,12 @@ interface ValidationRow {
       }
       .step-warning app-icon {
         flex: 0 0 auto;
-        color: var(--warning-color, #92400e);
+        color: var(--color-warning);
       }
       .step-error {
         margin: 0;
         font-size: 0.85rem;
-        color: var(--color-destructive, #b91c1c);
+        color: var(--color-destructive);
       }
       @media (max-width: 560px) {
         .validation-row {

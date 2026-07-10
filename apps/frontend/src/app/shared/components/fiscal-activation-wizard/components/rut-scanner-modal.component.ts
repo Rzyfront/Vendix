@@ -83,7 +83,7 @@ const TAX_REGIME_LABELS: Record<string, string> = {
             <button
               type="button"
               (click)="triggerCamera()"
-              class="w-full flex items-center justify-center gap-3 p-4 bg-primary-600 text-white rounded-xl shadow-md active:scale-[0.98] transition-transform"
+              class="w-full flex items-center justify-center gap-3 p-4 bg-primary text-[var(--color-text-on-primary)] rounded-xl shadow-md active:scale-[0.98] transition-transform"
             >
               <app-icon name="camera" [size]="24"></app-icon>
               <span class="text-base font-semibold">Tomar Foto</span>
@@ -97,11 +97,11 @@ const TAX_REGIME_LABELS: Record<string, string> = {
             (dragleave)="onDragLeave($event)"
             (drop)="onDrop($event)"
             class="group relative border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all min-h-[200px]"
-            [class.border-primary-600]="isDragging()"
+            [class.border-primary]="isDragging()"
             [class.border-border]="!isDragging() && !selectedFile()"
-            [class.hover:border-primary-600]="!isDragging()"
-            [class.border-emerald-500]="selectedFile() && !isProcessingFile()"
-            [class.bg-emerald-50]="selectedFile() && !isProcessingFile()"
+            [class.hover:border-primary]="!isDragging()"
+            [class.border-success]="selectedFile() && !isProcessingFile()"
+            [class.bg-success-light]="selectedFile() && !isProcessingFile()"
           >
             @if (filePreviewUrl() || selectedFile()) {
               <!-- File preview -->
@@ -110,7 +110,7 @@ const TAX_REGIME_LABELS: Record<string, string> = {
                   <app-icon
                     name="loader-2"
                     [size]="32"
-                    class="text-primary-600"
+                    class="text-[var(--color-primary)]"
                     [spin]="true"
                   ></app-icon>
                   <p class="text-sm text-text-secondary">Cargando archivo...</p>
@@ -122,11 +122,11 @@ const TAX_REGIME_LABELS: Record<string, string> = {
                   />
                 } @else {
                   <!-- PDF / non-image -->
-                  <div class="p-4 bg-primary-50 rounded-lg">
+                  <div class="p-4 bg-[var(--color-primary-light)] rounded-lg">
                     <app-icon
                       name="file-text"
                       [size]="48"
-                      class="text-primary-600"
+                      class="text-[var(--color-primary)]"
                     ></app-icon>
                   </div>
                 }
@@ -139,14 +139,14 @@ const TAX_REGIME_LABELS: Record<string, string> = {
                   </p>
                 }
                 @if (!isProcessingFile()) {
-                  <div class="flex items-center gap-2 text-emerald-600">
+                  <div class="flex items-center gap-2 text-success">
                     <app-icon name="check-circle" [size]="16"></app-icon>
                     <span class="text-xs font-medium">Archivo listo</span>
                   </div>
                 }
                 <button
                   type="button"
-                  class="text-xs text-primary-600 hover:underline font-medium"
+                  class="text-xs text-[var(--color-primary)] hover:underline font-medium"
                   (click)="removeFile(); $event.stopPropagation()"
                 >
                   Cambiar archivo
@@ -155,12 +155,12 @@ const TAX_REGIME_LABELS: Record<string, string> = {
             } @else {
               <!-- Empty state -->
               <div
-                class="p-3 bg-primary-50 rounded-full mb-3 group-hover:scale-110 transition-transform"
+                class="p-3 bg-[var(--color-primary-light)] rounded-full mb-3 group-hover:scale-110 transition-transform"
               >
                 <app-icon
                   name="scan-line"
                   [size]="32"
-                  class="text-primary-600"
+                  class="text-[var(--color-primary)]"
                 ></app-icon>
               </div>
               <p class="text-sm font-semibold text-text-primary mb-1">
@@ -188,7 +188,7 @@ const TAX_REGIME_LABELS: Record<string, string> = {
           />
 
           @if (fileError()) {
-            <p class="text-sm text-red-600">{{ fileError() }}</p>
+            <p class="text-sm text-error">{{ fileError() }}</p>
           }
         </div>
       }
@@ -345,14 +345,14 @@ const TAX_REGIME_LABELS: Record<string, string> = {
           <!-- Extraction notes -->
           @if (result()!.extraction_notes) {
             <div
-              class="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3"
+              class="flex items-start gap-2 bg-warning-light border border-warning rounded-lg p-3"
             >
               <app-icon
                 name="info"
                 [size]="16"
-                class="text-amber-600 mt-0.5"
+                class="text-warning mt-0.5"
               ></app-icon>
-              <p class="text-xs text-amber-800">
+              <p class="text-xs text-warning">
                 {{ result()!.extraction_notes }}
               </p>
             </div>
@@ -408,7 +408,7 @@ const TAX_REGIME_LABELS: Record<string, string> = {
             color-mix(in oklab, var(--color-primary) 10%, transparent),
             transparent 70%
           ),
-          var(--color-surface-muted, #f8fafc);
+          var(--color-surface-secondary);
         animation: ai-breathe 2.4s ease-in-out infinite;
       }
 
@@ -432,7 +432,7 @@ const TAX_REGIME_LABELS: Record<string, string> = {
       .ai-stage__caption {
         position: relative;
         z-index: 6;
-        color: var(--color-text-secondary, #64748b);
+        color: var(--color-text-secondary);
         animation: ai-soft-pulse 2.4s ease-in-out infinite;
       }
 
@@ -446,8 +446,8 @@ const TAX_REGIME_LABELS: Record<string, string> = {
         background: conic-gradient(
           from 0deg,
           color-mix(in oklab, var(--color-primary) 35%, transparent),
-          color-mix(in oklab, var(--color-info, #6366f1) 25%, transparent),
-          color-mix(in oklab, var(--color-success, #10b981) 25%, transparent),
+          color-mix(in oklab, var(--color-info) 25%, transparent),
+          color-mix(in oklab, var(--color-success) 25%, transparent),
           color-mix(in oklab, var(--color-primary) 35%, transparent)
         );
         filter: blur(40px);
@@ -526,7 +526,7 @@ const TAX_REGIME_LABELS: Record<string, string> = {
         background:
           radial-gradient(
             circle at 30% 30%,
-            color-mix(in oklab, var(--color-info, #6366f1) 45%, transparent),
+            color-mix(in oklab, var(--color-info) 45%, transparent),
             transparent 55%
           ),
           radial-gradient(
@@ -536,7 +536,7 @@ const TAX_REGIME_LABELS: Record<string, string> = {
           ),
           radial-gradient(
             circle at 50% 80%,
-            color-mix(in oklab, var(--color-success, #10b981) 30%, transparent),
+            color-mix(in oklab, var(--color-success) 30%, transparent),
             transparent 55%
           );
         filter: blur(48px);
