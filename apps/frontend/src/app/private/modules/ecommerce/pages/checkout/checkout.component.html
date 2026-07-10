@@ -306,7 +306,7 @@
             <h2>Metodo de Pago</h2>
 
             <div class="payment-list">
-              @for (method of payment_methods(); track method.id) {
+              @for (method of availablePaymentMethods(); track method.id) {
                 <div
                   class="payment-card"
                   [class.selected]="selected_payment_method_id() === method.id"

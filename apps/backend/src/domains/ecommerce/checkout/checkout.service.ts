@@ -181,7 +181,23 @@ export class CheckoutService {
       orderBy: { display_order: 'asc' },
     });
 
-    return methods.map((m) => {
+    // Wallet requiere cliente autenticado: el saldo y el crédito por
+    // reembolsos están vinculados a un customer_id. Si no hay user_id en
+    // el request context (guest con @OptionalAuth()), ocultamos wallet
+    // incluso si el método está habilitado en el sistema. Esto cierra
+    // el bug "Wallet permite compras sin autenticación" aunque el
+    // frontend sea bypaseado (defensa en profundidad — la UI también
+    // filtra, pero el backend es la fuente de verdad).
+    const isAuthenticated = RequestContextService.getUserId() != null;
+
+    return methods
+      .filter((m) => {
+        if (m.system_payment_method.type === 'wallet' && !isAuthenticated) {
+          return false;
+        }
+        return true;
+      })
+      .map((m) => {
       const base: Record<string, any> = {
         id: m.id,
         name: m.display_name || m.system_payment_method.display_name,

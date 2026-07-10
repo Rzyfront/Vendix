@@ -121,6 +121,24 @@ export class CheckoutComponent implements OnInit {
     return this.addressFormValid();
   });
 
+  /**
+   * Métodos de pago que el visitante puede seleccionar. Filtra los métodos
+   * que requieren autenticación (wallet — saldo y crédito vinculados a un
+   * customer_id) cuando el visitante es un guest. El backend hace el mismo
+   * filtro en getPaymentMethods(); este computed es defensa adicional para
+   * mantener coherencia visual y evitar flicker si la respuesta llega antes
+   * que is_authenticated se haya poblado.
+   */
+  readonly availablePaymentMethods = computed<PaymentMethod[]>(() => {
+    const isAuth = this.is_authenticated();
+    return this.payment_methods().filter((m) => {
+      if ((m.type === 'wallet' || m.provider === 'wallet') && !isAuth) {
+        return false;
+      }
+      return true;
+    });
+  });
+
   address_form!: FormGroup;
   readonly notes = signal('');
   /**
