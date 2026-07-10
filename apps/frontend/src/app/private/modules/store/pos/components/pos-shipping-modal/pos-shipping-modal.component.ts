@@ -1306,10 +1306,14 @@ export class PosShippingModalComponent {
     await this.applyCustomerAddress(customer);
   }
 
-  /** (customerCleared) handler: reset address auto-fill when customer is removed. */
+  /** (customerCleared) handler: reset ONLY customer-derived auto-fill signals,
+   *  but preserve whatever the user has typed manually in the address form
+   *  (address_line1, city, state_province, delivery_notes). Calling
+   *  `addressForm.reset()` here was wiping manual entries that the user had
+   *  already filled in — see fix for "checkout state resets when customer is
+   *  selected late" (POS admin). */
   clearCustomer(): void {
     this.selectedCustomerAddressId.set(null);
-    this.addressForm.reset();
     this.selectedDepartmentId.set(null);
     this.selectedCityId.set(null);
     this.cities.set([]);
@@ -1348,10 +1352,17 @@ export class PosShippingModalComponent {
       }
 
       if (this.selectedShippingMethod() && !this.manualCostOverride()) {
-        this.calculateShippingCost();
+        // Only recalculate when the address has a usable city. Without a
+        // city, calculateShippingCost returns early and the previous cost
+        // is preserved (better than zeroing it).
+        if (this.addressForm.value.city) {
+          this.calculateShippingCost();
+        }
       }
     } else {
-      this.addressForm.reset();
+      // Customer has NO primary address: clear customer-derived signals but
+      // do NOT reset addressForm — the user may have already filled it in
+      // manually. Wiping it caused the "shipping data lost" bug.
       this.selectedCustomerAddressId.set(null);
       this.selectedDepartmentId.set(null);
       this.selectedCityId.set(null);
