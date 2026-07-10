@@ -15,6 +15,8 @@ import type {
   TableColumn,
   ItemListCardConfig,
 } from '../../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
 /**
  * Conciliación 1435 vs inventario (C5, Ola 3) — papel de trabajo de
@@ -128,7 +130,7 @@ interface ApiResponse<T> {
               </app-button>
             </div>
 
-            <p class="text-xs text-gray-500">
+            <p class="text-xs text-text-secondary">
               Papel de trabajo de auditoría (read-only): último snapshot de
               inventario por bodega/producto vs saldo contable de la cuenta
               1435 y sus subcuentas, a la fecha de cierre del período.
@@ -137,7 +139,7 @@ interface ApiResponse<T> {
             <!-- Filters -->
             <div class="flex flex-col md:flex-row gap-2 md:items-end">
               <div class="flex-1">
-                <label class="text-xs text-gray-500 block mb-1">Período fiscal (ID)</label>
+                <label class="text-xs text-text-secondary block mb-1">Período fiscal (ID)</label>
                 <input
                   type="number"
                   class="w-full px-3 py-2 text-sm border border-border rounded-lg"
@@ -147,7 +149,7 @@ interface ApiResponse<T> {
                 />
               </div>
               <div class="flex-1">
-                <label class="text-xs text-gray-500 block mb-1">
+                <label class="text-xs text-text-secondary block mb-1">
                   Entidad contable (opcional — por defecto la del período)
                 </label>
                 <input
@@ -169,12 +171,12 @@ interface ApiResponse<T> {
         <div class="relative p-2 md:p-4">
           @if (loading()) {
             <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
             </div>
           }
 
           @if (errorMessage(); as err) {
-            <div class="flex flex-col items-center justify-center py-10 text-red-500">
+            <div class="flex flex-col items-center justify-center py-10 text-error">
               <app-icon name="alert-triangle" [size]="32"></app-icon>
               <p class="mt-2 text-sm">{{ err }}</p>
             </div>
@@ -182,40 +184,40 @@ interface ApiResponse<T> {
             <!-- Summary cards -->
             <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
               <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border p-4">
-                <p class="text-xs text-gray-500 mb-1">Según snapshots de inventario</p>
+                <p class="text-xs text-text-secondary mb-1">Según snapshots de inventario</p>
                 <p class="text-lg font-bold font-mono">{{ r.inventory_side.total_value | number: '1.2-2' }}</p>
-                <p class="text-[11px] text-gray-400 mt-1">{{ r.inventory_side.snapshot_count }} combinación(es) bodega/producto</p>
+                <p class="text-[11px] text-text-secondary mt-1">{{ r.inventory_side.snapshot_count }} combinación(es) bodega/producto</p>
               </div>
               <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border p-4">
-                <p class="text-xs text-gray-500 mb-1">Según cuenta 1435 (mayor)</p>
+                <p class="text-xs text-text-secondary mb-1">Según cuenta 1435 (mayor)</p>
                 <p class="text-lg font-bold font-mono">{{ r.accounting_side.total_balance | number: '1.2-2' }}</p>
-                <p class="text-[11px] text-gray-400 mt-1">{{ r.accounting_side.accounts.length }} cuenta(s)</p>
+                <p class="text-[11px] text-text-secondary mt-1">{{ r.accounting_side.accounts.length }} cuenta(s)</p>
               </div>
               <div
                 class="rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border p-4"
-                [class.bg-green-50]="r.is_reconciled"
-                [class.border-green-200]="r.is_reconciled"
-                [class.bg-red-50]="!r.is_reconciled"
-                [class.border-red-200]="!r.is_reconciled"
+                [class.bg-success-light]="r.is_reconciled"
+                [class.border-success]="r.is_reconciled"
+                [class.bg-error-light]="!r.is_reconciled"
+                [class.border-error]="!r.is_reconciled"
               >
-                <p class="text-xs text-gray-500 mb-1">Diferencia</p>
+                <p class="text-xs text-text-secondary mb-1">Diferencia</p>
                 <p
                   class="text-lg font-bold font-mono"
-                  [class.text-green-700]="r.is_reconciled"
-                  [class.text-red-700]="!r.is_reconciled"
+                  [class.text-success]="r.is_reconciled"
+                  [class.text-error]="!r.is_reconciled"
                 >
                   {{ r.difference | number: '1.2-2' }}
                 </p>
-                <p class="text-[11px] mt-1" [class.text-green-600]="r.is_reconciled" [class.text-red-600]="!r.is_reconciled">
+                <p class="text-[11px] mt-1" [class.text-success]="r.is_reconciled" [class.text-error]="!r.is_reconciled">
                   {{ r.is_reconciled ? 'Conciliado' : 'Descuadre — revisar drill-down' }}
                 </p>
               </div>
             </div>
 
-            <div class="text-xs text-gray-500 mb-4 flex flex-wrap gap-x-4 gap-y-1">
-              <span>Entidad contable: <span class="font-mono font-bold text-gray-700">{{ r.accounting_entity_id }}</span></span>
-              <span>Corte (period_end): <span class="font-mono font-bold text-gray-700">{{ formatDate(r.period_end) }}</span></span>
-              <span>Período: <span class="font-bold text-gray-700">{{ r.fiscal_period.name }}</span></span>
+            <div class="text-xs text-text-secondary mb-4 flex flex-wrap gap-x-4 gap-y-1">
+              <span>Entidad contable: <span class="font-mono font-bold text-text-primary">{{ r.accounting_entity_id }}</span></span>
+              <span>Corte (period_end): <span class="font-mono font-bold text-text-primary">{{ formatDate(r.period_end) }}</span></span>
+              <span>Período: <span class="font-bold text-text-primary">{{ r.fiscal_period.name }}</span></span>
             </div>
 
             <!-- Inventory snapshots detail -->
@@ -256,7 +258,7 @@ interface ApiResponse<T> {
               ></app-responsive-data-view>
             </div>
           } @else {
-            <div class="flex flex-col items-center justify-center py-16 text-gray-400">
+            <div class="flex flex-col items-center justify-center py-16 text-text-secondary">
               <app-icon name="scale" [size]="48"></app-icon>
               <p class="mt-4">Ingresa un período fiscal y presiona Conciliar</p>
             </div>
@@ -268,6 +270,7 @@ interface ApiResponse<T> {
 })
 export class InventoryReconciliationComponent {
   private readonly http = inject(HttpClient);
+  private readonly currencyFormat = inject(CurrencyFormatService);
 
   protected readonly Number = Number;
 
@@ -299,13 +302,13 @@ export class InventoryReconciliationComponent {
       key: 'unit_cost',
       label: 'Costo unitario',
       align: 'right',
-      transform: (v) => Number(v).toFixed(2),
+      transform: (v) => this.currencyFormat.format(Number(v)),
     },
     {
       key: 'total_value',
       label: 'Valor total',
       align: 'right',
-      transform: (v) => Number(v).toFixed(2),
+      transform: (v) => this.currencyFormat.format(Number(v)),
     },
   ];
 
@@ -327,19 +330,19 @@ export class InventoryReconciliationComponent {
       key: 'total_debit',
       label: 'Débito',
       align: 'right',
-      transform: (v) => Number(v).toFixed(2),
+      transform: (v) => this.currencyFormat.format(Number(v)),
     },
     {
       key: 'total_credit',
       label: 'Crédito',
       align: 'right',
-      transform: (v) => Number(v).toFixed(2),
+      transform: (v) => this.currencyFormat.format(Number(v)),
     },
     {
       key: 'balance',
       label: 'Saldo',
       align: 'right',
-      transform: (v) => Number(v).toFixed(2),
+      transform: (v) => this.currencyFormat.format(Number(v)),
     },
   ];
 
@@ -355,7 +358,7 @@ export class InventoryReconciliationComponent {
   };
 
   readonly entryColumns: TableColumn[] = [
-    { key: 'entry_date', label: 'Fecha', transform: (v) => (v ? new Date(v).toLocaleDateString() : '-') },
+    { key: 'entry_date', label: 'Fecha', transform: (v) => (v ? formatDateOnlyUTC(v) : '-') },
     { key: 'entry_number', label: 'Asiento #' },
     { key: 'account_code', label: 'Cuenta' },
     { key: 'line_description', label: 'Descripción', defaultValue: '-' },
@@ -363,13 +366,13 @@ export class InventoryReconciliationComponent {
       key: 'debit_amount',
       label: 'Débito',
       align: 'right',
-      transform: (v) => (Number(v) > 0 ? Number(v).toFixed(2) : '-'),
+      transform: (v) => (Number(v) > 0 ? this.currencyFormat.format(Number(v)) : '-'),
     },
     {
       key: 'credit_amount',
       label: 'Crédito',
       align: 'right',
-      transform: (v) => (Number(v) > 0 ? Number(v).toFixed(2) : '-'),
+      transform: (v) => (Number(v) > 0 ? this.currencyFormat.format(Number(v)) : '-'),
     },
   ];
 
@@ -385,7 +388,7 @@ export class InventoryReconciliationComponent {
   };
 
   formatDate(value: string): string {
-    return value ? new Date(value).toLocaleDateString() : '-';
+    return value ? formatDateOnlyUTC(value) : '-';
   }
 
   async loadReport(): Promise<void> {

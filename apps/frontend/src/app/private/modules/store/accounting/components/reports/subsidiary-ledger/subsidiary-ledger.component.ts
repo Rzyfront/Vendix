@@ -1,6 +1,6 @@
 import { Component, inject, signal, computed } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { DecimalPipe } from '@angular/common';
+import { DecimalPipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 
@@ -16,6 +16,8 @@ import type {
   TableColumn,
   ItemListCardConfig,
 } from '../../../../../../../shared/components/index';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 
 /**
  * Libro auxiliar (art. 48-55 C.Co): dos modos consumen el mismo endpoint
@@ -84,6 +86,7 @@ type LedgerMode = 'account' | 'third_party';
   standalone: true,
   imports: [
     DecimalPipe,
+    NgClass,
     FormsModule,
     ButtonComponent,
     CardComponent,
@@ -117,10 +120,11 @@ type LedgerMode = 'account' | 'third_party';
               <button
                 type="button"
                 class="px-3 py-1.5 text-xs rounded-lg font-medium transition-colors"
-                [class.bg-primary]="mode() === 'account'"
-                [class.text-white]="mode() === 'account'"
-                [class.bg-gray-100]="mode() !== 'account'"
-                [class.text-gray-600]="mode() !== 'account'"
+                [ngClass]="
+                  mode() === 'account'
+                    ? 'bg-primary text-[var(--color-text-on-primary)]'
+                    : 'bg-[var(--color-surface-secondary)] text-gray-600'
+                "
                 (click)="setMode('account')"
               >
                 Por cuenta
@@ -128,10 +132,11 @@ type LedgerMode = 'account' | 'third_party';
               <button
                 type="button"
                 class="px-3 py-1.5 text-xs rounded-lg font-medium transition-colors"
-                [class.bg-primary]="mode() === 'third_party'"
-                [class.text-white]="mode() === 'third_party'"
-                [class.bg-gray-100]="mode() !== 'third_party'"
-                [class.text-gray-600]="mode() !== 'third_party'"
+                [ngClass]="
+                  mode() === 'third_party'
+                    ? 'bg-primary text-[var(--color-text-on-primary)]'
+                    : 'bg-[var(--color-surface-secondary)] text-gray-600'
+                "
                 (click)="setMode('third_party')"
               >
                 Por tercero
@@ -142,7 +147,7 @@ type LedgerMode = 'account' | 'third_party';
             <div class="flex flex-col md:flex-row gap-2 md:items-end">
               @if (mode() === 'account') {
                 <div class="flex-1">
-                  <label class="text-xs text-gray-500 block mb-1">Código de cuenta (PUC)</label>
+                  <label class="text-xs text-text-secondary block mb-1">Código de cuenta (PUC)</label>
                   <input
                     type="text"
                     class="w-full px-3 py-2 text-sm border border-border rounded-lg"
@@ -153,7 +158,7 @@ type LedgerMode = 'account' | 'third_party';
                 </div>
               } @else {
                 <div class="flex-1">
-                  <label class="text-xs text-gray-500 block mb-1">Tipo de tercero</label>
+                  <label class="text-xs text-text-secondary block mb-1">Tipo de tercero</label>
                   <app-selector
                     [options]="thirdPartyTypeOptions"
                     [ngModel]="thirdPartyType()"
@@ -162,7 +167,7 @@ type LedgerMode = 'account' | 'third_party';
                   ></app-selector>
                 </div>
                 <div class="flex-1">
-                  <label class="text-xs text-gray-500 block mb-1">ID del tercero</label>
+                  <label class="text-xs text-text-secondary block mb-1">ID del tercero</label>
                   <input
                     type="number"
                     class="w-full px-3 py-2 text-sm border border-border rounded-lg"
@@ -173,7 +178,7 @@ type LedgerMode = 'account' | 'third_party';
                 </div>
               }
               <div class="flex-1">
-                <label class="text-xs text-gray-500 block mb-1">Desde</label>
+                <label class="text-xs text-text-secondary block mb-1">Desde</label>
                 <input
                   type="date"
                   class="w-full px-3 py-2 text-sm border border-border rounded-lg"
@@ -182,7 +187,7 @@ type LedgerMode = 'account' | 'third_party';
                 />
               </div>
               <div class="flex-1">
-                <label class="text-xs text-gray-500 block mb-1">Hasta</label>
+                <label class="text-xs text-text-secondary block mb-1">Hasta</label>
                 <input
                   type="date"
                   class="w-full px-3 py-2 text-sm border border-border rounded-lg"
@@ -201,12 +206,12 @@ type LedgerMode = 'account' | 'third_party';
         <div class="relative p-2 md:p-4">
           @if (loading()) {
             <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
-              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
             </div>
           }
 
           @if (errorMessage(); as err) {
-            <div class="flex flex-col items-center justify-center py-10 text-red-500">
+            <div class="flex flex-col items-center justify-center py-10 text-error">
               <app-icon name="alert-triangle" [size]="32"></app-icon>
               <p class="mt-2 text-sm">{{ err }}</p>
             </div>
@@ -219,7 +224,7 @@ type LedgerMode = 'account' | 'third_party';
               @for (group of report.accounts; track group.account_id) {
                 <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
                   <div
-                    class="px-4 py-3 bg-gray-50 border-b border-border cursor-pointer"
+                    class="px-4 py-3 bg-[var(--color-surface-secondary)] border-b border-border cursor-pointer"
                     (click)="toggleGroup(group.account_id)"
                   >
                     <div class="flex items-center justify-between">
@@ -228,10 +233,10 @@ type LedgerMode = 'account' | 'third_party';
                           [name]="isGroupExpanded(group.account_id) ? 'chevron-down' : 'chevron-right'"
                           [size]="16"
                         ></app-icon>
-                        <span class="text-sm font-mono text-gray-500">{{ group.account_code }}</span>
+                        <span class="text-sm font-mono text-text-secondary">{{ group.account_code }}</span>
                         <span class="text-sm font-bold text-text-primary">{{ group.account_name }}</span>
                         @if (group.is_parent) {
-                          <span class="text-[10px] uppercase tracking-wide text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                          <span class="text-[10px] uppercase tracking-wide text-[var(--color-primary)] bg-[var(--color-primary-light)] px-1.5 py-0.5 rounded">
                             Padre
                           </span>
                         }
@@ -258,7 +263,7 @@ type LedgerMode = 'account' | 'third_party';
             <div class="mb-3 text-sm text-gray-600">
               Tercero: <span class="font-bold">{{ report.third_party.name || '(sin nombre en snapshot)' }}</span>
               @if (report.third_party.tax_id) {
-                <span class="font-mono text-gray-500"> — {{ report.third_party.tax_id }}</span>
+                <span class="font-mono text-text-secondary"> — {{ report.third_party.tax_id }}</span>
               }
             </div>
             <app-responsive-data-view
@@ -274,7 +279,7 @@ type LedgerMode = 'account' | 'third_party';
               <span class="font-bold">Saldo: {{ report.totals.final_balance | number: '1.2-2' }}</span>
             </div>
           } @else {
-            <div class="flex flex-col items-center justify-center py-16 text-gray-400">
+            <div class="flex flex-col items-center justify-center py-16 text-text-secondary">
               <app-icon name="book-open" [size]="48"></app-icon>
               <p class="mt-4">Completa los filtros y presiona Consultar</p>
             </div>
@@ -286,6 +291,7 @@ type LedgerMode = 'account' | 'third_party';
 })
 export class SubsidiaryLedgerComponent {
   private readonly http = inject(HttpClient);
+  private readonly currencyFormat = inject(CurrencyFormatService);
 
   protected readonly Number = Number;
   protected readonly String = String;
@@ -317,31 +323,31 @@ export class SubsidiaryLedgerComponent {
   });
 
   readonly lineColumns: TableColumn[] = [
-    { key: 'entry_date', label: 'Fecha', transform: (v) => (v ? new Date(v).toLocaleDateString() : '-') },
+    { key: 'entry_date', label: 'Fecha', transform: (v) => (v ? formatDateOnlyUTC(v) : '-') },
     { key: 'entry_number', label: 'Asiento #' },
     { key: 'line_description', label: 'Descripción', defaultValue: '-' },
     {
       key: 'debit_amount',
       label: 'Débito',
       align: 'right',
-      transform: (v) => (Number(v) > 0 ? Number(v).toFixed(2) : '-'),
+      transform: (v) => (Number(v) > 0 ? this.currencyFormat.format(Number(v)) : '-'),
     },
     {
       key: 'credit_amount',
       label: 'Crédito',
       align: 'right',
-      transform: (v) => (Number(v) > 0 ? Number(v).toFixed(2) : '-'),
+      transform: (v) => (Number(v) > 0 ? this.currencyFormat.format(Number(v)) : '-'),
     },
     {
       key: 'running_balance',
       label: 'Saldo',
       align: 'right',
-      transform: (v) => Number(v).toFixed(2),
+      transform: (v) => this.currencyFormat.format(Number(v)),
     },
   ];
 
   readonly thirdPartyLineColumns: TableColumn[] = [
-    { key: 'entry_date', label: 'Fecha', transform: (v) => (v ? new Date(v).toLocaleDateString() : '-') },
+    { key: 'entry_date', label: 'Fecha', transform: (v) => (v ? formatDateOnlyUTC(v) : '-') },
     { key: 'account_code', label: 'Cuenta' },
     { key: 'account_name', label: 'Nombre cuenta' },
     { key: 'entry_number', label: 'Asiento #' },
@@ -349,19 +355,19 @@ export class SubsidiaryLedgerComponent {
       key: 'debit_amount',
       label: 'Débito',
       align: 'right',
-      transform: (v) => (Number(v) > 0 ? Number(v).toFixed(2) : '-'),
+      transform: (v) => (Number(v) > 0 ? this.currencyFormat.format(Number(v)) : '-'),
     },
     {
       key: 'credit_amount',
       label: 'Crédito',
       align: 'right',
-      transform: (v) => (Number(v) > 0 ? Number(v).toFixed(2) : '-'),
+      transform: (v) => (Number(v) > 0 ? this.currencyFormat.format(Number(v)) : '-'),
     },
     {
       key: 'running_balance',
       label: 'Saldo',
       align: 'right',
-      transform: (v) => Number(v).toFixed(2),
+      transform: (v) => this.currencyFormat.format(Number(v)),
     },
   ];
 
