@@ -428,7 +428,7 @@ type AuditView = 'evidence' | 'history';
       @if (activeTab() === 'audit') {
         <div class="flex">
           <div
-            class="inline-flex items-center gap-1 rounded-lg border border-border bg-surface p-1"
+            class="inline-flex items-center gap-1 rounded-lg border border-border bg-[var(--color-surface)] p-1"
             role="tablist"
             aria-label="Vista de auditoría"
           >
@@ -439,7 +439,7 @@ type AuditView = 'evidence' | 'history';
               class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors md:text-sm"
               [class]="
                 auditView() === 'evidence'
-                  ? 'bg-primary-600 text-white'
+                  ? 'bg-primary text-[var(--color-text-on-primary)]'
                   : 'text-text-secondary hover:text-text-primary'
               "
               (click)="auditView.set('evidence')"
@@ -454,7 +454,7 @@ type AuditView = 'evidence' | 'history';
               class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors md:text-sm"
               [class]="
                 auditView() === 'history'
-                  ? 'bg-primary-600 text-white'
+                  ? 'bg-primary text-[var(--color-text-on-primary)]'
                   : 'text-text-secondary hover:text-text-primary'
               "
               (click)="auditView.set('history')"
