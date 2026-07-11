@@ -41,6 +41,15 @@ export class AnalyticsQueryDto {
   @IsEnum(DatePreset)
   date_preset?: DatePreset;
 
+  /**
+   * IANA timezone del browser del usuario (ej: "America/Bogota").
+   * Si está presente, el backend calcula "hoy"/"ayer"/"este mes" en esa zona.
+   * Si no, fallback a UTC (comportamiento legacy).
+   */
+  @IsOptional()
+  @IsString()
+  timezone?: string;
+
   @IsOptional()
   @IsEnum(Granularity)
   granularity?: Granularity;

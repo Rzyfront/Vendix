@@ -189,6 +189,18 @@ export class AnalyticsService {
       }
     });
 
+    // Auto-inject browser timezone so backend calculates "hoy"/"este mes"
+    // en la zona local del usuario (no en UTC). Sin esto, usuarios al
+    // oeste de UTC ven ventas de la tarde aparecer en "mañana".
+    if (!params.has('timezone')) {
+      try {
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (tz) params = params.set('timezone', tz);
+      } catch {
+        // Intl no disponible: omitir timezone → backend usa UTC fallback
+      }
+    }
+
     return params;
   }
 
