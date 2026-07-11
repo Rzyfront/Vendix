@@ -137,7 +137,7 @@ export class ModalComponent {
   readonly subtitle = input<string>();
   readonly size = input<ModalSize>('md');
   readonly centered = input<boolean>(true);
-  readonly closeOnBackdrop = input<boolean>(true);
+  readonly closeOnBackdrop = input<boolean>(false);
   readonly closeOnEscape = input<boolean>(true);
   readonly showCloseButton = input<boolean>(true);
   readonly overlayCloseButton = input<boolean>(false);
