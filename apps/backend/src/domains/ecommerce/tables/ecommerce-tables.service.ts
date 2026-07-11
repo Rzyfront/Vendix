@@ -282,14 +282,8 @@ export class EcommerceTablesService {
   /**
    * Step 8 — Mesero confirms a `require_staff` QR scan. Opens a table
    * session with `opened_by = userId` (the authenticated mesero).
-   *
-   * `openTableSessionPublic` always sets `opened_by = null` (anonymous).
-   * Since `table-sessions.service.ts` is outside this agent's scope, we
-   * open the session via `openTableSessionPublic` and then set
-   * `opened_by` via a direct `table_sessions.update`. This is a
-   * temporary workaround — the clean fix is to add an optional
-   * `openedByUserId?` parameter to `openTableSessionPublic` (reported
-   * as a blocker for a follow-up change in table-sessions.service.ts).
+   * `openTableSessionPublic` accepts an optional `openedByUserId` so the
+   * opener is set atomically inside the create-session `$transaction`.
    */
   async confirmStaff(token: string, userId: number): Promise<ConfirmStaffResult> {
     const store_id = RequestContextService.getStoreId();
@@ -305,17 +299,14 @@ export class EcommerceTablesService {
       throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
     }
 
-    // Open the anonymous session, then set opened_by to the mesero.
+    // Open the session atomically with opened_by = mesero (require_staff
+    // confirmation). openTableSessionPublic accepts an optional userId so
+    // the session is created with the correct opener inside the same
+    // $transaction — no post-open update needed.
     const session = await this.tableSessionsService.openTableSessionPublic(
       table.id,
+      userId,
     );
-
-    if (session.opened_by === null) {
-      await this.prisma.table_sessions.update({
-        where: { id: session.id },
-        data: { opened_by: userId, updated_at: new Date() },
-      });
-    }
 
     this.logger.log(
       `Staff confirmed QR table: session=${session.id} table=${table.id} opened_by=${userId}`,

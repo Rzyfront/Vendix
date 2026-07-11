@@ -290,7 +290,10 @@ export class TableSessionsService {
    *     `TABLE_SESSION_ALREADY_OPEN`. This matches the diner mental
    *     model — scanning the same QR twice must not error.
    */
-  async openTableSessionPublic(tableId: number): Promise<TableSessionView> {
+  async openTableSessionPublic(
+    tableId: number,
+    openedByUserId?: number | null,
+  ): Promise<TableSessionView> {
     const { storeId } = this.requireStoreContext();
 
     // 1. Idempotency: if there is already an active session for this
@@ -306,7 +309,7 @@ export class TableSessionsService {
     const session = await this.createOpenSession({
       tableId,
       storeId,
-      openedBy: null,
+      openedBy: openedByUserId ?? null,
       customerId: null,
       channel: 'ecommerce',
       deliveryType: 'dine_in',
