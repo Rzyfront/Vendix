@@ -34,6 +34,9 @@ describe('TablesService — CRUD + floor map (Fase E smoke)', () => {
         findMany: jest.fn(),
         count: jest.fn().mockResolvedValue(0),
       },
+      bookings: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       $transaction: jest.fn((cb: any) => cb(prismaMock)),
     };
 
@@ -41,7 +44,9 @@ describe('TablesService — CRUD + floor map (Fase E smoke)', () => {
       .spyOn(RequestContextService, 'getContext')
       .mockReturnValue(context);
 
-    service = new TablesService(prismaMock as any);
+    service = new TablesService(prismaMock as any, {
+      generateDataUrl: jest.fn(),
+    } as any);
   });
 
   afterEach(() => jest.clearAllMocks());
