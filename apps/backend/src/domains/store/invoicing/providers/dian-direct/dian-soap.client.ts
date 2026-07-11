@@ -109,6 +109,30 @@ export class DianSoapClient {
   }
 
   /**
+   * Polls the validation status of an async submission (SendTestSetAsync).
+   * The ZipKey returned by the async submit is used as the trackId here.
+   * Returns the DIAN verdict once processing completes (StatusCode 00 / IsValid,
+   * or an ErrorMessageList on rejection).
+   */
+  async getStatusZip(
+    zip_key: string,
+    environment: 'test' | 'production',
+    credentials?: WsSecurityCredentials,
+  ): Promise<DianSendBillResponse> {
+    const endpoint = DIAN_ENDPOINTS[environment].url;
+    const soap_action = DIAN_SOAP_ACTIONS.GetStatusZip;
+
+    const soap_body = this.buildGetStatusZipEnvelope(
+      zip_key,
+      endpoint,
+      soap_action,
+      credentials,
+    );
+
+    return this.executeWithRetry(endpoint, soap_action, soap_body);
+  }
+
+  /**
    * Executes a SOAP request with retry for network timeouts.
    */
   private async executeWithRetry(
@@ -255,26 +279,49 @@ export class DianSoapClient {
       };
     }
 
-    // Extract status code from SOAP response
+    // Extract status fields. Synchronous operations (SendBillSync / GetStatus /
+    // GetStatusZip) carry StatusCode/StatusMessage/IsValid; the asynchronous
+    // SendTestSetAsync only returns a ZipKey acknowledgement that must then be
+    // polled via GetStatusZip to obtain the real validation verdict.
     const status_code_match = response_xml.match(
       /<b:StatusCode>(.*?)<\/b:StatusCode>/,
     );
-    const status_message_match = response_xml.match(
-      /<b:StatusMessage>(.*?)<\/b:StatusMessage>/,
-    );
+    const status_message_match =
+      response_xml.match(/<b:StatusMessage>(.*?)<\/b:StatusMessage>/) ||
+      response_xml.match(/<b:StatusDescription>(.*?)<\/b:StatusDescription>/);
     const is_valid_match = response_xml.match(/<b:IsValid>(.*?)<\/b:IsValid>/);
+    const zip_key_match = response_xml.match(/<b:ZipKey>(.*?)<\/b:ZipKey>/);
 
+    // DIAN serializes validation errors as <b:string> items inside
+    // <b:ErrorMessageList>. Extract them for diagnostics.
+    const error_list_block = response_xml.match(
+      /<b:ErrorMessageList[^>]*>([\s\S]*?)<\/b:ErrorMessageList>/,
+    )?.[1];
+    const error_messages = error_list_block
+      ? Array.from(
+          error_list_block.matchAll(/<b:string>(.*?)<\/b:string>/g),
+        ).map((m) => m[1])
+      : [];
+
+    const zip_key = zip_key_match?.[1];
     const status_code = status_code_match?.[1] || String(http_status);
     const status_message =
-      status_message_match?.[1] || 'No status message in response';
+      status_message_match?.[1] ||
+      (zip_key
+        ? 'Set de pruebas recibido por la DIAN; pendiente de consultar estado (GetStatusZip).'
+        : 'No status message in response');
     const is_valid = is_valid_match?.[1]?.toLowerCase() === 'true';
 
     return {
+      // A bare ZipKey acknowledgement is NOT a final success — the verdict is
+      // resolved later via GetStatusZip. Only StatusCode 00 / IsValid is success.
       success: is_valid || status_code === '00',
       status_code,
       status_message,
       raw_response: response_xml,
       duration_ms,
+      zip_key,
+      error_messages: error_messages.length ? error_messages : undefined,
     };
   }
 
@@ -532,6 +579,26 @@ export class DianSoapClient {
       `<wcf:GetStatus>
       <wcf:trackId>${tracking_id}</wcf:trackId>
     </wcf:GetStatus>`,
+      credentials,
+    );
+  }
+
+  /**
+   * Builds the SOAP envelope for GetStatusZip (async test-set polling).
+   * DIAN expects the ZipKey acknowledgement as the trackId.
+   */
+  private buildGetStatusZipEnvelope(
+    zip_key: string,
+    endpoint: string,
+    soap_action: string,
+    credentials?: WsSecurityCredentials,
+  ): string {
+    return this.wrapEnvelope(
+      endpoint,
+      soap_action,
+      `<wcf:GetStatusZip>
+      <wcf:trackId>${zip_key}</wcf:trackId>
+    </wcf:GetStatusZip>`,
       credentials,
     );
   }

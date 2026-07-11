@@ -207,4 +207,16 @@ export class DianConfigController {
     const result = await this.dian_test_service.getTestResults(id);
     return this.response_service.success(result);
   }
+
+  /**
+   * Re-polls GetStatusZip for the stored test-set ZipKey. Resolves a verdict
+   * that was still "in process" when run-test-set returned, without re-sending
+   * the 50 documents.
+   */
+  @Get(':id/test-set-status')
+  @Permissions('invoicing:read')
+  async checkTestSetStatus(@Param('id', ParseIntPipe) id: number) {
+    const result = await this.dian_test_service.checkTestSetStatus(id);
+    return this.response_service.success(result);
+  }
 }
