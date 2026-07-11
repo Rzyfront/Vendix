@@ -33,6 +33,25 @@ export interface Table {
    * el floor map.
    */
   pending_bookings?: PendingBookingSummary[];
+  /**
+   * Token público opaco usado para construir la URL de carta-por-mesa
+   * (`${ecommerceUrl}/?mesa=${public_token}`). Lo genera el backend al
+   * crear la mesa (uuidv4) y lo backfill-ea en `GET /store/tables/:id/qr`
+   * si la mesa es previa a la migración. Opcional en el listado porque
+   * el frontend no lo consume directamente — el endpoint QR lo devuelve
+   * embebido en `public_url`.
+   */
+  public_token?: string;
+}
+
+/**
+ * Respuesta de `GET /store/tables/:id/qr`. El backend genera un PNG
+ * data URL (base64) listo para `<img [src]>` y la URL pública de la
+ * carta de la mesa.
+ */
+export interface TableQrResponse {
+  public_url: string;
+  qr_data_url: string;
 }
 
 export interface PendingBookingSummary {
