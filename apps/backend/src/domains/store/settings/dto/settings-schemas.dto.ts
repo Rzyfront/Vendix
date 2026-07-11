@@ -699,6 +699,27 @@ export class RestaurantSettingsDto {
   @IsOptional()
   @IsBoolean()
   enable_table_checkout?: boolean;
+
+  @ApiProperty({
+    enum: ['menu_only', 'mark_occupied', 'open_tab', 'require_staff'],
+    example: 'menu_only',
+    required: false,
+    description:
+      'Behavior when a customer scans a table QR code. `menu_only` (default) shows the digital menu without changing table state; `mark_occupied` marks the table occupied; `open_tab` also opens a tab (draft order); `require_staff` requires staff confirmation first.',
+  })
+  @IsOptional()
+  @IsIn(['menu_only', 'mark_occupied', 'open_tab', 'require_staff'])
+  qr_scan_behavior?: 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
+
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'When true, scanning the QR auto-fires order items to KDS/kitchen (same as the POS "fire" action). Default false — items stay as a draft until staff fires them.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  qr_auto_fire?: boolean;
 }
 
 export class FingerprintDeviceConfigDto {

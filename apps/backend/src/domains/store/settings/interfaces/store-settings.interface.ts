@@ -537,6 +537,8 @@ export interface OperationsSettings {
 // ============================================================================
 // RESTAURANT - Restaurant suite behavior toggles
 // ============================================================================
+export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
+
 export interface RestaurantSettings {
   /**
    * Enables paying/closing a table check directly from the table screen
@@ -544,6 +546,20 @@ export interface RestaurantSettings {
    * the normal POS payment flow.
    */
   enable_table_checkout: boolean;
+  /**
+   * Behavior when a customer scans a table QR code.
+   * - `menu_only` (default): show the digital menu only; no table state change.
+   * - `mark_occupied`: mark the table as occupied (no tab opened).
+   * - `open_tab`: mark occupied and open a tab (draft order) for the table.
+   * - `require_staff`: a staff member must confirm before any action.
+   */
+  qr_scan_behavior: QrScanBehavior;
+  /**
+   * When true, scanning the QR auto-fires the order items to KDS/kitchen
+   * (same as the POS "fire" action). Default `false` — items stay as a
+   * draft until staff fires them.
+   */
+  qr_auto_fire: boolean;
 }
 
 export interface FingerprintDeviceConfig {

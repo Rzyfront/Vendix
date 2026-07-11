@@ -364,8 +364,12 @@ export function getDefaultStoreSettings(): StoreSettings {
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is
     // opt-in (false by default) so existing stores keep paying via POS.
+    // QR scan defaults to `menu_only` (show menu, no table state change)
+    // and `qr_auto_fire` off so staff explicitly fires items to kitchen.
     restaurant: {
       enable_table_checkout: false,
+      qr_scan_behavior: 'menu_only',
+      qr_auto_fire: false,
     },
 
     // Membership - gym/membership suite behavior toggles. Ambient access
