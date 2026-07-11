@@ -20,6 +20,7 @@ import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
 import { WishlistService } from '../../modules/ecommerce/services/wishlist.service';
 import { StoreUiService } from '../../modules/ecommerce/services/store-ui.service';
+import { TableContextService } from '../../modules/ecommerce/services/table-context.service';
 import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/search-autocomplete';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthModalComponent } from './components/auth-modal/auth-modal.component';
@@ -118,6 +119,7 @@ export class StoreEcommerceLayoutComponent {
   private cart_service = inject(CartService);
   private wishlist_service = inject(WishlistService);
   private store_ui_service = inject(StoreUiService);
+  private table_context_service = inject(TableContextService);
   private router = inject(Router);
   private viewport_scroller = inject(ViewportScroller);
   private destroy_ref = inject(DestroyRef);
@@ -151,6 +153,9 @@ export class StoreEcommerceLayoutComponent {
     })),
   );
   readonly wishlist_badge = toSignal(this.wishlist_badge$, { initialValue: { show: false, count: 0 } });
+
+  // Table QR context (exposed read-only for template)
+  readonly table_context = this.table_context_service;
 
   // Cart animation and tooltip state
   readonly is_animating = signal(false);
@@ -237,6 +242,27 @@ export class StoreEcommerceLayoutComponent {
           this.scrollToTop();
         }
       });
+
+    // QR-por-mesa: hydrate persisted table context, then check ?mesa= token.
+    // Router is NOT configured with withComponentInputBinding (see
+    // reference_route_input_binding memory), so we read query params via
+    // URLSearchParams on window.location.search with is_browser guard.
+    if (this.is_browser) {
+      this.table_context_service.hydrate();
+      const params = new URLSearchParams(window.location.search);
+      const mesaToken = params.get('mesa');
+      if (mesaToken && !this.table_context_service.isActive()) {
+        this.table_context_service
+          .resolve(mesaToken)
+          .pipe(takeUntilDestroyed(this.destroy_ref))
+          .subscribe({
+            error: () => {
+              // Invalid/expired token — clear any stale context.
+              this.table_context_service.clear();
+            },
+          });
+      }
+    }
   }
 
   private triggerCartAnimation(): void {

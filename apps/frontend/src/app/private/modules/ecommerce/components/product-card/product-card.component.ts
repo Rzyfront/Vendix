@@ -1,6 +1,8 @@
 import { Component, ChangeDetectionStrategy, inject, input, output } from '@angular/core';
 import { RouterModule, Router } from '@angular/router';
 import { EcommerceProduct } from '../../services/catalog.service';
+import { TableContextService } from '../../services/table-context.service';
+import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
@@ -72,7 +74,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
           </app-button>
         </div>
 
-        @if (!isUnavailable()) {
+        @if (!isUnavailable() && !tableContext.isRequireStaff()) {
           <button
             class="quick-cart-btn"
             type="button"
@@ -538,6 +540,8 @@ export class ProductCardComponent {
 
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
+  private tableContext = inject(TableContextService);
+  private toastService = inject(ToastService);
 
   constructor() {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
@@ -679,6 +683,27 @@ export class ProductCardComponent {
       this.router.navigate(['/products', this.product().slug]);
       return;
     }
+    // QR table — open_tab: send item directly to the table's running order
+    // instead of adding to the regular cart. No payment here (bill settles
+    // at the table at the end).
+    if (this.tableContext.isOpenTab()) {
+      this.tableContext
+        .addOrder([{ product_id: this.product().id, quantity: 1 }])
+        .subscribe({
+          next: (res) => {
+            if (res.success) {
+              const msg = res.data.fired
+                ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
+                : `Agregado a la mesa ${this.tableContext.tableName()}`;
+              this.toastService.success(msg);
+            }
+          },
+          error: () => {
+            this.toastService.error('No se pudo agregar a la cuenta de la mesa');
+          },
+        });
+      return;
+    }
     this.add_to_cart.emit(this.product());
   }
 
@@ -700,6 +725,8 @@ export class ProductCardComponent {
       return 'calendar-check';
     }
     if (this.hasVariants()) return 'eye';
+    // QR table open_tab → cuenta icon
+    if (this.tableContext.isOpenTab()) return 'concierge-bell';
     return 'shopping-cart';
   }
 
@@ -708,6 +735,8 @@ export class ProductCardComponent {
       return 'Agendar';
     }
     if (this.hasVariants()) return 'Ver opciones';
+    // QR table open_tab → cuenta label
+    if (this.tableContext.isOpenTab()) return 'Agregar a mi cuenta';
     return 'Agregar al carrito';
   }
 

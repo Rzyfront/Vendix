@@ -218,6 +218,26 @@
     </div>
   </header>
 
+  <!-- QR Table Banner -->
+  @if (table_context.isActive()) {
+  <div class="table-banner" [class.table-banner--open-tab]="table_context.isOpenTab()"
+       [class.table-banner--require-staff]="table_context.isRequireStaff()">
+    <div class="table-banner-content">
+      <app-icon [name]="table_context.isOpenTab() ? 'concierge-bell' : 'utensils'" [size]="18"></app-icon>
+      <span class="table-banner-name">Mesa {{ table_context.tableName() }}</span>
+      @if (table_context.isOpenTab()) {
+      <span class="table-banner-status">Cuenta abierta</span>
+      } @else if (table_context.isRequireStaff()) {
+      <span class="table-banner-status">Esperando mesero</span>
+      } @else if (table_context.isMenuOnly()) {
+      <span class="table-banner-status">Carta digital</span>
+      } @else if (table_context.isMarkOccupied()) {
+      <span class="table-banner-status">Mesa ocupada</span>
+      }
+    </div>
+  </div>
+  }
+
   <!-- Main Content -->
   <main class="ecommerce-main">
     <router-outlet></router-outlet>

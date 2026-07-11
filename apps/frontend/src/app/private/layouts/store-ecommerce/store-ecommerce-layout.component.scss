@@ -7,6 +7,47 @@
   background: var(--color-background);
 }
 
+// QR Table Banner
+.table-banner {
+  background: rgba(var(--color-primary-rgb, 59, 130, 246), 0.08);
+  border-bottom: 1px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.18);
+  padding: 0.42rem 1.5rem;
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-sm);
+  color: var(--color-primary);
+
+  &--open-tab {
+    background: rgba(34, 197, 94, 0.08);
+    border-bottom-color: rgba(34, 197, 94, 0.18);
+    color: var(--color-success);
+  }
+
+  &--require-staff {
+    background: rgba(245, 158, 11, 0.08);
+    border-bottom-color: rgba(245, 158, 11, 0.18);
+    color: var(--color-warning, rgb(245, 158, 11));
+  }
+
+  .table-banner-content {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 1600px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .table-banner-name {
+    font-weight: var(--fw-bold);
+  }
+
+  .table-banner-status {
+    font-weight: var(--fw-medium);
+    opacity: 0.85;
+  }
+}
+
 // Header
 .ecommerce-header {
   background: var(--color-surface);
