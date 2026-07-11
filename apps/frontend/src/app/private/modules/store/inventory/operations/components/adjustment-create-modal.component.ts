@@ -6,8 +6,8 @@ import { FormsModule } from '@angular/forms';
 import {
   ModalComponent,
   ButtonComponent,
-  SelectorComponent,
-  SelectorOption,
+  MultiSelectorComponent,
+  MultiSelectorOption,
   IconComponent,
   StepsLineComponent,
   StepsLineItem,
@@ -30,7 +30,7 @@ import {
     FormsModule,
     ModalComponent,
     ButtonComponent,
-    SelectorComponent,
+    MultiSelectorComponent,
     IconComponent,
     StepsLineComponent,
     InputsearchComponent
@@ -43,6 +43,7 @@ import {
       (closed)="onCancel()"
       (isOpenChange)="isOpenChange.emit($event)"
       subtitle="Registrar ajustes de inventario"
+      [hasUnsavedChanges]="hasUnsavedChanges()"
     >
       <!-- Steps -->
       <app-steps-line
@@ -58,19 +59,38 @@ import {
       @if (isLocationStep) {
         <div class="space-y-6">
           <div>
-            <label class="block text-sm font-medium text-text-secondary mb-2">Ubicacion *</label>
-            <app-selector
+            <label class="block text-sm font-medium text-text-secondary mb-2">
+              Bodegas * <span class="text-text-tertiary">(selecciona una o más)</span>
+            </label>
+            <app-multi-selector
               [options]="locations()"
-              [ngModel]="selectedLocation()"
-              placeholder="Seleccionar ubicacion"
-              (ngModelChange)="onLocationChange($event)"
-            ></app-selector>
+              [ngModel]="selectedLocations()"
+              placeholder="Seleccionar bodegas"
+              (ngModelChange)="onLocationsChange($event)"
+            ></app-multi-selector>
           </div>
 
-          @if (selectedLocation()) {
-            <div class="p-3 bg-primary/5 rounded-xl border border-primary/20 text-center">
-              <p class="text-sm text-text-secondary">Ubicacion seleccionada</p>
-              <p class="text-lg font-bold text-primary">{{ getLocationName(selectedLocation()) }}</p>
+          @if (selectedLocations().length > 0) {
+            <div class="p-3 bg-primary/5 rounded-xl border border-primary/20">
+              <p class="text-sm text-text-secondary mb-2">
+                {{ selectedLocations().length }}
+                {{ selectedLocations().length === 1 ? 'bodega seleccionada' : 'bodegas seleccionadas' }}
+              </p>
+              <div class="flex flex-wrap gap-1.5">
+                @for (locId of selectedLocations(); track locId) {
+                  <span class="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary text-xs font-medium rounded-lg">
+                    {{ getLocationName(locId) }}
+                    <button
+                      type="button"
+                      (click)="removeLocation(locId)"
+                      class="text-primary/70 hover:text-primary"
+                      [attr.aria-label]="'Quitar ' + getLocationName(locId)"
+                    >
+                      ✕
+                    </button>
+                  </span>
+                }
+              </div>
             </div>
           }
 
@@ -90,7 +110,11 @@ import {
           <div class="p-3 bg-surface-secondary rounded-xl border border-border flex items-center gap-3">
             <app-icon name="map-pin" [size]="18" class="text-primary"></app-icon>
             <span class="text-sm font-medium text-text-primary">
-              {{ getLocationName(selectedLocation()) }}
+              @if (selectedLocations().length === 1) {
+                {{ getLocationName(selectedLocations()[0]) }}
+              } @else {
+                {{ selectedLocations().length }} bodegas seleccionadas
+              }
             </span>
             <button type="button" (click)="goToStep(1)" class="ml-auto text-sm text-primary hover:underline">Cambiar</button>
           </div>
@@ -243,7 +267,13 @@ import {
               <app-icon name="map-pin" [size]="18" class="text-primary"></app-icon>
               <div>
                 <p class="text-xs text-text-secondary">Ubicacion</p>
-                <p class="text-sm font-medium text-text-primary">{{ getLocationName(selectedLocation()) }}</p>
+                <p class="text-sm font-medium text-text-primary">
+                  @if (selectedLocations().length === 1) {
+                    {{ getLocationName(selectedLocations()[0]) }}
+                  } @else {
+                    {{ selectedLocations().length }} bodegas
+                  }
+                </p>
               </div>
             </div>
           </div>
@@ -509,7 +539,7 @@ export class AdjustmentCreateModalComponent {
 
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
-  readonly locations = input<SelectorOption[]>([]);
+  readonly locations = input<MultiSelectorOption[]>([]);
   readonly preselectedProduct = input<PreselectedProduct | null>(null);
 
   readonly isOpenChange = output<boolean>();
@@ -525,7 +555,7 @@ export class AdjustmentCreateModalComponent {
   ];
 
   // Step 1
-  selectedLocation = signal<number | null>(null);
+  selectedLocations = signal<number[]>([]);
 
   // Step 2
   @ViewChild('productSearch') productSearchRef?: InputsearchComponent;
@@ -537,6 +567,13 @@ export class AdjustmentCreateModalComponent {
 
   // Preselected product loading
   readonly isLoadingPreselectedStock = signal(false);
+
+  /**
+   * true mientras el usuario haya hecho algún cambio (locaciones, items,
+   * descripción). El `app-modal` lo consume para pedir confirmación al cerrar.
+   * Se resetea a false al abrir el modal y al confirmar el envío exitoso.
+   */
+  readonly hasUnsavedChanges = signal(false);
 
   adjustmentTypes: { label: string; value: AdjustmentType; icon: string }[] = [
     { label: 'Dano', value: 'damage', icon: 'alert-triangle' },
@@ -574,24 +611,37 @@ export class AdjustmentCreateModalComponent {
     });
   }
 
-  onLocationChange(value: string | number | null): void {
-    let id: number | null = null;
-    if (value !== null && value !== undefined && value !== '') {
-      const parsed = typeof value === 'number' ? value : Number(value);
-      if (Number.isFinite(parsed)) id = parsed;
+  onLocationsChange(value: number[] | (string | number)[] | null | undefined): void {
+    this.hasUnsavedChanges.set(true);
+    let ids: number[] = [];
+    if (Array.isArray(value)) {
+      ids = value
+        .map((v) => (typeof v === 'number' ? v : Number(v)))
+        .filter((n) => Number.isFinite(n));
     }
-    this.selectedLocation.set(id);
+    this.selectedLocations.set(ids);
+    this.adjustmentItems = [];
+    this.productSearchResults.set([]);
+  }
+
+  removeLocation(locationId: number): void {
+    this.selectedLocations.update((ids) => ids.filter((id) => id !== locationId));
     this.adjustmentItems = [];
     this.productSearchResults.set([]);
   }
 
   searchProducts(term: string): void {
-    const locationId = this.selectedLocation();
-    if (!term || term.length < 2 || !locationId) {
+    const locationIds = this.selectedLocations();
+    if (locationIds.length === 0 || !term || term.length < 2) {
       this.productSearchResults.set([]);
       return;
     }
-
+    // Para multi-bodega, la búsqueda usa la primera bodega como anclaje
+    // (el backend searchAdjustableProducts toma un solo locationId). Si el
+    // producto no existe en la primera bodega seleccionada, el usuario puede
+    // reordenar o agregar manualmente. Búsqueda cross-bodega queda como
+    // follow-up.
+    const locationId = locationIds[0];
     this.inventoryService.searchAdjustableProducts(term, locationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const products = response.data || [];
@@ -606,6 +656,7 @@ export class AdjustmentCreateModalComponent {
   }
 
   addProduct(product: AdjustableProduct): void {
+    this.hasUnsavedChanges.set(true);
     if (this.adjustmentItems.some((ai) => ai.product_id === product.id)) return;
 
     this.adjustmentItems = [
@@ -692,7 +743,7 @@ export class AdjustmentCreateModalComponent {
 
   canAdvance(): boolean {
     if (this.currentStep() === 1) {
-      return !!this.selectedLocation() && !this.isLoadingPreselectedStock();
+      return this.selectedLocations().length > 0 && !this.isLoadingPreselectedStock();
     }
     if (this.isProductsStep) {
       return this.adjustmentItems.length > 0 && !this.hasMissingType();
@@ -720,7 +771,9 @@ export class AdjustmentCreateModalComponent {
     const product = this.preselectedProduct()!;
     this.isLoadingPreselectedStock.set(true);
 
-    this.inventoryService.searchAdjustableProducts(product.name, this.selectedLocation()!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    const preselectedLocationId = this.selectedLocations()[0];
+    if (!preselectedLocationId) return;
+    this.inventoryService.searchAdjustableProducts(product.name, preselectedLocationId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const products = response.data || [];
         const match = products.find((p) => p.id === product.id);
@@ -780,21 +833,25 @@ export class AdjustmentCreateModalComponent {
     const dto = this.buildDto();
     if (!dto) return;
     this.save.emit(dto);
+    this.hasUnsavedChanges.set(false);
   }
 
   onSubmitAndComplete(): void {
     const dto = this.buildDto();
     if (!dto) return;
     this.saveAndComplete.emit(dto);
+    this.hasUnsavedChanges.set(false);
   }
 
   private buildDto(): BatchCreateAdjustmentsRequest | null {
-    const locationId = this.selectedLocation();
-    if (!locationId || this.adjustmentItems.length === 0) return null;
+    const locationIds = this.selectedLocations();
+    if (locationIds.length === 0 || this.adjustmentItems.length === 0) {
+      return null;
+    }
     if (this.hasMissingType()) return null;
 
     return {
-      location_id: locationId,
+      location_ids: locationIds,
       items: this.adjustmentItems.map((item) => ({
         product_id: item.product_id,
         type: item.type,
@@ -817,11 +874,12 @@ export class AdjustmentCreateModalComponent {
           { label: 'PRODUCTOS', completed: false },
           { label: 'CONFIRMAR', completed: false },
         ];
-    this.selectedLocation.set(null);
+    this.selectedLocations.set([]);
     this.productSearchResults.set([]);
     this.adjustmentItems = [];
     this.productSearchRef?.clearInput();
     this.confirmCreate.set(false);
     this.isLoadingPreselectedStock.set(false);
+    this.hasUnsavedChanges.set(false);
   }
 }

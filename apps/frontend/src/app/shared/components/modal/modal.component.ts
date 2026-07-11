@@ -13,6 +13,7 @@ import {
   inject,
 } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
+import { DialogService } from '../dialog/dialog.service';
 
 export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
 
@@ -126,6 +127,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
 export class ModalComponent {
   private isBrowser: boolean;
   private destroyRef = inject(DestroyRef);
+  private dialog = inject(DialogService);
 
   readonly modalContainer = viewChild<ElementRef>('modalContainer');
 
@@ -140,6 +142,19 @@ export class ModalComponent {
   readonly showCloseButton = input<boolean>(true);
   readonly overlayCloseButton = input<boolean>(false);
   readonly customClasses = input<string>('');
+
+  /**
+   * If true, closing the modal (via backdrop, Escape, or X) opens a confirmation
+   * dialog before discarding. The consumer wires its form's dirty state here so the
+   * shared `app-modal` doesn't need to know about any specific form API.
+   */
+  readonly hasUnsavedChanges = input<boolean>(false);
+  readonly confirmCloseTitle = input<string>('Cambios sin guardar');
+  readonly confirmCloseMessage = input<string>(
+    'Tienes cambios sin guardar. ¿Cerrar de todas formas?',
+  );
+  readonly confirmCloseAcceptText = input<string>('Cerrar sin guardar');
+  readonly confirmCloseCancelText = input<string>('Seguir editando');
 
   readonly closed = output<void>();
   readonly opened = output<void>();
@@ -218,6 +233,27 @@ export class ModalComponent {
   }
 
   close(): void {
+    if (!this.isOpen()) return;
+    // Guard: si hay cambios sin guardar, pedir confirmación antes de descartar.
+    // El guard corre en TODOS los caminos de cierre (backdrop click, Escape,
+    // botón X, programmatic) porque close() es el único punto de salida.
+    if (this.hasUnsavedChanges()) {
+      void this.confirmAndClose();
+      return;
+    }
+    this.isOpen.set(false);
+    this.cancel.emit();
+  }
+
+  private async confirmAndClose(): Promise<void> {
+    const confirmed = await this.dialog.confirm({
+      title: this.confirmCloseTitle(),
+      message: this.confirmCloseMessage(),
+      confirmText: this.confirmCloseAcceptText(),
+      cancelText: this.confirmCloseCancelText(),
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
     if (!this.isOpen()) return;
     this.isOpen.set(false);
     this.cancel.emit();

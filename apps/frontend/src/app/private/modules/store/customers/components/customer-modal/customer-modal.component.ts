@@ -1,5 +1,5 @@
-import { Component, inject, input, output, effect, signal, computed } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { Component, inject, input, output, effect, signal, computed, DestroyRef } from '@angular/core';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import {
   ModalComponent,
@@ -38,6 +38,7 @@ export { translateCustomerError } from '../../utils/customer-error.translator';
       [size]="'md'"
       [title]="modalTitle()"
       subtitle="Administra la información del cliente"
+      [hasUnsavedChanges]="hasUnsavedChanges()"
     >
       <form [formGroup]="form" class="space-y-4">
         <!-- Email -->
@@ -153,6 +154,7 @@ export { translateCustomerError } from '../../utils/customer-error.translator';
 })
 export class CustomerModalComponent {
   private fb = inject(FormBuilder);
+  private destroyRef = inject(DestroyRef);
 
   readonly isOpen = input(false);
   readonly customer = input<Customer | null>(null);
@@ -162,6 +164,9 @@ export class CustomerModalComponent {
   readonly isOpenChange = output<boolean>();
   readonly closed = output<void>();
   readonly save = output<CreateCustomerRequest>();
+
+  /** true mientras el form tenga cambios sin guardar. Lo consume `app-modal`. */
+  readonly hasUnsavedChanges = signal(false);
 
   form: FormGroup;
 
@@ -251,6 +256,11 @@ export class CustomerModalComponent {
       ctrl.updateValueAndValidity({ emitEvent: false });
     });
 
+    // Track dirty state para guard de cierre del modal
+    this.form.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => this.hasUnsavedChanges.set(this.form.dirty));
+
     // Reemplaza ngOnChanges para customer y isOpen.
     effect(() => {
       const customer = this.customer();
@@ -266,6 +276,9 @@ export class CustomerModalComponent {
           person_type: customer.person_type ?? '',
           is_withholding_agent: customer.is_withholding_agent ?? false,
         });
+        // patchValue emite valueChanges → reseteamos dirty
+        this.form.markAsPristine();
+        this.hasUnsavedChanges.set(false);
       }
     });
 
@@ -277,6 +290,8 @@ export class CustomerModalComponent {
         // Boolean no-nullable en backend, así que un `null` emitido rompe el
         // alta (500). Reseteamos preservando el booleano en `false`.
         this.form.reset({ is_withholding_agent: false });
+        this.form.markAsPristine();
+        this.hasUnsavedChanges.set(false);
       }
     });
   }
