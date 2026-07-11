@@ -119,12 +119,12 @@ export interface RestaurantSettings {
    * - `require_staff`: notify a waiter; no automatic state change.
    * Default `menu_only`.
    */
-  qr_scan_behavior: QrScanBehavior;
+  qr_scan_behavior?: QrScanBehavior;
   /**
    * When `true`, scanning the QR auto-fires the order items to the kitchen
    * (KDS) without waiter intervention. Default `false`.
    */
-  qr_auto_fire: boolean;
+  qr_auto_fire?: boolean;
 }
 
 /**

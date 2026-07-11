@@ -11,8 +11,8 @@ export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'requi
 
 export interface RestaurantSettings {
   enable_table_checkout: boolean;
-  qr_scan_behavior: QrScanBehavior;
-  qr_auto_fire: boolean;
+  qr_scan_behavior?: QrScanBehavior;
+  qr_auto_fire?: boolean;
 }
 
 @Component({
