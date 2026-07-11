@@ -292,16 +292,25 @@ export class DianSoapClient {
     const is_valid_match = response_xml.match(/<b:IsValid>(.*?)<\/b:IsValid>/);
     const zip_key_match = response_xml.match(/<b:ZipKey>(.*?)<\/b:ZipKey>/);
 
-    // DIAN serializes validation errors as <b:string> items inside
-    // <b:ErrorMessageList>. Extract them for diagnostics.
-    const error_list_block = response_xml.match(
-      /<b:ErrorMessageList[^>]*>([\s\S]*?)<\/b:ErrorMessageList>/,
-    )?.[1];
-    const error_messages = error_list_block
-      ? Array.from(
-          error_list_block.matchAll(/<b:string>(.*?)<\/b:string>/g),
-        ).map((m) => m[1])
-      : [];
+    // DIAN serializes validation errors as an array of strings. The container is
+    // <b:ErrorMessage> in GetStatusZip/GetStatus responses (children are
+    // <c:string> from the MS Serialization/Arrays namespace) and
+    // <b:ErrorMessageList> in some other operations. The string items may carry
+    // any namespace prefix (c:, b:, or none). A nil/empty container is
+    // self-closing (i:nil="true") and has no closing tag, so it won't match.
+    const error_block =
+      response_xml.match(
+        /<b:ErrorMessage\b[^>]*>([\s\S]*?)<\/b:ErrorMessage>/,
+      )?.[1] ??
+      response_xml.match(
+        /<b:ErrorMessageList\b[^>]*>([\s\S]*?)<\/b:ErrorMessageList>/,
+      )?.[1] ??
+      '';
+    const error_messages = Array.from(
+      error_block.matchAll(/<(?:\w+:)?string>([\s\S]*?)<\/(?:\w+:)?string>/g),
+    )
+      .map((m) => m[1].trim())
+      .filter(Boolean);
 
     const zip_key = zip_key_match?.[1];
     const status_code = status_code_match?.[1] || String(http_status);

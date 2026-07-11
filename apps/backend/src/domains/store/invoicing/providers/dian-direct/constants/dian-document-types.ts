@@ -30,14 +30,17 @@ export const DIAN_OPERATION_TYPES = {
   EXPORT_INVOICE: '20',
   /** Factura de contingencia */
   CONTINGENCY_INVOICE: '30',
+  /**
+   * Nota crédito que referencia una factura electrónica (con referencia).
+   * Valor por defecto DIAN para notas crédito.
+   */
+  CREDIT_NOTE_WITH_REF: '20',
   /** Nota crédito sin referencia a facturas */
-  CREDIT_NOTE_NO_REF: '20',
-  /** Nota crédito referenciando facturas */
-  CREDIT_NOTE_WITH_REF: '22',
+  CREDIT_NOTE_NO_REF: '22',
+  /** Nota débito que referencia una factura electrónica (con referencia) */
+  DEBIT_NOTE_WITH_REF: '30',
   /** Nota débito sin referencia a facturas */
-  DEBIT_NOTE_NO_REF: '30',
-  /** Nota débito referenciando facturas */
-  DEBIT_NOTE_WITH_REF: '32',
+  DEBIT_NOTE_NO_REF: '32',
   /** Documento soporte: vendedor residente fiscal colombiano */
   SUPPORT_DOCUMENT_RESIDENT_SELLER: '10',
   /** Documento soporte: vendedor no residente fiscal colombiano */

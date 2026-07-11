@@ -9,6 +9,7 @@ import {
   DianIssuerData,
   DianCustomerData,
   DianSoftwareSecurity,
+  DianInvoiceControl,
 } from '../interfaces/dian-config.interface';
 import { ProviderInvoiceData } from '../../invoice-provider.interface';
 
@@ -31,6 +32,8 @@ export class UblDebitNoteBuilder {
     original_invoice_cufe?: string;
     /** The original invoice issue date */
     original_invoice_date?: string;
+    /** Numbering-resolution control for sts:DianExtensions/InvoiceControl. */
+    control?: DianInvoiceControl;
   }): string {
     const {
       debit_note_data,
@@ -42,6 +45,7 @@ export class UblDebitNoteBuilder {
       original_invoice_number,
       original_invoice_cufe,
       original_invoice_date,
+      control,
     } = params;
 
     const currency = debit_note_data.currency || UBL_CONSTANTS.DEFAULT_CURRENCY;
@@ -60,14 +64,24 @@ export class UblDebitNoteBuilder {
       .att('xmlns:xades', UBL_NAMESPACES.XADES)
       .att('xmlns:xades141', UBL_NAMESPACES.XADES141);
 
-    // UBL Extensions
-    UblCommonBuilder.buildExtensions(doc, software_security);
+    // UBL Extensions (DIAN software security + invoice control + QR)
+    UblCommonBuilder.buildExtensions(doc, software_security, {
+      control,
+      issuer_nit: issuer.nit,
+      issuer_nit_dv: issuer.nit_dv,
+      qr_code: UblCommonBuilder.buildQrUrl(environment, cude),
+    });
 
-    // Document metadata
+    // Document metadata. CustomizationID = tipo de operación de la nota débito:
+    // '30' cuando referencia una factura electrónica, '32' sin referencia.
     doc.ele(UBL_NAMESPACES.CBC, 'UBLVersionID').txt(UBL_CONSTANTS.UBL_VERSION);
     doc
       .ele(UBL_NAMESPACES.CBC, 'CustomizationID')
-      .txt(UBL_CONSTANTS.CUSTOMIZATION_ID);
+      .txt(
+        original_invoice_number
+          ? DIAN_OPERATION_TYPES.DEBIT_NOTE_WITH_REF
+          : DIAN_OPERATION_TYPES.DEBIT_NOTE_NO_REF,
+      );
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileID').txt(UBL_CONSTANTS.PROFILE_ID);
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID').txt(profile_execution_id);
     doc.ele(UBL_NAMESPACES.CBC, 'ID').txt(debit_note_data.invoice_number);

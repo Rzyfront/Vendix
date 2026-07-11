@@ -24,7 +24,7 @@ import {
 import { ProviderInvoiceData } from '../providers/invoice-provider.interface';
 
 /** One GetStatusZip poll attempt recorded in last_test_result for diagnostics. */
-interface TestSetPollAttempt {
+export interface TestSetPollAttempt {
   attempt: number;
   status_code: string;
   status_message: string;
@@ -210,6 +210,20 @@ export class DianTestService {
       );
     }
 
+    // DIAN InvoiceControl (sts:DianExtensions/InvoiceControl) — populated from the
+    // numbering-resolution row so the AuthorizedInvoices range and authorization
+    // period rendered in the XML are the real habilitación values, not empty.
+    const control = {
+      invoice_authorization: resolution.resolution_number,
+      authorization_start_date: resolution.valid_from
+        .toISOString()
+        .split('T')[0],
+      authorization_end_date: resolution.valid_to.toISOString().split('T')[0],
+      prefix: resolution.prefix,
+      range_from: String(resolution.range_from),
+      range_to: String(resolution.range_to),
+    };
+
     // 3. Build issuer data from config + organization
     const context = RequestContextService.getContext();
     if (!context) {
@@ -327,6 +341,7 @@ export class DianTestService {
         invoice_number,
         invoice_type: '01',
         issue_date: today,
+        issue_time: time_now,
         subtotal_amount: subtotal,
         discount_amount: '0.00',
         tax_amount: tax,
@@ -356,6 +371,7 @@ export class DianTestService {
 
       let xml = UblInvoiceBuilder.build({
         invoice_data,
+        control,
         issuer,
         customer,
         software_security: {
@@ -408,6 +424,7 @@ export class DianTestService {
         invoice_number: note_number,
         invoice_type: '92',
         issue_date: today,
+        issue_time: time_now,
         subtotal_amount: subtotal,
         discount_amount: '0.00',
         tax_amount: tax,
@@ -438,6 +455,7 @@ export class DianTestService {
 
       let xml = UblDebitNoteBuilder.build({
         debit_note_data,
+        control,
         issuer,
         customer,
         software_security: {
@@ -491,6 +509,7 @@ export class DianTestService {
         invoice_number: note_number,
         invoice_type: '91',
         issue_date: today,
+        issue_time: time_now,
         subtotal_amount: subtotal,
         discount_amount: '0.00',
         tax_amount: tax,
@@ -521,6 +540,7 @@ export class DianTestService {
 
       let xml = UblCreditNoteBuilder.build({
         credit_note_data,
+        control,
         issuer,
         customer,
         software_security: {

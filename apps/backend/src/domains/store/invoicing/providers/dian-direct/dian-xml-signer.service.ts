@@ -1,16 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { SignedXml } from 'xml-crypto';
+import { XadesEpesBuilder } from './xades/xades-epes-builder';
 
 /**
  * XML Digital Signature service for DIAN electronic invoicing.
  * Signs UBL XML documents using a PKCS#12 (.p12) certificate.
  *
- * Uses XAdES-EPES (Electronic Signatures and Infrastructures) profile
- * as required by DIAN resolution 000012/2021.
+ * Produces an XAdES-EPES (Electronic Signature with Explicit Policy) signature
+ * as required by DIAN resolution 000012/2021 and the Anexo Técnico (v1.8/1.9):
+ * an enveloped `ds:Signature` inside the second
+ * `ext:UBLExtensions/ext:UBLExtension/ext:ExtensionContent`, with a
+ * `xades:QualifyingProperties/xades:SignedProperties` block carrying SigningTime,
+ * SigningCertificate and the DIAN SignaturePolicyIdentifier.
+ *
+ * @see XadesEpesBuilder for the signature construction details.
  */
 @Injectable()
 export class DianXmlSignerService {
   private readonly logger = new Logger(DianXmlSignerService.name);
+  private readonly xades_builder = new XadesEpesBuilder();
 
   /**
    * Signs an XML document using the provided .p12 certificate.
@@ -18,7 +25,7 @@ export class DianXmlSignerService {
    * @param xml_content - The unsigned UBL XML string
    * @param p12_buffer - The .p12 certificate file buffer
    * @param p12_password - The certificate password
-   * @returns The signed XML string
+   * @returns The signed XML string (XAdES-EPES)
    */
   async sign(
     xml_content: string,
@@ -26,48 +33,19 @@ export class DianXmlSignerService {
     p12_password: string,
   ): Promise<string> {
     try {
-      // Extract private key and certificate from .p12
+      // Extract private key and certificate (PEM) from the .p12 container.
       const { private_key, certificate } = this.extractFromP12(
         p12_buffer,
         p12_password,
       );
 
-      // Create signature with the certificate for KeyInfo generation
-      const sig = new SignedXml({
-        privateKey: private_key,
-        publicCert: certificate,
-        canonicalizationAlgorithm: 'http://www.w3.org/2001/10/xml-exc-c14n#',
-        signatureAlgorithm: 'http://www.w3.org/2001/04/xmldsig-more#rsa-sha256',
-      });
+      const signed_xml = this.xades_builder.sign(
+        xml_content,
+        private_key,
+        certificate,
+      );
 
-      // Add reference to the document root
-      sig.addReference({
-        xpath: '/*',
-        digestAlgorithm: 'http://www.w3.org/2001/04/xmlenc#sha256',
-        transforms: [
-          'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
-          'http://www.w3.org/2001/10/xml-exc-c14n#',
-        ],
-      });
-
-      // Detect root element type (Invoice, CreditNote, or DebitNote)
-      const root_element = xml_content.includes('<CreditNote')
-        ? 'CreditNote'
-        : xml_content.includes('<DebitNote')
-          ? 'DebitNote'
-          : 'Invoice';
-
-      // Compute and insert signature
-      sig.computeSignature(xml_content, {
-        location: {
-          reference: `/*[local-name()='${root_element}']/*[local-name()='UBLExtensions']/*[local-name()='UBLExtension'][2]/*[local-name()='ExtensionContent']`,
-          action: 'append',
-        },
-      });
-
-      const signed_xml = sig.getSignedXml();
-
-      this.logger.debug('XML document signed successfully');
+      this.logger.debug('XML document signed successfully (XAdES-EPES)');
       return signed_xml;
     } catch (error) {
       this.logger.error(`XML signing failed: ${error.message}`);
