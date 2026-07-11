@@ -338,7 +338,11 @@ export class TableSessionsService {
     sessionId: number,
     dto: AddItemsToTableSessionDto,
   ): Promise<TableSessionView> {
-    const { storeId } = this.requireContext();
+    // requireStoreContext (not requireContext) so anonymous QR diners
+    // (@OptionalAuth, no user_id) can self-order via EcommerceTablesService.
+    // userId is not consumed in this method, and the POS controller path is
+    // already gated by @Permissions('store:table_sessions:update') (auth).
+    const { storeId } = this.requireStoreContext();
 
     const session = await this.findOne(sessionId);
     if (session.closed_at) {
