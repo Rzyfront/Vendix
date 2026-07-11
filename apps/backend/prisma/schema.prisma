@@ -2984,6 +2984,7 @@ enum order_delivery_type_enum {
   home_delivery
   direct_delivery
   other
+  dine_in
 }
 
 enum order_channel_enum {
