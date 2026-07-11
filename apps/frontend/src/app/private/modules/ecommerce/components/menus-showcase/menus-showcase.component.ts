@@ -9,42 +9,55 @@ import {
   signal,
 } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
+import { NgTemplateOutlet } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   CatalogService,
   MenuItem,
+  MenuNextAvailable,
   PublicMenu,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
+import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 /**
- * Compact "Cartas" summary rendered on the storefront home. It is fully
- * self-gating: the public `/ecommerce/catalog/menus` endpoint returns no
- * menus for non-restaurant stores, so the component renders nothing in that
- * case (no need for an extra industry check here).
+ * Compact "Cartas" summary rendered on the storefront home. Fully self-gating:
+ * the public `/ecommerce/catalog/menus` endpoint returns no menus for
+ * non-restaurant stores, so the component renders nothing in that case.
  *
- * `availabilityDisplay` mirrors the store setting `home_sections.menus`:
- * - `hide`  → only dishes available right now are shown.
- * - `badge` → every dish is shown; off-schedule ones get a
- *   "Disponible {día} HH:mm" badge.
+ * Renders ONE block per available carta (grouped by menu, not a flat list),
+ * each capped at `limit` dishes. When no carta is available right now, it
+ * renders exactly one fallback block: the carta with the globally-smallest
+ * `next_available` delta (same formula as backend `nextAvailableWindow`),
+ * with its dishes listed and the Agregar button disabled.
+ *
+ * Off-schedule dish filtering is FIXED (always `is_available_now`); the old
+ * `availabilityDisplay` knob is gone — it only governs `/cartas` now.
  */
-interface PreviewDish {
-  item: MenuItem;
-  menuName: string;
+interface CartaBlock {
+  menu: PublicMenu;
+  dishes: MenuItem[];
 }
 
 @Component({
   selector: 'app-menus-showcase',
   standalone: true,
-  imports: [RouterModule, CurrencyPipe, ButtonComponent, IconComponent],
+  imports: [
+    RouterModule,
+    NgTemplateOutlet,
+    CurrencyPipe,
+    ButtonComponent,
+    BadgeComponent,
+    IconComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    @if (visibleDishes().length > 0) {
+    @if (renderCartas().length || fallbackMenu()) {
       <section class="menus-section">
         <div class="section-header">
           <span class="section-kicker">Carta del restaurante</span>
@@ -54,101 +67,130 @@ interface PreviewDish {
           </p>
         </div>
 
-        <div class="dishes-grid">
-          @for (dish of visibleDishes(); track dish.item.id) {
-            <a
-              class="dish-card"
-              [class.dish-card--off]="!dish.item.is_available_now"
-              [routerLink]="
-                dish.item.product?.slug
-                  ? ['/products', dish.item.product?.slug]
-                  : null
-              "
-            >
-              <div class="dish-image">
-                @if (dish.item.product?.image_url) {
-                  <img
-                    [src]="dish.item.product?.image_url"
-                    [alt]="dish.item.product?.name"
-                    loading="lazy"
-                  />
-                } @else {
-                  <div class="dish-image__placeholder">🍽️</div>
-                }
-                @if (!dish.item.is_available_now) {
-                  <span class="dish-badge">
-                    Disponible {{ nextLabel(dish.item) }}
-                  </span>
-                }
-              </div>
-              <div class="dish-body">
-                <span class="dish-menu">{{ dish.menuName }}</span>
-                <h3 class="dish-name">{{ dish.item.product?.name }}</h3>
-                <span class="dish-price">
-                  {{ dishPrice(dish.item) | currency }}
-                </span>
+        <!-- Shared dish card template (used by available + fallback blocks). -->
+        <ng-template #dishCard let-dish="dish">
+          <a
+            class="dish-card"
+            [class.dish-card--off]="!dish.is_available_now"
+            [routerLink]="
+              dish.product?.slug ? ['/products', dish.product?.slug] : null
+            "
+          >
+            <div class="dish-image">
+              @if (dish.product?.image_url) {
+                <img
+                  [src]="dish.product?.image_url"
+                  [alt]="dish.product?.name"
+                  loading="lazy"
+                />
+              } @else {
+                <div class="dish-image__placeholder">🍽️</div>
+              }
+            </div>
+            <div class="dish-body">
+              <h3 class="dish-name">{{ dish.product?.name }}</h3>
+              <span class="dish-price">
+                {{ dishPrice(dish) | currency }}
+              </span>
 
-                @if (dish.item.product?.has_variants) {
-                  <!-- Variant products: cart rejects them without a
-                       product_variant_id → route to detail to pick options. -->
-                  <span class="dish-buy">
-                    <app-button
-                      variant="outline"
-                      size="sm"
-                      [fullWidth]="true"
-                      (clicked)="onViewOptions($event, dish.item)"
-                    >
-                      <app-icon slot="icon" name="eye" [size]="15" />
-                      Ver opciones
-                    </app-button>
-                  </span>
-                } @else {
-                  <span
-                    class="dish-buy"
-                    (click)="stopCardNav($event)"
+              @if (dish.product?.has_variants) {
+                <!-- Variant products: cart rejects them without a
+                     product_variant_id → route to detail to pick options. -->
+                <span class="dish-buy">
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [fullWidth]="true"
+                    [disabled]="!dish.is_available_now"
+                    (clicked)="onViewOptions($event, dish)"
                   >
-                    <span class="qty-stepper">
-                      <button
-                        type="button"
-                        class="qty-btn"
-                        [disabled]="qtyOf(dish.item.id) <= 1"
-                        aria-label="Disminuir cantidad"
-                        (click)="decQty($event, dish.item.id)"
-                      >
-                        <app-icon name="minus" [size]="14" />
-                      </button>
-                      <span class="qty-value">{{ qtyOf(dish.item.id) }}</span>
-                      <button
-                        type="button"
-                        class="qty-btn"
-                        aria-label="Aumentar cantidad"
-                        (click)="incQty($event, dish.item.id)"
-                      >
-                        <app-icon name="plus" [size]="14" />
-                      </button>
-                    </span>
-                    <app-button
-                      variant="primary"
-                      size="sm"
-                      [fullWidth]="true"
-                      [disabled]="!dish.item.is_available_now"
-                      (clicked)="onAdd($event, dish.item)"
+                    <app-icon slot="icon" name="eye" [size]="15" />
+                    Ver opciones
+                  </app-button>
+                </span>
+              } @else {
+                <span class="dish-buy" (click)="stopCardNav($event)">
+                  <span class="qty-stepper">
+                    <button
+                      type="button"
+                      class="qty-btn"
+                      [disabled]="qtyOf(dish.id) <= 1"
+                      aria-label="Disminuir cantidad"
+                      (click)="decQty($event, dish.id)"
                     >
-                      <app-icon slot="icon" name="shopping-cart" [size]="15" />
-                      Agregar
-                    </app-button>
+                      <app-icon name="minus" [size]="14" />
+                    </button>
+                    <span class="qty-value">{{ qtyOf(dish.id) }}</span>
+                    <button
+                      type="button"
+                      class="qty-btn"
+                      aria-label="Aumentar cantidad"
+                      (click)="incQty($event, dish.id)"
+                    >
+                      <app-icon name="plus" [size]="14" />
+                    </button>
                   </span>
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    [fullWidth]="true"
+                    [disabled]="!dish.is_available_now"
+                    (clicked)="onAdd($event, dish)"
+                  >
+                    <app-icon slot="icon" name="shopping-cart" [size]="15" />
+                    Agregar
+                  </app-button>
+                </span>
+              }
+            </div>
+          </a>
+        </ng-template>
+
+        @if (renderCartas().length) {
+          @for (carta of renderCartas(); track carta.menu.id) {
+            <div class="carta-block">
+              <div class="carta-header">
+                <h3 class="carta-name">{{ carta.menu.name }}</h3>
+                <app-badge variant="success">Disponible ahora</app-badge>
+              </div>
+              <div class="dishes-grid">
+                @for (dish of carta.dishes; track dish.id) {
+                  <ng-container
+                    [ngTemplateOutlet]="dishCard"
+                    [ngTemplateOutletContext]="{ dish: dish }"
+                  />
                 }
               </div>
-            </a>
+              <div class="carta-cta">
+                <app-button variant="outline" [routerLink]="['/cartas']">
+                  Ver carta completa
+                </app-button>
+              </div>
+            </div>
           }
-        </div>
-
-        <div class="view-more-container">
-          <app-button variant="outline" [routerLink]="['/cartas']">
-            Ver carta completa
-          </app-button>
-        </div>
+        } @else if (fallbackMenu(); as fb) {
+          <div class="carta-block carta-block--fallback">
+            <div class="carta-header">
+              <h3 class="carta-name">{{ fb.menu.name }}</h3>
+              <app-badge variant="warning">
+                Disponible {{ formatNext(fb.menu.next_available) }}
+              </app-badge>
+            </div>
+            <div class="dishes-grid">
+              @for (dish of fb.dishes; track dish.id) {
+                <ng-container
+                  [ngTemplateOutlet]="dishCard"
+                  [ngTemplateOutletContext]="{ dish: dish }"
+                />
+              }
+            </div>
+            <div class="carta-cta">
+              <app-button variant="outline" [routerLink]="['/cartas']">
+                Ver carta completa
+              </app-button>
+            </div>
+          </div>
+        }
       </section>
     }
   `,
@@ -179,6 +221,29 @@ interface PreviewDish {
       .section-header .subtitle {
         color: #6b7280;
         margin: 0;
+      }
+      .carta-block {
+        margin-bottom: 2rem;
+      }
+      .carta-block:last-child {
+        margin-bottom: 0;
+      }
+      .carta-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+      }
+      .carta-name {
+        font-size: 1.25rem;
+        font-weight: 700;
+        margin: 0;
+      }
+      .carta-cta {
+        text-align: center;
+        margin-top: 1rem;
       }
       .dishes-grid {
         display: grid;
@@ -224,27 +289,11 @@ interface PreviewDish {
         justify-content: center;
         font-size: 2rem;
       }
-      .dish-badge {
-        position: absolute;
-        bottom: 0.5rem;
-        left: 0.5rem;
-        background: rgba(17, 24, 39, 0.85);
-        color: #fff;
-        font-size: 0.7rem;
-        padding: 0.2rem 0.5rem;
-        border-radius: 999px;
-      }
       .dish-body {
         padding: 0.65rem 0.75rem 0.85rem;
         display: flex;
         flex-direction: column;
         gap: 0.15rem;
-      }
-      .dish-menu {
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
-        color: #9ca3af;
       }
       .dish-name {
         font-size: 0.95rem;
@@ -294,17 +343,13 @@ interface PreviewDish {
         font-size: 0.85rem;
         font-weight: 600;
       }
-      .view-more-container {
-        text-align: center;
-        margin-top: 1.75rem;
-      }
     `,
   ],
 })
 export class MenusShowcaseComponent implements OnInit {
   readonly title = input<string>('');
   readonly subtitle = input<string>('');
-  readonly availabilityDisplay = input<'hide' | 'badge'>('hide');
+  /** Tope de platos por carta en el teaser del home. */
   readonly limit = input<number>(8);
 
   private readonly catalogService = inject(CatalogService);
@@ -314,6 +359,12 @@ export class MenusShowcaseComponent implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
 
   private readonly menus = signal<PublicMenu[]>([]);
+  /** Store-local "now" decomposition from the backend response (NOT a client
+   * clock) — used to compute the next-available delta for the fallback carta. */
+  private readonly now = signal<{
+    day_of_week: number;
+    minutes: number;
+  } | null>(null);
 
   /**
    * Per-item quantity for the inline stepper, keyed by `MenuItem.id`.
@@ -321,36 +372,98 @@ export class MenusShowcaseComponent implements OnInit {
    */
   private readonly quantities = signal<Record<number, number>>({});
 
-  /** Flattened, schedule-aware dish list capped at `limit`. */
-  readonly visibleDishes = computed<PreviewDish[]>(() => {
-    const display = this.availabilityDisplay();
+  /**
+   * Cartas disponibles ahora, cada una con sus platos disponibles capados a
+   * `limit()`. Solo se incluyen cartas con ≥1 plato disponible.
+   */
+  readonly renderCartas = computed<CartaBlock[]>(() => {
     const cap = this.limit();
-    const out: PreviewDish[] = [];
+    const out: CartaBlock[] = [];
     for (const menu of this.menus()) {
+      if (!menu.is_available_now) continue;
+      const dishes: MenuItem[] = [];
       for (const section of menu.sections ?? []) {
         for (const item of section.items ?? []) {
           if (!item.product) continue;
-          if (display === 'hide' && !item.is_available_now) continue;
-          out.push({ item, menuName: menu.name });
+          if (!item.is_available_now) continue;
+          dishes.push(item);
         }
       }
+      if (dishes.length === 0) continue;
+      out.push({ menu, dishes: dishes.slice(0, cap) });
     }
-    // Show available dishes first when in badge mode.
-    out.sort(
-      (a, b) =>
-        Number(b.item.is_available_now) - Number(a.item.is_available_now),
-    );
-    return out.slice(0, cap);
+    return out;
   });
+
+  /**
+   * Cuando ninguna carta está disponible ahora, la carta activa con el
+   * `next_available` de menor delta global (fórmula idéntica a
+   * `nextAvailableWindow` del backend, computada en cliente con el `now` de
+   * la respuesta). `dishes` son todos los platos de esa carta (off-schedule)
+   * para listarlos deshabilitados en el preview. Null si no hay `now` o no
+   * hay cartas con `next_available`.
+   */
+  readonly fallbackMenu = computed<CartaBlock | null>(() => {
+    if (this.renderCartas().length > 0) return null;
+    const now = this.now();
+    if (!now) return null;
+    const cap = this.limit();
+    let best: { block: CartaBlock; delta: number } | null = null;
+    for (const menu of this.menus()) {
+      if (!menu.is_active) continue;
+      const na = menu.next_available;
+      if (!na) continue;
+      const delta = this.deltaToNext(na, now);
+      const dishes: MenuItem[] = [];
+      for (const section of menu.sections ?? []) {
+        for (const item of section.items ?? []) {
+          if (!item.product) continue;
+          dishes.push(item);
+        }
+      }
+      if (dishes.length === 0) continue;
+      const block: CartaBlock = { menu, dishes: dishes.slice(0, cap) };
+      if (!best || delta < best.delta) best = { block, delta };
+    }
+    return best ? best.block : null;
+  });
+
+  readonly showFallback = computed(
+    () => this.renderCartas().length === 0 && this.fallbackMenu() !== null,
+  );
 
   ngOnInit(): void {
     this.catalogService
       .getMenus()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => this.menus.set(res.data?.menus ?? []),
-        error: () => this.menus.set([]),
+        next: (res) => {
+          this.now.set(res.data?.now ?? null);
+          this.menus.set(res.data?.menus ?? []);
+        },
+        error: () => {
+          this.now.set(null);
+          this.menus.set([]);
+        },
       });
+  }
+
+  /**
+   * Delta en minutos hasta la próxima apertura de una carta, replicando
+   * `nextAvailableWindow` del backend (`catalog.service.ts:1336-1339`):
+   * `dayDiff = (na.day_of_week - now.day_of_week + 7) % 7`,
+   * `delta = dayDiff*1440 + (start - now.minutes)`, wrap semanal si <= 0.
+   */
+  private deltaToNext(
+    na: MenuNextAvailable,
+    now: { day_of_week: number; minutes: number },
+  ): number {
+    const [h, m] = na.start_time.split(':').map(Number);
+    const start = h * 60 + m;
+    const dayDiff = (na.day_of_week - now.day_of_week + 7) % 7;
+    let delta = dayDiff * 1440 + (start - now.minutes);
+    if (delta <= 0) delta += 7 * 1440; // 10080
+    return delta;
   }
 
   dishPrice(item: MenuItem): number {
@@ -359,18 +472,10 @@ export class MenusShowcaseComponent implements OnInit {
     return p.is_on_sale && p.sale_price != null ? p.sale_price : p.base_price;
   }
 
-  nextLabel(item: MenuItem): string {
-    const na = item.next_available;
+  /** Formatea `{día} HH:mm` a partir de un `MenuNextAvailable` (o "pronto"). */
+  formatNext(na: MenuNextAvailable | null): string {
     if (!na) return 'pronto';
-    const days = [
-      'Dom',
-      'Lun',
-      'Mar',
-      'Mié',
-      'Jue',
-      'Vie',
-      'Sáb',
-    ];
+    const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
     const day = days[na.day_of_week] ?? '';
     return `${day} ${na.start_time}`.trim();
   }
