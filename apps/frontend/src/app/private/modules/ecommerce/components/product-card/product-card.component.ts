@@ -540,7 +540,7 @@ export class ProductCardComponent {
 
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
-  private tableContext = inject(TableContextService);
+  public readonly tableContext = inject(TableContextService);
   private toastService = inject(ToastService);
 
   constructor() {
