@@ -2951,17 +2951,30 @@ export class AuthService {
       throw new VendixHttpException(ErrorCodes.AUTH_TOKEN_001);
     }
 
-    // Link the customer to the ecommerce store (idempotent) and ensure
-    // the account is active. claimCustomerAccount does both: it
-    // inserts a store_users row if missing and activates the user if
-    // still pending. Without this, the customer reset their password
-    // but the store still didn't know about them — the link is the
-    // whole point of the recovery flow.
+    // Link the customer to the ecommerce store (idempotent). Activation is
+    // already handled by the $transaction above, so we only need the link.
+    // Use the base Prisma client because this @Public route has no store
+    // context, and validate that the store belongs to the customer's own
+    // organization — otherwise a valid token plus a foreign store_id could
+    // link the account into another tenant's store (cross-store IDOR).
     if (store_id) {
-      await this.customersService.claimCustomerAccount(
-        resetToken.user_id,
-        store_id,
-      );
+      const store = await this.prismaService.stores.findUnique({
+        where: { id: store_id },
+        select: { organization_id: true },
+      });
+      if (
+        store &&
+        store.organization_id === resetToken.users.organization_id
+      ) {
+        const existingLink = await this.prismaService.store_users.findFirst({
+          where: { user_id: resetToken.user_id, store_id },
+        });
+        if (!existingLink) {
+          await this.prismaService.store_users.create({
+            data: { user_id: resetToken.user_id, store_id },
+          });
+        }
+      }
     }
 
     await this.auditService.logAuth(

@@ -479,7 +479,19 @@ export class AuthEffects {
         this.authService
           .resetCustomerPassword(token, new_password, store_id)
           .pipe(
-          map(() => AuthActions.resetCustomerPasswordSuccess()),
+          map((response: any) => {
+            // Backend returns HTTP 200 with { success: false, message, ... }
+            // on business errors (invalid/expired token) because the handler
+            // uses @HttpCode(OK) + ResponseService.error. Treat that as a
+            // failure so the page shows the error and does NOT navigate away
+            // (mirrors registerCustomer$ above).
+            if (response?.success === false) {
+              throw new Error(
+                response?.message ?? 'No se pudo restablecer la contraseña',
+              );
+            }
+            return AuthActions.resetCustomerPasswordSuccess();
+          }),
           catchError((error) =>
             of(
               AuthActions.resetCustomerPasswordFailure({
