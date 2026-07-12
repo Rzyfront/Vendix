@@ -130,9 +130,9 @@ export default function BrandsListScreen() {
               {
                 label: 'Estado',
                 options: [
-                  { label: 'Todas', value: 'all' },
-                  { label: 'Activas', value: 'active' },
-                  { label: 'Inactivas', value: 'inactive' },
+                  { label: 'Todas', value: 'all', active: (stateFilter ?? 'all') === 'all' },
+                  { label: 'Activas', value: 'active', active: stateFilter === 'active' },
+                  { label: 'Inactivas', value: 'inactive', active: stateFilter === 'inactive' },
                 ],
                 onSelect: (value) => {
                   setStateFilter(
@@ -144,9 +144,9 @@ export default function BrandsListScreen() {
               {
                 label: 'Destacadas',
                 options: [
-                  { label: 'Todas', value: 'all' },
-                  { label: 'Destacadas', value: 'true' },
-                  { label: 'No destacadas', value: 'false' },
+                  { label: 'Todas', value: 'all', active: featuredFilter === undefined },
+                  { label: 'Destacadas', value: 'true', active: featuredFilter === true },
+                  { label: 'No destacadas', value: 'false', active: featuredFilter === false },
                 ],
                 onSelect: (value) => {
                   setFeaturedFilter(
