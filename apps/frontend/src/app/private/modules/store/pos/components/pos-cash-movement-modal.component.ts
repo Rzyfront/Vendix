@@ -16,6 +16,7 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { finalize, timeout, TimeoutError } from 'rxjs';
 import {
   ButtonComponent,
   ModalComponent,
@@ -142,7 +143,7 @@ import { extractApiErrorMessage } from '../../../../../core/utils/api-error-hand
           variant="primary"
           size="md"
           (clicked)="onSubmit()"
-          [disabled]="!form.valid || submitting()"
+          [disabled]="!form.valid || !sessionId() || submitting()"
         >
           <app-icon
             [name]="
@@ -203,15 +204,24 @@ export class PosCashMovementModalComponent {
   }
 
   onSubmit() {
-    if (!this.form.valid || !this.sessionId()) return;
+    if (!this.sessionId()) {
+      this.toastService.error(
+        'No hay una caja abierta. Abre la caja antes de registrar movimientos.',
+      );
+      return;
+    }
+    if (!this.form.valid) return;
     this.submitting.set(true);
 
     this.cashRegisterService
       .addMovement(this.sessionId()!, this.form.value)
-      .pipe(takeUntilDestroyed())
+      .pipe(
+        takeUntilDestroyed(),
+        timeout({ first: 15_000, meta: { reason: 'cash-movement-timeout' } }),
+        finalize(() => this.submitting.set(false)),
+      )
       .subscribe({
         next: (movement) => {
-          this.submitting.set(false);
           this.toastService.success(
             this.form.value.type === 'cash_in'
               ? 'Entrada registrada'
@@ -221,8 +231,11 @@ export class PosCashMovementModalComponent {
           this.isOpenChange.emit(false);
         },
         error: (err) => {
-          this.submitting.set(false);
-          this.toastService.error(extractApiErrorMessage(err));
+          const message =
+            err instanceof TimeoutError
+              ? 'La operación tardó demasiado. Verifica tu conexión e intenta de nuevo.'
+              : extractApiErrorMessage(err);
+          this.toastService.error(message);
         },
       });
   }
