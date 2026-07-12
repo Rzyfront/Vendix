@@ -2,12 +2,6 @@ import { Injectable, signal } from '@angular/core';
 
 export type ToastVariant = 'default' | 'success' | 'warning' | 'error' | 'info';
 
-export interface ToastAction {
-  label: string;
-  variant?: 'primary' | 'outline' | 'ghost';
-  callback: () => void;
-}
-
 export interface Toast {
   id: string;
   title?: string;
@@ -15,7 +9,6 @@ export interface Toast {
   variant: ToastVariant;
   duration: number; // ms
   leaving: boolean; // UI state for exit animation
-  action?: ToastAction;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -29,7 +22,6 @@ export class ToastService {
       title?: string;
       variant?: ToastVariant;
       duration?: number;
-      action?: ToastAction;
     },
   ) {
     const toast: Toast = {
@@ -39,7 +31,6 @@ export class ToastService {
       variant: input.variant ?? 'default',
       duration: input.duration ?? 1750,
       leaving: false,
-      action: input.action,
     };
     this.toastsSig.update((arr) => [toast, ...arr]);
     if (toast.duration > 0) {
@@ -64,6 +55,7 @@ export class ToastService {
         this.toastsSig.update((arr) => arr.filter((t) => t.id !== id));
       }, 200);
     } else {
+      // If it was already leaving or not found, ensure it's removed
       this.toastsSig.update((arr) => arr.filter((t) => t.id !== id));
     }
   }

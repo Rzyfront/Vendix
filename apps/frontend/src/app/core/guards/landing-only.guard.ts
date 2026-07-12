@@ -15,11 +15,8 @@ import { ConfigFacade } from '../store/config/config.facade';
  * Auth routes (/auth/login, /auth/register, etc.) should only be accessible
  * from LANDING contexts (VENDIX_LANDING, ORG_LANDING, STORE_LANDING).
  *
- * EXCEPTIONS (allowed from ANY app type, including ADMIN/ECOMMERCE):
- * - /auth/verify-email: email verification links can be clicked from any context.
- * - /auth/reset-customer-password: customer password reset links are sent from
- *   the ecommerce storefront and clicked from any context (including
- *   STORE_ECOMMERCE), so the route must be reachable from non-landing apps.
+ * EXCEPTION: verify-email route is allowed from ALL app types (ADMIN included)
+ * because email verification links can be clicked from any context.
  *
  * For ADMIN and ECOMMERCE app types, users are redirected to '/'.
  */
@@ -36,11 +33,8 @@ export class LandingOnlyGuard implements CanActivate {
     'STORE_LANDING',
   ];
 
-  // Routes that are allowed from ANY app type (including ADMIN/ECOMMERCE)
-  private readonly ALWAYS_ALLOWED_ROUTES = [
-    '/auth/verify-email',
-    '/auth/reset-customer-password',
-  ];
+  // Routes that are allowed from ANY app type (including ADMIN)
+  private readonly ALWAYS_ALLOWED_ROUTES = ['/auth/verify-email'];
 
   canActivate(
     _route: ActivatedRouteSnapshot,

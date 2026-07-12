@@ -239,11 +239,7 @@ El equipo de ${this.COMPANY_NAME}
   }
 
   static getPasswordResetTemplate(data: EmailTemplateData) {
-    // F2: prefer data.resetUrl when the caller built a tenant-specific URL
-    // (e.g. customer reset on the ecommerce storefront). Fall back to the
-    // owner-reset URL only when no custom URL was provided.
-    const resetUrl =
-      data.resetUrl ?? `${this.BASE_URL}/auth/reset-owner-password?token=${data.token}`;
+    const resetUrl = `${this.BASE_URL}/auth/reset-owner-password?token=${data.token}`;
     const loginUrl = data.vlink
       ? `https://${data.vlink}.${DomainConfigService.getBaseDomain()}`
       : this.BASE_URL;

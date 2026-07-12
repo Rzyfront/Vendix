@@ -20,13 +20,11 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { AuthFacade } from '../../../../../core/store';
 import { TenantFacade } from '../../../../../core/store';
-import { AuthService } from '../../../../../core/services/auth.service';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
-import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import {
   LegalService,
   PendingDocument,
@@ -115,9 +113,25 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           </button>
         </div>
 
-        <!-- Error Message banner removed: the recovery CTA below replaces it
-             for the customer-claimable case, and for other errors the
-             inline field-level validators are sufficient. -->
+        <!-- Error Message -->
+        @if (errorMessage()) {
+          <div
+            class="p-4 rounded-lg bg-red-50 border border-red-200"
+            role="alert"
+          >
+            <div class="flex items-start gap-3">
+              <app-icon
+                name="alert-circle"
+                [size]="20"
+                class="text-red-500 mt-0.5 flex-shrink-0"
+              ></app-icon>
+              <div class="flex-1">
+                <p class="text-sm font-medium text-red-800">{{ errorTitle() }}</p>
+                <p class="text-sm text-red-700 mt-1">{{ errorMessage() }}</p>
+              </div>
+            </div>
+          </div>
+        }
 
         <form
           id="authForm"
@@ -179,49 +193,6 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
                     especial
                   </li>
                 </ul>
-              </div>
-            </div>
-          }
-
-          <!-- Customer account claim CTA — surfaces when the register
-               endpoint reports AUTH_CUSTOMER_CLAIMABLE_001 (POS / backoffice
-               pre-existing customer with the same email). Triggers the
-               customer-only password reset flow. -->
-          @if (claimableEmail()) {
-            <div
-              class="p-4 rounded-lg bg-amber-50 border border-amber-200"
-              role="status"
-            >
-              <div class="flex items-start gap-3">
-                <app-icon
-                  name="key-round"
-                  [size]="20"
-                  class="text-amber-600 mt-0.5 flex-shrink-0"
-                ></app-icon>
-                <div class="flex-1">
-                  <p class="text-sm font-medium text-amber-900">
-                    ¿Ya tienes cuenta con este correo?
-                  </p>
-                  <p class="text-sm text-amber-800 mt-1">
-                    Te enviamos un link para activar tu contraseña y
-                    vincular tu cuenta a esta tienda.
-                  </p>
-                  <app-button
-                    class="mt-3"
-                    variant="primary"
-                    size="sm"
-                    [disabled]="recoveryPending()"
-                    [loading]="recoveryPending()"
-                    [showTextWhileLoading]="true"
-                    (clicked)="onStartRecovery()"
-                  >
-                    {{
-                      recoveryPending()
-                        ? 'Enviando...'
-                        : 'Enviar link de activación'
-                    }}
-                  </app-button>
-                </div>
               </div>
             </div>
           }
@@ -296,15 +267,6 @@ export class AuthModalComponent {
   readonly errorMessage = signal<string | null>(null);
   readonly errorTitle = signal('Error de autenticación');
 
-  /**
-   * Set when the backend returns AUTH_CUSTOMER_CLAIMABLE_001 — the email
-   * the user tried to register is already on file as a POS / backoffice
-   * customer. The UI then offers a one-click password reset to claim
-   * the existing account instead of dead-ending with a generic 409.
-   */
-  readonly claimableEmail = signal<string | null>(null);
-  readonly recoveryPending = signal(false);
-
   // Legal Documents state
   readonly pendingDocuments = signal<PendingDocument[]>([]);
   readonly acceptedDocuments = signal<Record<number, boolean>>({});
@@ -313,22 +275,10 @@ export class AuthModalComponent {
 
   private fb = inject(FormBuilder);
   private authFacade = inject(AuthFacade);
-  private authService = inject(AuthService);
   private tenantFacade = inject(TenantFacade);
   private legalService = inject(LegalService);
   private destroyRef = inject(DestroyRef);
   private toast = inject(ToastService);
-
-  /**
-   * Tracks the last raw error string surfaced as a toast/errorMessage, so we
-   * don't re-fire the same error toast on every effect re-run (the effect
-   * re-evaluates whenever `isOpen` flips). Seeded with the current facade
-   * error AFTER the constructor initializers run (via the constructor
-   * itself) so the FIRST render doesn't re-surface a stale error from a
-   * previous login/register attempt. Cleared back to null when the facade
-   * clears the error so the next fresh error still surfaces.
-   */
-  private readonly lastShownError = signal<string | null>(null);
 
   loading = this.authFacade.authLoading;
   authForm: FormGroup;
@@ -368,31 +318,19 @@ export class AuthModalComponent {
       }
     });
 
-    // Listen for auth errors — surface them in BOTH the inline banner
-    // (errorMessage) AND a toast. The toast is essential because the inline
-    // banner is cleared when the user starts typing or switches tabs; without
-    // it, login/register failures become invisible. Dedup via lastShownError
-    // prevents the toast from re-firing the same message on every open.
+    // Listen for auth errors — effect sobre signal de facade
     effect(() => {
       const error = this.authFacade.authError();
       const open = this.isOpen();
       if (error && open) {
-        const rawMessage =
-          typeof error === 'string' ? error : extractApiErrorMessage(error);
-        if (this.lastShownError() === rawMessage) return;
-        this.lastShownError.set(rawMessage);
         untracked(() => {
-          const { title, message } = this.mapErrorToUserFriendly(error, rawMessage);
+          const rawMessage =
+            typeof error === 'string' ? error : extractApiErrorMessage(error);
+          const { title, message } = this.mapErrorToUserFriendly(rawMessage);
           this.errorTitle.set(title);
           this.errorMessage.set(message);
-          // F3: show toast so errors that survive modal open (network,
-          // server validation) are visible even after the user starts
-          // typing or switches tabs. Dedup is enforced above via
-          // lastShownError, so the toast only fires once per unique error.
-          this.toast.error(message, title);
+          this.toast.error(message, title, 4000);
         });
-      } else if (!error) {
-        this.lastShownError.set(null);
       }
     });
 
@@ -420,18 +358,6 @@ export class AuthModalComponent {
 
         if (open) {
           this.errorMessage.set(null);
-          // Hydrate the dedupe tracker so the first effect tick that
-          // observes the current (about-to-be-cleared) authError treats
-          // it as already-shown. Without this, the effect below can fire
-          // the toast on the same tick before this clear propagates.
-          this.lastShownError.set(
-            typeof this.authFacade.authError() === 'string'
-              ? (this.authFacade.authError() as string)
-              : null,
-          );
-          // Clear stale error$ state from a previous login/register attempt
-          // so the modal doesn't re-fire the previous toast on open.
-          this.authFacade.setAuthError(null);
           if (!isLoginMode) {
             this.loadPendingDocuments();
           }
@@ -457,26 +383,11 @@ export class AuthModalComponent {
   /**
    * Maps backend error messages to user-friendly messages
    */
-  private mapErrorToUserFriendly(error: any, fallbackMessage: string): {
+  private mapErrorToUserFriendly(error: string): {
     title: string;
     message: string;
   } {
-    // Check structured error_code FIRST — robust against backend copy changes.
-    // The customer-claimable CTA was previously dead because the string-based
-    // check ran against the userMessage (already a generic fallback when
-    // AUTH_CUSTOMER_CLAIMABLE_001 is not in ERROR_MESSAGES). Matching on
-    // errorCode bypasses that chain.
-    const parsed = parseApiError(error);
-    if (parsed.errorCode === 'AUTH_CUSTOMER_CLAIMABLE_001') {
-      this.claimableEmail.set(this.authForm.get('email')?.value ?? null);
-      return {
-        title: 'Ya tienes cuenta con este correo',
-        message:
-          'Detectamos que este correo ya está registrado como cliente. Te enviaremos un link para que actives tu contraseña.',
-      };
-    }
-
-    const errorLower = fallbackMessage.toLowerCase();
+    const errorLower = error.toLowerCase();
 
     // Invalid credentials
     if (
@@ -500,21 +411,6 @@ export class AuthModalComponent {
       return {
         title: 'Usuario no encontrado',
         message: 'No existe una cuenta con este correo electrónico.',
-      };
-    }
-
-    // Customer account claimable via password reset (POS / backoffice
-    // pre-existing customer). MUST come BEFORE the generic "ya existe"
-    // check below because the backend message contains both substrings.
-    if (
-      errorLower.includes('auth_customer_claimable_001') ||
-      errorLower.includes('recoverable via password reset')
-    ) {
-      this.claimableEmail.set(this.authForm.get('email')?.value ?? null);
-      return {
-        title: 'Ya tienes cuenta con este correo',
-        message:
-          'Detectamos que este correo ya está registrado como cliente. Te enviaremos un link para que actives tu contraseña.',
       };
     }
 
@@ -690,46 +586,10 @@ export class AuthModalComponent {
 
   onClose(): void {
     this.errorMessage.set(null);
-    this.claimableEmail.set(null);
-    this.recoveryPending.set(false);
     this.closed.emit();
     this.authForm.reset();
     this.pendingDocuments.set([]);
     this.acceptedDocuments.set({});
-  }
-
-  /**
-   * Triggered by the "¿Recuperar contraseña?" CTA that the modal surfaces
-   * when the register endpoint reports AUTH_CUSTOMER_CLAIMABLE_001. Fires
-   * the customer-only password-reset request and shows the same generic
-   * toast regardless of whether the email is on file, to avoid enumeration.
-   */
-  onStartRecovery(): void {
-    const email = this.claimableEmail() ?? this.authForm.get('email')?.value;
-    const storeId = this.tenantFacade.getCurrentStoreId();
-    if (!email || !storeId) return;
-
-    this.recoveryPending.set(true);
-    this.authService.forgotCustomerPassword(email, storeId).subscribe({
-      next: () => {
-        this.recoveryPending.set(false);
-        this.toast.success(
-          'Te enviamos un email con un link para activar tu cuenta. Revisa tu bandeja de entrada (incluye spam).',
-          'Email enviado',
-          5000,
-        );
-      },
-      error: () => {
-        this.recoveryPending.set(false);
-        // Same generic message — backend intentionally doesn't reveal
-        // whether the email exists. Don't leak via the error either.
-        this.toast.success(
-          'Te enviamos un email con un link para activar tu cuenta. Revisa tu bandeja de entrada (incluye spam).',
-          'Email enviado',
-          5000,
-        );
-      },
-    });
   }
 
   onSubmit(): void {
