@@ -79,6 +79,22 @@ export default function NotificationSoundSettings({
   // Porcentaje clampeado 0-100 (el form puede traer null mientras carga).
   const safeVolume = Math.max(0, Math.min(100, soundVolume ?? 70));
 
+  const stopPreview = useCallback(() => {
+    // Pause + reset al inicio del source para que un play() posterior empiece
+    // desde 0. Si solo hiciéramos pause(), `expo-audio` puede reanudar el
+    // source anterior en lugar de reemplazarlo limpio.
+    try {
+      soundPlayer.pause();
+      soundPlayer.seekTo(0);
+    } catch {
+      // Si el player está en estado inválido (nunca inicializado), ignorar.
+    }
+    if (previewTimerRef.current) {
+      clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = null;
+    }
+  }, [soundPlayer]);
+
   const handlePlayPreview = useCallback(() => {
     if (!soundId) return;
     const sound = soundsCatalog?.find((s) => s.id === soundId);
@@ -86,18 +102,23 @@ export default function NotificationSoundSettings({
 
     const vol = Math.max(0, Math.min(1, safeVolume / 100));
     try {
+      // Detener cualquier preview en curso antes de reemplazarlo (parity con
+      // web `this.stopPreview()` línea 202 + previene race de `replace()` que
+      // deja el source anterior sonando encima del nuevo).
+      stopPreview();
       soundPlayer.replace(sound.url);
       soundPlayer.volume = vol;
       soundPlayer.seekTo(0);
       soundPlayer.play();
       // Auto-stop a 1.5s por seguridad (parity con web playPreview).
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-      previewTimerRef.current = setTimeout(() => soundPlayer.pause(), 1500);
+      previewTimerRef.current = setTimeout(() => {
+        try { soundPlayer.pause(); } catch {}
+      }, 1500);
     } catch {
       // Silenciar errores de playback (network, codec, permisos) — el form
       // sigue siendo usable.
     }
-  }, [soundId, safeVolume, soundsCatalog, soundPlayer]);
+  }, [soundId, safeVolume, soundsCatalog, soundPlayer, stopPreview]);
 
   const handleVolumeScrub = useCallback(
     (locationX: number) => {
@@ -128,12 +149,14 @@ export default function NotificationSoundSettings({
   );
   const onTrackResponderTerminateRequest = useCallback(() => false, []);
 
-  // Limpia el timer de preview si el componente se desmonta.
+  // Limpia el timer + pausa el audio al desmontar. Sin esto, el preview puede
+  // seguir sonando en background (memory leak + sonido fantasma al cambiar
+  // de pantalla). Parity con web `DestroyRef.onDestroy(() => this.stopPreview())`.
   useEffect(() => {
     return () => {
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+      stopPreview();
     };
-  }, []);
+  }, [stopPreview]);
 
   // Opciones del selector — "Sin sonido" primero + catálogo.
   const selectorOptions = [
@@ -194,6 +217,18 @@ export default function NotificationSoundSettings({
         onResponderTerminationRequest={onTrackResponderTerminateRequest}
         onResponderGrant={onTrackResponderStart}
         onResponderMove={onTrackResponderMove}
+        // Accesibilidad: el web usa `<input type="range">` que el lector de
+        // pantalla anuncia como "slider, X%". En RN declarativo hay que
+        // configurarlo a mano con accessibilityRole + accessibilityValue.
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel="Volumen de notificaciones"
+        accessibilityValue={{
+          min: 0,
+          max: 100,
+          now: Math.round(safeVolume),
+        }}
+        accessibilityHint="Desliza para ajustar el volumen entre 0 y 100 por ciento"
       >
         <View style={styles.sliderRail}>
           <View style={[styles.sliderFill, { width: `${safeVolume}%` }]} />
