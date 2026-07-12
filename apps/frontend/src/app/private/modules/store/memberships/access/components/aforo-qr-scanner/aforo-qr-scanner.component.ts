@@ -15,6 +15,7 @@ import { IconComponent } from '../../../../../../../shared/components/index';
 // eagerly — the runtime class is pulled in via a dynamic import() when the
 // scanner actually opens.
 import type { BrowserQRCodeReader, IScannerControls } from '@zxing/browser';
+import type { Result } from '@zxing/library';
 
 /**
  * Fullscreen live QR scanner overlay for the gym/aforo check-in flow.
@@ -157,7 +158,7 @@ export class AforoQrScannerComponent implements OnDestroy {
       const controls = await reader.decodeFromConstraints(
         { video: { facingMode: 'environment' } },
         video,
-        (result, _error, ctrls) => {
+        (result: Result | undefined, _error: unknown, ctrls: IScannerControls) => {
           // `_error` is a NotFoundException for frames without a QR — expected,
           // ignored. Act only on the first real decode.
           if (!result || this.decoded) return;
