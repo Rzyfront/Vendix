@@ -107,14 +107,21 @@ export default function NotificationSoundSettings({
     [soundRailWidth, onSoundVolumeChange],
   );
 
-  // PanResponder discriminado: deja al ScrollView padre ganar el gesto cuando
-  // el usuario arrastra mayormente vertical (scroll de la página). Solo
-  // capturamos cuando el movimiento es claramente horizontal, o desde el
-  // primer toque (tap directo sobre la barra → grant inmediato).
+  // PanResponder con captura: usa la fase de captura para ganar el touch
+// inicial al `<ScrollView>` padre, que de otro modo siempre reclama el
+// primer pointer como inicio de scroll vertical. Sin la fase `*Capture`
+// el evento nunca llega al slider y `onPanResponderGrant` jamás se llama.
+//
+// Trade-off: el ScrollView padre NO puede hacer scroll vertical cuando el
+// touch empieza sobre la barra de volumen. Aceptable porque la barra ocupa
+// solo 40px de alto — los usuarios pueden scrollear tocando fuera de ella.
+// Para scrolls horizontales pequeños en la página, los gestos verticales
+// sobre el resto del contenido siguen funcionando normalmente.
   const volumePanResponder = useRef(
     PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_evt, g) =>
+      // Capture phase: el View se vuelve "responder" antes que el padre.
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponderCapture: (_evt, g) =>
         Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 2,
       onPanResponderGrant: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
       onPanResponderMove: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
