@@ -44,6 +44,8 @@ export interface TablePaymentSubmit {
   store_payment_method_id: number;
   amount_received?: number;
   payment_reference?: string;
+  /** Optional gratuity added on top of the bill (only sent when > 0). */
+  tip_amount?: number;
 }
 
 @Component({
@@ -83,29 +85,34 @@ export class TablePaymentModalComponent {
   readonly isLoadingMethods = signal(false);
   readonly selectedMethod = signal<PaymentMethod | null>(null);
   readonly cashReceived = signal<number>(0);
+  /** Gratuity added on top of the bill. Signal → templates + computeds stay reactive. */
+  readonly tip = signal<number>(0);
   readonly referenceControl = new FormControl('');
 
   readonly currencySymbol = this.currencyService.currencySymbol;
 
+  /** Amount actually charged: bill total + gratuity. */
+  readonly effectiveTotal = computed(() => this.total() + this.tip());
+
   readonly change = computed(() => {
     if (this.selectedMethod()?.type !== 'cash') return 0;
-    return Math.max(0, this.cashReceived() - this.total());
+    return Math.max(0, this.cashReceived() - this.effectiveTotal());
   });
 
   readonly isCashInsufficient = computed(() => {
     if (this.selectedMethod()?.type !== 'cash') return false;
-    return this.cashReceived() < this.total();
+    return this.cashReceived() < this.effectiveTotal();
   });
 
   readonly missingAmount = computed(() =>
-    this.isCashInsufficient() ? this.total() - this.cashReceived() : 0,
+    this.isCashInsufficient() ? this.effectiveTotal() - this.cashReceived() : 0,
   );
 
   readonly canProcess = computed(() => {
     const method = this.selectedMethod();
     if (!method || this.isProcessing()) return false;
     if (method.type === 'cash') {
-      return this.cashReceived() >= this.total();
+      return this.cashReceived() >= this.effectiveTotal();
     }
     if (method.requiresReference) {
       const ref = this.referenceControl.value;
@@ -151,7 +158,7 @@ export class TablePaymentModalComponent {
     this.selectedMethod.set(method);
     this.referenceControl.reset();
     if (method.type === 'cash') {
-      this.cashReceived.set(this.total());
+      this.cashReceived.set(this.effectiveTotal());
     } else {
       this.cashReceived.set(0);
     }
@@ -161,8 +168,12 @@ export class TablePaymentModalComponent {
     this.cashReceived.set(Number.isFinite(value) ? value : 0);
   }
 
+  onTipInput(value: number): void {
+    this.tip.set(Number.isFinite(value) && value > 0 ? value : 0);
+  }
+
   setFullAmount(): void {
-    this.cashReceived.set(this.total());
+    this.cashReceived.set(this.effectiveTotal());
   }
 
   getReferenceError(): string | undefined {
@@ -184,6 +195,7 @@ export class TablePaymentModalComponent {
       ...(method.requiresReference && this.referenceControl.value?.trim()
         ? { payment_reference: this.referenceControl.value.trim() }
         : {}),
+      ...(this.tip() > 0 ? { tip_amount: this.tip() } : {}),
     };
     this.pay.emit(payload);
   }
@@ -200,6 +212,7 @@ export class TablePaymentModalComponent {
   private resetState(): void {
     this.selectedMethod.set(null);
     this.cashReceived.set(0);
+    this.tip.set(0);
     this.referenceControl.reset();
   }
 }

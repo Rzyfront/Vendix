@@ -19,6 +19,8 @@ import {
   PublicMenu,
 } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { TableContextService } from '../../services/table-context.service';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 import { CurrencyPipe } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
@@ -354,6 +356,7 @@ export class MenusShowcaseComponent implements OnInit {
 
   private readonly catalogService = inject(CatalogService);
   private readonly cartService = inject(CartService);
+  private readonly tableContext = inject(TableContextService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -510,14 +513,40 @@ export class MenusShowcaseComponent implements OnInit {
     if (slug) this.router.navigate(['/products', slug]);
   }
 
-  /** Adds a non-variant dish to the cart. Backend rejects off-schedule dishes
-   * (422 MENU_ITEM_NOT_AVAILABLE_NOW), so the button is already gated by
-   * `is_available_now`; this is a defensive guard. */
+  /** Adds a non-variant dish to the cart — or, in a dine-in `open_tab`
+   * session, straight to the diner's table tab. Backend rejects off-schedule
+   * dishes (422 MENU_ITEM_NOT_AVAILABLE_NOW), so the button is already gated
+   * by `is_available_now`; this is a defensive guard. */
   onAdd(event: Event, item: MenuItem): void {
     this.stopCardNav(event);
     const product = item.product;
     if (!product || !item.is_available_now) return;
-    const result = this.cartService.addToCart(product.id, this.qtyOf(item.id));
+    const qty = this.qtyOf(item.id);
+
+    // Dine-in QR (open_tab): the dish belongs on the diner's table tab, NOT
+    // the ecommerce cart. Mirrors product-card.onAddToCart so both entry
+    // points (home showcase + full carta page) feed the same session.
+    if (this.tableContext.isOpenTab()) {
+      this.tableContext
+        .addOrder([{ product_id: product.id, quantity: qty }])
+        .subscribe({
+          next: () => {
+            const msg = this.tableContext.autoFire()
+              ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
+              : `Agregado a la mesa ${this.tableContext.tableName()}`;
+            this.toastService.success(msg);
+            this.quantities.update((q) => ({ ...q, [item.id]: 1 }));
+          },
+          error: (err) => {
+            const { userMessage, devMessage } = parseApiError(err);
+            this.toastService.error(userMessage);
+            if (devMessage) console.error('[table addOrder]', devMessage);
+          },
+        });
+      return;
+    }
+
+    const result = this.cartService.addToCart(product.id, qty);
     const done = () => this.toastService.success('Plato agregado al carrito');
     if (result) {
       result.subscribe({ next: done });

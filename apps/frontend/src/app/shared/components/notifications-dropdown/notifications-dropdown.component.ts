@@ -236,6 +236,10 @@ export class NotificationsDropdownComponent {
       booking_check_in: 'door-open',
       booking_confirmation_request: 'message-circle',
       booking_auto_cancelled: 'calendar-x',
+      // Dine-in QR-por-mesa — llamados desde la mesa del comensal
+      table_call_waiter: 'concierge-bell',
+      table_request_bill: 'receipt',
+      table_request_split: 'split',
     };
     return map[type] ?? 'bell';
   }

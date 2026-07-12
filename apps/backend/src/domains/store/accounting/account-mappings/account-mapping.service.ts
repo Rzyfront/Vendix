@@ -326,6 +326,14 @@ export const DEFAULT_ACCOUNT_MAPPINGS: Record<
     code: '4175',
     description: 'Descuentos en Ventas (POS)',
   },
+  // GAP-6 (QR mesa dine-in): Propina recaudada en venta POS directa. Pasivo
+  // custodio (dinero de los empleados en poder del establecimiento), SIN IVA y
+  // NO es ingreso. Por defecto a 238005 "Acreedores Varios"; una tienda puede
+  // sobreescribir el mapping a una subcuenta dedicada "Propinas por Pagar".
+  'payment.received.tip_payable': {
+    code: '238005',
+    description: 'Propinas por Pagar a Empleados (venta directa)',
+  },
   'credit_sale.created.sales_discount': {
     code: '4175',
     description: 'Descuentos en Ventas (Crédito)',

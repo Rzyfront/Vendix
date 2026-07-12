@@ -1176,6 +1176,8 @@ model orders {
   total_paid                                      Decimal                   @default(0) @db.Decimal(12, 2)
   remaining_balance                               Decimal                   @default(0) @db.Decimal(12, 2)
   total_with_interest                             Decimal?                  @db.Decimal(12, 2)
+  // Dine-in QR: propina opcional capturada al cerrar la cuenta (nullable, sin default)
+  tip_amount                                      Decimal?                  @db.Decimal(12, 2)
   order_items                                     order_items[]
   order_installments                              order_installments[]
   addresses_orders_billing_address_idToaddresses  addresses?                @relation("orders_billing_address_idToaddresses", fields: [billing_address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
@@ -2829,6 +2831,9 @@ enum notification_type_enum {
   pqr_update
   membership_expiring
   membership_expired
+  table_call_waiter
+  table_request_bill
+  table_request_split
 }
 
 model notifications {

@@ -2915,6 +2915,12 @@ export const ErrorCodes = {
     devMessage:
       'Items inválidos para agregar a la sesión de mesa',
   },
+  TABLE_GUEST_COUNT_EXCEEDS_CAPACITY: {
+    code: 'TABLE_GUEST_COUNT_EXCEEDS_CAPACITY',
+    httpStatus: 422,
+    devMessage:
+      'El número de comensales excede la capacidad de la mesa',
+  },
   // ── Split Order (Restaurant Suite Fase E) ────────────────────
   SPLIT_ORDER_NOT_FOUND: {
     code: 'SPLIT_ORDER_NOT_FOUND',

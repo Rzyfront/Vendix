@@ -116,6 +116,9 @@ const MAPPING_DEFAULTS: Record<string, string> = {
   // Phase 2: Sales discounts (POS coupons, manual discounts)
   'payment.received.sales_discount': '4175',
   'credit_sale.created.sales_discount': '4175',
+  // GAP-6 (QR mesa dine-in): Propina POS = pasivo custodio (238005 Acreedores
+  // Varios), sin IVA, no es ingreso. Dual-source con DEFAULT_ACCOUNT_MAPPINGS.
+  'payment.received.tip_payable': '238005',
   // Layaway (Plan Separé)
   'layaway.payment.cash': '1105',
   'layaway.payment.bank': '1110',

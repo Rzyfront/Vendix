@@ -293,6 +293,7 @@ export class TableSessionsService {
   async openTableSessionPublic(
     tableId: number,
     openedByUserId?: number | null,
+    guestCount?: number | null,
   ): Promise<TableSessionView> {
     const { storeId } = this.requireStoreContext();
 
@@ -306,6 +307,8 @@ export class TableSessionsService {
 
     // 2. ATOMIC: create draft order (anonymous, ecommerce/dine_in) +
     //    table_session (opened_by null) + flip table to 'occupied'.
+    //    `guestCount` is optional (GAP-10): the QR scan may not know the
+    //    party size yet — the diner can set it later via `setGuestCount`.
     const session = await this.createOpenSession({
       tableId,
       storeId,
@@ -313,7 +316,7 @@ export class TableSessionsService {
       customerId: null,
       channel: 'ecommerce',
       deliveryType: 'dine_in',
-      guestCount: null,
+      guestCount: guestCount ?? null,
       internalNotes: 'Mesa abierta vía QR — cuenta anónima',
     });
 
@@ -322,6 +325,53 @@ export class TableSessionsService {
     );
 
     return this.findOne(session.id);
+  }
+
+  // ---------------------------------------------------------- guest count
+  /**
+   * Set the party size on an open table session (Restaurant Suite —
+   * QR-por-mesa, GAP-10).
+   *
+   * Anonymous-safe: uses `requireStoreContext()` (only `store_id`, no
+   * `user_id`) so an unauthenticated QR diner can declare how many guests
+   * are seated. Capacity validation (against `tables.capacity`) lives in
+   * `EcommerceTablesService.setGuests` — here we only enforce the numeric
+   * floor and the store-scoped write.
+   *
+   * The write goes through `updateMany` with an explicit `store_id`
+   * filter (same tenant-guard pattern as `assignCustomer`) so a session
+   * from another store can never be mutated even if the id is guessed.
+   */
+  async setGuestCount(
+    sessionId: number,
+    guestCount: number,
+  ): Promise<TableSessionView> {
+    const { storeId } = this.requireStoreContext();
+
+    if (!Number.isInteger(guestCount) || guestCount < 1) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_ADD_ITEMS_INVALID,
+        'El número de comensales debe ser un entero mayor o igual a 1',
+      );
+    }
+
+    // findOne is store-scoped (StorePrismaService): a session from another
+    // store surfaces as TABLE_SESSION_NOT_FOUND before we ever write.
+    const session = await this.findOne(sessionId);
+    if (session.closed_at) {
+      throw new VendixHttpException(ErrorCodes.TABLE_SESSION_CLOSED);
+    }
+
+    await this.prisma.table_sessions.updateMany({
+      where: { id: sessionId, store_id: storeId },
+      data: { guest_count: guestCount, updated_at: new Date() },
+    });
+
+    this.logger.log(
+      `Table session guest_count set: session=${sessionId} guests=${guestCount}`,
+    );
+
+    return this.findOne(sessionId);
   }
 
   // ----------------------------------------------------------------- add

@@ -32,6 +32,7 @@
   .table-banner-content {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 0.5rem;
     max-width: 1600px;
     margin: 0 auto;
@@ -45,6 +46,97 @@
   .table-banner-status {
     font-weight: var(--fw-medium);
     opacity: 0.85;
+  }
+
+  .table-banner-order-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    font-size: var(--fs-xs);
+    font-weight: var(--fw-semibold);
+    background: rgba(59, 130, 246, 0.12);
+    color: var(--color-primary);
+
+    &[data-status='listo'] {
+      background: rgba(34, 197, 94, 0.16);
+      color: var(--color-success);
+    }
+
+    &[data-status='en-preparación'] {
+      background: rgba(245, 158, 11, 0.16);
+      color: var(--color-warning, rgb(217, 119, 6));
+    }
+  }
+
+  .table-banner-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-left: auto;
+  }
+
+  .table-banner-guests {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+  }
+}
+
+// QR dine-in — "Mi cuenta" modal body (projected into app-modal)
+.bill-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bill-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: var(--fs-sm);
+
+  .bill-item-name {
+    flex: 1;
+    min-width: 0;
+    color: var(--color-text-primary);
+  }
+
+  .bill-item-qty {
+    color: var(--color-text-secondary);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .bill-item-total {
+    font-weight: var(--fw-semibold);
+    color: var(--color-text-primary);
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.bill-empty {
+  color: var(--color-text-secondary);
+  font-size: var(--fs-sm);
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.bill-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  font-weight: var(--fw-bold);
+  color: var(--color-text-primary);
+
+  .bill-footer-total {
+    font-size: var(--fs-lg);
+    font-variant-numeric: tabular-nums;
   }
 }
 

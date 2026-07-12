@@ -9,8 +9,10 @@ import { SettingsService } from '../../store/settings/settings.service';
 import { KitchenFireService } from '../../store/kitchen-fire/kitchen-fire.service';
 import { MenuAvailabilityCheckerService } from '../../store/menus/menu-availability-checker.service';
 import { NotificationsSseService } from '../../store/notifications/notifications-sse.service';
+import { NotificationsService } from '../../store/notifications/notifications.service';
 import { storeIsRestaurant } from '../../../common/helpers/industry-capabilities.helper';
 import { AddItemsToTableSessionDto } from '../../store/tables/dto';
+import { CallWaiterDto, RequestBillDto, RequestSplitDto } from './dto';
 
 /**
  * QR-por-mesa scan behavior — mirrors the `restaurant.qr_scan_behavior`
@@ -24,6 +26,7 @@ export type QrScanBehavior =
   | 'require_staff';
 
 export interface ResolveByTokenResult {
+  store_id: number;
   table: { id: number; name: string };
   behavior: QrScanBehavior;
   auto_fire: boolean;
@@ -41,6 +44,38 @@ export interface ConfirmStaffResult {
   session_id: number;
   order_id: number;
   opened_by: number;
+}
+
+export interface SetGuestsResult {
+  session_id: number;
+  guest_count: number;
+}
+
+export interface BillItemView {
+  name: string;
+  quantity: number;
+  unit_price: number;
+  total: number;
+}
+
+export interface BillView {
+  table: { id: number; name: string };
+  session_id: number;
+  order_id: number;
+  items: BillItemView[];
+  subtotal: number;
+  grand_total: number;
+  currency: string;
+}
+
+/**
+ * Server-derived binding for the diner SSE stream. Both ids are resolved
+ * from the `public_token` (never from the client), so a diner can only
+ * ever see KDS/bill events for their own table's active order.
+ */
+export interface DinerStreamBinding {
+  order_id: number;
+  session_id: number;
 }
 
 /**
@@ -78,6 +113,7 @@ export class EcommerceTablesService {
     private readonly kitchenFireService: KitchenFireService,
     private readonly menuAvailabilityChecker: MenuAvailabilityCheckerService,
     private readonly sseService: NotificationsSseService,
+    private readonly notificationsService: NotificationsService,
   ) {}
 
   // ------------------------------------------------------------- settings
@@ -124,6 +160,14 @@ export class EcommerceTablesService {
         ErrorCodes.TABLE_NOT_FOUND,
         'Token de mesa requerido',
       );
+    }
+
+    // store_id is echoed back so the diner's EventSource (which cannot send
+    // an `x-store-id` header) can pass it as `?store_id=` on the /stream URL —
+    // `DomainResolverMiddleware` reads `req.query.store_id`.
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
     }
 
     const table = await this.prisma.tables.findFirst({
@@ -173,6 +217,7 @@ export class EcommerceTablesService {
     }
 
     return {
+      store_id,
       table: { id: table.id, name: table.name },
       behavior,
       auto_fire,
@@ -317,6 +362,266 @@ export class EcommerceTablesService {
       order_id: session.order_id,
       opened_by: userId,
     };
+  }
+
+  // --------------------------------------------------- token → session
+  /**
+   * Resolve the current store + table + active session from a
+   * `public_token`. THROWS `TABLE_SESSION_NOT_FOUND` when the table has
+   * no open check — used by the diner write endpoints (set guests, call
+   * waiter, request bill/split) which all require an open session.
+   *
+   * The table lookup is store-scoped (StorePrismaService), so a token
+   * from store A can never resolve a table from store B.
+   */
+  private async resolveActiveSessionByToken(token: string): Promise<{
+    store_id: number;
+    table: { id: number; name: string; capacity: number | null };
+    session: { id: number; order_id: number };
+  }> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    if (!token || typeof token !== 'string') {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_NOT_FOUND,
+        'Token de mesa requerido',
+      );
+    }
+
+    const table = await this.prisma.tables.findFirst({
+      where: { public_token: token },
+      select: { id: true, name: true, capacity: true },
+    });
+    if (!table) {
+      throw new VendixHttpException(ErrorCodes.TABLE_NOT_FOUND);
+    }
+
+    const session = await this.tablesService.getActiveSession(table.id);
+    if (!session) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_SESSION_NOT_FOUND,
+        'No hay una cuenta abierta para esta mesa',
+      );
+    }
+
+    return {
+      store_id,
+      table,
+      session: { id: session.id, order_id: session.order_id },
+    };
+  }
+
+  /**
+   * Non-throwing variant used by the diner SSE stream (GAP-3). Returns
+   * `null` when there is no store context, unknown token, or no active
+   * session — the stream still connects (empty snapshot + heartbeat) so
+   * the storefront banner can attach the moment the QR is scanned, even
+   * before a tab is open. The returned ids are derived SERVER-SIDE from
+   * the token and used as the default-deny filter key for live events.
+   */
+  async resolveDinerBinding(
+    token: string,
+  ): Promise<DinerStreamBinding | null> {
+    const store_id = RequestContextService.getStoreId();
+    if (!store_id || !token || typeof token !== 'string') {
+      return null;
+    }
+    const table = await this.prisma.tables.findFirst({
+      where: { public_token: token },
+      select: { id: true },
+    });
+    if (!table) {
+      return null;
+    }
+    const session = await this.tablesService.getActiveSession(table.id);
+    if (!session) {
+      return null;
+    }
+    return { order_id: session.order_id, session_id: session.id };
+  }
+
+  // ------------------------------------------------------------- guests
+  /**
+   * GAP-10 — the diner declares the party size for the table's active
+   * session. Validates against `tables.capacity` (when set) BEFORE
+   * delegating the persistence to `TableSessionsService.setGuestCount`.
+   */
+  async setGuests(
+    token: string,
+    guestCount: number,
+  ): Promise<SetGuestsResult> {
+    const { table, session } = await this.resolveActiveSessionByToken(token);
+
+    if (table.capacity != null && guestCount > table.capacity) {
+      throw new VendixHttpException(
+        ErrorCodes.TABLE_GUEST_COUNT_EXCEEDS_CAPACITY,
+        `La mesa "${table.name}" admite máximo ${table.capacity} comensales`,
+      );
+    }
+
+    await this.tableSessionsService.setGuestCount(session.id, guestCount);
+
+    return { session_id: session.id, guest_count: guestCount };
+  }
+
+  // --------------------------------------------------------------- bill
+  /**
+   * GAP-5 (read) — the live check the diner sees. Projects the draft
+   * order backing the table's active session to a diner-safe shape
+   * (name + quantity + unit_price + total per line; no COGS, no cost
+   * snapshot, no recipe). 404 `TABLE_SESSION_NOT_FOUND` when the table
+   * has no open check.
+   */
+  async getBill(token: string): Promise<BillView> {
+    const { table, session } = await this.resolveActiveSessionByToken(token);
+
+    // Reuse the store-scoped session view for the projected items/totals.
+    const view = await this.tableSessionsService.findOne(session.id);
+    const order = view.order;
+
+    // `findOne` intentionally omits currency; read it cheaply from the
+    // scoped order row so the storefront can format money correctly.
+    const orderRow = await this.prisma.orders.findFirst({
+      where: { id: session.order_id },
+      select: { currency: true },
+    });
+
+    const items: BillItemView[] = (order?.order_items ?? []).map((it) => ({
+      name: it.product_name,
+      quantity: it.quantity,
+      unit_price: Number(it.unit_price),
+      total: Number(it.total_price),
+    }));
+
+    return {
+      table: { id: table.id, name: table.name },
+      session_id: session.id,
+      order_id: session.order_id,
+      items,
+      subtotal: Number(order?.subtotal_amount ?? 0),
+      grand_total: Number(order?.grand_total ?? 0),
+      currency: orderRow?.currency ?? 'COP',
+    };
+  }
+
+  // ------------------------------------------------------- call waiter
+  /**
+   * GAP-5 (write) — the diner requests attention. Persists + broadcasts a
+   * `table_call_waiter` notification (bell + SSE + web push) to the
+   * store's staff. No table/order mutation.
+   */
+  async callWaiter(token: string, note?: string): Promise<{ ok: true }> {
+    const { store_id, table, session } =
+      await this.resolveActiveSessionByToken(token);
+
+    await this.notificationsService.createAndBroadcast(
+      store_id,
+      'table_call_waiter',
+      'Llamado de mesero',
+      `Mesa ${table.name} solicita atención`,
+      {
+        table_id: table.id,
+        table_name: table.name,
+        table_session_id: session.id,
+        order_id: session.order_id,
+        note: note ?? null,
+      },
+    );
+
+    this.logger.log(
+      `QR call-waiter: table=${table.id} session=${session.id}`,
+    );
+    return { ok: true };
+  }
+
+  // ------------------------------------------------------- request bill
+  /**
+   * GAP-5 (write) — the diner requests the bill. Persists + broadcasts a
+   * `table_request_bill` staff notification AND pushes a lightweight
+   * `bill.requested` event onto the per-store SSE subject so the diner's
+   * own stream (GAP-3) reflects the request immediately. No mutation.
+   */
+  async requestBill(
+    token: string,
+    dto: RequestBillDto,
+  ): Promise<{ ok: true }> {
+    const { store_id, table, session } =
+      await this.resolveActiveSessionByToken(token);
+
+    const title = 'Solicitud de cuenta';
+    const body = `Mesa ${table.name} solicita la cuenta`;
+
+    await this.notificationsService.createAndBroadcast(
+      store_id,
+      'table_request_bill',
+      title,
+      body,
+      {
+        table_id: table.id,
+        table_name: table.name,
+        table_session_id: session.id,
+        order_id: session.order_id,
+        note: dto.note ?? null,
+        payment_preference: dto.payment_preference ?? null,
+      },
+    );
+
+    // Echo into the diner stream. The diner SSE filter (GAP-3) accepts
+    // `bill.requested` events matched by `data.table_session_id`, so the
+    // storefront banner flips to "cuenta solicitada" without a refetch.
+    this.sseService.push(store_id, {
+      id: Date.now(),
+      type: 'bill.requested',
+      title,
+      body,
+      data: {
+        table_session_id: session.id,
+        order_id: session.order_id,
+      },
+      created_at: new Date().toISOString(),
+    });
+
+    this.logger.log(
+      `QR request-bill: table=${table.id} session=${session.id}`,
+    );
+    return { ok: true };
+  }
+
+  // ------------------------------------------------------ request split
+  /**
+   * GAP-8 (conservative) — the diner asks to split the bill. This does
+   * NOT mutate anything and does NOT call `SplitOrderService`. It only
+   * persists + broadcasts a `table_request_split` staff notification so a
+   * mesero can execute the real split from the staff panel.
+   */
+  async requestSplit(
+    token: string,
+    dto: RequestSplitDto,
+  ): Promise<{ ok: true }> {
+    const { store_id, table, session } =
+      await this.resolveActiveSessionByToken(token);
+
+    await this.notificationsService.createAndBroadcast(
+      store_id,
+      'table_request_split',
+      'Solicitud de división de cuenta',
+      `Mesa ${table.name} pide dividir en ${dto.n_splits}`,
+      {
+        table_id: table.id,
+        table_name: table.name,
+        table_session_id: session.id,
+        order_id: session.order_id,
+        n_splits: dto.n_splits,
+        mode: dto.mode,
+      },
+    );
+
+    this.logger.log(
+      `QR request-split: table=${table.id} session=${session.id} n=${dto.n_splits} mode=${dto.mode}`,
+    );
+    return { ok: true };
   }
 
   // ----------------------------------------------------------- auto-fire

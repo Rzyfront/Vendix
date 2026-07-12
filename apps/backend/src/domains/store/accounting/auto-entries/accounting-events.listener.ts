@@ -193,6 +193,8 @@ export class AccountingEventsListener {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /** GAP-6 — propina (sin IVA): pasivo custodio, línea CR en el asiento. */
+    tip_amount?: number;
     currency: string;
     payment_method: string;
     user_id?: number;
@@ -221,6 +223,8 @@ export class AccountingEventsListener {
           event.discount_amount != null
             ? Number(event.discount_amount)
             : undefined,
+        tip_amount:
+          event.tip_amount != null ? Number(event.tip_amount) : undefined,
         user_id: event.user_id,
         customer: event.customer,
       });

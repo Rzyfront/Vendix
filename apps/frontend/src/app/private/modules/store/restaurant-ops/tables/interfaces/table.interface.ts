@@ -242,6 +242,8 @@ export interface PayTableSessionDto {
   amount_received?: number;
   /** Reference for non-cash methods (transfer/card). */
   payment_reference?: string;
+  /** Optional gratuity added on top of the bill (only forwarded when > 0). */
+  tip_amount?: number;
 }
 
 /**

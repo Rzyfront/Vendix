@@ -1145,6 +1145,12 @@ export class AutoEntryService {
     tax_breakdown?: TaxBreakdownItem[];
     withholding_breakdown?: WithholdingLine[];
     discount_amount?: number;
+    /**
+     * GAP-6 — propina (sin IVA). El DR caja ya la incluye (amount = grand_total
+     * con propina); esta línea CR pasivo custodio la equilibra. Solo aplica en
+     * la rama sin factura (venta POS directa).
+     */
+    tip_amount?: number;
     user_id?: number;
     /**
      * Snapshot del cliente que paga. El emisor ya tiene `order.customer_id`
@@ -1273,6 +1279,28 @@ export class AutoEntryService {
           side: 'debit',
         })),
       );
+
+      // GAP-6 — Propina (tip): pasivo custodio, SIN IVA, NO ingreso. El DR caja
+      // ya incluye la propina (amount = grand_total con tip), por lo que sin
+      // esta línea CR el asiento NO cuadraría por el monto del tip y el guard de
+      // balance (Math.abs(debit-credit) > 0.001) lanzaría, revirtiendo el pago.
+      // Balance: DR(caja=subtotal+iva-desc+tip) + DR(desc) = CR(ingreso=subtotal)
+      //          + CR(iva) + CR(tip). Cuenta por defecto: 238005 "Acreedores
+      //          Varios" (pasivo custodio, no toca P&L). Mapping key
+      //          `payment.received.tip_payable` — dual-source (const + seed).
+      const tip = Number(data.tip_amount || 0);
+      if (tip > 0) {
+        lines.push(
+          await this.resolveAccountLine(
+            data.organization_id,
+            'payment.received.tip_payable',
+            `Propina por pagar${order_ref}`,
+            0,
+            tip,
+            data.store_id,
+          ),
+        );
+      }
     }
 
     const description = has_invoice

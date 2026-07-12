@@ -1,4 +1,4 @@
-import { Component, ChangeDetectionStrategy, inject, input, output } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, input, output, signal } from '@angular/core';
 import { RouterModule, Router } from '@angular/router';
 import { EcommerceProduct } from '../../services/catalog.service';
 import { TableContextService } from '../../services/table-context.service';
@@ -7,11 +7,13 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { BadgeComponent } from '../../../../../shared/components/badge/badge.component';
+import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
+import { parseApiError } from '../../../../../core/utils/parse-api-error';
 
 @Component({
   selector: 'app-product-card',
   standalone: true,
-  imports: [RouterModule, IconComponent, CurrencyPipe, ButtonComponent, BadgeComponent],
+  imports: [RouterModule, IconComponent, CurrencyPipe, ButtonComponent, BadgeComponent, QuantityControlComponent],
   template: `
     <article class="product-card" (click)="onCardClick($event)">
       <div class="product-image">
@@ -84,6 +86,18 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
           >
             <app-icon [name]="quickActionIcon()" [size]="17"></app-icon>
           </button>
+        }
+
+        <!-- QR table open_tab — quantity stepper for "Agregar a mi cuenta" -->
+        @if (!isUnavailable() && tableContext.isOpenTab() && !hasVariants()) {
+          <div class="open-tab-qty" (click)="$event.stopPropagation()">
+            <app-quantity-control
+              [value]="qtyToAdd()"
+              (valueChange)="qtyToAdd.set($event)"
+              size="sm"
+              [min]="1"
+            ></app-quantity-control>
+          </div>
         }
       </div>
       <div class="product-info">
@@ -253,6 +267,19 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         outline: 2px solid rgba(var(--color-primary-rgb, 59, 130, 246), 0.42);
         outline-offset: 2px;
       }
+    }
+
+    .open-tab-qty {
+      position: absolute;
+      left: 0.6rem;
+      bottom: 0.6rem;
+      z-index: 2;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 999px;
+      padding: 2px;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      box-shadow: 0 10px 22px -18px rgba(15, 23, 42, 0.42);
     }
 
     .product-card:hover .product-image img {
@@ -543,6 +570,13 @@ export class ProductCardComponent {
   public readonly tableContext = inject(TableContextService);
   private toastService = inject(ToastService);
 
+  /**
+   * Quantity to add to the table tab (QR open_tab). Signal-based so the
+   * template stepper stays reactive under zoneless CD. Reset to 1 after a
+   * successful add.
+   */
+  readonly qtyToAdd = signal(1);
+
   constructor() {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
     this.currencyService.loadCurrency();
@@ -688,7 +722,7 @@ export class ProductCardComponent {
     // at the table at the end).
     if (this.tableContext.isOpenTab()) {
       this.tableContext
-        .addOrder([{ product_id: this.product().id, quantity: 1 }])
+        .addOrder([{ product_id: this.product().id, quantity: this.qtyToAdd() }])
         .subscribe({
           next: (res) => {
             if (res.success) {
@@ -696,10 +730,13 @@ export class ProductCardComponent {
                 ? `Agregado a la mesa ${this.tableContext.tableName()} — enviado a cocina`
                 : `Agregado a la mesa ${this.tableContext.tableName()}`;
               this.toastService.success(msg);
+              this.qtyToAdd.set(1);
             }
           },
-          error: () => {
-            this.toastService.error('No se pudo agregar a la cuenta de la mesa');
+          error: (err) => {
+            const { userMessage, devMessage } = parseApiError(err);
+            this.toastService.error(userMessage);
+            if (devMessage) console.error('[table addOrder]', devMessage);
           },
         });
       return;

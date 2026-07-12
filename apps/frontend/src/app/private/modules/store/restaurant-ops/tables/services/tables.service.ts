@@ -228,6 +228,9 @@ export class TablesService {
       ...(payload.payment_reference
         ? { payment_reference: payload.payment_reference }
         : {}),
+      ...(payload.tip_amount != null && payload.tip_amount > 0
+        ? { tip_amount: payload.tip_amount }
+        : {}),
     };
     return this.http
       .post<ApiResponse<PayTableSessionResult>>(

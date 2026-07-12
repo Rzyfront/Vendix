@@ -234,6 +234,63 @@
       } @else if (table_context.isMarkOccupied()) {
       <span class="table-banner-status">Mesa ocupada</span>
       }
+
+      <!-- Live kitchen status (SSE, GAP-3) -->
+      @if (table_sse.orderStatus(); as status) {
+      <span class="table-banner-order-status" [attr.data-status]="status">
+        @switch (status) {
+          @case ('listo') {
+          <app-icon name="bell-ring" [size]="15"></app-icon>
+          <span>Tu pedido está listo</span>
+          }
+          @case ('en-preparación') {
+          <app-icon name="chef-hat" [size]="15"></app-icon>
+          <span>En preparación</span>
+          }
+          @case ('enviado-a-cocina') {
+          <app-icon name="utensils" [size]="15"></app-icon>
+          <span>Enviado a cocina</span>
+          }
+          @case ('entregado') {
+          <app-icon name="check" [size]="15"></app-icon>
+          <span>Entregado</span>
+          }
+        }
+      </span>
+      }
+
+      <!-- Diner actions (GAP-5) -->
+      <div class="table-banner-actions">
+        @if (table_context.isOpenTab() || table_context.isRequireStaff() || table_context.isMarkOccupied()) {
+        <app-button variant="ghost" size="sm" [loading]="table_context.calling_waiter()" (clicked)="callWaiter()">
+          <app-icon slot="icon" name="concierge-bell" [size]="16"></app-icon>
+          Llamar al mesero
+        </app-button>
+        }
+        @if (table_context.isOpenTab()) {
+        <app-button variant="ghost" size="sm" (clicked)="is_bill_modal_open.set(true)">
+          <app-icon slot="icon" name="list" [size]="16"></app-icon>
+          Ver mi cuenta
+        </app-button>
+        <app-button variant="ghost" size="sm" [loading]="table_context.requesting_bill()" (clicked)="requestBill()">
+          <app-icon slot="icon" name="receipt" [size]="16"></app-icon>
+          Pedir la cuenta
+        </app-button>
+        <app-button variant="ghost" size="sm" [loading]="table_context.requesting_bill()" (clicked)="requestSplit()">
+          <app-icon slot="icon" name="split" [size]="16"></app-icon>
+          Dividir cuenta
+        </app-button>
+        <span class="table-banner-guests" title="Comensales en la mesa">
+          <app-icon name="users" [size]="15"></app-icon>
+          <app-quantity-control
+            [value]="guest_count()"
+            (valueChange)="onGuestCountChange($event)"
+            size="sm"
+            [min]="1"
+          ></app-quantity-control>
+        </span>
+        }
+      </div>
     </div>
   </div>
   }
@@ -442,4 +499,37 @@
   [content]="footer_settings()?.help?.returns_info || ''"
   (closed)="show_returns_modal.set(false)">
 </app-info-modal>
+}
+
+<!-- QR dine-in — Mi cuenta modal (GAP-5) -->
+@if (table_context.isOpenTab()) {
+<app-modal
+  [(isOpen)]="is_bill_modal_open"
+  title="Mi cuenta"
+  size="sm"
+  (opened)="loadBill()">
+  @if (table_context.loading_bill()) {
+  <p class="bill-empty">Cargando tu cuenta…</p>
+  } @else if (table_context.bill(); as bill) {
+    @if (bill.items.length) {
+    <ul class="bill-items">
+      @for (item of bill.items; track $index) {
+      <li class="bill-item">
+        <span class="bill-item-name">{{ item.name }}</span>
+        <span class="bill-item-qty">× {{ item.quantity }}</span>
+        <span class="bill-item-total">{{ item.total | currency }}</span>
+      </li>
+      }
+    </ul>
+    } @else {
+    <p class="bill-empty">Aún no has agregado nada a tu cuenta.</p>
+    }
+  } @else {
+  <p class="bill-empty">No pudimos cargar tu cuenta.</p>
+  }
+  <div slot="footer" class="bill-footer">
+    <span>Total</span>
+    <span class="bill-footer-total">{{ table_context.bill()?.grand_total | currency }}</span>
+  </div>
+</app-modal>
 }
