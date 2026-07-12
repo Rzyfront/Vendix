@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
   },
   triggerText: {
     flex: 1,
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.base,
     color: colors.text.primary,
   },
   placeholder: {
@@ -258,7 +258,7 @@ const styles = StyleSheet.create({
   },
   optionLabel: {
     flex: 1,
-    fontSize: typography.fontSize.sm,
+    fontSize: typography.fontSize.base,
     color: colors.text.primary,
     fontWeight: typography.fontWeight.medium,
   },
