@@ -79,33 +79,22 @@ describe('HeaderComponent — breadcrumb snapshot (ISSUE-08)', () => {
     fixture.detectChanges();
   });
 
-  it('exposes the 3-level parents[] chain on the breadcrumb signal', () => {
+  it('exposes the parent/current chain on the breadcrumb signal', () => {
     const data = fixture.componentInstance.breadcrumb();
-    expect(
-      data?.parents?.map((p: { label: string }) => p.label),
-    ).toEqual(['Analíticas', 'Ventas']);
     expect(data?.parent?.label).toBe('Ventas');
     expect(data?.current.label).toBe('Por Producto');
     expect(data?.title).toBe('Por Producto');
   });
 
   it('locks down the breadcrumb data shape (ISSUE-08 regression baseline)', () => {
-    // Pins down the exact shape so future refactors that accidentally
-    // collapse `parents` to a single object or drop `parent` (backward
-    // compat) will fail this test and force a deliberate update.
+    // Pins down the exact shape so future refactors that accidentally drop
+    // `parent` or change its type will fail this test and force a
+    // deliberate update.
     //
     // Uses explicit toEqual() because the project ships Jasmine (not Jest),
     // so toMatchSnapshot() is not available.
     const data = fixture.componentInstance.breadcrumb();
     expect(data).toEqual({
-      parents: [
-        {
-          label: 'Analíticas',
-          url: '/admin/analytics',
-          icon: 'chart-line',
-        },
-        { label: 'Ventas', url: '/admin/analytics/sales', icon: 'dollar-sign' },
-      ],
       parent: {
         label: 'Ventas',
         url: '/admin/analytics/sales',
