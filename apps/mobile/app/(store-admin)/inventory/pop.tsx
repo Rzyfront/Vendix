@@ -23,6 +23,7 @@ import PopPrebulkModal from '../../../src/features/pop/components/pop-prebulk-mo
 import PopInvoiceScanner from '../../../src/features/pop/components/pop-invoice-scanner';
 import PopBulkModal from '../../../src/features/pop/components/pop-bulk-modal';
 import { usePopCart } from '../../../src/features/pop/pop-cart-service';
+import { POP_USE_UNIFIED_MODAL } from '../../../src/features/pop/pop.config';
 import type {
   PopProduct,
   PopProductConfigResult,
@@ -465,11 +466,15 @@ export default function PopScreen() {
         isLoading={isCreating}
       />
 
-      <PopPrebulkModal
-        visible={showPrebulk}
-        onConfirm={handlePrebulkConfirm}
-        onCancel={() => setShowPrebulk(false)}
-      />
+      {/* PrebulkModal solo se muestra si el flag POP_USE_UNIFIED_MODAL es false.
+          Cuando es true, el PopConfigModal actúa como modal unificado. */}
+      {!POP_USE_UNIFIED_MODAL && (
+        <PopPrebulkModal
+          visible={showPrebulk}
+          onConfirm={handlePrebulkConfirm}
+          onCancel={() => setShowPrebulk(false)}
+        />
+      )}
 
       <PopInvoiceScanner
         visible={showScanner}

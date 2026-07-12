@@ -5,6 +5,7 @@ import type {
   CartSummary,
   CartState,
   PosCustomer,
+  PosMode,
   Product,
   ProductVariant,
 } from '@/features/store/types';
@@ -24,6 +25,7 @@ interface CartActions {
   updateQuantity: (itemId: string, quantity: number) => void;
   setCustomer: (customer: PosCustomer | null) => void;
   setNotes: (notes: string) => void;
+  setMode: (mode: PosMode) => void;
   applyDiscount: (type: 'percentage' | 'fixed', value: number, description: string) => void;
   removeDiscount: (discountId: string) => void;
   clearCart: () => void;
@@ -36,6 +38,7 @@ const initialState: CartState = {
   notes: '',
   discounts: [],
   summary: { subtotal: 0, taxAmount: 0, discountAmount: 0, total: 0, itemCount: 0, totalItems: 0 },
+  mode: 'sale',
 };
 
 function generateItemId(): string {
@@ -43,9 +46,9 @@ function generateItemId(): string {
 }
 
 function getTaxRateSum(product: Product): number {
-  if (!product.tax_assignments || product.tax_assignments.length === 0) return 0;
+  if (!product.product_tax_assignments || product.product_tax_assignments.length === 0) return 0;
   let total = 0;
-  for (const assignment of product.tax_assignments) {
+  for (const assignment of product.product_tax_assignments) {
     const taxCategory = assignment.tax_category ?? (assignment as any).tax_categories;
     if (taxCategory?.tax_rates) {
       for (const rate of taxCategory.tax_rates) {
@@ -200,6 +203,8 @@ export const useCartStore = create<CartState & CartActions>()((set, get) => ({
   setCustomer: (customer) => set({ customer }),
 
   setNotes: (notes) => set({ notes }),
+
+  setMode: (mode) => set({ mode }),
 
   applyDiscount: (type, value, description) => {
     const { items, discounts } = get();

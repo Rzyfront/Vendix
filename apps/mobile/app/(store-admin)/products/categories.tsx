@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { ActivityIndicator, View, FlatList, Text, RefreshControl, Pressable } from 'react-native';
+import { ActivityIndicator, View, FlatList, Text, RefreshControl, Pressable, Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import {
@@ -27,6 +28,9 @@ import { colors, colorScales, spacing, borderRadius, typography } from '@/shared
 const PAGE_SIZE = 20;
 
 export default function CategoriesListScreen() {
+  // Safe area bottom: el FlatList debe tener paddingBottom suficiente
+  // para que el último item no quede tapado por el FAB + gesture bar.
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const queryClient = useQueryClient();
   const canCreate = useCan('store:categories:create');
@@ -76,8 +80,8 @@ export default function CategoriesListScreen() {
 
   function handleSearch(value: string) {
     setSearch(value);
+    setDebouncedSearch(value);
     setPage(1);
-    setTimeout(() => setDebouncedSearch(value), 400);
   }
 
   const filtersActive = (stateFilter ? 1 : 0) + (featuredFilter !== undefined ? 1 : 0);
@@ -100,9 +104,6 @@ export default function CategoriesListScreen() {
         />
 
         <View style={{ flexDirection: 'row', gap: spacing[2], alignItems: 'center' }}>
-          <Text style={{ fontSize: typography.fontSize.lg, fontWeight: '700', color: colors.text.primary, marginRight: spacing[2] }}>
-            Categorías ({total})
-          </Text>
           <View style={{ flex: 1 }}>
             <SearchBar
               placeholder="Buscar categorías..."
@@ -114,44 +115,34 @@ export default function CategoriesListScreen() {
           <OptionsDropdown
             filters={[
               {
-                key: 'state',
                 label: 'Estado',
-                type: 'select',
                 options: [
-                  { value: 'all', label: 'Todas' },
-                  { value: 'active', label: 'Activas' },
-                  { value: 'inactive', label: 'Inactivas' },
+                  { label: 'Todas', value: 'all', active: (stateFilter ?? 'all') === 'all' },
+                  { label: 'Activas', value: 'active', active: stateFilter === 'active' },
+                  { label: 'Inactivas', value: 'inactive', active: stateFilter === 'inactive' },
                 ],
+                onSelect: (value) => {
+                  setStateFilter(
+                    !value || value === 'all' ? undefined : (value as CategoryState),
+                  );
+                  setPage(1);
+                },
               },
               {
-                key: 'featured',
                 label: 'Destacadas',
-                type: 'select',
                 options: [
-                  { value: 'all', label: 'Todas' },
-                  { value: 'true', label: 'Destacadas' },
-                  { value: 'false', label: 'No destacadas' },
+                  { label: 'Todas', value: 'all', active: featuredFilter === undefined },
+                  { label: 'Destacadas', value: 'true', active: featuredFilter === true },
+                  { label: 'No destacadas', value: 'false', active: featuredFilter === false },
                 ],
+                onSelect: (value) => {
+                  setFeaturedFilter(
+                    !value || value === 'all' ? undefined : value === 'true',
+                  );
+                  setPage(1);
+                },
               },
             ]}
-            filterValues={{
-              state: stateFilter ?? 'all',
-              featured:
-                featuredFilter === undefined ? 'all' : featuredFilter ? 'true' : 'false',
-            }}
-            onFilterChange={(values) => {
-              const stateVal = values.state;
-              const featuredVal = values.featured;
-              setStateFilter(
-                !stateVal || stateVal === 'all' ? undefined : (stateVal as CategoryState),
-              );
-              setFeaturedFilter(
-                !featuredVal || featuredVal === 'all'
-                  ? undefined
-                  : featuredVal === 'true',
-              );
-              setPage(1);
-            }}
             actions={canCreate ? [
               {
                 label: 'Nueva Categoría',
@@ -202,7 +193,7 @@ export default function CategoriesListScreen() {
         <FlatList
           data={categories}
           keyExtractor={(item) => String(item.id)}
-          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: 96 }}
+          contentContainerStyle={{ paddingHorizontal: spacing[4], paddingTop: spacing[2], paddingBottom: insets.bottom + 96 }}
           ItemSeparatorComponent={() => <View style={{ height: spacing[2] }} />}
           refreshControl={
             <RefreshControl refreshing={isFetching} onRefresh={() => refetch()} tintColor={colors.primary} />
@@ -287,7 +278,11 @@ function CategoryCard({
         }}
       >
         {category.image_url ? (
-          <Text style={{ fontSize: 24 }}>📚</Text>
+          <Image
+            source={{ uri: category.image_url }}
+            style={{ width: 48, height: 48, borderRadius: borderRadius.md }}
+            resizeMode="cover"
+          />
         ) : (
           <Icon name="layers" size={22} color={colors.text.muted} />
         )}

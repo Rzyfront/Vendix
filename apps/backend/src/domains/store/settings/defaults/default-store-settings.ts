@@ -342,6 +342,13 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
     },
 
+    // Availability - Generic-slot fallback. Mon-Fri matches the historic
+    // hardcoded skip-weekend behavior in `AvailabilityService.generateGenericSlots`;
+    // stores that open on weekends override via this setting.
+    availability: {
+      working_days: [1, 2, 3, 4, 5],
+    },
+
     // Operations - Preparation and delivery defaults
     operations: {
       default_preparation_time_minutes: 15,
@@ -357,8 +364,12 @@ export function getDefaultStoreSettings(): StoreSettings {
 
     // Restaurant - restaurant suite behavior toggles. Table checkout is
     // opt-in (false by default) so existing stores keep paying via POS.
+    // QR scan defaults to `menu_only` (show menu, no table state change)
+    // and `qr_auto_fire` off so staff explicitly fires items to kitchen.
     restaurant: {
       enable_table_checkout: false,
+      qr_scan_behavior: 'menu_only',
+      qr_auto_fire: false,
     },
 
     // Membership - gym/membership suite behavior toggles. Ambient access
@@ -371,6 +382,14 @@ export function getDefaultStoreSettings(): StoreSettings {
       turnstile_mode: false,
       auto_leveling_enabled: false,
       auto_leveling_interval_hours: 2,
+      // Default reader mode = Tipo A (id_wrapper). Reader emits an opaque ID
+      // directly; Vendix stores credentials as `external_ref` and never sees
+      // the biometric template. The `template_sdk` (Tipo B) flow is planned
+      // in anotación 3c of the membership-access plan and is NOT yet wired
+      // to any endpoint — see settings plan for the documented design.
+      fingerprint_device: {
+        reader_type: 'id_wrapper',
+      },
     },
 
     // Legacy: Mantener por compatibilidad (redundante con branding)

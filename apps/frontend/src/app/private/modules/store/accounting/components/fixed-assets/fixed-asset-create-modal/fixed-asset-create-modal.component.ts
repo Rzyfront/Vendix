@@ -136,7 +136,7 @@ import {
       </div>
 
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border">
           <app-button variant="outline" (clicked)="onClose()">Cancelar</app-button>
           <app-button
             variant="primary"

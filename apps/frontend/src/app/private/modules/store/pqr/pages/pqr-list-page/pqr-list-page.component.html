@@ -1,10 +1,9 @@
 <div class="pqr-list-page">
-  <!-- ── Sticky header (patrón Ventas) ─────────────────────────────────
-       Same component used by every admin module (Ventas, Reportes,
-       Clientes). Tabs inline at the top so the operator can narrow
-       the queue by bucket (Todas / Vencidas / Pendientes / Nuevas).
-       No primary-action button — "+ Nueva solicitud" lives in the
-       options-dropdown "Acciones" menu inside the list card. -->
+  <!-- ── Sticky header ─────────────────────────────────────────────────
+       Same component used by every admin module. Tabs inline at the
+       top so the operator can narrow the queue by bucket
+       (Todas / Vencidas / Pendientes / Nuevas). The primary action
+       "+ Nueva solicitud" lives in the right slot. -->
   @if (stats() && stats()!.total > 0) {
   <app-sticky-header
     title="Bandeja"
@@ -16,6 +15,8 @@
     [activeTab]="quickFilter()"
     tabsAriaLabel="Filtros de PQRS"
     (tabChanged)="setQuickFilter($event)"
+    [actions]="stickyHeaderActions()"
+    (actionClicked)="onStickyHeaderAction($event)"
   />
   } @else {
   <app-sticky-header
@@ -24,28 +25,14 @@
     icon="inbox"
     variant="glass"
     [showBackButton]="false"
+    [actions]="stickyHeaderActions()"
+    (actionClicked)="onStickyHeaderAction($event)"
   />
   }
 
-  <!-- ── Sub-header card ────────────────────────────────────────────────
-       Mirrors the "Ventas / Reportes de ventas y facturación" card
-       pattern used by the Reportes module. Icon + title + subtitle so
-       the operator has a single, scannable block of context right
-       under the page header. -->
-  <div class="pqr-subheader">
-    <div class="pqr-subheader__icon">
-      <app-icon name="message-square" [size]="22"></app-icon>
-    </div>
-    <div class="pqr-subheader__copy">
-      <h2>Bandeja</h2>
-      <p>Gestiona las solicitudes de tus clientes</p>
-    </div>
-  </div>
-
   <!-- ── Stats grid ──────────────────────────────────────────────────────
-       Same `<app-stats>` shared component used by Clientes / Reportes /
-       Ventas so the operator has a single mental model for "PQR health
-       at a glance". -->
+       Shared <app-stats> component (same as Clientes / Reportes /
+       Ventas). Surfaces PQR health at a glance. -->
   @if (stats() && stats()!.total > 0) {
   <div class="stats-container">
     <app-stats
@@ -210,7 +197,7 @@
 
 <!-- ── Modal: Nueva solicitud ───────────────────────────────────────────── -->
 @if (showNewPqrModal()) {
-<div class="modal-overlay" (click)="closeNewPqrModal()">
+<div class="modal-overlay">
   <div class="modal" (click)="$event.stopPropagation()">
     <header class="modal__header">
       <h2>Nueva solicitud</h2>

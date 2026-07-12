@@ -54,11 +54,11 @@ const MONTH_LABELS = [
     SelectorComponent,
   ],
   template: `
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+    <div class="bg-[var(--color-surface)] rounded-lg shadow">
       <!-- Filters -->
-      <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+      <div class="p-4 border-b border-border">
         <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 class="text-lg font-semibold text-text-primary">
             Auditoría de Cálculos
           </h2>
           <div class="grid grid-cols-3 gap-2 md:flex md:gap-3">

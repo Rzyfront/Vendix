@@ -66,7 +66,7 @@ export const createFromOrderSuccess = createAction(
 );
 export const createFromOrderFailure = createAction(
   '[Invoicing] Create From Order Failure',
-  props<{ error: string }>(),
+  props<{ error: string; errorCode?: string | null }>(),
 );
 
 // ── Create From Sales Order ─────────────────────────────────
@@ -81,7 +81,7 @@ export const createFromSalesOrderSuccess = createAction(
 );
 export const createFromSalesOrderFailure = createAction(
   '[Invoicing] Create From Sales Order Failure',
-  props<{ error: string }>(),
+  props<{ error: string; errorCode?: string | null }>(),
 );
 
 // ── Update Invoice ──────────────────────────────────────────

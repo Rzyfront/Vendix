@@ -9,6 +9,7 @@ import {
   DianIssuerData,
   DianCustomerData,
   DianSoftwareSecurity,
+  DianInvoiceControl,
 } from '../interfaces/dian-config.interface';
 import { ProviderInvoiceData } from '../../invoice-provider.interface';
 
@@ -36,6 +37,12 @@ export class UblInvoiceBuilder {
     software_security: DianSoftwareSecurity;
     cufe: string;
     environment: 'test' | 'production';
+    /**
+     * Numbering-resolution control (InvoiceAuthorization, period, range) for
+     * the sts:DianExtensions/InvoiceControl block. Optional so existing callers
+     * compile; the orchestrator populates it from the invoice_resolutions row.
+     */
+    control?: DianInvoiceControl;
   }): string {
     const {
       invoice_data,
@@ -44,6 +51,7 @@ export class UblInvoiceBuilder {
       software_security,
       cufe,
       environment,
+      control,
     } = params;
 
     const currency = invoice_data.currency || UBL_CONSTANTS.DEFAULT_CURRENCY;
@@ -63,14 +71,20 @@ export class UblInvoiceBuilder {
       .att('xmlns:xades', UBL_NAMESPACES.XADES)
       .att('xmlns:xades141', UBL_NAMESPACES.XADES141);
 
-    // 1. UBL Extensions
-    UblCommonBuilder.buildExtensions(doc, software_security);
+    // 1. UBL Extensions (DIAN software security + invoice control + QR)
+    UblCommonBuilder.buildExtensions(doc, software_security, {
+      control,
+      issuer_nit: issuer.nit,
+      issuer_nit_dv: issuer.nit_dv,
+      qr_code: UblCommonBuilder.buildQrUrl(environment, cufe),
+    });
 
-    // 2. Document metadata
+    // 2. Document metadata. CustomizationID = tipo de operación; '10' = Estándar
+    //    (factura electrónica de venta nacional).
     doc.ele(UBL_NAMESPACES.CBC, 'UBLVersionID').txt(UBL_CONSTANTS.UBL_VERSION);
     doc
       .ele(UBL_NAMESPACES.CBC, 'CustomizationID')
-      .txt(UBL_CONSTANTS.CUSTOMIZATION_ID);
+      .txt(DIAN_OPERATION_TYPES.STANDARD_INVOICE);
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileID').txt(UBL_CONSTANTS.PROFILE_ID);
     doc.ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID').txt(profile_execution_id);
     doc.ele(UBL_NAMESPACES.CBC, 'ID').txt(invoice_data.invoice_number);

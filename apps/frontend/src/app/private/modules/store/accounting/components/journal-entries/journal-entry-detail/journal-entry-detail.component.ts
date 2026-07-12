@@ -36,23 +36,23 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
           <!-- Header Info -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p class="text-xs text-gray-500">Número</p>
+              <p class="text-xs text-text-secondary">Número</p>
               <p class="text-sm font-medium">{{ entry()?.entry_number }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Fecha</p>
+              <p class="text-xs text-text-secondary">Fecha</p>
               <p class="text-sm font-medium">
-                {{ entry()?.entry_date | date: 'mediumDate' }}
+                {{ entry()?.entry_date | date: 'mediumDate' : 'UTC' }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Tipo</p>
+              <p class="text-xs text-text-secondary">Tipo</p>
               <p class="text-sm font-medium capitalize">
                 {{ entry()?.entry_type }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Estado</p>
+              <p class="text-xs text-text-secondary">Estado</p>
               <span
                 class="text-xs px-2 py-0.5 rounded-full font-medium"
                 [class]="getStatusClasses(entry()?.status ?? '')"
@@ -64,7 +64,7 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
 
           @if (entry()?.description) {
             <div>
-              <p class="text-xs text-gray-500">Descripción</p>
+              <p class="text-xs text-text-secondary">Descripción</p>
               <p class="text-sm">{{ entry()?.description }}</p>
             </div>
           }
@@ -78,8 +78,8 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
             <div class="border border-border rounded-lg overflow-hidden">
               <!-- Header -->
               <div
-                class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2 bg-gray-50
-                          text-xs font-semibold text-gray-500 uppercase"
+                class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2 bg-[var(--color-surface-secondary)]
+                          text-xs font-semibold text-text-secondary uppercase"
               >
                 <div class="col-span-2">Código</div>
                 <div class="col-span-4">Cuenta</div>
@@ -100,19 +100,19 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
                             {{ line.account?.code }} - {{ line.account?.name }}
                           </p>
                           @if (line.description) {
-                            <p class="text-xs text-gray-500 mt-0.5">
+                            <p class="text-xs text-text-secondary mt-0.5">
                               {{ line.description }}
                             </p>
                           }
                         </div>
                         <div class="text-right">
                           @if (line.debit_amount > 0) {
-                            <p class="text-sm font-mono text-blue-600">
+                            <p class="text-sm font-mono text-[var(--color-info)]">
                               D: {{ line.debit_amount | number: '1.2-2' }}
                             </p>
                           }
                           @if (line.credit_amount > 0) {
-                            <p class="text-sm font-mono text-green-600">
+                            <p class="text-sm font-mono text-success">
                               C: {{ line.credit_amount | number: '1.2-2' }}
                             </p>
                           }
@@ -129,7 +129,7 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
                       <div class="col-span-4 text-sm">
                         {{ line.account?.name }}
                       </div>
-                      <div class="col-span-2 text-sm text-gray-500">
+                      <div class="col-span-2 text-sm text-text-secondary">
                         {{ line.description || '-' }}
                       </div>
                       <div class="col-span-2 text-right text-sm font-mono">
@@ -153,7 +153,7 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
 
               <!-- Totals -->
               <div
-                class="grid grid-cols-12 gap-2 px-4 py-2 bg-gray-50 border-t border-border"
+                class="grid grid-cols-12 gap-2 px-4 py-2 bg-[var(--color-surface-secondary)] border-t border-border"
               >
                 <div class="col-span-8 text-sm font-semibold">Totales</div>
                 <div class="col-span-2 text-right text-sm font-mono font-bold">
@@ -170,7 +170,7 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
 
       <div slot="footer">
         <div
-          class="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+          class="flex items-center justify-between gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border"
         >
           <div class="flex items-center gap-2">
             @if (entry()?.status === 'draft') {
@@ -251,10 +251,10 @@ export class JournalEntryDetailComponent {
 
   getStatusClasses(status: string): string {
     const classes: Record<string, string> = {
-      draft: 'bg-amber-50 text-amber-700',
-      posted: 'bg-emerald-50 text-emerald-700',
-      voided: 'bg-red-50 text-red-700',
+      draft: 'bg-warning-light text-warning',
+      posted: 'bg-success-light text-success',
+      voided: 'bg-error-light text-error',
     };
-    return classes[status] || 'bg-gray-100 text-gray-600';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-gray-600';
   }
 }

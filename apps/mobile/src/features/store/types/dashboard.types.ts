@@ -56,15 +56,75 @@ export interface InventorySummary {
   total_value: number;
 }
 
-export type DatePreset =
-  | 'today'
-  | 'yesterday'
-  | 'thisWeek'
-  | 'lastWeek'
-  | 'thisMonth'
-  | 'lastMonth'
-  | 'thisYear'
-  | 'custom';
+/**
+ * Fila individual de "Ventas por Producto" (analytics/sales/by-product).
+ * Paridad con apps/frontend `sales-by-product.component.ts`:
+ *   product_id, product_name, units_sold, revenue, orders_count.
+ * `image_url` es opcional — backend puede no devolverlo si el producto
+ * no tiene imagen principal configurada.
+ */
+export interface SalesByProduct {
+  product_id: number;
+  product_name: string;
+  units_sold: number;
+  revenue: number;
+  orders_count: number;
+  image_url?: string | null;
+}
+
+/**
+ * Fila individual de "Ventas por Categoría" (analytics/sales/by-category).
+ * Paridad con apps/frontend `sales-by-category.component.ts`.
+ * Backend agrega a nivel de product_categories y reparte revenue/units
+ * entre todas las categorías del producto (multi-categoría soportado).
+ * Productos sin categoría se consolidan en `category_id: 0` con
+ * `category_name: "Sin categoría"` (ver `sales-analytics.service.ts`).
+ */
+export interface SalesByCategory {
+  category_id: number;
+  category_name: string;
+  units_sold: number;
+  revenue: number;
+  percentage_of_total: number;
+}
+
+/**
+ * Fila individual de "Top Clientes" (analytics/sales/by-customer).
+ * Paridad con apps/frontend `sales-by-customer.component.ts`.
+ * `customer_id` puede ser `null` para órdenes sin cliente (consolidado
+ * en "Cliente" en backend). `last_order_date` viene como ISO string
+ * (`toISOString()` en backend) o `null` si no hay órdenes.
+ */
+export interface SalesByCustomer {
+  customer_id: number | null;
+  customer_name: string;
+  email: string;
+  total_orders: number;
+  total_spent: number;
+  average_order_value: number;
+  last_order_date: string | null;
+}
+
+/**
+ * Fila individual de "Métodos de Pago" (analytics/sales/by-payment-method).
+ * Paridad con apps/frontend `sales-by-payment-method.component.ts`.
+ * `payment_method` es el `name` interno del `system_payment_method`
+ * (e.g. `"cash"`, `"card"`, `"nequi"`); `display_name` es la etiqueta
+ * localizada que el merchant configuró (o el fallback del sistema).
+ */
+export interface SalesByPaymentMethod {
+  payment_method: string;
+  display_name: string;
+  transaction_count: number;
+  total_amount: number;
+  percentage: number;
+}
+
+// Re-export from canonical location to keep types unified across the app.
+// `DateRangeFilterValue` (shared) y `DateRange` (features) usan exactamente
+// el mismo union. Si agregas un preset, edita solo `shared/types/date.ts`.
+export type { DatePreset } from '@/shared/types/date';
+import type { DatePreset } from '@/shared/types/date';
 
 export interface DateRange {
   start_date: string;

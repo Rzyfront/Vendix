@@ -211,6 +211,12 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'User already exists',
   },
+  AUTH_CUSTOMER_CLAIMABLE_001: {
+    code: 'AUTH_CUSTOMER_CLAIMABLE_001',
+    httpStatus: 409,
+    devMessage:
+      'Ya existe una cuenta de cliente con este correo — puedes recuperarla restableciendo tu contraseña.',
+  },
   AUTH_PERM_001: {
     code: 'AUTH_PERM_001',
     httpStatus: 403,
@@ -2201,6 +2207,38 @@ export const ErrorCodes = {
     devMessage: 'Invalid file type — only images and PDFs are accepted',
   },
 
+  // Member Roster Scanner (bulk member import via AI)
+  MEMBER_SCAN_NO_FILE: {
+    code: 'MEMBER_SCAN_NO_FILE',
+    httpStatus: 400,
+    devMessage: 'No roster file provided',
+  },
+  MEMBER_SCAN_INVALID_FILE: {
+    code: 'MEMBER_SCAN_INVALID_FILE',
+    httpStatus: 400,
+    devMessage: 'Invalid file type — only images and PDFs are accepted',
+  },
+  MEMBER_SCAN_AI_FAIL: {
+    code: 'MEMBER_SCAN_AI_FAIL',
+    httpStatus: 502,
+    devMessage: 'AI member roster processing failed',
+  },
+  MEMBER_SCAN_PARSE_FAIL: {
+    code: 'MEMBER_SCAN_PARSE_FAIL',
+    httpStatus: 422,
+    devMessage: 'Failed to parse AI member roster response as valid JSON',
+  },
+  MEMBER_BULK_EMPTY: {
+    code: 'MEMBER_BULK_EMPTY',
+    httpStatus: 400,
+    devMessage: 'No members detected in the roster document',
+  },
+  MEMBER_BULK_TOO_MANY: {
+    code: 'MEMBER_BULK_TOO_MANY',
+    httpStatus: 400,
+    devMessage: 'Too many members; maximum 200 per upload',
+  },
+
   // Route Sheet Scanner (planilla de ruta extraction)
   RTSCAN_AI_FAIL: {
     code: 'RTSCAN_AI_FAIL',
@@ -2889,6 +2927,12 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage:
       'Items inválidos para agregar a la sesión de mesa',
+  },
+  TABLE_GUEST_COUNT_EXCEEDS_CAPACITY: {
+    code: 'TABLE_GUEST_COUNT_EXCEEDS_CAPACITY',
+    httpStatus: 422,
+    devMessage:
+      'El número de comensales excede la capacidad de la mesa',
   },
   // ── Split Order (Restaurant Suite Fase E) ────────────────────
   SPLIT_ORDER_NOT_FOUND: {

@@ -37,6 +37,14 @@ interface MovementsStats {
     MovementDetailModalComponent,
     MovementListComponent
 ],
+  styles: [`
+    @media (max-width: 639px) {
+      .stats-container app-stats:first-child {
+        margin-left: -1rem;
+        padding-left: 0;
+      }
+    }
+  `],
   template: `
     <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile, static on desktop -->

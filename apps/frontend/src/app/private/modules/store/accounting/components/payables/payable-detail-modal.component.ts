@@ -33,21 +33,21 @@ import {
           <!-- Supplier Info -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p class="text-xs text-gray-500">Proveedor</p>
+              <p class="text-xs text-text-secondary">Proveedor</p>
               <p class="text-sm font-semibold">
                 {{ d.supplier?.name || '—' }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Email</p>
+              <p class="text-xs text-text-secondary">Email</p>
               <p class="text-sm">{{ d.supplier?.email || '—' }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Telefono</p>
+              <p class="text-xs text-text-secondary">Telefono</p>
               <p class="text-sm">{{ d.supplier?.phone || '—' }}</p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Origen</p>
+              <p class="text-xs text-text-secondary">Origen</p>
               <p class="text-sm">
                 {{ d.source_type }} #{{ d.source_id }}
               </p>
@@ -69,7 +69,7 @@ import {
               {{ getPriorityLabel(d.priority) }}
             </span>
             @if (d.days_overdue > 0) {
-              <span class="text-xs text-red-500 font-medium">
+              <span class="text-xs text-error font-medium">
                 {{ d.days_overdue }} dias vencido
               </span>
             }
@@ -77,30 +77,30 @@ import {
 
           <!-- Financial Summary -->
           <div
-            class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg"
+            class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-[var(--color-surface-secondary)] rounded-lg"
           >
             <div>
-              <p class="text-xs text-gray-500">Monto Original</p>
+              <p class="text-xs text-text-secondary">Monto Original</p>
               <p class="text-sm font-semibold font-mono">
                 {{ formatCurrency(d.original_amount) }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Pagado</p>
-              <p class="text-sm font-semibold font-mono text-emerald-600">
+              <p class="text-xs text-text-secondary">Pagado</p>
+              <p class="text-sm font-semibold font-mono text-success">
                 {{ formatCurrency(d.paid_amount) }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Saldo</p>
-              <p class="text-sm font-bold font-mono text-primary-600">
+              <p class="text-xs text-text-secondary">Saldo</p>
+              <p class="text-sm font-bold font-mono text-[var(--color-primary)]">
                 {{ formatCurrency(d.balance) }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Vencimiento</p>
+              <p class="text-xs text-text-secondary">Vencimiento</p>
               <p class="text-sm font-medium">
-                {{ d.due_date | date: 'dd/MM/yyyy' }}
+                {{ d.due_date | date: 'dd/MM/yyyy':'UTC' }}
               </p>
             </div>
           </div>
@@ -108,24 +108,24 @@ import {
           <!-- Dates -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
-              <p class="text-xs text-gray-500">Fecha Emision</p>
+              <p class="text-xs text-text-secondary">Fecha Emision</p>
               <p class="text-sm">
-                {{ d.issue_date | date: 'dd/MM/yyyy' }}
+                {{ d.issue_date | date: 'dd/MM/yyyy':'UTC' }}
               </p>
             </div>
             <div>
-              <p class="text-xs text-gray-500">Ultimo Pago</p>
+              <p class="text-xs text-text-secondary">Ultimo Pago</p>
               <p class="text-sm">
                 {{
                   d.last_payment_date
-                    ? (d.last_payment_date | date: 'dd/MM/yyyy')
+                    ? (d.last_payment_date | date: 'dd/MM/yyyy':'UTC')
                     : '—'
                 }}
               </p>
             </div>
             @if (d.notes) {
               <div class="col-span-2">
-                <p class="text-xs text-gray-500">Notas</p>
+                <p class="text-xs text-text-secondary">Notas</p>
                 <p class="text-sm">{{ d.notes }}</p>
               </div>
             }
@@ -143,24 +143,24 @@ import {
               <div class="space-y-2">
                 @for (payment of d.ap_payments; track payment.id) {
                   <div
-                    class="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    class="flex items-center justify-between p-3 bg-[var(--color-surface-secondary)] rounded-lg"
                   >
                     <div class="flex items-center gap-3 min-w-0">
                       <div
-                        class="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0"
+                        class="w-8 h-8 rounded-full bg-success-light flex items-center justify-center shrink-0"
                       >
                         <app-icon
                           name="banknote"
                           [size]="14"
-                          class="text-emerald-600"
+                          class="text-success"
                         ></app-icon>
                       </div>
                       <div class="min-w-0">
                         <p class="text-sm font-medium">
                           {{ formatCurrency(payment.amount) }}
                         </p>
-                        <p class="text-xs text-gray-500">
-                          {{ payment.payment_date | date: 'dd/MM/yyyy' }}
+                        <p class="text-xs text-text-secondary">
+                          {{ payment.payment_date | date: 'dd/MM/yyyy':'UTC' }}
                           @if (payment.payment_method) {
                             ·
                             {{ getPaymentMethodLabel(payment.payment_method) }}
@@ -172,7 +172,7 @@ import {
                       </div>
                     </div>
                     @if (payment.bank_export_ref) {
-                      <span class="text-xs text-gray-400 font-mono">
+                      <span class="text-xs text-text-secondary font-mono">
                         {{ payment.bank_export_ref }}
                       </span>
                     }
@@ -180,7 +180,7 @@ import {
                 }
               </div>
             } @else {
-              <p class="text-sm text-gray-400 text-center py-4">
+              <p class="text-sm text-text-secondary text-center py-4">
                 No hay pagos registrados
               </p>
             }
@@ -204,7 +204,7 @@ import {
                   track schedule.id
                 ) {
                   <div
-                    class="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                    class="flex items-center justify-between p-3 bg-[var(--color-surface-secondary)] rounded-lg"
                   >
                     <div class="flex items-center gap-3">
                       <div
@@ -220,9 +220,9 @@ import {
                         <p class="text-sm font-medium">
                           {{ formatCurrency(schedule.amount) }}
                         </p>
-                        <p class="text-xs text-gray-500">
+                        <p class="text-xs text-text-secondary">
                           Programado:
-                          {{ schedule.scheduled_date | date: 'dd/MM/yyyy' }}
+                          {{ schedule.scheduled_date | date: 'dd/MM/yyyy':'UTC' }}
                           @if (schedule.processed_at) {
                             · Procesado:
                             {{ schedule.processed_at | date: 'dd/MM/yyyy' }}
@@ -240,7 +240,7 @@ import {
                 }
               </div>
             } @else {
-              <p class="text-sm text-gray-400 text-center py-4">
+              <p class="text-sm text-text-secondary text-center py-4">
                 No hay pagos programados
               </p>
             }
@@ -271,9 +271,9 @@ import {
           }
         </div>
       } @else {
-        <div class="p-8 text-center text-gray-400">
+        <div class="p-8 text-center text-text-secondary">
           <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
           ></div>
           <p class="mt-2">Cargando detalle...</p>
         </div>
@@ -343,13 +343,13 @@ export class PayableDetailModalComponent {
 
   getStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      open: 'bg-blue-50 text-blue-600',
-      partial: 'bg-amber-50 text-amber-600',
-      overdue: 'bg-red-50 text-red-600',
-      paid: 'bg-emerald-50 text-emerald-600',
-      written_off: 'bg-gray-100 text-gray-500',
+      open: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      partial: 'bg-warning-light text-warning',
+      overdue: 'bg-error-light text-error',
+      paid: 'bg-success-light text-success',
+      written_off: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 
   getPriorityLabel(priority: string): string {
@@ -364,12 +364,12 @@ export class PayableDetailModalComponent {
 
   getPriorityClass(priority: string): string {
     const classes: Record<string, string> = {
-      urgent: 'bg-red-50 text-red-600',
-      high: 'bg-orange-50 text-orange-600',
-      normal: 'bg-blue-50 text-blue-600',
-      low: 'bg-gray-100 text-gray-500',
+      urgent: 'bg-error-light text-error',
+      high: 'bg-warning-light text-warning',
+      normal: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      low: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[priority] || 'bg-gray-100 text-gray-500';
+    return classes[priority] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 
   getPaymentMethodLabel(method: string): string {
@@ -392,11 +392,11 @@ export class PayableDetailModalComponent {
 
   getScheduleStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      scheduled: 'bg-blue-50 text-blue-600',
-      processed: 'bg-emerald-50 text-emerald-600',
-      cancelled: 'bg-gray-100 text-gray-500',
+      scheduled: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      processed: 'bg-success-light text-success',
+      cancelled: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 
   getScheduleIcon(status: string): string {
@@ -410,10 +410,10 @@ export class PayableDetailModalComponent {
 
   getScheduleIconClass(status: string): string {
     const classes: Record<string, string> = {
-      scheduled: 'bg-blue-100 text-blue-600',
-      processed: 'bg-emerald-100 text-emerald-600',
-      cancelled: 'bg-gray-100 text-gray-500',
+      scheduled: 'bg-[var(--color-info-light)] text-[var(--color-info)]',
+      processed: 'bg-success-light text-success',
+      cancelled: 'bg-[var(--color-surface-secondary)] text-text-secondary',
     };
-    return classes[status] || 'bg-gray-100 text-gray-500';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 }

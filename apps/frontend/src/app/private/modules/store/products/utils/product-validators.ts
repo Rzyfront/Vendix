@@ -2,6 +2,23 @@ import { AbstractControl, ValidationErrors, ValidatorFn, FormGroup, FormArray } 
 import { GeneratedVariant } from '../pages/product-create-page/product-create-page.component';
 
 /**
+ * Rechaza nombres vacíos, compuestos solo por espacios en blanco, o por
+ * debajo de la longitud mínima real (medida tras trim). Cubre el hueco de
+ * Validators.required + minLength(1), que dejan pasar "   ".
+ */
+export function notBlankValidator(minTrimmedLength = 2): ValidatorFn {
+  return (control: AbstractControl): ValidationErrors | null => {
+    const raw = control.value;
+    if (raw === null || raw === undefined) return null; // required lo cubre
+    const trimmed = String(raw).trim();
+    if (trimmed.length === 0) return { blank: true };
+    if (trimmed.length < minTrimmedLength)
+      return { tooShort: { requiredLength: minTrimmedLength, actualLength: trimmed.length } };
+    return null;
+  };
+}
+
+/**
  * Validator: sale_price must be less than base_price
  */
 export function saleLessThanBaseValidator(

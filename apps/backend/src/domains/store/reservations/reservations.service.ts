@@ -856,19 +856,24 @@ export class ReservationsService {
 
   /**
    * Obtiene estadisticas de reservas
+   *
+   * Date comparisons use UTC midnight (not local midnight) because
+   * the `bookings.date` column is `@db.Date` and is stored as UTC
+   * midnight (e.g. 2026-07-02 00:00:00Z). Using `new Date(year, month,
+   * day)` in a non-UTC tz (e.g. Colombia = UTC-5) yields a value 5h
+   * ahead of the stored value, so the gte compare fails. Both this
+   * method and `getToday` use `Date.UTC(...)` for consistency.
    */
   async getStats() {
     const now = new Date();
     const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
     const todayEnd = new Date(todayStart);
-    todayEnd.setDate(todayEnd.getDate() + 1);
+    todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
 
     const thirtyDaysAgo = new Date(todayStart);
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    thirtyDaysAgo.setUTCDate(thirtyDaysAgo.getUTCDate() - 30);
 
     const [
       today_count,
@@ -925,16 +930,19 @@ export class ReservationsService {
 
   /**
    * Obtiene las reservas de hoy ordenadas por hora de inicio
+   *
+   * Uses UTC midnight for the date range. See getStats() comment
+   * for the rationale (bookings.date is @db.Date stored as UTC
+   * midnight; local midnight would miss the record in non-UTC
+   * timezones).
    */
   async getToday() {
     const now = new Date();
     const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     );
     const todayEnd = new Date(todayStart);
-    todayEnd.setDate(todayEnd.getDate() + 1);
+    todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
 
     const bookings = await this.prisma.bookings.findMany({
       where: {

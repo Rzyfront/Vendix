@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Modal, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View, KeyboardAvoidingView, Platform } from 'react-native';
+import { Selector } from '@/shared/components/selector/selector';
 import { useQuery } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Icon } from '@/shared/components/icon/icon';
@@ -313,17 +314,27 @@ export default function FieldsScreen() {
         keyboardShouldPersistTaps="handled"
       />
 
-      {/* Create/Edit Modal */}
+      {/* Create/Edit Modal — centered card pattern (Web Visual Pattern) */}
       {showModal && (
-        <View style={styles.modalOverlay}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setShowModal(false)} />
-          <ScrollView style={styles.modalSheet} keyboardShouldPersistTaps="handled">
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{editingField ? 'Editar Campo' : 'Nuevo Campo'}</Text>
-              <Pressable onPress={() => setShowModal(false)}>
-                <Icon name="x" size={20} color={colorScales.gray[500]} />
-              </Pressable>
-            </View>
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowModal(false)}>
+          <Pressable style={styles.modalBackdrop} onPress={() => setShowModal(false)}>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={styles.centeredCardRoot}
+            >
+              <View style={styles.centeredCard}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>{editingField ? 'Editar Campo' : 'Nuevo Campo'}</Text>
+                  <Pressable onPress={() => setShowModal(false)}>
+                    <Icon name="x" size={20} color={colorScales.gray[500]} />
+                  </Pressable>
+                </View>
+                <ScrollView
+                  style={styles.modalScroll}
+                  contentContainerStyle={styles.modalScrollContent}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
 
             {/* Label */}
             <View style={styles.formGroup}>
@@ -350,39 +361,23 @@ export default function FieldsScreen() {
               />
             </View>
 
-            {/* Entity type */}
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Tipo de Entidad</Text>
-              <View style={styles.chipRow}>
-                {ENTITY_OPTIONS.map((type) => (
-                  <Pressable
-                    key={type}
-                    onPress={() => setFormEntityType(type)}
-                    style={[styles.chip, formEntityType === type && styles.chipActive]}
-                  >
-                    <Text style={[styles.chipText, formEntityType === type && styles.chipTextActive]}>
-                      {ENTITY_LABELS[type]}
-                    </Text>
-                  </Pressable>
-                ))}
+            {/* Entity type + Field type — 2-col grid (web parity) */}
+            <View style={styles.formRow}>
+              <View style={styles.formCol}>
+                <Selector
+                  label="Tipo de Entidad *"
+                  value={formEntityType}
+                  onChange={(v) => setFormEntityType(v as EntityType)}
+                  options={ENTITY_OPTIONS.map((e) => ({ label: ENTITY_LABELS[e], value: e }))}
+                />
               </View>
-            </View>
-
-            {/* Field type */}
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Tipo de Campo</Text>
-              <View style={styles.chipRowWrapped}>
-                {FIELD_TYPES.map((ft) => (
-                  <Pressable
-                    key={ft.value}
-                    onPress={() => setFormFieldType(ft.value)}
-                    style={[styles.chip, formFieldType === ft.value && styles.chipActive]}
-                  >
-                    <Text style={[styles.chipText, formFieldType === ft.value && styles.chipTextActive]}>
-                      {ft.label}
-                    </Text>
-                  </Pressable>
-                ))}
+              <View style={styles.formCol}>
+                <Selector
+                  label="Tipo de Campo *"
+                  value={formFieldType}
+                  onChange={(v) => setFormFieldType(v as FieldType)}
+                  options={FIELD_TYPES.map((ft) => ({ label: ft.label, value: ft.value }))}
+                />
               </View>
             </View>
 
@@ -394,26 +389,28 @@ export default function FieldsScreen() {
                 onChangeText={setFormDescription}
                 placeholder="Descripción opcional..."
                 placeholderTextColor={colorScales.gray[400]}
-                style={styles.formTextarea}
+                style={[styles.formTextarea, { minHeight: 70 }]}
                 multiline
               />
             </View>
 
-            {/* Display mode */}
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>Modo de Display</Text>
-              <View style={styles.chipRow}>
-                {DISPLAY_MODES.map((dm) => (
-                  <Pressable
-                    key={dm.value}
-                    onPress={() => setFormDisplayMode(dm.value)}
-                    style={[styles.chip, formDisplayMode === dm.value && styles.chipActive]}
-                  >
-                    <Text style={[styles.chipText, formDisplayMode === dm.value && styles.chipTextActive]}>
-                      {dm.label}
-                    </Text>
-                  </Pressable>
-                ))}
+            {/* Display mode + Obligatorio — 2-col grid (web parity) */}
+            <View style={styles.formRow}>
+              <View style={styles.formCol}>
+                <Selector
+                  label="Modo de Display"
+                  value={formDisplayMode}
+                  onChange={(v) => setFormDisplayMode(v as DisplayMode)}
+                  options={DISPLAY_MODES.map((dm) => ({ label: dm.label, value: dm.value }))}
+                />
+              </View>
+              <View style={[styles.formCol, styles.formColToggle]}>
+                <Text style={styles.formLabel}>Obligatorio</Text>
+                <Pressable onPress={() => setFormRequired((v) => !v)} style={styles.toggleRow}>
+                  <View style={[styles.toggle, formRequired && styles.toggleActive]}>
+                    <View style={[styles.toggleThumb, formRequired && styles.toggleThumbActive]} />
+                  </View>
+                </Pressable>
               </View>
             </View>
 
@@ -432,16 +429,6 @@ export default function FieldsScreen() {
               </View>
             )}
 
-            {/* Required toggle */}
-            <View style={styles.formGroup}>
-              <Pressable onPress={() => setFormRequired((v) => !v)} style={styles.toggleRow}>
-                <Text style={styles.formLabel}>Obligatorio</Text>
-                <View style={[styles.toggle, formRequired && styles.toggleActive]}>
-                  <View style={[styles.toggleThumb, formRequired && styles.toggleThumbActive]} />
-                </View>
-              </Pressable>
-            </View>
-
             {/* Actions */}
             <View style={styles.formActions}>
               <Pressable onPress={() => setShowModal(false)} style={styles.cancelBtn}>
@@ -457,8 +444,11 @@ export default function FieldsScreen() {
                 </Text>
               </Pressable>
             </View>
-          </ScrollView>
-        </View>
+                </ScrollView>
+              </View>
+            </KeyboardAvoidingView>
+          </Pressable>
+        </Modal>
       )}
 
       <ConfirmDialog
@@ -569,13 +559,18 @@ const styles = StyleSheet.create({
   cardActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing[2], borderTopWidth: 1, borderTopColor: colorScales.gray[100], paddingTop: spacing[2] },
   actionBtn: { padding: spacing[1] },
   // Modal
-  modalOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: 'flex-end', zIndex: 100 },
-  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.4)' },
-  modalSheet: { maxHeight: '90%', backgroundColor: colors.background, borderTopLeftRadius: borderRadius.xl, borderTopRightRadius: borderRadius.xl, padding: spacing[4] },
-  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing[4] },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.45)', justifyContent: 'center', alignItems: 'center' },
+  centeredCardRoot: { flex: 1, justifyContent: 'center', alignItems: 'center', width: '100%' },
+  centeredCard: { width: '100%', maxWidth: 480, maxHeight: '85%', backgroundColor: colors.card, borderRadius: borderRadius.lg, borderWidth: 1, borderColor: colorScales.gray[200], overflow: 'hidden', marginHorizontal: spacing[4] },
+  modalScroll: { maxHeight: '85%' },
+  modalScrollContent: { paddingHorizontal: spacing[4], paddingVertical: spacing[4], gap: spacing[3] },
+  modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: spacing[4], paddingTop: spacing[4], paddingBottom: spacing[3] },
   modalTitle: { fontSize: typography.fontSize.lg, fontWeight: '700', color: colorScales.gray[900] },
   // Form
   formGroup: { marginBottom: spacing[3] },
+  formRow: { flexDirection: 'row', gap: spacing[3], marginBottom: spacing[3] },
+  formCol: { flex: 1 },
+  formColToggle: { justifyContent: 'flex-end' },
   formLabel: { fontSize: typography.fontSize.xs, fontWeight: '600', color: colorScales.gray[500], marginBottom: spacing[1], textTransform: 'uppercase', letterSpacing: 0.5 },
   formInput: {
     backgroundColor: colorScales.gray[50],
@@ -600,6 +595,25 @@ const styles = StyleSheet.create({
     minHeight: 60,
     textAlignVertical: 'top',
   },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingTop: 18,
+    paddingBottom: spacing[2],
+    minHeight: 44,
+  },
+  toggle: {
+    width: 48,
+    height: 28,
+    borderRadius: 13,
+    backgroundColor: colorScales.gray[200],
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleActive: { backgroundColor: colors.primary },
+  toggleThumb: { width: 24, height: 24, borderRadius: 12, backgroundColor: colors.background },
+  toggleThumbActive: { transform: [{ translateX: 20 }] },
   chipRow: { flexDirection: 'row', gap: spacing[2] },
   chipRowWrapped: { flexDirection: 'row', gap: spacing[2], flexWrap: 'wrap' },
   chip: {
@@ -613,23 +627,6 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: colorScales.green[50], borderColor: colorScales.green[500] },
   chipText: { fontSize: typography.fontSize.sm, fontWeight: typography.fontWeight.medium, color: colorScales.gray[600] },
   chipTextActive: { color: colorScales.green[600], fontWeight: typography.fontWeight.bold },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  toggle: {
-    width: 44,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: colorScales.gray[300],
-    justifyContent: 'center',
-    padding: 2,
-  },
-  toggleActive: { backgroundColor: colors.primary },
-  toggleThumb: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: colors.background,
-  },
-  toggleThumbActive: { marginLeft: 20 },
   formActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: spacing[2], marginTop: spacing[2] },
   cancelBtn: { paddingHorizontal: spacing[4], paddingVertical: spacing[2] },
   cancelBtnText: { fontSize: typography.fontSize.sm, color: colorScales.gray[600], fontWeight: typography.fontWeight.medium },

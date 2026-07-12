@@ -27,32 +27,32 @@ import { WithholdingConceptFormModalComponent } from './withholding-concept-form
   ],
   template: `
     <!-- Concepts Table -->
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-      <div class="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center gap-3">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Conceptos de Retención</h2>
+    <div class="bg-[var(--color-surface)] rounded-lg shadow">
+      <div class="p-4 border-b border-border flex justify-between items-center gap-3">
+        <h2 class="text-lg font-semibold text-text-primary">Conceptos de Retención</h2>
         <app-button variant="primary" size="sm" (clicked)="openCreateModal()">
           <app-icon name="plus" [size]="16" slot="icon"></app-icon>
           Nuevo Concepto
         </app-button>
       </div>
       <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-          <thead class="bg-gray-50 dark:bg-gray-900">
+        <table class="min-w-full divide-y divide-[var(--color-border)]">
+          <thead class="bg-[var(--color-surface-secondary)]">
             <tr>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Código</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Nombre</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Tipo</th>
-              <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Tasa %</th>
-              <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Umbral UVT</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden md:table-cell">Aplica a</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase hidden lg:table-cell">PUC</th>
-              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Estado</th>
-              <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Acciones</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase">Código</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase">Nombre</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase hidden md:table-cell">Tipo</th>
+              <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Tasa %</th>
+              <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase hidden md:table-cell">Umbral UVT</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase hidden md:table-cell">Aplica a</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase hidden lg:table-cell">PUC</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-text-secondary uppercase">Estado</th>
+              <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Acciones</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+          <tbody class="divide-y divide-[var(--color-border)]">
             @for (concept of concepts(); track concept.id) {
-              <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+              <tr class="hover:bg-[var(--color-surface-secondary)]">
                 <td class="px-4 py-3 text-sm font-mono">{{ concept.code }}</td>
                 <td class="px-4 py-3 text-sm">{{ concept.name }}</td>
                 <td class="px-4 py-3 text-sm hidden md:table-cell">{{ withholdingTypeLabel(concept.withholding_type) }}</td>
@@ -61,7 +61,7 @@ import { WithholdingConceptFormModalComponent } from './withholding-concept-form
                 <td class="px-4 py-3 text-sm hidden md:table-cell capitalize">{{ concept.applies_to }}</td>
                 <td class="px-4 py-3 text-sm font-mono hidden lg:table-cell">{{ concept.account_code || '—' }}</td>
                 <td class="px-4 py-3 text-sm text-center">
-                  <span [class]="concept.is_active ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'"
+                  <span [class]="concept.is_active ? 'bg-success-light text-success' : 'bg-[var(--color-surface-secondary)] text-text-secondary'"
                         class="px-2 py-1 rounded-full text-xs font-medium">
                     {{ concept.is_active ? 'Activo' : 'Inactivo' }}
                   </span>
@@ -80,7 +80,7 @@ import { WithholdingConceptFormModalComponent } from './withholding-concept-form
             }
             @empty {
               <tr>
-                <td colspan="9" class="px-4 py-8 text-center text-gray-500">No hay conceptos de retención configurados</td>
+                <td colspan="9" class="px-4 py-8 text-center text-text-secondary">No hay conceptos de retención configurados</td>
               </tr>
             }
           </tbody>

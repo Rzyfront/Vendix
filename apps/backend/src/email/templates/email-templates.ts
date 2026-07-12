@@ -239,13 +239,26 @@ El equipo de ${this.COMPANY_NAME}
   }
 
   static getPasswordResetTemplate(data: EmailTemplateData) {
-    const resetUrl = `${this.BASE_URL}/auth/reset-owner-password?token=${data.token}`;
+    const resetUrl =
+      data.resetUrl ||
+      `${this.BASE_URL}/auth/reset-owner-password?token=${data.token}`;
     const loginUrl = data.vlink
       ? `https://${data.vlink}.${DomainConfigService.getBaseDomain()}`
       : this.BASE_URL;
 
+    // Dynamic branding with fallback to Vendix defaults (mirrors getWelcomeTemplate)
+    const companyName =
+      data.organizationName ||
+      data.storeName ||
+      data.companyName ||
+      this.COMPANY_NAME;
+    const primaryColor = data.branding?.primary_color || '#7ED7A5';
+    const secondaryColor = data.branding?.secondary_color || '#2F6F4E';
+    const accentColor = data.branding?.accent_color || '#FFFFFF';
+    const logoUrl = data.branding?.logo_url;
+
     return {
-      subject: `🔐 Restablece tu contraseña en ${this.COMPANY_NAME}`,
+      subject: `🔐 Restablece tu contraseña en ${companyName}`,
       html: `
         <!DOCTYPE html>
         <html lang="es">
@@ -256,16 +269,18 @@ El equipo de ${this.COMPANY_NAME}
           <style>
             body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #F8FAFC; }
             .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
-            .header { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); padding: 50px 30px; text-align: center; position: relative; }
+            .header { background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%); padding: 50px 30px; text-align: center; position: relative; }
             .header::before { content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><defs><pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="white" stroke-width="0.5" opacity="0.1"/></pattern></defs><rect width="100" height="100" fill="url(%23grid)"/></svg>') repeat; opacity: 0.1; }
-            .header h1 { color: #FFFFFF; margin: 0; font-size: 32px; font-weight: 700; position: relative; z-index: 1; }
-            .header .subtitle { color: rgba(255, 255, 255, 0.9); margin: 10px 0 0 0; font-size: 16px; position: relative; z-index: 1; }
+            .logo-container { text-align: center; margin-bottom: 15px; position: relative; z-index: 1; }
+            .logo-image { max-height: 60px; }
+            .header h1 { color: ${accentColor}; margin: 0; font-size: 32px; font-weight: 700; position: relative; z-index: 1; }
+            .header .subtitle { color: ${accentColor}; margin: 10px 0 0 0; font-size: 16px; position: relative; z-index: 1; opacity: 0.9; }
             .content { padding: 50px 30px; }
             .reset-icon { font-size: 64px; text-align: center; margin-bottom: 30px; }
             .reset-title { font-size: 24px; color: #1F2937; margin-bottom: 20px; text-align: center; font-weight: 700; }
             .reset-message { color: #4B5563; line-height: 1.7; margin-bottom: 30px; font-size: 16px; text-align: center; }
             .reset-card { background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%); border: 2px solid #F59E0B; border-radius: 12px; padding: 30px; margin: 30px 0; text-align: center; }
-            .reset-button { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); color: #FFFFFF; padding: 18px 36px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; border: none; cursor: pointer; font-size: 16px; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(47, 111, 78, 0.2); }
+            .reset-button { background: linear-gradient(135deg, ${primaryColor} 0%, ${secondaryColor} 100%); color: ${accentColor}; padding: 18px 36px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: 600; text-align: center; border: none; cursor: pointer; font-size: 16px; transition: all 0.3s ease; box-shadow: 0 4px 6px rgba(47, 111, 78, 0.2); }
             .reset-button:hover { transform: translateY(-2px); box-shadow: 0 6px 12px rgba(47, 111, 78, 0.3); }
             .security-warning { background-color: #FEE2E2; border-left: 4px solid #DC2626; border-radius: 8px; padding: 25px; margin: 30px 0; }
             .security-title { color: #991B1B; font-size: 18px; font-weight: 600; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
@@ -274,9 +289,9 @@ El equipo de ${this.COMPANY_NAME}
             .login-title { color: #166534; font-size: 16px; font-weight: 600; margin-bottom: 10px; }
             .divider { border-top: 2px solid #E5E7EB; margin: 40px 0; }
             .footer { background-color: #1F2937; padding: 30px; text-align: center; color: #D1D5DB; font-size: 14px; }
-            .footer-logo { font-size: 24px; font-weight: 700; color: #7ED7A5; margin-bottom: 15px; }
+            .footer-logo { font-size: 24px; font-weight: 700; color: ${primaryColor}; margin-bottom: 15px; }
             .footer-links { margin: 20px 0; }
-            .footer-links a { color: #7ED7A5; text-decoration: none; margin: 0 10px; }
+            .footer-links a { color: ${primaryColor}; text-decoration: none; margin: 0 10px; }
             .footer-links a:hover { text-decoration: underline; }
             .copyright { margin-top: 20px; color: #9CA3AF; font-size: 12px; }
           </style>
@@ -284,7 +299,17 @@ El equipo de ${this.COMPANY_NAME}
         <body>
           <div class="container">
             <div class="header">
-              <h1>🔐 ${this.COMPANY_NAME}</h1>
+              ${
+                logoUrl
+                  ? `
+                <div class="logo-container">
+                  <img src="${logoUrl}" alt="${companyName}" class="logo-image">
+                </div>
+              `
+                  : `
+                <h1>🔐 ${companyName}</h1>
+              `
+              }
               <div class="subtitle">Plataforma de Gestión Comercial</div>
             </div>
             <div class="content">
@@ -351,14 +376,14 @@ El equipo de ${this.COMPANY_NAME}
               </div>
             </div>
             <div class="footer">
-              <div class="footer-logo">${this.COMPANY_NAME}</div>
+              <div class="footer-logo">${companyName}</div>
               <div class="footer-links">
                 <a href="https://${DomainConfigService.getBaseDomain()}">Sitio Web</a>
                 <a href="mailto:${this.SUPPORT_EMAIL}">Soporte</a>
                 <a href="https://help.${DomainConfigService.getBaseDomain()}">Ayuda</a>
               </div>
               <div class="copyright">
-                © ${new Date().getFullYear()} ${this.COMPANY_NAME}. Todos los derechos reservados.<br>
+                © ${new Date().getFullYear()} ${companyName}. Todos los derechos reservados.<br>
                 Este correo fue enviado como respuesta a una solicitud de restablecimiento de contraseña.
               </div>
             </div>
@@ -367,11 +392,11 @@ El equipo de ${this.COMPANY_NAME}
         </html>
       `,
       text: `
-🔐 Restablecer Contraseña - ${this.COMPANY_NAME}
+🔐 Restablecer Contraseña - ${companyName}
 
 Hola ${data.username},
 
-Hemos recibido una solicitud para restablecer la contraseña de tu cuenta en ${this.COMPANY_NAME}.
+Hemos recibido una solicitud para restablecer la contraseña de tu cuenta en ${companyName}.
 
 🔗 ENLACE DE RESTABLECIMIENTO:
 ${resetUrl}
@@ -394,7 +419,7 @@ Contraseña: [Tu nueva contraseña]
 
 Mantén tu cuenta segura usando contraseñas únicas y complejas.
 
-El equipo de ${this.COMPANY_NAME}
+El equipo de ${companyName}
       `,
     };
   }

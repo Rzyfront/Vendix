@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Modal, Pressable, Text, View, StyleSheet, type ViewStyle } from 'react-native';
+import { Alert, Modal, Pressable, Text, View, StyleSheet, type ViewStyle } from 'react-native';
 import { colors, colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 
@@ -10,7 +10,7 @@ export interface SelectorOption<T = string | number> {
   description?: string;
 }
 
-interface SelectorProps<T = string | number> {
+export interface SelectorProps<T = string | number> {
   value: T | null | undefined;
   onChange: (value: T) => void;
   options: SelectorOption<T>[];
@@ -18,6 +18,18 @@ interface SelectorProps<T = string | number> {
   label?: string;
   error?: string;
   disabled?: boolean;
+  /** Marca el campo como requerido. Muestra un asterisco rojo en el label. */
+  required?: boolean;
+  /**
+   * Descripción pequeña debajo del label (mirror web mobile).
+   * Ej: "Como la recibes del proveedor." en el selector de Compra UoM.
+   */
+  description?: string;
+  /**
+   * Texto del tooltip mostrado al lado del label (mirror web).
+   * Renderiza un ícono help-circle que al tap muestra el texto en un Alert.
+   */
+  tooltip?: string;
   style?: ViewStyle;
 }
 
@@ -29,6 +41,9 @@ export function Selector<T = string | number>({
   label,
   error,
   disabled = false,
+  required = false,
+  description,
+  tooltip,
   style,
 }: SelectorProps<T>) {
   const [open, setOpen] = useState(false);
@@ -47,7 +62,20 @@ export function Selector<T = string | number>({
 
   return (
     <View style={style}>
-      {label && <Text style={styles.label}>{label}</Text>}
+      {label && (
+        <Text style={styles.label}>
+          {label}
+          {required && <Text style={styles.requiredMark}> *</Text>}
+          {tooltip && (
+            <Text
+              onPress={() => Alert.alert(label, tooltip)}
+              style={styles.helpIconInline}
+            >
+              {' '}ⓘ
+            </Text>
+          )}
+        </Text>
+      )}
       <Pressable
         ref={triggerRef}
         onPress={() => !disabled && (open ? setOpen(false) : measureTrigger())}
@@ -70,6 +98,7 @@ export function Selector<T = string | number>({
         </Text>
         <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.text.secondary} />
       </Pressable>
+      {description && <Text style={styles.description}>{description}</Text>}
       {error && <Text style={styles.errorText}>{error}</Text>}
 
       <Modal
@@ -126,12 +155,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing[3],
     paddingVertical: spacing[2],
     borderRadius: 10,
-    borderWidth: 0,
-    backgroundColor: colorScales.gray[50],
+    borderWidth: 1,
+    borderColor: colorScales.gray[300],
+    backgroundColor: colors.background,
     gap: spacing[2],
   },
   triggerPressed: {
-    backgroundColor: colorScales.gray[50],
+    backgroundColor: colorScales.gray[100],
   },
   triggerText: {
     flex: 1,
@@ -150,6 +180,11 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: typography.fontSize.xs,
     color: colors.error,
+    marginTop: spacing[1],
+  },
+  description: {
+    fontSize: 10,
+    color: colorScales.gray[500],
     marginTop: spacing[1],
   },
   backdrop: {
@@ -194,5 +229,15 @@ const styles = StyleSheet.create({
   optionLabelSelected: {
     color: colors.background,
     fontWeight: typography.fontWeight.bold,
+  },
+  requiredMark: {
+    color: colors.error,
+    fontSize: 10,
+    fontWeight: '700' as any,
+  },
+  helpIconInline: {
+    color: colorScales.gray[400],
+    fontSize: 12,
+    fontWeight: typography.fontWeight.normal as any,
   },
 });

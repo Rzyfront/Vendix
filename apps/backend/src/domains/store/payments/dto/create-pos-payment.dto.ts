@@ -428,6 +428,17 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   shipping_cost?: number;
 
+  /**
+   * GAP-6 (QR mesa dine-in) — Propina opcional. Aditiva al grand_total igual
+   * que shipping_cost, PERO sin IVA: NO entra a subtotal_amount ni tax_amount.
+   * Se contabiliza como pasivo custodio (propinas por pagar), no como ingreso.
+   */
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Type(() => Number)
+  tip_amount?: number;
+
   @IsOptional()
   shipping_address_snapshot?: Record<string, any>;
 

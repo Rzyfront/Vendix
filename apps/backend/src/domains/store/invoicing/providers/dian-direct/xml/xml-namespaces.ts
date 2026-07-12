@@ -31,8 +31,12 @@ export const UBL_NAMESPACES = {
 export const UBL_CONSTANTS = {
   /** UBL version for Colombia */
   UBL_VERSION: 'UBL 2.1',
-  /** DIAN customization version */
-  CUSTOMIZATION_ID: '2',
+  /**
+   * NOTE: `cbc:CustomizationID` is NOT a fixed constant. DIAN requires the
+   * document's *operation type* code (e.g. '10' Estándar for a national sales
+   * invoice, '20'/'22' for credit notes, '30'/'32' for debit notes). Each
+   * builder sets it from `DIAN_OPERATION_TYPES` per document + reference.
+   */
   /** Profile ID for standard invoicing */
   PROFILE_ID: 'DIAN 2.1: Factura Electrónica de Venta',
   /** Profile execution ID: 1=Production, 2=Test */

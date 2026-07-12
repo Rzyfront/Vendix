@@ -400,6 +400,23 @@ export class AuthService {
       new_password,
     });
   }
+  forgotCustomerPassword(email: string, store_id: number): Observable<any> {
+    return this.http.post(`${this.API_URL}/forgot-customer-password`, {
+      email,
+      store_id,
+    });
+  }
+  resetCustomerPassword(
+    token: string,
+    new_password: string,
+    store_id?: number,
+  ): Observable<any> {
+    return this.http.post(`${this.API_URL}/reset-customer-password`, {
+      token,
+      new_password,
+      ...(store_id ? { store_id } : {}),
+    });
+  }
 
   getProfile(): Observable<any> {
     return this.http.get(`${this.API_URL}/profile`);

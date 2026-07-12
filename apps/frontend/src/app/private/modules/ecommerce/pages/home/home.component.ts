@@ -33,9 +33,11 @@ interface HomeSectionConfig {
   enabled?: boolean;
   title?: string;
   subtitle?: string;
+  /** Tope de platos por carta en el teaser del home (showcase agrupa por carta). */
   limit?: number;
   sort_order?: number;
-  /** Cartas only: 'hide' (off-schedule hidden) | 'badge' (shown with badge). */
+  /** Cartas: rige el render de `/cartas` (no el home). En el default del home
+   * queda inerte — el showcase del home tiene filtrado fijo por horario. */
   availability_display?: 'hide' | 'badge';
 }
 
@@ -93,8 +95,10 @@ const DEFAULT_HOME_SECTIONS: HomeSectionsConfig = {
     enabled: false,
     title: 'Nuestras cartas',
     subtitle: 'Descubre los platos disponibles según el horario',
+    // limit = tope de platos por carta en el teaser del home (showcase agrupa por carta)
     limit: 8,
     sort_order: 60,
+    // Inerte en el default del home (solo lo lee /cartas via menus-page).
     availability_display: 'hide',
   },
 };

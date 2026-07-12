@@ -2,6 +2,10 @@ import { Component, computed, input } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { DianConfig } from '../../interfaces/invoice.interface';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import {
+  BadgeComponent,
+  BadgeVariant,
+} from '../../../../../../shared/components/badge/badge.component';
 
 interface ChecklistItem {
   label: string;
@@ -25,10 +29,10 @@ const DIAN_DOC_URL = '#';
 @Component({
   selector: 'vendix-dian-setup-guide',
   standalone: true,
-  imports: [NgClass, IconComponent],
+  imports: [NgClass, IconComponent, BadgeComponent],
   template: `
     <aside
-      class="border border-border rounded-xl p-4 bg-white space-y-3
+      class="border border-border rounded-xl p-4 bg-[var(--color-surface)] space-y-3
              md:sticky md:top-4"
     >
       <div class="flex items-center gap-2">
@@ -39,12 +43,9 @@ const DIAN_DOC_URL = '#';
       <!-- Enablement Status Pill -->
       <div class="flex items-center justify-between">
         <span class="text-xs text-text-secondary">Estado</span>
-        <span
-          class="px-2 py-0.5 rounded-full text-[11px] font-medium"
-          [ngClass]="statusPillClass()"
-        >
+        <app-badge [variant]="statusVariant()" size="xs">
           {{ statusLabel() }}
-        </span>
+        </app-badge>
       </div>
 
       <!-- Checklist -->
@@ -54,7 +55,7 @@ const DIAN_DOC_URL = '#';
             <app-icon
               [name]="item.done ? 'check-circle' : 'circle'"
               [size]="14"
-              [class]="item.done ? 'text-green-600 mt-0.5' : 'text-gray-300 mt-0.5'"
+              [class]="item.done ? 'text-success mt-0.5' : 'text-text-secondary mt-0.5'"
             ></app-icon>
             <span [ngClass]="item.done ? 'text-text-primary' : 'text-text-secondary'">
               {{ item.label }}
@@ -125,14 +126,14 @@ export class DianSetupGuideComponent {
     return labels[s] || s;
   });
 
-  readonly statusPillClass = computed(() => {
+  readonly statusVariant = computed<BadgeVariant>(() => {
     const s = this.config()?.enablement_status ?? 'not_started';
-    const classes: Record<string, string> = {
-      not_started: 'bg-gray-100 text-gray-600',
-      testing: 'bg-yellow-100 text-yellow-700',
-      enabled: 'bg-green-100 text-green-700',
-      suspended: 'bg-red-100 text-red-700',
+    const variants: Record<string, BadgeVariant> = {
+      not_started: 'neutral',
+      testing: 'warning',
+      enabled: 'success',
+      suspended: 'error',
     };
-    return classes[s] || 'bg-gray-100 text-gray-600';
+    return variants[s] || 'neutral';
   });
 }

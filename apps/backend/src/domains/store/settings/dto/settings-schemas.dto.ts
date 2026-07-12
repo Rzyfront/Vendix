@@ -653,6 +653,29 @@ export class OperationsSettingsDto {
   ticket_closing_hour?: number;
 }
 
+export class AvailabilitySettingsDto {
+  /**
+   * Days of the week (0=Sunday … 6=Saturday) on which the store wants
+   * generic slot generation to produce slots. Mirrors
+   * `AvailabilitySettings.working_days` in the store-settings interface.
+   */
+  @ApiProperty({
+    type: [Number],
+    example: [1, 2, 3, 4, 5],
+    required: true,
+    description:
+      'Days of the week (0=Sun, 1=Mon, …, 6=Sat) the store is open. ' +
+      'Used by AvailabilityService.generateGenericSlots as a fallback when ' +
+      'no provider_schedules row covers the date. Default: Mon-Fri.',
+  })
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(6, { each: true })
+  working_days: number[];
+}
+
 export class DispatchSettingsDto {
   @ApiProperty({
     enum: ['live', 'on_close'],
@@ -676,6 +699,94 @@ export class RestaurantSettingsDto {
   @IsOptional()
   @IsBoolean()
   enable_table_checkout?: boolean;
+
+  @ApiProperty({
+    enum: ['menu_only', 'mark_occupied', 'open_tab', 'require_staff'],
+    example: 'menu_only',
+    required: false,
+    description:
+      'Behavior when a customer scans a table QR code. `menu_only` (default) shows the digital menu without changing table state; `mark_occupied` marks the table occupied; `open_tab` also opens a tab (draft order); `require_staff` requires staff confirmation first.',
+  })
+  @IsOptional()
+  @IsIn(['menu_only', 'mark_occupied', 'open_tab', 'require_staff'])
+  qr_scan_behavior?: 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
+
+  @ApiProperty({
+    example: false,
+    required: false,
+    description:
+      'When true, scanning the QR auto-fires order items to KDS/kitchen (same as the POS "fire" action). Default false — items stay as a draft until staff fires them.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  qr_auto_fire?: boolean;
+}
+
+export class FingerprintDeviceConfigDto {
+  @ApiProperty({
+    example: 'id_wrapper',
+    required: false,
+    enum: ['id_wrapper', 'template_sdk'],
+    description:
+      "Reader integration mode. `id_wrapper` (default, Tipo A): reader emits an opaque ID. `template_sdk` (Tipo B, plan only): reader ships a template to a configured SDK provider.",
+  })
+  @IsOptional()
+  @IsIn(['id_wrapper', 'template_sdk'])
+  reader_type?: 'id_wrapper' | 'template_sdk';
+
+  @ApiProperty({
+    example: 'zkteco',
+    required: false,
+    enum: ['zkteco', 'digitalpersona', 'generic_http'],
+    description: 'SDK provider for `template_sdk` mode.',
+  })
+  @IsOptional()
+  @IsIn(['zkteco', 'digitalpersona', 'generic_http'])
+  sdk_provider?: 'zkteco' | 'digitalpersona' | 'generic_http';
+
+  @ApiProperty({
+    example: 'https://fingerprint-adapter.example.com/identify',
+    required: false,
+    description:
+      'URL of the SDK adapter for `template_sdk` mode. Not used in `id_wrapper` mode.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  endpoint?: string;
+
+  @ApiProperty({
+    example: 'fp-sdk-prod',
+    required: false,
+    description:
+      'Reference (NOT the key) to the API key used to authenticate against the SDK endpoint.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  api_key_ref?: string;
+
+  @ApiProperty({
+    example: 5000,
+    required: false,
+    description: 'Request timeout in milliseconds when calling the SDK.',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  timeout_ms?: number;
+
+  @ApiProperty({
+    example: 2000,
+    required: false,
+    description: 'Per-verification timeout in milliseconds (latency cap).',
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  verify_timeout_ms?: number;
 }
 
 export class MembershipSettingsDto {
@@ -740,6 +851,17 @@ export class MembershipSettingsDto {
   @IsInt()
   @IsIn([1, 2])
   auto_leveling_interval_hours?: number;
+
+  @ApiProperty({
+    type: FingerprintDeviceConfigDto,
+    required: false,
+    description:
+      'Fingerprint reader device configuration. Default reader_type is `id_wrapper` (current behavior: reader emits an opaque ID, Vendix never sees the template).',
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => FingerprintDeviceConfigDto)
+  fingerprint_device?: FingerprintDeviceConfigDto;
 }
 
 export class PanelUISettingsDto {

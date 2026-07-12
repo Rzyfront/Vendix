@@ -1,4 +1,4 @@
-<div class="restaurant-settings-form">
+<div class="restaurant-settings-form space-y-6">
   <div>
     <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Cobro en mesa</h4>
     <div class="flex items-start justify-between gap-4">
@@ -13,6 +13,35 @@
         ariaLabel="Habilitar cobro desde la mesa"
         (changed)="onFieldChange()"
       ></app-toggle>
+    </div>
+  </div>
+
+  <div>
+    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Mesas</h4>
+    <div class="space-y-4">
+      <app-selector
+        [formControl]="qrScanBehaviorControl"
+        label="Modo de escaneo QR"
+        [options]="qrScanBehaviors"
+        (valueChange)="onFieldChange()"
+        size="sm"
+      ></app-selector>
+      <p class="text-xs text-[var(--color-text-muted)]">
+        Define qué ocurre cuando un cliente escanea el código QR de una mesa.
+      </p>
+      <div class="flex items-start justify-between gap-4 pt-2">
+        <div class="flex-1">
+          <p class="text-sm font-medium text-[var(--color-text-primary)]">Auto-disparar a cocina</p>
+          <p class="text-xs text-[var(--color-text-muted)] mt-1">
+            Cuando un cliente escanea el QR, envía automáticamente los items de la orden a cocina (KDS) sin intervención del mesero.
+          </p>
+        </div>
+        <app-toggle
+          [formControl]="qrAutoFireControl"
+          ariaLabel="Auto-disparar a cocina"
+          (changed)="onFieldChange()"
+        ></app-toggle>
+      </div>
     </div>
   </div>
 </div>

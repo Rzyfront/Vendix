@@ -9,7 +9,10 @@ import {
   EmailTemplates,
   EmailTemplateData,
 } from '../templates/email-templates';
-import { WelcomeEmailOptions } from '../interfaces/branding.interface';
+import {
+  WelcomeEmailOptions,
+  PasswordResetEmailOptions,
+} from '../interfaces/branding.interface';
 import * as nodemailer from 'nodemailer';
 
 @Injectable()
@@ -93,6 +96,7 @@ export class SesProvider implements EmailProvider {
           filename: a.filename,
           content: a.content,
           contentType: a.contentType,
+          ...(a.cid ? { cid: a.cid } : {}),
         })),
       });
 
@@ -136,11 +140,16 @@ export class SesProvider implements EmailProvider {
     to: string,
     token: string,
     username: string,
+    options?: PasswordResetEmailOptions,
   ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
       token,
+      resetUrl: options?.resetUrl,
+      branding: options?.branding,
+      storeName: options?.storeName,
+      vlink: options?.organizationSlug,
       companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
       year: new Date().getFullYear(),

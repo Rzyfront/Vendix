@@ -1,4 +1,8 @@
-import { EmailBranding, WelcomeEmailOptions } from './branding.interface';
+import {
+  EmailBranding,
+  WelcomeEmailOptions,
+  PasswordResetEmailOptions,
+} from './branding.interface';
 
 // Interfaz base para todos los proveedores de email
 export interface EmailProvider {
@@ -25,6 +29,7 @@ export interface EmailProvider {
     to: string,
     token: string,
     username: string,
+    options?: PasswordResetEmailOptions,
   ): Promise<EmailResult>;
   sendWelcomeEmail(
     to: string,
@@ -73,6 +78,13 @@ export interface EmailAttachment {
   filename: string;
   content: Buffer;
   contentType: string;
+  /**
+   * Optional Content-ID for inline-embedded images (`<img src="cid:...">`).
+   * Only the SES/SMTP provider propagates it today; Resend/SendGrid treat
+   * the asset as a regular download attachment and the inline reference
+   * renders as a broken image in their clients.
+   */
+  cid?: string;
 }
 
 export interface EmailTemplate {

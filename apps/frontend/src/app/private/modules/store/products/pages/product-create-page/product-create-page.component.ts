@@ -77,7 +77,7 @@ import { ProductUtils } from '../../utils/product.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { PosBarcodeService } from '../../../pos/services/pos-barcode.service';
 import { environment } from '../../../../../../../environments/environment';
-import { saleLessThanBaseValidator, uomDimensionMatchValidator } from '../../utils/product-validators';
+import { saleLessThanBaseValidator, uomDimensionMatchValidator, notBlankValidator } from '../../utils/product-validators';
 import { UomService, UnitOfMeasure, UomApiResponse } from '../../../inventory/services';
 import { PriceTiersService } from '../../../price-tiers/services/price-tiers.service';
 import { PriceTierCacheService } from '../../../price-tiers/services/price-tier-cache.service';
@@ -94,6 +94,9 @@ import {
   SerialSummary,
 } from '../../../serial-numbers/services/serial-numbers.service';
 import { ProductSerialsManagerModalComponent } from '../../../serial-numbers/components/product-serials-manager-modal/product-serials-manager-modal.component';
+import { SaveRequirementsModalComponent } from '../../../../../../shared/components/save-requirements-modal/save-requirements-modal.component';
+import { SaveRequirement } from '../../../../../../shared/components/save-requirements-modal/save-requirements.interface';
+import { mapBackendErrorToRequirements } from '../../utils/product-save-requirements';
 
 interface VariantAttribute {
   name: string;
@@ -174,6 +177,7 @@ interface PriceTierOverrideRow {
     DecimalPipe,
     KeyValuePipe,
     ProductSerialsManagerModalComponent,
+    SaveRequirementsModalComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -729,6 +733,11 @@ export class ProductCreatePageComponent {
 
   productForm: FormGroup = this.createForm();
   isSubmitting = signal(false);
+  // Modal de "requisitos para guardar": consolida en un solo lugar todo lo que
+  // impide guardar (errores de form + reglas de variantes + reservas), en vez
+  // de disparar toasts sueltos y bloquear el botón.
+  isRequirementsModalOpen = signal(false);
+  saveRequirements = signal<SaveRequirement[]>([]);
   isGeneratingDescription = signal(false);
   aiDescriptionUsesLeft = signal(3);
   aiDescriptionLimitReached = computed(() => this.aiDescriptionUsesLeft() <= 0);
@@ -1008,7 +1017,7 @@ export class ProductCreatePageComponent {
         icon: this.isEditMode() ? 'save' : 'plus',
         variant: 'primary',
         loading: this.isSubmitting(),
-        disabled: this.isSubmitting() || this.productForm.invalid,
+        disabled: this.isSubmitting(),
       },
     ];
   });
@@ -1055,13 +1064,38 @@ export class ProductCreatePageComponent {
           ?.patchValue('physical', { emitEvent: false });
         this.productForm.get('is_combo')?.patchValue(false, { emitEvent: false });
       }
+      // Al desactivar "Es insumo": un producto que deja de ser insumo mantiene
+      // stock_uom_id / purchase_uom_id y el validador cross-field
+      // `uomDimensionMismatch` los evalúa SIEMPRE (aunque los selectores estén
+      // ocultos) → bloqueo irresoluble. Reseteamos ambas UoM al apagarse.
+      if (!isIngredient) {
+        this.resetUomControls();
+      }
     }
     if (isSellable !== prevSell) {
       if (isSellable && ingCtrl.value !== false) {
         ingCtrl.patchValue(false, { emitEvent: false });
         this.lastIngredientFlag = false;
+        // Encender "vendible" apaga "insumo" de forma indirecta → mismo reset.
+        this.resetUomControls();
       }
     }
+  }
+
+  /**
+   * Resetea las FKs de unidad de medida (stock_uom_id / purchase_uom_id) cuando
+   * el producto deja de ser insumo. `uomDimensionMatchValidator` evalúa ambas
+   * SIEMPRE (aunque los selectores queden ocultos), así que dejarlas con valor
+   * produce un `uomDimensionMismatch` irresoluble para el usuario.
+   * `{ emitEvent: false }` evita re-entrar en el valueChanges que dispara esta
+   * lógica.
+   */
+  private resetUomControls(): void {
+    this.productForm.patchValue(
+      { stock_uom_id: null, purchase_uom_id: null },
+      { emitEvent: false },
+    );
+    this.productForm.updateValueAndValidity({ emitEvent: false });
   }
   /** Last seen is_ingredient value (used to detect the just-flipped field). */
   private lastIngredientFlag: boolean | null = null;
@@ -1511,7 +1545,7 @@ export class ProductCreatePageComponent {
           '',
           [
             Validators.required,
-            Validators.minLength(1),
+            notBlankValidator(2),
             Validators.maxLength(255),
           ],
         ],
@@ -3025,82 +3059,261 @@ export class ProductCreatePageComponent {
     event.preventDefault();
   }
 
-  onSubmit(): void {
-    if (this.productForm.invalid || this.isSubmitting()) {
-      this.productForm.markAllAsTouched();
-      const saleErr = this.productForm.errors?.['saleLessThanBase'];
-      if (saleErr) {
-        this.toastService.error(
-          'El precio de oferta debe ser menor al precio base.',
-          'Precio de oferta inválido',
-        );
-      } else {
-        this.toastService.error(
-          'Por favor, completa todos los campos requeridos correctamente',
-          'Formulario inválido',
-        );
+  /**
+   * Recolecta en UNA sola pasada TODOS los requisitos pendientes que impiden
+   * guardar el producto: errores de FormControl, errores a nivel de formulario,
+   * reglas de variantes y stock reservado. Devuelve [] cuando todo está OK.
+   * Es un colector puro: no dispara toasts ni efectos colaterales — lo consume
+   * el modal de requisitos.
+   */
+  private collectSaveRequirements(): SaveRequirement[] {
+    const requirements: SaveRequirement[] = [];
+    const form = this.productForm;
+
+    const FIELD_LABELS: { [controlName: string]: string } = {
+      name: 'Nombre del producto',
+      slug: 'Slug (URL)',
+      description: 'Descripción',
+      cost_price: 'Costo',
+      profit_margin: 'Margen de ganancia',
+      base_price: 'Precio base',
+      sale_price: 'Precio de oferta',
+      sku: 'SKU',
+      barcode: 'Código de barras',
+      stock_quantity: 'Stock',
+      weight: 'Peso',
+      dimensions: 'Dimensiones',
+      tax_category_ids: 'Impuestos',
+      category_ids: 'Categorías',
+      brand_ids: 'Marcas',
+      stock_uom_id: 'Unidad de stock',
+      purchase_uom_id: 'Unidad de compra',
+      service_duration_minutes: 'Duración del servicio',
+      service_modality: 'Modalidad del servicio',
+      service_pricing_type: 'Tipo de precio del servicio',
+      service_instructions: 'Instrucciones del servicio',
+      preparation_time_minutes: 'Tiempo de preparación',
+    };
+
+    // (a) Errores de FormControl ------------------------------------------
+    const nameErrors = form.get('name')?.errors;
+    if (nameErrors) {
+      if (nameErrors['required'] || nameErrors['blank']) {
+        requirements.push({
+          id: 'name',
+          label: 'Nombre del producto',
+          reason:
+            'Escribe un nombre válido; no puede estar vacío ni contener solo espacios.',
+          severity: 'required',
+          action: { label: 'Ir al nombre', kind: 'focus', target: 'name' },
+        });
+      } else if (nameErrors['tooShort']) {
+        requirements.push({
+          id: 'name',
+          label: 'Nombre del producto',
+          reason: 'El nombre es demasiado corto (mínimo 2 caracteres).',
+          severity: 'required',
+          action: { label: 'Ir al nombre', kind: 'focus', target: 'name' },
+        });
+      } else if (nameErrors['maxlength']) {
+        requirements.push({
+          id: 'name',
+          label: 'Nombre del producto',
+          reason: 'El nombre es demasiado largo (máximo 255 caracteres).',
+          severity: 'required',
+          action: { label: 'Ir al nombre', kind: 'focus', target: 'name' },
+        });
       }
-      return;
     }
 
-    // Variant-specific validations
+    const basePriceErrors = form.get('base_price')?.errors;
+    if (
+      basePriceErrors &&
+      (basePriceErrors['required'] || basePriceErrors['min'])
+    ) {
+      requirements.push({
+        id: 'base_price',
+        label: 'Precio base',
+        reason: 'Indica un precio base válido (mayor o igual a 0).',
+        severity: 'required',
+        action: {
+          label: 'Ir al precio base',
+          kind: 'focus',
+          target: 'base_price',
+        },
+      });
+    }
+
+    // Errores a nivel de formulario (cross-field).
+    const formErrors = form.errors ?? {};
+    if (formErrors['saleLessThanBase']) {
+      requirements.push({
+        id: 'saleLessThanBase',
+        label: 'Precio de oferta',
+        reason: 'El precio de oferta debe ser menor al precio base.',
+        severity: 'required',
+        action: {
+          label: 'Ir al precio de oferta',
+          kind: 'focus',
+          target: 'sale_price',
+        },
+      });
+    }
+    // La clave real que produce uomDimensionMatchValidator es `uomDimensionMismatch`.
+    if (formErrors['uomDimensionMismatch']) {
+      requirements.push({
+        id: 'uomDimensionMismatch',
+        label: 'Unidades de medida',
+        reason:
+          'Las unidades de compra y de stock deben ser de la misma dimensión.',
+        severity: 'required',
+        action: {
+          label: 'Revisar unidades de medida',
+          kind: 'scroll',
+          target: 'stock_uom_id',
+        },
+      });
+    }
+
+    // Cualquier otro control inválido no cubierto arriba (min/maxLength, etc.).
+    const handledControls = new Set(['name', 'base_price']);
+    Object.keys(form.controls).forEach((controlName) => {
+      if (handledControls.has(controlName)) return;
+      const control = form.get(controlName);
+      if (control && control.invalid) {
+        requirements.push({
+          id: `field:${controlName}`,
+          label: FIELD_LABELS[controlName] ?? 'Un campo del formulario',
+          reason:
+            'Este campo tiene un valor inválido. Revísalo antes de guardar.',
+          severity: 'required',
+          action: { label: 'Ir al campo', kind: 'focus', target: controlName },
+        });
+      }
+    });
+
+    // (b) Validaciones de variantes (trasladadas fielmente desde onSubmit) --
     if (this.hasVariants) {
-      // Must have at least one variant
+      // (3.1) Un producto con variantes activas necesita SKU propio.
+      const productSku = String(this.productForm.get('sku')?.value ?? '').trim();
+      if (!productSku) {
+        requirements.push({
+          id: 'product-sku-required',
+          label: 'Falta el SKU del producto',
+          reason:
+            'El producto necesita un SKU configurado antes de activar variantes. Asigna un SKU al producto.',
+          severity: 'required',
+          action: { label: 'Ir al SKU', kind: 'focus', target: 'sku' },
+        });
+      }
+
+      // (3.2) Código de barras repetido entre el producto y sus variantes.
+      // El nombre del campo en GeneratedVariant es `barcode`.
+      const allBarcodes = [
+        String(this.productForm.get('barcode')?.value ?? '').trim(),
+        ...this.generatedVariants.map((v) => String(v.barcode ?? '').trim()),
+      ].filter((code) => code.length > 0);
+      const seenBarcodes = new Set<string>();
+      const hasDuplicateBarcode = allBarcodes.some((code) => {
+        if (seenBarcodes.has(code)) return true;
+        seenBarcodes.add(code);
+        return false;
+      });
+      if (hasDuplicateBarcode) {
+        requirements.push({
+          id: 'barcode-duplicate',
+          label: 'Código de barras duplicado',
+          reason:
+            'Hay un código de barras repetido entre el producto y sus variantes. Cada código de barras debe ser único.',
+          severity: 'required',
+          action: {
+            label: 'Ir a variantes',
+            kind: 'scroll',
+            target: 'variants',
+          },
+        });
+      }
+
       if (this.generatedVariants.length === 0) {
-        this.toastService.error(
-          'Debes crear al menos una variante. Agrega atributos con valores para generar variantes automáticamente.',
-          'Variantes requeridas',
-        );
-        return;
+        requirements.push({
+          id: 'variants-required',
+          label: 'Variantes requeridas',
+          reason:
+            'Debes crear al menos una variante. Agrega atributos con valores para generar variantes automáticamente.',
+          severity: 'required',
+          action: {
+            label: 'Configurar variantes',
+            kind: 'scroll',
+            target: 'variants',
+          },
+        });
       }
 
-      // Check for duplicate SKUs
       if (this.hasDuplicateSkus) {
-        this.toastService.error(
-          'Hay SKUs duplicados entre las variantes. Cada variante debe tener un SKU único.',
-          'SKUs duplicados',
-        );
-        return;
+        requirements.push({
+          id: 'duplicate-skus',
+          label: 'SKUs duplicados',
+          reason:
+            'Hay SKUs duplicados entre las variantes. Cada variante debe tener un SKU único.',
+          severity: 'required',
+          action: {
+            label: 'Configurar variantes',
+            kind: 'scroll',
+            target: 'variants',
+          },
+        });
       }
 
-      // Check for empty SKUs in variants
       const emptySkuVariants = this.generatedVariants.filter(
         (v) => !v.sku || v.sku.trim() === '',
       );
       if (emptySkuVariants.length > 0) {
-        this.toastService.error(
-          `${emptySkuVariants.length} variante(s) no tienen SKU configurado. Cada variante necesita un SKU único.`,
-          'SKU requerido',
-        );
-        return;
+        requirements.push({
+          id: 'variant-sku-required',
+          label: 'SKU de variante requerido',
+          reason: `${emptySkuVariants.length} variante(s) no tienen SKU configurado. Cada variante necesita un SKU único.`,
+          severity: 'required',
+          action: {
+            label: 'Configurar variantes',
+            kind: 'scroll',
+            target: 'variants',
+          },
+        });
       }
 
-      // Strict guard: edit mode, transitioning simple→variants, base stock > 0.
-      // Force a non-reset mode AND ensure variant totals match the base stock
-      // (no stock can be "lost" in the transition).
+      // Edit mode, transición simple→variantes, stock base > 0.
       const baseline = this.originalBaseStock();
       const isTransitioning =
         this.isEditMode() && !this.originalHadVariants() && baseline > 0;
       if (isTransitioning) {
         if (!this.stockTransferMode || this.stockTransferMode === 'reset') {
-          this.toastService.error(
-            "Debes redistribuir el stock base. Elige 'Asignar a una variante' o 'Distribuir'.",
-            'Redistribución requerida',
-          );
-          this.showStockTransferDialog(baseline);
-          return;
-        }
-        if (this.totalVariantStock !== baseline) {
-          this.toastService.error(
-            `La suma de stock de las variantes (${this.totalVariantStock}) debe igualar el stock base original (${baseline}).`,
-            'Totales desalineados',
-          );
-          return;
+          requirements.push({
+            id: 'stock-redistribute',
+            label: 'Redistribuir stock base',
+            reason:
+              "Debes redistribuir el stock base. Elige 'Asignar a una variante' o 'Distribuir'.",
+            severity: 'required',
+            action: {
+              label: 'Configurar redistribución',
+              kind: 'scroll',
+              target: 'variants',
+            },
+          });
+        } else if (this.totalVariantStock !== baseline) {
+          requirements.push({
+            id: 'stock-misaligned',
+            label: 'Totales de stock desalineados',
+            reason: `La suma de stock de las variantes (${this.totalVariantStock}) debe igualar el stock base original (${baseline}).`,
+            severity: 'required',
+            action: {
+              label: 'Configurar redistribución',
+              kind: 'scroll',
+              target: 'variants',
+            },
+          });
         }
       }
 
-      // Track-inventory products with variants must declare at least one unit of stock
-      // across the variants (otherwise the product becomes unsellable silently).
       const trackInventoryEnabled =
         !!this.productForm.get('track_inventory')?.value;
       if (trackInventoryEnabled) {
@@ -3109,11 +3322,18 @@ export class ProductCreatePageComponent {
           return true;
         });
         if (allVariantsTrackInventory && this.totalVariantStock <= 0) {
-          this.toastService.error(
-            'Todas las variantes que manejan stock tienen 0 unidades. Asigna al menos 1 unidad antes de guardar.',
-            'Stock de variantes requerido',
-          );
-          return;
+          requirements.push({
+            id: 'variant-stock-required',
+            label: 'Stock de variantes requerido',
+            reason:
+              'Todas las variantes que manejan stock tienen 0 unidades. Asigna al menos 1 unidad antes de guardar.',
+            severity: 'required',
+            action: {
+              label: 'Configurar variantes',
+              kind: 'scroll',
+              target: 'variants',
+            },
+          });
         }
       }
 
@@ -3124,12 +3344,64 @@ export class ProductCreatePageComponent {
         return salePrice <= 0 || salePrice >= regularPrice;
       });
       if (invalidSaleVariant) {
-        this.toastService.error(
-          `La oferta de la variante ${invalidSaleVariant.sku} debe ser mayor a 0 y menor que su precio regular.`,
-          'Precio de oferta inválido',
-        );
-        return;
+        requirements.push({
+          id: 'variant-sale-invalid',
+          label: 'Precio de oferta de variante inválido',
+          reason: `La oferta de la variante ${invalidSaleVariant.sku} debe ser mayor a 0 y menor que su precio regular.`,
+          severity: 'required',
+          action: {
+            label: 'Configurar variantes',
+            kind: 'scroll',
+            target: 'variants',
+          },
+        });
       }
+    }
+
+    // (c) Stock reservado (producto simple) -------------------------------
+    if (!this.hasVariants && this.totalStockReserved > 0) {
+      requirements.push({
+        id: 'stock-reserved',
+        label: 'Stock reservado',
+        reason: `Este producto tiene ${this.totalStockReserved} unidad(es) reservada(s). Libera las reservas antes de guardar cambios.`,
+        severity: 'blocker',
+        action: { label: 'Liberar reservas', kind: 'release-reservations' },
+      });
+    }
+
+    return requirements;
+  }
+
+  /**
+   * Ejecuta el CTA de una fila del modal de requisitos: liberar reservas, o
+   * enfocar / desplazar hasta el campo problemático.
+   */
+  onRequirementAction(req: SaveRequirement): void {
+    if (req.action?.kind === 'release-reservations') {
+      this.isRequirementsModalOpen.set(false);
+      this.releaseReservations();
+      return;
+    }
+    if (
+      req.action?.target &&
+      (req.action.kind === 'focus' || req.action.kind === 'scroll')
+    ) {
+      this.isRequirementsModalOpen.set(false);
+      const sel = `[formcontrolname="${req.action.target}"], #${req.action.target}`;
+      const el = document.querySelector(sel) as HTMLElement | null;
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el?.focus?.();
+    }
+  }
+
+  onSubmit(): void {
+    if (this.isSubmitting()) return;
+    this.productForm.markAllAsTouched();
+    const requirements = this.collectSaveRequirements();
+    if (requirements.length > 0) {
+      this.saveRequirements.set(requirements);
+      this.isRequirementsModalOpen.set(true);
+      return; // NO se envía al backend, NO se muestra éxito
     }
 
     // Fase 1: defense-in-depth — if the user is submitting a pure-ingredient
@@ -3353,16 +3625,21 @@ export class ProductCreatePageComponent {
           this.hasLoadedPriceTiers() &&
           !!savedProduct?.id;
 
+        const navigateAfterSave = () => {
+          const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
+          this.router.navigate(['/admin/products'], {
+            queryParams: { page: returnPage },
+          });
+        };
+
+        // Camino limpio: éxito real "creado/actualizado correctamente".
         const finish = () => {
           this.toastService.success(
             this.isEditMode()
               ? 'Producto actualizado correctamente'
               : 'Producto creado correctamente',
           );
-          const returnPage = this.route.snapshot.queryParams['fromPage'] || 1;
-          this.router.navigate(['/admin/products'], {
-            queryParams: { page: returnPage },
-          });
+          navigateAfterSave();
         };
 
         if (!shouldSyncOverrides) {
@@ -3374,24 +3651,20 @@ export class ProductCreatePageComponent {
           .then(() => finish())
           .catch((err) => {
             console.error('Error syncing tier overrides:', err);
-            const message = extractApiErrorMessage(err);
-            this.toastService.error(
-              message || 'No se pudieron guardar todos los precios por tarifa',
-              'Tarifas no sincronizadas',
+            // El producto SÍ se guardó, pero las tarifas no: el texto NO debe
+            // decir "correctamente". Warning + navegar igual (no bloquear).
+            this.toastService.warning(
+              'Producto guardado, pero algunas tarifas no se sincronizaron. Revísalas.',
             );
-            // Product saved OK — still navigate so the user is not blocked.
-            finish();
+            navigateAfterSave();
           });
       },
       error: (err: any) => {
         console.error('Error saving product:', err);
-        const message = extractApiErrorMessage(err);
-        this.toastService.error(
-          message,
-          this.isEditMode()
-            ? 'Error al actualizar el producto'
-            : 'Error al crear el producto',
-        );
+        // Todo error de guardado se explica en el modal (bloqueo explicado), con
+        // mensaje curado en español + CTA cuando aplica. Nunca un toast genérico.
+        this.saveRequirements.set(mapBackendErrorToRequirements(err));
+        this.isRequirementsModalOpen.set(true);
         this.isSubmitting.set(false);
       },
     });

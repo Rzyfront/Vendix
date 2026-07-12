@@ -1188,6 +1188,10 @@ export class PaymentsService {
               tax_breakdown,
               withholding_breakdown: wh.lines,
               discount_amount: Number(order.discount_amount || 0),
+              // GAP-6 — propina (sin IVA). El asiento la reconoce como pasivo
+              // custodio (CR propinas por pagar) para cuadrar el DR caja que ya
+              // incluye la propina dentro de payment.amount (= grand_total).
+              tip_amount: Number(order.tip_amount || 0),
               currency: payment.currency || createPosPaymentDto.currency,
               payment_method:
                 payment.store_payment_method?.system_payment_method
@@ -2568,6 +2572,11 @@ export class PaymentsService {
       }, 0),
     );
     const shippingCost = this.roundMoney(dto.shipping_cost || 0);
+    // GAP-6 — Propina del cierre de mesa. Aditiva al grand_total, SIN IVA:
+    // NO se suma a subtotal_amount ni tax_amount (no es ingreso ni base
+    // gravable). Se persiste aparte en orders.tip_amount y la contabilidad
+    // la reconoce como pasivo custodio (propinas por pagar).
+    const tip = this.roundMoney(dto.tip_amount || 0);
     // Re-evaluate promotions + coupons over the merged subtotal so the
     // final total stays consistent with the fresh path.
     const promotionQuote = await this.calculatePosPromotionQuote(dto);
@@ -2580,7 +2589,7 @@ export class PaymentsService {
       promotionQuote.total_discount + couponInfo.discount_amount,
     );
     const grandTotal = this.roundMoney(
-      Math.max(0, newSubtotal + newTax - totalDiscount + shippingCost),
+      Math.max(0, newSubtotal + newTax - totalDiscount + shippingCost + tip),
     );
 
     // Persist new items + totals on the session's order. Customer is
@@ -2598,6 +2607,8 @@ export class PaymentsService {
         discount_amount: totalDiscount,
         grand_total: grandTotal,
         shipping_cost: shippingCost,
+        // GAP-6 — propina persistida aparte (no entra a subtotal/tax).
+        tip_amount: tip,
         updated_at: new Date(),
         // The table's own order already carries `channel=pos` from the
         // session creation; we keep that and just refresh totals.
@@ -3100,7 +3111,48 @@ export class PaymentsService {
       },
     });
 
+    // GAP-2 — Saneamiento del balance de la orden SOLO para métodos directos
+    // (cash/card/bank_transfer) recién creados como `succeeded`. La rama digital
+    // (wompi/wallet) retorna antes (arriba) porque nace `pending`; su balance se
+    // confirma en otro flujo. `payableAmount` == `payment.amount` (== grand_total
+    // ya finalizado, con propina/envío incluidos porque `createOrUpdateOrderFromPos`
+    // /`applyPosPaymentToTableSession` ya escribieron grand_total ANTES de este
+    // punto). El helper re-lee grand_total fresco dentro del `tx`.
+    await this.applyOrderBalanceOnPayment(tx, order.id, payableAmount);
+
     return payment;
+  }
+
+  /**
+   * GAP-2 — Persiste `orders.total_paid` y `orders.remaining_balance` tras un
+   * pago. Réplica del patrón canónico de `OrderFlowService` (order-flow.service.ts:
+   * newTotalPaid = total_paid + paidAmount; remaining = max(grand_total -
+   * newTotalPaid, 0)), leyendo grand_total + total_paid FRESCOS dentro del mismo
+   * `tx` para ver el grand_total ya finalizado (propina incluida en cierre de mesa).
+   *
+   * Saneamiento puro: ningún auto-entry lee `orders.total_paid` (el asiento usa
+   * `payment.amount`), por lo que esta escritura NO tiene efecto contable.
+   */
+  private async applyOrderBalanceOnPayment(
+    tx: any,
+    orderId: number,
+    paidAmount: number,
+  ): Promise<void> {
+    const order = await tx.orders.findUnique({
+      where: { id: orderId },
+      select: { grand_total: true, total_paid: true },
+    });
+    if (!order) return;
+    const grandTotal = Number(order.grand_total || 0);
+    const newTotalPaid = Number(order.total_paid || 0) + Number(paidAmount || 0);
+    const remainingBalance = Math.max(grandTotal - newTotalPaid, 0);
+    await tx.orders.update({
+      where: { id: orderId },
+      data: {
+        total_paid: Math.round(newTotalPaid * 100) / 100,
+        remaining_balance: Math.round(remainingBalance * 100) / 100,
+      },
+    });
   }
 
   /**

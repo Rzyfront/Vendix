@@ -7,6 +7,12 @@
  *
  * Importante: Colombia = America/Bogota = UTC-05:00 (fijo). No usamos
  * Intl ni Date#getTimezoneOffset para evitar drift por DST.
+ *
+ * NOTA (store-timezone): este Colombia-fijo es una EXCEPCIÓN consciente ligada a
+ * la regla de negocio "domingo 07:00 Colombia", no el patrón general. Las
+ * analíticas/reportes usan la TZ del store vía common/utils/store-timezone.util.ts
+ * (multi-tenant, DST-safe). Ver docs/architecture/store-timezone.md. Marcado
+ * tz-audit:ignore por ser una ventana fija de negocio, no bucketing en UTC.
  */
 
 const COLOMBIA_OFFSET_MINUTES = -5 * 60; // UTC-05:00

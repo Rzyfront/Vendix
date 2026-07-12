@@ -142,7 +142,7 @@ interface NoveltyFormControls {
               formControlName="notes"
               rows="3"
               maxlength="255"
-              class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm
+              class="w-full rounded-lg border border-border bg-[var(--color-surface)] px-3 py-2 text-sm
                      text-text-primary placeholder-text-secondary focus:border-primary-600
                      focus:outline-none focus:ring-1 focus:ring-primary-600 resize-none"
               placeholder="Notas (opcional)..."
@@ -154,7 +154,7 @@ interface NoveltyFormControls {
       <!-- Footer -->
       <div slot="footer">
         <div
-          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+          class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border"
         >
           <app-button variant="outline" (clicked)="onClose()">
             Cancelar

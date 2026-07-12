@@ -1,5 +1,4 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { AnalyticsQueryDto, Granularity } from '../dto/analytics-query.dto';
@@ -8,8 +7,12 @@ import {
   formatPeriodFromDate,
   parseDateRange,
   getPreviousPeriod,
-  getDateTruncInterval,
 } from '../utils/date.util';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  resolveStoreTimezone,
+  localPeriodSql,
+} from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -19,8 +22,22 @@ export class OverviewAnalyticsService {
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
   private readonly VALID_EXPENSE_STATES = ['pending', 'approved', 'paid'];
 
+  /**
+   * Resolves the current request's store timezone (single source of truth).
+   * Falls back to the default when there is no store context (the scoped client
+   * would already reject such a call before reaching real data).
+   */
+  private async getStoreTimezone(): Promise<string> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      return DEFAULT_STORE_TIMEZONE;
+    }
+    return resolveStoreTimezone(this.prisma, context.store_id);
+  }
+
   async getOverviewSummary(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
     const { previousStartDate, previousEndDate } = getPreviousPeriod(
       startDate,
       endDate,
@@ -102,7 +119,6 @@ export class OverviewAnalyticsService {
   }
 
   async getOverviewTrends(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -111,61 +127,73 @@ export class OverviewAnalyticsService {
     }
     const storeId = context.store_id;
 
-    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
+    // Resolve the store timezone ONCE and drive both the date range and the
+    // bucketing with it (single source of truth). Buckets by the store's LOCAL
+    // calendar so a sale/expense at 23:00 local time lands on the correct day.
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
 
-    // Sales per period (with cost of goods for gross profit and taxes)
+    const salesPeriodSql = localPeriodSql('o.created_at', tz, granularity);
+    const expensePeriodSql = localPeriodSql('e.expense_date', tz, granularity);
+
+    // Sales per period (with cost of goods for gross profit and taxes).
+    // `period` is the authoritative LOCAL label emitted as TEXT by the SQL.
     const salesResults = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
-        period: Date;
+        period: string;
         sales: any;
         cost_of_goods: any;
         taxes: any;
       }>
     >`
       SELECT
-        DATE_TRUNC(${truncSql}, o.created_at) AS period,
+        ${salesPeriodSql} AS period,
         COALESCE(SUM(o.grand_total - o.tax_amount), 0) AS sales,
-        COALESCE(SUM(oi.quantity * COALESCE(oi.cost_price, 0)), 0) AS cost_of_goods,
+        COALESCE(SUM(oi.cogs), 0) AS cost_of_goods,
         COALESCE(SUM(o.tax_amount), 0) AS taxes
       FROM orders o
-      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN (
+        SELECT order_id, SUM(quantity * COALESCE(cost_price, 0)) AS cogs
+        FROM order_items
+        GROUP BY order_id
+      ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
         AND o.state IN ('delivered', 'finished')
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
-      GROUP BY DATE_TRUNC(${truncSql}, o.created_at)
-      ORDER BY period ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
-    // Expenses per period
+    // Expenses per period. `period` is the authoritative LOCAL label as TEXT.
     const expenseResults = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
-        period: Date;
+        period: string;
         expenses: any;
       }>
     >`
       SELECT
-        DATE_TRUNC(${truncSql}, e.expense_date) AS period,
+        ${expensePeriodSql} AS period,
         COALESCE(SUM(e.amount), 0) AS expenses
       FROM expenses e
       WHERE e.store_id = ${storeId}
         AND e.state IN ('pending', 'approved', 'paid')
         AND e.expense_date >= ${startDate}
         AND e.expense_date <= ${endDate}
-      GROUP BY DATE_TRUNC(${truncSql}, e.expense_date)
-      ORDER BY period ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
-    // Build expense map for merging
+    // Build expense map for merging. `period` is already the authoritative
+    // local label from SQL — do NOT re-derive it in JS.
     const expenseMap = new Map<string, number>();
     for (const r of expenseResults) {
-      const key = formatPeriodFromDate(new Date(r.period), granularity);
-      expenseMap.set(key, Number(r.expenses));
+      expenseMap.set(r.period, Number(r.expenses));
     }
 
     // Merge sales + expenses
     const merged = salesResults.map((r) => {
-      const key = formatPeriodFromDate(new Date(r.period), granularity);
+      const key = r.period;
       const sales = Number(r.sales);
       const costOfGoods = Number(r.cost_of_goods);
       const taxes = Number(r.taxes);
@@ -204,6 +232,7 @@ export class OverviewAnalyticsService {
       granularity,
       { sales: 0, expenses: 0, taxes: 0, gross_profit: 0, net_profit: 0 },
       formatPeriodFromDate,
+      tz,
     );
   }
 }

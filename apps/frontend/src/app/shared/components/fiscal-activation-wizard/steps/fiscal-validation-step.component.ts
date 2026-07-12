@@ -12,6 +12,9 @@ import {
 import { FiscalWizardStepHost } from '../wizard-step.contract';
 import { IconComponent } from '../../icon/icon.component';
 import { parseApiError } from '../../../../core/utils/parse-api-error';
+import { SaveRequirementsModalComponent } from '../../save-requirements-modal/save-requirements-modal.component';
+import { SaveRequirement } from '../../save-requirements-modal/save-requirements.interface';
+import { mapFiscalBackendErrorToRequirements } from '../utils/fiscal-requirements.util';
 
 interface ValidationRow {
   step: FiscalWizardStepId;
@@ -27,7 +30,7 @@ interface ValidationRow {
 @Component({
   selector: 'app-fiscal-validation-step',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CommonModule, IconComponent, SaveRequirementsModalComponent],
   template: `
     <div class="validation-step">
       <div class="validation-list">
@@ -91,6 +94,15 @@ interface ValidationRow {
           {{ localError() }}
         </p>
       }
+
+      <!-- Prevalidacion accionable (aditiva a las filas inline): ante un 409
+           FISCAL_STATUS_INCOMPLETE (o el pre-check) explica el "por que" con un
+           CTA "Volver a {paso}" por cada requisito faltante. -->
+      <app-save-requirements-modal
+        [(isOpen)]="requirementsModalOpen"
+        [requirements]="fiscalRequirements()"
+        (action)="onRequirementAction($event)"
+      />
     </div>
   `,
   styles: [
@@ -109,9 +121,9 @@ interface ValidationRow {
         align-items: flex-start;
         gap: 0.7rem;
         padding: 0.85rem;
-        border: 1px solid var(--border-color, #e5e7eb);
+        border: 1px solid var(--color-border);
         border-radius: 0.5rem;
-        background: var(--surface-color, #ffffff);
+        background: var(--color-surface);
       }
       .validation-row__body {
         display: flex;
@@ -121,7 +133,7 @@ interface ValidationRow {
         min-width: 0;
       }
       .validation-row__reason {
-        color: var(--warning-color, #92400e) !important;
+        color: var(--color-warning) !important;
         font-weight: 600;
       }
       .validation-row__cta {
@@ -131,10 +143,10 @@ interface ValidationRow {
         align-items: center;
         gap: 0.35rem;
         padding: 0.45rem 0.7rem;
-        border: 1px solid var(--border-color, #e5e7eb);
+        border: 1px solid var(--color-border);
         border-radius: 0.45rem;
-        background: var(--surface-color, #ffffff);
-        color: var(--primary-color, #2563eb);
+        background: var(--color-surface);
+        color: var(--color-primary);
         font: inherit;
         font-size: 0.82rem;
         font-weight: 700;
@@ -144,12 +156,12 @@ interface ValidationRow {
       .validation-row__cta:hover {
         background: color-mix(
           in srgb,
-          var(--primary-color, #2563eb) 8%,
+          var(--color-primary) 8%,
           #ffffff
         );
       }
       .validation-row__cta:focus-visible {
-        outline: 2px solid var(--primary-color, #2563eb);
+        outline: 2px solid var(--color-primary);
         outline-offset: 2px;
       }
       .validation-state {
@@ -161,34 +173,34 @@ interface ValidationRow {
         border-radius: 999px;
         background: color-mix(
           in srgb,
-          var(--success-color, #16a34a) 14%,
+          var(--color-success) 14%,
           #ffffff
         );
-        color: var(--success-color, #166534);
+        color: var(--color-success);
       }
       .validation-row--missing .validation-state {
         background: color-mix(
           in srgb,
-          var(--warning-color, #f59e0b) 14%,
+          var(--color-warning) 14%,
           #ffffff
         );
-        color: var(--warning-color, #92400e);
+        color: var(--color-warning);
       }
       .validation-row--flagged {
-        border-color: var(--color-destructive, #b91c1c);
+        border-color: var(--color-destructive);
         background: color-mix(
           in srgb,
-          var(--color-destructive, #b91c1c) 5%,
+          var(--color-destructive) 5%,
           #ffffff
         );
       }
       .validation-row strong {
         display: block;
         font-size: 0.95rem;
-        color: var(--text-primary, #0f172a);
+        color: var(--color-text-primary);
       }
       .validation-row small {
-        color: var(--text-secondary, #64748b);
+        color: var(--color-text-secondary);
         font-size: 0.85rem;
         line-height: 1.25rem;
       }
@@ -201,7 +213,7 @@ interface ValidationRow {
         border: 1px solid #fcd34d;
         border-radius: 0.5rem;
         background: #fffbeb;
-        color: var(--warning-color, #92400e);
+        color: var(--color-warning);
       }
       .step-warning__body {
         display: flex;
@@ -211,7 +223,7 @@ interface ValidationRow {
       .step-warning__body strong {
         display: block;
         font-size: 0.9rem;
-        color: var(--warning-color, #92400e);
+        color: var(--color-warning);
       }
       .step-warning__body small {
         display: block;
@@ -221,12 +233,12 @@ interface ValidationRow {
       }
       .step-warning app-icon {
         flex: 0 0 auto;
-        color: var(--warning-color, #92400e);
+        color: var(--color-warning);
       }
       .step-error {
         margin: 0;
         font-size: 0.85rem;
-        color: var(--color-destructive, #b91c1c);
+        color: var(--color-destructive);
       }
       @media (max-width: 560px) {
         .validation-row {
@@ -248,6 +260,10 @@ export class FiscalValidationStepComponent
   readonly stepId: FiscalWizardStepId = 'validation';
   readonly submitting = signal(false);
   readonly localError = signal<string | null>(null);
+
+  /** Shared requirements modal: visibility + rows (prevalidacion accionable). */
+  readonly requirementsModalOpen = signal(false);
+  readonly fiscalRequirements = signal<SaveRequirement[]>([]);
 
   /** True while the on-enter prefill refresh is in flight. */
   readonly refreshing = signal(false);
@@ -465,6 +481,9 @@ export class FiscalValidationStepComponent
           `Faltan pasos por completar antes de activar: ${missingHere.join(', ')}. ` +
             'Selecciona cada paso de la lista para abrirlo y completarlo.',
         );
+        // Aditivo: abre el modal compartido con una fila accionable por cada
+        // paso pendiente (sin llegar a golpear el backend con un 409 previsto).
+        this.openFiscalRequirementsFromPendingRows();
         return null;
       }
     }
@@ -484,12 +503,64 @@ export class FiscalValidationStepComponent
       // surfaced the missing-step banner. Don't override it with the raw
       // userMessage; the validation list is the source of truth now.
       const parsed = parseApiError(e);
-      if (parsed.errorCode !== 'FISCAL_STATUS_INCOMPLETE') {
+      if (parsed.errorCode === 'FISCAL_STATUS_INCOMPLETE') {
+        // Aditivo: además del banner/filas inline, abre el modal compartido con
+        // el "por qué" accionable (una fila por paso faltante, CTA "Volver a").
+        this.openFiscalRequirementsFromError(e);
+      } else {
         this.localError.set(parsed.userMessage);
       }
       return null;
     } finally {
       this.submitting.set(false);
+    }
+  }
+
+  /**
+   * Construye las filas del modal desde el 409 real del backend, reutilizando
+   * el `finalizeMissingSteps` capturado por el servicio y el `reasonFor` local
+   * para un motivo especifico por paso.
+   */
+  private openFiscalRequirementsFromError(err: unknown): void {
+    const requirements = mapFiscalBackendErrorToRequirements(err, {
+      reasonFor: (step) => this.reasonFor(step),
+      missingSteps: this.service.finalizeMissingSteps(),
+    });
+    if (requirements.length === 0) return;
+    this.fiscalRequirements.set(requirements);
+    this.requirementsModalOpen.set(true);
+  }
+
+  /**
+   * Pre-submit (sin 409 todavia): construye las filas a partir de las filas
+   * pendientes ya calculadas por `rows()`, reutilizando el mismo builder para
+   * garantizar el CTA "Volver a {paso}".
+   */
+  private openFiscalRequirementsFromPendingRows(): void {
+    const pending = this.rows()
+      .filter((r) => !r.completed)
+      .map((r) => r.step);
+    if (pending.length === 0) return;
+    const area = this.service.selectedAreas()[0] ?? 'invoicing';
+    const requirements = mapFiscalBackendErrorToRequirements(null, {
+      reasonFor: (step) => this.reasonFor(step),
+      missingSteps: { [area]: pending } as Partial<
+        Record<FiscalArea, FiscalWizardStepId[]>
+      >,
+    });
+    if (requirements.length === 0) return;
+    this.fiscalRequirements.set(requirements);
+    this.requirementsModalOpen.set(true);
+  }
+
+  /**
+   * CTA de una fila del modal: navega al paso indicado via el servicio del
+   * wizard (goToStep) y cierra el modal.
+   */
+  onRequirementAction(req: SaveRequirement): void {
+    if (req.action?.kind === 'navigate' && req.action.target) {
+      this.requirementsModalOpen.set(false);
+      this.service.goToStep(req.action.target as FiscalWizardStepId);
     }
   }
 }

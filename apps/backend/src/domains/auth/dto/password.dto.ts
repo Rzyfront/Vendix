@@ -1,4 +1,12 @@
-import { IsEmail, IsString, IsNotEmpty, MinLength } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  IsNotEmpty,
+  MinLength,
+  IsInt,
+  IsPositive,
+  IsOptional,
+} from 'class-validator';
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 
 export class ForgotPasswordDto {
@@ -20,6 +28,24 @@ export class ForgotPasswordDto {
   organization_slug: string;
 }
 
+export class ForgotPasswordCustomerDto {
+  @ApiProperty({
+    example: 'cliente@email.com',
+    description: 'Correo electrónico del cliente',
+  })
+  @IsEmail()
+  @IsNotEmpty()
+  email: string;
+
+  @ApiProperty({
+    example: 1,
+    description: 'ID de la tienda (requerido para multi-tenant ecommerce)',
+  })
+  @IsInt()
+  @IsPositive()
+  store_id: number;
+}
+
 export class ResetPasswordDto {
   @ApiProperty({
     example: 'reset-token-here',
@@ -37,6 +63,21 @@ export class ResetPasswordDto {
   @IsNotEmpty()
   @MinLength(8)
   new_password: string;
+
+  /**
+   * ID de la tienda ecommerce desde la que se inicia la recuperación.
+   * Opcional: cuando está presente, el flujo customer vincula al cliente
+   * con la tienda (idempotente) y activa la cuenta pending_verification.
+   * El reset genérico (owner/staff) lo ignora.
+   */
+  @ApiProperty({
+    example: 10,
+    description: 'ID de la tienda ecommerce donde el cliente recupera su cuenta',
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  store_id?: number;
 }
 
 @ApiSchema({ name: 'AuthChangePasswordDto' })

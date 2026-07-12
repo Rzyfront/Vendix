@@ -51,7 +51,7 @@ interface CarteraDashboardBundle {
         <!-- ══════ CUENTAS POR COBRAR ══════ -->
         <div>
           <h2 class="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2">
-            <app-icon name="file-input" [size]="20" class="text-blue-600"></app-icon>
+            <app-icon name="file-input" [size]="20" class="text-[var(--color-info)]"></app-icon>
             Cuentas por Cobrar
           </h2>
 
@@ -106,8 +106,8 @@ interface CarteraDashboardBundle {
                   <div class="space-y-2">
                     @for (bucket of ar_aging.buckets; track bucket.label; let i = $index) {
                       <div class="flex items-center gap-3">
-                        <span class="text-xs text-gray-500 w-24 shrink-0">{{ bucket.label }}</span>
-                        <div class="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                        <span class="text-xs text-text-secondary w-24 shrink-0">{{ bucket.label }}</span>
+                        <div class="flex-1 bg-[var(--color-surface-secondary)] rounded-full h-5 overflow-hidden">
                           <div
                             class="h-full rounded-full transition-all duration-300"
                             [class]="getAgingBarColor(i)"
@@ -117,7 +117,7 @@ interface CarteraDashboardBundle {
                         <span class="text-xs font-mono font-medium w-28 text-right shrink-0">
                           {{ format(bucket.total) }}
                         </span>
-                        <span class="text-xs text-gray-400 w-8 text-right shrink-0">
+                        <span class="text-xs text-text-secondary w-8 text-right shrink-0">
                           {{ bucket.count }}
                         </span>
                       </div>
@@ -140,14 +140,14 @@ interface CarteraDashboardBundle {
                 </h3>
                 <div class="space-y-2">
                   @for (item of ar_upcoming(); track item.id) {
-                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center justify-between p-3 bg-[var(--color-surface-secondary)] rounded-lg">
                       <div class="min-w-0">
                         <p class="text-sm font-medium truncate">
                           {{ item.customer?.name || '—' }}
                         </p>
-                        <p class="text-xs text-gray-500">
+                        <p class="text-xs text-text-secondary">
                           {{ item.document_number || '—' }} · Vence:
-                          {{ item.due_date | date: 'dd/MM/yyyy' }}
+                          {{ item.due_date | date: 'dd/MM/yyyy':'UTC' }}
                         </p>
                       </div>
                       <span class="text-sm font-semibold font-mono text-primary shrink-0 ml-3">
@@ -164,7 +164,7 @@ interface CarteraDashboardBundle {
         <!-- ══════ CUENTAS POR PAGAR ══════ -->
         <div>
           <h2 class="text-lg font-semibold text-text-primary mb-3 flex items-center gap-2">
-            <app-icon name="file-output" [size]="20" class="text-orange-600"></app-icon>
+            <app-icon name="file-output" [size]="20" class="text-warning"></app-icon>
             Cuentas por Pagar
           </h2>
 
@@ -219,8 +219,8 @@ interface CarteraDashboardBundle {
                   <div class="space-y-2">
                     @for (bucket of ap_aging.buckets; track bucket.label; let i = $index) {
                       <div class="flex items-center gap-3">
-                        <span class="text-xs text-gray-500 w-24 shrink-0">{{ bucket.label }}</span>
-                        <div class="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+                        <span class="text-xs text-text-secondary w-24 shrink-0">{{ bucket.label }}</span>
+                        <div class="flex-1 bg-[var(--color-surface-secondary)] rounded-full h-5 overflow-hidden">
                           <div
                             class="h-full rounded-full transition-all duration-300"
                             [class]="getAgingBarColor(i)"
@@ -230,7 +230,7 @@ interface CarteraDashboardBundle {
                         <span class="text-xs font-mono font-medium w-28 text-right shrink-0">
                           {{ format(bucket.total) }}
                         </span>
-                        <span class="text-xs text-gray-400 w-8 text-right shrink-0">
+                        <span class="text-xs text-text-secondary w-8 text-right shrink-0">
                           {{ bucket.count }}
                         </span>
                       </div>
@@ -253,14 +253,14 @@ interface CarteraDashboardBundle {
                 </h3>
                 <div class="space-y-2">
                   @for (item of ap_upcoming(); track item.id) {
-                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                    <div class="flex items-center justify-between p-3 bg-[var(--color-surface-secondary)] rounded-lg">
                       <div class="min-w-0">
                         <p class="text-sm font-medium truncate">
                           {{ item.supplier?.name || '—' }}
                         </p>
-                        <p class="text-xs text-gray-500">
+                        <p class="text-xs text-text-secondary">
                           {{ item.document_number || '—' }} · Vence:
-                          {{ item.due_date | date: 'dd/MM/yyyy' }}
+                          {{ item.due_date | date: 'dd/MM/yyyy':'UTC' }}
                         </p>
                       </div>
                       <span class="text-sm font-semibold font-mono text-primary shrink-0 ml-3">
@@ -377,13 +377,13 @@ export class OrgCarteraDashboardComponent {
 
   getAgingBarColor(index: number): string {
     const colors = [
-      'bg-emerald-400',
-      'bg-blue-400',
-      'bg-amber-400',
-      'bg-orange-400',
-      'bg-red-400',
-      'bg-red-600',
+      'bg-success',
+      'bg-[var(--color-info)]',
+      'bg-warning',
+      'bg-warning',
+      'bg-error',
+      'bg-error',
     ];
-    return colors[index] || 'bg-gray-400';
+    return colors[index] || 'bg-[var(--color-surface-secondary)]';
   }
 }

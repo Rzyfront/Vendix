@@ -1,12 +1,11 @@
 import {Component, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CurrencyPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 
 import { AccountingService } from '../../services/accounting.service';
-import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
   FixedAsset,
   FixedAssetCategory,
@@ -156,18 +155,18 @@ interface AssetStats {
         <div class="relative p-2 md:p-4">
           @if (is_loading()) {
             <div
-              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+              class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
               ></div>
             </div>
           }
 
           <!-- Table Header (desktop) -->
           <div
-            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg
-                      text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1"
+            class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-[var(--color-surface-secondary)] rounded-lg
+                      text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1"
           >
             <div class="col-span-1">N.o</div>
             <div class="col-span-2">Nombre</div>
@@ -181,7 +180,7 @@ interface AssetStats {
 
           @if (filtered_assets().length === 0 && !is_loading()) {
             <div
-              class="flex flex-col items-center justify-center py-16 text-gray-400"
+              class="flex flex-col items-center justify-center py-16 text-text-secondary"
             >
               <app-icon name="package" [size]="48"></app-icon>
               <p class="mt-4 text-base">No se encontraron activos fijos</p>
@@ -198,13 +197,13 @@ interface AssetStats {
               @for (asset of filtered_assets(); track asset.id) {
                 <!-- Mobile Card -->
                 <div
-                  class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
+                  class="md:hidden p-3 mx-2 my-1 bg-[var(--color-surface)] rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
                   (click)="openDetailModal(asset)"
                 >
                   <div class="flex items-center justify-between">
                     <div class="min-w-0">
                       <div class="flex items-center gap-2">
-                        <span class="text-xs font-mono text-gray-500">{{
+                        <span class="text-xs font-mono text-text-secondary">{{
                           asset.asset_number
                         }}</span>
                         <span
@@ -215,7 +214,7 @@ interface AssetStats {
                       <div class="flex items-center gap-2 mt-1">
                         @if (asset.category) {
                           <span
-                            class="text-[10px] font-bold uppercase text-gray-500 px-1.5 py-0.5 rounded bg-gray-100"
+                            class="text-[10px] font-bold uppercase text-text-secondary px-1.5 py-0.5 rounded bg-[var(--color-surface-secondary)]"
                             >{{ asset.category.name }}</span
                           >
                         }
@@ -227,35 +226,29 @@ interface AssetStats {
                         </span>
                       </div>
                       <div
-                        class="flex items-center gap-4 mt-2 text-xs text-gray-500"
+                        class="flex items-center gap-4 mt-2 text-xs text-text-secondary"
                       >
                         <span
                           >Costo:
-                          {{
-                            asset.acquisition_cost
-                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                          }}</span
+                          {{ asset.acquisition_cost | currency: 0 }}</span
                         >
                         <span class="font-semibold text-text-primary"
                           >VL:
-                          {{
-                            asset.book_value ?? 0
-                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                          }}</span
+                          {{ asset.book_value ?? 0 | currency: 0 }}</span
                         >
                       </div>
                     </div>
                     <app-icon
                       name="chevron-right"
                       [size]="16"
-                      class="text-gray-400 ml-2"
+                      class="text-text-secondary ml-2"
                     ></app-icon>
                   </div>
                 </div>
 
                 <!-- Desktop Row -->
                 <div
-                  class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors cursor-pointer"
+                  class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-[var(--color-surface-secondary)] transition-colors cursor-pointer"
                   (click)="openDetailModal(asset)"
                 >
                   <div class="col-span-1 text-sm font-mono text-gray-600">
@@ -266,30 +259,21 @@ interface AssetStats {
                   >
                     {{ asset.name }}
                   </div>
-                  <div class="col-span-2 text-xs text-gray-500">
+                  <div class="col-span-2 text-xs text-text-secondary">
                     {{ asset.category?.name || '—' }}
                   </div>
                   <div class="col-span-2 text-sm text-right font-mono">
-                    {{
-                      asset.acquisition_cost
-                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                    }}
+                    {{ asset.acquisition_cost | currency: 0 }}
                   </div>
                   <div
-                    class="col-span-2 text-sm text-right font-mono text-red-500"
+                    class="col-span-2 text-sm text-right font-mono text-error"
                   >
-                    {{
-                      asset.accumulated_depreciation
-                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                    }}
+                    {{ asset.accumulated_depreciation | currency: 0 }}
                   </div>
                   <div
                     class="col-span-1 text-sm text-right font-mono font-semibold"
                   >
-                    {{
-                      asset.book_value ?? 0
-                        | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                    }}
+                    {{ asset.book_value ?? 0 | currency: 0 }}
                   </div>
                   <div class="col-span-1 text-center">
                     <span
@@ -303,7 +287,7 @@ interface AssetStats {
                     @if (asset.status === 'active') {
                       <button
                         (click)="openEditModal(asset); $event.stopPropagation()"
-                        class="p-1.5 hover:bg-gray-100 rounded text-gray-500 hover:text-primary-600"
+                        class="p-1.5 hover:bg-[var(--color-surface-secondary)] rounded text-text-secondary hover:text-[var(--color-primary)]"
                       >
                         <app-icon name="edit" [size]="14"></app-icon>
                       </button>
@@ -323,13 +307,13 @@ interface AssetStats {
           (click)="show_depreciation_dialog = false"
         >
           <div
-            class="bg-surface rounded-xl shadow-xl p-6 w-full max-w-sm mx-4"
+            class="bg-[var(--color-surface)] rounded-xl shadow-xl p-6 w-full max-w-sm mx-4"
             (click)="$event.stopPropagation()"
           >
             <h3 class="text-lg font-semibold text-text-primary mb-4">
               Ejecutar Depreciacion
             </h3>
-            <p class="text-sm text-gray-500 mb-4">
+            <p class="text-sm text-text-secondary mb-4">
               Selecciona el periodo para ejecutar la depreciacion mensual de
               todos los activos activos.
             </p>
@@ -340,7 +324,7 @@ interface AssetStats {
                 >
                 <select
                   [(ngModel)]="depreciation_year"
-                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface"
+                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-[var(--color-surface)]"
                 >
                   @for (y of available_years; track y) {
                     <option [value]="y">{{ y }}</option>
@@ -353,7 +337,7 @@ interface AssetStats {
                 >
                 <select
                   [(ngModel)]="depreciation_month"
-                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-surface"
+                  class="w-full rounded-lg border border-border px-3 py-2 text-sm bg-[var(--color-surface)]"
                 >
                   @for (m of months; track m.value) {
                     <option [value]="m.value">{{ m.label }}</option>
@@ -599,10 +583,10 @@ loadAssets(): void {
 
   getStatusClass(status: string): string {
     const classes: Record<string, string> = {
-      active: 'bg-emerald-50 text-emerald-600',
-      fully_depreciated: 'bg-amber-50 text-amber-600',
-      retired: 'bg-gray-100 text-gray-500',
-      disposed: 'bg-red-50 text-red-500'};
-    return classes[status] || 'bg-gray-100 text-gray-500';
+      active: 'bg-success-light text-success',
+      fully_depreciated: 'bg-warning-light text-warning',
+      retired: 'bg-[var(--color-surface-secondary)] text-text-secondary',
+      disposed: 'bg-error-light text-error'};
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-secondary';
   }
 }

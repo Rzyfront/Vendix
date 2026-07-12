@@ -323,6 +323,9 @@ export interface StoreSettings {
   // Reservations - Booking reminders, confirmation, and check-in
   reservations?: ReservationsSettings;
 
+  // Availability - Slot generation behavior for fallback schedule
+  availability?: AvailabilitySettings;
+
   // Operations - Preparation and delivery defaults
   operations?: OperationsSettings;
 
@@ -507,6 +510,25 @@ export interface ReservationsSettings {
   check_in: BookingCheckInSettings;
 }
 
+// ============================================================================
+// AVAILABILITY - Slot generation behavior when no provider schedule exists
+// ============================================================================
+export interface AvailabilitySettings {
+  /**
+   * Days of the week on which the store wants generic slot generation to
+   * produce slots. ISO-ish: 0=Sunday, 1=Monday, ..., 6=Saturday. Default
+   * is Mon-Fri (1-5) — matches the historic hardcoded behavior in
+   * `AvailabilityService.generateGenericSlots` (which used to skip both
+   * Saturday and Sunday). Stores that open on weekends should add `0`
+   * and/or `6` to override.
+   *
+   * Used only as a fallback by `generateGenericSlots` when no
+   * `provider_schedules` row covers the date. Per-provider schedules
+   * remain the source of truth when they exist.
+   */
+  working_days: number[];
+}
+
 export interface OperationsSettings {
   default_preparation_time_minutes: number;
   ticket_closing_hour?: number;
@@ -515,6 +537,8 @@ export interface OperationsSettings {
 // ============================================================================
 // RESTAURANT - Restaurant suite behavior toggles
 // ============================================================================
+export type QrScanBehavior = 'menu_only' | 'mark_occupied' | 'open_tab' | 'require_staff';
+
 export interface RestaurantSettings {
   /**
    * Enables paying/closing a table check directly from the table screen
@@ -522,6 +546,53 @@ export interface RestaurantSettings {
    * the normal POS payment flow.
    */
   enable_table_checkout: boolean;
+  /**
+   * Behavior when a customer scans a table QR code.
+   * - `menu_only` (default): show the digital menu only; no table state change.
+   * - `mark_occupied`: mark the table as occupied (no tab opened).
+   * - `open_tab`: mark occupied and open a tab (draft order) for the table.
+   * - `require_staff`: a staff member must confirm before any action.
+   */
+  qr_scan_behavior: QrScanBehavior;
+  /**
+   * When true, scanning the QR auto-fires the order items to KDS/kitchen
+   * (same as the POS "fire" action). Default `false` — items stay as a
+   * draft until staff fires them.
+   */
+  qr_auto_fire: boolean;
+}
+
+export interface FingerprintDeviceConfig {
+  /**
+   * Reader integration mode for fingerprint access validation.
+   * - `id_wrapper` (Tipo A, default): the reader emits an opaque ID directly;
+   *   Vendix stores/looks up credentials as `external_ref` and never sees
+   *   the biometric template.
+   * - `template_sdk` (Tipo B, plan only): the reader ships a template/image
+   *   to a configured SDK provider that returns an opaque ID. The endpoint
+   *   and SDK are NOT implemented yet — see plan anotación 3c.
+   */
+  reader_type: 'id_wrapper' | 'template_sdk';
+  /**
+   * SDK provider to delegate fingerprint template processing to.
+   * Only relevant when `reader_type === 'template_sdk'`.
+   */
+  sdk_provider?: 'zkteco' | 'digitalpersona' | 'generic_http';
+  /**
+   * URL of the SDK adapter for `template_sdk` mode (HTTP endpoint for
+   * `generic_http`, or vendor-specific host for `zkteco`/`digitalpersona`).
+   */
+  endpoint?: string;
+  /**
+   * Reference to an API key (NOT the key itself) used to authenticate
+   * against the configured SDK endpoint. Secrets are resolved via the
+   * settings secrets store; the reference identifies the entry.
+   */
+  api_key_ref?: string;
+  /** Request timeout in milliseconds when calling the SDK. */
+  timeout_ms?: number;
+  /** Per-verification timeout in milliseconds (latency cap per check). */
+  verify_timeout_ms?: number;
 }
 
 export interface MembershipSettings {
@@ -556,6 +627,12 @@ export interface MembershipSettings {
    * count by 1 person. Allowed values: `1` or `2`. Default `2`.
    */
   auto_leveling_interval_hours?: number;
+  /**
+   * Fingerprint reader device configuration for access validation.
+   * Default (`reader_type: 'id_wrapper'`) preserves the current behavior
+   * where the reader emits an opaque ID and Vendix never sees the template.
+   */
+  fingerprint_device?: FingerprintDeviceConfig;
 }
 
 // ============================================================================

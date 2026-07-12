@@ -260,7 +260,7 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
           <div
             class="mt-4 flex flex-col items-center gap-3 rounded-lg border border-dashed border-border p-6 text-center"
           >
-            <app-icon name="alert-circle" [size]="24" class="text-red-500" />
+            <app-icon name="alert-circle" [size]="24" class="text-error" />
             <p class="text-sm text-text-secondary">{{ flowError() }}</p>
             <app-button variant="outline" size="sm" (clicked)="loadFlowState()">
               Reintentar
@@ -270,22 +270,22 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
           <div class="mt-4 space-y-3" aria-hidden="true">
             @for (i of [1, 2, 3]; track i) {
               <div class="animate-pulse rounded-lg border border-border p-4">
-                <div class="mb-3 h-3 w-24 rounded bg-gray-200"></div>
+                <div class="mb-3 h-3 w-24 rounded bg-[var(--color-surface-secondary)]"></div>
                 <div class="flex flex-col gap-2 md:flex-row">
-                  <div class="h-16 rounded-lg bg-gray-100 md:flex-1"></div>
-                  <div class="h-16 rounded-lg bg-gray-100 md:flex-1"></div>
-                  <div class="h-16 rounded-lg bg-gray-100 md:flex-1"></div>
+                  <div class="h-16 rounded-lg bg-[var(--color-surface-secondary)] md:flex-1"></div>
+                  <div class="h-16 rounded-lg bg-[var(--color-surface-secondary)] md:flex-1"></div>
+                  <div class="h-16 rounded-lg bg-[var(--color-surface-secondary)] md:flex-1"></div>
                 </div>
               </div>
             }
-            <div class="h-28 animate-pulse rounded-xl bg-gray-200"></div>
+            <div class="h-28 animate-pulse rounded-xl bg-[var(--color-surface-secondary)]"></div>
           </div>
         } @else if (flowState()) {
           @if (allQuiet()) {
             <div
-              class="mt-4 flex items-center gap-2 rounded-lg bg-primary-600/10 px-3 py-2 text-xs text-text-secondary"
+              class="mt-4 flex items-center gap-2 rounded-lg bg-[var(--color-primary-light)] px-3 py-2 text-xs text-text-secondary"
             >
-              <app-icon name="info" [size]="14" class="text-primary-600" />
+              <app-icon name="info" [size]="14" class="text-[var(--color-primary)]" />
               Sin movimientos fiscales en
               {{ periodLabel() }}. Cuando vendas, compres o liquides nómina,
               verás aquí el recorrido completo.
@@ -295,7 +295,7 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
           <!-- Carriles -->
           <div class="mt-4 space-y-3">
             @for (lane of lanes(); track lane.key) {
-              <div class="rounded-lg border border-border bg-surface p-3">
+              <div class="rounded-lg border border-border bg-[var(--color-surface)] p-3">
                 <div class="mb-2 flex items-center gap-1.5">
                   <app-icon
                     [name]="lane.icon"
@@ -371,12 +371,12 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
 
                     @if (!last) {
                       <div
-                        class="flex justify-center py-0.5 text-gray-400 md:hidden"
+                        class="flex justify-center py-0.5 text-text-secondary md:hidden"
                       >
                         <app-icon name="chevron-down" [size]="14" />
                       </div>
                       <div
-                        class="hidden items-center px-0.5 text-gray-400 md:flex"
+                        class="hidden items-center px-0.5 text-text-secondary md:flex"
                       >
                         <app-icon name="chevron-right" [size]="14" />
                       </div>
@@ -389,9 +389,9 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
 
           <!-- Convergencia -->
           <div class="mx-auto h-4 w-px bg-border"></div>
-          <div class="rounded-xl border border-primary-600/20 bg-primary-600/5 p-4">
+          <div class="rounded-xl border border-[color-mix(in_srgb,var(--color-primary)_20%,transparent)] bg-[var(--color-primary-light)] p-4">
             <div class="mb-3 flex items-center gap-2">
-              <app-icon name="landmark" [size]="16" class="text-primary-600" />
+              <app-icon name="landmark" [size]="16" class="text-[var(--color-primary)]" />
               <h3 class="text-sm font-semibold text-text-primary">
                 Operación fiscal — aquí converge todo
               </h3>
@@ -487,7 +487,7 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
           <div
             class="mt-4 flex flex-col items-center gap-3 rounded-lg border border-dashed border-border p-6 text-center"
           >
-            <app-icon name="alert-circle" [size]="24" class="text-red-500" />
+            <app-icon name="alert-circle" [size]="24" class="text-error" />
             <p class="text-sm text-text-secondary">{{ checklistError() }}</p>
             <app-button
               variant="outline"
@@ -499,19 +499,19 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
           </div>
         } @else if (checklistLoading() && !checklist()) {
           <div class="mt-4 space-y-3" aria-hidden="true">
-            <div class="h-2 w-full animate-pulse rounded-full bg-gray-200"></div>
+            <div class="h-2 w-full animate-pulse rounded-full bg-[var(--color-surface-secondary)]"></div>
             <div class="grid gap-2 sm:grid-cols-2">
               @for (i of [1, 2, 3, 4, 5, 6]; track i) {
                 <div
-                  class="h-14 animate-pulse rounded-lg border border-border bg-gray-100"
+                  class="h-14 animate-pulse rounded-lg border border-border bg-[var(--color-surface-secondary)]"
                 ></div>
               }
             </div>
           </div>
         } @else if (checklist(); as cl) {
-          <div class="mt-3 h-2 w-full overflow-hidden rounded-full bg-gray-100">
+          <div class="mt-3 h-2 w-full overflow-hidden rounded-full bg-[var(--color-surface-secondary)]">
             <div
-              class="h-full rounded-full bg-emerald-500 transition-all"
+              class="h-full rounded-full bg-success transition-all"
               [style.width.%]="cl.completion_pct"
             ></div>
           </div>
@@ -531,7 +531,7 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
                     [name]="item.complete ? 'check-circle' : 'alert-circle'"
                     [size]="18"
                     [class]="
-                      item.complete ? 'text-emerald-500' : 'text-amber-500'
+                      item.complete ? 'text-success' : 'text-warning'
                     "
                   />
                   <span class="min-w-0 flex-1">
@@ -550,7 +550,7 @@ const STATUS_LABELS: Record<FiscalFlowStageStatus, string> = {
                     <app-icon
                       name="chevron-right"
                       [size]="14"
-                      class="text-gray-400"
+                      class="text-text-secondary"
                     />
                   }
                 </button>
@@ -1023,13 +1023,13 @@ export class FiscalFlowDashboardComponent {
     const base = 'h-2.5 w-2.5 shrink-0 rounded-full';
     switch (status) {
       case 'ok':
-        return `${base} bg-emerald-500`;
+        return `${base} bg-success`;
       case 'warning':
-        return `${base} bg-amber-500`;
+        return `${base} bg-warning`;
       case 'blocked':
-        return `${base} bg-red-500`;
+        return `${base} bg-error`;
       default:
-        return `${base} bg-gray-300`;
+        return `${base} bg-muted`;
     }
   }
 
@@ -1038,52 +1038,52 @@ export class FiscalFlowDashboardComponent {
       'flex h-7 w-7 shrink-0 items-center justify-center rounded-md';
     switch (status) {
       case 'ok':
-        return `${base} bg-emerald-100 text-emerald-600`;
+        return `${base} bg-success-light text-success`;
       case 'warning':
-        return `${base} bg-amber-100 text-amber-600`;
+        return `${base} bg-warning-light text-warning`;
       case 'blocked':
-        return `${base} bg-red-100 text-red-600`;
+        return `${base} bg-error-light text-error`;
       default:
-        return `${base} bg-gray-100 text-gray-500`;
+        return `${base} bg-[var(--color-surface-secondary)] text-text-secondary`;
     }
   }
 
   stageCardClass(flow: FlowLaneKey, stage: FiscalFlowStage): string {
     const base =
-      'block w-full h-full rounded-lg border border-border bg-surface p-3 text-left transition-colors';
+      'block w-full h-full rounded-lg border border-border bg-[var(--color-surface)] p-3 text-left transition-colors';
     if (stage.status === 'not_applicable') {
       return `${base} opacity-50 cursor-default`;
     }
     if (!this.isStageClickable(flow, stage)) {
       return `${base} cursor-default`;
     }
-    return `${base} cursor-pointer hover:border-primary-600 hover:shadow-sm`;
+    return `${base} cursor-pointer hover:border-primary hover:shadow-sm`;
   }
 
   convergenceCellClass(stage: FiscalFlowStage): string {
     const base =
-      'block w-full h-full rounded-lg border border-border bg-surface p-3 text-left transition-colors';
+      'block w-full h-full rounded-lg border border-border bg-[var(--color-surface)] p-3 text-left transition-colors';
     if (stage.status === 'not_applicable') {
       return `${base} opacity-50 cursor-default`;
     }
-    return `${base} cursor-pointer hover:border-primary-600 hover:shadow-sm`;
+    return `${base} cursor-pointer hover:border-primary hover:shadow-sm`;
   }
 
   pctTextClass(): string {
     const pct = this.checklist()?.completion_pct ?? 0;
-    if (pct >= 100) return 'text-emerald-600';
-    if (pct >= 60) return 'text-amber-600';
-    return 'text-red-600';
+    if (pct >= 100) return 'text-success';
+    if (pct >= 60) return 'text-warning';
+    return 'text-error';
   }
 
   checklistItemClass(item: FiscalConfigChecklistItem): string {
     const base =
       'flex w-full items-center gap-2.5 rounded-lg border p-3 text-left transition-colors';
     const tone = item.complete
-      ? 'border-border bg-surface'
-      : 'border-amber-200 bg-amber-50';
+      ? 'border-border bg-[var(--color-surface)]'
+      : 'border-warning bg-warning-light';
     if (this.checklistRoute(item)) {
-      return `${base} ${tone} cursor-pointer hover:border-primary-600`;
+      return `${base} ${tone} cursor-pointer hover:border-primary`;
     }
     return `${base} ${tone} cursor-default`;
   }

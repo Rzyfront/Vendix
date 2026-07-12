@@ -178,6 +178,22 @@ export class NotificationsDropdownComponent {
       case 'installment_paid':
       case 'credit_completed':
         return '/admin/orders/sales';
+      case 'booking_created':
+      case 'booking_confirmed':
+      case 'booking_cancelled':
+      case 'booking_no_show':
+      case 'booking_reminder':
+      case 'booking_rescheduled':
+      case 'booking_started':
+      case 'booking_completed':
+      case 'booking_arrival':
+      case 'booking_attending':
+      case 'booking_check_in':
+      case 'booking_confirmation_request':
+      case 'booking_auto_cancelled':
+        return d?.booking_id
+          ? `/admin/reservations?booking_id=${d.booking_id}`
+          : '/admin/reservations';
       default:
         return null;
     }
@@ -206,6 +222,24 @@ export class NotificationsDropdownComponent {
       installment_overdue: 'alert-triangle',
       installment_paid: 'check-circle',
       credit_completed: 'trophy',
+      // Bookings — arrival & attending are the most urgent
+      booking_created: 'calendar-plus',
+      booking_confirmed: 'calendar-check',
+      booking_cancelled: 'calendar-x',
+      booking_no_show: 'user-x',
+      booking_reminder: 'bell-ring',
+      booking_rescheduled: 'calendar-clock',
+      booking_started: 'play-circle',
+      booking_completed: 'check-circle-2',
+      booking_arrival: 'door-open',
+      booking_attending: 'user-check',
+      booking_check_in: 'door-open',
+      booking_confirmation_request: 'message-circle',
+      booking_auto_cancelled: 'calendar-x',
+      // Dine-in QR-por-mesa — llamados desde la mesa del comensal
+      table_call_waiter: 'concierge-bell',
+      table_request_bill: 'receipt',
+      table_request_split: 'split',
     };
     return map[type] ?? 'bell';
   }

@@ -20,6 +20,7 @@ import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
 import { WishlistService } from '../../modules/ecommerce/services/wishlist.service';
 import { StoreUiService } from '../../modules/ecommerce/services/store-ui.service';
+import { TableContextService } from '../../modules/ecommerce/services/table-context.service';
 import { SearchAutocompleteComponent } from '../../modules/ecommerce/components/search-autocomplete';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
 import { AuthModalComponent } from './components/auth-modal/auth-modal.component';
@@ -27,6 +28,10 @@ import { QuantityControlComponent } from '../../../shared/components/quantity-co
 import { InfoModalComponent } from './components/info-modal';
 import { FaqModalComponent } from './components/faq-modal';
 import { ButtonComponent } from '../../../shared/components/button/button.component';
+import { ModalComponent } from '../../../shared/components/modal/modal.component';
+import { ToastService } from '../../../shared/components/toast/toast.service';
+import { TableSessionSseService } from '../../modules/ecommerce/services/table-session-sse.service';
+import { parseApiError } from '../../../core/utils/parse-api-error';
 
 // Footer types (matching backend interfaces)
 interface FooterStoreInfo {
@@ -82,6 +87,7 @@ interface FooterSettings {
     InfoModalComponent,
     FaqModalComponent,
     ButtonComponent,
+    ModalComponent,
     CurrencyPipe,
   ],
   templateUrl: './store-ecommerce-layout.component.html',
@@ -93,7 +99,7 @@ export class StoreEcommerceLayoutComponent {
   readonly show_user_menu = signal(false);
   readonly show_mobile_menu = signal(false);
   readonly is_auth_modal_open = signal(false);
-  readonly auth_modal_mode = signal<'login' | 'register'>('login');
+  readonly auth_modal_mode = signal<'login' | 'register' | 'forgot'>('login');
 
   // Footer settings
   readonly footer_settings = signal<FooterSettings | null>(null);
@@ -118,6 +124,9 @@ export class StoreEcommerceLayoutComponent {
   private cart_service = inject(CartService);
   private wishlist_service = inject(WishlistService);
   private store_ui_service = inject(StoreUiService);
+  private table_context_service = inject(TableContextService);
+  private table_sse_service = inject(TableSessionSseService);
+  private toast_service = inject(ToastService);
   private router = inject(Router);
   private viewport_scroller = inject(ViewportScroller);
   private destroy_ref = inject(DestroyRef);
@@ -152,6 +161,17 @@ export class StoreEcommerceLayoutComponent {
   );
   readonly wishlist_badge = toSignal(this.wishlist_badge$, { initialValue: { show: false, count: 0 } });
 
+  // Table QR context (exposed read-only for template)
+  readonly table_context = this.table_context_service;
+  // Live table-session stream (auto-connects on active table token)
+  readonly table_sse = this.table_sse_service;
+
+  // QR dine-in — "Mi cuenta" modal + guest count (GAP-5)
+  readonly is_bill_modal_open = signal(false);
+  readonly guest_count = signal(1);
+  // QR dine-in — bottom-sheet de acciones (móvil). Sólo activo en flujo de mesa.
+  readonly is_actions_sheet_open = signal(false);
+
   // Cart animation and tooltip state
   readonly is_animating = signal(false);
   readonly show_added_tooltip = signal(false);
@@ -166,6 +186,9 @@ export class StoreEcommerceLayoutComponent {
   private wishlist_tooltip_timeout: any;
 
   constructor() {
+    // Restore body scroll if the actions sheet is torn down mid-open.
+    this.destroy_ref.onDestroy(() => this.setBodyScrollLock(false));
+
     // Get store info from domain resolution reactively
     this.domain_service.domainConfig$
       .pipe(takeUntilDestroyed(this.destroy_ref))
@@ -237,6 +260,31 @@ export class StoreEcommerceLayoutComponent {
           this.scrollToTop();
         }
       });
+
+    // QR-por-mesa: hydrate persisted table context, then check ?mesa= token.
+    // Router is NOT configured with withComponentInputBinding (see
+    // reference_route_input_binding memory), so we read query params via
+    // URLSearchParams on window.location.search with is_browser guard.
+    if (this.is_browser) {
+      this.table_context_service.hydrate();
+      const params = new URLSearchParams(window.location.search);
+      const mesaToken = params.get('mesa');
+      // A fresh `?mesa=` token must OVERRIDE a stale hydrated context (a diner
+      // scanning a NEW table's QR). Guarding on `!isActive()` would keep the
+      // old table because hydrate() already made it active. Re-resolve only
+      // when the scanned token differs from the current one (idempotent).
+      if (mesaToken && mesaToken !== this.table_context_service.tableToken()) {
+        this.table_context_service
+          .resolve(mesaToken)
+          .pipe(takeUntilDestroyed(this.destroy_ref))
+          .subscribe({
+            error: () => {
+              // Invalid/expired token — clear any stale context.
+              this.table_context_service.clear();
+            },
+          });
+      }
+    }
   }
 
   private triggerCartAnimation(): void {
@@ -428,6 +476,87 @@ export class StoreEcommerceLayoutComponent {
     } else {
       this.cart_service.clearLocalCart();
     }
+  }
+
+  // ── QR dine-in diner actions (GAP-5) ─────────────────────────────
+
+  /** Notify staff that the table needs a waiter. */
+  callWaiter(): void {
+    this.table_context_service
+      .callWaiter()
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: () => this.toast_service.success('El mesero fue notificado'),
+        error: (err) => this.toast_service.error(parseApiError(err).userMessage),
+      });
+  }
+
+  /** Ask staff to bring the bill to the table. */
+  requestBill(): void {
+    this.table_context_service
+      .requestBill()
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: () =>
+          this.toast_service.success('Pedimos tu cuenta, un mesero se acerca'),
+        error: (err) => this.toast_service.error(parseApiError(err).userMessage),
+      });
+  }
+
+  /**
+   * Ask staff to split the bill. Uses the declared guest count as the number
+   * of equal splits (min 2, as required by the backend contract).
+   */
+  requestSplit(): void {
+    const splits = Math.max(2, this.guest_count());
+    this.table_context_service
+      .requestSplit(splits, 'equal')
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        next: () =>
+          this.toast_service.success(
+            `Le avisamos al mesero para dividir la cuenta en ${splits}`,
+          ),
+        error: (err) => this.toast_service.error(parseApiError(err).userMessage),
+      });
+  }
+
+  /** Load the current bill (called when the "Mi cuenta" modal opens). */
+  loadBill(): void {
+    this.table_context_service
+      .getMyBill()
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        error: (err) => this.toast_service.error(parseApiError(err).userMessage),
+      });
+  }
+
+  /** Open the mobile bottom-sheet of table actions (locks body scroll). */
+  openActionsSheet(): void {
+    this.is_actions_sheet_open.set(true);
+    this.setBodyScrollLock(true);
+  }
+
+  /** Close the mobile bottom-sheet and release the body scroll lock. */
+  closeActionsSheet(): void {
+    this.is_actions_sheet_open.set(false);
+    this.setBodyScrollLock(false);
+  }
+
+  private setBodyScrollLock(locked: boolean): void {
+    if (!this.is_browser) return;
+    document.body.style.overflow = locked ? 'hidden' : '';
+  }
+
+  /** Persist the number of guests at the table (422 if over capacity). */
+  onGuestCountChange(count: number): void {
+    this.guest_count.set(count);
+    this.table_context_service
+      .setGuests(count)
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe({
+        error: (err) => this.toast_service.error(parseApiError(err).userMessage),
+      });
   }
 
   // Footer helper methods

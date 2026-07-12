@@ -307,15 +307,15 @@ class ChartErrorBoundary extends Component<
 }
 
 const styles = StyleSheet.create({
+  container: {
+    gap: spacing[3],
+  },
   title: {
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
     fontFamily: typography.fontFamily,
     color: colors.text.secondary,
     marginBottom: spacing[3],
-  },
-  container: {
-    flex: 1,
   },
   chartWrapper: {
     paddingTop: spacing[2],

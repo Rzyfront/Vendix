@@ -188,6 +188,13 @@ export const storeEcommercePublicRoutes: Routes = [
           ),
       },
       {
+        path: 'fila/volver',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/queue-rejoin/queue-rejoin.component').then(
+            (c) => c.QueueRejoinComponent,
+          ),
+      },
+      {
         path: 'factura/:token',
         loadComponent: () =>
           import('../../public/ecommerce/pages/invoice-data/invoice-data.component').then(
@@ -199,6 +206,15 @@ export const storeEcommercePublicRoutes: Routes = [
         loadComponent: () =>
           import('../../private/modules/ecommerce/pages/data-collection-form/data-collection-form.component').then(
             (c) => c.DataCollectionFormComponent,
+          ),
+      },
+      {
+        // Public customer password reset (link from recovery email).
+        // Token arrives as a query param: /reset-password?token=...
+        path: 'reset-password',
+        loadComponent: () =>
+          import('../../public/ecommerce/pages/reset-password/reset-password.component').then(
+            (c) => c.ResetPasswordComponent,
           ),
       },
       {

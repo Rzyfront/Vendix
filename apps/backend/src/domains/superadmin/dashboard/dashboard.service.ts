@@ -7,6 +7,12 @@ export class DashboardService {
   constructor(private readonly prisma: GlobalPrismaService) {}
 
   async getDashboardStats() {
+    // TIMEZONE POLICY (platform scope): this superadmin dashboard aggregates
+    // ACROSS stores that may live in different timezones, so no single store tz
+    // is meaningful — UTC is the neutral reference and the day/month boundaries
+    // below are deliberately UTC (`Date.UTC` / `setUTCHours`). This is NOT the
+    // QUI-487 store day-boundary bug; store-scoped analytics use the store tz via
+    // common/utils/store-timezone.util.ts. See docs/architecture/store-timezone.md.
     const now = new Date();
     const currentMonthStart = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),

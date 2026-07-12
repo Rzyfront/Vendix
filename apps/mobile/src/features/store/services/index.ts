@@ -1,4 +1,11 @@
 export { ProductService } from './product.service';
+export { PromotionsService } from './promotions.service';
+export { CouponsService } from './coupons.service';
+export { SocialSalesService } from './social-sales.service';
+export { AnunciosService } from './anuncios.service';
+export type { AnunciosApiResponse, StreamGenerateOptions } from './anuncios.service';
+export { AdCreativeAssetService } from './ad-creative-asset.service';
+export type { AssetOpResult } from './ad-creative-asset.service';
 export { OrderService } from './order.service';
 export { DashboardService, AnalyticsService } from './dashboard.service';
 export { AnalyticsDetailService } from './analytics.service';

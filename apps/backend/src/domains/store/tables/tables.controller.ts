@@ -29,6 +29,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
  *   GET    /api/store/tables            list (paginated, filterable)
  *   GET    /api/store/tables/floor-map  one-shot floor projection
  *   GET    /api/store/tables/:id        detail + active session
+ *   GET    /api/store/tables/:id/qr     QR code (public_url + qr_data_url)
  *   PATCH  /api/store/tables/:id        partial update
  *   DELETE /api/store/tables/:id        hard delete (rejected if sessions exist)
  *
@@ -121,6 +122,25 @@ export class TablesController {
     } catch (error: any) {
       return this.responseService.error(
         error.message || 'Error al obtener la mesa',
+        error.response?.message || error.message,
+        error.status || 400,
+        error.error_code,
+      );
+    }
+  }
+
+  @Get(':id/qr')
+  @Permissions('store:tables:read')
+  async getQr(@Param('id', ParseIntPipe) id: number) {
+    try {
+      const result = await this.tablesService.getQr(id);
+      return this.responseService.success(
+        result,
+        'QR de mesa generado exitosamente',
+      );
+    } catch (error: any) {
+      return this.responseService.error(
+        error.message || 'Error al generar el QR de la mesa',
         error.response?.message || error.message,
         error.status || 400,
         error.error_code,

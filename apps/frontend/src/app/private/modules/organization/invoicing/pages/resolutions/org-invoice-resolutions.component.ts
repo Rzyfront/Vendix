@@ -15,11 +15,13 @@ import {
   ModalComponent,
   OptionsDropdownComponent,
   ResponsiveDataViewComponent,
+  SaveRequirementsModalComponent,
   StatsComponent,
   TableAction,
   TableColumn,
 } from '../../../../../../shared/components/index';
 import { ApiErrorService } from '../../../../../../core/services/api-error.service';
+import { FiscalRequirementsService } from '../../../../../../shared/services/fiscal-requirements.service';
 import { AuthFacade } from '../../../../../../core/store/auth/auth.facade';
 import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 import { OrgFiscalScopeSelectorComponent } from '../../../shared/components/org-fiscal-scope-selector.component';
@@ -42,6 +44,7 @@ import {
     OptionsDropdownComponent,
     ReactiveFormsModule,
     ResponsiveDataViewComponent,
+    SaveRequirementsModalComponent,
     StatsComponent,
     OrgFiscalScopeSelectorComponent,
   ],
@@ -236,6 +239,14 @@ import {
           </app-button>
         </div>
       </app-modal>
+
+      <!-- Modal de requisitos fiscales: explica un 4xx fiscal que bloquea
+           crear/actualizar/eliminar una resolucion DIAN con su CTA. -->
+      <app-save-requirements-modal
+        [(isOpen)]="fiscalReq.isOpen"
+        [requirements]="fiscalReq.requirements()"
+        (action)="fiscalReq.handleAction($event)"
+      />
     </div>
   `,
 })
@@ -243,6 +254,7 @@ export class OrgInvoiceResolutionsComponent {
   private readonly service = inject(OrgInvoicingService);
   private readonly auth = inject(AuthFacade);
   private readonly errors = inject(ApiErrorService);
+  readonly fiscalReq = inject(FiscalRequirementsService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly destroyRef = inject(DestroyRef);
@@ -504,10 +516,15 @@ export class OrgInvoiceResolutionsComponent {
         this.loadData();
       },
       error: (err) => {
+        this.savingResolution.set(false);
+        // Restriccion fiscal reconocida: explicarla con el modal de
+        // requisitos (mismo CTA que el wizard) en lugar del banner crudo.
+        if (this.fiscalReq.presentFiscalError(err)) {
+          return;
+        }
         this.errorMessage.set(
           this.errors.humanize(err, 'No se pudo guardar la resolución.'),
         );
-        this.savingResolution.set(false);
       },
     });
   }
@@ -522,6 +539,11 @@ export class OrgInvoiceResolutionsComponent {
       .subscribe({
         next: () => this.loadData(),
         error: (err) => {
+          // Restriccion fiscal reconocida: explicarla con el modal de
+          // requisitos en lugar del banner crudo.
+          if (this.fiscalReq.presentFiscalError(err)) {
+            return;
+          }
           this.errorMessage.set(
             this.errors.humanize(err, 'No se pudo eliminar la resolución.'),
           );

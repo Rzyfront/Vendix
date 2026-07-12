@@ -9,6 +9,12 @@ interface StatsCardProps extends ViewProps {
   icon?: ReactNode | string;
   description?: string;
   /**
+   * Color override para el texto `description`. Si se omite, se usa
+   * el verde esmeralda por defecto (#10b981 — paridad web
+   * `text-emerald-500`).
+   */
+  descriptionColor?: string;
+  /**
    * Secondary highlighted text rendered below the value with brand color.
    * Mirrors the web `app-stats` `smallText` prop (rendered as `text-emerald-500` on mobile).
    */
@@ -129,6 +135,7 @@ export function StatsCard({
   value,
   icon,
   description,
+  descriptionColor,
   smallText,
   smallTextColor = '#10b981',
   iconBg = '#dbeafe',
@@ -176,7 +183,10 @@ export function StatsCard({
           {value}
         </Text>
         {description && (
-          <Text style={styles.description} numberOfLines={1}>
+          <Text
+            style={[styles.description, descriptionColor ? { color: descriptionColor } : null]}
+            numberOfLines={1}
+          >
             {description}
           </Text>
         )}

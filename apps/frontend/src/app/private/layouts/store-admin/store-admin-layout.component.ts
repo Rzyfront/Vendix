@@ -35,6 +35,8 @@ import { WeeklyReportBannerComponent } from '../../modules/store/weekly-report/c
 import { WeeklyReportStoriesComponent } from '../../modules/store/weekly-report/components/weekly-report-stories/weekly-report-stories.component';
 import { WeeklyReportSnapshot } from '../../modules/store/weekly-report/interfaces/weekly-report.interface';
 import { WeeklyReportService } from '../../modules/store/weekly-report/services/weekly-report.service';
+import { PqrAdminService } from '../../modules/store/pqr/services/pqr-admin.service';
+import { ArrivalBannerComponent } from '../components/arrival-banner/arrival-banner.component';
 import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 import { MembershipAmbientAccessService } from '../../../core/services/membership-ambient-access.service';
 import type { StoreSettings } from '../../../core/models/store-settings.interface';
@@ -56,6 +58,7 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
     FiscalGateOutletComponent,
     WeeklyReportBannerComponent,
     WeeklyReportStoriesComponent,
+    ArrivalBannerComponent,
   ],
   template: `
     <div class="admin-layout-shell flex">
@@ -166,6 +169,9 @@ import { map, distinctUntilChanged, skip, switchMap } from 'rxjs/operators';
         <app-subscription-banner />
         <app-fiscal-obligation-banner />
 
+        <!-- Customer arrival banner (booking check-in alerts) -->
+        <app-arrival-banner />
+
         <!-- Weekly Report banner (Tu Semana en Vendix) -->
         @if (currentStoreId()) {
           <app-weekly-report-banner
@@ -238,6 +244,7 @@ export class StoreAdminLayoutComponent {
 
   // ─── Weekly Report (Tu Semana en Vendix) ───────────────────────────────
   private readonly weeklyReportService = inject(WeeklyReportService);
+  private readonly pqrAdminService = inject(PqrAdminService);
   /** Store actual para condicionar la inyección al contexto STORE_ADMIN. */
   readonly currentStoreId = computed<number | null>(
     () => (this.storeSignal() as any)?.id ?? null,
@@ -776,7 +783,7 @@ export class StoreAdminLayoutComponent {
           route: '/admin/help/support',
         },
         {
-          label: 'Mis Solicitudes',
+          label: 'PQRS',
           icon: 'message-square',
           route: '/admin/pqrs',
         },
@@ -882,15 +889,29 @@ export class StoreAdminLayoutComponent {
       ]),
   );
 
+  /**
+   * True when the current store has at least one PQR. Drives the
+   * visibility of the "PQRS" sidebar entry — we hide it for stores with
+   * zero PQRs (and re-show it as soon as the count goes above zero). Fed
+   * by an HTTP fetch on store-context activation. Safe default `false`
+   * so the entry stays hidden until we know otherwise; better to hide
+   * than to flash a brand-new store with an empty mailbox.
+   */
+  readonly hasStorePqrs = signal<boolean>(false);
+
   // Reactive menu items as signal via toSignal.
-  // Reacts to `canManageUsers`: the "Usuarios" entry is stripped from the
-  // base tree for users who cannot manage users, then the resulting tree is
-  // passed through the existing panel_ui/scope/fiscal filter pipeline.
+  // Reacts to BOTH `canManageUsers` (Usuarios gate) and `hasStorePqrs`
+  // (PQRS gate) — combineLatest emits only after both signals have
+  // produced at least one value, so the menu tree stabilizes immediately
+  // and updates on either condition flip.
   readonly filteredMenuItems = toSignal(
-    toObservable(this.canManageUsers).pipe(
-      switchMap((canManageUsers) =>
+    combineLatest([
+      toObservable(this.canManageUsers),
+      toObservable(this.hasStorePqrs),
+    ]).pipe(
+      switchMap(([canManageUsers, hasStorePqrs]) =>
         this.menuFilterService.filterMenuItems(
-          this.getBaseMenuItems(canManageUsers),
+          this.getBaseMenuItems(canManageUsers, hasStorePqrs),
         ),
       ),
     ),
@@ -898,22 +919,46 @@ export class StoreAdminLayoutComponent {
   );
 
   /**
-   * Returns the base menu tree, removing the "Usuarios" entry from the
-   * "Configuración" group when the logged-in user cannot manage users.
-   * Visibility-only defense in depth — the route guard is the real boundary.
+   * Returns the base menu tree with two authorizacion-driven entry
+   * removals applied:
+   *   - "Usuarios" hidden when the logged-in user cannot manage users.
+   *   - "PQRS" hidden when the store has no PQRs.
+   *
+   * Both checks are visibility-only — the route guards
+   * (`manageUsersGuard`, the PQR list's own existence) are the real
+   * security boundary. Filters run BEFORE panel_ui/scope/fiscal so they
+   * stay scoped to this layout.
    */
-  private getBaseMenuItems(canManageUsers: boolean): MenuItem[] {
-    if (canManageUsers) return this.allMenuItems;
-    return this.allMenuItems.map((item) =>
-      item.children
-        ? {
-            ...item,
-            children: item.children.filter(
-              (child) => child.route !== '/admin/settings/users',
-            ),
-          }
-        : item,
-    );
+  private getBaseMenuItems(
+    canManageUsers: boolean,
+    hasStorePqrs: boolean,
+  ): MenuItem[] {
+    let items = this.allMenuItems;
+    if (!canManageUsers) {
+      items = items.map((item) =>
+        item.children
+          ? {
+              ...item,
+              children: item.children.filter(
+                (child) => child.route !== '/admin/settings/users',
+              ),
+            }
+          : item,
+      );
+    }
+    if (!hasStorePqrs) {
+      items = items.map((item) =>
+        item.children
+          ? {
+              ...item,
+              children: item.children.filter(
+                (child) => child.route !== '/admin/pqrs',
+              ),
+            }
+          : item,
+      );
+    }
+    return items;
   }
 
   readonly posTourConfig = POS_TOUR_CONFIG;
@@ -979,6 +1024,32 @@ export class StoreAdminLayoutComponent {
         this.weeklyReportSnapshot.set(report);
         this.showWeeklyReportTakeover.set(true);
       }
+    });
+
+    // ── PQR stats: hidratar `hasStorePqrs` cuando hay store context ──
+    // The fetch fires when `currentStoreId` becomes non-null. We don't
+    // re-fetch on store-type changes — env switches go through a fresh
+    // layout mount which re-runs this effect.
+    effect(() => {
+      const storeId = this.currentStoreId();
+      if (!storeId) return;
+      // Guard against re-entry while an in-flight request is still pending
+      // so we don't kick off duplicate fetches if the signal changes more
+      // than once before the response lands.
+      this.pqrAdminService
+        .getStats()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: (res) => {
+            const total = res?.data?.total ?? 0;
+            this.hasStorePqrs.set(total > 0);
+          },
+          error: () => {
+            // Safe default: leave the entry hidden. Better to require
+            // an explicit refresh than to show a broken inbox.
+            this.hasStorePqrs.set(false);
+          },
+        });
     });
 
     // Mark sidebar as ready after first render

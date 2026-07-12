@@ -15,6 +15,7 @@ jobs:
     outputs:
       frontend: ${{ steps.filter.outputs.frontend }}
       mobile: ${{ steps.filter.outputs.mobile }}
+      backend: ${{ steps.filter.outputs.backend }}
     steps:
       - uses: dorny/paths-filter@v3
         id: filter
@@ -24,6 +25,9 @@ jobs:
               - 'apps/frontend/**'
             mobile:
               - 'apps/mobile/**'
+            backend:
+              - 'apps/backend/**'
+              - 'scripts/tz-audit.sh'
 
   zoneless-audit:
     name: Zoneless Audit
@@ -45,10 +49,26 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+      # NOTA: `cache:` se omite intencionalmente. Pasar `false` o string
+      # vacío rompe el action con 'Caching for false is not supported'.
+      # Ver docs/setup-node@v4 — omitir el parámetro es la forma soportada
+      # de desactivar npm caching.
       - run: npm ci
       - run: chmod +x scripts/zoneless-audit.sh
       - run: ./scripts/zoneless-audit.sh
+
+  tz-audit:
+    name: TZ Audit
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    # Pure grep guard over the checked-out tree (no build/deps needed): fails if
+    # any module reintroduces UTC day/month bucketing outside the store-timezone
+    # primitive (QUI-487). See scripts/tz-audit.sh + docs/architecture/store-timezone.md.
+    steps:
+      - uses: actions/checkout@v4
+      - run: chmod +x scripts/tz-audit.sh
+      - run: ./scripts/tz-audit.sh
 
   mobile-typecheck:
     name: Mobile Typecheck
@@ -60,7 +80,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
+      # NOTA: `cache:` se omite intencionalmente. Pasar `false` o string
+      # vacío rompe el action con 'Caching for false is not supported'. Sin
+      # este parámetro el action funciona correctamente y desactiva cache
+      # por defecto. Ver docs/setup-node@v4.
       - run: npm ci
       - run: npx tsc --noEmit
         working-directory: apps/mobile

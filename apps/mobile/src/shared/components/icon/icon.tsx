@@ -23,6 +23,7 @@ import {
   Calculator,
   Wallet,
   BarChart3,
+  BarChart2,
   Settings,
   Shield,
   Bot,
@@ -48,6 +49,9 @@ import {
   Clock,
   Truck,
   RotateCcw,
+  RotateCw,
+  FlipHorizontal,
+  FlipVertical,
   Ban,
   Tag,
   Barcode,
@@ -56,6 +60,7 @@ import {
   MoreVertical,
   MoreHorizontal,
   Share,
+  Share2,
   Printer,
   RefreshCw,
   Sliders,
@@ -72,6 +77,8 @@ import {
   Bell,
   HelpCircle,
   Upload,
+  UploadCloud,
+  Link,
   Maximize2,
   Minimize2,
   Info,
@@ -409,6 +416,8 @@ import {
   ArrowDown,
   ArrowUp,
   CircleSlash,
+  ToggleRight,
+  ToggleLeft,
   Ban as BanIcon,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
@@ -438,6 +447,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   calculator: Calculator,
   wallet: Wallet,
   'bar-chart': BarChart3,
+  // Paridad con apps/frontend (lucide-react) — `bar-chart-2` existe como
+  // nombre estable del icono. lucide-react-native lo provee directamente.
+  'bar-chart-2': BarChart2,
   // Mantenemos `bar-chart-3` mapeado a `ChartBar` para paridad con
   // apps/frontend (lucide-react), donde ese nombre existe pero RN no lo
   // provee. El alias `bar-chart` usa `BarChart3` directamente.
@@ -467,6 +479,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   clock: Clock,
   truck: Truck,
   'rotate-ccw': RotateCcw,
+  'rotate-cw': RotateCw,
+  'flip-horizontal': FlipHorizontal,
+  'flip-vertical': FlipVertical,
   ban: Ban,
   tag: Tag,
   barcode: Barcode,
@@ -475,6 +490,7 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'more-vertical': MoreVertical,
   'more-horizontal': MoreHorizontal,
   share: Share,
+  'share-2': Share2,
   printer: Printer,
   refresh: RefreshCw,
   sliders: Sliders,
@@ -492,6 +508,7 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   bell: Bell,
   'help-circle': HelpCircle,
   upload: Upload,
+  'upload-cloud': UploadCloud,
   'maximize-2': Maximize2,
   'minimize-2': Minimize2,
   info: Info,
@@ -500,6 +517,7 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'book-open': BookOpen,
   banknote: Banknote,
   'link-2': Link2,
+  link: Link,
   circle: Circle,
   'package-check': PackageCheck,
   'package-plus': PackagePlus,
@@ -831,6 +849,8 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'pencil-line': PencilLine,
   'edit-3': Edit3,
   'circle-slash': CircleSlash,
+  'toggle-right': ToggleRight,
+  'toggle-left': ToggleLeft,
   'ban-solid': BanIcon,
 };
 

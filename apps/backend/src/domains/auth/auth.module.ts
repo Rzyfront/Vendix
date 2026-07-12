@@ -14,6 +14,7 @@ import { OrganizationsModule } from '../organization/organizations/organizations
 import { OnboardingModule } from '../organization/onboarding/onboarding.module';
 import { ResponseModule } from '@common/responses/response.module';
 import { LegalAcceptancesModule } from './legal-acceptances/legal-acceptances.module';
+import { CustomersModule } from '../store/customers/customers.module';
 import {
   RateLimitMiddleware,
   LoginRateLimitMiddleware,
@@ -28,6 +29,7 @@ import { TOKEN_DEFAULTS } from './constants/token.constants';
     PrismaModule,
     EmailModule,
     OrganizationsModule,
+    CustomersModule,
     // AuditModule, // Removed to use global CommonAuditModule
     OnboardingModule,
     LegalAcceptancesModule,
@@ -87,6 +89,8 @@ export class AuthModule {
         { path: 'auth/register-staff', method: RequestMethod.POST },
         { path: 'auth/forgot-password', method: RequestMethod.POST },
         { path: 'auth/reset-password', method: RequestMethod.POST },
+        { path: 'auth/forgot-customer-password', method: RequestMethod.POST },
+        { path: 'auth/reset-customer-password', method: RequestMethod.POST },
       );
   }
 }

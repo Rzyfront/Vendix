@@ -73,11 +73,11 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
   standalone: true,
   imports: [FormsModule, ButtonComponent, IconComponent, SelectorComponent],
   template: `
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
+    <div class="bg-[var(--color-surface)] rounded-lg shadow">
       <!-- Selectors -->
-      <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+      <div class="p-4 border-b border-border">
         <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+          <h2 class="text-lg font-semibold text-text-primary">
             Certificados de Retención
           </h2>
           <div class="grid grid-cols-2 gap-2 md:flex md:flex-wrap md:gap-3">
@@ -154,22 +154,22 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
       <div class="p-4">
         @if (loading()) {
           <div class="flex items-center justify-center py-16">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
           </div>
         } @else if (kind() === 'supplier_practiced' && practicedCertificate(); as cert) {
           <!-- Certificate header -->
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between mb-4">
             <div>
-              <h3 class="text-base font-bold text-gray-900 dark:text-white uppercase">
+              <h3 class="text-base font-bold text-text-primary uppercase">
                 Certificado de Retención en la Fuente
               </h3>
-              <p class="text-sm text-gray-500 dark:text-gray-400">
+              <p class="text-sm text-text-secondary">
                 Año Gravable {{ cert.year }} · Art. 381 Estatuto Tributario
               </p>
-              <div class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+              <div class="mt-2 text-sm text-text-primary">
                 <p class="font-semibold">{{ cert.supplier_name }}</p>
                 @if (cert.supplier_nit) {
-                  <p class="text-gray-500 dark:text-gray-400">NIT: {{ cert.supplier_nit }}</p>
+                  <p class="text-text-secondary">NIT: {{ cert.supplier_nit }}</p>
                 }
               </div>
             </div>
@@ -180,20 +180,20 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
           </div>
 
           <!-- Monthly breakdown -->
-          <div class="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead class="bg-gray-50 dark:bg-gray-900">
+          <div class="overflow-x-auto border border-border rounded-lg">
+            <table class="min-w-full divide-y divide-[var(--color-border)]">
+              <thead class="bg-[var(--color-surface-secondary)]">
                 <tr>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mes</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Concepto</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Base</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Tarifa</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Valor Retenido</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase">Mes</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase">Concepto</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Base</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Tarifa</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Valor Retenido</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody class="divide-y divide-[var(--color-border)]">
                 @for (row of cert.monthly_breakdown; track $index) {
-                  <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <tr class="hover:bg-[var(--color-surface-secondary)]">
                     <td class="px-4 py-3 text-sm">{{ monthLabel(row.month) }}</td>
                     <td class="px-4 py-3 text-sm">{{ row.concept }}</td>
                     <td class="px-4 py-3 text-sm text-right font-mono">{{ formatCurrency(row.base) }}</td>
@@ -203,14 +203,14 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
                 }
                 @empty {
                   <tr>
-                    <td colspan="5" class="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colspan="5" class="px-4 py-8 text-center text-sm text-text-secondary">
                       Sin retenciones registradas para este proveedor en {{ cert.year }}
                     </td>
                   </tr>
                 }
               </tbody>
               @if (cert.monthly_breakdown.length > 0) {
-                <tfoot class="bg-gray-50 dark:bg-gray-900">
+                <tfoot class="bg-[var(--color-surface-secondary)]">
                   <tr>
                     <td colspan="2" class="px-4 py-3 text-sm font-bold text-right">Totales</td>
                     <td class="px-4 py-3 text-sm text-right font-mono font-bold">{{ formatCurrency(cert.total_base) }}</td>
@@ -225,16 +225,16 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
           <!-- Certificate header -->
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between mb-4">
             <div>
-              <h3 class="text-base font-bold text-gray-900 dark:text-white uppercase">
+              <h3 class="text-base font-bold text-text-primary uppercase">
                 Certificado de Retención Sufrida
               </h3>
-              <p class="text-sm text-gray-500 dark:text-gray-400">
+              <p class="text-sm text-text-secondary">
                 Año Gravable {{ cert.year }} · Art. 381 Estatuto Tributario
               </p>
-              <div class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+              <div class="mt-2 text-sm text-text-primary">
                 <p class="font-semibold">{{ cert.counterparty_name }}</p>
                 @if (cert.counterparty_nit) {
-                  <p class="text-gray-500 dark:text-gray-400">NIT/CC: {{ cert.counterparty_nit }}</p>
+                  <p class="text-text-secondary">NIT/CC: {{ cert.counterparty_nit }}</p>
                 }
               </div>
             </div>
@@ -245,21 +245,21 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
           </div>
 
           <!-- Monthly breakdown -->
-          <div class="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead class="bg-gray-50 dark:bg-gray-900">
+          <div class="overflow-x-auto border border-border rounded-lg">
+            <table class="min-w-full divide-y divide-[var(--color-border)]">
+              <thead class="bg-[var(--color-surface-secondary)]">
                 <tr>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mes</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Concepto</th>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Base</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Tarifa</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Valor Retenido</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase">Mes</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase">Concepto</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase">Tipo</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Base</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Tarifa</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Valor Retenido</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody class="divide-y divide-[var(--color-border)]">
                 @for (row of cert.monthly_breakdown; track $index) {
-                  <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <tr class="hover:bg-[var(--color-surface-secondary)]">
                     <td class="px-4 py-3 text-sm">{{ monthLabel(row.month) }}</td>
                     <td class="px-4 py-3 text-sm">{{ row.concept }}</td>
                     <td class="px-4 py-3 text-sm uppercase">{{ row.withholding_type }}</td>
@@ -270,14 +270,14 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
                 }
                 @empty {
                   <tr>
-                    <td colspan="6" class="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colspan="6" class="px-4 py-8 text-center text-sm text-text-secondary">
                       Sin retenciones sufridas registradas en {{ cert.year }}
                     </td>
                   </tr>
                 }
               </tbody>
               @if (cert.monthly_breakdown.length > 0) {
-                <tfoot class="bg-gray-50 dark:bg-gray-900">
+                <tfoot class="bg-[var(--color-surface-secondary)]">
                   <tr>
                     <td colspan="3" class="px-4 py-3 text-sm font-bold text-right">Totales</td>
                     <td class="px-4 py-3 text-sm text-right font-mono font-bold">{{ formatCurrency(cert.total_base) }}</td>
@@ -292,16 +292,16 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
           <!-- Certificate header -->
           <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between mb-4">
             <div>
-              <h3 class="text-base font-bold text-gray-900 dark:text-white uppercase">
+              <h3 class="text-base font-bold text-text-primary uppercase">
                 Certificado de Ingresos y Retenciones
               </h3>
-              <p class="text-sm text-gray-500 dark:text-gray-400">
+              <p class="text-sm text-text-secondary">
                 Formulario 220 DIAN · Año Gravable {{ cert.year }}
               </p>
-              <div class="mt-2 text-sm text-gray-700 dark:text-gray-300">
+              <div class="mt-2 text-sm text-text-primary">
                 <p class="font-semibold">{{ cert.employee_name }}</p>
                 @if (cert.employee_document_number) {
-                  <p class="text-gray-500 dark:text-gray-400">
+                  <p class="text-text-secondary">
                     {{ (cert.employee_document_type || 'CC').toUpperCase() }}: {{ cert.employee_document_number }}
                   </p>
                 }
@@ -314,20 +314,20 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
           </div>
 
           <!-- Monthly breakdown -->
-          <div class="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead class="bg-gray-50 dark:bg-gray-900">
+          <div class="overflow-x-auto border border-border rounded-lg">
+            <table class="min-w-full divide-y divide-[var(--color-border)]">
+              <thead class="bg-[var(--color-surface-secondary)]">
                 <tr>
-                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mes</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Salario</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Aporte Salud</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Aporte Pensión</th>
-                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Retefuente</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase">Mes</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Salario</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Aporte Salud</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Aporte Pensión</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Retefuente</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody class="divide-y divide-[var(--color-border)]">
                 @for (row of cert.monthly_breakdown; track $index) {
-                  <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <tr class="hover:bg-[var(--color-surface-secondary)]">
                     <td class="px-4 py-3 text-sm">{{ monthLabel(row.month) }}</td>
                     <td class="px-4 py-3 text-sm text-right font-mono">{{ formatCurrency(row.salary) }}</td>
                     <td class="px-4 py-3 text-sm text-right font-mono">{{ formatCurrency(row.health_deduction) }}</td>
@@ -337,14 +337,14 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
                 }
                 @empty {
                   <tr>
-                    <td colspan="5" class="px-4 py-8 text-center text-sm text-gray-500">
+                    <td colspan="5" class="px-4 py-8 text-center text-sm text-text-secondary">
                       Sin nómina registrada para este empleado en {{ cert.year }}
                     </td>
                   </tr>
                 }
               </tbody>
               @if (cert.monthly_breakdown.length > 0) {
-                <tfoot class="bg-gray-50 dark:bg-gray-900">
+                <tfoot class="bg-[var(--color-surface-secondary)]">
                   <tr>
                     <td class="px-4 py-3 text-sm font-bold text-right">Totales</td>
                     <td class="px-4 py-3 text-sm text-right font-mono font-bold">{{ formatCurrency(cert.total_salaries) }}</td>
@@ -357,7 +357,7 @@ const SUFFERED_COUNTERPARTY_OPTIONS: SelectorOption[] = [
             </table>
           </div>
         } @else {
-          <div class="flex flex-col items-center justify-center py-16 text-gray-400">
+          <div class="flex flex-col items-center justify-center py-16 text-text-secondary">
             <app-icon name="printer" [size]="48"></app-icon>
             <p class="mt-4 text-base">{{ emptyStateHint() }}</p>
           </div>

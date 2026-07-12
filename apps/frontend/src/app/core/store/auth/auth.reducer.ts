@@ -20,6 +20,7 @@ export interface AuthState {
   onboarding_completed: boolean;
   onboarding_current_step?: string;
   onboarding_completed_steps: string[];
+  password_reset_email_sent: boolean;
 }
 
 export const initialAuthState: AuthState = {
@@ -35,6 +36,7 @@ export const initialAuthState: AuthState = {
   is_authenticated: false,
   onboarding_completed: false,
   onboarding_completed_steps: [],
+  password_reset_email_sent: false,
 };
 
 export const authReducer = createReducer(
@@ -264,6 +266,57 @@ export const authReducer = createReducer(
       typeof error === 'string'
         ? error
         : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+  })),
+
+  // Forgot Customer Password
+  on(AuthActions.forgotCustomerPassword, (state) => ({
+    ...state,
+    loading: true,
+    error: null,
+    password_reset_email_sent: false,
+  })),
+
+  on(AuthActions.forgotCustomerPasswordSuccess, (state) => ({
+    ...state,
+    loading: false,
+    password_reset_email_sent: true,
+  })),
+
+  on(AuthActions.forgotCustomerPasswordFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+    password_reset_email_sent: false,
+  })),
+
+  // Reset Customer Password
+  on(AuthActions.resetCustomerPassword, (state) => ({
+    ...state,
+    loading: true,
+    error: null,
+  })),
+
+  on(AuthActions.resetCustomerPasswordSuccess, (state) => ({
+    ...state,
+    loading: false,
+  })),
+
+  on(AuthActions.resetCustomerPasswordFailure, (state, { error }) => ({
+    ...state,
+    loading: false,
+    error:
+      typeof error === 'string'
+        ? error
+        : (error as NormalizedApiPayload) || extractApiErrorMessage(error),
+  })),
+
+  on(AuthActions.clearPasswordResetState, (state) => ({
+    ...state,
+    error: null,
+    password_reset_email_sent: false,
   })),
 
   // Verify Email

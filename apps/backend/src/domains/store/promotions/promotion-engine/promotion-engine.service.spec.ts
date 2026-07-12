@@ -486,4 +486,279 @@ describe('PromotionEngineService - quoteDiscounts', () => {
       ]);
     });
   });
+
+  describe('quantity_tiered - aggregated by scope', () => {
+    // Tier factory: mirrors PromotionQuantityTierRecord. `max_quantity` is
+    // number|null (null = open-ended top band).
+    function buildTier(overrides: Partial<Record<string, unknown>> = {}) {
+      return {
+        id: 1,
+        promotion_id: 100,
+        min_quantity: 2,
+        max_quantity: null as number | null,
+        value: 10,
+        type: 'percentage',
+        sort_order: 0,
+        ...overrides,
+      };
+    }
+
+    // Case 1 — THE reproduced bug: an order-scope tier whose min_quantity is 2
+    // must fire when the cart carries two DISTINCT single-unit lines, because
+    // scopedQty aggregates quantity across the scope (2), not per line (1+1).
+    // With the old per-line engine each line saw qty=1 < 2 and got nothing.
+    it('order scope: 2 distinct lines qty1 each aggregate to scopedQty=2 and apply the tier', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 101,
+          name: 'Escala orden 15% desde 2 und',
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 101, min_quantity: 2, max_quantity: null, value: 15, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'l1', product_id: 1, unit_price: 75000, quantity: 1 },
+          { line_id: 'l2', product_id: 2, unit_price: 43500, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // applicableTotal = 118500; 15% = 17775 spread over both lines.
+      expect(result.total_discount).toBe(17775);
+      const l1 = result.items.find((i) => i.line_id === 'l1')!;
+      const l2 = result.items.find((i) => i.line_id === 'l2')!;
+      expect(l1.promotion_discount).toBe(11250); // 75000 * 15%
+      expect(l2.promotion_discount).toBe(6525); // 43500 * 15%
+      expect(l1.promotion_ids).toEqual([101]);
+      expect(l2.promotion_ids).toEqual([101]);
+      expect(result.applied_promotions[0].promotion_id).toBe(101);
+      expect(result.applied_promotions[0].applicable_item_ids).toEqual(['l1', 'l2']);
+      expect(result.order_promotions_snapshot).toEqual([
+        { promotion_id: 101, discount_amount: 17775 },
+      ]);
+    });
+
+    // Case 2 — category scope aggregates quantity across category lines.
+    it('category scope: 2 products of the same category qty1 each trigger the tier by sum', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 102,
+          name: 'Categoria 5 escala 10% desde 2 und',
+          scope: 'category',
+          rule_type: 'quantity_tiered',
+          promotion_categories: [{ category_id: 5 }],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 102, min_quantity: 2, max_quantity: null, value: 10, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'a', product_id: 1, category_id: 5, unit_price: 100, quantity: 1 },
+          { line_id: 'b', product_id: 2, category_id: 5, unit_price: 200, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // scopedQty = 2 -> 10% tier. applicableTotal = 300 -> 30.
+      expect(result.total_discount).toBe(30);
+      const a = result.items.find((i) => i.line_id === 'a')!;
+      const b = result.items.find((i) => i.line_id === 'b')!;
+      expect(a.promotion_discount).toBe(10); // 100 * 10%
+      expect(b.promotion_discount).toBe(20); // 200 * 10%
+      expect(result.applied_promotions[0].promotion_id).toBe(102);
+    });
+
+    // Case 3 — product scope with base + variant sharing the same product_id.
+    // Two lines with product_id=10 (base + a variant) aggregate to scopedQty=2.
+    it('product scope: base + variant lines (same product_id) qty1 each aggregate to trigger the tier', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 103,
+          name: 'Producto 10 escala 10% desde 2 und',
+          scope: 'product',
+          rule_type: 'quantity_tiered',
+          promotion_products: [{ product_id: 10 }],
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 103, min_quantity: 2, max_quantity: null, value: 10, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'base', product_id: 10, unit_price: 100, quantity: 1 },
+          { line_id: 'variant', product_id: 10, variant_id: 55, unit_price: 150, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // scopedQty = 2 -> 10% tier on each line. 10 + 15 = 25.
+      expect(result.total_discount).toBe(25);
+      const base = result.items.find((i) => i.line_id === 'base')!;
+      const variant = result.items.find((i) => i.line_id === 'variant')!;
+      expect(base.promotion_discount).toBe(10); // 100 * 10%
+      expect(variant.promotion_discount).toBe(15); // 150 * 10%
+      expect(base.promotion_ids).toEqual([103]);
+      expect(variant.promotion_ids).toEqual([103]);
+    });
+
+    // Case 4 — aggregated quantity below the lowest tier min => no tier matched.
+    it('does not apply when aggregated scopedQty is below the tier minimum', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 104,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 104, min_quantity: 2, max_quantity: null, value: 20, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 }],
+        now: REFERENCE_NOW,
+      });
+
+      expect(result.total_discount).toBe(0);
+      expect(result.applied_promotions).toEqual([]);
+      expect(result.items[0].promotion_discount).toBe(0);
+    });
+
+    // Case 5 — fixed_amount tier: value is PER UNIT, applied to aggregated qty.
+    it('fixed_amount tier: discount is tier.value x aggregated quantity, capped at applicable total', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 105,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 105, min_quantity: 2, max_quantity: null, value: 1000, type: 'fixed_amount' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'a', product_id: 1, unit_price: 5000, quantity: 1 },
+          { line_id: 'b', product_id: 2, unit_price: 5000, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // 1000 per unit x 2 units = 2000 (applicableTotal = 10000, no cap hit).
+      expect(result.total_discount).toBe(2000);
+      const a = result.items.find((i) => i.line_id === 'a')!;
+      const b = result.items.find((i) => i.line_id === 'b')!;
+      expect(a.promotion_discount).toBe(1000);
+      expect(b.promotion_discount).toBe(1000);
+    });
+
+    // Case 6 — the global max_discount_amount cap still applies on top of the
+    // summed tiered line discounts.
+    it('caps the tiered discount at max_discount_amount', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 106,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          max_discount_amount: 100,
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 106, min_quantity: 2, max_quantity: null, value: 50, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'a', product_id: 1, unit_price: 1000, quantity: 1 },
+          { line_id: 'b', product_id: 2, unit_price: 1000, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      // 50% of 2000 = 1000 raw, capped to 100.
+      expect(result.total_discount).toBe(100);
+      expect(result.applied_promotions[0].discount_amount).toBe(100);
+    });
+
+    // Case 7 — proration invariant: the sum of per-item promotion_discount must
+    // equal both applied_promotions[0].discount_amount and total_discount with
+    // zero rounding drift, even when a cap forces a fractional scale.
+    it('prorates with no rounding drift: sum of item discounts == applied discount == total', async () => {
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 107,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          max_discount_amount: 100, // forces scale = 100/150 = 0.6667 across 3 lines
+          promotion_quantity_tiers: [
+            buildTier({ id: 1, promotion_id: 107, min_quantity: 2, max_quantity: null, value: 50, type: 'percentage' }),
+          ],
+        }),
+      ]);
+
+      const result = await service.quoteDiscounts({
+        items: [
+          { line_id: 'a', product_id: 1, unit_price: 100, quantity: 1 },
+          { line_id: 'b', product_id: 2, unit_price: 100, quantity: 1 },
+          { line_id: 'c', product_id: 3, unit_price: 100, quantity: 1 },
+        ],
+        now: REFERENCE_NOW,
+      });
+
+      const sumItems = result.items.reduce((s, i) => s + i.promotion_discount, 0);
+      expect(result.total_discount).toBe(100);
+      expect(result.applied_promotions[0].discount_amount).toBe(100);
+      expect(Math.round(sumItems * 100) / 100).toBe(100);
+      expect(Math.round(sumItems * 100) / 100).toBe(result.applied_promotions[0].discount_amount);
+    });
+
+    // Case 8 — max_quantity bounds a band: scopedQty picks the correct tier.
+    it('selects the tier whose band contains scopedQty (max_quantity bounds the band)', async () => {
+      const tiers = [
+        buildTier({ id: 1, promotion_id: 108, min_quantity: 2, max_quantity: 4, value: 10, type: 'percentage', sort_order: 0 }),
+        buildTier({ id: 2, promotion_id: 108, min_quantity: 5, max_quantity: null, value: 20, type: 'percentage', sort_order: 1 }),
+      ];
+
+      // scopedQty = 3 -> first band (10%).
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 108,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          promotion_quantity_tiers: tiers,
+        }),
+      ]);
+      const low = await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 3 }],
+        now: REFERENCE_NOW,
+      });
+      // lineTotal = 300, 10% = 30.
+      expect(low.total_discount).toBe(30);
+
+      // scopedQty = 6 -> second band (20%).
+      prisma.promotions.findMany.mockResolvedValue([
+        buildPromotion({
+          id: 108,
+          scope: 'order',
+          rule_type: 'quantity_tiered',
+          promotion_quantity_tiers: tiers,
+        }),
+      ]);
+      const high = await service.quoteDiscounts({
+        items: [{ line_id: 'a', product_id: 1, unit_price: 100, quantity: 6 }],
+        now: REFERENCE_NOW,
+      });
+      // lineTotal = 600, 20% = 120.
+      expect(high.total_discount).toBe(120);
+    });
+  });
 });

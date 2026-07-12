@@ -9,6 +9,7 @@ import { VendixHttpException } from 'src/common/errors';
 describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
   let service: TableSessionsService;
   let tablesService: TablesService;
+  let settingsService: any;
   let prismaMock: any;
   let context: any;
 
@@ -60,9 +61,14 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
       getActiveSession: jest.fn(),
     } as any;
 
+    settingsService = {
+      getStoreCurrency: jest.fn().mockResolvedValue('COP'),
+    };
+
     service = new TableSessionsService(
       prismaMock as any,
       tablesService as any,
+      settingsService,
     );
   });
 
@@ -171,7 +177,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         order_id: 100,
         closed_at: new Date(),
         table_id: 5,
-        order: { state: 'draft' },
+        order: { state: 'draft', order_items: [] },
       });
       await expect(
         service.addItems(1, { items: [{ product_id: 1, quantity: 1 }] } as any),
@@ -215,7 +221,7 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
         order_id: 100,
         closed_at: null,
         table_id: 5,
-        order: { state: 'draft' },
+        order: { state: 'draft', order_items: [] },
         table: { id: 5, name: 'Mesa 5', zone: null, status: 'occupied' },
       });
 
@@ -231,6 +237,165 @@ describe('TableSessionsService — open + addItems (Fase E smoke)', () => {
           }),
         }),
       );
+    });
+  });
+
+  describe('openTableSessionPublic (QR-por-mesa, Fase 7)', () => {
+    const PUBLIC_STORE_ID = 200;
+
+    /**
+     * Runs `openTableSessionPublic` with a context that has NO
+     * `user_id` (anonymous QR diner). Returns the mocks-backed result
+     * and exposes the order creation payload for assertions.
+     */
+    async function runPublicOpen(tableId: number, existingSession: any) {
+      (tablesService.getActiveSession as jest.Mock).mockResolvedValue(
+        existingSession,
+      );
+      prismaMock.orders.create.mockResolvedValue({
+        id: 7001,
+        order_number: 'T-pub-001',
+      });
+      prismaMock.table_sessions.create.mockResolvedValue({
+        id: 88,
+        order_id: 7001,
+        table_id: tableId,
+        opened_by: null,
+        opened_at: new Date(),
+        closed_at: null,
+        guest_count: null,
+      });
+      prismaMock.tables.update.mockResolvedValue({});
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 88,
+        store_id: PUBLIC_STORE_ID,
+        table_id: tableId,
+        order_id: 7001,
+        opened_by: null,
+        opened_at: new Date(),
+        closed_at: null,
+        guest_count: null,
+        order: {
+          id: 7001,
+          state: 'draft',
+          grand_total: new Prisma.Decimal(0),
+          subtotal_amount: new Prisma.Decimal(0),
+          tax_amount: new Prisma.Decimal(0),
+          discount_amount: new Prisma.Decimal(0),
+          order_items: [],
+        },
+        table: {
+          id: tableId,
+          name: 'Mesa QR',
+          zone: null,
+          status: 'occupied',
+        },
+      });
+
+      return service.openTableSessionPublic(tableId);
+    }
+
+    it('creates an anonymous session with opened_by=null and dine_in/ecommerce order', async () => {
+      // Anonymous context: store_id present, user_id ABSENT.
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: PUBLIC_STORE_ID,
+        organization_id: 1,
+        is_super_admin: false,
+      } as any);
+
+      const result = await runPublicOpen(7, null);
+
+      expect(result.id).toBe(88);
+      expect(result.opened_by).toBeNull();
+      // Order created with the QR-specific channel + delivery_type.
+      expect(prismaMock.orders.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            store_id: PUBLIC_STORE_ID,
+            channel: 'ecommerce',
+            delivery_type: 'dine_in',
+            customer_id: null,
+            state: 'draft',
+          }),
+        }),
+      );
+      // Session created with opened_by null (anonymous opener).
+      expect(prismaMock.table_sessions.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            table_id: 7,
+            store_id: PUBLIC_STORE_ID,
+            opened_by: null,
+            guest_count: null,
+          }),
+        }),
+      );
+      // Table flipped to occupied.
+      expect(prismaMock.tables.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 7 },
+          data: expect.objectContaining({ status: 'occupied' }),
+        }),
+      );
+    });
+
+    it('does NOT throw STORE_CONTEXT_001 when user_id is absent', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: PUBLIC_STORE_ID,
+        organization_id: 1,
+        is_super_admin: false,
+      } as any);
+
+      await expect(runPublicOpen(7, null)).resolves.not.toThrow();
+      // Sanity: the store-only context was enough — no orders.create
+      // rejection path was triggered by a missing user_id.
+      expect(prismaMock.orders.create).toHaveBeenCalled();
+    });
+
+    it('is idempotent: a second call returns the existing active session', async () => {
+      jest.spyOn(RequestContextService, 'getContext').mockReturnValue({
+        store_id: PUBLIC_STORE_ID,
+        organization_id: 1,
+        is_super_admin: false,
+      } as any);
+
+      // First call creates a fresh session (no active session yet).
+      await runPublicOpen(7, null);
+      expect(prismaMock.table_sessions.create).toHaveBeenCalledTimes(1);
+
+      // Second call: an active session already exists for the table.
+      // The helper returns it without creating a new one.
+      (tablesService.getActiveSession as jest.Mock).mockResolvedValue({
+        id: 88,
+        order_id: 7001,
+        table_id: 7,
+      });
+      prismaMock.table_sessions.findFirst.mockResolvedValue({
+        id: 88,
+        store_id: PUBLIC_STORE_ID,
+        table_id: 7,
+        order_id: 7001,
+        opened_by: null,
+        opened_at: new Date(),
+        closed_at: null,
+        guest_count: null,
+        order: {
+          id: 7001,
+          state: 'draft',
+          grand_total: new Prisma.Decimal(0),
+          subtotal_amount: new Prisma.Decimal(0),
+          tax_amount: new Prisma.Decimal(0),
+          discount_amount: new Prisma.Decimal(0),
+          order_items: [],
+        },
+        table: { id: 7, name: 'Mesa QR', zone: null, status: 'occupied' },
+      });
+
+      const second = await service.openTableSessionPublic(7);
+      expect(second.id).toBe(88);
+      // No NEW session created — create still at 1 call from the first open.
+      expect(prismaMock.table_sessions.create).toHaveBeenCalledTimes(1);
+      expect(prismaMock.orders.create).toHaveBeenCalledTimes(1);
     });
   });
 });

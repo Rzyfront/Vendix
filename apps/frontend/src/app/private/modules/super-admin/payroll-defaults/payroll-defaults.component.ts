@@ -54,7 +54,7 @@ import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
         <!-- Table Container -->
         <div class="relative min-h-[300px] p-2 md:p-4">
           @if (isLoading()) {
-            <div class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center">
+            <div class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center">
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
             </div>
           }

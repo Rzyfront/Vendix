@@ -401,7 +401,8 @@ export class PromotionEngineService {
         continue;
 
       // ---------------------------------------------------------------
-      // quantity_tiered branch: per-line tier lookup, sum, then global cap.
+      // quantity_tiered branch: resolve ONE tier from the AGGREGATED scope
+      // quantity, apply it to every line, sum, then global cap.
       // ---------------------------------------------------------------
       if (promo.rule_type === 'quantity_tiered') {
         const tiers = (promo.promotion_quantity_tiers ?? [])
@@ -416,15 +417,35 @@ export class PromotionEngineService {
 
         if (tiers.length === 0) continue;
 
-        // Per-line discount computed independently from each line's quantity.
+        // Aggregate the scope quantity: ALL scopes sum the `quantity` of their
+        // applicable lines (order = whole cart, category = category lines,
+        // product = product lines INCLUDING variants/derivatives that share the
+        // same product_id, already merged by resolveApplicableItemIndexes).
+        const scopedQty = applicableIndexes.reduce(
+          (sum, idx) => sum + Number(items[idx].quantity),
+          0,
+        );
+
+        // Resolve ONE winning tier from the aggregated quantity. Tiers are
+        // already sorted ascending by min_quantity, so `find` returns the
+        // correct band. That single tier applies to every line in scope.
+        const matchedTier = tiers.find(
+          (t) =>
+            t.min_quantity <= scopedQty &&
+            (t.max_quantity === null || t.max_quantity >= scopedQty),
+        );
+        if (!matchedTier) continue;
+
+        // Per-line discount computed from the FIXED winning tier (resolved once
+        // from scopedQty above), not from each line's individual quantity.
         const perLineDiscount = new Map<number, number>();
         let rawTotal = 0;
         for (const idx of applicableIndexes) {
           const item = items[idx];
-          const lineDiscount = this.computeQuantityTierDiscountForLine(
-            promo,
-            item,
-            tiers,
+          const lineDiscount = this.computeTierDiscountForResolvedTier(
+            Number(item.unit_price),
+            Number(item.quantity),
+            matchedTier,
           );
           perLineDiscount.set(idx, lineDiscount);
           rawTotal = this.roundMoney(rawTotal + lineDiscount);
@@ -836,45 +857,37 @@ export class PromotionEngineService {
   }
 
   /**
-   * Compute the per-line discount for a `quantity_tiered` promotion. The
-   * matching tier is the one where `min_quantity <= line.quantity` and
-   * (`max_quantity` is null OR `>= line.quantity`). Tier math:
+   * Compute the per-line discount for a `quantity_tiered` promotion once the
+   * winning tier has ALREADY been resolved from the aggregated scope quantity
+   * (`scopedQty`) by the caller. The tier is fixed for every line in scope, so
+   * this helper never performs a `find`; it only applies the tier math to a
+   * single line. Tier math:
    *  - percentage: `lineTotal × tier.value / 100`
-   *  - fixed_amount: `tier.value × line.quantity` (per-unit value × qty)
+   *  - fixed_amount: `tier.value × quantity` (per-unit value × line qty)
    * The returned discount is capped at the line total (never negative line)
-   * and rounded to 2 decimals.
-   *
-   * Tiers MUST be pre-sorted by `min_quantity` ascending before calling; this
-   * helper picks the first tier that matches the line quantity.
+   * and rounded to 2 decimals. Returns 0 when guards fail
+   * (quantity <= 0, unitPrice <= 0, or tier.value <= 0).
    */
-  private computeQuantityTierDiscountForLine(
-    promotion: PromotionRecord,
-    line: PromotionQuoteItemInput,
-    tiers: PromotionQuantityTierRecord[],
+  private computeTierDiscountForResolvedTier(
+    unitPrice: number,
+    quantity: number,
+    tier: PromotionQuantityTierRecord,
   ): number {
-    const quantity = Number(line.quantity);
-    const unitPrice = Number(line.unit_price);
-    if (!Number.isFinite(quantity) || quantity <= 0) return 0;
-    if (!Number.isFinite(unitPrice) || unitPrice <= 0) return 0;
-    if (!Array.isArray(tiers) || tiers.length === 0) return 0;
+    const qty = Number(quantity);
+    const price = Number(unitPrice);
+    if (!Number.isFinite(qty) || qty <= 0) return 0;
+    if (!Number.isFinite(price) || price <= 0) return 0;
 
-    const matchedTier = tiers.find(
-      (t) =>
-        t.min_quantity <= quantity &&
-        (t.max_quantity === null || t.max_quantity >= quantity),
-    );
-    if (!matchedTier) return 0;
-
-    const tierValue = Number(matchedTier.value);
+    const tierValue = Number(tier.value);
     if (!Number.isFinite(tierValue) || tierValue <= 0) return 0;
 
-    const lineTotal = unitPrice * quantity;
+    const lineTotal = price * qty;
     let discount = 0;
-    if (matchedTier.type === 'percentage') {
+    if (tier.type === 'percentage') {
       discount = (lineTotal * tierValue) / 100;
     } else {
       // fixed_amount: tier.value applies per unit bought
-      discount = tierValue * quantity;
+      discount = tierValue * qty;
     }
 
     // Never discount more than the line total (final line total >= 0).

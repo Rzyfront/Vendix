@@ -50,9 +50,9 @@ import { IconComponent } from '../icon/icon.component';
         gap: 0.75rem;
         min-height: 3.25rem;
         padding: 0.65rem 1rem;
-        border-bottom: 1px solid color-mix(in srgb, var(--primary-color, #2563eb) 22%, transparent);
-        background: color-mix(in srgb, var(--primary-color, #2563eb) 7%, var(--surface-color, #ffffff));
-        color: var(--text-primary, #111827);
+        border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+        background: color-mix(in srgb, var(--color-primary) 7%, var(--color-surface));
+        color: var(--color-text-primary);
       }
 
       .fiscal-banner__icon {
@@ -61,8 +61,8 @@ import { IconComponent } from '../icon/icon.component';
         width: 2rem;
         height: 2rem;
         border-radius: 0.5rem;
-        color: var(--primary-color, #2563eb);
-        background: color-mix(in srgb, var(--primary-color, #2563eb) 12%, transparent);
+        color: var(--color-primary);
+        background: color-mix(in srgb, var(--color-primary) 12%, transparent);
         flex: 0 0 auto;
       }
 
@@ -77,7 +77,7 @@ import { IconComponent } from '../icon/icon.component';
       }
 
       .fiscal-banner__content span {
-        color: var(--text-secondary, #4b5563);
+        color: var(--color-text-secondary);
       }
 
       .fiscal-banner__cta,
@@ -87,7 +87,7 @@ import { IconComponent } from '../icon/icon.component';
         gap: 0.35rem;
         border: 0;
         background: transparent;
-        color: var(--primary-color, #2563eb);
+        color: var(--color-primary);
         font-weight: 600;
         font-size: 0.85rem;
         text-decoration: none;
@@ -98,7 +98,7 @@ import { IconComponent } from '../icon/icon.component';
         width: 2rem;
         height: 2rem;
         justify-content: center;
-        color: var(--text-secondary, #4b5563);
+        color: var(--color-text-secondary);
         cursor: pointer;
       }
 

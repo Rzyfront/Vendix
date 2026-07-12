@@ -14,7 +14,7 @@
   <div class="week-body">
     <!-- Time labels column -->
     <div class="time-gutter">
-      @for (slot of timeSlots; track slot) {
+      @for (slot of timeSlots(); track slot) {
         <div class="time-label">{{ formatTime(slot) }}</div>
       }
     </div>
@@ -23,7 +23,7 @@
     @for (day of weekDays(); track day.date) {
       <div class="day-column" (click)="onColumnClick($event, day.date)">
         <!-- Grid lines -->
-        @for (slot of timeSlots; track slot) {
+        @for (slot of timeSlots(); track slot) {
           <div class="time-row"></div>
         }
 

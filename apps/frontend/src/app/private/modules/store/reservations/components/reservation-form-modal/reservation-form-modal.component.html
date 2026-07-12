@@ -316,9 +316,29 @@
                 [bookingsByDate]="bookingsByDate()"
                 [freeSlotsByDate]="freeSlotsByDate()"
                 [currentDate]="selectedDate() ? parseAsDate(selectedDate()) : today"
+                [slotMinutes]="selectedService()?.service_duration_minutes || 30"
                 (slotClicked)="onCalendarSlotPicked($event)"
               />
             </div>
+
+            @if (!loadingSlots() && freeSlotsCount() === 0) {
+              <!-- Empty state: no free slots in the visible week.
+                   Renders BELOW the calendar (which still shows
+                   day headers + hour grid for context) so the user
+                   keeps the visual context of "the week is here, just
+                   empty". -->
+              <div class="empty-slots-message">
+                <app-icon name="calendar-x" [size]="20" class="text-gray-400"></app-icon>
+                <p class="text-sm text-gray-700">
+                  No hay horarios disponibles en esta semana.
+                </p>
+                <p class="text-xs text-gray-500">
+                  Puede que el provider no tenga horarios configurados, o que
+                  todos estén reservados. Probá seleccionar otro día o contactá
+                  al proveedor.
+                </p>
+              </div>
+            }
 
             @if (selectedSlot(); as picked) {
               <div class="slot-picked-summary">
@@ -349,7 +369,7 @@
           type="time"
           label="Hora inicio"
           [ngModel]="startTime()"
-          (ngModelChange)="startTime.set($event)"
+          (ngModelChange)="onStartTimeChange($event)"
           placeholder="HH:mm"
           [required]="true"
         ></app-input>

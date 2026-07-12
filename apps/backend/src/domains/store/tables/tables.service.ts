@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { QrService } from '@common/services/qr.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   CreateTableDto,
@@ -77,7 +79,10 @@ export interface FloorMapTable {
 export class TablesService {
   private readonly logger = new Logger(TablesService.name);
 
-  constructor(private prisma: StorePrismaService) {}
+  constructor(
+    private prisma: StorePrismaService,
+    private readonly qrService: QrService,
+  ) {}
 
   // ------------------------------------------------------------------ helpers
   private requireStoreId(): number {
@@ -137,6 +142,7 @@ export class TablesService {
           status: dto.status ?? 'available',
           pos_x: dto.pos_x ?? null,
           pos_y: dto.pos_y ?? null,
+          public_token: uuidv4(),
           updated_at: new Date(),
         },
       });
@@ -194,6 +200,77 @@ export class TablesService {
     const table = await this.getById(id);
     const active_session = await this.getActiveSession(id);
     return { ...table, active_session };
+  }
+
+  // --------------------------------------------------------------- QR por mesa
+  /**
+   * Resuelve el dominio ecommerce primario activo de la tienda.
+   *
+   * Replica la lógica de `EcommerceService.findPrimaryEcommerceDomain`
+   * (privado en ese servicio — fuera de scope importarlo). Query directa
+   * a `domain_settings` filtrando por store_id + domain_type 'ecommerce'
+   * + status 'active' + is_primary true.
+   */
+  private async findPrimaryEcommerceDomain(storeId: number) {
+    return this.prisma.domain_settings.findFirst({
+      where: {
+        store_id: storeId,
+        domain_type: 'ecommerce',
+        status: 'active',
+        is_primary: true,
+      },
+      orderBy: { updated_at: 'desc' },
+    });
+  }
+
+  /**
+   * Construye la URL completa del dominio. Replica
+   * `EcommerceService.buildEcommerceUrl` (privado). Si el hostname ya
+   * incluye protocolo, se devuelve tal cual; si no, se prefija https://.
+   */
+  private buildEcommerceUrl(hostname: string): string {
+    if (hostname.startsWith('http://') || hostname.startsWith('https://')) {
+      return hostname;
+    }
+    return `https://${hostname}`;
+  }
+
+  /**
+   * Genera la URL pública de la mesa + el QR (data URL PNG) que apunta a
+   * esa URL. El QR contiene `${ecommerceUrl}/?mesa=${public_token}`.
+   *
+   * Reutiliza `QrService.generateDataUrl` (common/services/qr.service) —
+   * inyectado en el módulo. La resolución del dominio primario se
+   * replica localmente porque `EcommerceService.findPrimaryEcommerceDomain`
+   * es privado (ver arriba).
+   */
+  async getQr(id: number): Promise<{ public_url: string; qr_data_url: string }> {
+    const storeId = this.requireStoreId();
+    const table = await this.getById(id);
+
+    if (!table.public_token) {
+      // Mesa creada antes de la migración que añadió public_token.
+      // Genera el token on-demand para que el QR funcione.
+      const updated = await this.prisma.tables.update({
+        where: { id },
+        data: { public_token: uuidv4(), updated_at: new Date() },
+      });
+      table.public_token = updated.public_token;
+    }
+
+    const domain = await this.findPrimaryEcommerceDomain(storeId);
+    if (!domain) {
+      throw new VendixHttpException(
+        ErrorCodes.ORG_DOMAIN_001,
+        'No hay un dominio ecommerce principal activo para generar el QR de la mesa',
+      );
+    }
+
+    const baseUrl = this.buildEcommerceUrl(domain.hostname);
+    const publicUrl = `${baseUrl}/?mesa=${table.public_token}`;
+    const qrDataUrl = await this.qrService.generateDataUrl(publicUrl, 320);
+
+    return { public_url: publicUrl, qr_data_url: qrDataUrl };
   }
 
   async update(id: number, dto: UpdateTableDto) {

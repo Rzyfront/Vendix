@@ -11,8 +11,12 @@ import {
   formatPeriodFromDate,
   parseDateRange,
   getPreviousPeriod,
-  getDateTruncInterval,
 } from '../utils/date.util';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  resolveStoreTimezone,
+  localPeriodSql,
+} from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -22,8 +26,22 @@ export class SalesAnalyticsService {
   // States that count as completed sales
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
+  /**
+   * Resolves the current request's store timezone (single source of truth).
+   * Falls back to the default when there is no store context (e.g. the scoped
+   * client would already reject such a call before reaching real data).
+   */
+  private async getStoreTimezone(): Promise<string> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      return DEFAULT_STORE_TIMEZONE;
+    }
+    return resolveStoreTimezone(this.prisma, context.store_id);
+  }
+
   async getSalesSummary(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
     const { previousStartDate, previousEndDate } = getPreviousPeriod(
       startDate,
       endDate,
@@ -120,7 +138,8 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByProduct(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const groupWhere: any = {
       orders: {
@@ -303,7 +322,8 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByCategory(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     // Step 1: Aggregate order_items by product_id at DB level
     const productAggregates = await this.prisma.order_items.groupBy({
@@ -425,7 +445,8 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByPaymentMethod(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const payments = await this.prisma.payments.findMany({
       where: {
@@ -523,44 +544,55 @@ export class SalesAnalyticsService {
       return this.getHourlyTrendsForToday(storeId, query.channel);
     }
 
-    const { startDate, endDate } = parseDateRange(query);
+    // Resolve the store timezone ONCE and drive both the date range and the
+    // bucketing with it (single source of truth).
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
 
-    // Map granularity to PostgreSQL DATE_TRUNC interval
-    // Use Prisma.raw() so the interval is inlined as a SQL literal
-    // instead of parameterized (avoids GROUP BY mismatch with SELECT)
-    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
+    // Bucket by the store's LOCAL calendar. `localPeriodSql` emits the period as
+    // an authoritative TEXT label (to_char(DATE_TRUNC(..., created_at AT TIME
+    // ZONE 'UTC' AT TIME ZONE tz), fmt)); this avoids the pg driver re-parsing a
+    // wall-clock timestamp tz-ambiguously, and the fill below reproduces the
+    // exact same labels by walking the local calendar.
+    const periodSql = localPeriodSql('o.created_at', tz, granularity);
 
     // withoutScope() needed: $queryRaw is not available on the scoped client.
     // storeId is validated above and used in the WHERE clause.
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
-        period: Date;
+        period: string;
         revenue: any;
         order_count: bigint;
         units_sold: any;
       }>
     >`
       SELECT
-        DATE_TRUNC(${truncSql}, o.created_at) AS period,
+        ${periodSql} AS period,
         COALESCE(SUM(o.grand_total), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
-        COALESCE(SUM(oi.quantity), 0) AS units_sold
+        COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
-      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN (
+        SELECT order_id, SUM(quantity) AS units
+        FROM order_items
+        GROUP BY order_id
+      ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
         AND o.state IN ('delivered', 'finished')
         AND o.created_at >= ${startDate}
         AND o.created_at <= ${endDate}
         ${query.channel ? Prisma.sql`AND o.channel = ${query.channel}::order_channel_enum` : Prisma.empty}
-      GROUP BY DATE_TRUNC(${truncSql}, o.created_at)
-      ORDER BY period ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
     const mapped = results.map((r) => {
       const revenue = Number(r.revenue);
       const orders = Number(r.order_count);
       return {
-        period: formatPeriodFromDate(new Date(r.period), granularity),
+        // period is already the authoritative local label from SQL — do NOT
+        // re-derive it in JS (that reintroduced the tz-ambiguity bug).
+        period: r.period,
         revenue,
         orders,
         units_sold: Number(r.units_sold),
@@ -575,33 +607,18 @@ export class SalesAnalyticsService {
       granularity,
       { revenue: 0, orders: 0, units_sold: 0, average_order_value: 0 },
       formatPeriodFromDate,
+      tz,
     );
-  }
-
-  /**
-   * Resolves the store's IANA timezone from store_settings, falling back to
-   * America/Bogota. Validated against a safe charset because it is inlined
-   * into raw SQL via Prisma.raw().
-   */
-  private async resolveStoreTimezone(storeId: number): Promise<string> {
-    const settings = await this.prisma.store_settings.findFirst({
-      where: { store_id: storeId },
-      select: { settings: true },
-    });
-    const tz = (settings?.settings as any)?.general?.timezone as
-      | string
-      | undefined;
-    return tz && /^[A-Za-z0-9_/+-]+$/.test(tz) ? tz : 'America/Bogota';
   }
 
   /**
    * Hourly sales trend for the current day in the store's LOCAL timezone.
    * Buckets run from 00:00 to the current local hour (inclusive); missing
-   * hours are zero-filled. Independent of the UTC parseDateRange/fillTimeSeries
-   * path used by the other granularities.
+   * hours are zero-filled. Uses the shared `resolveStoreTimezone` (single
+   * source of truth) instead of a private copy.
    */
   private async getHourlyTrendsForToday(storeId: number, channel?: string) {
-    const timezone = await this.resolveStoreTimezone(storeId);
+    const timezone = await resolveStoreTimezone(this.prisma, storeId);
     const tzSql = Prisma.raw(`'${timezone}'`);
 
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
@@ -616,9 +633,13 @@ export class SalesAnalyticsService {
         EXTRACT(HOUR FROM (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql}))::int AS hour_local,
         COALESCE(SUM(o.grand_total), 0) AS revenue,
         COUNT(DISTINCT o.id) AS order_count,
-        COALESCE(SUM(oi.quantity), 0) AS units_sold
+        COALESCE(SUM(oi.units), 0) AS units_sold
       FROM orders o
-      LEFT JOIN order_items oi ON oi.order_id = o.id
+      LEFT JOIN (
+        SELECT order_id, SUM(quantity) AS units
+        FROM order_items
+        GROUP BY order_id
+      ) oi ON oi.order_id = o.id
       WHERE o.store_id = ${storeId}
         AND o.state IN ('delivered', 'finished')
         AND (o.created_at AT TIME ZONE 'UTC' AT TIME ZONE ${tzSql})::date
@@ -668,7 +689,8 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByCustomer(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const where = {
       state: { in: this.COMPLETED_STATES },
@@ -797,7 +819,8 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByChannel(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const results = await this.prisma.orders.groupBy({
       by: ['channel'],
@@ -864,7 +887,8 @@ export class SalesAnalyticsService {
   }
 
   async getOrdersForExport(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const orders = await this.prisma.orders.findMany({
       where: {

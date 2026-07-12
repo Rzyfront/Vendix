@@ -72,6 +72,11 @@ export const selectAuthError = createSelector(
   (state: AuthState) => state.error,
 );
 
+export const selectPasswordResetEmailSent = createSelector(
+  selectAuthState,
+  (state: AuthState) => state.password_reset_email_sent,
+);
+
 export const selectUserRole = createSelector(selectUser, (user: any) => {
   // Handle both role (string) and roles (array) formats
   if (user?.role) {

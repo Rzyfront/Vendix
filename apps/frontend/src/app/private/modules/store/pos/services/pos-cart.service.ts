@@ -428,15 +428,16 @@ export class PosCartService {
    * Apply eligible promotions to the cart.
    *
    * Phase 3b / Section 6: when a promotion has
-   * `rule_type === 'quantity_tiered'`, the per-line discount is computed by
-   * matching the matched tier against `line.quantity` and priced against the
-   * line total (`unitPrice * quantity`). Tier selection order matches the
-   * backend engine byte-for-byte (see `computeQuantityTierDiscountForLine` in
+   * `rule_type === 'quantity_tiered'`, a SINGLE tier is resolved from the
+   * AGGREGATED scope quantity (`scopedQty` = sum of `line.quantity` across
+   * every in-scope item) and then applied to each line. Tier selection order
+   * matches the backend engine byte-for-byte (see
+   * `computeTierDiscountForResolvedTier` in
    * `apps/backend/src/domains/store/promotions/promotion-engine/promotion-engine.service.ts`):
    *
    *   1. Sort tiers by `(min_quantity ASC, sort_order ASC, id ASC)`.
-   *   2. Pick the first tier where `min_quantity <= line.quantity` and
-   *      (`max_quantity` is null OR `>= line.quantity`).
+   *   2. Pick the first tier where `min_quantity <= scopedQty` and
+   *      (`max_quantity` is null OR `>= scopedQty`) — resolved ONCE, not per line.
    *   3. `percentage`: `lineTotal * tier.value / 100`.
    *      `fixed_amount`: `tier.value * line.quantity` (per-unit value × qty).
    *   4. Cap each line discount at its line total (never-negative line).
@@ -493,14 +494,30 @@ export class PosCartService {
               currentState.items,
             );
 
-            // Per-line discount computed independently from each line's quantity.
+            // Tier is resolved ONCE from the AGGREGATED scope quantity, then
+            // fixed for every line in scope — mirror of the backend engine.
+            const scopedQty = applicableItems.reduce(
+              (sum, item) => sum + Number(item.quantity),
+              0,
+            );
+            const matchedTier = sortedTiers.find(
+              (t: any) =>
+                t.min_quantity <= scopedQty &&
+                (t.max_quantity === null ||
+                  t.max_quantity === undefined ||
+                  t.max_quantity >= scopedQty),
+            );
+            if (!matchedTier) continue;
+
+            // Per-line discount priced with the SINGLE resolved tier.
             const perLineDiscount: Array<{ item: CartItem; discount: number }> =
               [];
             let rawTotal = 0;
             for (const item of applicableItems) {
-              const lineDiscount = this.computeQuantityTierDiscountForLine(
-                item,
-                sortedTiers,
+              const lineDiscount = this.computeTierDiscountForResolvedTier(
+                Number(item.finalPrice),
+                Number(item.quantity),
+                matchedTier,
               );
               perLineDiscount.push({ item, discount: lineDiscount });
               rawTotal = this.roundMoney(rawTotal + lineDiscount);
@@ -626,52 +643,35 @@ export class PosCartService {
   }
 
   /**
-   * Compute the per-line discount for a `quantity_tiered` promotion. The
-   * matching tier is the one where `min_quantity <= line.quantity` and
-   * (`max_quantity` is null OR `>= line.quantity`). Tier math:
-   *  - percentage: `lineTotal × tier.value / 100`
-   *  - fixed_amount: `tier.value × line.quantity` (per-unit value × qty)
-   * The returned discount is capped at the line total (never negative line)
-   * and rounded to 2 decimals.
-   *
-   * Tiers MUST be pre-sorted by `min_quantity` ascending before calling; this
-   * helper picks the first tier that matches the line quantity.
-   *
-   * MIRROR of `computeQuantityTierDiscountForLine` in the backend engine —
-   * KEEP math byte-identical. See plan Section 6 (drift mitigation).
+   * Compute per-line discount for a `quantity_tiered` promotion once the winning
+   * tier is ALREADY resolved from the aggregated scope quantity (scopedQty) by
+   * the caller. The tier is fixed for every line in scope, so this helper never
+   * does a `find`. MIRROR of `computeTierDiscountForResolvedTier` in the backend
+   * engine — KEEP math byte-identical.
+   *  - percentage: lineTotal × tier.value / 100
+   *  - fixed_amount: tier.value × quantity (per-unit value × line qty)
    */
-  private computeQuantityTierDiscountForLine(
-    item: CartItem,
-    sortedTiers: any[],
+  private computeTierDiscountForResolvedTier(
+    unitPrice: number,
+    quantity: number,
+    tier: any,
   ): number {
-    const quantity = Number(item.quantity);
-    const unitPrice = Number(item.finalPrice);
-    if (!Number.isFinite(quantity) || quantity <= 0) return 0;
-    if (!Number.isFinite(unitPrice) || unitPrice <= 0) return 0;
-    if (!Array.isArray(sortedTiers) || sortedTiers.length === 0) return 0;
+    const qty = Number(quantity);
+    const price = Number(unitPrice);
+    if (!Number.isFinite(qty) || qty <= 0) return 0;
+    if (!Number.isFinite(price) || price <= 0) return 0;
 
-    const matchedTier = sortedTiers.find(
-      (t) =>
-        t.min_quantity <= quantity &&
-        (t.max_quantity === null ||
-          t.max_quantity === undefined ||
-          t.max_quantity >= quantity),
-    );
-    if (!matchedTier) return 0;
-
-    const tierValue = Number(matchedTier.value);
+    const tierValue = Number(tier.value);
     if (!Number.isFinite(tierValue) || tierValue <= 0) return 0;
 
-    const lineTotal = unitPrice * quantity;
+    const lineTotal = price * qty;
     let discount = 0;
-    if (matchedTier.type === 'percentage') {
+    if (tier.type === 'percentage') {
       discount = (lineTotal * tierValue) / 100;
     } else {
-      // fixed_amount: tier.value applies per unit bought
-      discount = tierValue * quantity;
+      discount = tierValue * qty;
     }
 
-    // Never discount more than the line total (final line total >= 0).
     discount = Math.max(0, Math.min(discount, lineTotal));
     return this.roundMoney(discount);
   }

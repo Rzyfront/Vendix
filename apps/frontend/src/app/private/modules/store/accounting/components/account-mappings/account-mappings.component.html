@@ -14,7 +14,7 @@
           >
             Mapeo de Cuentas PUC
           </h2>
-          <p class="text-xs text-gray-400 mt-0.5 md:text-sm">
+          <p class="text-xs text-text-secondary mt-0.5 md:text-sm">
             Configure las cuentas contables para los asientos automaticos
           </p>
         </div>
@@ -47,10 +47,10 @@
     <div class="relative p-2 md:p-4">
       @if (loading()) {
         <div
-          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+          class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center"
         >
           <div
-            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
           ></div>
         </div>
       }
@@ -70,29 +70,29 @@
         <div class="mb-4 last:mb-0">
           <!-- Group Header -->
           <div
-            class="flex items-center justify-between gap-2 px-2 py-2 md:px-4 md:py-3 bg-gray-50 rounded-lg mb-1"
+            class="flex items-center justify-between gap-2 px-2 py-2 md:px-4 md:py-3 bg-[var(--color-surface-secondary)] rounded-lg mb-1"
           >
             <div class="flex items-center gap-2">
               <app-icon
                 [name]="group.icon"
                 [size]="16"
                 [ngClass]="
-                  isFlowEnabled(group.key) ? 'text-gray-500' : 'text-gray-300'
+                  isFlowEnabled(group.key) ? 'text-text-secondary' : 'text-text-secondary opacity-50'
                 "
               ></app-icon>
               <h3
                 class="text-xs font-semibold uppercase tracking-wider"
                 [ngClass]="
                   isFlowEnabled(group.key)
-                    ? 'text-gray-500'
-                    : 'text-gray-300 line-through'
+                    ? 'text-text-secondary'
+                    : 'text-text-secondary opacity-50 line-through'
                 "
               >
                 {{ group.label }}
               </h3>
               @if (!isFlowEnabled(group.key)) {
                 <span
-                  class="text-[10px] text-amber-500 font-medium bg-amber-50 px-1.5 py-0.5 rounded"
+                  class="text-[10px] text-warning font-medium bg-warning-light px-1.5 py-0.5 rounded"
                 >
                   Desactivado
                 </span>
@@ -101,16 +101,16 @@
             @if (flows_loaded()) {
               <button
                 type="button"
-                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-600/30"
+                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[color-mix(in_srgb,var(--color-primary)_30%,transparent)]"
                 [ngClass]="{
-                  'bg-emerald-500 border-emerald-500': isFlowEnabled(group.key),
-                  'bg-gray-300 border-gray-300': !isFlowEnabled(group.key),
+                  'bg-success border-success': isFlowEnabled(group.key),
+                  'bg-[var(--color-border)] border-border': !isFlowEnabled(group.key),
                 }"
                 (click)="toggleFlow(group.key)"
                 [attr.aria-label]="'Toggle ' + group.label"
               >
                 <span
-                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out"
+                  class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow-md ring-0 transition duration-200 ease-in-out"
                   [ngClass]="{
                     'translate-x-5': isFlowEnabled(group.key),
                     'translate-x-0': !isFlowEnabled(group.key),
@@ -129,7 +129,7 @@
             @for (mapping of group.mappings; track mapping.mapping_key) {
               <!-- Mobile Card -->
               <div
-                class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
+                class="md:hidden p-3 mx-2 my-1 bg-[var(--color-surface)] rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
               >
                 <div class="flex flex-col gap-2">
                   <div class="flex items-center justify-between">
@@ -139,18 +139,18 @@
                     <span
                       class="source-badge"
                       [ngClass]="{
-                        'bg-gray-100 text-gray-500':
+                        'bg-[var(--color-surface-secondary)] text-text-secondary':
                           mapping.source === 'default',
-                        'bg-blue-50 text-blue-600':
+                        'bg-[var(--color-info-light)] text-[var(--color-info)]':
                           mapping.source === 'organization',
-                        'bg-emerald-50 text-emerald-600':
+                        'bg-success-light text-success':
                           mapping.source === 'store',
                       }"
                     >
                       {{ getSourceLabel(mapping.source) }}
                     </span>
                   </div>
-                  <div class="text-xs text-gray-400 font-mono">
+                  <div class="text-xs text-text-secondary font-mono">
                     {{ mapping.account_code }} - {{ mapping.description }}
                   </div>
                   <select
@@ -170,25 +170,25 @@
 
               <!-- Desktop Row -->
               <div
-                class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors border-b border-border/50 last:border-b-0"
+                class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-[var(--color-surface-secondary)] transition-colors border-b border-border/50 last:border-b-0"
               >
                 <div class="col-span-3 text-sm font-medium text-text-primary">
                   {{ getLabel(mapping.mapping_key) }}
                 </div>
-                <div class="col-span-2 text-xs text-gray-500 font-mono">
+                <div class="col-span-2 text-xs text-text-secondary font-mono">
                   {{ mapping.account_code }}
                 </div>
-                <div class="col-span-2 text-xs text-gray-400 truncate">
+                <div class="col-span-2 text-xs text-text-secondary truncate">
                   {{ mapping.description }}
                 </div>
                 <div class="col-span-1 text-center">
                   <span
                     class="source-badge"
                     [ngClass]="{
-                      'bg-gray-100 text-gray-500': mapping.source === 'default',
-                      'bg-blue-50 text-blue-600':
+                      'bg-[var(--color-surface-secondary)] text-text-secondary': mapping.source === 'default',
+                      'bg-[var(--color-info-light)] text-[var(--color-info)]':
                         mapping.source === 'organization',
-                      'bg-emerald-50 text-emerald-600':
+                      'bg-success-light text-success':
                         mapping.source === 'store',
                     }"
                   >

@@ -1,5 +1,4 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
 import { UserRole } from '../../../auth/enums/user-role.enum';
@@ -12,8 +11,13 @@ import {
   formatPeriodFromDate,
   parseDateRange,
   getPreviousPeriod,
-  getDateTruncInterval,
 } from '../utils/date.util';
+import {
+  DEFAULT_STORE_TIMEZONE,
+  resolveStoreTimezone,
+  localPeriodSql,
+  localBucketSql,
+} from '@common/utils/store-timezone.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -22,8 +26,21 @@ export class CustomersAnalyticsService {
 
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
+  /**
+   * Resolves the current request's store timezone (single source of truth).
+   * Falls back to the default when there is no store context.
+   */
+  private async getStoreTimezone(): Promise<string> {
+    const context = RequestContextService.getContext();
+    if (!context?.store_id) {
+      return DEFAULT_STORE_TIMEZONE;
+    }
+    return resolveStoreTimezone(this.prisma, context.store_id);
+  }
+
   async getCustomersSummary(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
     const { previousStartDate, previousEndDate } = getPreviousPeriod(
       startDate,
       endDate,
@@ -133,7 +150,6 @@ export class CustomersAnalyticsService {
   }
 
   async getCustomersTrends(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -142,17 +158,23 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
+    // Resolve the store timezone ONCE and drive both the date range and the
+    // bucketing with it (single source of truth).
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    // Bucket by the store's LOCAL calendar via the authoritative TEXT label.
+    const periodSql = localPeriodSql('u.created_at', tz, granularity);
 
     // New customers by period (using users.created_at with customer role)
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
-        period: Date;
+        period: string;
         new_customers: bigint;
       }>
     >`
       SELECT
-        DATE_TRUNC(${truncSql}, u.created_at) AS period,
+        ${periodSql} AS period,
         COUNT(DISTINCT u.id) AS new_customers
       FROM users u
       WHERE EXISTS (
@@ -166,8 +188,8 @@ export class CustomersAnalyticsService {
       )
       AND u.created_at >= ${startDate}
       AND u.created_at <= ${endDate}
-      GROUP BY DATE_TRUNC(${truncSql}, u.created_at)
-      ORDER BY period ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
     // Get cumulative total before start date
@@ -193,7 +215,8 @@ export class CustomersAnalyticsService {
       const newCustomers = Number(r.new_customers);
       cumulative += newCustomers;
       return {
-        period: formatPeriodFromDate(new Date(r.period), granularity),
+        // period is already the authoritative local label from SQL.
+        period: r.period,
         new_customers: newCustomers,
         cumulative_customers: cumulative,
       };
@@ -206,11 +229,13 @@ export class CustomersAnalyticsService {
       granularity,
       { new_customers: 0, cumulative_customers: cumulative },
       formatPeriodFromDate,
+      tz,
     );
   }
 
   async getTopCustomers(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
     const isPaginated = query.page !== undefined && query.limit !== undefined;
 
     const where = {
@@ -324,7 +349,8 @@ export class CustomersAnalyticsService {
   }
 
   async getCustomersChannels(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
@@ -378,7 +404,8 @@ export class CustomersAnalyticsService {
   }
 
   async getCustomersForExport(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
     const context = RequestContextService.getContext();
 
     if (!context?.store_id) {
@@ -442,7 +469,8 @@ export class CustomersAnalyticsService {
   // ==================== ABANDONED CARTS ANALYTICS ====================
 
   async getAbandonedCartsSummary(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
     const { previousStartDate, previousEndDate } = getPreviousPeriod(startDate, endDate);
 
     const context = RequestContextService.getContext();
@@ -530,7 +558,6 @@ export class CustomersAnalyticsService {
   }
 
   async getAbandonedCartsTrends(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
 
     const context = RequestContextService.getContext();
@@ -539,49 +566,56 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
+    // Resolve the store timezone ONCE and drive both the date range and the
+    // bucketing with it (single source of truth).
+    const tz = await resolveStoreTimezone(this.prisma, storeId);
+    const { startDate, endDate } = parseDateRange(query, tz);
+
+    // Bucket by the store's LOCAL calendar via the authoritative TEXT label.
+    const cartsPeriodSql = localPeriodSql('c.created_at', tz, granularity);
+    const ordersPeriodSql = localPeriodSql('o.placed_at', tz, granularity);
 
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
-        period: Date;
+        period: string;
         abandoned_carts: bigint;
         cart_value: number;
       }>
     >`
       SELECT
-        DATE_TRUNC(${truncSql}, c.created_at) AS period,
+        ${cartsPeriodSql} AS period,
         COUNT(c.id) AS abandoned_carts,
         COALESCE(SUM(c.subtotal), 0) as cart_value
       FROM carts c
       WHERE c.store_id = ${storeId}
         AND c.created_at >= ${startDate}
         AND c.created_at <= ${endDate}
-      GROUP BY DATE_TRUNC(${truncSql}, c.created_at)
-      ORDER BY period ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
     const completedOrders = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
-        period: Date;
+        period: string;
         order_count: bigint;
       }>
     >`
       SELECT
-        DATE_TRUNC(${truncSql}, o.placed_at) AS period,
+        ${ordersPeriodSql} AS period,
         COUNT(o.id) AS order_count
       FROM orders o
       WHERE o.store_id = ${storeId}
         AND o.placed_at >= ${startDate}
         AND o.placed_at <= ${endDate}
         AND o.state IN ('delivered', 'finished')
-      GROUP BY DATE_TRUNC(${truncSql}, o.placed_at)
-      ORDER BY period ASC
+      GROUP BY 1
+      ORDER BY 1 ASC
     `;
 
     const ordersMap = new Map<string, number>();
     completedOrders.forEach(o => {
-      const periodKey = formatPeriodFromDate(new Date(o.period), granularity);
-      ordersMap.set(periodKey, Number(o.order_count));
+      // period is already the authoritative local label from SQL.
+      ordersMap.set(o.period, Number(o.order_count));
     });
 
     let defaultRecoveryRate = 0;
@@ -589,7 +623,7 @@ export class CustomersAnalyticsService {
 
     return fillTimeSeries(
       results.map((r) => {
-        const periodKey = formatPeriodFromDate(new Date(r.period), granularity);
+        const periodKey = r.period;
         const orderCount = ordersMap.get(periodKey) || 0;
         const cartCount = Number(r.abandoned_carts);
         
@@ -619,11 +653,13 @@ export class CustomersAnalyticsService {
         recovery_rate: defaultRecoveryRate,
       },
       formatPeriodFromDate,
+      tz,
     );
   }
 
   async getAbandonedCartsByReason(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const context = RequestContextService.getContext();
     if (!context?.store_id) {
@@ -640,14 +676,14 @@ export class CustomersAnalyticsService {
       }>
     >`
       SELECT
-        EXTRACT(HOUR FROM c.created_at) as hour,
+        EXTRACT(HOUR FROM ${localBucketSql('c.created_at', tz)}) as hour,
         COUNT(c.id) as count,
         COALESCE(SUM(c.subtotal), 0) as total_value
       FROM carts c
       WHERE c.store_id = ${storeId}
         AND c.created_at >= ${startDate}
         AND c.created_at <= ${endDate}
-      GROUP BY EXTRACT(HOUR FROM c.created_at)
+      GROUP BY EXTRACT(HOUR FROM ${localBucketSql('c.created_at', tz)})
       ORDER BY count DESC
     `;
 
@@ -692,7 +728,8 @@ export class CustomersAnalyticsService {
   }
 
   async getAbandonedCartsForExport(query: AnalyticsQueryDto) {
-    const { startDate, endDate } = parseDateRange(query);
+    const tz = await this.getStoreTimezone();
+    const { startDate, endDate } = parseDateRange(query, tz);
 
     const context = RequestContextService.getContext();
     if (!context?.store_id) {

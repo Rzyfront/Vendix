@@ -40,6 +40,14 @@ export interface DianSendBillResponse {
   duration_ms: number;
   /** Whether the response is a SOAP Fault (e.g., InvalidSecurity) */
   is_soap_fault?: boolean;
+  /**
+   * Async acknowledgement key returned by SendTestSetAsync. Present only on the
+   * async submit response; must be polled afterwards via GetStatusZip to obtain
+   * the actual validation verdict.
+   */
+  zip_key?: string;
+  /** Validation error messages extracted from DIAN's ErrorMessageList, if any. */
+  error_messages?: string[];
 }
 
 /**

@@ -10,7 +10,28 @@
     <!-- Total -->
     <div class="total-display">
       <span class="label">Total a cobrar</span>
-      <p class="amount">{{ total() | currency }}</p>
+      <p class="amount">{{ effectiveTotal() | currency }}</p>
+      @if (tip() > 0) {
+        <span class="total-breakdown">
+          Cuenta {{ total() | currency }} + Propina {{ tip() | currency }}
+        </span>
+      }
+    </div>
+
+    <!-- Tip (optional gratuity) -->
+    <div class="tip-section">
+      <label>Propina (opcional)</label>
+      <div class="tip-input">
+        <span class="currency">{{ currencySymbol() }}</span>
+        <input
+          type="number"
+          [value]="tip()"
+          (input)="onTipInput($any($event.target).valueAsNumber)"
+          placeholder="0.00"
+          step="0.01"
+          min="0"
+        />
+      </div>
     </div>
 
     <!-- Payment method picker -->
@@ -90,6 +111,16 @@
           <span>Método</span>
           <strong>{{ method.name }}</strong>
         </div>
+        @if (tip() > 0) {
+          <div class="summary-row">
+            <span>Cuenta</span>
+            <strong>{{ total() | currency }}</strong>
+          </div>
+          <div class="summary-row">
+            <span>Propina</span>
+            <strong>{{ tip() | currency }}</strong>
+          </div>
+        }
         @if (method.type === 'cash' && cashReceived() > 0) {
           <div class="summary-row">
             <span>Recibido</span>
@@ -102,7 +133,7 @@
         }
         <div class="summary-row total">
           <span>Total</span>
-          <strong>{{ total() | currency }}</strong>
+          <strong>{{ effectiveTotal() | currency }}</strong>
         </div>
       </div>
     }

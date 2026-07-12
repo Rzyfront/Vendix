@@ -25,6 +25,7 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import {
   ChangePasswordDto,
   ForgotPasswordDto,
+  ForgotPasswordCustomerDto,
   ResetPasswordDto,
 } from './dto/password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -100,22 +101,20 @@ export class AuthController {
       user_agent: user_agent || undefined,
     };
 
-    try {
-      const result = await this.authService.registerCustomer(
-        registerCustomerDto,
-        client_info,
-      );
-      return this.responseService.success(
-        result,
-        'Cliente registrado exitosamente en la tienda.',
-      );
-    } catch (error) {
-      return this.responseService.error(
-        error.message || 'Error al registrar el cliente',
-        error.response?.message || error.message,
-        error.status || 400,
-      );
-    }
+    // Sin try/catch: el AllExceptionsFilter global
+    // (common/filters/http-exception.filter.ts) detecta VendixHttpException y
+    // propaga `error_code` al body automáticamente. Capturar la excepción aquí
+    // perdería el error_code (vive en exception.errorCode), impidiendo que el
+    // frontend distinga AUTH_CUSTOMER_CLAIMABLE_001 para ofrecer el CTA de
+    // recuperación en vez de un 409 genérico.
+    const result = await this.authService.registerCustomer(
+      registerCustomerDto,
+      client_info,
+    );
+    return this.responseService.success(
+      result,
+      'Cliente registrado exitosamente en la tienda.',
+    );
   }
 
   @Post('register-staff')
@@ -439,6 +438,45 @@ export class AuthController {
       const result = await this.authService.resetPassword(
         resetDto.token,
         resetDto.new_password,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al restablecer la contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Public()
+  @Post('forgot-customer-password')
+  @HttpCode(HttpStatus.OK)
+  async forgotCustomerPassword(@Body() forgotDto: ForgotPasswordCustomerDto) {
+    try {
+      const result = await this.authService.forgotPasswordCustomer(
+        forgotDto.email,
+        forgotDto.store_id,
+      );
+      return this.responseService.success(result, result.message);
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al solicitar recuperación de contraseña',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Public()
+  @Post('reset-customer-password')
+  @HttpCode(HttpStatus.OK)
+  async resetCustomerPassword(@Body() resetDto: ResetPasswordDto) {
+    try {
+      const result = await this.authService.resetCustomerPassword(
+        resetDto.token,
+        resetDto.new_password,
+        resetDto.store_id,
       );
       return this.responseService.success(result, result.message);
     } catch (error) {

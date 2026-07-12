@@ -31,7 +31,7 @@ import { ExogenousValidationPanelComponent } from './components/exogenous-valida
   template: `
     <div class="w-full">
       <!-- Stats -->
-      <div class="sticky top-0 z-20 bg-white dark:bg-gray-900 pb-2 md:static md:z-auto">
+      <div class="sticky top-0 z-20 bg-background pb-2 md:static md:z-auto">
         <div class="flex gap-3 overflow-x-auto pb-2 md:grid md:grid-cols-4 md:overflow-visible">
           <app-stats title="Total Generados" [value]="stats()?.total_reports || 0" icon="file-text" color="blue"></app-stats>
           <app-stats title="Pendientes" [value]="stats()?.by_status?.['generated'] || 0" icon="clock" color="orange"></app-stats>
@@ -41,16 +41,16 @@ import { ExogenousValidationPanelComponent } from './components/exogenous-valida
       </div>
 
       <!-- Generate Section -->
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow mt-4 p-4">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Generar Reporte</h2>
+      <div class="bg-[var(--color-surface)] rounded-lg shadow mt-4 p-4">
+        <h2 class="text-lg font-semibold text-text-primary mb-4">Generar Reporte</h2>
         <div class="flex flex-col md:flex-row gap-4 items-end">
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Año Fiscal</label>
-            <input type="number" [(ngModel)]="selectedYear" class="block w-32 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm px-3 py-2" />
+            <label class="block text-sm font-medium text-text-primary mb-1">Año Fiscal</label>
+            <input type="number" [(ngModel)]="selectedYear" class="block w-32 rounded-md border border-border bg-[var(--color-surface)] text-text-primary shadow-sm focus:border-[var(--color-primary)] focus:ring-[var(--color-primary)] sm:text-sm px-3 py-2" />
           </div>
           <div>
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Formato</label>
-            <select [(ngModel)]="selectedFormat" class="block w-64 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white sm:text-sm px-3 py-2">
+            <label class="block text-sm font-medium text-text-primary mb-1">Formato</label>
+            <select [(ngModel)]="selectedFormat" class="block w-64 rounded-md border border-border bg-[var(--color-surface)] text-text-primary shadow-sm focus:border-[var(--color-primary)] focus:ring-[var(--color-primary)] sm:text-sm px-3 py-2">
               <option value="1001">1001 - Retenciones practicadas</option>
               <option value="1005">1005 - IVA descontable y generado</option>
               <option value="1007">1007 - Ingresos recibidos</option>
@@ -60,11 +60,11 @@ import { ExogenousValidationPanelComponent } from './components/exogenous-valida
             </select>
           </div>
           <button (click)="generate()" [disabled]="generating()"
-            class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 text-sm font-medium">
+            class="px-4 py-2 bg-[var(--color-primary)] text-[var(--color-text-on-primary)] rounded-md hover:opacity-90 disabled:opacity-50 text-sm font-medium">
             {{ generating() ? 'Generando...' : 'Generar' }}
           </button>
           <button (click)="validate()" [disabled]="validating()"
-            class="px-4 py-2 bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm font-medium disabled:opacity-50">
+            class="px-4 py-2 bg-[var(--color-surface-secondary)] text-text-primary rounded-md hover:opacity-90 text-sm font-medium disabled:opacity-50">
             {{ validating() ? 'Validando...' : 'Validar Datos' }}
           </button>
         </div>
@@ -74,9 +74,9 @@ import { ExogenousValidationPanelComponent } from './components/exogenous-valida
       <app-exogenous-validation-panel [validation]="validation()"></app-exogenous-validation-panel>
 
       <!-- Reports List -->
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow mt-4">
-        <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Reportes Generados</h2>
+      <div class="bg-[var(--color-surface)] rounded-lg shadow mt-4">
+        <div class="p-4 border-b border-border">
+          <h2 class="text-lg font-semibold text-text-primary">Reportes Generados</h2>
         </div>
         <div class="p-2 md:p-4">
           <app-responsive-data-view

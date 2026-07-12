@@ -8,7 +8,7 @@
 
 .week-header {
   display: grid;
-  grid-template-columns: 60px repeat(7, 1fr);
+  grid-template-columns: 72px repeat(7, 1fr);
   border-bottom: 1px solid var(--color-border);
   position: sticky;
   top: 0;
@@ -17,7 +17,7 @@
 }
 
 .time-gutter {
-  width: 60px;
+  width: 72px;
   flex-shrink: 0;
 }
 
@@ -55,7 +55,7 @@
 
 .week-body {
   display: grid;
-  grid-template-columns: 60px repeat(7, 1fr);
+  grid-template-columns: 72px repeat(7, 1fr);
   position: relative;
   background: var(--color-surface);
 }
@@ -64,12 +64,14 @@
   .time-label {
     height: 48px;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: flex-end;
-    padding-right: 8px;
+    padding-right: 10px;
+    padding-left: 8px;
     font-size: 11px;
     color: var(--color-text-muted);
-    transform: translateY(-6px);
+    overflow: visible;
+    white-space: nowrap;
   }
 }
 

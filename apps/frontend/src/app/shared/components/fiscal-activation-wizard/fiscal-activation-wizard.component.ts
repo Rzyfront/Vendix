@@ -238,7 +238,7 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
       }
 
       .store-switcher__label {
-        color: var(--text-secondary, #64748b);
+        color: var(--color-text-secondary);
         font-size: 0.78rem;
         font-weight: 700;
         text-transform: uppercase;
@@ -246,10 +246,10 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
 
       .store-switcher__select {
         min-height: 2.25rem;
-        border: 1px solid var(--border-color, #d1d5db);
+        border: 1px solid var(--color-border);
         border-radius: 0.45rem;
-        background: var(--surface-color, #ffffff);
-        color: var(--text-primary, #111827);
+        background: var(--color-surface);
+        color: var(--color-text-primary);
         padding: 0.45rem 0.7rem;
         font: inherit;
         font-size: 0.84rem;
@@ -277,7 +277,7 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
          it reads as the wizard's progress header. */
       .step-stepper {
         display: block;
-        border-bottom: 1px solid var(--border-color, #e5e7eb);
+        border-bottom: 1px solid var(--color-border);
         padding-bottom: 0.25rem;
       }
 
@@ -290,19 +290,19 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
         border-radius: 999px;
         background: color-mix(
           in srgb,
-          var(--success-color, #16a34a) 14%,
+          var(--color-success) 14%,
           #ffffff
         );
-        color: var(--success-color, #166534);
+        color: var(--color-success);
         font-size: 0.72rem;
         font-weight: 800;
       }
 
       .step-card {
         min-height: 28rem;
-        border: 1px solid var(--border-color, #e5e7eb);
+        border: 1px solid var(--color-border);
         border-radius: 0.5rem;
-        background: var(--surface-color, #ffffff);
+        background: var(--color-surface);
         padding: 1rem;
         display: flex;
         flex-direction: column;
@@ -321,21 +321,21 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
       }
 
       .step-heading p {
-        color: var(--text-secondary, #64748b);
+        color: var(--color-text-secondary);
         font-size: 0.78rem;
         font-weight: 800;
         text-transform: uppercase;
       }
 
       .step-heading h1 {
-        color: var(--text-primary, #0f172a);
+        color: var(--color-text-primary);
         font-size: 1.25rem;
       }
 
       .step-heading span,
       .canonical-step span,
       .validation-row small {
-        color: var(--text-secondary, #64748b);
+        color: var(--color-text-secondary);
         font-size: 0.9rem;
         line-height: 1.4rem;
       }
@@ -349,9 +349,9 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
       .area-option,
       .validation-row,
       .canonical-step {
-        border: 1px solid var(--border-color, #e5e7eb);
+        border: 1px solid var(--color-border);
         border-radius: 0.5rem;
-        background: var(--surface-color, #ffffff);
+        background: var(--color-surface);
       }
 
       .area-option {
@@ -374,7 +374,7 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
       }
 
       .area-option small {
-        color: var(--text-secondary, #64748b);
+        color: var(--color-text-secondary);
         line-height: 1.25rem;
       }
 
@@ -388,10 +388,10 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
       .validation-row--missing .validation-state {
         background: color-mix(
           in srgb,
-          var(--warning-color, #f59e0b) 14%,
+          var(--color-warning) 14%,
           #ffffff
         );
-        color: var(--warning-color, #92400e);
+        color: var(--color-warning);
       }
 
       .canonical-step {
@@ -421,14 +421,14 @@ import { FiscalValidationStepComponent } from './steps/fiscal-validation-step.co
 
       .dedicated-link,
       .secondary-btn {
-        border: 1px solid var(--border-color, #e5e7eb);
-        background: var(--surface-color, #ffffff);
-        color: var(--text-primary, #111827);
+        border: 1px solid var(--color-border);
+        background: var(--color-surface);
+        color: var(--color-text-primary);
       }
 
       .primary-btn {
-        border: 1px solid var(--primary-color, #2563eb);
-        background: var(--primary-color, #2563eb);
+        border: 1px solid var(--color-primary);
+        background: var(--color-primary);
         color: #ffffff;
       }
 
@@ -499,12 +499,25 @@ export class FiscalActivationWizardComponent implements OnInit {
   readonly areaLabels = FISCAL_AREA_LABELS;
   readonly stepLabels = FISCAL_STEP_LABELS;
 
-  /** Steps fed to the shared <app-steps-line> connector stepper. */
-  readonly wizardSteps = computed<StepsLineItem[]>(() =>
-    this.service
-      .stepSequence()
-      .map((step) => ({ label: this.stepLabels[step] })),
-  );
+  /**
+   * Steps fed to the shared <app-steps-line> connector stepper.
+   *
+   * Data steps carry an explicit `completed` flag driven strictly by the
+   * backend's `prefill.satisfied_steps` (via `realSatisfiedDataSteps`), never
+   * the optimistic union — so the stepper's ✓ never contradicts the real
+   * validation. Non-data steps (`area_selection`, `validation`) omit the flag
+   * and keep the stepper's cursor-driven ✓.
+   */
+  readonly wizardSteps = computed<StepsLineItem[]>(() => {
+    const realSatisfied = this.service.realSatisfiedDataSteps();
+    return this.service.stepSequence().map((step) => {
+      const item: StepsLineItem = { label: this.stepLabels[step] };
+      if (this.service.isDataStep(step)) {
+        item.completed = realSatisfied.has(step);
+      }
+      return item;
+    });
+  });
 
   readonly currentTitle = computed(() => {
     const step = this.service.currentStep();

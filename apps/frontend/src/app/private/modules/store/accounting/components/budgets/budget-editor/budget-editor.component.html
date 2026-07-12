@@ -1,6 +1,6 @@
 @if (loading()) {
   <div class="flex items-center justify-center min-h-[400px]">
-    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
   </div>
 } @else if (budget(); as b) {
   <div class="w-full">
@@ -10,7 +10,7 @@
       <div class="flex items-center gap-2">
         <button
           (click)="goBack()"
-          class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-gray-100 transition-colors"
+          class="flex items-center justify-center w-8 h-8 rounded-lg hover:bg-[var(--color-surface-secondary)] transition-colors"
         >
           <app-icon name="arrow-left" [size]="18"></app-icon>
         </button>
@@ -23,15 +23,16 @@
           </p>
         </div>
         <span
-          class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
-          [class.bg-amber-100]="b.status === 'draft'"
-          [class.text-amber-800]="b.status === 'draft'"
-          [class.bg-blue-100]="b.status === 'approved'"
-          [class.text-blue-800]="b.status === 'approved'"
-          [class.bg-emerald-100]="b.status === 'active'"
-          [class.text-emerald-800]="b.status === 'active'"
-          [class.bg-gray-100]="b.status === 'closed'"
-          [class.text-gray-800]="b.status === 'closed'"
+          [class]="
+            'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ' +
+            (b.status === 'draft'
+              ? 'bg-warning-light text-warning'
+              : b.status === 'approved'
+                ? 'bg-[var(--color-info-light)] text-[var(--color-info)]'
+                : b.status === 'active'
+                  ? 'bg-success-light text-success'
+                  : 'bg-[var(--color-surface-secondary)] text-text-primary')
+          "
         >
           {{ status_label() }}
         </span>
@@ -104,12 +105,12 @@
     }
 
     <!-- Grid Table -->
-    <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
+    <div class="bg-[var(--color-surface)] rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] border border-border overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full min-w-[900px] text-sm">
           <thead>
-            <tr class="bg-gray-50 border-b border-border">
-              <th class="sticky left-0 z-10 bg-gray-50 text-left px-3 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[180px]">
+            <tr class="bg-[var(--color-surface-secondary)] border-b border-border">
+              <th class="sticky left-0 z-10 bg-[var(--color-surface-secondary)] text-left px-3 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[180px]">
                 Cuenta
               </th>
               @for (label of month_labels; track label; let i = $index) {
@@ -117,7 +118,7 @@
                   {{ label }}
                 </th>
               }
-              <th class="text-right px-3 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[100px] bg-gray-100">
+              <th class="text-right px-3 py-2.5 font-semibold text-text-secondary text-xs uppercase tracking-wider min-w-[100px] bg-[var(--color-surface-secondary)]">
                 Total
               </th>
               @if (is_editable()) {
@@ -127,8 +128,8 @@
           </thead>
           <tbody>
             @for (line of lines(); track trackByIndex($index); let idx = $index) {
-              <tr class="border-b border-border/50 hover:bg-gray-50/50 transition-colors">
-                <td class="sticky left-0 z-10 bg-surface px-3 py-2 font-medium text-text-primary">
+              <tr class="border-b border-border/50 hover:bg-[var(--color-surface-secondary)] transition-colors">
+                <td class="sticky left-0 z-10 bg-[var(--color-surface)] px-3 py-2 font-medium text-text-primary">
                   <div class="truncate max-w-[170px]" [title]="line.account_code + ' - ' + line.account_name">
                     <span class="text-text-secondary text-xs">{{ line.account_code }}</span>
                     <span class="ml-1">{{ line.account_name }}</span>
@@ -142,8 +143,8 @@
                         [value]="month"
                         (change)="onCellChange(idx, mi, $any($event.target).value)"
                         class="w-full text-right px-2 py-1.5 text-sm border border-border rounded-md
-                               focus:outline-none focus:ring-1 focus:ring-primary-600 focus:border-primary-600
-                               bg-white hover:bg-gray-50 transition-colors
+                               focus:outline-none focus:ring-1 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]
+                               bg-[var(--color-surface)] hover:bg-[var(--color-surface-secondary)] transition-colors
                                [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         min="0"
                         step="1000"
@@ -155,14 +156,14 @@
                     }
                   </td>
                 }
-                <td class="px-3 py-2 text-right font-semibold text-text-primary bg-gray-50/50">
+                <td class="px-3 py-2 text-right font-semibold text-text-primary bg-[var(--color-surface-secondary)]">
                   {{ formatCurrency(line.total) }}
                 </td>
                 @if (is_editable()) {
                   <td class="px-1 py-2 text-center">
                     <button
                       (click)="removeLine(idx)"
-                      class="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+                      class="p-1 rounded hover:bg-error-light text-text-secondary hover:text-error transition-colors"
                       title="Eliminar linea"
                     >
                       <app-icon name="trash-2" [size]="14"></app-icon>
@@ -186,8 +187,8 @@
           <!-- Column Totals -->
           @if (lines().length > 0) {
             <tfoot>
-              <tr class="bg-gray-100 border-t-2 border-border font-semibold">
-                <td class="sticky left-0 z-10 bg-gray-100 px-3 py-2.5 text-text-primary text-sm">
+              <tr class="bg-[var(--color-surface-secondary)] border-t-2 border-border font-semibold">
+                <td class="sticky left-0 z-10 bg-[var(--color-surface-secondary)] px-3 py-2.5 text-text-primary text-sm">
                   Totales
                 </td>
                 @for (total of column_totals(); track trackByIndex($index)) {
@@ -195,7 +196,7 @@
                     {{ formatCurrency(total) }}
                   </td>
                 }
-                <td class="px-3 py-2.5 text-right text-sm text-text-primary bg-gray-200/50 font-bold">
+                <td class="px-3 py-2.5 text-right text-sm text-text-primary bg-[var(--color-surface-secondary)] font-bold">
                   {{ formatCurrency(grand_total()) }}
                 </td>
                 @if (is_editable()) {

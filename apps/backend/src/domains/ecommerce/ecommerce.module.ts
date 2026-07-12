@@ -10,6 +10,7 @@ import { EcommerceReservationsModule } from './reservations/ecommerce-reservatio
 import { EcommerceCustomerQueueModule } from './customer-queue/ecommerce-customer-queue.module';
 import { EcommerceInvoiceDataModule } from './invoice-data/ecommerce-invoice-data.module';
 import { EcommerceDataCollectionModule } from './data-collection/ecommerce-data-collection.module';
+import { EcommerceTablesModule } from './tables/ecommerce-tables.module';
 
 /**
  * 🛒 Ecommerce Domain Module
@@ -21,6 +22,7 @@ import { EcommerceDataCollectionModule } from './data-collection/ecommerce-data-
  * - CheckoutModule: Order placement
  * - AccountModule: Customer profile and orders
  * - EcommerceReviewsModule: Product reviews and ratings
+ * - EcommerceTablesModule: QR-por-mesa table resolution + auto-pedido
  */
 @Module({
   imports: [
@@ -35,6 +37,7 @@ import { EcommerceDataCollectionModule } from './data-collection/ecommerce-data-
     EcommerceCustomerQueueModule,
     EcommerceInvoiceDataModule,
     EcommerceDataCollectionModule,
+    EcommerceTablesModule,
   ],
 })
 export class EcommerceDomainModule {}

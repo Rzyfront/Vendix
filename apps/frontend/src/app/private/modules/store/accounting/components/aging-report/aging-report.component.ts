@@ -83,25 +83,25 @@ export class AgingReportComponent {
 
   getBucketColor(index: number): string {
     const colors = [
-      'bg-emerald-400',  // Current
-      'bg-yellow-400',   // 1-30
-      'bg-orange-400',   // 31-60
-      'bg-red-400',      // 61-90
-      'bg-red-600',      // 91-120
-      'bg-red-800',      // 120+
+      'bg-success',  // Current
+      'bg-[color-mix(in_srgb,var(--color-success),var(--color-warning))]',   // 1-30
+      'bg-warning',   // 31-60
+      'bg-[color-mix(in_srgb,var(--color-warning),var(--color-error))]',      // 61-90
+      'bg-error',      // 91-120
+      'bg-[color-mix(in_srgb,var(--color-error),var(--color-text-primary)_35%)]',      // 120+
     ];
-    return colors[index] || 'bg-gray-400';
+    return colors[index] || 'bg-[var(--color-text-secondary)]';
   }
 
   getBucketTextColor(index: number): string {
     const colors = [
-      'text-emerald-700',
-      'text-yellow-700',
-      'text-orange-700',
-      'text-red-700',
-      'text-red-800',
-      'text-red-900',
+      'text-success',
+      'text-[color-mix(in_srgb,var(--color-success),var(--color-warning))]',
+      'text-warning',
+      'text-[color-mix(in_srgb,var(--color-warning),var(--color-error))]',
+      'text-error',
+      'text-[color-mix(in_srgb,var(--color-error),var(--color-text-primary)_35%)]',
     ];
-    return colors[index] || 'text-gray-700';
+    return colors[index] || 'text-text-primary';
   }
 }

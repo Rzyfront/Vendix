@@ -1,6 +1,7 @@
 import {Component, input, output, inject, effect, DestroyRef, signal, computed} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { CurrencyPipe, NgClass } from '@angular/common';
+import { NgClass } from '@angular/common';
+import { CurrencyPipe } from '../../../../../../../shared/pipes/currency';
 import { PayrollService } from '../../../services/payroll.service';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
@@ -64,18 +65,18 @@ import {
           <!-- Step-by-step guide -->
           <div class="space-y-2">
             <div
-              class="flex items-start gap-2.5 px-3 py-2 bg-blue-50 rounded-lg border border-blue-100"
+              class="flex items-start gap-2.5 px-3 py-2 bg-[var(--color-info-light)] rounded-lg border border-[var(--color-info)]"
             >
               <div
-                class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-600 text-white text-[10px] font-bold shrink-0"
+                class="flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-info)] text-white text-[10px] font-bold shrink-0"
               >
                 1
               </div>
               <div>
-                <p class="text-xs font-medium text-blue-900">
+                <p class="text-xs font-medium text-[var(--color-info)]">
                   Descarga la plantilla
                 </p>
-                <p class="text-[11px] text-blue-700">
+                <p class="text-[11px] text-[var(--color-info)]">
                   Excel con columnas pre-configuradas para tus empleados.
                 </p>
               </div>
@@ -115,18 +116,18 @@ import {
               </div>
             </div>
             <div
-              class="flex items-start gap-2.5 px-3 py-2 bg-green-50 rounded-lg border border-green-100"
+              class="flex items-start gap-2.5 px-3 py-2 bg-success-light rounded-lg border border-success"
             >
               <div
-                class="flex items-center justify-center w-6 h-6 rounded-full bg-green-600 text-white text-[10px] font-bold shrink-0"
+                class="flex items-center justify-center w-6 h-6 rounded-full bg-[var(--color-success)] text-white text-[10px] font-bold shrink-0"
               >
                 4
               </div>
               <div>
-                <p class="text-xs font-medium text-green-900">
+                <p class="text-xs font-medium text-success">
                   Revisa y confirma
                 </p>
-                <p class="text-[11px] text-green-700">
+                <p class="text-[11px] text-success">
                   Análisis empleado por empleado antes de confirmar la carga.
                 </p>
               </div>
@@ -219,14 +220,14 @@ import {
           <div class="space-y-3">
             <!-- Compact hint -->
             <div
-              class="bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 flex items-start gap-2"
+              class="bg-[var(--color-info-light)] px-3 py-2 rounded-lg border border-[var(--color-info)] flex items-start gap-2"
             >
               <app-icon
                 name="info"
                 [size]="14"
-                class="text-blue-600 shrink-0 mt-0.5"
+                class="text-[var(--color-info)] shrink-0 mt-0.5"
               ></app-icon>
-              <p class="text-[11px] text-blue-800 leading-relaxed">
+              <p class="text-[11px] text-[var(--color-info)] leading-relaxed">
                 <span class="font-medium">Descarga la plantilla</span>, completa
                 los datos de tus empleados y sube el archivo. Formatos: .xlsx,
                 .xls, .csv · Máx. 1000 empleados.
@@ -275,13 +276,15 @@ import {
                 2. Sube tu archivo
               </p>
               <div
-                class="border-2 border-dashed border-border rounded-lg p-5 text-center hover:border-blue-500 hover:bg-blue-50 transition-all cursor-pointer"
+                class="border-2 border-dashed border-border rounded-lg p-5 text-center hover:border-[var(--color-info)] hover:bg-[var(--color-info-light)] transition-all cursor-pointer"
                 (dragover)="onDragOver($event)"
                 (dragleave)="onDragLeave($event)"
                 (drop)="onDrop($event)"
                 (click)="fileInput.click()"
-                [class.border-blue-500]="isDragging()"
-                [class.bg-blue-50]="isDragging()"
+                [ngClass]="{
+                  'border-[var(--color-info)] bg-[var(--color-info-light)]':
+                    isDragging(),
+                }"
               >
                 <input
                   #fileInput
@@ -296,7 +299,7 @@ import {
                     name="upload-cloud"
                     [size]="36"
                     class="mx-auto text-muted-foreground mb-2"
-                    [class.text-blue-500]="isDragging()"
+                    [ngClass]="{ 'text-[var(--color-info)]': isDragging() }"
                   ></app-icon>
                   <p class="text-sm text-text-primary font-medium">
                     Arrastra tu archivo Excel aquí
@@ -311,7 +314,7 @@ import {
                   <app-icon
                     name="file-spreadsheet"
                     [size]="36"
-                    class="mx-auto text-green-500 mb-2"
+                    class="mx-auto text-success mb-2"
                   ></app-icon>
                   <p class="text-sm text-text-primary font-medium">
                     {{ selectedFile()!.name }}
@@ -325,7 +328,7 @@ import {
               @if (selectedFile()) {
                 <div class="flex justify-end mt-2">
                   <button
-                    class="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1"
+                    class="text-xs text-error hover:text-error font-medium flex items-center gap-1"
                     (click)="removeFile()"
                   >
                     <app-icon name="x" [size]="12"></app-icon>
@@ -338,7 +341,7 @@ import {
             <!-- Upload Error -->
             @if (uploadError()) {
               <div
-                class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
+                class="bg-error-light px-3 py-2 rounded-lg border border-error text-error text-xs flex items-start gap-2"
               >
                 <app-icon
                   name="alert-circle"
@@ -378,42 +381,42 @@ import {
                 class="flex overflow-x-auto gap-2 pb-1 md:grid md:grid-cols-4 md:gap-3 md:overflow-visible"
               >
                 <div
-                  class="min-w-[100px] bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 shrink-0"
+                  class="min-w-[100px] bg-[var(--color-info-light)] px-3 py-2 rounded-lg border border-[var(--color-info)] shrink-0"
                 >
-                  <div class="text-[10px] text-blue-600 font-medium">
+                  <div class="text-[10px] text-[var(--color-info)] font-medium">
                     Total Empleados
                   </div>
-                  <div class="text-xl font-bold text-blue-700">
+                  <div class="text-xl font-bold text-[var(--color-info)]">
                     {{ analysisResult()!.total_employees }}
                   </div>
                 </div>
                 <div
-                  class="min-w-[100px] bg-green-50 px-3 py-2 rounded-lg border border-green-100 shrink-0"
+                  class="min-w-[100px] bg-success-light px-3 py-2 rounded-lg border border-success shrink-0"
                 >
-                  <div class="text-[10px] text-green-600 font-medium">
+                  <div class="text-[10px] text-success font-medium">
                     Listos
                   </div>
-                  <div class="text-xl font-bold text-green-700">
+                  <div class="text-xl font-bold text-success">
                     {{ analysisResult()!.ready }}
                   </div>
                 </div>
                 <div
-                  class="min-w-[100px] bg-amber-50 px-3 py-2 rounded-lg border border-amber-100 shrink-0"
+                  class="min-w-[100px] bg-warning-light px-3 py-2 rounded-lg border border-warning shrink-0"
                 >
-                  <div class="text-[10px] text-amber-600 font-medium">
+                  <div class="text-[10px] text-warning font-medium">
                     Advertencias
                   </div>
-                  <div class="text-xl font-bold text-amber-700">
+                  <div class="text-xl font-bold text-warning">
                     {{ analysisResult()!.with_warnings }}
                   </div>
                 </div>
                 <div
-                  class="min-w-[100px] bg-red-50 px-3 py-2 rounded-lg border border-red-100 shrink-0"
+                  class="min-w-[100px] bg-error-light px-3 py-2 rounded-lg border border-error shrink-0"
                 >
-                  <div class="text-[10px] text-red-600 font-medium">
+                  <div class="text-[10px] text-error font-medium">
                     Errores
                   </div>
-                  <div class="text-xl font-bold text-red-700">
+                  <div class="text-xl font-bold text-error">
                     {{ analysisResult()!.with_errors }}
                   </div>
                 </div>
@@ -478,10 +481,7 @@ import {
                           <td
                             class="px-3 py-2 text-sm text-right text-text-secondary"
                           >
-                            {{
-                              item.base_salary
-                                | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                            }}
+                            {{ item.base_salary | currency: 0 }}
                           </td>
                           <td class="px-3 py-2 text-sm text-text-secondary">
                             {{ item.contract_type || '—' }}
@@ -490,11 +490,11 @@ import {
                             <span
                               class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
                               [ngClass]="{
-                                'bg-emerald-100 text-emerald-800':
+                                'bg-success-light text-success':
                                   item.action === 'create',
                                 'bg-sky-100 text-sky-800':
                                   item.action === 'update',
-                                'bg-blue-100 text-blue-800':
+                                'bg-[var(--color-info-light)] text-[var(--color-info)]':
                                   item.action === 'associate',
                               }"
                             >
@@ -511,11 +511,11 @@ import {
                             <span
                               class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
                               [ngClass]="{
-                                'bg-green-100 text-green-800':
+                                'bg-success-light text-success':
                                   item.status === 'ready',
-                                'bg-amber-100 text-amber-800':
+                                'bg-warning-light text-warning':
                                   item.status === 'warning',
-                                'bg-red-100 text-red-800':
+                                'bg-error-light text-error':
                                   item.status === 'error',
                               }"
                             >
@@ -537,7 +537,7 @@ import {
                             <td colspan="6" class="px-3 py-2">
                               @for (warning of item.warnings; track warning) {
                                 <p
-                                  class="text-xs text-amber-700 flex items-start gap-1"
+                                  class="text-xs text-warning flex items-start gap-1"
                                 >
                                   <app-icon
                                     name="alert-triangle"
@@ -549,7 +549,7 @@ import {
                               }
                               @for (error of item.errors; track error) {
                                 <p
-                                  class="text-xs text-red-700 flex items-start gap-1"
+                                  class="text-xs text-error flex items-start gap-1"
                                 >
                                   <app-icon
                                     name="x-circle"
@@ -585,11 +585,11 @@ import {
                       <span
                         class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
                         [ngClass]="{
-                          'bg-green-100 text-green-800':
+                          'bg-success-light text-success':
                             item.status === 'ready',
-                          'bg-amber-100 text-amber-800':
+                          'bg-warning-light text-warning':
                             item.status === 'warning',
-                          'bg-red-100 text-red-800': item.status === 'error',
+                          'bg-error-light text-error': item.status === 'error',
                         }"
                       >
                         {{
@@ -605,17 +605,14 @@ import {
                       {{ item.document_type }} {{ item.document_number }}
                     </p>
                     <div class="flex gap-3 text-xs text-text-secondary mb-1">
-                      <span>{{
-                        item.base_salary
-                          | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                      }}</span>
+                      <span>{{ item.base_salary | currency: 0 }}</span>
                       <span
                         class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
                         [ngClass]="{
-                          'bg-emerald-100 text-emerald-700':
+                          'bg-success-light text-success':
                             item.action === 'create',
                           'bg-sky-100 text-sky-700': item.action === 'update',
-                          'bg-blue-100 text-blue-700':
+                          'bg-[var(--color-info-light)] text-[var(--color-info)]':
                             item.action === 'associate',
                         }"
                       >
@@ -632,16 +629,26 @@ import {
                       <div class="mt-2 pt-2 border-t border-border space-y-1">
                         @for (warning of item.warnings; track warning) {
                           <p
-                            class="text-[11px] text-amber-700 flex items-start gap-1"
+                            class="text-[11px] text-warning flex items-start gap-1"
                           >
-                            <span class="shrink-0">&#9888;</span> {{ warning }}
+                            <app-icon
+                              name="alert-triangle"
+                              [size]="14"
+                              class="shrink-0 mt-0.5"
+                            ></app-icon>
+                            {{ warning }}
                           </p>
                         }
                         @for (error of item.errors; track error) {
                           <p
-                            class="text-[11px] text-red-700 flex items-start gap-1"
+                            class="text-[11px] text-error flex items-start gap-1"
                           >
-                            <span class="shrink-0">&#10007;</span> {{ error }}
+                            <app-icon
+                              name="x-circle"
+                              [size]="14"
+                              class="shrink-0 mt-0.5"
+                            ></app-icon>
+                            {{ error }}
                           </p>
                         }
                       </div>
@@ -676,7 +683,7 @@ import {
             <!-- Upload Error -->
             @if (uploadError() && !isUploading()) {
               <div
-                class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
+                class="bg-error-light px-3 py-2 rounded-lg border border-error text-error text-xs flex items-start gap-2"
               >
                 <app-icon
                   name="alert-circle"
@@ -703,32 +710,32 @@ import {
                 </div>
                 <div class="p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
                   <div
-                    class="bg-green-50 px-3 py-2 rounded border border-green-100"
+                    class="bg-success-light px-3 py-2 rounded border border-success"
                   >
-                    <div class="text-[10px] text-green-600 font-medium">
+                    <div class="text-[10px] text-success font-medium">
                       Exitosos
                     </div>
-                    <div class="text-xl font-bold text-green-700">
+                    <div class="text-xl font-bold text-success">
                       {{ uploadResults()!.successful || 0 }}
                     </div>
                   </div>
                   <div
-                    class="bg-red-50 px-3 py-2 rounded border border-red-100"
+                    class="bg-error-light px-3 py-2 rounded border border-error"
                   >
-                    <div class="text-[10px] text-red-600 font-medium">
+                    <div class="text-[10px] text-error font-medium">
                       Fallidos
                     </div>
-                    <div class="text-xl font-bold text-red-700">
+                    <div class="text-xl font-bold text-error">
                       {{ uploadResults()!.failed || 0 }}
                     </div>
                   </div>
                   <div
-                    class="bg-blue-50 px-3 py-2 rounded border border-blue-100"
+                    class="bg-[var(--color-info-light)] px-3 py-2 rounded border border-[var(--color-info)]"
                   >
-                    <div class="text-[10px] text-blue-600 font-medium">
+                    <div class="text-[10px] text-[var(--color-info)] font-medium">
                       Usuarios Creados
                     </div>
-                    <div class="text-xl font-bold text-blue-700">
+                    <div class="text-xl font-bold text-[var(--color-info)]">
                       {{ uploadResults()!.users_created || 0 }}
                     </div>
                   </div>
@@ -824,9 +831,9 @@ import {
                             <span
                               class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
                               [ngClass]="{
-                                'bg-green-100 text-green-800':
+                                'bg-success-light text-success':
                                   result.status === 'success',
-                                'bg-red-100 text-red-800':
+                                'bg-error-light text-error':
                                   result.status === 'error',
                               }"
                             >

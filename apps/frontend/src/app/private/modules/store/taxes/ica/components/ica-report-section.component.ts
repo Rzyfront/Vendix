@@ -41,9 +41,9 @@ type IcaPeriodType = 'month' | 'quarter' | 'year';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, SelectorComponent],
   template: `
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow mt-4">
-      <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-        <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Reporte ICA por Período</h2>
+    <div class="bg-[var(--color-surface)] rounded-lg shadow mt-4">
+      <div class="p-4 border-b border-border">
+        <h2 class="text-lg font-semibold text-text-primary">Reporte ICA por Período</h2>
         <div class="flex flex-col md:flex-row gap-3 mt-3 md:items-end">
           <div class="w-full md:w-36">
             <app-selector
@@ -85,42 +85,42 @@ type IcaPeriodType = 'month' | 'quarter' | 'year';
       </div>
 
       @if (loading()) {
-        <div class="p-8 text-center text-gray-500 text-sm">Cargando reporte...</div>
+        <div class="p-8 text-center text-text-secondary text-sm">Cargando reporte...</div>
       } @else if (report(); as r) {
         <!-- Summary -->
-        <div class="grid grid-cols-3 gap-4 p-4 border-b border-gray-200 dark:border-gray-700">
+        <div class="grid grid-cols-3 gap-4 p-4 border-b border-border">
           <div>
-            <p class="text-xs text-gray-500 uppercase">Base Gravable</p>
-            <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ formatCurrency(r.total_base) }}</p>
+            <p class="text-xs text-text-secondary uppercase">Base Gravable</p>
+            <p class="text-lg font-semibold text-text-primary">{{ formatCurrency(r.total_base) }}</p>
           </div>
           <div>
-            <p class="text-xs text-gray-500 uppercase">Total ICA</p>
-            <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ formatCurrency(r.total_ica) }}</p>
+            <p class="text-xs text-text-secondary uppercase">Total ICA</p>
+            <p class="text-lg font-semibold text-text-primary">{{ formatCurrency(r.total_ica) }}</p>
           </div>
           <div>
-            <p class="text-xs text-gray-500 uppercase">Facturas</p>
-            <p class="text-lg font-semibold text-gray-900 dark:text-white">{{ r.invoice_count }}</p>
+            <p class="text-xs text-text-secondary uppercase">Facturas</p>
+            <p class="text-lg font-semibold text-text-primary">{{ r.invoice_count }}</p>
           </div>
         </div>
 
         <!-- Breakdown table -->
         <div class="overflow-x-auto">
-          <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead class="bg-gray-50 dark:bg-gray-900">
+          <table class="min-w-full divide-y divide-[var(--color-border)]">
+            <thead class="bg-[var(--color-surface-secondary)]">
               <tr>
-                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Municipio</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Base</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Tarifa ‰</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">ICA</th>
-                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase"># Facturas</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-text-secondary uppercase">Municipio</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Base</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">Tarifa ‰</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase">ICA</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-text-secondary uppercase"># Facturas</th>
               </tr>
             </thead>
-            <tbody class="divide-y divide-gray-200 dark:divide-gray-700">
+            <tbody class="divide-y divide-[var(--color-border)]">
               @for (row of r.breakdown; track row.municipality_code) {
-                <tr class="hover:bg-gray-50 dark:hover:bg-gray-700">
+                <tr class="hover:bg-[var(--color-surface-secondary)]">
                   <td class="px-4 py-3 text-sm">
                     {{ row.municipality }}
-                    <span class="text-gray-400">({{ row.municipality_code }})</span>
+                    <span class="text-text-secondary">({{ row.municipality_code }})</span>
                   </td>
                   <td class="px-4 py-3 text-sm text-right">{{ formatCurrency(row.base) }}</td>
                   <td class="px-4 py-3 text-sm text-right">{{ row.rate_per_mil }}‰</td>
@@ -130,13 +130,13 @@ type IcaPeriodType = 'month' | 'quarter' | 'year';
               }
               @empty {
                 <tr>
-                  <td colspan="5" class="px-4 py-8 text-center text-gray-500">
+                  <td colspan="5" class="px-4 py-8 text-center text-text-secondary">
                     Sin movimientos ICA en el período seleccionado
                   </td>
                 </tr>
               }
               @if (r.breakdown.length > 0) {
-                <tr class="bg-gray-50 dark:bg-gray-900 font-semibold">
+                <tr class="bg-[var(--color-surface-secondary)] font-semibold">
                   <td class="px-4 py-3 text-sm">Totales</td>
                   <td class="px-4 py-3 text-sm text-right">{{ formatCurrency(r.total_base) }}</td>
                   <td class="px-4 py-3 text-sm text-right">—</td>
@@ -148,7 +148,7 @@ type IcaPeriodType = 'month' | 'quarter' | 'year';
           </table>
         </div>
       } @else {
-        <div class="p-8 text-center text-gray-500 text-sm">
+        <div class="p-8 text-center text-text-secondary text-sm">
           No se pudo cargar el reporte para el período seleccionado
         </div>
       }

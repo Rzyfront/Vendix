@@ -25,6 +25,8 @@ import { InvoiceDetailComponent } from './components/invoice-detail/invoice-deta
 import { CreditNoteCreateComponent } from './components/credit-note-create/credit-note-create.component';
 import { InvoicingNotConfiguredComponent } from './components/invoicing-not-configured/invoicing-not-configured.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
+import { SaveRequirementsModalComponent } from '../../../../shared/components/index';
+import { FiscalRequirementsService } from '../../../../shared/services/fiscal-requirements.service';
 
 @Component({
   selector: 'vendix-invoicing',
@@ -36,6 +38,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     InvoiceDetailComponent,
     CreditNoteCreateComponent,
     InvoicingNotConfiguredComponent,
+    SaveRequirementsModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -82,12 +85,24 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
           [reason]="notConfiguredReason()"
         ></app-invoicing-not-configured>
       }
+
+      <!-- Prevalidacion operativa de facturacion: un 4xx fiscal al validar /
+           enviar a la DIAN / anular / nota credito se explica con el modal de
+           requisitos compartido (motivo + CTA a la config correcta). Lo dispara
+           InvoicingEffects via FiscalRequirementsService. -->
+      <app-save-requirements-modal
+        [(isOpen)]="fiscalReq.isOpen"
+        [requirements]="fiscalReq.requirements()"
+        (action)="fiscalReq.handleAction($event)"
+      />
     </div>
   `,
 })
 export class InvoicingComponent {
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
+  /** Modal compartido de requisitos fiscales (accedido desde el template). */
+  readonly fiscalReq = inject(FiscalRequirementsService);
 
   invoices$ = this.store.select(selectInvoices);
   loading$ = this.store.select(selectInvoicesLoading);
@@ -121,6 +136,10 @@ export class InvoicingComponent {
   readonly creditNoteSourceInvoice = signal<Invoice | null>(null);
 
   constructor() {
+    // Limpia cualquier estado stale del modal dejado por otra superficie
+    // (p.ej. una factura creada desde el POS) antes de que este contenedor
+    // monte su propio host del modal.
+    this.fiscalReq.close();
     this.currencyService.loadCurrency();
     this.store.dispatch(loadInvoices());
     this.store.dispatch(loadInvoiceStats());

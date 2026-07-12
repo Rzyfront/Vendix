@@ -12,6 +12,14 @@
     <meta name="theme-color" content="#2F6F4E" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
 
+    <!-- iOS / Apple Web App: Safari ignora el manifest (y no lee un Blob URL) para
+         la app instalada; estos meta habilitan modo standalone y el nombre correcto.
+         apple-mobile-web-app-title se sobreescribe en runtime con el nombre del tenant. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Vendix" />
+
     <!-- SEO -->
     <meta name="description" content="Crea tu tienda online, gestiona inventario, punto de venta, envíos y clientes desde un solo lugar. Potenciado con inteligencia artificial. Comienza gratis." />
     <meta name="keywords" content="ecommerce, tienda online, punto de venta, POS, inventario, gestión de negocio, vendix, plataforma multitenant, inteligencia artificial" />

@@ -1,4 +1,15 @@
 <div>
+  <!-- Sticky Header -->
+  <app-sticky-header
+    title="Resumen"
+    subtitle="Vision general del equilibrio financiero de tu tienda"
+    icon="layout-dashboard"
+    [tabs]="overviewTabs"
+    [actions]="overviewActions"
+    (actionClicked)="onHeaderAction($event)"
+    tabsAriaLabel="Navegacion de analiticas"
+  ></app-sticky-header>
+
   <!-- Stats Cards -->
   @if (loading()) {
     <div class="stats-container">
@@ -12,9 +23,7 @@
       }
     </div>
   } @else {
-    <div
-      class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
-    >
+    <div class="stats-container">
       <app-stats
         title="Ingresos Totales"
         [value]="summary()?.total_income | currency"
@@ -52,17 +61,6 @@
       ></app-stats>
     </div>
   }
-
-  <!-- Sticky Header -->
-  <app-sticky-header
-    title="Resumen"
-    subtitle="Vision general del equilibrio financiero de tu tienda"
-    icon="layout-dashboard"
-    [tabs]="overviewTabs"
-    [actions]="overviewActions"
-    (actionClicked)="onHeaderAction($event)"
-    tabsAriaLabel="Navegacion de analiticas"
-  ></app-sticky-header>
 
   <!-- Filter Bar -->
   <div class="flex items-center justify-between gap-3 sticky top-0 z-10 bg-white px-4 py-3 border-b border-border rounded-lg mx-1 mb-4">
@@ -112,7 +110,7 @@
           >Porcentaje de ingresos destinado a gastos</span
         >
       </div>
-      <div class="px-3 pt-3 pb-3 sm:px-4 sm:pt-4 h-full flex flex-col">
+      <div class="px-5 pt-5 pb-5 sm:px-6 sm:pt-6 h-full flex flex-col">
         @if (loading()) {
           <div class="flex-1 min-h-[200px] flex items-center justify-center">
             <div
@@ -120,14 +118,8 @@
             ></div>
           </div>
         } @else {
-          <div class="flex-1 min-h-0 h-[200px] sm:h-[230px] lg:h-auto">
-            @defer (on immediate) {
-              <app-chart [options]="gaugeChartOptions()"></app-chart>
-            } @placeholder {
-              <div
-                class="h-full bg-surface-secondary animate-pulse rounded-xl"
-              ></div>
-            }
+          <div class="py-2">
+            <app-break-even-gauge [ratio]="summary()?.breakeven_ratio ?? 0" />
           </div>
 
           <!-- Range Legend -->
@@ -204,7 +196,7 @@
             ></div>
           </div>
         } @else {
-          <div class="flex-1 min-h-0 h-[260px] sm:h-[340px] lg:h-auto">
+          <div class="h-[260px] sm:h-[340px] lg:h-[380px]">
             @defer (on immediate) {
               <app-chart [options]="comparativeChartOptions()"></app-chart>
             } @placeholder {

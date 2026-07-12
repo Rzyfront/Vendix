@@ -1,0 +1,203 @@
+/* Fullscreen live QR scanner overlay. Uses `position: fixed` directly — the
+   aforo view has no transformed ancestor, so no teleport-to-body is needed. */
+:host {
+  display: contents;
+}
+
+.scanner-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: #000;
+  overflow: hidden;
+}
+
+.scanner-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
+}
+
+/* ── Top bar ─────────────────────────────────────────────────────────── */
+.scanner-topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: flex-end;
+  padding: max(0.75rem, env(safe-area-inset-top)) 0.75rem 0.75rem;
+}
+
+.scanner-close {
+  width: 2.75rem;
+  height: 2.75rem;
+  border: none;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  transition: background-color 160ms ease;
+}
+
+.scanner-close:hover {
+  background: rgba(0, 0, 0, 0.7);
+}
+
+/* ── Framing + scanline ──────────────────────────────────────────────── */
+.scanner-frame-wrap {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  pointer-events: none;
+}
+
+.scanner-frame {
+  position: relative;
+  width: 72vw;
+  max-width: 320px;
+  aspect-ratio: 1;
+}
+
+.corner {
+  position: absolute;
+  width: 2rem;
+  height: 2rem;
+  border: 0 solid rgba(255, 255, 255, 0.92);
+}
+
+.corner-tl {
+  top: 0;
+  left: 0;
+  border-top-width: 3px;
+  border-left-width: 3px;
+  border-top-left-radius: 0.5rem;
+}
+
+.corner-tr {
+  top: 0;
+  right: 0;
+  border-top-width: 3px;
+  border-right-width: 3px;
+  border-top-right-radius: 0.5rem;
+}
+
+.corner-bl {
+  bottom: 0;
+  left: 0;
+  border-bottom-width: 3px;
+  border-left-width: 3px;
+  border-bottom-left-radius: 0.5rem;
+}
+
+.corner-br {
+  bottom: 0;
+  right: 0;
+  border-bottom-width: 3px;
+  border-right-width: 3px;
+  border-bottom-right-radius: 0.5rem;
+}
+
+.scanline {
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  top: 4%;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-primary, #16a34a),
+    transparent
+  );
+  box-shadow: 0 0 12px 2px rgba(var(--color-primary-rgb, 22, 163, 74), 0.7);
+  animation: aforo-scan 2.2s ease-in-out infinite;
+}
+
+@keyframes aforo-scan {
+  0% {
+    top: 4%;
+  }
+  50% {
+    top: 92%;
+  }
+  100% {
+    top: 4%;
+  }
+}
+
+.scanner-help {
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  text-align: center;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  padding: 0 1.5rem;
+}
+
+/* ── Error state ─────────────────────────────────────────────────────── */
+.scanner-error-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+}
+
+.scanner-error {
+  max-width: 22rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: center;
+  padding: 1.5rem;
+  border-radius: 0.875rem;
+  color: var(--color-text-primary, #111827);
+  background: var(--color-surface, #ffffff);
+  border: 1px solid var(--color-border, #e5e7eb);
+}
+
+.scanner-error p {
+  margin: 0;
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+
+.scanner-error app-icon {
+  color: var(--color-destructive, #dc2626);
+}
+
+.scanner-error-btn {
+  margin-top: 0.25rem;
+  padding: 0.5rem 1.25rem;
+  border: none;
+  border-radius: 0.75rem;
+  background: var(--color-primary, #16a34a);
+  color: var(--color-text-on-primary, #ffffff);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+/* Respect reduced-motion: freeze the scanline at center. */
+@media (prefers-reduced-motion: reduce) {
+  .scanline {
+    animation: none;
+    top: 50%;
+  }
+}

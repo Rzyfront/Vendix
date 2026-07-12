@@ -9,7 +9,10 @@ import {
   EmailTemplates,
   EmailTemplateData,
 } from '../templates/email-templates';
-import { WelcomeEmailOptions } from '../interfaces/branding.interface';
+import {
+  WelcomeEmailOptions,
+  PasswordResetEmailOptions,
+} from '../interfaces/branding.interface';
 import { DomainConfigService } from '../../common/config/domain.config';
 
 @Injectable()
@@ -94,11 +97,16 @@ export class ConsoleProvider implements EmailProvider {
     to: string,
     token: string,
     username: string,
+    options?: PasswordResetEmailOptions,
   ): Promise<EmailResult> {
     const templateData: EmailTemplateData = {
       username,
       email: to,
       token,
+      resetUrl: options?.resetUrl,
+      branding: options?.branding,
+      storeName: options?.storeName,
+      vlink: options?.organizationSlug,
       companyName: 'Vendix',
       supportEmail: this.config.fromEmail,
       year: new Date().getFullYear(),
@@ -108,7 +116,10 @@ export class ConsoleProvider implements EmailProvider {
 
     // Log adicional para desarrollo
     this.logger.log(
-      `🔗 PASSWORD RESET LINK: ${EmailTemplates.BASE_URL}/auth/reset-owner-password?token=${token}`,
+      `🔗 PASSWORD RESET LINK: ${
+        options?.resetUrl ||
+        `${EmailTemplates.BASE_URL}/auth/reset-owner-password?token=${token}`
+      }`,
     );
 
     return this.sendEmail(to, template.subject, template.html, template.text);

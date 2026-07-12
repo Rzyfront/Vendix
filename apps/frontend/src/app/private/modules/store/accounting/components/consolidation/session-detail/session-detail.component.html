@@ -2,7 +2,7 @@
 <div class="w-full">
   <!-- Header Bar -->
   <div
-    class="bg-surface border-b border-border px-3 py-3 md:px-6 md:py-4 mb-4 md:mb-6 rounded-t-xl"
+    class="bg-[var(--color-surface)] border-b border-border px-3 py-3 md:px-6 md:py-4 mb-4 md:mb-6 rounded-t-xl"
   >
     <div
       class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between"
@@ -10,7 +10,7 @@
       <!-- Left: Back + Title -->
       <div class="flex items-center gap-3">
         <button
-          class="p-1.5 rounded-lg hover:bg-gray-100 transition-colors"
+          class="p-1.5 rounded-lg hover:bg-[var(--color-surface-secondary)] transition-colors"
           (click)="goBack()"
         >
           <app-icon name="arrow-left" [size]="20"></app-icon>
@@ -335,7 +335,7 @@
 
         <div slot="footer">
           <div
-            class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+            class="flex items-center justify-end gap-3 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border"
           >
             <app-button
               variant="outline"
@@ -381,10 +381,10 @@
         <div class="relative p-2 md:p-4 min-h-[300px]">
           @if (report_loading()) {
             <div
-              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+              class="absolute inset-0 bg-[color-mix(in_srgb,var(--color-surface)_50%,transparent)] z-10 flex items-center justify-center"
             >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
               ></div>
             </div>
           }
@@ -424,7 +424,7 @@
                       track row.account_code || $index
                     ) {
                       <tr
-                        class="border-b border-border/50 hover:bg-gray-50 transition-colors"
+                        class="border-b border-border/50 hover:bg-[var(--color-surface-secondary)] transition-colors"
                       >
                         <td class="py-2 px-3 text-text-primary">
                           {{ row.account_code }} - {{ row.account_name }}

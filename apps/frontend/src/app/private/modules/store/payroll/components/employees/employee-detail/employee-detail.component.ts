@@ -70,12 +70,12 @@ import { EmployeeFiscalProfileFormComponent } from '../employee-fiscal-profile/e
 
         <!-- Linked user info -->
         @if (employee()?.user) {
-          <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+          <div class="mb-4 p-3 bg-[var(--color-info-light)] rounded-lg border border-[var(--color-info)]">
             <div class="flex items-center gap-2">
-              <span class="text-sm font-medium text-blue-800"
+              <span class="text-sm font-medium text-[var(--color-info)]"
                 >Usuario vinculado:</span
               >
-              <span class="text-sm text-blue-700"
+              <span class="text-sm text-[var(--color-info)]"
                 >{{ employee()?.user?.first_name }}
                 {{ employee()?.user?.last_name }} ({{
                   employee()?.user?.email
@@ -335,10 +335,10 @@ import { EmployeeFiscalProfileFormComponent } from '../employee-fiscal-profile/e
 
         <!-- Termination info -->
         @if (employee()?.termination_date) {
-          <div class="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
-            <p class="text-sm text-red-800">
+          <div class="mt-4 p-3 bg-error-light rounded-lg border border-error">
+            <p class="text-sm text-error">
               <strong>Fecha de terminacion:</strong>
-              {{ employee()?.termination_date | date: 'dd/MM/yyyy' }}
+              {{ employee()?.termination_date | date: 'dd/MM/yyyy':'UTC' }}
             </p>
           </div>
         }
@@ -347,7 +347,7 @@ import { EmployeeFiscalProfileFormComponent } from '../employee-fiscal-profile/e
       <!-- Footer -->
       <div slot="footer">
         <div
-          class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+          class="flex items-center justify-end gap-2 p-3 bg-[var(--color-surface-secondary)] rounded-b-xl border-t border-border"
         >
           @if (employee()) {
             <app-button
@@ -648,10 +648,10 @@ export class EmployeeDetailComponent {
 
   getStatusBadgeClass(status: string): string {
     const classes: Record<string, string> = {
-      active: 'bg-green-100 text-green-800',
-      inactive: 'bg-yellow-100 text-yellow-800',
-      terminated: 'bg-red-100 text-red-800',
+      active: 'bg-success-light text-success',
+      inactive: 'bg-warning-light text-warning',
+      terminated: 'bg-error-light text-error',
     };
-    return classes[status] || 'bg-gray-100 text-gray-800';
+    return classes[status] || 'bg-[var(--color-surface-secondary)] text-text-primary';
   }
 }

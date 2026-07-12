@@ -33,6 +33,9 @@ import {
   DateRangeFilterComponent
 } from '../../../components/date-range-filter/date-range-filter.component';
 import {
+  BreakEvenGaugeComponent
+} from '../../../components/break-even-gauge/break-even-gauge.component';
+import {
   StickyHeaderComponent,
   StickyHeaderTab,
   StickyHeaderActionButton,
@@ -67,6 +70,7 @@ import { queryParamsToDateRange } from '../../../../shared/utils/date-range-para
     AnalyticsCategoryChipsComponent,
     ExportButtonComponent,
     DateRangeFilterComponent,
+    BreakEvenGaugeComponent,
     StickyHeaderComponent,
   ],
   templateUrl: './overview-summary.component.html',
@@ -155,15 +159,12 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   });
 
 // Chart options
-  gaugeChartOptions= signal<EChartsOption>({});
   comparativeChartOptions= signal<EChartsOption>({});
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
     preset: 'thisMonth'});
 
-  // Cached summary for template helpers
-  private currentSummary: OverviewSummary | null = null;
   // Cached trends so charts can be rebuilt on viewport changes without refetch
   private currentTrends: OverviewTrend[] = [];
   private currentGranularity = 'day';
@@ -193,13 +194,8 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     this.store.dispatch(OverviewActions.loadOverviewSummary());
     this.store.dispatch(OverviewActions.loadOverviewTrends());
 
-    // Cache summary for template helpers
-    this.summary$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((summary) => {
-      this.currentSummary = summary;
-      if (summary) {
-        this.updateGaugeChart(summary.breakeven_ratio);
-      }
-    });
+    // Subscribe to summary so the signal stays hot for the template.
+    this.summary$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
 
     // Subscribe to trends to build comparative chart
     combineLatest([this.trends$, this.granularity$])
@@ -217,9 +213,6 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
         const mobile = this.computeIsMobile();
         if (mobile === this.isMobile()) return;
         this.isMobile.set(mobile);
-        if (this.currentSummary) {
-          this.updateGaugeChart(this.currentSummary.breakeven_ratio);
-        }
         this.updateComparativeChart(this.currentTrends, this.currentGranularity);
       });
   }
@@ -311,55 +304,6 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   }
 
   // Chart builders
-  private updateGaugeChart(ratio: number): void {
-    const m = this.isMobile();
-    this.gaugeChartOptions.set({
-      series: [
-        {
-          type: 'gauge',
-          // Semicircle only draws upward: anchor low and let radius exceed
-          // 100% of min(w,h)/2 so the arc fills the canvas without clipping.
-          center: ['50%', m ? '75%' : '78%'],
-          radius: m ? '105%' : '112%',
-          startAngle: 180,
-          endAngle: 0,
-          min: 0,
-          max: 150,
-          splitNumber: 3,
-          pointer: {
-            show: true,
-            length: m ? '58%' : '62%',
-            width: m ? 5 : 7,
-            itemStyle: {
-              color: 'auto' } },
-          axisLine: {
-            lineStyle: {
-              width: m ? 18 : 26,
-              color: [
-                [0.467, '#22c55e'], // 0-70%: green
-                [0.6, '#eab308'], // 70-90%: yellow
-                [1, '#ef4444'], // 90-150%: red
-              ] } },
-          axisTick: { show: false },
-          splitLine: {
-            length: m ? 10 : 14,
-            lineStyle: { width: 2, color: '#999' } },
-          axisLabel: {
-            // Negative distance pushes the % ticks outside the arc (cleaner look).
-            distance: m ? -18 : -28,
-            fontSize: m ? 10 : 12,
-            formatter: (value: number) => `${value}%` },
-          detail: {
-            valueAnimation: true,
-            formatter: (value: number) => `${value.toFixed(1)}%`,
-            fontSize: m ? 20 : 26,
-            fontWeight: 'bold',
-            offsetCenter: [0, m ? '20%' : '16%'],
-            color: ratio < 70 ? '#22c55e' : ratio < 90 ? '#eab308' : '#ef4444' },
-          data: [{ value: Math.min(ratio, 150) }] },
-      ] });
-  }
-
   private updateComparativeChart(
     trends: OverviewTrend[],
     granularity: string,

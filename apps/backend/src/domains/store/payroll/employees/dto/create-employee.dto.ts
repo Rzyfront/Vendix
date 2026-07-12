@@ -5,6 +5,7 @@ import {
   IsEnum,
   IsDateString,
   IsBoolean,
+  IsEmail,
   MaxLength,
   Min,
   IsInt,
@@ -128,6 +129,30 @@ export class CreateEmployeeDto {
   @IsString()
   @MaxLength(100)
   compensation_fund?: string;
+
+  // Contact channels — kept OPTIONAL here because CreateEmployeeDto
+  // is the shared DTO used by multiple flows (bulk import, payroll
+  // module's full form, etc.), and making them required would
+  // break TS2739 compile errors in callers that don't set them
+  // (e.g. employees-bulk.service.ts builds the DTO from a partial
+  // import row).
+  //
+  // The inline quick-create form in schedule-management IS strict
+  // about email/phone — it gates submission via newEmployeeValid
+  // BEFORE calling createQuickEmployee, so the backend never sees
+  // an empty email/phone from that path.
+  //
+  // When the operator DOES provide them, the format validators
+  // (and the Spanish messages) still apply — so we keep the
+  // @IsEmail/@MaxLength decorations, just not the required one.
+  @IsOptional()
+  @IsEmail({}, { message: 'El correo debe tener un formato válido (ej: usuario@empresa.com)' })
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20, { message: 'El teléfono no puede exceder 20 caracteres' })
+  phone?: string;
 
   @IsOptional()
   @IsBoolean()

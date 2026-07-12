@@ -46,6 +46,8 @@ export interface CartState {
   notes: string;
   discounts: CartDiscount[];
   summary: CartSummary;
+  /** Modo de operación del POS (paridad web `isQuotationMode / isLayawayMode`). */
+  mode?: PosMode;
 }
 
 export interface PaymentMethod {
@@ -135,4 +137,53 @@ export interface PaymentResult {
   change?: number;
 }
 
-export type PosMode = 'sale' | 'quotation';
+/**
+ * Modo de operación del POS — paridad con `pos.component.ts` web
+ * (`isQuotationMode`, `isLayawayMode`, `isEditMode`).
+ *
+ * - `sale`     → Punto de venta (default). Cobrar normal.
+ * - `quotation`→ Crear cotización. No descuenta inventario.
+ * - `layaway`  → Crear plan separé. Requiere cliente.
+ */
+export type PosMode = 'sale' | 'quotation' | 'layaway';
+
+/**
+ * Type-only stub de `CashRegisterSession` — declarado aquí (en lugar del
+ * servicio de cash-register) para que `pos-screen-header.tsx` compile
+ * standalone sin acoplar la pantalla POS al módulo de caja. Cuando el
+ * servicio de cash-register se integre, su shape debe coincidir
+ * exactamente con este; la fuente de verdad canónica será el service.
+ */
+export type CashSessionStatus = 'open' | 'closed' | 'suspended';
+
+export interface CashRegister {
+  id: number;
+  name: string;
+  code: string;
+  description?: string;
+  is_active: boolean;
+  default_opening_amount?: number;
+  location_id?: number | null;
+  location?: { id: number; name: string } | null;
+}
+
+export interface CashRegisterSession {
+  id: number;
+  cash_register_id: number;
+  store_id: number;
+  opened_by: number;
+  closed_by?: number;
+  status: CashSessionStatus;
+  opened_at: string;
+  closed_at?: string;
+  opening_amount: number;
+  expected_closing_amount?: number;
+  actual_closing_amount?: number;
+  difference?: number;
+  closing_notes?: string;
+  summary?: unknown;
+  ai_summary?: string;
+  register?: CashRegister;
+  opened_by_user?: { id: number; first_name: string; last_name: string };
+  closed_by_user?: { id: number; first_name: string; last_name: string };
+}

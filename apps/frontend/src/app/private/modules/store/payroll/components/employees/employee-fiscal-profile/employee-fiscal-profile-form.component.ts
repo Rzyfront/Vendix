@@ -190,7 +190,7 @@ import {
               </div>
               @if (calculationDetail(); as detail) {
                 <div
-                  class="md:col-span-2 p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900 space-y-1"
+                  class="md:col-span-2 p-3 rounded-lg bg-[var(--color-info-light)] border border-[var(--color-info)] text-xs text-[var(--color-info)] space-y-1"
                 >
                   <div>
                     Calculado sobre {{ detail.months_used }} mes(es) de
@@ -211,14 +211,14 @@ import {
 
         @if (errorMessage()) {
           <div
-            class="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800"
+            class="p-3 rounded-lg bg-error-light border border-error text-sm text-error"
           >
             {{ errorMessage() }}
           </div>
         }
         @if (successMessage()) {
           <div
-            class="p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-800"
+            class="p-3 rounded-lg bg-success-light border border-success text-sm text-success"
           >
             {{ successMessage() }}
           </div>

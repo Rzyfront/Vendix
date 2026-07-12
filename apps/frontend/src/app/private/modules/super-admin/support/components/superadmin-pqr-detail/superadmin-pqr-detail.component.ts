@@ -1384,6 +1384,23 @@ export class SuperadminPqrDetailComponent {
       const id = Number(this.route.snapshot.paramMap.get('id'));
       if (id) this.fetch(id);
     });
+
+    // Auto-open the content-edit modal when the list page navigates
+    // here with ?edit=content. Captured once at mount — the flag
+    // prevents the modal from re-opening every time `pqr()` is
+    // re-fetched (e.g. after submitEdit()). The signal-tracked
+    // condition ensures we open only once the PQR data is in scope.
+    const autoOpenEdit =
+      this.route.snapshot.queryParamMap.get('edit') === 'content';
+    let autoOpenTriggered = false;
+    if (autoOpenEdit) {
+      effect(() => {
+        if (!autoOpenTriggered && this.pqr()) {
+          autoOpenTriggered = true;
+          this.openEditModal();
+        }
+      });
+    }
   }
 
   typeLabel(type: string): string {
