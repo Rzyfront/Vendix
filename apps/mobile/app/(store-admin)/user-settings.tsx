@@ -500,6 +500,10 @@ export default function UserSettingsScreen() {
           {/* Parent Modules with Children */}
           {filteredParentModules.map((module) => {
             const isParentGated = isGatedByIndustry(module.key);
+            // Cuando el padre está gated, forzar render apagado en UI (parity con web
+            // `panel-toggle-row`). El valor real del usuario se preserva en `modules`;
+            // si la regla de industria cambia, su preferencia resurge sin perder data.
+            const parentVisualOn = isParentEnabled(module.key) && !isParentGated;
             return (
               <View key={module.key} style={styles.moduleGroup}>
                 <View style={styles.parentToggle}>
@@ -517,17 +521,20 @@ export default function UserSettingsScreen() {
                     )}
                   </View>
                   <Switch
-                    value={isParentEnabled(module.key)}
+                    value={parentVisualOn}
                     disabled={isParentGated}
                     onValueChange={(v) => toggleModule(module.key, v)}
                     trackColor={{ false: colorScales.gray[200], true: colors.primary }}
                     thumbColor="#FFFFFF"
                   />
                 </View>
-                {isParentEnabled(module.key) && module.children && (
+                {parentVisualOn && module.children && (
                   <View style={styles.childrenGrid}>
                     {module.children.map((child) => {
                       const isChildGated = isGatedByIndustry(child.key);
+                      // Cascada visual: si el padre está gated, los hijos también se ven
+                      // apagados aunque su valor real esté en `true`.
+                      const childVisualOn = (modules[child.key] ?? false) && parentVisualOn && !isChildGated;
                       return (
                         <View key={child.key} style={styles.childItem}>
                           <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -539,8 +546,8 @@ export default function UserSettingsScreen() {
                             )}
                           </View>
                           <Switch
-                            value={modules[child.key] ?? false}
-                            disabled={isChildGated}
+                            value={childVisualOn}
+                            disabled={!parentVisualOn || isChildGated}
                             onValueChange={(v) => toggleModule(child.key, v)}
                             trackColor={{ false: colorScales.gray[200], true: colors.primary }}
                             thumbColor="#FFFFFF"
@@ -561,6 +568,8 @@ export default function UserSettingsScreen() {
               <View style={styles.standaloneGrid}>
                 {filteredStandaloneModules.map((module) => {
                   const isModuleGated = isGatedByIndustry(module.key);
+                  // Forzar render apagado en UI cuando gated (parity con web).
+                  const visualOn = (modules[module.key] ?? false) && !isModuleGated;
                   return (
                     <View key={module.key} style={styles.standaloneItem}>
                       <View style={styles.standaloneItemLeft}>
@@ -577,7 +586,7 @@ export default function UserSettingsScreen() {
                         )}
                       </View>
                       <Switch
-                        value={modules[module.key] ?? false}
+                        value={visualOn}
                         disabled={isModuleGated}
                         onValueChange={(v) => toggleModule(module.key, v)}
                         trackColor={{ false: colorScales.gray[200], true: colors.primary }}

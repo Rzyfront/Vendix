@@ -1569,8 +1569,16 @@ function GeneralTab() {
                         form.general?.industries ?? ['retail'],
                       );
                       return STORE_ADMIN_MODULES.map((mod) => {
+                        // `isOn` mantiene el valor real del usuario (preservado en `form.panel_ui`
+                        // aunque la industria lo gatee — así si la regla cambia, su preferencia
+                        // resurge sin perder data).
                         const isOn = form.panel_ui?.[mod.key] !== false; // default true
                         const isGatedByIndustry = hiddenByIndustries.includes(mod.key);
+                        // Cuando el padre está gated, **forzar render apagado** (parity con web
+                        // `panel-toggle-row`: el padre se ve en gris aunque su `panel_ui` real
+                        // siga `true` en DB). Es solo cosmético — la prop `disabled` del Toggle
+                        // ya impide cualquier cambio; no toca `form.panel_ui`.
+                        const visualOn = isOn && !isGatedByIndustry;
                         return (
                           <View key={mod.key} style={{ backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#E5E7EB', marginBottom: 12, padding: 12 }}>
                             {/* Parent row */}
@@ -1608,7 +1616,7 @@ function GeneralTab() {
                                 {mod.description && <Text style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>{mod.description}</Text>}
                               </View>
                               <AppToggle
-                                value={isOn}
+                                value={visualOn}
                                 disabled={isGatedByIndustry}
                                 onValueChange={(val) => {
                                   // Gated toggles no son interactivos (parity con web `onToggle`).
@@ -1636,6 +1644,9 @@ function GeneralTab() {
                                 {mod.children.map(child => {
                                   const isChildOn = form.panel_ui?.[child.key] !== false;
                                   const isChildGatedByIndustry = hiddenByIndustries.includes(child.key);
+                                  // Cascada: si el padre está gated, todos los hijos se ven apagados
+                                  // aunque su valor real esté en `true`.
+                                  const childVisualOn = visualOn && isChildOn && !isChildGatedByIndustry;
                                   return (
                                     <View key={child.key} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, position: 'relative' }}>
                                       {/* Horizontal notch */}
@@ -1651,7 +1662,7 @@ function GeneralTab() {
                                         padding: 10,
                                         marginLeft: 16,
                                         flex: 1,
-                                        opacity: (isOn && !isChildGatedByIndustry) ? 1 : 0.5,
+                                        opacity: childVisualOn ? 1 : 0.5,
                                       }}>
                                         <View style={{ flex: 1, paddingRight: 16 }}>
                                           <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1676,8 +1687,8 @@ function GeneralTab() {
                                           </View>
                                         </View>
                                         <AppToggle
-                                          value={isChildOn && isOn}
-                                          disabled={!isOn || isChildGatedByIndustry}
+                                          value={childVisualOn}
+                                          disabled={!visualOn || isChildGatedByIndustry}
                                           onValueChange={(val) => {
                                             if (isChildGatedByIndustry) return;
                                             setForm((prev) => ({ ...prev, panel_ui: { ...prev.panel_ui, [child.key]: val } }));
