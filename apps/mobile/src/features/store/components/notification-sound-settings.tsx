@@ -70,7 +70,10 @@ export default function NotificationSoundSettings({
   const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Track width para mapear locationX → porcentaje en el slider.
-  const [soundTrackWidth, setSoundTrackWidth] = useState(0);
+  // Se mide sobre el rail visible (4px de alto, ancho completo) — no sobre el
+  // wrapper de 40px, así `locationX / width` da el porcentaje correcto aunque
+  // el usuario tapee por encima o por debajo del rail.
+  const [soundRailWidth, setSoundRailWidth] = useState(0);
 
   // Porcentaje clampeado 0-100 (el form puede traer null mientras carga).
   const safeVolume = Math.max(0, Math.min(100, soundVolume ?? 70));
@@ -97,19 +100,26 @@ export default function NotificationSoundSettings({
 
   const handleVolumeScrub = useCallback(
     (locationX: number) => {
-      if (soundTrackWidth <= 0) return;
-      const pct = Math.max(0, Math.min(100, (locationX / soundTrackWidth) * 100));
+      if (soundRailWidth <= 0) return;
+      const pct = Math.max(0, Math.min(100, (locationX / soundRailWidth) * 100));
       onSoundVolumeChange(Math.round(pct));
     },
-    [soundTrackWidth, onSoundVolumeChange],
+    [soundRailWidth, onSoundVolumeChange],
   );
 
+  // PanResponder discriminado: deja al ScrollView padre ganar el gesto cuando
+  // el usuario arrastra mayormente vertical (scroll de la página). Solo
+  // capturamos cuando el movimiento es claramente horizontal, o desde el
+  // primer toque (tap directo sobre la barra → grant inmediato).
   const volumePanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_evt, g) =>
+        Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 2,
       onPanResponderGrant: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
       onPanResponderMove: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
+      onPanResponderRelease: () => {},
+      onPanResponderTerminate: () => {},
     }),
   ).current;
 
@@ -161,21 +171,29 @@ export default function NotificationSoundSettings({
 
       <Text style={styles.volumeLabel}>Volumen: {safeVolume}%</Text>
       {/* Slider interactivo (parity web <input type="range">). Tap y drag
-          horizontal via PanResponder; el thumb sigue el dedo. */}
+          horizontal via PanResponder; el thumb sigue el dedo.
+          Arquitectura:
+          - `<View sliderTrack>` (40px alto) = área clicable completa + maneja
+            PanResponder + mide width real del rail.
+          - `<View sliderRail>` (4px alto) = línea visual del rail (gris/fill
+            púrpura). Centrada vertical dentro del track.
+          - `<View sliderThumb>` (16×16) = knob posicionado al % actual.
+          Split track / rail para que el usuario pueda tapeear arriba o abajo
+          del rail sin perder precisión de `locationX / width`. */}
       <View
-        onLayout={(e) => setSoundTrackWidth(e.nativeEvent.layout.width)}
+        onLayout={(e) => setSoundRailWidth(e.nativeEvent.layout.width)}
         style={styles.sliderTrack}
         {...volumePanResponder.panHandlers}
       >
         <View style={styles.sliderRail}>
           <View style={[styles.sliderFill, { width: `${safeVolume}%` }]} />
-          <View
-            style={[
-              styles.sliderThumb,
-              { left: `${safeVolume}%` },
-            ]}
-          />
         </View>
+        <View
+          style={[
+            styles.sliderThumb,
+            { left: `${safeVolume}%` },
+          ]}
+        />
       </View>
     </View>
   );
@@ -208,14 +226,16 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   sliderTrack: {
+    // Wrapper de 40px — área clicable amplia + maneja PanResponder.
     height: 40,
     justifyContent: 'center',
+    position: 'relative',
   },
   sliderRail: {
+    // Visual del rail: 4px de alto centrado verticalmente dentro del track.
     height: 4,
     backgroundColor: '#E5E7EB',
     borderRadius: 2,
-    position: 'relative',
   },
   sliderFill: {
     height: '100%',
@@ -229,6 +249,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#7C3AED',
     position: 'absolute',
     marginLeft: -8,
-    top: -6,
+    // Centrado vertical dentro del track de 40px (16px knob + 12px offset = top 12).
+    top: 12,
+    // Elevación sobre el rail — RN no soporta z-index de hermano confiable,
+    // pero el orden en JSX (después del rail) lo pone encima en iOS y Android.
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
   },
 });
