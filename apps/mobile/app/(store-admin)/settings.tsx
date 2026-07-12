@@ -13,19 +13,14 @@ import {
   TouchableOpacity,
   Animated,
   Image,
-  PanResponder,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useAudioPlayer } from 'expo-audio';
 import {
   Selector,
   type SelectorOption,
 } from '@/shared/components/selector/selector';
-import {
-  getNotificationSoundsCatalog,
-  type NotificationSoundCatalogItem,
-} from '@/features/store/services/notification-sounds-catalog.service';
+import NotificationSoundSettings from '@/features/store/components/notification-sound-settings';
 import { SettingsService } from '@/features/store/services/settings.service';
 import type {
   StoreSettings,
@@ -62,7 +57,6 @@ import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { StatsGrid } from '@/shared/components/stats-card/stats-grid';
 import { Modal } from '@/shared/components/modal/modal';
-import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { toastSuccess, toastError, toastInfo } from '@/shared/components/toast/toast.store';
 import {
@@ -1061,24 +1055,12 @@ function GeneralTab() {
   const [offsets, setOffsets] = useState<Record<string, number>>({});
   const [isScrollingFromTab, setIsScrollingFromTab] = useState(false);
 
-  const [showTimezone, setShowTimezone] = useState(false);
-  const [showCurrency, setShowCurrency] = useState(false);
-  const [showLanguage, setShowLanguage] = useState(false);
   const [showModulesModal, setShowModulesModal] = useState(false);
-  const [showStoreType, setShowStoreType] = useState(false);
-  const [showOutOfStock, setShowOutOfStock] = useState(false);
-  const [showCosting, setShowCosting] = useState(false);
-  const [showPosScope, setShowPosScope] = useState(false);
-  const [showAlertScope, setShowAlertScope] = useState(false);
-  const [showOrderUpdate, setShowOrderUpdate] = useState(false);
-  const [showTheme, setShowTheme] = useState(false);
   const [devicePushEnabled, setDevicePushEnabled] = useState(false);
   const [showWeightUnit, setShowWeightUnit] = useState(false);
   const [showBaudRate, setShowBaudRate] = useState(false);
   const [showProtocol, setShowProtocol] = useState(false);
   const [showScheduleMode, setShowScheduleMode] = useState(false);
-  // Sonido seleccionado (parity web notifications-settings-form)
-  const [soundTrackWidth, setSoundTrackWidth] = useState(0);
   const [subscriptions, setSubscriptions] = useState<Record<string, boolean>>({
     'new_order': true,
     'order_status': true,
@@ -1092,66 +1074,6 @@ function GeneralTab() {
     queryKey: ['store-settings'],
     queryFn: () => SettingsService.getSettings(),
   });
-
-  // Catálogo de sonidos (GET /notification-sounds). Cacheado a nivel de servicio
-  // (mismo patrón que uom.service.ts) — la promise se comparte entre mounts.
-  const { data: soundsCatalog } = useQuery<NotificationSoundCatalogItem[]>({
-    queryKey: ['notification-sounds-catalog'],
-    queryFn: () => getNotificationSoundsCatalog(),
-    staleTime: 1000 * 60 * 60, // 1h — el seed es inmutable en runtime
-  });
-
-  // Player para preview de sonido (expo-audio). Se inicializa con `null`
-  // para poder llamar `replace(url)` cuando el usuario elige un sonido.
-  const soundPlayer = useAudioPlayer(null);
-  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // PanResponder para el slider de volumen (tap + drag horizontal).
-  const volumePanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
-      onPanResponderMove: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
-    }),
-  ).current;
-
-  const handlePlayPreview = useCallback(() => {
-    const soundId = form.notifications?.sound_id;
-    if (!soundId) return;
-    const sound = soundsCatalog?.find((s) => s.id === soundId);
-    if (!sound?.url) return;
-
-    const vol = Math.max(0, Math.min(1, (form.notifications?.sound_volume ?? 70) / 100));
-    try {
-      soundPlayer.replace(sound.url);
-      soundPlayer.volume = vol;
-      soundPlayer.seekTo(0);
-      soundPlayer.play();
-      // Auto-stop a 1.5s por seguridad (parity con web playPreview).
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-      previewTimerRef.current = setTimeout(() => soundPlayer.pause(), 1500);
-    } catch {
-      // Silenciar errores de playback (network, codec, permisos) — el form
-      // sigue siendo usable; el usuario verá el toast sólo si lo implementamos.
-    }
-  }, [form.notifications?.sound_id, form.notifications?.sound_volume, soundsCatalog, soundPlayer]);
-
-  const handleVolumeScrub = useCallback(
-    (locationX: number) => {
-      if (soundTrackWidth <= 0) return;
-      const pct = Math.max(0, Math.min(100, (locationX / soundTrackWidth) * 100));
-      updateNotificationsField('sound_volume', Math.round(pct));
-    },
-    [soundTrackWidth],
-  );
-
-  // Limpia el timer de preview si el componente se desmonta.
-  useEffect(() => {
-    return () => {
-      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
-    };
-  }, []);
 
   const subTabs = [
     { key: 'identity', label: 'Identidad' },
@@ -1492,94 +1414,43 @@ function GeneralTab() {
                 placeholder="Mi Tienda"
               />
 
-              <Text style={styles.inputLabel}>Tipo de Tienda</Text>
-              <TouchableOpacity
-                style={styles.selector}
-                onPress={() => setShowStoreType(true)}
-              >
-                <Text style={form.general?.store_type ? styles.selectorText : styles.placeholder}>
-                  {form.general?.store_type === 'physical' ? 'Tienda Física' :
-                   form.general?.store_type === 'online' ? 'Tienda Online' :
-                   form.general?.store_type === 'hybrid' ? 'Híbrida (Física + Online)' :
-                   form.general?.store_type === 'popup' ? 'Tienda Pop-up' :
-                   form.general?.store_type === 'kiosko' ? 'Kiosco' : 'Seleccionar...'}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color="#9CA3AF" />
-              </TouchableOpacity>
-              <BottomSheet visible={showStoreType} onClose={() => setShowStoreType(false)} snapPoint="partial">
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 16 }}>Tipo de Tienda</Text>
-        
-        
-                  {['physical', 'online', 'hybrid', 'popup', 'kiosko'].map((t) => (
-                    <TouchableOpacity
-                      key={t}
-                      style={styles.dropdownItem}
-                      onPress={() => { updateGeneralField('store_type', t); setShowStoreType(false); }}
-                    >
-                      <Text style={styles.dropdownText}>
-                        {t === 'physical' ? 'Tienda Física' :
-                         t === 'online' ? 'Tienda Online' :
-                         t === 'hybrid' ? 'Híbrida (Física + Online)' :
-                         t === 'popup' ? 'Tienda Pop-up' : 'Kiosco'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                        
-              </BottomSheet>
+              <Selector
+                label="Tipo de Tienda"
+                value={form.general?.store_type ?? null}
+                onChange={(v) => updateGeneralField('store_type', v)}
+                options={[
+                  { value: 'physical', label: 'Tienda Física' },
+                  { value: 'online', label: 'Tienda Online' },
+                  { value: 'hybrid', label: 'Híbrida (Física + Online)' },
+                  { value: 'popup', label: 'Tienda Pop-up' },
+                  { value: 'kiosko', label: 'Kiosco' },
+                ]}
+                placeholder="Seleccionar..."
+              />
 
               <Text style={[sectionStyles.sectionTitle, { marginTop: 24 }]}>Preferencias y Localización</Text>
 
-              <Text style={styles.inputLabel}>Moneda</Text>
-              <TouchableOpacity
-                style={styles.selector}
-                onPress={() => setShowCurrency(true)}
-              >
-                <Text style={form.general?.currency ? styles.selectorText : styles.placeholder}>
-                  {form.general?.currency || 'Seleccionar...'}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color="#9CA3AF" />
-              </TouchableOpacity>
-              <BottomSheet visible={showCurrency} onClose={() => setShowCurrency(false)} snapPoint="partial">
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 16 }}>Moneda</Text>
-        
-        
-                  {['COP', 'MXN', 'USD', 'CLP', 'PEN', 'EUR'].map((cur) => (
-                    <TouchableOpacity
-                      key={cur}
-                      style={styles.dropdownItem}
-                      onPress={() => { updateGeneralField('currency', cur); setShowCurrency(false); }}
-                    >
-                      <Text style={styles.dropdownText}>{cur}</Text>
-                    </TouchableOpacity>
-                  ))}
-                        
-              </BottomSheet>
+              <Selector
+                label="Moneda"
+                value={form.general?.currency ?? null}
+                onChange={(v) => updateGeneralField('currency', v)}
+                options={['COP', 'MXN', 'USD', 'CLP', 'PEN', 'EUR'].map((cur) => ({
+                  value: cur,
+                  label: cur,
+                }))}
+                placeholder="Seleccionar..."
+              />
 
-              <Text style={[styles.inputLabel, { marginTop: 14 }]}>Zona Horaria</Text>
-              <TouchableOpacity
-                style={styles.selector}
-                onPress={() => setShowTimezone(true)}
-              >
-                <Text style={form.general?.timezone ? styles.selectorText : styles.placeholder}>
-                  {form.general?.timezone || 'Seleccionar...'}
-                </Text>
-                <Ionicons name="chevron-down" size={16} color="#9CA3AF" />
-              </TouchableOpacity>
-              <BottomSheet visible={showTimezone} onClose={() => setShowTimezone(false)} snapPoint="partial">
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 16 }}>Zona Horaria</Text>
-        
-        
-                  {['America/Bogota', 'America/Mexico_City', 'America/Caracas', 'America/Santiago', 'America/Lima', 'America/New_York', 'UTC'].map((tz) => (
-                    <TouchableOpacity
-                      key={tz}
-                      style={styles.dropdownItem}
-                      onPress={() => { updateGeneralField('timezone', tz); setShowTimezone(false); }}
-                    >
-                      <Text style={styles.dropdownText}>{tz}</Text>
-                    </TouchableOpacity>
-                  ))}
-                        
-              </BottomSheet>
+              <Selector
+                label="Zona Horaria"
+                value={form.general?.timezone ?? null}
+                onChange={(v) => updateGeneralField('timezone', v)}
+                options={['America/Bogota', 'America/Mexico_City', 'America/Caracas', 'America/Santiago', 'America/Lima', 'America/New_York', 'UTC'].map((tz) => ({
+                  value: tz,
+                  label: tz,
+                }))}
+                placeholder="Seleccionar..."
+              />
 
               {/* ── Tipos de Negocio (multi-selector) ── */}
               <Text style={[sectionStyles.sectionTitle, { marginTop: 24 }]}>Tipos de Negocio *</Text>
@@ -2122,131 +1993,57 @@ function GeneralTab() {
             </View>
 
             <Text style={styles.sectionSubtitle}>Comportamiento</Text>
-            <Text style={styles.inputLabel}>Acción sin stock</Text>
-            <TouchableOpacity
-              style={styles.selector}
-              onPress={() => setShowOutOfStock(!showOutOfStock)}
-            >
-              <Text style={form.inventory?.out_of_stock_action ? styles.selectorText : styles.placeholder}>
-                {form.inventory?.out_of_stock_action === 'show' ? 'Mostrar con etiqueta sin stock' :
-                 form.inventory?.out_of_stock_action === 'hide' ? 'Ocultar producto' :
-                 form.inventory?.out_of_stock_action === 'disable' ? 'Desactivar compra' :
-                 form.inventory?.out_of_stock_action === 'allow_backorder' ? 'Permitir reserva' : 'Seleccionar...'}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#9CA3AF" />
-            </TouchableOpacity>
-            <BottomSheet visible={showOutOfStock} onClose={() => setShowOutOfStock(false)} snapPoint="partial">
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 16 }}>Comportamiento sin Stock</Text>
-        
-        
-                {['show', 'hide', 'disable', 'allow_backorder'].map((a) => (
-                  <TouchableOpacity
-                    key={a}
-                    style={styles.dropdownItem}
-                    onPress={() => { updateInventoryField('out_of_stock_action', a); setShowOutOfStock(false); }}
-                  >
-                    <Text style={styles.dropdownText}>
-                      {a === 'show' ? 'Mostrar con etiqueta sin stock' :
-                       a === 'hide' ? 'Ocultar producto' :
-                       a === 'disable' ? 'Desactivar compra' : 'Permitir reserva'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                      
-              </BottomSheet>
+            <Selector
+              label="Acción sin stock"
+              value={form.inventory?.out_of_stock_action ?? null}
+              onChange={(v) => updateInventoryField('out_of_stock_action', v)}
+              options={[
+                { value: 'show', label: 'Mostrar con etiqueta sin stock' },
+                { value: 'hide', label: 'Ocultar producto' },
+                { value: 'disable', label: 'Desactivar compra' },
+                { value: 'allow_backorder', label: 'Permitir reserva' },
+              ]}
+              placeholder="Seleccionar..."
+            />
 
             <Text style={styles.sectionSubtitle}>Valoración de Inventario</Text>
-            <Text style={styles.inputLabel}>Método de costeo</Text>
-            <TouchableOpacity
-              style={styles.selector}
-              onPress={() => setShowCosting(!showCosting)}
-            >
-              <Text style={form.inventory?.costing_method ? styles.selectorText : styles.placeholder}>
-                {form.inventory?.costing_method === 'cpp' ? 'CPP (Costo Promedio Ponderado)' :
-                 form.inventory?.costing_method === 'fifo' ? 'PEPS (FIFO)' : 'Seleccionar...'}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#9CA3AF" />
-            </TouchableOpacity>
-            <BottomSheet visible={showCosting} onClose={() => setShowCosting(false)} snapPoint="partial">
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 16 }}>Método de Costeo</Text>
-        
-        
-                {['cpp', 'fifo'].map((m) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={styles.dropdownItem}
-                    onPress={() => { updateInventoryField('costing_method', m); setShowCosting(false); }}
-                  >
-                    <Text style={styles.dropdownText}>
-                      {m === 'cpp' ? 'CPP (Costo Promedio Ponderado)' : 'PEPS (FIFO)'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                      
-              </BottomSheet>
+            <Selector
+              label="Método de costeo"
+              value={form.inventory?.costing_method ?? null}
+              onChange={(v) => updateInventoryField('costing_method', v)}
+              options={[
+                { value: 'cpp', label: 'CPP (Costo Promedio Ponderado)' },
+                { value: 'fifo', label: 'PEPS (FIFO)' },
+              ]}
+              placeholder="Seleccionar..."
+            />
             <Text style={{ fontSize: 12, color: '#EA580C', marginTop: 8, marginBottom: 16, lineHeight: 16 }}>
               Cambiar el método de costeo puede tener implicaciones contables. Consulte con su contador antes de modificar esta configuración.
             </Text>
 
             <Text style={styles.sectionSubtitle}>Alcance de Bodegas</Text>
-            <Text style={styles.inputLabel}>Origen de stock en el POS</Text>
-            <TouchableOpacity
-              style={styles.selector}
-              onPress={() => setShowPosScope(!showPosScope)}
-            >
-              <Text style={form.inventory?.pos_stock_scope ? styles.selectorText : styles.placeholder}>
-                {form.inventory?.pos_stock_scope === 'main_location' ? 'Bodega Principal' :
-                 form.inventory?.pos_stock_scope === 'all_locations' ? 'Todas las bodegas' : 'Seleccionar...'}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#9CA3AF" />
-            </TouchableOpacity>
-            <BottomSheet visible={showPosScope} onClose={() => setShowPosScope(false)} snapPoint="partial">
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 16 }}>Alcance POS</Text>
-        
-        
-                {['main_location', 'all_locations'].map((s) => (
-                  <TouchableOpacity
-                    key={s}
-                    style={styles.dropdownItem}
-                    onPress={() => { updateInventoryField('pos_stock_scope', s); setShowPosScope(false); }}
-                  >
-                    <Text style={styles.dropdownText}>
-                      {s === 'main_location' ? 'Bodega Principal' : 'Todas las bodegas'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                      
-              </BottomSheet>
+            <Selector
+              label="Origen de stock en el POS"
+              value={form.inventory?.pos_stock_scope ?? null}
+              onChange={(v) => updateInventoryField('pos_stock_scope', v)}
+              options={[
+                { value: 'main_location', label: 'Bodega Principal' },
+                { value: 'all_locations', label: 'Todas las bodegas' },
+              ]}
+              placeholder="Seleccionar..."
+            />
             <Text style={[styles.toggleDesc, { marginTop: 4 }]}>Determina de qué bodegas el POS descuenta inventario al vender.</Text>
 
-            <Text style={[styles.inputLabel, { marginTop: 14 }]}>Origen de alertas de stock bajo</Text>
-            <TouchableOpacity
-              style={styles.selector}
-              onPress={() => setShowAlertScope(!showAlertScope)}
-            >
-              <Text style={form.inventory?.low_stock_alerts_scope ? styles.selectorText : styles.placeholder}>
-                {form.inventory?.low_stock_alerts_scope === 'main_location' ? 'Bodega Principal' :
-                 form.inventory?.low_stock_alerts_scope === 'all_locations' ? 'Todas las bodegas' : 'Seleccionar...'}
-              </Text>
-              <Ionicons name="chevron-down" size={16} color="#9CA3AF" />
-            </TouchableOpacity>
-            <BottomSheet visible={showAlertScope} onClose={() => setShowAlertScope(false)} snapPoint="partial">
-                <Text style={{ fontSize: 16, fontWeight: '700', color: '#111827', textAlign: 'center', marginBottom: 16 }}>Alcance Alertas</Text>
-        
-        
-                {['main_location', 'all_locations'].map((s) => (
-                  <TouchableOpacity
-                    key={s}
-                    style={styles.dropdownItem}
-                    onPress={() => { updateInventoryField('low_stock_alerts_scope', s); setShowAlertScope(false); }}
-                  >
-                    <Text style={styles.dropdownText}>
-                      {s === 'main_location' ? 'Bodega Principal' : 'Todas las bodegas'}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-                      
-              </BottomSheet>
+            <Selector
+              label="Origen de alertas de stock bajo"
+              value={form.inventory?.low_stock_alerts_scope ?? null}
+              onChange={(v) => updateInventoryField('low_stock_alerts_scope', v)}
+              options={[
+                { value: 'main_location', label: 'Bodega Principal' },
+                { value: 'all_locations', label: 'Todas las bodegas' },
+              ]}
+              placeholder="Seleccionar..."
+            />
             <Text style={[styles.toggleDesc, { marginTop: 4 }]}>Define qué bodegas se consideran al evaluar el umbral de stock bajo.</Text>
           </View>
         </View>
@@ -2456,70 +2253,14 @@ function GeneralTab() {
               />
             </View>
 
-            <View style={{ marginTop: 16, opacity: form.notifications?.sound_muted ? 0.5 : 1 }} pointerEvents={form.notifications?.sound_muted ? 'none' : 'auto'}>
-              {/* Selector con popover anclado (parity con shared <Selector> que
-                  usan los módulos pop / prebulk / etc., y con la web
-                  <app-selector> del notifications-settings-form). */}
-              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end', marginBottom: 16 }}>
-                <Selector<string | null>
-                  label="Sonido seleccionado"
-                  value={form.notifications?.sound_id ?? null}
-                  onChange={(v) => updateNotificationsField('sound_id', v)}
-                  options={[
-                    { value: null, label: '— Sin sonido —' },
-                    ...((soundsCatalog ?? []).map((s) => ({
-                      value: s.id as string | null,
-                      label: s.name,
-                    })) as SelectorOption<string | null>[]),
-                  ]}
-                  placeholder="— Sin sonido —"
-                  disabled={!!form.notifications?.sound_muted}
-                  style={{ flex: 1 }}
-                />
-                <TouchableOpacity
-                  style={{
-                    backgroundColor: (form.notifications?.sound_id && !form.notifications?.sound_muted) ? '#2ecc71' : '#9CA3AF',
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    paddingHorizontal: 16,
-                    height: 44,
-                    borderRadius: 10,
-                    opacity: (form.notifications?.sound_id && !form.notifications?.sound_muted) ? 1 : 0.5,
-                  }}
-                  disabled={!form.notifications?.sound_id || form.notifications?.sound_muted}
-                  onPress={handlePlayPreview}
-                >
-                  <Ionicons name="play" size={16} color="#FFFFFF" />
-                  <Text style={{ fontSize: 14, fontWeight: '600', color: '#FFFFFF', marginLeft: 6 }}>Probar</Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={{ fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 6 }}>
-                Volumen: {form.notifications?.sound_volume ?? 70}%
-              </Text>
-              {/* Slider interactivo (parity web <input type="range">). Soporta tap
-                  y drag horizontal via PanResponder; el thumb sigue el dedo. */}
-              <View
-                onLayout={(e) => setSoundTrackWidth(e.nativeEvent.layout.width)}
-                style={{ height: 40, justifyContent: 'center' }}
-                {...volumePanResponder.panHandlers}
-              >
-                <View style={{ height: 4, backgroundColor: '#E5E7EB', borderRadius: 2, position: 'relative' }}>
-                  <View style={{ width: `${Math.max(0, Math.min(100, form.notifications?.sound_volume ?? 70))}%`, height: '100%', backgroundColor: '#7C3AED', borderRadius: 2 }} />
-                  <View
-                    style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: 8,
-                      backgroundColor: '#7C3AED',
-                      position: 'absolute',
-                      left: `${Math.max(0, Math.min(100, form.notifications?.sound_volume ?? 70))}%`,
-                      marginLeft: -8,
-                      top: -6,
-                    }}
-                  />
-                </View>
-              </View>
+            <View style={{ marginTop: 16 }}>
+              <NotificationSoundSettings
+                soundId={form.notifications?.sound_id}
+                soundVolume={form.notifications?.sound_volume}
+                muted={!!form.notifications?.sound_muted}
+                onSoundIdChange={(v) => updateNotificationsField('sound_id', v)}
+                onSoundVolumeChange={(v) => updateNotificationsField('sound_volume', v)}
+              />
             </View>
 
             <Text style={styles.sectionSubtitle}>Alertas de Eventos</Text>
@@ -3866,48 +3607,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.6,
     marginBottom: 6,
-  },
-  selector: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 0,
-    backgroundColor: '#fff',
-    height: 44,
-  },
-  selectorText: {
-    fontSize: 14,
-    color: '#111827',
-  },
-  placeholder: {
-    fontSize: 14,
-    color: '#9CA3AF',
-  },
-  dropdownScroll: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    marginTop: 4,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-  },
-  dropdownItem: {
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F6',
-  },
-  dropdownText: {
-    fontSize: 14,
-    color: '#374151',
   },
   /* ── Toggle row: matches web app-setting-toggle layout ── */
   toggleRow: {
