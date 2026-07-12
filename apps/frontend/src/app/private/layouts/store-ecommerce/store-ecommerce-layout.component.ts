@@ -169,6 +169,8 @@ export class StoreEcommerceLayoutComponent {
   // QR dine-in — "Mi cuenta" modal + guest count (GAP-5)
   readonly is_bill_modal_open = signal(false);
   readonly guest_count = signal(1);
+  // QR dine-in — bottom-sheet de acciones (móvil). Sólo activo en flujo de mesa.
+  readonly is_actions_sheet_open = signal(false);
 
   // Cart animation and tooltip state
   readonly is_animating = signal(false);
@@ -184,6 +186,9 @@ export class StoreEcommerceLayoutComponent {
   private wishlist_tooltip_timeout: any;
 
   constructor() {
+    // Restore body scroll if the actions sheet is torn down mid-open.
+    this.destroy_ref.onDestroy(() => this.setBodyScrollLock(false));
+
     // Get store info from domain resolution reactively
     this.domain_service.domainConfig$
       .pipe(takeUntilDestroyed(this.destroy_ref))
@@ -524,6 +529,23 @@ export class StoreEcommerceLayoutComponent {
       .subscribe({
         error: (err) => this.toast_service.error(parseApiError(err).userMessage),
       });
+  }
+
+  /** Open the mobile bottom-sheet of table actions (locks body scroll). */
+  openActionsSheet(): void {
+    this.is_actions_sheet_open.set(true);
+    this.setBodyScrollLock(true);
+  }
+
+  /** Close the mobile bottom-sheet and release the body scroll lock. */
+  closeActionsSheet(): void {
+    this.is_actions_sheet_open.set(false);
+    this.setBodyScrollLock(false);
+  }
+
+  private setBodyScrollLock(locked: boolean): void {
+    if (!this.is_browser) return;
+    document.body.style.overflow = locked ? 'hidden' : '';
   }
 
   /** Persist the number of guests at the table (422 if over capacity). */
