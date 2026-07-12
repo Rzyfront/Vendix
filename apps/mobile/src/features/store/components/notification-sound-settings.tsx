@@ -1,0 +1,234 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  PanResponder,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useQuery } from '@tanstack/react-query';
+import { useAudioPlayer } from 'expo-audio';
+import {
+  Selector,
+  type SelectorOption,
+} from '@/shared/components/selector/selector';
+import {
+  getNotificationSoundsCatalog,
+  type NotificationSoundCatalogItem,
+} from '@/features/store/services/notification-sounds-catalog.service';
+import { borderRadius } from '@/shared/theme';
+
+/**
+ * `NotificationSoundSettings` — bloque de configuración de sonido de
+ * notificaciones (selector + probar + slider de volumen).
+ *
+ * Réplica del sub-bloque "Sonido de notificaciones" del web
+ * `notifications-settings-form.component.ts`. Encapsula:
+ *  - Catálogo de sonidos (`GET /notification-sounds`, cacheado a nivel de
+ *    servicio — mismo patrón que `uom.service.ts`).
+ *  - Reproductor de preview con `expo-audio` (auto-stop a 1.5s).
+ *  - Slider de volumen (PanResponder, parity con web `<input type="range">`).
+ *  - Popover anchored para el selector de sonido (parity con el shared
+ *    `<Selector>` que usan los módulos pop y prebulk).
+ *
+ * El toggle "Silenciar sonidos" (`sound_muted`) NO vive aquí porque es un
+ * ajuste de alto nivel que también afecta a las suscripciones push; lo
+ * mantiene el padre (Settings → General → Alertas) que tiene acceso al
+ * `<AppToggle>` local. Esta vista recibe `muted` para deshabilitar todos
+ * sus controles de forma coherente con la UI.
+ */
+export interface NotificationSoundSettingsProps {
+  /** ID del sonido seleccionado actualmente (null = sin sonido). */
+  soundId: string | null | undefined;
+  /** Volumen 0-100. */
+  soundVolume: number | undefined;
+  /** Cuando true, todos los controles quedan deshabilitados visualmente. */
+  muted: boolean;
+  onSoundIdChange: (id: string | null) => void;
+  onSoundVolumeChange: (volume: number) => void;
+}
+
+export default function NotificationSoundSettings({
+  soundId,
+  soundVolume,
+  muted,
+  onSoundIdChange,
+  onSoundVolumeChange,
+}: NotificationSoundSettingsProps) {
+  // Catálogo de sonidos (inmutable en runtime). staleTime 1h reusa la
+  // entrada del queryClient entre mounts (parity con uom.service.ts).
+  const { data: soundsCatalog } = useQuery<NotificationSoundCatalogItem[]>({
+    queryKey: ['notification-sounds-catalog'],
+    queryFn: () => getNotificationSoundsCatalog(),
+    staleTime: 1000 * 60 * 60,
+  });
+
+  // Reproductor de preview (expo-audio). Se inicializa con `null` para
+  // poder llamar `replace(url)` cuando el usuario elige un sonido.
+  const soundPlayer = useAudioPlayer(null);
+  const previewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Track width para mapear locationX → porcentaje en el slider.
+  const [soundTrackWidth, setSoundTrackWidth] = useState(0);
+
+  // Porcentaje clampeado 0-100 (el form puede traer null mientras carga).
+  const safeVolume = Math.max(0, Math.min(100, soundVolume ?? 70));
+
+  const handlePlayPreview = useCallback(() => {
+    if (!soundId) return;
+    const sound = soundsCatalog?.find((s) => s.id === soundId);
+    if (!sound?.url) return;
+
+    const vol = Math.max(0, Math.min(1, safeVolume / 100));
+    try {
+      soundPlayer.replace(sound.url);
+      soundPlayer.volume = vol;
+      soundPlayer.seekTo(0);
+      soundPlayer.play();
+      // Auto-stop a 1.5s por seguridad (parity con web playPreview).
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+      previewTimerRef.current = setTimeout(() => soundPlayer.pause(), 1500);
+    } catch {
+      // Silenciar errores de playback (network, codec, permisos) — el form
+      // sigue siendo usable.
+    }
+  }, [soundId, safeVolume, soundsCatalog, soundPlayer]);
+
+  const handleVolumeScrub = useCallback(
+    (locationX: number) => {
+      if (soundTrackWidth <= 0) return;
+      const pct = Math.max(0, Math.min(100, (locationX / soundTrackWidth) * 100));
+      onSoundVolumeChange(Math.round(pct));
+    },
+    [soundTrackWidth, onSoundVolumeChange],
+  );
+
+  const volumePanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
+      onPanResponderMove: (evt) => handleVolumeScrub(evt.nativeEvent.locationX),
+    }),
+  ).current;
+
+  // Limpia el timer de preview si el componente se desmonta.
+  useEffect(() => {
+    return () => {
+      if (previewTimerRef.current) clearTimeout(previewTimerRef.current);
+    };
+  }, []);
+
+  // Opciones del selector — "Sin sonido" primero + catálogo.
+  const selectorOptions = [
+    { value: null, label: '— Sin sonido —' },
+    ...((soundsCatalog ?? []).map((s) => ({
+      value: s.id as string | null,
+      label: s.name,
+    })) as SelectorOption<string | null>[]),
+  ];
+
+  const canPreview = !!soundId && !muted;
+  const isDisabled = muted;
+
+  return (
+    <View style={{ opacity: isDisabled ? 0.5 : 1 }} pointerEvents={isDisabled ? 'none' : 'auto'}>
+      <View style={styles.row}>
+        <Selector<string | null>
+          label="Sonido seleccionado"
+          value={soundId ?? null}
+          onChange={onSoundIdChange}
+          options={selectorOptions}
+          placeholder="— Sin sonido —"
+          disabled={isDisabled}
+          style={{ flex: 1 }}
+        />
+        <TouchableOpacity
+          style={[
+            styles.previewButton,
+            { backgroundColor: canPreview ? '#2ecc71' : '#9CA3AF' },
+          ]}
+          disabled={!canPreview}
+          onPress={handlePlayPreview}
+          accessibilityRole="button"
+          accessibilityLabel="Probar sonido"
+        >
+          <Ionicons name="play" size={16} color="#FFFFFF" />
+          <Text style={styles.previewButtonText}>Probar</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.volumeLabel}>Volumen: {safeVolume}%</Text>
+      {/* Slider interactivo (parity web <input type="range">). Tap y drag
+          horizontal via PanResponder; el thumb sigue el dedo. */}
+      <View
+        onLayout={(e) => setSoundTrackWidth(e.nativeEvent.layout.width)}
+        style={styles.sliderTrack}
+        {...volumePanResponder.panHandlers}
+      >
+        <View style={styles.sliderRail}>
+          <View style={[styles.sliderFill, { width: `${safeVolume}%` }]} />
+          <View
+            style={[
+              styles.sliderThumb,
+              { left: `${safeVolume}%` },
+            ]}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-end',
+    marginBottom: 16,
+  },
+  previewButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    height: 44,
+    borderRadius: borderRadius.md,
+  },
+  previewButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
+    marginLeft: 6,
+  },
+  volumeLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+    marginBottom: 6,
+  },
+  sliderTrack: {
+    height: 40,
+    justifyContent: 'center',
+  },
+  sliderRail: {
+    height: 4,
+    backgroundColor: '#E5E7EB',
+    borderRadius: 2,
+    position: 'relative',
+  },
+  sliderFill: {
+    height: '100%',
+    backgroundColor: '#7C3AED',
+    borderRadius: 2,
+  },
+  sliderThumb: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#7C3AED',
+    position: 'absolute',
+    marginLeft: -8,
+    top: -6,
+  },
+});
