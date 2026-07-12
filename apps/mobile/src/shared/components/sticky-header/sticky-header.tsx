@@ -7,7 +7,7 @@ import { Icon } from '@/shared/components/icon/icon';
 export interface StickyHeaderAction {
   label: string;
   onPress: () => void;
-  variant?: 'primary' | 'outline' | 'ghost' | 'destructive';
+  variant?: 'primary' | 'outline' | 'outline-danger' | 'ghost' | 'destructive';
   loading?: boolean;
   disabled?: boolean;
   icon?: string;
@@ -136,16 +136,26 @@ function ActionButton({ action }: { action: StickyHeaderAction }) {
   const isPrimary = action.variant === 'primary';
   const isDestructive = action.variant === 'destructive';
   const isOutline = action.variant === 'outline';
+  // 'outline-danger': borde + label rojos, fondo transparente — paridad
+  // con el web `app-button[variant="outline-danger"]` (Restablecer en
+  // Settings → General).
+  const isOutlineDanger = action.variant === 'outline-danger';
 
   const bg = isPrimary
     ? colors.primary
     : isDestructive
       ? colorScales.red[600]
       : 'transparent';
-  const borderColor = isOutline ? 'rgba(126, 215, 165, 0.5)' : 'transparent';
+  const borderColor = isOutlineDanger
+    ? colorScales.red[300]
+    : isOutline
+      ? 'rgba(126, 215, 165, 0.5)'
+      : 'transparent';
   const textColor = isPrimary || isDestructive
     ? colors.background
-    : colors.primary;
+    : isOutlineDanger
+      ? colorScales.red[600]
+      : colors.primary;
 
   return (
     <Pressable
@@ -154,7 +164,11 @@ function ActionButton({ action }: { action: StickyHeaderAction }) {
       style={({ pressed }) => [
         styles.actionButton,
         isPrimary && styles.actionPrimary,
-        isOutline && styles.actionOutline,
+        (isOutline || isOutlineDanger) && styles.actionOutline,
+        // Inline override: `actionOutline` tiene borderColor verde
+        // hardcoded; para `outline-danger` pintamos el borde rojo sin
+        // agregar un nuevo style.
+        isOutlineDanger && { borderColor: colorScales.red[300] },
         pressed && styles.actionPressed,
         (action.disabled || action.loading) && styles.disabled,
       ]}
